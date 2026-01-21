@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { nanoid } from 'nanoid';
+import neo4j from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -188,7 +189,7 @@ router.get('/conversations/:id/messages', requireAuth, async (req: Request, res:
         LIMIT $limit
       `;
 
-    const result = await session.run(query, { id, limit, before });
+    const result = await session.run(query, { id, limit: neo4j.int(limit), before });
     const messages = result.records.map(r => toJS(r.get('message'))).reverse();
     res.json(messages);
   } catch (error) {
