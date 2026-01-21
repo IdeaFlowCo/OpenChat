@@ -4,6 +4,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { initDatabase, closeDatabase } from './db.js';
+import authRoutes from './routes/auth.js';
 import chatRoutes from './routes/chat.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 
@@ -31,6 +32,7 @@ app.get('/health', (_req, res) => {
 });
 
 // API routes
+app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 
 // Setup WebSocket handlers

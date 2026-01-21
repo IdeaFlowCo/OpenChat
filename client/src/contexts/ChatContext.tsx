@@ -5,8 +5,9 @@ import { useChatSocket } from '../hooks/useChatSocket';
 interface ChatContextValue {
   // Auth
   token: string | null;
-  currentUser: { userId: string; email: string } | null;
+  currentUser: { userId: string; email: string; name?: string } | null;
   login: (token: string) => void;
+  devLogin: (email: string, name?: string) => Promise<void>;
   logout: () => void;
 
   // Connection
@@ -41,7 +42,7 @@ const ChatContext = createContext<ChatContextValue | null>(null);
 export function ChatProvider({ children }: { children: ReactNode }) {
   // Auth state
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('openchat_token'));
-  const [currentUser, setCurrentUser] = useState<{ userId: string; email: string } | null>(() => {
+  const [currentUser, setCurrentUser] = useState<{ userId: string; email: string; name?: string } | null>(() => {
     const saved = localStorage.getItem('openchat_user');
     return saved ? JSON.parse(saved) : null;
   });
@@ -133,7 +134,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     api.setToken(token);
   }, [token]);
 
-  // Login
+  // Login with token
   const login = useCallback((newToken: string) => {
     // Decode JWT to get user info (basic decode, not verification)
     try {
@@ -148,8 +149,23 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Dev login with email (creates user if needed)
+  const devLogin = useCallback(async (email: string, name?: string) => {
+    const result = await api.devLogin(email, name);
+    const user = { userId: result.user.id, email: result.user.email, name: result.user.name };
+    setCurrentUser(user);
+    setToken(result.token);
+    localStorage.setItem('openchat_token', result.token);
+    localStorage.setItem('openchat_user', JSON.stringify(user));
+  }, []);
+
   // Logout
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      await api.logout();
+    } catch {
+      // Ignore errors
+    }
     setToken(null);
     setCurrentUser(null);
     setConversations([]);
@@ -244,6 +260,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     token,
     currentUser,
     login,
+    devLogin,
     logout,
     isConnected,
     conversations,

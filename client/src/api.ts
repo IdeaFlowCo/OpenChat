@@ -1,4 +1,5 @@
 const API_BASE = '/api/chat';
+const AUTH_BASE = '/api/auth';
 
 export interface User {
   id: string;
@@ -103,6 +104,36 @@ class ApiClient {
     return this.fetch('/presence', {
       method: 'PUT',
       body: JSON.stringify({ presenceStatus, statusMessage }),
+    });
+  }
+
+  // Auth
+  async devLogin(email: string, name?: string): Promise<{ token: string; user: User; expiresIn: number }> {
+    const response = await fetch(`${AUTH_BASE}/dev-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, name }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Login failed' }));
+      throw new Error(error.error || 'Login failed');
+    }
+
+    return response.json();
+  }
+
+  async getMe(): Promise<User> {
+    return this.fetch('/me'.replace('/chat', '/auth'));
+  }
+
+  async logout(): Promise<void> {
+    await fetch(`${AUTH_BASE}/logout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+      },
     });
   }
 }
