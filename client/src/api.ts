@@ -1,5 +1,6 @@
 const API_BASE = '/api/chat';
 const AUTH_BASE = '/api/auth';
+const NOOS_URL = import.meta.env.VITE_NOOS_URL || 'http://localhost:4747';
 
 export interface User {
   id: string;
@@ -135,6 +136,27 @@ class ApiClient {
         ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
       },
     });
+  }
+
+  // Exchange SSO token from Noos for full auth tokens
+  async ssoExchange(ssoToken: string): Promise<{ token: string; user: User }> {
+    const response = await fetch(`${NOOS_URL}/api/auth/sso-exchange`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: ssoToken }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'SSO exchange failed' }));
+      throw new Error(error.error || 'SSO exchange failed');
+    }
+
+    const data = await response.json();
+    // Return in format compatible with our auth system
+    return {
+      token: data.accessToken,
+      user: data.user
+    };
   }
 }
 

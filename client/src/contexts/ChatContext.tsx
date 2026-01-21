@@ -8,6 +8,7 @@ interface ChatContextValue {
   currentUser: { userId: string; email: string; name?: string } | null;
   login: (token: string) => void;
   devLogin: (email: string, name?: string) => Promise<void>;
+  ssoLogin: (ssoToken: string) => Promise<void>;
   logout: () => void;
 
   // Connection
@@ -159,6 +160,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('openchat_user', JSON.stringify(user));
   }, []);
 
+  // SSO login - exchange Noos SSO token for session
+  const ssoLogin = useCallback(async (ssoToken: string) => {
+    const result = await api.ssoExchange(ssoToken);
+    const user = { userId: result.user.id, email: result.user.email, name: result.user.name };
+    setCurrentUser(user);
+    setToken(result.token);
+    localStorage.setItem('openchat_token', result.token);
+    localStorage.setItem('openchat_user', JSON.stringify(user));
+  }, []);
+
   // Logout
   const logout = useCallback(async () => {
     try {
@@ -261,6 +272,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     currentUser,
     login,
     devLogin,
+    ssoLogin,
     logout,
     isConnected,
     conversations,

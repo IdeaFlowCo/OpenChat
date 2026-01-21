@@ -1,7 +1,72 @@
-import { useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { ChatProvider, useChat } from './contexts/ChatContext';
 import { ChatPage } from './pages/ChatPage';
+
+// SSO Callback - handles redirect from Noos with SSO token
+function SSOCallback() {
+  const { ssoLogin, token } = useChat();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const ssoToken = searchParams.get('token');
+
+    if (!ssoToken) {
+      setError('No SSO token provided');
+      setLoading(false);
+      return;
+    }
+
+    // Already logged in? Go to chat
+    if (token) {
+      navigate('/', { replace: true });
+      return;
+    }
+
+    // Exchange SSO token
+    ssoLogin(ssoToken)
+      .then(() => {
+        navigate('/', { replace: true });
+      })
+      .catch((err) => {
+        setError(err.message || 'SSO login failed');
+        setLoading(false);
+      });
+  }, [searchParams, ssoLogin, token, navigate]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">Signing in from Noos...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+        <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md text-center">
+          <h1 className="text-xl font-bold text-red-600 mb-4">SSO Login Failed</h1>
+          <p className="text-gray-600 mb-6">{error}</p>
+          <button
+            onClick={() => navigate('/login', { replace: true })}
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+          >
+            Go to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
 
 function LoginPage() {
   const { devLogin, login } = useChat();
@@ -163,6 +228,10 @@ function AppRoutes() {
       <Route
         path="/login"
         element={token ? <Navigate to="/" replace /> : <LoginPage />}
+      />
+      <Route
+        path="/auth/callback"
+        element={<SSOCallback />}
       />
       <Route
         path="/"
