@@ -96,8 +96,16 @@ class ApiClient {
   }
 
   // Contacts
-  async getContacts(): Promise<User[]> {
-    return this.fetch('/contacts');
+  async getContacts(search?: string): Promise<User[]> {
+    const params = new URLSearchParams();
+    if (search) params.set('q', search);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return this.fetch(`/contacts${query}`);
+  }
+
+  // User lookup by email
+  async getUserByEmail(email: string): Promise<User> {
+    return this.fetch(`/users/by-email/${encodeURIComponent(email)}`);
   }
 
   // Presence

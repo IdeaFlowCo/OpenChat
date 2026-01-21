@@ -28,7 +28,8 @@ interface ChatContextValue {
 
   // Contacts
   contacts: User[];
-  loadContacts: () => Promise<void>;
+  loadContacts: (search?: string) => Promise<void>;
+  searchContacts: (query: string) => Promise<User[]>;
 
   // Presence
   presence: Map<string, { status: string; statusMessage?: string }>;
@@ -239,10 +240,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, [activeConversationId, socketSendMessage]);
 
-  // Load contacts
-  const loadContacts = useCallback(async () => {
+  // Load contacts (optionally with search query)
+  const loadContacts = useCallback(async (search?: string) => {
     try {
-      const data = await api.getContacts();
+      const data = await api.getContacts(search);
       setContacts(data);
 
       // Initialize presence from contacts
@@ -255,9 +256,23 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           });
         }
       }
-      setPresence(newPresence);
+      setPresence(prev => {
+        const merged = new Map(prev);
+        newPresence.forEach((v, k) => merged.set(k, v));
+        return merged;
+      });
     } catch (e) {
       console.error('Failed to load contacts:', e);
+    }
+  }, []);
+
+  // Search contacts (returns results without updating state - for debounced search)
+  const searchContacts = useCallback(async (query: string): Promise<User[]> => {
+    try {
+      return await api.getContacts(query);
+    } catch (e) {
+      console.error('Failed to search contacts:', e);
+      return [];
     }
   }, []);
 
@@ -285,6 +300,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     loadMessages,
     contacts,
     loadContacts,
+    searchContacts,
     presence,
     updatePresence,
     typingUsers,
