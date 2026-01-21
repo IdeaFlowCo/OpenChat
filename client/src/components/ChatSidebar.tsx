@@ -20,7 +20,7 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 export function ChatSidebar() {
-  const { searchContacts, createConversation, setActiveConversation, presence, currentUser } = useChat();
+  const { searchContacts, createConversation, setActiveConversation, presence, currentUser, isConnected } = useChat();
   const [showContacts, setShowContacts] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<User[]>([]);
@@ -92,8 +92,16 @@ export function ChatSidebar() {
         {/* Current user status */}
         {currentUser && (
           <div className="flex items-center gap-2 text-sm text-gray-600">
-            <PresenceIndicator status="available" size="sm" />
+            <PresenceIndicator status={isConnected ? "available" : "offline"} size="sm" />
             <span>{currentUser.email}</span>
+          </div>
+        )}
+
+        {/* Connection warning */}
+        {!isConnected && (
+          <div className="mt-2 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded flex items-center gap-1">
+            <span className="animate-pulse">●</span>
+            Reconnecting...
           </div>
         )}
       </div>

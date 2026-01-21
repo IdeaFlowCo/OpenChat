@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import toast from 'react-hot-toast';
 import { api, Conversation, Message, User } from '../api';
 import { useChatSocket } from '../hooks/useChatSocket';
 
@@ -194,6 +195,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setConversations(data);
     } catch (e) {
       console.error('Failed to load conversations:', e);
+      toast.error('Failed to load conversations');
     }
   }, []);
 
@@ -263,6 +265,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       });
     } catch (e) {
       console.error('Failed to load contacts:', e);
+      toast.error('Failed to load contacts. Check your connection.');
     }
   }, []);
 
@@ -272,6 +275,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       return await api.getContacts(query);
     } catch (e) {
       console.error('Failed to search contacts:', e);
+      const errorMsg = e instanceof Error ? e.message : 'Unknown error';
+      toast.error(`Search failed: ${errorMsg}`);
       return [];
     }
   }, []);

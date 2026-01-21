@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import { ChatProvider, useChat } from './contexts/ChatContext';
 import { ChatPage } from './pages/ChatPage';
 
@@ -248,6 +249,25 @@ function AppRoutes() {
 export default function App() {
   return (
     <ChatProvider>
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 4000,
+          error: {
+            duration: 6000,
+            style: {
+              background: '#fee2e2',
+              color: '#991b1b',
+            },
+          },
+          success: {
+            style: {
+              background: '#dcfce7',
+              color: '#166534',
+            },
+          },
+        }}
+      />
       <AppRoutes />
     </ChatProvider>
   );
