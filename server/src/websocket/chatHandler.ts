@@ -71,6 +71,11 @@ export function setupChatSocket(io: Server): void {
           conversationSockets.set(conversationId, new Set());
         }
         conversationSockets.get(conversationId)!.add(socket.id);
+
+        // Ensure socketConversations entry exists (may be missing after reconnect)
+        if (!socketConversations.has(socket.id)) {
+          socketConversations.set(socket.id, new Set());
+        }
         socketConversations.get(socket.id)!.add(conversationId);
 
         socket.emit('conversation:joined', { conversationId });
