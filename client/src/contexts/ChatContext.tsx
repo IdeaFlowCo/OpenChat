@@ -8,6 +8,8 @@ interface ChatContextValue {
   token: string | null;
   currentUser: { userId: string; email: string; name?: string } | null;
   login: (token: string) => void;
+  noosLogin: (email: string, password: string) => Promise<void>;
+  noosRegister: (email: string, password: string, name: string) => Promise<void>;
   devLogin: (email: string, name?: string) => Promise<void>;
   ssoLogin: (ssoToken: string) => Promise<void>;
   logout: () => void;
@@ -152,7 +154,32 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Dev login with email (creates user if needed)
+  // Noos login with email/password
+  const noosLogin = useCallback(async (email: string, password: string) => {
+    const result = await api.login(email, password);
+    const user = { userId: result.user.id, email: result.user.email, name: result.user.name };
+    setCurrentUser(user);
+    setToken(result.token);
+    localStorage.setItem('openchat_token', result.token);
+    localStorage.setItem('openchat_user', JSON.stringify(user));
+    if (result.refreshToken) {
+      localStorage.setItem('openchat_refresh_token', result.refreshToken);
+    }
+    toast.success('Logged in successfully');
+  }, []);
+
+  // Noos registration
+  const noosRegister = useCallback(async (email: string, password: string, name: string) => {
+    const result = await api.register(email, password, name);
+    const user = { userId: result.user.id, email: result.user.email, name: result.user.name };
+    setCurrentUser(user);
+    setToken(result.token);
+    localStorage.setItem('openchat_token', result.token);
+    localStorage.setItem('openchat_user', JSON.stringify(user));
+    toast.success('Account created successfully');
+  }, []);
+
+  // Dev login with email (creates user if needed) - for development only
   const devLogin = useCallback(async (email: string, name?: string) => {
     const result = await api.devLogin(email, name);
     const user = { userId: result.user.id, email: result.user.email, name: result.user.name };
@@ -291,6 +318,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     token,
     currentUser,
     login,
+    noosLogin,
+    noosRegister,
     devLogin,
     ssoLogin,
     logout,

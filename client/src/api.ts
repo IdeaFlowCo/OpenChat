@@ -116,7 +116,28 @@ class ApiClient {
     });
   }
 
-  // Auth
+  // Auth - Login via Noos
+  async login(email: string, password: string): Promise<{ token: string; user: User; refreshToken?: string }> {
+    const response = await fetch(`${NOOS_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Login failed' }));
+      throw new Error(error.error || 'Login failed');
+    }
+
+    const data = await response.json();
+    return {
+      token: data.accessToken,
+      user: data.user,
+      refreshToken: data.refreshToken
+    };
+  }
+
+  // Dev login (for development without password)
   async devLogin(email: string, name?: string): Promise<{ token: string; user: User; expiresIn: number }> {
     const response = await fetch(`${AUTH_BASE}/dev-login`, {
       method: 'POST',
@@ -130,6 +151,26 @@ class ApiClient {
     }
 
     return response.json();
+  }
+
+  // Register via Noos
+  async register(email: string, password: string, name: string): Promise<{ token: string; user: User }> {
+    const response = await fetch(`${NOOS_URL}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, name }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Registration failed' }));
+      throw new Error(error.error || 'Registration failed');
+    }
+
+    const data = await response.json();
+    return {
+      token: data.accessToken,
+      user: data.user
+    };
   }
 
   async getMe(): Promise<User> {
