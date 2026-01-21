@@ -7,7 +7,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "seed": "tsx src/seed-test-data.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",
