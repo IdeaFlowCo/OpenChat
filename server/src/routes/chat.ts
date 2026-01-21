@@ -264,23 +264,60 @@ router.post('/conversations/:id/messages', requireAuth, async (req: Request, res
 });
 
 // GET /api/chat/contacts - Get all users (for starting conversations)
+// Supports ?q=search to filter by name or email (case-insensitive)
 router.get('/contacts', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
+  const searchQuery = req.query.q as string | undefined;
 
   try {
-    const result = await session.run(`
-      MATCH (u:User)
-      WHERE u.id <> $userId
-      RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt } AS user
-      ORDER BY u.name
-    `, { userId });
+    const query = searchQuery
+      ? `
+        MATCH (u:User)
+        WHERE u.id <> $userId
+          AND (toLower(u.name) CONTAINS toLower($search) OR toLower(u.email) CONTAINS toLower($search))
+        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt } AS user
+        ORDER BY u.name
+      `
+      : `
+        MATCH (u:User)
+        WHERE u.id <> $userId
+        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt } AS user
+        ORDER BY u.name
+      `;
 
+    const result = await session.run(query, { userId, search: searchQuery || '' });
     const contacts = result.records.map(r => toJS(r.get('user')));
     res.json(contacts);
   } catch (error) {
     console.error('Error fetching contacts:', error);
     res.status(500).json({ error: 'Failed to fetch contacts' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/users/by-email/:email - Look up user by exact email
+router.get('/users/by-email/:email', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const { email } = req.params;
+
+  try {
+    const result = await session.run(`
+      MATCH (u:User {email: $email})
+      RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt } AS user
+    `, { email });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const user = toJS(result.records[0].get('user'));
+    res.json(user);
+  } catch (error) {
+    console.error('Error fetching user by email:', error);
+    res.status(500).json({ error: 'Failed to fetch user' });
   } finally {
     await session.close();
   }
