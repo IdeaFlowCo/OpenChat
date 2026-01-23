@@ -19,17 +19,30 @@ dotenv.config({ path: path.join(__dirname, '..', '.env'), override: true });
 const app = express();
 const httpServer = createServer(app);
 
+// CORS configuration
+const allowedOrigins = [
+  'http://localhost:29231',
+  'https://chat.globalbr.ai',
+  process.env.CORS_ORIGIN
+].filter(Boolean) as string[];
+
 // Socket.io setup
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:29231',
-    methods: ['GET', 'POST']
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
+    credentials: true
   }
 });
 
 // Middleware
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:29231',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(null, false);
+  },
   credentials: true
 }));
 app.use(express.json());
@@ -39,6 +52,10 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Serve static files from client build (production)
+const clientDistPath = path.join(__dirname, '..', '..', 'client', 'dist');
+app.use(express.static(clientDistPath));
+
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
@@ -46,6 +63,11 @@ app.use('/api/client-logs', clientLogsRoutes);
 
 // Setup WebSocket handlers
 setupChatSocket(io);
+
+// SPA fallback - serve index.html for all non-API routes
+app.use((_req, res) => {
+  res.sendFile(path.join(clientDistPath, 'index.html'));
+});
 
 // Start server
 const PORT = parseInt(process.env.PORT || '41851', 10);
