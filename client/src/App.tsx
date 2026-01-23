@@ -126,8 +126,14 @@ function SSOCallback() {
   return null;
 }
 
+// Test accounts for quick login
+const TEST_ACCOUNTS = [
+  { email: 'alice@noos.app', name: 'Alice', password: 'Test123!' },
+  { email: 'bob@noos.app', name: 'Bob', password: 'Test123!' },
+];
+
 function LoginPage() {
-  const { devLogin, login } = useChat();
+  const { devLogin, login, noosLogin } = useChat();
   const [searchParams] = useSearchParams();
   const [mode, setMode] = useState<'sso' | 'token' | 'dev'>('sso');
   const [email, setEmail] = useState('');
@@ -188,6 +194,18 @@ function LoginPage() {
     setError('');
     try {
       await devLogin(email.trim(), name.trim() || undefined);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTestAccountLogin = async (account: typeof TEST_ACCOUNTS[0]) => {
+    setLoading(true);
+    setError('');
+    try {
+      await noosLogin(account.email, account.password);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -323,6 +341,25 @@ function LoginPage() {
             </form>
           </>
         )}
+
+        {/* Test accounts section */}
+        <div className="mt-6 pt-6 border-t border-gray-200">
+          <p className="text-sm text-gray-500 text-center mb-3">
+            Quick test accounts (password: <code className="bg-gray-100 px-1 rounded text-xs">Test123!</code>)
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {TEST_ACCOUNTS.map((account) => (
+              <button
+                key={account.email}
+                onClick={() => handleTestAccountLogin(account)}
+                disabled={loading}
+                className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                {account.name}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
