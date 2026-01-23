@@ -44,6 +44,7 @@ export function ConversationList() {
         const isActive = conv.id === activeConversationId;
         const other = getOtherParticipant(conv);
         const otherPresence = other ? presence.get(other.id) : null;
+        const fallbackStatus = other?.presenceStatus;
 
         return (
           <div
@@ -61,7 +62,7 @@ export function ConversationList() {
                 </div>
                 {conv.type === 'direct' && (
                   <div className="absolute -bottom-0.5 -right-0.5">
-                    <PresenceIndicator status={otherPresence?.status} size="sm" />
+                    <PresenceIndicator status={otherPresence?.status || fallbackStatus} size="sm" />
                   </div>
                 )}
               </div>

@@ -34,12 +34,21 @@ router.get('/conversations', requireAuth, async (req: Request, res: Response) =>
   try {
     const result = await session.run(`
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
-      OPTIONAL MATCH (c)<-[:IN_CONVERSATION]-(m:Message)
-      WITH c, m ORDER BY m.createdAt DESC
-      WITH c, collect(m)[0] AS lastMessage
+      CALL {
+        WITH c
+        OPTIONAL MATCH (c)<-[:IN_CONVERSATION]-(m:Message)
+        WITH m ORDER BY m.createdAt DESC
+        RETURN collect(m)[0] AS lastMessage
+      }
+      CALL {
+        WITH c
+        MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
+        RETURN collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}) AS participants
+      }
       RETURN c {
         .*,
-        lastMessage: lastMessage { .content, .senderId, .createdAt }
+        lastMessage: lastMessage { .content, .senderId, .createdAt },
+        participants: participants
       } AS conversation
       ORDER BY c.lastMessageAt DESC
     `, { userId });
@@ -70,11 +79,16 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
     const otherId = participantIds[0];
     const existing = await session.run(`
       MATCH (u1:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {type: 'direct'})<-[:PARTICIPATES_IN]-(u2:User {id: $otherId})
-      RETURN c
+      MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
+      WITH c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}) AS participants
+      RETURN c {
+        .*,
+        participants: participants
+      } AS conversation
     `, { userId, otherId });
 
     if (existing.records.length > 0) {
-      const conv = toJS(existing.records[0].get('c').properties);
+      const conv = toJS(existing.records[0].get('conversation'));
       await session.close();
       res.json(conv);
       return;
@@ -98,11 +112,12 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
       WITH c
       UNWIND $participants AS pid
       MATCH (u:User {id: pid})
-      CREATE (u)-[:PARTICIPATES_IN {
+      CREATE (u)-[rel:PARTICIPATES_IN {
         joinedAt: datetime($now),
         role: CASE WHEN pid = $userId THEN 'owner' ELSE 'member' END
       }]->(c)
-      RETURN c
+      WITH c, collect({user: u {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}) AS participants
+      RETURN c { .*, participants: participants } AS conversation
     `, {
       id: conversationId,
       title: title || null,
@@ -112,7 +127,7 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
       userId
     });
 
-    const conversation = toJS(result.records[0].get('c').properties);
+    const conversation = toJS(result.records[0].get('conversation'));
     res.status(201).json(conversation);
   } catch (error) {
     console.error('Error creating conversation:', error);
@@ -132,7 +147,7 @@ router.get('/conversations/:id', requireAuth, async (req: Request, res: Response
     const result = await session.run(`
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $id})
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-      RETURN c, collect({user: participant {.id, .name, .email}, role: rel.role}) AS participants
+      RETURN c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}) AS participants
     `, { userId, id });
 
     if (result.records.length === 0) {

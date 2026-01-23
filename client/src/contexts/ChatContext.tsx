@@ -7,11 +7,11 @@ interface ChatContextValue {
   // Auth
   token: string | null;
   currentUser: { userId: string; email: string; name?: string } | null;
-  login: (token: string) => void;
+  login: (token: string) => boolean;
   noosLogin: (email: string, password: string) => Promise<void>;
   noosRegister: (email: string, password: string, name: string) => Promise<void>;
   devLogin: (email: string, name?: string) => Promise<void>;
-  ssoLogin: (ssoToken: string) => Promise<void>;
+  ssoLogin: (payload: { code?: string; token?: string }) => Promise<void>;
   logout: () => void;
 
   // Connection
@@ -40,6 +40,8 @@ interface ChatContextValue {
 
   // Typing
   typingUsers: Map<string, Set<string>>; // conversationId -> userIds
+  startTyping: (conversationId: string) => void;
+  stopTyping: (conversationId: string) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -126,7 +128,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const { isConnected, joinConversation, leaveConversation, sendMessage: socketSendMessage, updatePresence: socketUpdatePresence } = useChatSocket({
+  const {
+    isConnected,
+    joinConversation,
+    leaveConversation,
+    sendMessage: socketSendMessage,
+    updatePresence: socketUpdatePresence,
+    startTyping,
+    stopTyping,
+  } = useChatSocket({
     token,
     onMessage: handleMessage,
     onTypingStart: handleTypingStart,
@@ -140,7 +150,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [token]);
 
   // Login with token
-  const login = useCallback((newToken: string) => {
+  const login = useCallback((newToken: string): boolean => {
     // Decode JWT to get user info (basic decode, not verification)
     try {
       const payload = JSON.parse(atob(newToken.split('.')[1]));
@@ -149,8 +159,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setToken(newToken);
       localStorage.setItem('openchat_token', newToken);
       localStorage.setItem('openchat_user', JSON.stringify(user));
+      return true;
     } catch (e) {
       console.error('Invalid token:', e);
+      return false;
     }
   }, []);
 
@@ -189,9 +201,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('openchat_user', JSON.stringify(user));
   }, []);
 
-  // SSO login - exchange Noos SSO token for session
-  const ssoLogin = useCallback(async (ssoToken: string) => {
-    const result = await api.ssoExchange(ssoToken);
+  // SSO login - exchange Noos SSO code/token for session
+  const ssoLogin = useCallback(async (payload: { code?: string; token?: string }) => {
+    const result = await api.ssoExchange(payload);
     const user = { userId: result.user.id, email: result.user.email, name: result.user.name };
     setCurrentUser(user);
     setToken(result.token);
@@ -220,6 +232,25 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     try {
       const data = await api.getConversations();
       setConversations(data);
+      const seededPresence = new Map<string, { status: string; statusMessage?: string }>();
+      for (const conv of data) {
+        for (const participant of conv.participants || []) {
+          const user = participant.user;
+          if (user?.presenceStatus) {
+            seededPresence.set(user.id, {
+              status: user.presenceStatus,
+              statusMessage: user.statusMessage || undefined,
+            });
+          }
+        }
+      }
+      if (seededPresence.size > 0) {
+        setPresence(prev => {
+          const merged = new Map(prev);
+          seededPresence.forEach((value, key) => merged.set(key, value));
+          return merged;
+        });
+      }
     } catch (e) {
       console.error('Failed to load conversations:', e);
       toast.error('Failed to load conversations');
@@ -338,6 +369,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     presence,
     updatePresence,
     typingUsers,
+    startTyping,
+    stopTyping,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

@@ -1,4 +1,6 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
@@ -6,7 +8,13 @@ import { Server } from 'socket.io';
 import { initDatabase, closeDatabase } from './db.js';
 import authRoutes from './routes/auth.js';
 import chatRoutes from './routes/chat.js';
+import clientLogsRoutes from './routes/clientLogs.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '..', '.env'), override: true });
 
 const app = express();
 const httpServer = createServer(app);
@@ -14,14 +22,14 @@ const httpServer = createServer(app);
 // Socket.io setup
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: process.env.CORS_ORIGIN || 'http://localhost:29231',
     methods: ['GET', 'POST']
   }
 });
 
 // Middleware
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: process.env.CORS_ORIGIN || 'http://localhost:29231',
   credentials: true
 }));
 app.use(express.json());
@@ -34,12 +42,13 @@ app.get('/health', (_req, res) => {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/client-logs', clientLogsRoutes);
 
 // Setup WebSocket handlers
 setupChatSocket(io);
 
 // Start server
-const PORT = parseInt(process.env.PORT || '4001', 10);
+const PORT = parseInt(process.env.PORT || '41851', 10);
 
 async function start() {
   try {
