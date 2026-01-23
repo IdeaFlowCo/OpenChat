@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useChat } from '../contexts/ChatContext';
 import { ConversationList } from './ConversationList';
 import { PresenceIndicator } from './PresenceIndicator';
@@ -20,12 +20,16 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 export function ChatSidebar() {
-  const { searchContacts, createConversation, setActiveConversation, presence, currentUser, isConnected } = useChat();
+  const { searchContacts, createConversation, setActiveConversation, presence, currentUser, isConnected, updatePresence, logout } = useChat();
   const [showContacts, setShowContacts] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [status, setStatus] = useState<'available' | 'away' | 'busy' | 'invisible'>('available');
+  const [statusMessage, setStatusMessage] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const statusMessageTimeoutRef = useRef<number | null>(null);
+  const presenceInitializedRef = useRef(false);
 
   // Debounce search term (300ms)
   const debouncedSearch = useDebounce(searchTerm, 300);
@@ -53,12 +57,42 @@ export function ChatSidebar() {
     performSearch();
   }, [debouncedSearch, showContacts, searchContacts]);
 
+  useEffect(() => {
+    if (!isConnected) return;
+    if (!presenceInitializedRef.current) {
+      return;
+    }
+
+    if (statusMessageTimeoutRef.current) {
+      window.clearTimeout(statusMessageTimeoutRef.current);
+    }
+
+    statusMessageTimeoutRef.current = window.setTimeout(() => {
+      updatePresence(status, statusMessage.trim() || undefined);
+    }, 800);
+
+    return () => {
+      if (statusMessageTimeoutRef.current) {
+        window.clearTimeout(statusMessageTimeoutRef.current);
+        statusMessageTimeoutRef.current = null;
+      }
+    };
+  }, [statusMessage, status, isConnected, updatePresence]);
+
   const handleNewChat = () => {
     setShowContacts(true);
     setSearchTerm('');
     setSearchResults([]);
     // Focus search input after render
     setTimeout(() => searchInputRef.current?.focus(), 100);
+  };
+
+  const handleStatusChange = (nextStatus: 'available' | 'away' | 'busy' | 'invisible') => {
+    presenceInitializedRef.current = true;
+    setStatus(nextStatus);
+    if (isConnected) {
+      updatePresence(nextStatus, statusMessage.trim() || undefined);
+    }
   };
 
   const handleSelectContact = async (contactId: string) => {
@@ -79,21 +113,55 @@ export function ChatSidebar() {
     <div className="w-80 border-r border-gray-200 flex flex-col bg-white">
       {/* Header */}
       <div className="p-4 border-b border-gray-200">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 gap-2">
           <h1 className="text-xl font-semibold">Chats</h1>
-          <button
-            onClick={handleNewChat}
-            className="px-3 py-1 text-sm bg-blue-500 text-white rounded-full hover:bg-blue-600"
-          >
-            New
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleNewChat}
+              className="px-3 py-1 text-sm bg-blue-500 text-white rounded-full hover:bg-blue-600"
+            >
+              New
+            </button>
+            <button
+              onClick={logout}
+              className="px-3 py-1 text-xs border border-gray-300 rounded-full text-gray-600 hover:text-gray-800 hover:border-gray-400"
+            >
+              Log out
+            </button>
+          </div>
         </div>
 
         {/* Current user status */}
         {currentUser && (
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <PresenceIndicator status={isConnected ? "available" : "offline"} size="sm" />
-            <span>{currentUser.email}</span>
+          <div className="mt-2 space-y-2">
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <PresenceIndicator status={isConnected ? status : 'offline'} size="sm" />
+              <span className="truncate">{currentUser.email}</span>
+            </div>
+            <div className="flex gap-2">
+              <select
+                value={status}
+                onChange={(e) => handleStatusChange(e.target.value as 'available' | 'away' | 'busy' | 'invisible')}
+                className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs text-gray-700 bg-white"
+                disabled={!isConnected}
+              >
+                <option value="available">Available</option>
+                <option value="away">Away</option>
+                <option value="busy">Busy</option>
+                <option value="invisible">Invisible</option>
+              </select>
+              <input
+                type="text"
+                value={statusMessage}
+                onChange={(e) => {
+                  presenceInitializedRef.current = true;
+                  setStatusMessage(e.target.value);
+                }}
+                placeholder="Status message"
+                className="flex-[2] px-2 py-1 border border-gray-300 rounded text-xs"
+                disabled={!isConnected}
+              />
+            </div>
           </div>
         )}
 

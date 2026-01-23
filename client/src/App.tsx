@@ -1,10 +1,30 @@
 import { useState, useEffect } from 'react';
-import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { ChatProvider, useChat } from './contexts/ChatContext';
 import { ChatPage } from './pages/ChatPage';
 
-// SSO Callback - handles redirect from Noos with SSO token
+const NOOS_URL = import.meta.env.VITE_NOOS_URL || 'http://localhost:52743';
+const ALLOW_INSECURE_SSO_TOKEN = import.meta.env.MODE !== 'production';
+
+function normalizeRedirect(target: string | null): string {
+  if (!target) return '/';
+  if (!target.startsWith('/')) return '/';
+  try {
+    const url = new URL(target, window.location.origin);
+    if (url.origin !== window.location.origin) return '/';
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return '/';
+  }
+}
+
+function parseHashParams(hash: string): URLSearchParams {
+  if (!hash) return new URLSearchParams();
+  return new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
+}
+
+// SSO Callback - handles redirect from Noos with auth code/token
 function SSOCallback() {
   const { ssoLogin, token } = useChat();
   const [searchParams] = useSearchParams();
@@ -13,24 +33,61 @@ function SSOCallback() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const ssoToken = searchParams.get('token');
+    const code = searchParams.get('code');
+    const state = searchParams.get('state');
+    const queryToken = searchParams.get('token');
+    const hashToken = parseHashParams(window.location.hash).get('token');
 
-    if (!ssoToken) {
-      setError('No SSO token provided');
+    const storedStateRaw = sessionStorage.getItem('openchat_sso_state');
+    let storedState: { state?: string; redirect?: string } | null = null;
+    if (storedStateRaw) {
+      try {
+        storedState = JSON.parse(storedStateRaw) as { state?: string; redirect?: string };
+      } catch {
+        storedState = null;
+      }
+    }
+    const redirectTarget = normalizeRedirect(storedState?.redirect || searchParams.get('redirect'));
+
+    if (state && storedState?.state && state !== storedState.state) {
+      setError('Invalid SSO state. Please try again.');
       setLoading(false);
+      sessionStorage.removeItem('openchat_sso_state');
       return;
     }
 
     // Already logged in? Go to chat
     if (token) {
-      navigate('/', { replace: true });
+      navigate(redirectTarget, { replace: true });
       return;
     }
 
-    // Exchange SSO token
-    ssoLogin(ssoToken)
+    const exchangePayload = code
+      ? { code }
+      : hashToken
+        ? { token: hashToken }
+        : (queryToken && ALLOW_INSECURE_SSO_TOKEN)
+          ? { token: queryToken }
+          : null;
+
+    if (!exchangePayload) {
+      if (queryToken && !ALLOW_INSECURE_SSO_TOKEN) {
+        setError('Insecure SSO token in URL. Please sign in again.');
+      } else {
+        setError('No SSO code provided');
+      }
+      setLoading(false);
+      return;
+    }
+
+    sessionStorage.removeItem('openchat_sso_state');
+    if (window.location.hash) {
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+    }
+
+    ssoLogin(exchangePayload)
       .then(() => {
-        navigate('/', { replace: true });
+        navigate(redirectTarget, { replace: true });
       })
       .catch((err) => {
         setError(err.message || 'SSO login failed');
@@ -70,49 +127,54 @@ function SSOCallback() {
 }
 
 function LoginPage() {
-  const { noosLogin, noosRegister, devLogin, login } = useChat();
-  const [mode, setMode] = useState<'login' | 'register' | 'dev'>('login');
+  const { devLogin, login } = useChat();
+  const [searchParams] = useSearchParams();
+  const [mode, setMode] = useState<'sso' | 'token' | 'dev'>('sso');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [tokenInput, setTokenInput] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim() || !password.trim()) {
-      setError('Email and password are required');
-      return;
-    }
-    setLoading(true);
+  const redirectTarget = normalizeRedirect(searchParams.get('redirect'));
+  const showDev = import.meta.env.MODE !== 'production';
+
+  const resetForm = () => {
+    setEmail('');
+    setName('');
+    setTokenInput('');
     setError('');
-    try {
-      await noosLogin(email.trim(), password.trim());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
-    } finally {
-      setLoading(false);
-    }
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim() || !password.trim() || !name.trim()) {
-      setError('All fields are required');
-      return;
-    }
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
-      return;
-    }
-    setLoading(true);
+  const handleSsoLogin = () => {
     setError('');
-    try {
-      await noosRegister(email.trim(), password.trim(), name.trim());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Registration failed');
-    } finally {
-      setLoading(false);
+    setLoading(true);
+    const callbackUrl = new URL('/auth/callback', window.location.origin);
+    if (redirectTarget && redirectTarget !== '/') {
+      callbackUrl.searchParams.set('redirect', redirectTarget);
+    }
+    const state = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+
+    sessionStorage.setItem('openchat_sso_state', JSON.stringify({ state, redirect: redirectTarget }));
+
+    const loginUrl = new URL('/api/auth/login', window.location.origin);
+    loginUrl.searchParams.set('redirect_uri', callbackUrl.toString());
+    loginUrl.searchParams.set('state', state);
+    window.location.assign(loginUrl.toString());
+  };
+
+  const handleTokenLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tokenInput.trim()) {
+      setError('Token is required');
+      return;
+    }
+    setError('');
+    const ok = login(tokenInput.trim());
+    if (!ok) {
+      setError('Invalid token format');
     }
   };
 
@@ -133,150 +195,83 @@ function LoginPage() {
     }
   };
 
-  const resetForm = () => {
-    setEmail('');
-    setPassword('');
-    setName('');
-    setError('');
-  };
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
         <h1 className="text-2xl font-bold mb-2 text-center">OpenChat</h1>
         <p className="text-gray-500 text-sm mb-6 text-center">Powered by Noos</p>
 
-        {mode === 'login' && (
+        <div className="flex gap-2 justify-center mb-6 text-xs">
+          <button
+            onClick={() => { resetForm(); setMode('sso'); }}
+            className={`px-3 py-1 rounded-full border ${mode === 'sso' ? 'bg-blue-500 text-white border-blue-500' : 'border-gray-300 text-gray-600'}`}
+          >
+            Continue
+          </button>
+          <button
+            onClick={() => { resetForm(); setMode('token'); }}
+            className={`px-3 py-1 rounded-full border ${mode === 'token' ? 'bg-blue-500 text-white border-blue-500' : 'border-gray-300 text-gray-600'}`}
+          >
+            Use Token
+          </button>
+          {showDev && (
+            <button
+              onClick={() => { resetForm(); setMode('dev'); }}
+              className={`px-3 py-1 rounded-full border ${mode === 'dev' ? 'bg-yellow-500 text-white border-yellow-500' : 'border-gray-300 text-gray-600'}`}
+            >
+              Dev
+            </button>
+          )}
+        </div>
+
+        {mode === 'sso' && (
           <>
-            <form onSubmit={handleLogin}>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
-                  disabled={loading}
-                />
-              </div>
-
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
-                  disabled={loading}
-                />
-              </div>
-
-              {error && (
-                <p className="text-red-500 text-sm mb-4">{error}</p>
-              )}
-
-              <button
-                type="submit"
-                className="w-full py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
-                disabled={loading}
+            <button
+              onClick={handleSsoLogin}
+              className="w-full py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
+              disabled={loading}
+            >
+              {loading ? 'Redirecting...' : 'Continue with Noos'}
+            </button>
+            <p className="text-xs text-gray-500 mt-3 text-center">
+              You will be redirected to Noos for authentication.
+            </p>
+            <div className="mt-3 text-center">
+              <a
+                className="text-xs text-gray-400 hover:text-gray-600"
+                href={NOOS_URL}
+                target="_blank"
+                rel="noreferrer"
               >
-                {loading ? 'Signing in...' : 'Sign In'}
-              </button>
-            </form>
-
-            <div className="mt-4 text-center">
-              <button
-                onClick={() => { resetForm(); setMode('register'); }}
-                className="text-blue-500 text-sm hover:underline"
-              >
-                Don't have an account? Sign up
-              </button>
-            </div>
-
-            <div className="mt-4 pt-4 border-t border-gray-200 text-center">
-              <button
-                onClick={() => { resetForm(); setMode('dev'); }}
-                className="text-gray-400 text-xs hover:text-gray-600"
-              >
-                Dev login (no password)
-              </button>
+                Open Noos in a new tab
+              </a>
             </div>
           </>
         )}
 
-        {mode === 'register' && (
-          <>
-            <form onSubmit={handleRegister}>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Name
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Your name"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
-                  disabled={loading}
-                />
-              </div>
-
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
-                  disabled={loading}
-                />
-              </div>
-
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="At least 6 characters"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
-                  disabled={loading}
-                />
-              </div>
-
-              {error && (
-                <p className="text-red-500 text-sm mb-4">{error}</p>
-              )}
-
-              <button
-                type="submit"
-                className="w-full py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
-                disabled={loading}
-              >
-                {loading ? 'Creating account...' : 'Create Account'}
-              </button>
-            </form>
-
-            <div className="mt-4 text-center">
-              <button
-                onClick={() => { resetForm(); setMode('login'); }}
-                className="text-blue-500 text-sm hover:underline"
-              >
-                Already have an account? Sign in
-              </button>
-            </div>
-          </>
+        {mode === 'token' && (
+          <form onSubmit={handleTokenLogin}>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Paste JWT
+            </label>
+            <textarea
+              value={tokenInput}
+              onChange={(e) => setTokenInput(e.target.value)}
+              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-xs h-28"
+              disabled={loading}
+            />
+            {error && (
+              <p className="text-red-500 text-sm mt-3">{error}</p>
+            )}
+            <button
+              type="submit"
+              className="w-full py-2 mt-4 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
+              disabled={loading}
+            >
+              Use Token
+            </button>
+          </form>
         )}
 
         {mode === 'dev' && (
@@ -326,15 +321,6 @@ function LoginPage() {
                 {loading ? 'Signing in...' : 'Dev Login'}
               </button>
             </form>
-
-            <div className="mt-4 text-center">
-              <button
-                onClick={() => { resetForm(); setMode('login'); }}
-                className="text-blue-500 text-sm hover:underline"
-              >
-                Back to normal login
-              </button>
-            </div>
           </>
         )}
       </div>
@@ -344,8 +330,10 @@ function LoginPage() {
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token } = useChat();
+  const location = useLocation();
   if (!token) {
-    return <Navigate to="/login" replace />;
+    const redirect = encodeURIComponent(`${location.pathname}${location.search}${location.hash}`);
+    return <Navigate to={`/login?redirect=${redirect}`} replace />;
   }
   return <>{children}</>;
 }

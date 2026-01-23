@@ -5,8 +5,10 @@ import { getDriver } from '../db.js';
 import { requireAuth, AuthUser } from '../middleware/auth.js';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
-const NOOS_URL = process.env.NOOS_URL || 'http://localhost:4000';
+function getJwtSecret(): string {
+  return process.env.JWT_SECRET || 'dev-secret-change-me';
+}
+const NOOS_URL = process.env.NOOS_URL || 'http://localhost:52743';
 
 // Helper to convert Neo4j types to JS
 function toJS(value: unknown): unknown {
@@ -80,7 +82,7 @@ router.post('/dev-login', async (req: Request, res: Response) => {
     // Generate JWT (same format as Noos)
     const token = jwt.sign(
       { userId: user.id, email: user.email } as AuthUser,
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: '7d' }
     );
 
@@ -156,16 +158,20 @@ router.post('/logout', requireAuth, async (req: Request, res: Response) => {
  * Would redirect to: ${NOOS_URL}/auth/authorize?redirect_uri=...&client_id=openchat
  */
 router.get('/login', (req: Request, res: Response) => {
-  const redirectUri = req.query.redirect_uri || 'http://localhost:5173/auth/callback';
+  const defaultBase = process.env.OPENCHAT_URL || process.env.CORS_ORIGIN || 'http://localhost:5173';
+  const fallbackRedirect = `${defaultBase.replace(/\/$/, '')}/auth/callback`;
+  const redirectUri = typeof req.query.redirect_uri === 'string' ? req.query.redirect_uri : fallbackRedirect;
+  const state = typeof req.query.state === 'string' ? req.query.state : undefined;
 
-  // In production, redirect to Noos OAuth
-  // For now, return info about dev login
-  res.json({
-    message: 'In production, this redirects to Noos login',
-    devLogin: 'POST /api/auth/dev-login with { email, name? }',
-    noosUrl: NOOS_URL,
-    redirectUri
-  });
+  const authorizeUrl = new URL('/auth/authorize', NOOS_URL);
+  authorizeUrl.searchParams.set('client_id', 'openchat');
+  authorizeUrl.searchParams.set('redirect_uri', redirectUri);
+  authorizeUrl.searchParams.set('response_type', 'code');
+  if (state) {
+    authorizeUrl.searchParams.set('state', state);
+  }
+
+  res.redirect(authorizeUrl.toString());
 });
 
 export default router;

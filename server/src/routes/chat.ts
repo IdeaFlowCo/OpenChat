@@ -155,7 +155,7 @@ router.get('/conversations/:id', requireAuth, async (req: Request, res: Response
       return;
     }
 
-    const conv = toJS(result.records[0].get('c').properties);
+    const conv = toJS(result.records[0].get('c').properties) as Record<string, unknown>;
     const participants = toJS(result.records[0].get('participants'));
     res.json({ ...conv, participants });
   } catch (error) {

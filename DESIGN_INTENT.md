@@ -6,12 +6,12 @@ OpenChat is a GChat-inspired messaging application that integrates with the Noos
 
 ## Architecture
 
-### Backend (port 4001)
+### Backend (port 41851)
 - **Express + Socket.io** for REST API and real-time messaging
 - **Neo4j** graph database (same as Noos - production: `bolt://44.211.180.200:7687`)
 - **JWT authentication** (shared secret with Noos for SSO)
 
-### Frontend (port 5173 dev)
+### Frontend (port 29231 dev)
 - **React + TypeScript + Vite**
 - **TailwindCSS** for styling
 - **Socket.io client** for real-time updates
@@ -21,7 +21,7 @@ OpenChat is a GChat-inspired messaging application that integrates with the Noos
 ### Authentication
 - Dev login (`POST /api/auth/dev-login`) - email-based, creates user if needed
 - Token login - paste existing Noos JWT
-- SSO callback (`/auth/callback?token=...`) - receive token from Noos redirect
+- SSO callback (`/auth/callback?code=...` or `#token=...`) - exchange with Noos
 - Protected routes - redirect to login if not authenticated
 
 ### Contact Selection UI
@@ -29,7 +29,7 @@ OpenChat is a GChat-inspired messaging application that integrates with the Noos
 
 Flow:
 1. User clicks "New" button in sidebar header
-2. Contacts are loaded from API (`GET /api/chat/contacts`)
+2. Contacts are searched via API (`GET /api/chat/contacts?q=...`)
 3. Contact picker UI slides in with:
    - Back button to return to conversation list
    - Search input for filtering by name/email (client-side)
@@ -42,8 +42,8 @@ Flow:
    - Sets it as active conversation
    - Returns to conversation view
 
-### Contact Search (API - just implemented)
-- `GET /api/chat/contacts?q=search` - filter by name/email substring (case-insensitive)
+### Contact Search (API)
+- `GET /api/chat/contacts?q=search` - server-side filter by name/email substring (case-insensitive)
 - `GET /api/chat/users/by-email/:email` - exact email lookup
 
 ### Conversations
@@ -92,8 +92,8 @@ Flow:
 ### OpenChat-es7: SSO Redirect Flow
 Current login is standalone. Target flow:
 1. User visits OpenChat without auth → redirect to Noos login
-2. Noos authenticates → redirects back with token
-3. OpenChat exchanges token for session
+2. Noos authenticates → redirects back with short-lived code
+3. OpenChat exchanges code for session (no JWT in URL)
 
 ### Future: Group Chat
 - Multi-user conversations
@@ -130,6 +130,7 @@ App.tsx
 - `POST /api/auth/dev-login` - { email, name? } → { token, user }
 - `GET /api/auth/me` - Get current user
 - `POST /api/auth/logout` - Mark offline
+- `GET /api/auth/login` - Redirect to Noos SSO authorize (code flow)
 
 ### Chat
 - `GET /api/chat/conversations` - List user's conversations

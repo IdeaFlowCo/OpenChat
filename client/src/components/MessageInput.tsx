@@ -3,13 +3,27 @@ import { useChat } from '../contexts/ChatContext';
 
 export function MessageInput() {
   const [text, setText] = useState('');
-  const { sendMessage, activeConversationId } = useChat();
+  const { sendMessage, activeConversationId, startTyping, stopTyping } = useChat();
   const inputRef = useRef<HTMLInputElement>(null);
+  const typingTimeoutRef = useRef<number | null>(null);
+  const typingActiveRef = useRef(false);
+  const lastConversationRef = useRef<string | null>(null);
 
   // Focus input when conversation changes
   useEffect(() => {
     inputRef.current?.focus();
-  }, [activeConversationId]);
+    if (lastConversationRef.current && lastConversationRef.current !== activeConversationId && typingActiveRef.current) {
+      stopTyping(lastConversationRef.current);
+      typingActiveRef.current = false;
+    }
+    lastConversationRef.current = activeConversationId;
+    return () => {
+      if (typingTimeoutRef.current) {
+        window.clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+    };
+  }, [activeConversationId, stopTyping]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -17,7 +31,43 @@ export function MessageInput() {
 
     const content = text.trim();
     setText('');
+    if (typingTimeoutRef.current) {
+      window.clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    if (typingActiveRef.current) {
+      stopTyping(activeConversationId);
+      typingActiveRef.current = false;
+    }
     await sendMessage(content);
+  };
+
+  const handleChange = (value: string) => {
+    setText(value);
+    if (!activeConversationId) return;
+
+    if (typingTimeoutRef.current) {
+      window.clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+
+    if (!value.trim()) {
+      if (typingActiveRef.current) {
+        stopTyping(activeConversationId);
+        typingActiveRef.current = false;
+      }
+      return;
+    }
+
+    if (!typingActiveRef.current) {
+      startTyping(activeConversationId);
+      typingActiveRef.current = true;
+    }
+
+    typingTimeoutRef.current = window.setTimeout(() => {
+      stopTyping(activeConversationId);
+      typingActiveRef.current = false;
+    }, 1500);
   };
 
   if (!activeConversationId) {
@@ -31,7 +81,7 @@ export function MessageInput() {
           ref={inputRef}
           type="text"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => handleChange(e.target.value)}
           placeholder="Type a message..."
           className="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:border-blue-500"
         />
