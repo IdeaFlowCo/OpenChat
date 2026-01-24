@@ -15,6 +15,8 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
       - JWT_SECRET=${JWT_SECRET}
       - NOOS_API_URL=${NOOS_API_URL:-http://noos_api:4000/api}
+      - NOOS_URL=${NOOS_URL:-https://globalbr.ai}
+      - OPENCHAT_URL=${OPENCHAT_URL:-https://chat.globalbr.ai}
     networks:
       - app_network
 

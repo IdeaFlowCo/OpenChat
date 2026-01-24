@@ -9,9 +9,9 @@ APP_PORT="4001"
 
 echo "=== Deploying $APP_NAME to $SERVER_IP ==="
 
-# Build locally
+# Build locally with production URLs
 echo "Building..."
-npm run build
+VITE_NOOS_URL=https://globalbr.ai npm run build
 
 # Create deployment package
 echo "Creating deployment package..."
@@ -51,6 +51,8 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=CHANGE_ME
 JWT_SECRET=CHANGE_ME
 NOOS_API_URL=http://noos_api:4000/api
+NOOS_URL=https://globalbr.ai
+OPENCHAT_URL=https://chat.globalbr.ai
 EOF
 fi
 
