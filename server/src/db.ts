@@ -2,6 +2,14 @@ import neo4j, { Driver } from 'neo4j-driver';
 
 let driver: Driver | null = null;
 
+/**
+ * Get Neo4j driver connection.
+ *
+ * IMPORTANT: In production, this uses the SHARED Noos Neo4j database
+ * (same as Thoughtstreams, thoughtstream-gemini-jacob, and noos/client).
+ * The default port 7690 is only for local development isolation.
+ * Production config is set via docker-compose.prod.yml → NEO4J_URI=bolt://noos_neo4j:7687
+ */
 export function getDriver(): Driver {
   if (!driver) {
     const uri = process.env.NEO4J_URI || 'bolt://localhost:7690';
