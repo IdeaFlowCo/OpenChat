@@ -54,6 +54,9 @@ function getInitials(user: { name?: string; email: string }): string {
   return name.substring(0, 2).toUpperCase();
 }
 
+// App version (sync with package.json)
+const APP_VERSION = '0.1.0';
+
 // Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -242,6 +245,9 @@ export function ChatSidebar() {
                       >
                         🚪 Logout
                       </button>
+                    </div>
+                    <div className="border-t border-gray-100 px-3 py-2 text-center text-xs text-gray-400">
+                      v{APP_VERSION}
                     </div>
                   </div>
                 )}
