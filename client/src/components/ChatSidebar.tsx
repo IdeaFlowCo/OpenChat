@@ -1,8 +1,58 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useChat } from '../contexts/ChatContext';
 import { ConversationList } from './ConversationList';
 import { PresenceIndicator } from './PresenceIndicator';
 import { User } from '../api';
+
+// Environment detection for context-aware UI
+type AppEnvironment = 'tailscale' | 'localhost' | 'production';
+
+function detectEnvironment(): AppEnvironment {
+  const hostname = window.location.hostname;
+  if (/^100\.\d+\.\d+\.\d+$/.test(hostname) || hostname.endsWith('.ts.net')) {
+    return 'tailscale';
+  }
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return 'localhost';
+  }
+  return 'production';
+}
+
+// Local dev ports for each service
+const LOCAL_PORTS = {
+  noos: 33217,
+  thoughtstreams: 15737,
+  openchat: 41851,
+  notes: 3008,
+};
+
+function getServiceUrls(env: AppEnvironment) {
+  if (env === 'production') {
+    return {
+      noos: 'https://globalbr.ai',
+      thoughtstreams: 'https://ts.globalbr.ai',
+      openchat: 'https://chat.globalbr.ai',
+      notes: 'https://notes.globalbr.ai',
+    };
+  }
+  const baseHost = env === 'tailscale' ? window.location.hostname : 'localhost';
+  return {
+    noos: `http://${baseHost}:${LOCAL_PORTS.noos}`,
+    thoughtstreams: `http://${baseHost}:${LOCAL_PORTS.thoughtstreams}`,
+    openchat: `http://${baseHost}:${LOCAL_PORTS.openchat}`,
+    notes: `http://${baseHost}:${LOCAL_PORTS.notes}`,
+  };
+}
+
+// Generate user initials
+function getInitials(user: { name?: string; email: string }): string {
+  const name = user.name || user.email.split('@')[0] || '?';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return name.substring(0, 2).toUpperCase();
+}
 
 // Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
@@ -27,8 +77,24 @@ export function ChatSidebar() {
   const [isSearching, setIsSearching] = useState(false);
   const [status, setStatus] = useState<'available' | 'away' | 'busy' | 'invisible'>('available');
   const [statusMessage, setStatusMessage] = useState('');
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const appEnvironment = useMemo(() => detectEnvironment(), []);
+  const serviceUrls = useMemo(() => getServiceUrls(appEnvironment), [appEnvironment]);
   const statusMessageTimeoutRef = useRef<number | null>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close user menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (userMenuOpen && userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [userMenuOpen]);
   const presenceInitializedRef = useRef(false);
 
   // Debounce search term (300ms)
@@ -122,12 +188,65 @@ export function ChatSidebar() {
             >
               New
             </button>
-            <button
-              onClick={logout}
-              className="px-3 py-1 text-xs border border-gray-300 rounded-full text-gray-600 hover:text-gray-800 hover:border-gray-400"
-            >
-              Log out
-            </button>
+            {currentUser && (
+              <div className="relative" ref={userMenuRef}>
+                <button
+                  onClick={() => setUserMenuOpen(!userMenuOpen)}
+                  className="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm font-medium hover:bg-blue-600"
+                >
+                  {getInitials(currentUser)}
+                </button>
+                {userMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                    <div className="p-3 border-b border-gray-100">
+                      <div className="font-medium text-sm truncate">{currentUser.name || currentUser.email}</div>
+                      {(appEnvironment === 'tailscale' || appEnvironment === 'localhost') && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 mt-1 inline-block">
+                          {appEnvironment === 'tailscale' ? 'Tailscale' : 'Dev'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="py-1">
+                      <a
+                        href={serviceUrls.notes}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        onClick={() => setUserMenuOpen(false)}
+                      >
+                        📓 Notes
+                      </a>
+                      <a
+                        href={serviceUrls.noos}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        onClick={() => setUserMenuOpen(false)}
+                      >
+                        🔗 Noos
+                      </a>
+                      <a
+                        href={serviceUrls.thoughtstreams}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        onClick={() => setUserMenuOpen(false)}
+                      >
+                        📝 Thoughtstreams
+                      </a>
+                    </div>
+                    <div className="border-t border-gray-100">
+                      <button
+                        onClick={() => { setUserMenuOpen(false); logout(); }}
+                        className="block w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-gray-100"
+                      >
+                        🚪 Logout
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
