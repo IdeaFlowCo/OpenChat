@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-SERVER_IP="44.211.180.200"
+SERVER_IP="3.216.129.34"
 SSH_KEY="~/.ssh/lightsail-noos.pem"
 REMOTE_USER="ubuntu"
 APP_NAME="openchat"
