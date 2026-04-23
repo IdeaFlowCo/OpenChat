@@ -2,7 +2,7 @@ import { reportFetchError, reportHttpError } from './utils/clientLogger';
 
 const API_BASE = '/api/chat';
 const AUTH_BASE = '/api/auth';
-const NOOS_URL = import.meta.env.VITE_NOOS_URL || 'http://localhost:52743';
+const NOOS_URL = import.meta.env.VITE_NOOS_URL || 'https://globalbr.ai';
 
 export interface User {
   id: string;

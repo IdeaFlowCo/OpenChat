@@ -4,7 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import { ChatProvider, useChat } from './contexts/ChatContext';
 import { ChatPage } from './pages/ChatPage';
 
-const NOOS_URL = import.meta.env.VITE_NOOS_URL || 'http://localhost:52743';
+const NOOS_URL = import.meta.env.VITE_NOOS_URL || 'https://globalbr.ai';
 const ALLOW_INSECURE_SSO_TOKEN = import.meta.env.MODE !== 'production';
 
 function normalizeRedirect(target: string | null): string {
