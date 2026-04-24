@@ -9,11 +9,17 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <!--
+      Noos feedback widget. data-bottom-offset lifts the launcher above
+      the chat composer on mobile + desktop so the floating button and
+      panel don't overlap the Send button. See OpenChat-u7c.
+    -->
     <script
       src="https://globalbr.ai/widget/noos-feedback.js?v=2.1"
       data-project="openchat"
       data-position="bottom-right"
       data-theme="auto"
+      data-bottom-offset="80"
     ></script>
   </body>
 </html>
