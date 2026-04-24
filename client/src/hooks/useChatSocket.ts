@@ -26,9 +26,15 @@ export function useChatSocket(options: UseChatSocketOptions) {
       return;
     }
 
+    // WebSocket-only transport. Cloudflare's proxy breaks socket.io's
+    // XHR polling fallback (the poll cycle looks like real disconnects
+    // to the server, producing rapid connect/disconnect churn and a
+    // perma-"Reconnecting..." UI). picortex's OpenChatChannel hit the
+    // identical bug on 2026-04-23 and was fixed the same way.
+    // See OpenChat-0kv.
     const socket = io({
       auth: { token },
-      transports: ['websocket', 'polling'],
+      transports: ['websocket'],
     });
 
     socketRef.current = socket;
@@ -43,9 +49,16 @@ export function useChatSocket(options: UseChatSocketOptions) {
       }
     });
 
-    socket.on('disconnect', () => {
-      console.log('Socket disconnected');
+    socket.on('disconnect', (reason) => {
+      console.log('Socket disconnected:', reason);
       setIsConnected(false);
+    });
+
+    // Surface WS handshake/connect failures to the browser console so
+    // regressions (e.g. Cloudflare WebSocket upgrade disabled) don't
+    // degrade silently. See OpenChat-0kv.
+    socket.on('connect_error', (err) => {
+      console.error('Socket connect_error:', err?.message || err, err);
     });
 
     socket.on('message:new', (message: Message) => {
