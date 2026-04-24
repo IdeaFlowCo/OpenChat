@@ -61,6 +61,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/client-logs', clientLogsRoutes);
 
+// Make io available to HTTP route handlers (e.g. to emit conversation:created
+// when a new conversation is created via POST /api/chat/conversations).
+app.set('io', io);
+
 // Setup WebSocket handlers
 setupChatSocket(io);
 

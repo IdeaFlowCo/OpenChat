@@ -1,10 +1,37 @@
 import { Router, Request, Response } from 'express';
+import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
 import neo4j from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
+
+// Emit conversation:created to every participant's per-user room. Clients
+// (including the picortex bot) listen for this event and immediately join
+// the new conversation's room so the very first message isn't dropped.
+// See OpenChat-09h.
+function emitConversationCreated(
+  io: IOServer | undefined,
+  conversation: Record<string, unknown> | null
+): void {
+  if (!io || !conversation) return;
+  const conversationId = conversation.id as string | undefined;
+  if (!conversationId) return;
+  const participants = Array.isArray(conversation.participants)
+    ? (conversation.participants as Array<{ user?: { id?: string } }>)
+    : [];
+  const seen = new Set<string>();
+  for (const p of participants) {
+    const pid = p?.user?.id;
+    if (!pid || seen.has(pid)) continue;
+    seen.add(pid);
+    io.to(`user:${pid}`).emit('conversation:created', {
+      conversationId,
+      conversation
+    });
+  }
+}
 
 // Helper to convert Neo4j types to JS
 function toJS(value: unknown): unknown {
@@ -127,7 +154,15 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
       userId
     });
 
-    const conversation = toJS(result.records[0].get('conversation'));
+    const conversation = toJS(result.records[0].get('conversation')) as
+      | Record<string, unknown>
+      | null;
+
+    // Notify all participants (including creator, for consistency) via their
+    // per-user socket rooms so their clients can auto-join the new room.
+    const io = req.app.get('io') as IOServer | undefined;
+    emitConversationCreated(io, conversation);
+
     res.status(201).json(conversation);
   } catch (error) {
     console.error('Error creating conversation:', error);

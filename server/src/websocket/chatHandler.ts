@@ -44,6 +44,11 @@ export function setupChatSocket(io: Server): void {
     socketUsers.set(socket.id, userId);
     socketConversations.set(socket.id, new Set());
 
+    // Join a per-user room so we can emit targeted events (conversation:created,
+    // participant:added) without requiring prior conversation:join. Fixes the
+    // new-DM discovery race (OpenChat-09h).
+    socket.join(`user:${userId}`);
+
     // Update presence to online
     updateUserPresence(userId, 'available');
 
