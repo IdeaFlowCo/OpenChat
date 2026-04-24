@@ -75,7 +75,10 @@ export function MessageInput() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="p-4 border-t border-gray-200">
+    // Right padding reserves clearance so the Noos feedback widget
+    // launcher (fixed, bottom-right, ~48-56px) doesn't overlap the
+    // Send button. See OpenChat-u7c.
+    <form onSubmit={handleSubmit} className="p-4 pr-20 sm:pr-24 border-t border-gray-200">
       <div className="flex gap-2">
         <input
           ref={inputRef}
