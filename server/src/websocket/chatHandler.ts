@@ -15,6 +15,42 @@ const socketConversations = new Map<string, Set<string>>(); // socketId -> conve
 const userSockets = new Map<string, Set<string>>(); // userId -> socketIds
 const socketUsers = new Map<string, string>(); // socketId -> userId
 
+// Force-join a user's live sockets to a conversation room. Used when a
+// member is added to a group: their existing connection should immediately
+// start receiving message:new without waiting for them to click the conv.
+export function joinUserSocketsToConversation(io: Server, userId: string, conversationId: string): void {
+  const sockets = userSockets.get(userId);
+  if (!sockets) return;
+  for (const socketId of sockets) {
+    const s = io.sockets.sockets.get(socketId);
+    if (!s) continue;
+    s.join(`conversation:${conversationId}`);
+    if (!conversationSockets.has(conversationId)) {
+      conversationSockets.set(conversationId, new Set());
+    }
+    conversationSockets.get(conversationId)!.add(socketId);
+    if (!socketConversations.has(socketId)) {
+      socketConversations.set(socketId, new Set());
+    }
+    socketConversations.get(socketId)!.add(conversationId);
+  }
+}
+
+// Force-leave a user's live sockets from a conversation room. Used when a
+// member is removed/leaves so they don't keep getting messages over their
+// existing connection.
+export function leaveUserSocketsFromConversation(io: Server, userId: string, conversationId: string): void {
+  const sockets = userSockets.get(userId);
+  if (!sockets) return;
+  for (const socketId of sockets) {
+    const s = io.sockets.sockets.get(socketId);
+    if (!s) continue;
+    s.leave(`conversation:${conversationId}`);
+    conversationSockets.get(conversationId)?.delete(socketId);
+    socketConversations.get(socketId)?.delete(conversationId);
+  }
+}
+
 export function setupChatSocket(io: Server): void {
   // Authentication middleware
   io.use((socket: AuthenticatedSocket, next) => {

@@ -114,6 +114,29 @@ class ApiClient {
     return this.fetch(`/conversations/${id}`);
   }
 
+  // Group: rename
+  async updateConversation(id: string, patch: { title?: string }): Promise<Conversation> {
+    return this.fetch(`/conversations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  // Group: add member (owner-only)
+  async addParticipant(conversationId: string, userId: string): Promise<Conversation> {
+    return this.fetch(`/conversations/${conversationId}/participants`, {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  // Group: remove member (owner can remove anyone; member can remove self = leave)
+  async removeParticipant(conversationId: string, userId: string): Promise<{ ok: true }> {
+    return this.fetch(`/conversations/${conversationId}/participants/${userId}`, {
+      method: 'DELETE',
+    });
+  }
+
   // Messages
   async getMessages(conversationId: string, before?: string): Promise<Message[]> {
     const params = new URLSearchParams();

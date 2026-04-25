@@ -8,10 +8,24 @@ interface UseChatSocketOptions {
   onTypingStart?: (data: { conversationId: string; userId: string }) => void;
   onTypingStop?: (data: { conversationId: string; userId: string }) => void;
   onPresenceUpdate?: (data: { userId: string; status: string; statusMessage?: string }) => void;
+  onConversationCreated?: (data: { conversationId: string; conversation: unknown }) => void;
+  onConversationUpdated?: (data: { conversationId: string; conversation: unknown }) => void;
+  onParticipantAdded?: (data: { conversationId: string; conversation: unknown }) => void;
+  onParticipantRemoved?: (data: { conversationId: string; userId: string; conversation?: unknown }) => void;
 }
 
 export function useChatSocket(options: UseChatSocketOptions) {
-  const { token, onMessage, onTypingStart, onTypingStop, onPresenceUpdate } = options;
+  const {
+    token,
+    onMessage,
+    onTypingStart,
+    onTypingStop,
+    onPresenceUpdate,
+    onConversationCreated,
+    onConversationUpdated,
+    onParticipantAdded,
+    onParticipantRemoved,
+  } = options;
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const joinedConversations = useRef<Set<string>>(new Set());
@@ -77,6 +91,22 @@ export function useChatSocket(options: UseChatSocketOptions) {
       onPresenceUpdate?.(data);
     });
 
+    socket.on('conversation:created', (data) => {
+      onConversationCreated?.(data);
+    });
+
+    socket.on('conversation:updated', (data) => {
+      onConversationUpdated?.(data);
+    });
+
+    socket.on('participant:added', (data) => {
+      onParticipantAdded?.(data);
+    });
+
+    socket.on('participant:removed', (data) => {
+      onParticipantRemoved?.(data);
+    });
+
     socket.on('error', (error) => {
       console.error('Socket error:', error);
     });
@@ -93,7 +123,17 @@ export function useChatSocket(options: UseChatSocketOptions) {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [token, onMessage, onTypingStart, onTypingStop, onPresenceUpdate]);
+  }, [
+    token,
+    onMessage,
+    onTypingStart,
+    onTypingStop,
+    onPresenceUpdate,
+    onConversationCreated,
+    onConversationUpdated,
+    onParticipantAdded,
+    onParticipantRemoved,
+  ]);
 
   const joinConversation = useCallback((conversationId: string) => {
     if (socketRef.current?.connected) {

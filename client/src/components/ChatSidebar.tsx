@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import { useChat } from '../contexts/ChatContext';
 import { ConversationList } from './ConversationList';
 import { PresenceIndicator } from './PresenceIndicator';
@@ -55,7 +56,7 @@ function getInitials(user: { name?: string; email: string }): string {
 }
 
 // App version (sync with package.json)
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.2.0';
 
 // Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
@@ -72,21 +73,28 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
+type PickerMode = 'closed' | 'direct' | 'group';
+
 export function ChatSidebar() {
   const { searchContacts, createConversation, setActiveConversation, presence, currentUser, isConnected, updatePresence, logout } = useChat();
-  const [showContacts, setShowContacts] = useState(false);
+  const [pickerMode, setPickerMode] = useState<PickerMode>('closed');
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [status, setStatus] = useState<'available' | 'away' | 'busy' | 'invisible'>('available');
   const [statusMessage, setStatusMessage] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  // Group-creation state
+  const [selectedContacts, setSelectedContacts] = useState<User[]>([]);
+  const [groupTitle, setGroupTitle] = useState('');
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const appEnvironment = useMemo(() => detectEnvironment(), []);
   const serviceUrls = useMemo(() => getServiceUrls(appEnvironment), [appEnvironment]);
   const statusMessageTimeoutRef = useRef<number | null>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const presenceInitializedRef = useRef(false);
 
   // Close user menu on click outside
   useEffect(() => {
@@ -98,17 +106,15 @@ export function ChatSidebar() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [userMenuOpen]);
-  const presenceInitializedRef = useRef(false);
 
   // Debounce search term (300ms)
   const debouncedSearch = useDebounce(searchTerm, 300);
 
   // Perform search when debounced term changes
   useEffect(() => {
-    if (!showContacts) return;
+    if (pickerMode === 'closed') return;
 
     const performSearch = async () => {
-      // Only search if there's at least 1 character
       if (debouncedSearch.length === 0) {
         setSearchResults([]);
         return;
@@ -124,7 +130,7 @@ export function ChatSidebar() {
     };
 
     performSearch();
-  }, [debouncedSearch, showContacts, searchContacts]);
+  }, [debouncedSearch, pickerMode, searchContacts]);
 
   useEffect(() => {
     if (!isConnected) return;
@@ -148,11 +154,12 @@ export function ChatSidebar() {
     };
   }, [statusMessage, status, isConnected, updatePresence]);
 
-  const handleNewChat = () => {
-    setShowContacts(true);
+  const openPicker = (mode: 'direct' | 'group') => {
+    setPickerMode(mode);
     setSearchTerm('');
     setSearchResults([]);
-    // Focus search input after render
+    setSelectedContacts([]);
+    setGroupTitle('');
     setTimeout(() => searchInputRef.current?.focus(), 100);
   };
 
@@ -164,38 +171,84 @@ export function ChatSidebar() {
     }
   };
 
-  const handleSelectContact = async (contactId: string) => {
-    const conv = await createConversation([contactId]);
-    setActiveConversation(conv.id);
-    setShowContacts(false);
-    setSearchTerm('');
-    setSearchResults([]);
+  const handleSelectContact = async (contact: User) => {
+    if (pickerMode === 'group') {
+      // Toggle in selection
+      setSelectedContacts(prev => {
+        const exists = prev.some(c => c.id === contact.id);
+        if (exists) return prev.filter(c => c.id !== contact.id);
+        return [...prev, contact];
+      });
+      return;
+    }
+
+    // Direct: open chat immediately
+    try {
+      const conv = await createConversation([contact.id]);
+      setActiveConversation(conv.id);
+      handleClosePicker();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to start chat');
+    }
   };
 
-  const handleCloseContacts = () => {
-    setShowContacts(false);
+  const handleCreateGroup = async () => {
+    if (selectedContacts.length < 2) {
+      toast.error('Pick at least 2 people for a group');
+      return;
+    }
+    setCreatingGroup(true);
+    try {
+      const conv = await createConversation(
+        selectedContacts.map(c => c.id),
+        groupTitle.trim() || undefined,
+        'group'
+      );
+      setActiveConversation(conv.id);
+      handleClosePicker();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create group');
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
+
+  const handleClosePicker = () => {
+    setPickerMode('closed');
     setSearchTerm('');
     setSearchResults([]);
+    setSelectedContacts([]);
+    setGroupTitle('');
   };
+
+  const isContactSelected = (id: string) => selectedContacts.some(c => c.id === id);
 
   return (
-    <div className="w-80 border-r border-gray-200 flex flex-col bg-white">
+    <div className="flex-1 flex flex-col bg-white min-h-0">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="p-3 md:p-4 border-b border-gray-200 pt-safe">
         <div className="flex items-center justify-between mb-3 gap-2">
           <h1 className="text-xl font-semibold">Chats</h1>
           <div className="flex items-center gap-2">
             <button
-              onClick={handleNewChat}
-              className="px-3 py-1 text-sm bg-blue-500 text-white rounded-full hover:bg-blue-600"
+              onClick={() => openPicker('direct')}
+              className="px-3 py-2 min-h-[40px] text-sm bg-blue-500 text-white rounded-full hover:bg-blue-600 active:bg-blue-700 font-medium transition-colors"
             >
-              New
+              + New
+            </button>
+            <button
+              onClick={() => openPicker('group')}
+              className="px-3 py-2 min-h-[40px] text-sm bg-white text-blue-600 border border-blue-500 rounded-full hover:bg-blue-50 active:bg-blue-100 font-medium transition-colors"
+              title="New group chat"
+            >
+              + Group
             </button>
             {currentUser && (
               <div className="relative" ref={userMenuRef}>
                 <button
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
-                  className="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm font-medium hover:bg-blue-600"
+                  className="w-10 h-10 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm font-medium hover:bg-blue-600 active:bg-blue-700"
+                  aria-label="User menu"
                 >
                   {getInitials(currentUser)}
                 </button>
@@ -214,7 +267,7 @@ export function ChatSidebar() {
                         href={serviceUrls.notes}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        className="block px-3 py-3 text-sm text-gray-700 hover:bg-gray-100 active:bg-gray-200"
                         onClick={() => setUserMenuOpen(false)}
                       >
                         📓 Notes
@@ -223,7 +276,7 @@ export function ChatSidebar() {
                         href={serviceUrls.noos}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        className="block px-3 py-3 text-sm text-gray-700 hover:bg-gray-100 active:bg-gray-200"
                         onClick={() => setUserMenuOpen(false)}
                       >
                         🔗 Noos
@@ -232,7 +285,7 @@ export function ChatSidebar() {
                         href={serviceUrls.thoughtstreams}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        className="block px-3 py-3 text-sm text-gray-700 hover:bg-gray-100 active:bg-gray-200"
                         onClick={() => setUserMenuOpen(false)}
                       >
                         📝 Thoughtstreams
@@ -241,7 +294,7 @@ export function ChatSidebar() {
                     <div className="border-t border-gray-100">
                       <button
                         onClick={() => { setUserMenuOpen(false); logout(); }}
-                        className="block w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-gray-100"
+                        className="block w-full text-left px-3 py-3 text-sm text-red-600 hover:bg-gray-100 active:bg-gray-200"
                       >
                         🚪 Logout
                       </button>
@@ -267,7 +320,7 @@ export function ChatSidebar() {
               <select
                 value={status}
                 onChange={(e) => handleStatusChange(e.target.value as 'available' | 'away' | 'busy' | 'invisible')}
-                className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs text-gray-700 bg-white"
+                className="flex-1 px-2 py-2 min-h-[36px] border border-gray-300 rounded text-xs text-gray-700 bg-white"
                 disabled={!isConnected}
               >
                 <option value="available">Available</option>
@@ -283,7 +336,7 @@ export function ChatSidebar() {
                   setStatusMessage(e.target.value);
                 }}
                 placeholder="Status message"
-                className="flex-[2] px-2 py-1 border border-gray-300 rounded text-xs"
+                className="flex-[2] px-2 py-2 min-h-[36px] border border-gray-300 rounded text-xs"
                 disabled={!isConnected}
               />
             </div>
@@ -299,28 +352,78 @@ export function ChatSidebar() {
         )}
       </div>
 
-      {/* Contact picker modal/dropdown */}
-      {showContacts ? (
-        <div className="flex-1 flex flex-col">
+      {/* Contact picker */}
+      {pickerMode !== 'closed' ? (
+        <div className="flex-1 flex flex-col min-h-0">
           <div className="p-3 border-b border-gray-200">
             <div className="flex items-center gap-2 mb-2">
               <button
-                onClick={handleCloseContacts}
-                className="text-gray-500 hover:text-gray-700"
+                onClick={handleClosePicker}
+                className="text-gray-500 hover:text-gray-700 active:text-gray-900 px-2 py-1 -ml-2 min-h-[36px]"
               >
                 ← Back
               </button>
-              <span className="font-medium">Find Contact</span>
+              <span className="font-medium">
+                {pickerMode === 'group' ? 'New Group' : 'Find Contact'}
+              </span>
             </div>
+
+            {/* Group title input */}
+            {pickerMode === 'group' && (
+              <input
+                type="text"
+                placeholder="Group name (optional)"
+                value={groupTitle}
+                onChange={(e) => setGroupTitle(e.target.value)}
+                className="w-full px-3 py-2 mb-2 min-h-[40px] border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-base"
+              />
+            )}
+
             <input
               ref={searchInputRef}
               type="text"
               placeholder="Search by name or email..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+              className="w-full px-3 py-2 min-h-[40px] border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-base"
               autoFocus
             />
+
+            {/* Selected pills + Create button (group mode) */}
+            {pickerMode === 'group' && (
+              <>
+                {selectedContacts.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {selectedContacts.map(c => (
+                      <span
+                        key={c.id}
+                        className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs"
+                      >
+                        {c.name || c.email}
+                        <button
+                          onClick={() => setSelectedContacts(prev => prev.filter(x => x.id !== c.id))}
+                          className="hover:text-blue-900"
+                          aria-label={`Remove ${c.name || c.email}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <button
+                  onClick={handleCreateGroup}
+                  disabled={selectedContacts.length < 2 || creatingGroup}
+                  className="w-full mt-2 px-4 py-3 min-h-[44px] bg-blue-500 text-white rounded-lg hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
+                >
+                  {creatingGroup
+                    ? 'Creating…'
+                    : selectedContacts.length < 2
+                      ? `Pick ${2 - selectedContacts.length} more`
+                      : `Create group (${selectedContacts.length})`}
+                </button>
+              </>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto">
@@ -340,14 +443,24 @@ export function ChatSidebar() {
             ) : (
               searchResults.map((contact) => {
                 const contactPresence = presence.get(contact.id);
+                const selected = isContactSelected(contact.id);
 
                 return (
                   <div
                     key={contact.id}
-                    onClick={() => handleSelectContact(contact.id)}
-                    className="p-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100"
+                    onClick={() => handleSelectContact(contact)}
+                    className={`p-3 cursor-pointer hover:bg-gray-50 active:bg-gray-100 border-b border-gray-100 min-h-[60px] ${selected ? 'bg-blue-50' : ''}`}
                   >
                     <div className="flex items-center gap-3">
+                      {pickerMode === 'group' && (
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          readOnly
+                          className="w-5 h-5 accent-blue-500 pointer-events-none"
+                          aria-label={`Select ${contact.name || contact.email}`}
+                        />
+                      )}
                       <div className="relative">
                         <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-medium">
                           {(contact.name || contact.email).charAt(0).toUpperCase()}
@@ -376,7 +489,9 @@ export function ChatSidebar() {
           </div>
         </div>
       ) : (
-        <ConversationList />
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <ConversationList />
+        </div>
       )}
     </div>
   );

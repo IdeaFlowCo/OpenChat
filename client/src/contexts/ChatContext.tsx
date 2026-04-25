@@ -21,8 +21,11 @@ interface ChatContextValue {
   conversations: Conversation[];
   activeConversationId: string | null;
   setActiveConversation: (id: string | null) => void;
-  createConversation: (participantIds: string[], title?: string) => Promise<Conversation>;
+  createConversation: (participantIds: string[], title?: string, type?: 'direct' | 'group') => Promise<Conversation>;
   loadConversations: () => Promise<void>;
+  renameConversation: (id: string, title: string) => Promise<void>;
+  addParticipant: (conversationId: string, userId: string) => Promise<void>;
+  removeParticipant: (conversationId: string, userId: string) => Promise<void>;
 
   // Messages
   messages: Message[];
@@ -128,6 +131,63 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  // Conversation created (e.g. someone added me to a new group, or my own
+  // create echoed back from server). Idempotent merge.
+  const handleConversationCreated = useCallback((data: { conversationId: string; conversation: unknown }) => {
+    const conv = data.conversation as Conversation;
+    if (!conv?.id) return;
+    setConversations(prev => {
+      const idx = prev.findIndex(c => c.id === conv.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...conv };
+        return next;
+      }
+      return [conv, ...prev];
+    });
+  }, []);
+
+  const handleConversationUpdated = useCallback((data: { conversationId: string; conversation: unknown }) => {
+    const conv = data.conversation as Conversation;
+    if (!conv?.id) return;
+    setConversations(prev => prev.map(c => (c.id === conv.id ? { ...c, ...conv } : c)));
+  }, []);
+
+  const handleParticipantAdded = useCallback((data: { conversationId: string; conversation: unknown }) => {
+    const conv = data.conversation as Conversation;
+    if (!conv?.id) return;
+    setConversations(prev => {
+      const idx = prev.findIndex(c => c.id === conv.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...conv };
+        return next;
+      }
+      // We were just added — insert.
+      return [conv, ...prev];
+    });
+  }, []);
+
+  const handleParticipantRemoved = useCallback((data: { conversationId: string; userId: string; conversation?: unknown }) => {
+    const conv = data.conversation as Conversation | undefined;
+    // If *I* was the one removed, drop the conversation entirely from my view.
+    const me = JSON.parse(localStorage.getItem('openchat_user') || 'null') as { userId?: string } | null;
+    if (data.userId === me?.userId) {
+      setConversations(prev => prev.filter(c => c.id !== data.conversationId));
+      setActiveConversationId(curr => (curr === data.conversationId ? null : curr));
+      toast('You were removed from the group');
+      return;
+    }
+    setConversations(prev => prev.map(c => {
+      if (c.id !== data.conversationId) return c;
+      if (conv) return { ...c, ...conv };
+      return {
+        ...c,
+        participants: (c.participants || []).filter(p => p.user.id !== data.userId),
+      };
+    }));
+  }, []);
+
   const {
     isConnected,
     joinConversation,
@@ -142,6 +202,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     onTypingStart: handleTypingStart,
     onTypingStop: handleTypingStop,
     onPresenceUpdate: handlePresenceUpdate,
+    onConversationCreated: handleConversationCreated,
+    onConversationUpdated: handleConversationUpdated,
+    onParticipantAdded: handleParticipantAdded,
+    onParticipantRemoved: handleParticipantRemoved,
   });
 
   // Set API token when auth changes
@@ -282,11 +346,53 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [activeConversationId, joinConversation, leaveConversation, loadMessages]);
 
   // Create conversation
-  const createConversation = useCallback(async (participantIds: string[], title?: string) => {
-    const conv = await api.createConversation(participantIds, title);
-    setConversations(prev => [conv, ...prev]);
+  const createConversation = useCallback(async (participantIds: string[], title?: string, type?: 'direct' | 'group') => {
+    // Auto-derive type from participant count if not given: 1 -> direct, 2+ -> group
+    const resolvedType: 'direct' | 'group' = type ?? (participantIds.length > 1 ? 'group' : 'direct');
+    const conv = await api.createConversation(participantIds, title, resolvedType);
+    setConversations(prev => {
+      // Replace if it already exists (idempotent for repeat 1:1 creates)
+      const idx = prev.findIndex(c => c.id === conv.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = conv;
+        return next;
+      }
+      return [conv, ...prev];
+    });
     return conv;
   }, []);
+
+  // Rename group
+  const renameConversation = useCallback(async (id: string, title: string) => {
+    const updated = await api.updateConversation(id, { title });
+    setConversations(prev => prev.map(c => (c.id === id ? { ...c, ...updated } : c)));
+  }, []);
+
+  // Add member to group
+  const addParticipant = useCallback(async (conversationId: string, userId: string) => {
+    const updated = await api.addParticipant(conversationId, userId);
+    setConversations(prev => prev.map(c => (c.id === conversationId ? { ...c, ...updated } : c)));
+  }, []);
+
+  // Remove member (or leave, when userId === currentUser)
+  const removeParticipant = useCallback(async (conversationId: string, userId: string) => {
+    await api.removeParticipant(conversationId, userId);
+    if (userId === currentUser?.userId) {
+      // Self-leave — drop the conversation locally
+      setConversations(prev => prev.filter(c => c.id !== conversationId));
+      setActiveConversationId(curr => (curr === conversationId ? null : curr));
+    } else {
+      // Optimistic local update; the real conversation will arrive via WS
+      setConversations(prev => prev.map(c => {
+        if (c.id !== conversationId) return c;
+        return {
+          ...c,
+          participants: (c.participants || []).filter(p => p.user.id !== userId),
+        };
+      }));
+    }
+  }, [currentUser?.userId]);
 
   // Send message
   const sendMessage = useCallback(async (content: string) => {
@@ -360,6 +466,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setActiveConversation,
     createConversation,
     loadConversations,
+    renameConversation,
+    addParticipant,
+    removeParticipant,
     messages,
     sendMessage,
     loadMessages,

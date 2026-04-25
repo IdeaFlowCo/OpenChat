@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid';
 import neo4j from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { joinUserSocketsToConversation, leaveUserSocketsFromConversation } from '../websocket/chatHandler.js';
 
 const router = Router();
 
@@ -167,6 +168,272 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
   } catch (error) {
     console.error('Error creating conversation:', error);
     res.status(500).json({ error: 'Failed to create conversation' });
+  } finally {
+    await session.close();
+  }
+});
+
+// Helper: load full conversation with participants (used by mutating endpoints
+// that need to broadcast a fresh shape to clients). Returns null if the
+// conversation has no participants left (i.e. fully drained group).
+async function loadConversation(
+  session: ReturnType<ReturnType<typeof getDriver>['session']>,
+  conversationId: string
+): Promise<Record<string, unknown> | null> {
+  const result = await session.run(`
+    MATCH (c:Conversation {id: $conversationId})
+    OPTIONAL MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
+    WITH c, collect(
+      CASE WHEN participant IS NULL THEN NULL
+      ELSE {user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}
+      END
+    ) AS rawParticipants
+    WITH c, [p IN rawParticipants WHERE p IS NOT NULL] AS participants
+    RETURN c {
+      .*,
+      participants: participants
+    } AS conversation
+  `, { conversationId });
+  if (result.records.length === 0) return null;
+  return toJS(result.records[0].get('conversation')) as Record<string, unknown>;
+}
+
+// Emit conversation:updated to every current participant's user-room.
+function emitConversationUpdated(
+  io: IOServer | undefined,
+  conversation: Record<string, unknown> | null
+): void {
+  if (!io || !conversation) return;
+  const conversationId = conversation.id as string | undefined;
+  if (!conversationId) return;
+  const participants = Array.isArray(conversation.participants)
+    ? (conversation.participants as Array<{ user?: { id?: string } }>)
+    : [];
+  const seen = new Set<string>();
+  for (const p of participants) {
+    const pid = p?.user?.id;
+    if (!pid || seen.has(pid)) continue;
+    seen.add(pid);
+    io.to(`user:${pid}`).emit('conversation:updated', { conversationId, conversation });
+  }
+  // Also emit to anyone currently in the conversation room (in case they're
+  // in a non-participant viewer state — edge case but cheap)
+  io.to(`conversation:${conversationId}`).emit('conversation:updated', { conversationId, conversation });
+}
+
+// PATCH /api/chat/conversations/:id - Update title (owner-only for groups)
+router.patch('/conversations/:id', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const id = req.params.id as string;
+  const { title } = req.body as { title?: string };
+
+  if (typeof title !== 'string' || !title.trim()) {
+    res.status(400).json({ error: 'title is required' });
+    return;
+  }
+
+  try {
+    // Verify owner
+    const check = await session.run(`
+      MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
+      RETURN c, rel.role AS role
+    `, { userId, id });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    const role = check.records[0].get('role');
+    if (role !== 'owner') {
+      res.status(403).json({ error: 'Only the group owner can rename' });
+      return;
+    }
+
+    await session.run(`
+      MATCH (c:Conversation {id: $id})
+      SET c.title = $title, c.updatedAt = datetime($now)
+    `, { id, title: title.trim(), now: new Date().toISOString() });
+
+    const conversation = await loadConversation(session, id);
+    const io = req.app.get('io') as IOServer | undefined;
+    emitConversationUpdated(io, conversation);
+    res.json(conversation);
+  } catch (error) {
+    console.error('Error updating conversation:', error);
+    res.status(500).json({ error: 'Failed to update conversation' });
+  } finally {
+    await session.close();
+  }
+});
+
+// POST /api/chat/conversations/:id/participants - Add a member (owner-only, group only)
+router.post('/conversations/:id/participants', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const id = req.params.id as string;
+  const { userId: targetId } = req.body as { userId?: string };
+
+  if (!targetId || typeof targetId !== 'string') {
+    res.status(400).json({ error: 'userId is required' });
+    return;
+  }
+
+  try {
+    // Verify caller is owner of a group
+    const check = await session.run(`
+      MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
+      RETURN c.type AS type, rel.role AS role
+    `, { userId, id });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    const role = check.records[0].get('role');
+    const type = check.records[0].get('type');
+    if (type !== 'group') {
+      res.status(400).json({ error: 'Cannot add participants to a direct conversation' });
+      return;
+    }
+    if (role !== 'owner') {
+      res.status(403).json({ error: 'Only the group owner can add members' });
+      return;
+    }
+
+    // Verify target user exists
+    const userCheck = await session.run(`MATCH (u:User {id: $targetId}) RETURN u`, { targetId });
+    if (userCheck.records.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    // Idempotent add: MERGE relationship; preserve role/joinedAt if already present
+    const now = new Date().toISOString();
+    await session.run(`
+      MATCH (c:Conversation {id: $id})
+      MATCH (u:User {id: $targetId})
+      MERGE (u)-[rel:PARTICIPATES_IN]->(c)
+        ON CREATE SET rel.joinedAt = datetime($now), rel.role = 'member'
+      SET c.updatedAt = datetime($now)
+    `, { id, targetId, now });
+
+    const conversation = await loadConversation(session, id);
+    const io = req.app.get('io') as IOServer | undefined;
+    if (io && conversation) {
+      // Auto-join the new member's live sockets to the conversation room so
+      // they start receiving message:new immediately, without needing to
+      // click into the conversation first.
+      joinUserSocketsToConversation(io, targetId, id);
+
+      // Notify all current participants (incl. newly-added) so their clients
+      // refresh.
+      const participants = (conversation.participants as Array<{ user?: { id?: string } }>) || [];
+      const seen = new Set<string>();
+      for (const p of participants) {
+        const pid = p?.user?.id;
+        if (!pid || seen.has(pid)) continue;
+        seen.add(pid);
+        io.to(`user:${pid}`).emit('participant:added', {
+          conversationId: id,
+          conversation,
+          userId: targetId,
+        });
+      }
+    }
+
+    res.status(201).json(conversation);
+  } catch (error) {
+    console.error('Error adding participant:', error);
+    res.status(500).json({ error: 'Failed to add participant' });
+  } finally {
+    await session.close();
+  }
+});
+
+// DELETE /api/chat/conversations/:id/participants/:userId - Remove member or leave
+router.delete('/conversations/:id/participants/:userId', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const callerId = req.user!.userId;
+  const id = req.params.id as string;
+  const targetId = req.params.userId as string;
+
+  try {
+    // Caller must be participant
+    const callerCheck = await session.run(`
+      MATCH (u:User {id: $callerId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
+      RETURN c.type AS type, rel.role AS role
+    `, { callerId, id });
+
+    if (callerCheck.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    const type = callerCheck.records[0].get('type');
+    const callerRole = callerCheck.records[0].get('role');
+    if (type !== 'group') {
+      res.status(400).json({ error: 'Cannot remove participants from a direct conversation' });
+      return;
+    }
+
+    const isSelf = callerId === targetId;
+    if (!isSelf && callerRole !== 'owner') {
+      res.status(403).json({ error: 'Only the group owner can remove other members' });
+      return;
+    }
+
+    // Owner leaving with other members still present: block. Force a transfer
+    // (or removal of others first) — simpler to keep the invariant for now.
+    if (isSelf && callerRole === 'owner') {
+      const countResult = await session.run(`
+        MATCH (:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $id})
+        RETURN count(*) AS n
+      `, { id });
+      const n = countResult.records[0]?.get('n')?.toNumber?.() ?? 0;
+      if (n > 1) {
+        res.status(400).json({ error: 'Owner cannot leave a group with other members. Remove members first.' });
+        return;
+      }
+    }
+
+    // Capture participant ids BEFORE removal so we can notify the removed user too
+    const before = await loadConversation(session, id);
+    const beforeParticipants = (before?.participants as Array<{ user?: { id?: string } }>) || [];
+
+    await session.run(`
+      MATCH (u:User {id: $targetId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
+      DELETE rel
+      SET c.updatedAt = datetime($now)
+    `, { id, targetId, now: new Date().toISOString() });
+
+    const after = await loadConversation(session, id);
+
+    const io = req.app.get('io') as IOServer | undefined;
+    if (io) {
+      // Yank the removed user's sockets out of the conversation room first,
+      // so they don't receive the very participant:removed event for "you".
+      // (We still emit to their per-user room below.)
+      leaveUserSocketsFromConversation(io, targetId, id);
+
+      // Notify everyone who was a participant (this includes the removed
+      // user, via their per-user room).
+      const seen = new Set<string>();
+      for (const p of beforeParticipants) {
+        const pid = p?.user?.id;
+        if (!pid || seen.has(pid)) continue;
+        seen.add(pid);
+        io.to(`user:${pid}`).emit('participant:removed', {
+          conversationId: id,
+          userId: targetId,
+          conversation: after,
+        });
+      }
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Error removing participant:', error);
+    res.status(500).json({ error: 'Failed to remove participant' });
   } finally {
     await session.close();
   }
