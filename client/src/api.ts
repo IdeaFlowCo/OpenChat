@@ -20,6 +20,10 @@ export function isAuthError(error: unknown): boolean {
   return error instanceof ApiError && (error.status === 401 || error.status === 403);
 }
 
+function isAuthStatus(status: number): boolean {
+  return status === 401 || status === 403;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -54,23 +58,27 @@ export interface Conversation {
 
 class ApiClient {
   private token: string | null = null;
+  private authErrorHandler: (() => void) | null = null;
 
   setToken(token: string | null) {
     this.token = token;
   }
 
+  setAuthErrorHandler(handler: (() => void) | null) {
+    this.authErrorHandler = handler;
+  }
+
   private getToken() {
-    if (this.token) return this.token;
-    try {
-      const stored = localStorage.getItem('openchat_token');
-      if (stored) {
-        this.token = stored;
-        return stored;
-      }
-    } catch {
-      // localStorage may be unavailable in some environments.
+    return this.token;
+  }
+
+  private async toApiError(response: Response, fallbackMessage: string): Promise<ApiError> {
+    const error = await response.json().catch(() => ({ error: fallbackMessage }));
+    const apiError = new ApiError(error.error || fallbackMessage, response.status, response.statusText);
+    if (isAuthStatus(response.status)) {
+      this.authErrorHandler?.();
     }
-    return null;
+    return apiError;
   }
 
   private async fetch<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -107,8 +115,7 @@ class ApiClient {
         status: response.status,
         statusText: response.statusText,
       });
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new ApiError(error.error || 'Request failed', response.status, response.statusText);
+      throw await this.toApiError(response, 'Request failed');
     }
 
     return response.json();
@@ -308,8 +315,7 @@ class ApiClient {
         status: response.status,
         statusText: response.statusText,
       });
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new ApiError(error.error || 'Request failed', response.status, response.statusText);
+      throw await this.toApiError(response, 'Request failed');
     }
 
     return response.json();

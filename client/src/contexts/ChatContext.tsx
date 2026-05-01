@@ -2,6 +2,13 @@ import { createContext, useContext, useState, useCallback, useEffect, ReactNode 
 import toast from 'react-hot-toast';
 import { api, Conversation, isAuthError, Message, User } from '../api';
 import { useChatSocket } from '../hooks/useChatSocket';
+import {
+  clearStoredSession,
+  decodeJwtPayload,
+  getStoredToken,
+  getStoredUser,
+  rememberAuthNotice,
+} from '../utils/authSession';
 
 interface ChatContextValue {
   // Auth
@@ -48,57 +55,6 @@ interface ChatContextValue {
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
-const AUTH_NOTICE_KEY = 'openchat_auth_notice';
-const AUTH_NOTICE_MESSAGE = "You're not logged in. Please sign in with Noos.";
-
-function rememberAuthNotice() {
-  sessionStorage.setItem(AUTH_NOTICE_KEY, AUTH_NOTICE_MESSAGE);
-}
-
-function clearStoredSession() {
-  localStorage.removeItem('openchat_token');
-  localStorage.removeItem('openchat_user');
-  localStorage.removeItem('openchat_refresh_token');
-}
-
-function decodeJwtPayload(token: string): { userId?: string; email?: string; exp?: number } {
-  const payload = token.split('.')[1];
-  if (!payload) throw new Error('JWT payload missing');
-  const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = base64.padEnd(base64.length + ((4 - base64.length % 4) % 4), '=');
-  return JSON.parse(atob(padded));
-}
-
-function getStoredToken(): string | null {
-  const stored = localStorage.getItem('openchat_token');
-  if (!stored) return null;
-
-  try {
-    const payload = decodeJwtPayload(stored);
-    if (typeof payload.exp === 'number' && payload.exp * 1000 <= Date.now()) {
-      rememberAuthNotice();
-      clearStoredSession();
-      return null;
-    }
-    return stored;
-  } catch {
-    rememberAuthNotice();
-    clearStoredSession();
-    return null;
-  }
-}
-
-function getStoredUser(): { userId: string; email: string; name?: string } | null {
-  const saved = localStorage.getItem('openchat_user');
-  if (!saved) return null;
-
-  try {
-    return JSON.parse(saved);
-  } catch {
-    clearStoredSession();
-    return null;
-  }
-}
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   // Auth state
@@ -276,6 +232,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     api.setToken(token);
   }, [token]);
 
+  useEffect(() => {
+    api.setAuthErrorHandler(() => {
+      rememberAuthNotice();
+      clearSession();
+    });
+    return () => api.setAuthErrorHandler(null);
+  }, [clearSession]);
+
   // Login with token
   const login = useCallback((newToken: string): boolean => {
     // Decode JWT to get user info (basic decode, not verification)
@@ -354,6 +318,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Load conversations
   const loadConversations = useCallback(async () => {
     if (!token) return;
+    api.setToken(token);
 
     try {
       const data = await api.getConversations();
@@ -379,14 +344,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
     } catch (e) {
       console.error('Failed to load conversations:', e);
-      if (isAuthError(e)) {
-        rememberAuthNotice();
-        clearSession();
-        return;
-      }
+      if (isAuthError(e)) return;
       toast.error('Failed to load conversations');
     }
-  }, [clearSession, token]);
+  }, [token]);
 
   // Load messages for a conversation
   const loadMessages = useCallback(async (conversationId: string) => {
@@ -496,6 +457,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       });
     } catch (e) {
       console.error('Failed to load contacts:', e);
+      if (isAuthError(e)) return;
       toast.error('Failed to load contacts. Check your connection.');
     }
   }, []);
@@ -506,6 +468,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       return await api.getContacts(query);
     } catch (e) {
       console.error('Failed to search contacts:', e);
+      if (isAuthError(e)) return [];
       const errorMsg = e instanceof Error ? e.message : 'Unknown error';
       toast.error(`Search failed: ${errorMsg}`);
       return [];
