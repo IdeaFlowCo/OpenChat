@@ -382,7 +382,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (isAuthError(e)) {
         rememberAuthNotice();
         clearSession();
-        toast.error(AUTH_NOTICE_MESSAGE, { id: 'openchat-auth-required' });
         return;
       }
       toast.error('Failed to load conversations');
