@@ -6,6 +6,7 @@ import { ChatPage } from './pages/ChatPage';
 
 const NOOS_URL = import.meta.env.VITE_NOOS_URL || 'https://globalbr.ai';
 const ALLOW_INSECURE_SSO_TOKEN = import.meta.env.MODE !== 'production';
+const AUTH_NOTICE_KEY = 'openchat_auth_notice';
 
 function normalizeRedirect(target: string | null): string {
   if (!target) return '/';
@@ -129,6 +130,13 @@ function SSOCallback() {
 function LoginPage() {
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
+  const [authNotice, setAuthNotice] = useState<string | null>(() => {
+    const notice = sessionStorage.getItem(AUTH_NOTICE_KEY);
+    if (notice) {
+      sessionStorage.removeItem(AUTH_NOTICE_KEY);
+    }
+    return notice;
+  });
 
   const redirectTarget = normalizeRedirect(searchParams.get('redirect'));
 
@@ -158,8 +166,17 @@ function LoginPage() {
           Real-time messaging powered by the Global Brain
         </p>
 
+        {authNotice && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {authNotice}
+          </div>
+        )}
+
         <button
-          onClick={handleNoosLogin}
+          onClick={() => {
+            setAuthNotice(null);
+            handleNoosLogin();
+          }}
           className="w-full py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 font-medium"
           disabled={loading}
         >

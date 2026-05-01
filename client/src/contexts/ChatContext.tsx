@@ -48,6 +48,12 @@ interface ChatContextValue {
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
+const AUTH_NOTICE_KEY = 'openchat_auth_notice';
+const AUTH_NOTICE_MESSAGE = "You're not logged in. Please sign in with Noos.";
+
+function rememberAuthNotice() {
+  sessionStorage.setItem(AUTH_NOTICE_KEY, AUTH_NOTICE_MESSAGE);
+}
 
 function clearStoredSession() {
   localStorage.removeItem('openchat_token');
@@ -70,11 +76,13 @@ function getStoredToken(): string | null {
   try {
     const payload = decodeJwtPayload(stored);
     if (typeof payload.exp === 'number' && payload.exp * 1000 <= Date.now()) {
+      rememberAuthNotice();
       clearStoredSession();
       return null;
     }
     return stored;
   } catch {
+    rememberAuthNotice();
     clearStoredSession();
     return null;
   }
@@ -372,8 +380,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       console.error('Failed to load conversations:', e);
       if (isAuthError(e)) {
+        rememberAuthNotice();
         clearSession();
-        toast.error("You're not logged in. Please sign in with Noos.", { id: 'openchat-auth-required' });
+        toast.error(AUTH_NOTICE_MESSAGE, { id: 'openchat-auth-required' });
         return;
       }
       toast.error('Failed to load conversations');
