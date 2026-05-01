@@ -4,6 +4,22 @@ const API_BASE = '/api/chat';
 const AUTH_BASE = '/api/auth';
 const NOOS_URL = import.meta.env.VITE_NOOS_URL || 'https://globalbr.ai';
 
+export class ApiError extends Error {
+  status: number;
+  statusText: string;
+
+  constructor(message: string, status: number, statusText: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.statusText = statusText;
+  }
+}
+
+export function isAuthError(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403);
+}
+
 export interface User {
   id: string;
   name: string;
@@ -92,7 +108,7 @@ class ApiClient {
         statusText: response.statusText,
       });
       const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || 'Request failed');
+      throw new ApiError(error.error || 'Request failed', response.status, response.statusText);
     }
 
     return response.json();
@@ -270,7 +286,33 @@ class ApiClient {
   }
 
   async getMe(): Promise<User> {
-    return this.fetch('/me'.replace('/chat', '/auth'));
+    const url = `${AUTH_BASE}/me`;
+    const token = this.getToken();
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+
+    let response: Response;
+    try {
+      response = await fetch(url, { headers });
+    } catch (error) {
+      reportFetchError({ url, method: 'GET', error });
+      throw error;
+    }
+
+    if (!response.ok) {
+      reportHttpError({
+        url,
+        method: 'GET',
+        status: response.status,
+        statusText: response.statusText,
+      });
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new ApiError(error.error || 'Request failed', response.status, response.statusText);
+    }
+
+    return response.json();
   }
 
   async logout(): Promise<void> {

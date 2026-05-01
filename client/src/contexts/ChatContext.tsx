@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import toast from 'react-hot-toast';
-import { api, Conversation, Message, User } from '../api';
+import { api, Conversation, isAuthError, Message, User } from '../api';
 import { useChatSocket } from '../hooks/useChatSocket';
 
 interface ChatContextValue {
@@ -49,12 +49,54 @@ interface ChatContextValue {
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
+function clearStoredSession() {
+  localStorage.removeItem('openchat_token');
+  localStorage.removeItem('openchat_user');
+  localStorage.removeItem('openchat_refresh_token');
+}
+
+function decodeJwtPayload(token: string): { userId?: string; email?: string; exp?: number } {
+  const payload = token.split('.')[1];
+  if (!payload) throw new Error('JWT payload missing');
+  const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(base64.length + ((4 - base64.length % 4) % 4), '=');
+  return JSON.parse(atob(padded));
+}
+
+function getStoredToken(): string | null {
+  const stored = localStorage.getItem('openchat_token');
+  if (!stored) return null;
+
+  try {
+    const payload = decodeJwtPayload(stored);
+    if (typeof payload.exp === 'number' && payload.exp * 1000 <= Date.now()) {
+      clearStoredSession();
+      return null;
+    }
+    return stored;
+  } catch {
+    clearStoredSession();
+    return null;
+  }
+}
+
+function getStoredUser(): { userId: string; email: string; name?: string } | null {
+  const saved = localStorage.getItem('openchat_user');
+  if (!saved) return null;
+
+  try {
+    return JSON.parse(saved);
+  } catch {
+    clearStoredSession();
+    return null;
+  }
+}
+
 export function ChatProvider({ children }: { children: ReactNode }) {
   // Auth state
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('openchat_token'));
+  const [token, setToken] = useState<string | null>(() => getStoredToken());
   const [currentUser, setCurrentUser] = useState<{ userId: string; email: string; name?: string } | null>(() => {
-    const saved = localStorage.getItem('openchat_user');
-    return saved ? JSON.parse(saved) : null;
+    return token ? getStoredUser() : null;
   });
 
   // Data state
@@ -64,6 +106,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [contacts, setContacts] = useState<User[]>([]);
   const [presence, setPresence] = useState<Map<string, { status: string; statusMessage?: string }>>(new Map());
   const [typingUsers, setTypingUsers] = useState<Map<string, Set<string>>>(new Map());
+
+  const clearSession = useCallback(() => {
+    setToken(null);
+    setCurrentUser(null);
+    setConversations([]);
+    setActiveConversationId(null);
+    setMessages([]);
+    setContacts([]);
+    setPresence(new Map());
+    setTypingUsers(new Map());
+    clearStoredSession();
+    api.setToken(null);
+  }, []);
 
   // Socket handlers
   const handleMessage = useCallback((message: Message) => {
@@ -217,7 +272,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const login = useCallback((newToken: string): boolean => {
     // Decode JWT to get user info (basic decode, not verification)
     try {
-      const payload = JSON.parse(atob(newToken.split('.')[1]));
+      const payload = decodeJwtPayload(newToken);
+      if (!payload.userId || !payload.email) {
+        throw new Error('JWT missing required user fields');
+      }
       const user = { userId: payload.userId, email: payload.email };
       setCurrentUser(user);
       setToken(newToken);
@@ -282,17 +340,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } catch {
       // Ignore errors
     }
-    setToken(null);
-    setCurrentUser(null);
-    setConversations([]);
-    setMessages([]);
-    setContacts([]);
-    localStorage.removeItem('openchat_token');
-    localStorage.removeItem('openchat_user');
-  }, []);
+    clearSession();
+  }, [clearSession]);
 
   // Load conversations
   const loadConversations = useCallback(async () => {
+    if (!token) return;
+
     try {
       const data = await api.getConversations();
       setConversations(data);
@@ -317,9 +371,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
     } catch (e) {
       console.error('Failed to load conversations:', e);
+      if (isAuthError(e)) {
+        clearSession();
+        toast.error("You're not logged in. Please sign in with Noos.", { id: 'openchat-auth-required' });
+        return;
+      }
       toast.error('Failed to load conversations');
     }
-  }, []);
+  }, [clearSession, token]);
 
   // Load messages for a conversation
   const loadMessages = useCallback(async (conversationId: string) => {
