@@ -116,8 +116,22 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
     `, { userId, otherId });
 
     if (existing.records.length > 0) {
-      const conv = toJS(existing.records[0].get('conversation'));
+      const conv = toJS(existing.records[0].get('conversation')) as Record<string, unknown> | null;
       await session.close();
+      // Auto-join the live sockets of BOTH participants to the existing DM's
+      // conversation room. Without this, a client that re-requests a DM via
+      // POST /conversations (e.g. on first open from a fresh socket) and
+      // then immediately sends a message has the message broadcast to a
+      // conversation room nobody is in — recipient never sees it until they
+      // explicitly conversation:join. Same race as the group-creation
+      // auto-join below but for the dedupe path. Caught by multi-account
+      // e2e test (server/test-multi-account-e2e.mjs).
+      const io = req.app.get('io') as IOServer | undefined;
+      const existingId = typeof conv?.id === 'string' ? conv.id : null;
+      if (io && existingId) {
+        joinUserSocketsToConversation(io, userId, existingId);
+        joinUserSocketsToConversation(io, otherId, existingId);
+      }
       res.json(conv);
       return;
     }
