@@ -60,13 +60,20 @@ html, body {
 }
 
 /* Safe-area helpers for iOS notch / home indicator. Tailwind doesn't ship
-   these by default so expose them as utilities. */
+   these by default so expose them as utilities.
+   .pt-safe / .pb-safe use max(env, 0.5rem) so that in non-notched contexts
+   (Safari tab, desktop) the element still gets a sane minimum 8px padding
+   — matching Tailwind's py-2 default. Without the max(), pt-safe would
+   clobber any Tailwind py- with 0px in non-notched contexts, leaving
+   chat headers flush against the URL bar. Per codex review 2026-05-30. */
 .pb-safe {
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 0.5rem);
 }
 .pt-safe {
-  padding-top: env(safe-area-inset-top, 0);
+  padding-top: max(env(safe-area-inset-top, 0px), 0.5rem);
 }
+/* Left/right have no sensible "minimum" — they only exist for landscape
+   notched devices. Keep them as raw env() and let zero pass through. */
 .pl-safe {
   padding-left: env(safe-area-inset-left, 0);
 }
@@ -75,4 +82,16 @@ html, body {
 }
 .h-safe-bottom {
   height: env(safe-area-inset-bottom, 0);
+}
+
+/* Hide the Noos feedback widget on small screens while a conversation is
+   active. The widget is fixed bottom-right and floats into the chat area
+   when the keyboard is open; its `bottom: 80px` is independent of our
+   --app-height math so it does not lift correctly with the visualViewport.
+   Restored on desktop and on the conversation-list view. Per codex review
+   2026-05-30. */
+@media (max-width: 767px) {
+  html[data-active-conversation] #noos-feedback-widget {
+    display: none !important;
+  }
 }

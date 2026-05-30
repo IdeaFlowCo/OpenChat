@@ -13,6 +13,23 @@ export function ChatPage() {
     loadConversations();
   }, [loadConversations]);
 
+  // Toggle a data-attribute on <html> while a conversation is active so the
+  // Noos feedback widget can be hidden on mobile (where it floats into the
+  // chat area when the keyboard is open). The widget mounts as
+  // <div id="noos-feedback-widget"> outside the React tree; CSS in index.css
+  // targets it via this attribute. Per codex review 2026-05-30.
+  useEffect(() => {
+    const el = document.documentElement;
+    if (activeConversationId) {
+      el.setAttribute('data-active-conversation', '');
+    } else {
+      el.removeAttribute('data-active-conversation');
+    }
+    return () => {
+      el.removeAttribute('data-active-conversation');
+    };
+  }, [activeConversationId]);
+
   const activeConversation = conversations.find(c => c.id === activeConversationId);
   const isGroup = activeConversation?.type === 'group';
 

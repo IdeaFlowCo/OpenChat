@@ -9,9 +9,20 @@ export function MessageInput() {
   const typingActiveRef = useRef(false);
   const lastConversationRef = useRef<string | null>(null);
 
-  // Focus input when conversation changes
+  // Focus input when conversation changes — but ONLY on devices with a real
+  // pointer (desktop / hover-capable). On touch devices, autofocus opens the
+  // soft keyboard immediately on conversation open, which triggers the entire
+  // visualViewport-resize cascade during navigation — flicker, scroll jumps,
+  // layout shift. Let touch users explicitly tap the composer themselves.
+  // Per codex review 2026-05-30 of OpenChat-ka1.
   useEffect(() => {
-    inputRef.current?.focus();
+    const isPointerCoarse =
+      typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(pointer: coarse)').matches;
+    if (!isPointerCoarse) {
+      inputRef.current?.focus();
+    }
     if (lastConversationRef.current && lastConversationRef.current !== activeConversationId && typingActiveRef.current) {
       stopTyping(lastConversationRef.current);
       typingActiveRef.current = false;

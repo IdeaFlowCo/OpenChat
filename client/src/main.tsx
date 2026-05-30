@@ -18,12 +18,27 @@ initInstallPromptCapture()
 // for the soft keyboard — without this, opening the keyboard pushed the
 // chat area off-screen and the user saw a blank white screen until they
 // dismissed the keyboard. See OpenChat-ka1.
+//
+// rAF-debounced: visualViewport.resize fires multiple times during the
+// iOS keyboard animation; writing the CSS var on every tick causes visible
+// height jitter. Coalescing to one update per animation frame smooths it.
+// Per codex review 2026-05-30.
+let appHeightRaf: number | null = null
 function syncAppHeight(): void {
+  if (appHeightRaf !== null) return
+  appHeightRaf = requestAnimationFrame(() => {
+    appHeightRaf = null
+    const vv = window.visualViewport
+    const h = vv?.height ?? window.innerHeight
+    document.documentElement.style.setProperty('--app-height', `${h}px`)
+  })
+}
+// One synchronous write at boot so the first paint already has the right value.
+{
   const vv = window.visualViewport
   const h = vv?.height ?? window.innerHeight
   document.documentElement.style.setProperty('--app-height', `${h}px`)
 }
-syncAppHeight()
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', syncAppHeight)
   window.visualViewport.addEventListener('scroll', syncAppHeight)
