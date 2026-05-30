@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { useChat } from '../contexts/ChatContext';
 import { Conversation, User } from '../api';
 import { PresenceIndicator } from './PresenceIndicator';
+import { toastError } from '../utils/toastError';
 
 interface GroupSettingsProps {
   open: boolean;
@@ -95,7 +96,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
       setEditingTitle(false);
       toast.success('Group renamed');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to rename group');
+      toastError(e instanceof Error ? e.message : 'Failed to rename group', { id: 'rename-group' });
     } finally {
       setSavingTitle(false);
     }
@@ -109,7 +110,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
       setResults([]);
       toast.success(`Added ${user.name || user.email}`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to add member');
+      toastError(e instanceof Error ? e.message : 'Failed to add member', { id: 'add-member' });
     } finally {
       setBusyUserId(null);
     }
@@ -122,7 +123,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
       await removeParticipant(conversation.id, userId);
       toast.success(`Removed ${label}`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to remove member');
+      toastError(e instanceof Error ? e.message : 'Failed to remove member', { id: 'remove-member' });
     } finally {
       setBusyUserId(null);
     }
@@ -136,7 +137,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
       toast.success('Left group');
       onClose();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to leave group');
+      toastError(e instanceof Error ? e.message : 'Failed to leave group', { id: 'leave-group' });
     }
   };
 

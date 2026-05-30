@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import toast from 'react-hot-toast';
 import { useChat } from '../contexts/ChatContext';
 import { useTheme, ThemePreference } from '../contexts/ThemeContext';
 import { ConversationList } from './ConversationList';
 import { PresenceIndicator } from './PresenceIndicator';
 import { User } from '../api';
+import { toastError } from '../utils/toastError';
 
 // Environment detection for context-aware UI
 type AppEnvironment = 'tailscale' | 'localhost' | 'production';
@@ -190,13 +190,13 @@ export function ChatSidebar() {
       setActiveConversation(conv.id);
       handleClosePicker();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to start chat');
+      toastError(e instanceof Error ? e.message : 'Failed to start chat', { id: 'start-chat' });
     }
   };
 
   const handleCreateGroup = async () => {
     if (selectedContacts.length < 2) {
-      toast.error('Pick at least 2 people for a group');
+      toastError('Pick at least 2 people for a group', { id: 'pick-group-min' });
       return;
     }
     setCreatingGroup(true);
@@ -209,7 +209,7 @@ export function ChatSidebar() {
       setActiveConversation(conv.id);
       handleClosePicker();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to create group');
+      toastError(e instanceof Error ? e.message : 'Failed to create group', { id: 'create-group' });
     } finally {
       setCreatingGroup(false);
     }

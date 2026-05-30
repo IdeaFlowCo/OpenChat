@@ -18,6 +18,13 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, '..', '.env'), override: true });
 
 const app = express();
+
+// Behind Cloudflare → nginx → docker. Trust forwarded headers so req.protocol
+// and req.ip reflect the real client, not the immediate hop. Without this the
+// default redirect_uri built by /api/auth/google/url falls back to http://
+// even when the user came in over HTTPS (OpenChat-9jm).
+app.set('trust proxy', true);
+
 const httpServer = createServer(app);
 
 // CORS configuration
