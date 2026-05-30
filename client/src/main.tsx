@@ -3,9 +3,15 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import { initClientLogging } from './utils/clientLogger'
+import { initInstallPromptCapture } from './utils/installPrompt'
 import './index.css'
 
 initClientLogging()
+// Capture `beforeinstallprompt` as early as possible — Chrome fires it
+// exactly once, very early in the page lifecycle. If no listener exists
+// when it fires, the event is lost and the user has to navigate away
+// and back to retrigger.
+initInstallPromptCapture()
 
 // Track the *visible* viewport height in --app-height so the app shrinks
 // correctly when the iOS keyboard opens. 100dvh in CSS does NOT account
