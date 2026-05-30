@@ -13,10 +13,17 @@ html, body {
   overscroll-behavior-y: contain;
 }
 
+/* --app-height is set by main.tsx via the visualViewport API. It tracks the
+   *actual* visible viewport — i.e. it SHRINKS when the iOS soft keyboard is
+   open. 100dvh does NOT shrink for the keyboard on iOS Safari, which caused
+   the "screen goes white when keyboard opens" bug: the chat area scrolled
+   below the visible region and only the white body bg was visible.
+   See OpenChat-ka1. */
 #root {
-  /* 100dvh respects iOS dynamic toolbar; fallback to 100vh for older browsers */
+  /* Fallbacks for browsers w/o visualViewport JS (e.g. very old) */
   height: 100vh;
   height: 100dvh;
+  height: var(--app-height, 100dvh);
 }
 
 /* Mobile: 16px input font prevents iOS Safari from auto-zooming on focus.

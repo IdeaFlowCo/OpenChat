@@ -164,6 +164,19 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
     const io = req.app.get('io') as IOServer | undefined;
     emitConversationCreated(io, conversation);
 
+    // Force-join every participant's live sockets to the conversation room
+    // immediately. Without this, the very first message:send from the creator
+    // is broadcast to conversation:${id} *before* the other participants'
+    // clients react to conversation:created → conversation:join, and the
+    // message is dropped for them. (Same race as OpenChat-09h, but for group
+    // creation. POST /participants does this for add-member; creation needs
+    // it too.) See OpenChat-22u.
+    if (io) {
+      for (const pid of allParticipants) {
+        joinUserSocketsToConversation(io, pid, conversationId);
+      }
+    }
+
     res.status(201).json(conversation);
   } catch (error) {
     console.error('Error creating conversation:', error);
