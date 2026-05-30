@@ -32,6 +32,8 @@ const palette = {
     presenceBusy: '#ef4444',
     presenceOffline: '#9ca3af',
     danger: '#dc2626',
+    dangerMuted: 'rgba(220, 38, 38, 0.12)',
+    primaryMuted: 'rgba(59, 130, 246, 0.14)',
   },
   dark: {
     background: '#020617',         // slate-950
@@ -53,6 +55,8 @@ const palette = {
     presenceBusy: '#ef4444',
     presenceOffline: '#475569',
     danger: '#f87171',
+    dangerMuted: 'rgba(248, 113, 113, 0.16)',
+    primaryMuted: 'rgba(59, 130, 246, 0.16)',
   },
 };
 

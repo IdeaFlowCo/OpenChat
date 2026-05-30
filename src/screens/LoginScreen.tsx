@@ -13,29 +13,53 @@ import {
 } from 'react-native';
 import { loginWithPassword } from '../api/client';
 import { getColors } from '../theme/colors';
+import { useChat } from '../contexts/ChatContext';
 
-interface Props {
-  onSignedIn: () => void;
-}
+// Quick-login test accounts. Only rendered when EXPO_PUBLIC_SHOW_TEST_LOGINS is
+// truthy (default 'true' for dev via .env). Production EAS builds set it to
+// 'false' so the buttons don't ship. Mirrors the Noos web pattern in
+// `~/code/noos/client/src/components/Login.tsx` (the VITE_SHOW_TEST_LOGINS gate).
+//
+// IMPORTANT: these passwords are PUBLIC test creds — they are intentionally
+// committed (alice/bob are seed accounts on production Noos). Never put any
+// real-data account here.
+type TestAccount = { label: string; email: string; password: string };
+const TEST_ACCOUNTS: TestAccount[] = [
+  { label: 'Alice', email: 'alice@noos.app', password: 'password123' },
+  { label: 'Bob', email: 'bob@noos.app', password: 'password123' },
+];
+const SHOW_TEST_LOGINS =
+  (process.env.EXPO_PUBLIC_SHOW_TEST_LOGINS ?? 'true').toLowerCase() !== 'false';
 
-export function LoginScreen({ onSignedIn }: Props) {
+export function LoginScreen() {
   const scheme = useColorScheme() || 'light';
   const c = getColors(scheme);
+  const { bootstrapIfAuthed } = useChat();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async () => {
-    if (!email || !password) return;
+  const doLogin = async (e: string, p: string): Promise<void> => {
     setLoading(true);
     try {
-      await loginWithPassword(email.trim(), password);
-      onSignedIn();
+      await loginWithPassword(e.trim(), p);
+      // Flip auth state in the context — the navigator swaps stacks.
+      await bootstrapIfAuthed();
     } catch (err) {
       Alert.alert('Sign-in failed', err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = async () => {
+    if (!email || !password) return;
+    await doLogin(email, password);
+  };
+
+  const handleQuickLogin = async (acct: TestAccount) => {
+    if (loading) return;
+    await doLogin(acct.email, acct.password);
   };
 
   return (
@@ -85,6 +109,33 @@ export function LoginScreen({ onSignedIn }: Props) {
           )}
         </TouchableOpacity>
 
+        {SHOW_TEST_LOGINS && (
+          <View style={styles.quickLogin}>
+            <View style={[styles.divider, { backgroundColor: c.border }]} />
+            <Text style={[styles.quickLabel, { color: c.textMuted }]}>Quick login (testing)</Text>
+            <View style={styles.quickRow}>
+              {TEST_ACCOUNTS.map((acct) => (
+                <TouchableOpacity
+                  key={acct.email}
+                  style={[
+                    styles.quickButton,
+                    {
+                      backgroundColor: c.surfaceElevated,
+                      borderColor: c.border,
+                      opacity: loading ? 0.6 : 1,
+                    },
+                  ]}
+                  onPress={() => handleQuickLogin(acct)}
+                  disabled={loading}
+                >
+                  <Text style={[styles.quickButtonText, { color: c.textPrimary }]}>{acct.label}</Text>
+                  <Text style={[styles.quickButtonSub, { color: c.textMuted }]}>{acct.email}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
         <Text style={[styles.footer, { color: c.textMuted }]}>
           Uses your Noos credentials. Google + phone sign-in coming soon.
         </Text>
@@ -118,4 +169,18 @@ const styles = StyleSheet.create({
   },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   footer: { fontSize: 12, textAlign: 'center', marginTop: 8 },
+  quickLogin: { marginTop: 4 },
+  divider: { height: StyleSheet.hairlineWidth, marginVertical: 12 },
+  quickLabel: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, textAlign: 'center', marginBottom: 10 },
+  quickRow: { flexDirection: 'row', gap: 10 },
+  quickButton: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+  },
+  quickButtonText: { fontSize: 15, fontWeight: '600' },
+  quickButtonSub: { fontSize: 11, marginTop: 2 },
 });

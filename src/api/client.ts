@@ -24,6 +24,9 @@ export interface User {
   presenceStatus?: string;
   statusMessage?: string;
   lastSeenAt?: string;
+  avatarUrl?: string;
+  /** True for AI / agent users (picortex, future agents). Surface as a badge. */
+  isBot?: boolean;
 }
 
 export interface Participant {
@@ -96,6 +99,35 @@ export async function clearSession(): Promise<void> {
   await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
 }
 
+/** Custom error class so callers / UI can branch on status without parsing. */
+export class ApiError extends Error {
+  status: number;
+  body: string;
+  constructor(status: number, message: string, body: string) {
+    super(message);
+    this.status = status;
+    this.body = body;
+    this.name = 'ApiError';
+  }
+}
+
+// Listener for global auth expiry. ChatProvider hooks this on mount so a
+// 401 from any API call cascades into a clean sign-out + return to Login.
+type AuthListener = () => void;
+const authExpiredListeners: AuthListener[] = [];
+export function onAuthExpired(fn: AuthListener): () => void {
+  authExpiredListeners.push(fn);
+  return () => {
+    const i = authExpiredListeners.indexOf(fn);
+    if (i >= 0) authExpiredListeners.splice(i, 1);
+  };
+}
+function emitAuthExpired() {
+  for (const fn of authExpiredListeners) {
+    try { fn(); } catch { /* ignore listener errors */ }
+  }
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit & { auth?: boolean }
@@ -118,7 +150,14 @@ async function request<T>(
     } catch {
       /* not JSON */
     }
-    throw new Error(`${res.status}: ${msg}`);
+    if (res.status === 401 || res.status === 403) {
+      // Token is invalid / expired. Cascade to sign-out so the user isn't
+      // stuck on a stale screen with no recovery. Caller still gets a typed
+      // error (which it usually shouldn't try to display since the listener
+      // already navigated us to Login).
+      emitAuthExpired();
+    }
+    throw new ApiError(res.status, `${res.status}: ${msg}`, text);
   }
   return (await res.json()) as T;
 }
@@ -156,6 +195,8 @@ export async function loginWithPassword(
 
 export const api = {
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
+  getConversation: (conversationId: string) =>
+    request<Conversation>(`/api/chat/conversations/${conversationId}`),
   getMessages: (conversationId: string) =>
     request<Message[]>(`/api/chat/conversations/${conversationId}/messages`),
   sendMessage: (conversationId: string, content: string) =>
@@ -169,5 +210,19 @@ export const api = {
     request<Conversation>('/api/chat/conversations', {
       method: 'POST',
       body: JSON.stringify({ participantIds, title, type }),
+    }),
+  renameConversation: (conversationId: string, title: string) =>
+    request<Conversation>(`/api/chat/conversations/${conversationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    }),
+  addParticipant: (conversationId: string, userId: string) =>
+    request<Conversation>(`/api/chat/conversations/${conversationId}/participants`, {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    }),
+  removeParticipant: (conversationId: string, userId: string) =>
+    request<{ ok: boolean }>(`/api/chat/conversations/${conversationId}/participants/${userId}`, {
+      method: 'DELETE',
     }),
 };
