@@ -229,10 +229,26 @@ router.get('/google/url', (req: Request, res: Response) => {
   }
 
   // Default redirect_uri = the frontend callback path on the same origin the
-  // request came from. Honors X-Forwarded-Proto/Host when behind a proxy.
+  // request came from. We honor (in order): the standard X-Forwarded-Proto,
+  // and Cloudflare's `cf-visitor` header (JSON `{"scheme":"https"}`) which
+  // Cloudflare adds on requests to origins. Without the CF-specific fallback
+  // we end up building `http://chat.globalbr.ai/...` because CF strips
+  // X-Forwarded-Proto from requests to the origin. Pure curl tests would
+  // still be off without one of these, but the React client always passes
+  // an explicit redirect_uri so this is hygiene, not a real flow blocker.
   const forwardedProto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim();
   const forwardedHost = (req.headers['x-forwarded-host'] as string | undefined)?.split(',')[0]?.trim();
-  const proto = forwardedProto || req.protocol;
+  const cfVisitor = req.headers['cf-visitor'] as string | undefined;
+  let cfScheme: string | undefined;
+  if (cfVisitor) {
+    try {
+      const parsed = JSON.parse(cfVisitor) as { scheme?: string };
+      if (parsed.scheme === 'http' || parsed.scheme === 'https') cfScheme = parsed.scheme;
+    } catch {
+      // Not JSON or unexpected shape — ignore, fall through to other sources.
+    }
+  }
+  const proto = forwardedProto || cfScheme || req.protocol;
   const host = forwardedHost || req.get('host') || 'localhost';
   const defaultRedirect = `${proto}://${host}/auth/google/callback`;
 
