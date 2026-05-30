@@ -8,7 +8,7 @@
  *
  * Bump CACHE_VERSION on every meaningful change to force clients to refresh.
  */
-const CACHE_VERSION = 'openchat-v0.2.0-1';
+const CACHE_VERSION = 'openchat-v0.2.0-2';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 

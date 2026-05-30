@@ -46,6 +46,32 @@ if (window.visualViewport) {
   window.addEventListener('resize', syncAppHeight)
 }
 
+// Defensive: even with position:fixed on body + #root, iOS Safari has been
+// observed to apply an internal "scroll-the-focused-input-into-view" that
+// translates the document upward. Whenever ANY input gains focus, snap the
+// document scroll back to (0, 0) on the next paint. window.scrollTo on a
+// position:fixed body is a no-op in the correct case (cheap, harmless), but
+// undoes iOS's nudge in the bad case. Per Jacob's iPhone test 2026-05-30 v2.
+function snapScrollToZero(): void {
+  // Schedule on next frame so it runs AFTER iOS's own scroll attempt.
+  requestAnimationFrame(() => {
+    if (window.scrollY !== 0 || window.scrollX !== 0) {
+      window.scrollTo(0, 0)
+    }
+    if (document.documentElement.scrollTop !== 0) {
+      document.documentElement.scrollTop = 0
+    }
+    if (document.body.scrollTop !== 0) {
+      document.body.scrollTop = 0
+    }
+  })
+}
+document.addEventListener('focusin', snapScrollToZero, true)
+document.addEventListener('scroll', snapScrollToZero, true)
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', snapScrollToZero)
+}
+
 // Register service worker (PWA). Only in production builds — in dev, the
 // SW would aggressively cache HMR'd modules and mask the latest changes.
 // See OpenChat-t2w / OpenChat-6ha.

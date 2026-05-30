@@ -12,37 +12,40 @@ html, body {
   /* Block overscroll bounce + any document-level scroll on iOS. The chat
      viewport is an internal scroll region inside MessageList; the document
      itself MUST NOT scroll, or iOS will auto-scroll on input focus and push
-     the chat header above the URL bar. See OpenChat-ka1 follow-up. */
+     the chat header above the URL bar. */
   overscroll-behavior: none;
   overflow: hidden;
-}
-
-/* Pin html + body to the visible viewport. Combined with #root below, this
-   takes the document out of scroll flow entirely — the WhatsApp Web / Slack
-   pattern. Without this pinning, when the iOS keyboard opens and the input
-   gains focus, Safari auto-scrolls the document to keep the input visible,
-   which shoves the chat header above the URL bar (off-screen) and leaves a
-   large white area where the message list should be. See OpenChat-ka1
-   follow-up after Jacob's mobile test 2026-05-30. */
-html, body {
-  position: fixed;
-  inset: 0;
   width: 100%;
   height: 100%;
 }
 
+/* iOS quirk (2026-05-30 v2 fix): position:fixed on the <html> element is
+   known-buggy on some iOS Safari versions — html IS the viewport, so
+   fixed-positioning it is undefined behavior. Pin BODY only, not html.
+   Per Jacob's iPhone test where the previous html+body fixed approach
+   still leaked iOS auto-scroll on input focus. WhatsApp Web mobile uses
+   body-only fixed. Also force-isolate body into its own compositing
+   layer (transform: translateZ(0)) so iOS can't apply its own implicit
+   transform to "scroll" the focused input into view. */
+body {
+  position: fixed;
+  inset: 0;
+  transform: translateZ(0);
+}
+
 /* --app-height is set by main.tsx via the visualViewport API. It tracks the
    *actual* visible viewport — i.e. it SHRINKS when the iOS soft keyboard is
-   open. 100dvh does NOT shrink for the keyboard on iOS Safari. With html/body
-   pinned above, the document can't scroll, so the only thing left to do is
-   size #root to the visible region. See OpenChat-ka1. */
+   open. 100dvh does NOT shrink for the keyboard on iOS Safari. */
 #root {
-  position: fixed;
+  position: absolute;
   inset: 0;
   /* Fallbacks for browsers w/o visualViewport JS (e.g. very old) */
   height: 100vh;
   height: 100dvh;
   height: var(--app-height, 100dvh);
+  /* New compositing context isolates #root's layout from any iOS
+     scroll-into-view manipulation. */
+  isolation: isolate;
 }
 
 /* Mobile: 16px input font prevents iOS Safari from auto-zooming on focus.
