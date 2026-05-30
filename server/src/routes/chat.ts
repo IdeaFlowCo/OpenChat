@@ -620,13 +620,13 @@ router.get('/contacts', requireAuth, async (req: Request, res: Response) => {
         MATCH (u:User)
         WHERE u.id <> $userId
           AND (toLower(u.name) CONTAINS toLower($search) OR toLower(u.email) CONTAINS toLower($search))
-        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt } AS user
+        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
         ORDER BY u.name
       `
       : `
         MATCH (u:User)
         WHERE u.id <> $userId
-        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt } AS user
+        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
         ORDER BY u.name
       `;
 
@@ -649,7 +649,7 @@ router.get('/users/by-email/:email', requireAuth, async (req: Request, res: Resp
   try {
     const result = await session.run(`
       MATCH (u:User {email: $email})
-      RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt } AS user
+      RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
     `, { email });
 
     if (result.records.length === 0) {
