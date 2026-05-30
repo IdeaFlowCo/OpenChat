@@ -152,15 +152,15 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
     >
       <div
         ref={dialogRef}
-        className="bg-white w-full md:max-w-md md:rounded-2xl rounded-t-2xl shadow-xl max-h-[90vh] flex flex-col pb-safe"
+        className="bg-white dark:bg-slate-900 w-full md:max-w-md md:rounded-2xl rounded-t-2xl shadow-xl dark:shadow-black/40 max-h-[90vh] flex flex-col pb-safe"
       >
         {/* Header */}
-        <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between gap-2">
-          <h2 id="group-settings-title" className="font-semibold">Group settings</h2>
+        <div className="px-4 py-3 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between gap-2">
+          <h2 id="group-settings-title" className="font-semibold text-gray-900 dark:text-slate-100">Group settings</h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="p-2 -m-2 text-gray-500 hover:text-gray-900 min-w-[44px] min-h-[44px] flex items-center justify-center"
+            className="p-2 -m-2 text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-100 min-w-[44px] min-h-[44px] flex items-center justify-center"
           >
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
               <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
@@ -172,14 +172,14 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Title */}
           <section>
-            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Name</label>
+            <label className="text-xs font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wide">Name</label>
             {editingTitle ? (
               <div className="mt-1 flex gap-2">
                 <input
                   type="text"
                   value={titleDraft}
                   onChange={(e) => setTitleDraft(e.target.value)}
-                  className="flex-1 px-3 py-2 min-h-[40px] border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-base"
+                  className="flex-1 px-3 py-2 min-h-[40px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 rounded-lg focus:outline-none focus:border-blue-500 text-base"
                   autoFocus
                 />
                 <button
@@ -192,11 +192,11 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
               </div>
             ) : (
               <div className="mt-1 flex items-center gap-2">
-                <span className="flex-1 text-base">{conversation.title || <em className="text-gray-400">Untitled group</em>}</span>
+                <span className="flex-1 text-base text-gray-900 dark:text-slate-100">{conversation.title || <em className="text-gray-400 dark:text-slate-500">Untitled group</em>}</span>
                 {isOwner && (
                   <button
                     onClick={() => { setEditingTitle(true); setTitleDraft(conversation.title || ''); }}
-                    className="text-sm text-blue-600 hover:text-blue-800 active:text-blue-900 px-2 py-1 min-h-[36px]"
+                    className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 active:text-blue-900 px-2 py-1 min-h-[36px]"
                   >
                     Edit
                   </button>
@@ -208,13 +208,13 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
           {/* Members */}
           <section>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              <label className="text-xs font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wide">
                 Members ({conversation.participants?.length || 0})
               </label>
               {isOwner && !showAdd && (
                 <button
                   onClick={() => setShowAdd(true)}
-                  className="text-sm text-blue-600 hover:text-blue-800 active:text-blue-900 px-2 py-1 min-h-[36px]"
+                  className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 active:text-blue-900 px-2 py-1 min-h-[36px]"
                 >
                   + Add
                 </button>
@@ -223,45 +223,45 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
 
             {/* Add picker */}
             {showAdd && (
-              <div className="mb-3 p-3 bg-gray-50 rounded-lg">
+              <div className="mb-3 p-3 bg-gray-50 dark:bg-slate-800 rounded-lg">
                 <div className="flex gap-2 items-center mb-2">
                   <input
                     type="text"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Search to add member…"
-                    className="flex-1 px-3 py-2 min-h-[40px] border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-base"
+                    className="flex-1 px-3 py-2 min-h-[40px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-lg focus:outline-none focus:border-blue-500 text-base"
                     autoFocus
                   />
                   <button
                     onClick={() => { setShowAdd(false); setSearch(''); setResults([]); }}
-                    className="text-sm text-gray-600 hover:text-gray-900 px-2 py-1 min-h-[36px]"
+                    className="text-sm text-gray-600 dark:text-slate-300 hover:text-gray-900 dark:hover:text-slate-100 px-2 py-1 min-h-[36px]"
                   >
                     Cancel
                   </button>
                 </div>
                 {search.length > 0 && (
-                  <div className="max-h-48 overflow-y-auto bg-white rounded border border-gray-200">
+                  <div className="max-h-48 overflow-y-auto bg-white dark:bg-slate-900 rounded border border-gray-200 dark:border-slate-700">
                     {isSearching ? (
-                      <div className="p-3 text-sm text-gray-500 text-center">Searching…</div>
+                      <div className="p-3 text-sm text-gray-500 dark:text-slate-400 text-center">Searching…</div>
                     ) : results.length === 0 ? (
-                      <div className="p-3 text-sm text-gray-500 text-center">No matches</div>
+                      <div className="p-3 text-sm text-gray-500 dark:text-slate-400 text-center">No matches</div>
                     ) : (
                       results.map(u => (
                         <button
                           key={u.id}
                           onClick={() => handleAdd(u)}
                           disabled={busyUserId === u.id}
-                          className="w-full text-left p-3 hover:bg-gray-50 active:bg-gray-100 border-b border-gray-100 last:border-b-0 disabled:opacity-50 min-h-[56px] flex items-center gap-3"
+                          className="w-full text-left p-3 hover:bg-gray-50 dark:hover:bg-slate-800 active:bg-gray-100 dark:active:bg-slate-700 border-b border-gray-100 dark:border-slate-800 last:border-b-0 disabled:opacity-50 min-h-[56px] flex items-center gap-3"
                         >
-                          <div className="w-9 h-9 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-medium text-sm">
+                          <div className="w-9 h-9 rounded-full bg-gray-300 dark:bg-slate-700 flex items-center justify-center text-gray-600 dark:text-slate-300 font-medium text-sm">
                             {(u.name || u.email).charAt(0).toUpperCase()}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate">{u.name || u.email}</div>
-                            <div className="text-xs text-gray-500 truncate">{u.email}</div>
+                            <div className="font-medium truncate text-gray-900 dark:text-slate-100">{u.name || u.email}</div>
+                            <div className="text-xs text-gray-500 dark:text-slate-400 truncate">{u.email}</div>
                           </div>
-                          <span className="text-blue-600 text-sm font-medium">Add</span>
+                          <span className="text-blue-600 dark:text-blue-400 text-sm font-medium">Add</span>
                         </button>
                       ))
                     )}
@@ -271,7 +271,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
             )}
 
             {/* Member list */}
-            <ul className="divide-y divide-gray-100 border border-gray-200 rounded-lg overflow-hidden">
+            <ul className="divide-y divide-gray-100 dark:divide-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg overflow-hidden">
               {(conversation.participants || []).map(p => {
                 const u = p.user;
                 const isMe = u.id === currentUser?.userId;
@@ -288,18 +288,18 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
                       </div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate">
-                        {u.name || u.email}{isMe && <span className="text-gray-400 font-normal"> (you)</span>}
+                      <div className="font-medium truncate text-gray-900 dark:text-slate-100">
+                        {u.name || u.email}{isMe && <span className="text-gray-400 dark:text-slate-500 font-normal"> (you)</span>}
                       </div>
-                      <div className="text-xs text-gray-500 truncate">
-                        {u.email}{p.role === 'owner' && <span className="ml-1 text-blue-600">· owner</span>}
+                      <div className="text-xs text-gray-500 dark:text-slate-400 truncate">
+                        {u.email}{p.role === 'owner' && <span className="ml-1 text-blue-600 dark:text-blue-400">· owner</span>}
                       </div>
                     </div>
                     {canRemove && (
                       <button
                         onClick={() => handleRemove(u.id, u.name || u.email)}
                         disabled={busyUserId === u.id}
-                        className="text-sm text-red-600 hover:text-red-800 active:text-red-900 px-2 py-1 min-h-[36px] disabled:opacity-50"
+                        className="text-sm text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 active:text-red-900 px-2 py-1 min-h-[36px] disabled:opacity-50"
                       >
                         Remove
                       </button>
@@ -315,7 +315,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
             <section>
               <button
                 onClick={handleLeave}
-                className="w-full px-4 py-3 min-h-[44px] border border-red-300 text-red-600 rounded-lg hover:bg-red-50 active:bg-red-100 font-medium transition-colors"
+                className="w-full px-4 py-3 min-h-[44px] border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 active:bg-red-100 dark:active:bg-red-950/40 font-medium transition-colors"
               >
                 Leave group
               </button>

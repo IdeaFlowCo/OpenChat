@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { useChat } from '../contexts/ChatContext';
+import { useTheme, ThemePreference } from '../contexts/ThemeContext';
 import { ConversationList } from './ConversationList';
 import { PresenceIndicator } from './PresenceIndicator';
 import { User } from '../api';
@@ -77,6 +78,7 @@ type PickerMode = 'closed' | 'direct' | 'group';
 
 export function ChatSidebar() {
   const { searchContacts, createConversation, setActiveConversation, presence, currentUser, isConnected, updatePresence, logout } = useChat();
+  const { preference: themePref, setPreference: setThemePref } = useTheme();
   const [pickerMode, setPickerMode] = useState<PickerMode>('closed');
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<User[]>([]);
@@ -224,11 +226,11 @@ export function ChatSidebar() {
   const isContactSelected = (id: string) => selectedContacts.some(c => c.id === id);
 
   return (
-    <div className="flex-1 flex flex-col bg-white min-h-0">
+    <div className="flex-1 flex flex-col bg-white dark:bg-slate-900 min-h-0">
       {/* Header */}
-      <div className="p-3 md:p-4 border-b border-gray-200 pt-safe">
+      <div className="p-3 md:p-4 border-b border-gray-200 dark:border-slate-800 pt-safe">
         <div className="flex items-center justify-between mb-3 gap-2">
-          <h1 className="text-xl font-semibold">Chats</h1>
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-slate-100">Chats</h1>
           <div className="flex items-center gap-2">
             <button
               onClick={() => openPicker('direct')}
@@ -238,7 +240,7 @@ export function ChatSidebar() {
             </button>
             <button
               onClick={() => openPicker('group')}
-              className="px-3 py-2 min-h-[40px] text-sm bg-white text-blue-600 border border-blue-500 rounded-full hover:bg-blue-50 active:bg-blue-100 font-medium transition-colors"
+              className="px-3 py-2 min-h-[40px] text-sm bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 border border-blue-500 dark:border-blue-400 rounded-full hover:bg-blue-50 dark:hover:bg-slate-800 active:bg-blue-100 dark:active:bg-slate-700 font-medium transition-colors"
               title="New group chat"
             >
               + Group
@@ -253,21 +255,43 @@ export function ChatSidebar() {
                   {getInitials(currentUser)}
                 </button>
                 {userMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
-                    <div className="p-3 border-b border-gray-100">
-                      <div className="font-medium text-sm truncate">{currentUser.name || currentUser.email}</div>
+                  <div className="absolute right-0 top-full mt-1 w-56 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg shadow-lg dark:shadow-black/40 z-50">
+                    <div className="p-3 border-b border-gray-100 dark:border-slate-800">
+                      <div className="font-medium text-sm truncate text-gray-900 dark:text-slate-100">{currentUser.name || currentUser.email}</div>
                       {(appEnvironment === 'tailscale' || appEnvironment === 'localhost') && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 mt-1 inline-block">
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300 mt-1 inline-block">
                           {appEnvironment === 'tailscale' ? 'Tailscale' : 'Dev'}
                         </span>
                       )}
+                    </div>
+                    {/* Theme picker */}
+                    <div className="border-b border-gray-100 dark:border-slate-800 px-3 py-2">
+                      <div className="text-xs text-gray-500 dark:text-slate-400 mb-1.5">Theme</div>
+                      <div className="grid grid-cols-3 gap-1" role="radiogroup" aria-label="Theme">
+                        {(['light','system','dark'] as ThemePreference[]).map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            role="radio"
+                            aria-checked={themePref === opt}
+                            onClick={() => setThemePref(opt)}
+                            className={`text-xs py-1.5 rounded capitalize transition-colors ${
+                              themePref === opt
+                                ? 'bg-blue-500 text-white'
+                                : 'bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            {opt === 'light' ? '☀️' : opt === 'dark' ? '🌙' : '⚙️'} {opt}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                     <div className="py-1">
                       <a
                         href={serviceUrls.notes}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block px-3 py-3 text-sm text-gray-700 hover:bg-gray-100 active:bg-gray-200"
+                        className="block px-3 py-3 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 active:bg-gray-200 dark:active:bg-slate-700"
                         onClick={() => setUserMenuOpen(false)}
                       >
                         📓 Notes
@@ -276,7 +300,7 @@ export function ChatSidebar() {
                         href={serviceUrls.noos}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block px-3 py-3 text-sm text-gray-700 hover:bg-gray-100 active:bg-gray-200"
+                        className="block px-3 py-3 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 active:bg-gray-200 dark:active:bg-slate-700"
                         onClick={() => setUserMenuOpen(false)}
                       >
                         🔗 Noos
@@ -285,21 +309,21 @@ export function ChatSidebar() {
                         href={serviceUrls.thoughtstreams}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block px-3 py-3 text-sm text-gray-700 hover:bg-gray-100 active:bg-gray-200"
+                        className="block px-3 py-3 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 active:bg-gray-200 dark:active:bg-slate-700"
                         onClick={() => setUserMenuOpen(false)}
                       >
                         📝 Thoughtstreams
                       </a>
                     </div>
-                    <div className="border-t border-gray-100">
+                    <div className="border-t border-gray-100 dark:border-slate-800">
                       <button
                         onClick={() => { setUserMenuOpen(false); logout(); }}
-                        className="block w-full text-left px-3 py-3 text-sm text-red-600 hover:bg-gray-100 active:bg-gray-200"
+                        className="block w-full text-left px-3 py-3 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-800 active:bg-gray-200 dark:active:bg-slate-700"
                       >
                         🚪 Logout
                       </button>
                     </div>
-                    <div className="border-t border-gray-100 px-3 py-2 text-center text-xs text-gray-400">
+                    <div className="border-t border-gray-100 dark:border-slate-800 px-3 py-2 text-center text-xs text-gray-400 dark:text-slate-500">
                       v{APP_VERSION}
                     </div>
                   </div>
@@ -312,7 +336,7 @@ export function ChatSidebar() {
         {/* Current user status */}
         {currentUser && (
           <div className="mt-2 space-y-2">
-            <div className="flex items-center gap-2 text-sm text-gray-600">
+            <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-slate-400">
               <PresenceIndicator status={isConnected ? status : 'offline'} size="sm" />
               <span className="truncate">{currentUser.email}</span>
             </div>
@@ -320,7 +344,7 @@ export function ChatSidebar() {
               <select
                 value={status}
                 onChange={(e) => handleStatusChange(e.target.value as 'available' | 'away' | 'busy' | 'invisible')}
-                className="flex-1 px-2 py-2 min-h-[36px] border border-gray-300 rounded text-xs text-gray-700 bg-white"
+                className="flex-1 px-2 py-2 min-h-[36px] border border-gray-300 dark:border-slate-700 rounded text-xs text-gray-700 dark:text-slate-300 bg-white dark:bg-slate-800"
                 disabled={!isConnected}
               >
                 <option value="available">Available</option>
@@ -336,7 +360,7 @@ export function ChatSidebar() {
                   setStatusMessage(e.target.value);
                 }}
                 placeholder="Status message"
-                className="flex-[2] px-2 py-2 min-h-[36px] border border-gray-300 rounded text-xs"
+                className="flex-[2] px-2 py-2 min-h-[36px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded text-xs"
                 disabled={!isConnected}
               />
             </div>
@@ -345,7 +369,7 @@ export function ChatSidebar() {
 
         {/* Connection warning */}
         {!isConnected && (
-          <div className="mt-2 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded flex items-center gap-1">
+          <div className="mt-2 px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 text-xs rounded flex items-center gap-1">
             <span className="animate-pulse">●</span>
             Reconnecting...
           </div>
@@ -363,7 +387,7 @@ export function ChatSidebar() {
               >
                 ← Back
               </button>
-              <span className="font-medium">
+              <span className="font-medium text-gray-900 dark:text-slate-100">
                 {pickerMode === 'group' ? 'New Group' : 'Find Contact'}
               </span>
             </div>
@@ -375,7 +399,7 @@ export function ChatSidebar() {
                 placeholder="Group name (optional)"
                 value={groupTitle}
                 onChange={(e) => setGroupTitle(e.target.value)}
-                className="w-full px-3 py-2 mb-2 min-h-[40px] border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-base"
+                className="w-full px-3 py-2 mb-2 min-h-[40px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-lg focus:outline-none focus:border-blue-500 text-base"
               />
             )}
 
@@ -385,7 +409,7 @@ export function ChatSidebar() {
               placeholder="Search by name or email..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-3 py-2 min-h-[40px] border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-base"
+              className="w-full px-3 py-2 min-h-[40px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-lg focus:outline-none focus:border-blue-500 text-base"
               autoFocus
             />
 
@@ -397,12 +421,12 @@ export function ChatSidebar() {
                     {selectedContacts.map(c => (
                       <span
                         key={c.id}
-                        className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs"
+                        className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs"
                       >
                         {c.name || c.email}
                         <button
                           onClick={() => setSelectedContacts(prev => prev.filter(x => x.id !== c.id))}
-                          className="hover:text-blue-900"
+                          className="hover:text-blue-900 dark:hover:text-blue-100"
                           aria-label={`Remove ${c.name || c.email}`}
                         >
                           ×
@@ -426,18 +450,18 @@ export function ChatSidebar() {
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto bg-white dark:bg-slate-900">
             {searchTerm.length === 0 ? (
-              <div className="p-4 text-center text-gray-500">
+              <div className="p-4 text-center text-gray-500 dark:text-slate-400">
                 <p>Type to search for contacts</p>
                 <p className="text-sm mt-1">Search by name or email address</p>
               </div>
             ) : isSearching ? (
-              <div className="p-4 text-center text-gray-500">
+              <div className="p-4 text-center text-gray-500 dark:text-slate-400">
                 <div className="animate-pulse">Searching...</div>
               </div>
             ) : searchResults.length === 0 ? (
-              <div className="p-4 text-center text-gray-500">
+              <div className="p-4 text-center text-gray-500 dark:text-slate-400">
                 No contacts found for "{searchTerm}"
               </div>
             ) : (
@@ -449,7 +473,7 @@ export function ChatSidebar() {
                   <div
                     key={contact.id}
                     onClick={() => handleSelectContact(contact)}
-                    className={`p-3 cursor-pointer hover:bg-gray-50 active:bg-gray-100 border-b border-gray-100 min-h-[60px] ${selected ? 'bg-blue-50' : ''}`}
+                    className={`p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 active:bg-gray-100 dark:active:bg-slate-700 border-b border-gray-100 dark:border-slate-800 min-h-[60px] ${selected ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
                   >
                     <div className="flex items-center gap-3">
                       {pickerMode === 'group' && (
@@ -462,7 +486,7 @@ export function ChatSidebar() {
                         />
                       )}
                       <div className="relative">
-                        <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-medium">
+                        <div className="w-10 h-10 rounded-full bg-gray-300 dark:bg-slate-700 flex items-center justify-center text-gray-600 dark:text-slate-300 font-medium">
                           {(contact.name || contact.email).charAt(0).toUpperCase()}
                         </div>
                         <div className="absolute -bottom-0.5 -right-0.5">
@@ -473,10 +497,10 @@ export function ChatSidebar() {
                         </div>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium">{contact.name || contact.email}</div>
-                        <div className="text-sm text-gray-500 truncate">{contact.email}</div>
+                        <div className="font-medium text-gray-900 dark:text-slate-100">{contact.name || contact.email}</div>
+                        <div className="text-sm text-gray-500 dark:text-slate-400 truncate">{contact.email}</div>
                         {contactPresence?.statusMessage && (
-                          <div className="text-xs text-gray-400 truncate">
+                          <div className="text-xs text-gray-400 dark:text-slate-500 truncate">
                             {contactPresence.statusMessage}
                           </div>
                         )}

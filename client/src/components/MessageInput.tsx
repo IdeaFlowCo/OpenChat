@@ -92,7 +92,7 @@ export function MessageInput() {
     // pb-safe lifts the composer above the iOS home indicator. See OpenChat-sjr.
     <form
       onSubmit={handleSubmit}
-      className="p-3 sm:p-4 pr-20 sm:pr-24 border-t border-gray-200 bg-white pb-[max(env(safe-area-inset-bottom,0),0.75rem)]"
+      className="p-3 sm:p-4 pr-20 sm:pr-24 border-t border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 pb-[max(env(safe-area-inset-bottom,0),0.75rem)]"
     >
       <div className="flex gap-2 items-end">
         <input
@@ -104,7 +104,7 @@ export function MessageInput() {
           enterKeyHint="send"
           autoComplete="off"
           autoCorrect="on"
-          className="flex-1 px-4 py-3 min-h-[44px] border border-gray-300 rounded-full focus:outline-none focus:border-blue-500 text-base"
+          className="flex-1 px-4 py-3 min-h-[44px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-full focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 text-base"
         />
         <button
           type="submit"

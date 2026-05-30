@@ -151,7 +151,7 @@ export function InstallPrompt() {
     >
       <div
         className={[
-          'pointer-events-auto bg-white border border-gray-200 shadow-xl',
+          'pointer-events-auto bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 shadow-xl dark:shadow-black/40',
           // Mobile sheet: full width, top corners rounded, safe-area padding.
           'rounded-t-2xl pb-safe sm:pb-0 sm:rounded-2xl',
           'sm:w-[22rem] sm:mr-0 sm:max-w-[calc(100vw-2rem)]',
@@ -163,15 +163,15 @@ export function InstallPrompt() {
               {variant === 'ios' ? <ShareIcon /> : <DownloadIcon />}
             </div>
             <div className="flex-1 min-w-0">
-              <div id="openchat-install-headline" className="font-semibold text-gray-900 text-sm">
+              <div id="openchat-install-headline" className="font-semibold text-gray-900 dark:text-slate-100 text-sm">
                 {headline}
               </div>
-              <div className="text-xs text-gray-500 mt-0.5 leading-snug">{subhead}</div>
+              <div className="text-xs text-gray-500 dark:text-slate-400 mt-0.5 leading-snug">{subhead}</div>
             </div>
             <button
               onClick={handleSnooze}
               aria-label="Dismiss"
-              className="flex-shrink-0 -mr-1 -mt-1 w-7 h-7 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 active:bg-gray-200 flex items-center justify-center text-lg leading-none"
+              className="flex-shrink-0 -mr-1 -mt-1 w-7 h-7 rounded-full text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 active:bg-gray-200 dark:active:bg-slate-700 flex items-center justify-center text-lg leading-none"
             >
               ×
             </button>
@@ -182,7 +182,7 @@ export function InstallPrompt() {
               <>
                 <button
                   onClick={handleSnooze}
-                  className="flex-1 px-4 py-2 min-h-[40px] text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 rounded-full transition-colors"
+                  className="flex-1 px-4 py-2 min-h-[40px] text-sm font-medium text-gray-700 dark:text-slate-300 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 active:bg-gray-300 dark:active:bg-slate-600 rounded-full transition-colors"
                 >
                   Not now
                 </button>

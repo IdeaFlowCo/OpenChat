@@ -32,7 +32,7 @@ export function ConversationList() {
 
   if (conversations.length === 0) {
     return (
-      <div className="p-4 text-center text-gray-500">
+      <div className="p-4 text-center text-gray-500 dark:text-slate-400">
         No conversations yet
       </div>
     );
@@ -50,14 +50,14 @@ export function ConversationList() {
           <div
             key={conv.id}
             onClick={() => setActiveConversation(conv.id)}
-            className={`p-3 cursor-pointer border-b border-gray-100 hover:bg-gray-50 ${
-              isActive ? 'bg-blue-50' : ''
+            className={`p-3 cursor-pointer border-b border-gray-100 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-800 ${
+              isActive ? 'bg-blue-50 dark:bg-blue-900/30' : ''
             }`}
           >
             <div className="flex items-center gap-3">
               {/* Avatar placeholder */}
               <div className="relative">
-                <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-medium">
+                <div className="w-10 h-10 rounded-full bg-gray-300 dark:bg-slate-700 flex items-center justify-center text-gray-600 dark:text-slate-300 font-medium">
                   {getConversationTitle(conv).charAt(0).toUpperCase()}
                 </div>
                 {conv.type === 'direct' && (
@@ -69,11 +69,11 @@ export function ConversationList() {
 
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-center">
-                  <span className="font-medium truncate">{getConversationTitle(conv)}</span>
-                  <span className="text-xs text-gray-400">{formatTime(conv.lastMessageAt)}</span>
+                  <span className="font-medium truncate text-gray-900 dark:text-slate-100">{getConversationTitle(conv)}</span>
+                  <span className="text-xs text-gray-400 dark:text-slate-500">{formatTime(conv.lastMessageAt)}</span>
                 </div>
                 {conv.lastMessagePreview && (
-                  <p className="text-sm text-gray-500 truncate">{conv.lastMessagePreview}</p>
+                  <p className="text-sm text-gray-500 dark:text-slate-400 truncate">{conv.lastMessagePreview}</p>
                 )}
               </div>
             </div>
