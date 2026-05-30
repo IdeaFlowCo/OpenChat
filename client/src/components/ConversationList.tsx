@@ -3,7 +3,7 @@ import { PresenceIndicator } from './PresenceIndicator';
 import { BotBadge } from './BotBadge';
 
 export function ConversationList() {
-  const { conversations, activeConversationId, setActiveConversation, presence, currentUser } = useChat();
+  const { conversations, activeConversationId, setActiveConversation, presence, currentUser, unreadByConv } = useChat();
 
   const getOtherParticipant = (conv: typeof conversations[0]) => {
     const participants = conv.participants || [];
@@ -46,6 +46,8 @@ export function ConversationList() {
         const other = getOtherParticipant(conv);
         const otherPresence = other ? presence.get(other.id) : null;
         const fallbackStatus = other?.presenceStatus;
+        const unread = unreadByConv.get(conv.id) ?? 0;
+        const hasUnread = unread > 0 && !isActive;
 
         return (
           <div
@@ -70,14 +72,26 @@ export function ConversationList() {
 
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-center">
-                  <span className="font-medium truncate text-gray-900 dark:text-slate-100 flex items-center min-w-0">
+                  <span className={`truncate flex items-center min-w-0 ${hasUnread ? 'font-semibold text-gray-900 dark:text-slate-50' : 'font-medium text-gray-900 dark:text-slate-100'}`}>
                     <span className="truncate">{getConversationTitle(conv)}</span>
                     {conv.type === 'direct' && other && <BotBadge user={other} compact />}
                   </span>
-                  <span className="text-xs text-gray-400 dark:text-slate-500 shrink-0">{formatTime(conv.lastMessageAt)}</span>
+                  <span className="text-xs text-gray-400 dark:text-slate-500 shrink-0 ml-2 flex items-center gap-2">
+                    {formatTime(conv.lastMessageAt)}
+                    {hasUnread && (
+                      <span
+                        className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[10px] font-semibold bg-blue-500 text-white"
+                        aria-label={`${unread} unread`}
+                      >
+                        {unread > 99 ? '99+' : unread}
+                      </span>
+                    )}
+                  </span>
                 </div>
                 {conv.lastMessagePreview && (
-                  <p className="text-sm text-gray-500 dark:text-slate-400 truncate">{conv.lastMessagePreview}</p>
+                  <p className={`text-sm truncate ${hasUnread ? 'text-gray-700 dark:text-slate-300 font-medium' : 'text-gray-500 dark:text-slate-400'}`}>
+                    {conv.lastMessagePreview}
+                  </p>
                 )}
               </div>
             </div>
