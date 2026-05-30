@@ -71,7 +71,7 @@ router.get('/conversations', requireAuth, async (req: Request, res: Response) =>
       CALL {
         WITH c
         MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-        RETURN collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}) AS participants
+        RETURN collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
       }
       RETURN c {
         .*,
@@ -108,7 +108,7 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
     const existing = await session.run(`
       MATCH (u1:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {type: 'direct'})<-[:PARTICIPATES_IN]-(u2:User {id: $otherId})
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-      WITH c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}) AS participants
+      WITH c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
       RETURN c {
         .*,
         participants: participants
@@ -144,7 +144,7 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
         joinedAt: datetime($now),
         role: CASE WHEN pid = $userId THEN 'owner' ELSE 'member' END
       }]->(c)
-      WITH c, collect({user: u {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}) AS participants
+      WITH c, collect({user: u {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
       RETURN c { .*, participants: participants } AS conversation
     `, {
       id: conversationId,
@@ -198,7 +198,7 @@ async function loadConversation(
     OPTIONAL MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
     WITH c, collect(
       CASE WHEN participant IS NULL THEN NULL
-      ELSE {user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}
+      ELSE {user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}
       END
     ) AS rawParticipants
     WITH c, [p IN rawParticipants WHERE p IS NOT NULL] AS participants
@@ -462,7 +462,7 @@ router.get('/conversations/:id', requireAuth, async (req: Request, res: Response
     const result = await session.run(`
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $id})
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-      RETURN c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}) AS participants
+      RETURN c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
     `, { userId, id });
 
     if (result.records.length === 0) {

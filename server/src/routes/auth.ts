@@ -95,7 +95,7 @@ router.post('/dev-login', async (req: Request, res: Response) => {
       ON MATCH SET
         u.lastSeenAt = datetime($now),
         u.presenceStatus = 'available'
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage } AS user
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .isBot } AS user
     `, {
       email,
       name: name || null,
@@ -135,7 +135,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
   try {
     const result = await session.run(`
       MATCH (u:User {id: $userId})
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .lastSeenAt } AS user
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
     `, { userId });
 
     if (result.records.length === 0) {
@@ -370,7 +370,7 @@ router.post('/google/exchange', async (req: Request, res: Response) => {
         u.googleSub = coalesce(u.googleSub, $sub),
         u.googleEmailVerified = coalesce(u.googleEmailVerified, $emailVerified),
         u.avatarUrl = coalesce(u.avatarUrl, $picture)
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl } AS user
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot } AS user
     `, {
       email: userinfo.email,
       name: displayName,

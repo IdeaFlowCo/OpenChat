@@ -1,5 +1,6 @@
 import { useChat } from '../contexts/ChatContext';
 import { PresenceIndicator } from './PresenceIndicator';
+import { BotBadge } from './BotBadge';
 
 export function ConversationList() {
   const { conversations, activeConversationId, setActiveConversation, presence, currentUser } = useChat();
@@ -69,8 +70,11 @@ export function ConversationList() {
 
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-center">
-                  <span className="font-medium truncate text-gray-900 dark:text-slate-100">{getConversationTitle(conv)}</span>
-                  <span className="text-xs text-gray-400 dark:text-slate-500">{formatTime(conv.lastMessageAt)}</span>
+                  <span className="font-medium truncate text-gray-900 dark:text-slate-100 flex items-center min-w-0">
+                    <span className="truncate">{getConversationTitle(conv)}</span>
+                    {conv.type === 'direct' && other && <BotBadge user={other} compact />}
+                  </span>
+                  <span className="text-xs text-gray-400 dark:text-slate-500 shrink-0">{formatTime(conv.lastMessageAt)}</span>
                 </div>
                 {conv.lastMessagePreview && (
                   <p className="text-sm text-gray-500 dark:text-slate-400 truncate">{conv.lastMessagePreview}</p>

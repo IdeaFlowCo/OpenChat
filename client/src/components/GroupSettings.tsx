@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { useChat } from '../contexts/ChatContext';
 import { Conversation, User } from '../api';
 import { PresenceIndicator } from './PresenceIndicator';
+import { BotBadge } from './BotBadge';
 import { toastError } from '../utils/toastError';
 
 interface GroupSettingsProps {
@@ -289,8 +290,10 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
                       </div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate text-gray-900 dark:text-slate-100">
-                        {u.name || u.email}{isMe && <span className="text-gray-400 dark:text-slate-500 font-normal"> (you)</span>}
+                      <div className="font-medium truncate text-gray-900 dark:text-slate-100 flex items-center">
+                        <span className="truncate">{u.name || u.email}</span>
+                        {isMe && <span className="text-gray-400 dark:text-slate-500 font-normal ml-1">(you)</span>}
+                        <BotBadge user={u} compact />
                       </div>
                       <div className="text-xs text-gray-500 dark:text-slate-400 truncate">
                         {u.email}{p.role === 'owner' && <span className="ml-1 text-blue-600 dark:text-blue-400">· owner</span>}

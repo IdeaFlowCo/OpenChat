@@ -4,6 +4,7 @@ import { ChatSidebar } from '../components/ChatSidebar';
 import { MessageList } from '../components/MessageList';
 import { MessageInput } from '../components/MessageInput';
 import { GroupSettings } from '../components/GroupSettings';
+import { BotBadge } from '../components/BotBadge';
 
 export function ChatPage() {
   const { loadConversations, activeConversationId, setActiveConversation, conversations, isConnected, currentUser } = useChat();
@@ -70,13 +71,24 @@ export function ChatPage() {
                   disabled={!isGroup}
                   className={`flex-1 min-w-0 text-left ${isGroup ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 -mx-2 px-2 py-1 rounded' : 'cursor-default'}`}
                 >
-                  <h2 className="font-semibold truncate text-gray-900 dark:text-slate-100">
-                    {activeConversation.title ||
-                      (activeConversation.type === 'direct'
-                        ? activeConversation.participants?.find(p => p.user.id !== currentUser?.userId)?.user.name
-                          || activeConversation.participants?.find(p => p.user.id !== currentUser?.userId)?.user.email
-                          || 'Chat'
-                        : 'Group Chat')}
+                  <h2 className="font-semibold truncate text-gray-900 dark:text-slate-100 flex items-center min-w-0">
+                    <span className="truncate">
+                      {activeConversation.title ||
+                        (activeConversation.type === 'direct'
+                          ? activeConversation.participants?.find(p => p.user.id !== currentUser?.userId)?.user.name
+                            || activeConversation.participants?.find(p => p.user.id !== currentUser?.userId)?.user.email
+                            || 'Chat'
+                          : 'Group Chat')}
+                    </span>
+                    {activeConversation.type === 'direct' && (
+                      <BotBadge
+                        user={activeConversation.participants?.find(p => p.user.id !== currentUser?.userId)?.user}
+                      />
+                    )}
+                    {activeConversation.type === 'group'
+                      && activeConversation.participants?.some(p => p.user.isBot) && (
+                      <BotBadge user={{ isBot: true }} compact />
+                    )}
                   </h2>
                   {activeConversation.participants && activeConversation.participants.length > 0 && (
                     <p className="text-xs md:text-sm text-gray-500 dark:text-slate-400 truncate">

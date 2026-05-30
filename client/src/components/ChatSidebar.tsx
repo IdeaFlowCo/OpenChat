@@ -5,6 +5,7 @@ import { ConversationList } from './ConversationList';
 import { PresenceIndicator } from './PresenceIndicator';
 import { User } from '../api';
 import { toastError } from '../utils/toastError';
+import { BotBadge } from './BotBadge';
 
 // Environment detection for context-aware UI
 type AppEnvironment = 'tailscale' | 'localhost' | 'production';
@@ -424,6 +425,7 @@ export function ChatSidebar() {
                         className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs"
                       >
                         {c.name || c.email}
+                        <BotBadge user={c} compact />
                         <button
                           onClick={() => setSelectedContacts(prev => prev.filter(x => x.id !== c.id))}
                           className="hover:text-blue-900 dark:hover:text-blue-100"
@@ -497,7 +499,10 @@ export function ChatSidebar() {
                         </div>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium text-gray-900 dark:text-slate-100">{contact.name || contact.email}</div>
+                        <div className="font-medium text-gray-900 dark:text-slate-100 flex items-center">
+                          <span className="truncate">{contact.name || contact.email}</span>
+                          <BotBadge user={contact} />
+                        </div>
                         <div className="text-sm text-gray-500 dark:text-slate-400 truncate">{contact.email}</div>
                         {contactPresence?.statusMessage && (
                           <div className="text-xs text-gray-400 dark:text-slate-500 truncate">

@@ -31,6 +31,13 @@ export interface User {
   presenceStatus?: string;
   statusMessage?: string;
   lastSeenAt?: string;
+  avatarUrl?: string;
+  /**
+   * True for AI/agent users (picortex, future agents). Surface as a badge in
+   * the contact picker, conversation header, and message author so humans
+   * can tell who they're talking to. OpenChat-aoy / agent-chat vision.
+   */
+  isBot?: boolean;
 }
 
 export interface Message {
