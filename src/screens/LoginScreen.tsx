@@ -9,8 +9,8 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  useColorScheme,
 } from 'react-native';
+import { useTheme } from '../contexts/ThemeContext';
 import { loginWithPassword } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
@@ -32,7 +32,7 @@ const SHOW_TEST_LOGINS =
   (process.env.EXPO_PUBLIC_SHOW_TEST_LOGINS ?? 'true').toLowerCase() !== 'false';
 
 export function LoginScreen() {
-  const scheme = useColorScheme() || 'light';
+  const { scheme } = useTheme();
   const c = getColors(scheme);
   const { bootstrapIfAuthed } = useChat();
   const [email, setEmail] = useState('');

@@ -1,35 +1,37 @@
 /**
- * App entry. Sets up ChatProvider (the single source of truth for socket +
- * conversations state) and a native-stack navigator with these routes:
+ * App entry. Sets up ThemeProvider + ChatProvider and a native-stack navigator
+ * with these routes:
  *   Login              → email / password sign-in
  *   Conversations      → list + compose entry point
  *   Chat               → message thread + tappable header
  *   NewConversation    → contact picker (DM or group)
  *   GroupSettings      → rename, members, add, remove, leave
+ *   Settings           → theme toggle (Light/Dark/System), sign-out
  *
- * The "is the user signed in?" gate is driven by ChatContext.isAuthed, which
- * is hydrated on mount from AsyncStorage and updated by Login / signOut.
+ * The "is the user signed in?" gate is driven by ChatContext.isAuthed.
  */
 
 import { useEffect } from 'react';
-import { ActivityIndicator, StatusBar, StyleSheet, View, useColorScheme } from 'react-native';
+import { StatusBar, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { ChatProvider, useChat } from './src/contexts/ChatContext';
+import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { ConversationsScreen } from './src/screens/ConversationsScreen';
 import { ChatScreen } from './src/screens/ChatScreen';
 import { NewConversationScreen } from './src/screens/NewConversationScreen';
 import { GroupSettingsScreen } from './src/screens/GroupSettingsScreen';
+import { SettingsScreen } from './src/screens/SettingsScreen';
 import { getColors } from './src/theme/colors';
 import type { RootStackParamList } from './src/navigation/types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function Shell() {
-  const scheme = useColorScheme() || 'light';
+  const { scheme } = useTheme();
   const c = getColors(scheme);
   const { isAuthed, bootstrapIfAuthed, currentUser } = useChat();
 
@@ -37,12 +39,18 @@ function Shell() {
     bootstrapIfAuthed();
   }, [bootstrapIfAuthed]);
 
-  // A brief loading splash while we hydrate the auth state from storage.
-  // After bootstrapIfAuthed runs, isAuthed flips to true or stays false and
-  // the right stack renders.
-  const navTheme = scheme === 'dark'
-    ? { ...DarkTheme, colors: { ...DarkTheme.colors, background: c.background, card: c.surface, text: c.textPrimary, primary: c.primary, border: c.border } }
-    : { ...DefaultTheme, colors: { ...DefaultTheme.colors, background: c.background, card: c.surface, text: c.textPrimary, primary: c.primary, border: c.border } };
+  const baseNav = scheme === 'dark' ? DarkTheme : DefaultTheme;
+  const navTheme = {
+    ...baseNav,
+    colors: {
+      ...baseNav.colors,
+      background: c.background,
+      card: c.surface,
+      text: c.textPrimary,
+      primary: c.primary,
+      border: c.border,
+    },
+  };
 
   return (
     <NavigationContainer theme={navTheme}>
@@ -82,6 +90,11 @@ function Shell() {
               component={GroupSettingsScreen}
               options={{ title: 'Group Info' }}
             />
+            <Stack.Screen
+              name="Settings"
+              component={SettingsScreen}
+              options={{ title: 'Settings' }}
+            />
           </>
         )}
       </Stack.Navigator>
@@ -89,25 +102,28 @@ function Shell() {
   );
 }
 
-export default function App() {
-  const scheme = useColorScheme() || 'light';
+function ShellWithBackground() {
+  const { scheme } = useTheme();
   const c = getColors(scheme);
   return (
+    <View style={[styles.root, { backgroundColor: c.background }]}>
+      <ChatProvider>
+        <Shell />
+      </ChatProvider>
+    </View>
+  );
+}
+
+export default function App() {
+  return (
     <SafeAreaProvider>
-      <View style={[styles.root, { backgroundColor: c.background }]}>
-        <ChatProvider>
-          <Shell />
-        </ChatProvider>
-      </View>
+      <ThemeProvider>
+        <ShellWithBackground />
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  splash: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
-
-// Suppress unused-import lint for ActivityIndicator (kept for future loading
-// states the shell may show before NavigationContainer mounts its theme).
-void ActivityIndicator;

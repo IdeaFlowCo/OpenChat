@@ -7,6 +7,62 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+
+/**
+ * Token storage strategy (OpenChat-ghr):
+ *  - The JWT lives in SecureStore (iOS Keychain / Android Keystore) so it
+ *    survives app uninstall reasonably AND is encrypted at rest.
+ *  - The User profile cache still lives in AsyncStorage — it's not a secret
+ *    and we want it readable from non-async code paths.
+ *
+ * Migration: on first read after upgrade, if the JWT is in AsyncStorage but
+ * NOT in SecureStore, copy it over and delete the old key. Idempotent.
+ */
+const SECURE_TOKEN_KEY = 'openchat_jwt_v1';
+
+async function getTokenFromAnywhere(): Promise<string | null> {
+  // Prefer SecureStore.
+  try {
+    const t = await SecureStore.getItemAsync(SECURE_TOKEN_KEY);
+    if (t) return t;
+  } catch {
+    // SecureStore can fail on emulators that lack the keychain — fall through.
+  }
+  // Migration: legacy AsyncStorage token.
+  try {
+    const legacy = await AsyncStorage.getItem(TOKEN_KEY);
+    if (legacy) {
+      try {
+        await SecureStore.setItemAsync(SECURE_TOKEN_KEY, legacy);
+        await AsyncStorage.removeItem(TOKEN_KEY);
+      } catch {
+        // If we can't promote to SecureStore, keep using AsyncStorage so the
+        // user doesn't get logged out on a device where SecureStore is broken.
+      }
+      return legacy;
+    }
+  } catch {
+    /* unreadable storage */
+  }
+  return null;
+}
+
+async function setTokenSecurely(token: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(SECURE_TOKEN_KEY, token);
+    // Defensive: nuke any lingering legacy copy.
+    try { await AsyncStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+  } catch {
+    // SecureStore failure — fall back to AsyncStorage so login still works.
+    try { await AsyncStorage.setItem(TOKEN_KEY, token); } catch { /* ignore */ }
+  }
+}
+
+async function clearTokenEverywhere(): Promise<void> {
+  try { await SecureStore.deleteItemAsync(SECURE_TOKEN_KEY); } catch { /* ignore */ }
+  try { await AsyncStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+}
 
 // Production by default; can override via .env (EXPO_PUBLIC_OPENCHAT_URL).
 export const OPENCHAT_URL =
@@ -67,7 +123,7 @@ let memUser: CurrentUser | null = null;
 
 export async function getToken(): Promise<string | null> {
   if (memToken !== null) return memToken;
-  const t = await AsyncStorage.getItem(TOKEN_KEY);
+  const t = await getTokenFromAnywhere();
   memToken = t;
   return t;
 }
@@ -87,16 +143,15 @@ export async function getUser(): Promise<CurrentUser | null> {
 export async function setSession(token: string, user: CurrentUser): Promise<void> {
   memToken = token;
   memUser = user;
-  await AsyncStorage.multiSet([
-    [TOKEN_KEY, token],
-    [USER_KEY, JSON.stringify(user)],
-  ]);
+  await setTokenSecurely(token);
+  await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 export async function clearSession(): Promise<void> {
   memToken = null;
   memUser = null;
-  await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
+  await clearTokenEverywhere();
+  try { await AsyncStorage.removeItem(USER_KEY); } catch { /* ignore */ }
 }
 
 /** Custom error class so callers / UI can branch on status without parsing. */

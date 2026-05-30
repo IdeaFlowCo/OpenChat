@@ -13,8 +13,8 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  useColorScheme,
 } from 'react-native';
+import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { api, User } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
@@ -27,7 +27,7 @@ export function GroupSettingsScreen() {
   const navigation = useNavigation<NavProp<'GroupSettings'>>();
   const route = useRoute<RouteProps<'GroupSettings'>>();
   const { conversationId } = route.params;
-  const scheme = useColorScheme() || 'light';
+  const { scheme } = useTheme();
   const c = getColors(scheme);
 
   const {

@@ -15,8 +15,8 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  useColorScheme,
 } from 'react-native';
+import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Conversation, Message } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
@@ -75,7 +75,7 @@ export function ChatScreen() {
   const navigation = useNavigation<NavProp<'Chat'>>();
   const route = useRoute<RouteProps<'Chat'>>();
   const { conversationId } = route.params;
-  const scheme = useColorScheme() || 'light';
+  const { scheme } = useTheme();
   const c = getColors(scheme);
   const {
     currentUser, conversations, messages, loadingMessages,

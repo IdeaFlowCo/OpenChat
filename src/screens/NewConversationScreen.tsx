@@ -16,8 +16,8 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  useColorScheme,
 } from 'react-native';
+import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { api, User } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
@@ -39,7 +39,7 @@ function useDebounced<T>(value: T, delay = 250): T {
 
 export function NewConversationScreen() {
   const navigation = useNavigation<NavProp<'NewConversation'>>();
-  const scheme = useColorScheme() || 'light';
+  const { scheme } = useTheme();
   const c = getColors(scheme);
   const { createConversation, currentUser, presence } = useChat();
 

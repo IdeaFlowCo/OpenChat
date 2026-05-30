@@ -30,10 +30,15 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "eas": {}
+      "eas": {
+        "projectId": "fc828863-4fa4-4b62-97f6-8c00ce1dffe3"
+      }
     },
     "experiments": {
       "baseUrl": "/m"
-    }
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }

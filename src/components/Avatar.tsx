@@ -3,9 +3,9 @@
  * background, with an optional presence dot in the bottom-right.
  */
 import { StyleSheet, Text, View } from 'react-native';
+import { useTheme } from '../contexts/ThemeContext';
 import { PresenceDot, PresenceStatus } from './PresenceDot';
 import { getColors } from '../theme/colors';
-import { useColorScheme } from 'react-native';
 
 interface Props {
   name?: string;
@@ -24,7 +24,7 @@ function initials(name?: string, email?: string): string {
 }
 
 export function Avatar({ name, email, isBot, presenceStatus, size = 44 }: Props) {
-  const scheme = useColorScheme() || 'light';
+  const { scheme } = useTheme();
   const c = getColors(scheme);
   const dotSize = Math.max(8, Math.round(size / 4));
   return (

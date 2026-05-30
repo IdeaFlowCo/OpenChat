@@ -11,6 +11,7 @@ export type RootStackParamList = {
   Chat: { conversationId: string };
   NewConversation: undefined;
   GroupSettings: { conversationId: string };
+  Settings: undefined;
 };
 
 export type NavProp<T extends keyof RootStackParamList> = NativeStackNavigationProp<RootStackParamList, T>;

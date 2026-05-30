@@ -15,8 +15,8 @@ import {
   Text,
   TouchableOpacity,
   View,
-  useColorScheme,
 } from 'react-native';
+import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
 import { Conversation, CurrentUser } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
@@ -56,7 +56,7 @@ function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
 }
 
 export function ConversationsScreen() {
-  const scheme = useColorScheme() || 'light';
+  const { scheme } = useTheme();
   const c = getColors(scheme);
   const navigation = useNavigation<NavProp<'Conversations'>>();
   const {
@@ -86,11 +86,11 @@ export function ConversationsScreen() {
       ),
       headerLeft: () => (
         <TouchableOpacity
-          onPress={signOut}
-          accessibilityLabel="Sign out"
+          onPress={() => navigation.navigate('Settings')}
+          accessibilityLabel="Settings"
           style={{ paddingHorizontal: 8, paddingVertical: 4 }}
         >
-          <Text style={{ color: c.danger, fontSize: 14, fontWeight: '500' }}>Sign out</Text>
+          <Text style={{ color: c.primary, fontSize: 20 }}>⚙︎</Text>
         </TouchableOpacity>
       ),
     });
