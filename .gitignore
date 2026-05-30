@@ -4,3 +4,6 @@ dist/
 .env.local
 .DS_Store
 *.log
+
+# Mobile (RN-web) build output — built by deploy.sh from ../openchat-mobile.
+client-mobile/dist/

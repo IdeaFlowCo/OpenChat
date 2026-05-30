@@ -64,6 +64,21 @@ app.get('/health', (_req, res) => {
 const clientDistPath = path.join(__dirname, '..', '..', 'client', 'dist');
 app.use(express.static(clientDistPath));
 
+// Optional RN-web build of openchat-mobile, mounted at /m/*. Lets us experiment
+// with the React Native app on the web without disturbing the existing /
+// client. Built by deploy.sh from sibling openchat-mobile repo via
+// `npx expo export --platform web` (with app.json experiments.baseUrl=/m).
+// If the dist directory is missing this just no-ops (404 under /m).
+const mobileDistPath = path.join(__dirname, '..', '..', 'client-mobile', 'dist');
+app.use('/m', express.static(mobileDistPath));
+// SPA fallback for the mobile app's own client-side routes. Only matches
+// /m and /m/<anything>; must run BEFORE the catch-all SPA fallback below.
+app.get(/^\/m(\/|$)/, (_req, res, next) => {
+  res.sendFile(path.join(mobileDistPath, 'index.html'), (err) => {
+    if (err) next();
+  });
+});
+
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);

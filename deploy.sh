@@ -13,12 +13,36 @@ echo "=== Deploying $APP_NAME to $SERVER_IP ==="
 echo "Building..."
 VITE_NOOS_URL=https://globalbr.ai npm run build
 
+# Build openchat-mobile (RN-web) if its repo is sitting alongside.
+# The web export lands at $MOBILE_REPO/dist-web; we copy it under
+# ./client-mobile/dist for the docker COPY. Skipped silently if the sibling
+# repo doesn't exist on this machine; Dockerfile expects the directory so
+# we always at least drop a placeholder so `docker build` doesn't choke.
+MOBILE_REPO="${MOBILE_REPO:-$HOME/code/openchat-mobile}"
+rm -rf client-mobile/dist
+mkdir -p client-mobile/dist
+if [ -d "$MOBILE_REPO" ]; then
+  echo "Building openchat-mobile (RN-web) from $MOBILE_REPO..."
+  (cd "$MOBILE_REPO" && npx expo export --platform web --output-dir dist-web)
+  cp -r "$MOBILE_REPO/dist-web/." client-mobile/dist/
+else
+  echo "openchat-mobile repo not found at $MOBILE_REPO — /m will serve a placeholder."
+  cat > client-mobile/dist/index.html <<'PLACEHOLDER_HTML'
+<!doctype html><meta charset=utf-8><title>OpenChat /m</title>
+<body style="font-family:system-ui;padding:2rem;max-width:40rem;margin:0 auto;color:#444">
+<h1>/m placeholder</h1>
+<p>The React Native web build of openchat-mobile isn't present in this deploy. Set <code>MOBILE_REPO</code> on the deploy host (or place a sibling <code>openchat-mobile/</code> checkout next to <code>openchat/</code>) and redeploy.</p>
+</body>
+PLACEHOLDER_HTML
+fi
+
 # Create deployment package
 echo "Creating deployment package..."
 tar -czf /tmp/${APP_NAME}-deploy.tar.gz \
   server/dist/ \
   server/package*.json \
   client/dist/ \
+  client-mobile/dist/ \
   package*.json \
   docker-compose.prod.yml \
   Dockerfile
