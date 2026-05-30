@@ -24,6 +24,12 @@ services:
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
       - VAPID_SUBJECT=${VAPID_SUBJECT:-mailto:dev@globalbr.ai}
+      # Google OAuth (OpenChat-hwi). Client created in GCP project
+      # boreal-conquest-464203-v2 ("Noos / OpenChat"). Secret lives in
+      # the host .env for this docker-compose; same compose-forwarding
+      # caveat as the VAPID vars above — must be listed here.
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
     networks:
       - app_network
 

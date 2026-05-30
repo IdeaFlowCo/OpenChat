@@ -337,6 +337,54 @@ class ApiClient {
     }
   }
 
+  // Ask our server for the Google authorization URL. The server holds the
+  // client_id and decides redirect_uri + scopes. We just redirect the browser.
+  async googleAuthUrl(opts?: { state?: string; redirectUri?: string; prompt?: string }): Promise<{ url: string; state: string; redirectUri: string }> {
+    const url = new URL(`${AUTH_BASE}/google/url`, window.location.origin);
+    if (opts?.state) url.searchParams.set('state', opts.state);
+    if (opts?.redirectUri) url.searchParams.set('redirect_uri', opts.redirectUri);
+    if (opts?.prompt) url.searchParams.set('prompt', opts.prompt);
+
+    let response: Response;
+    try {
+      response = await fetch(url.toString());
+    } catch (error) {
+      reportFetchError({ url: url.toString(), method: 'GET', error });
+      throw error;
+    }
+
+    if (!response.ok) {
+      reportHttpError({ url: url.toString(), method: 'GET', status: response.status, statusText: response.statusText });
+      const e = await response.json().catch(() => ({ error: 'Could not start Google sign-in' }));
+      throw new Error(e.error || 'Could not start Google sign-in');
+    }
+    return response.json();
+  }
+
+  // Exchange Google auth code for an OpenChat JWT. Same return shape as
+  // devLogin so the ChatContext handler can be near-identical.
+  async googleExchange(code: string, redirectUri: string): Promise<{ token: string; user: User; expiresIn: number; provider: string }> {
+    const url = `${AUTH_BASE}/google/exchange`;
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, redirectUri }),
+      });
+    } catch (error) {
+      reportFetchError({ url, method: 'POST', error });
+      throw error;
+    }
+
+    if (!response.ok) {
+      reportHttpError({ url, method: 'POST', status: response.status, statusText: response.statusText });
+      const e = await response.json().catch(() => ({ error: 'Google sign-in failed' }));
+      throw new Error(e.error || 'Google sign-in failed');
+    }
+    return response.json();
+  }
+
   // Exchange SSO code/token from Noos for full auth tokens
   async ssoExchange(payload: { code?: string; token?: string }): Promise<{ token: string; user: User }> {
     const url = `${NOOS_URL}/api/auth/sso-exchange`;

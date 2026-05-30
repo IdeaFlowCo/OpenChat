@@ -19,6 +19,8 @@ interface ChatContextValue {
   noosRegister: (email: string, password: string, name: string) => Promise<void>;
   devLogin: (email: string, name?: string) => Promise<void>;
   ssoLogin: (payload: { code?: string; token?: string }) => Promise<void>;
+  startGoogleSignIn: (opts?: { redirect?: string }) => Promise<void>;
+  finishGoogleSignIn: (code: string, redirectUri: string) => Promise<void>;
   logout: () => void;
 
   // Connection
@@ -305,6 +307,36 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('openchat_user', JSON.stringify(user));
   }, []);
 
+  // Google: kick off the OAuth redirect. We stash state + redirect target
+  // in sessionStorage; the callback page reads them.
+  const startGoogleSignIn = useCallback(async (opts?: { redirect?: string }) => {
+    const stateSeed = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+    const callbackUrl = new URL('/auth/google/callback', window.location.origin).toString();
+    const { url, state, redirectUri } = await api.googleAuthUrl({
+      state: stateSeed,
+      redirectUri: callbackUrl,
+    });
+    sessionStorage.setItem('openchat_google_oauth', JSON.stringify({
+      state,
+      redirectUri,
+      redirect: opts?.redirect || '/',
+    }));
+    window.location.assign(url);
+  }, []);
+
+  // Google: handle the OAuth callback — exchange code for a session.
+  const finishGoogleSignIn = useCallback(async (code: string, redirectUri: string) => {
+    const result = await api.googleExchange(code, redirectUri);
+    const user = { userId: result.user.id, email: result.user.email, name: result.user.name };
+    setCurrentUser(user);
+    setToken(result.token);
+    localStorage.setItem('openchat_token', result.token);
+    localStorage.setItem('openchat_user', JSON.stringify(user));
+    toast.success(`Signed in with Google as ${user.email}`);
+  }, []);
+
   // Logout
   const logout = useCallback(async () => {
     try {
@@ -489,6 +521,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     noosRegister,
     devLogin,
     ssoLogin,
+    startGoogleSignIn,
+    finishGoogleSignIn,
     logout,
     isConnected,
     conversations,
