@@ -26,6 +26,12 @@ COPY client/dist/ ./client/dist/
 # entirely, also delete this line + the /m server mount.
 COPY client-mobile/dist/ ./client-mobile/dist/
 
+# Copy desktop-responsive RN-web build, served at /d/*. Same codebase as
+# /m but with a responsive multi-pane layout above 768px. Built by deploy.sh
+# from ../openchat-mobile-desktop/dist-web; falls back to a placeholder if
+# the sibling repo is absent.
+COPY client-mobile-desktop/dist/ ./client-mobile-desktop/dist/
+
 WORKDIR /app/server
 
 # Expose port

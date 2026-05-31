@@ -79,6 +79,17 @@ app.get(/^\/m(\/|$)/, (_req, res, next) => {
   });
 });
 
+// Desktop-responsive RN-web build, mounted at /d/*. Same codebase as /m but
+// with a multi-pane master-detail layout above the 768px breakpoint. Built
+// from sibling openchat-mobile-desktop repo (experiments.baseUrl=/d).
+const mobileDesktopDistPath = path.join(__dirname, '..', '..', 'client-mobile-desktop', 'dist');
+app.use('/d', express.static(mobileDesktopDistPath));
+app.get(/^\/d(\/|$)/, (_req, res, next) => {
+  res.sendFile(path.join(mobileDesktopDistPath, 'index.html'), (err) => {
+    if (err) next();
+  });
+});
+
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);

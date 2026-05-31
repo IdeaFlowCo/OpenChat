@@ -36,6 +36,29 @@ else
 PLACEHOLDER_HTML
 fi
 
+# Build openchat-mobile-desktop (same RN codebase, responsive layout) if its
+# sibling worktree is present. Mounted at /d on the openchat server. See
+# /Users/Jacob/code/openchat-mobile-desktop/app.json (experiments.baseUrl="/d")
+# and server/src/index.ts for the static mount. The dist always exists in the
+# tarball so the Dockerfile COPY doesn't fail in non-developer environments.
+MOBILE_DESKTOP_REPO="${MOBILE_DESKTOP_REPO:-$HOME/code/openchat-mobile-desktop}"
+rm -rf client-mobile-desktop/dist
+mkdir -p client-mobile-desktop/dist
+if [ -d "$MOBILE_DESKTOP_REPO" ]; then
+  echo "Building openchat-mobile-desktop (RN-web, responsive) from $MOBILE_DESKTOP_REPO..."
+  (cd "$MOBILE_DESKTOP_REPO" && npx expo export --platform web --output-dir dist-web)
+  cp -r "$MOBILE_DESKTOP_REPO/dist-web/." client-mobile-desktop/dist/
+else
+  echo "openchat-mobile-desktop repo not found at $MOBILE_DESKTOP_REPO — /d will serve a placeholder."
+  cat > client-mobile-desktop/dist/index.html <<'PLACEHOLDER_HTML'
+<!doctype html><meta charset=utf-8><title>OpenChat /d</title>
+<body style="font-family:system-ui;padding:2rem;max-width:40rem;margin:0 auto;color:#444">
+<h1>/d placeholder</h1>
+<p>The desktop-responsive React Native web build isn't present in this deploy. Set <code>MOBILE_DESKTOP_REPO</code> on the deploy host (or place a sibling <code>openchat-mobile-desktop/</code> checkout next to <code>openchat/</code>) and redeploy.</p>
+</body>
+PLACEHOLDER_HTML
+fi
+
 # Create deployment package
 echo "Creating deployment package..."
 tar -czf /tmp/${APP_NAME}-deploy.tar.gz \
@@ -43,6 +66,7 @@ tar -czf /tmp/${APP_NAME}-deploy.tar.gz \
   server/package*.json \
   client/dist/ \
   client-mobile/dist/ \
+  client-mobile-desktop/dist/ \
   package*.json \
   docker-compose.prod.yml \
   Dockerfile
