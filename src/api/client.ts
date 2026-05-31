@@ -365,6 +365,44 @@ export const api = {
       method: 'DELETE',
     }),
   /**
+   * Register the Expo native push token for this device. Server upserts a
+   * NativePushToken keyed by (userId, platform). Returns 204. (OpenChat-vg7)
+   * Bypasses request<T>() because the response has no body.
+   */
+  registerNativePushToken: async (token: string, platform: 'ios' | 'android') => {
+    const t = await getToken();
+    const r = await fetch(`${OPENCHAT_URL}/api/push/register-native`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(t ? { authorization: `Bearer ${t}` } : {}),
+      },
+      body: JSON.stringify({ token, platform }),
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new ApiError(r.status, `${r.status}: ${text}`, text);
+    }
+  },
+
+  /** Deregister the Expo native push token for this device at logout. */
+  deregisterNativePushToken: async (platform: 'ios' | 'android') => {
+    const t = await getToken();
+    const r = await fetch(`${OPENCHAT_URL}/api/push/register-native`, {
+      method: 'DELETE',
+      headers: {
+        'content-type': 'application/json',
+        ...(t ? { authorization: `Bearer ${t}` } : {}),
+      },
+      body: JSON.stringify({ platform }),
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new ApiError(r.status, `${r.status}: ${text}`, text);
+    }
+  },
+
+  /**
    * Combined search across messages, conversations, and contacts. Server
    * filters by the caller's participant access — no leaks. `q` must be at
    * least 2 chars (server returns empty buckets for shorter queries).

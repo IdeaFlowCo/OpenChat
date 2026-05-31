@@ -19,6 +19,12 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { ChatProvider, useChat } from './src/contexts/ChatContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
+import {
+  configureNotificationHandlers,
+  addNotificationTapListener,
+  registerForPushNotificationsAsync,
+  navigationRef,
+} from './src/services/notifications';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { ConversationsScreen } from './src/screens/ConversationsScreen';
 import { ChatScreen } from './src/screens/ChatScreen';
@@ -40,6 +46,27 @@ function Shell() {
     bootstrapIfAuthed();
   }, [bootstrapIfAuthed]);
 
+  // Configure notification foreground / tap handlers once at mount. Safe to call
+  // on web (no-op there). The tap listener is set up here (vs. inside the
+  // signed-in branch) because notifications can arrive while the user is on
+  // the Login screen too — we still want the navigator to react if they're
+  // signed in by the time they tap. (OpenChat-vg7)
+  useEffect(() => {
+    configureNotificationHandlers();
+    const sub = addNotificationTapListener();
+    return () => { sub?.remove(); };
+  }, []);
+
+  // Register for push notifications once the user is signed in. Re-runs when
+  // the user logs in or out. Idempotent — the service short-circuits if the
+  // current Expo push token is already cached as registered.
+  useEffect(() => {
+    if (!isAuthed) return;
+    void registerForPushNotificationsAsync().catch((err) => {
+      console.warn('[notifications] registration error:', err);
+    });
+  }, [isAuthed]);
+
   const baseNav = scheme === 'dark' ? DarkTheme : DefaultTheme;
   const navTheme = {
     ...baseNav,
@@ -54,7 +81,7 @@ function Shell() {
   };
 
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer ref={navigationRef} theme={navTheme}>
       <StatusBar
         barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'}
         backgroundColor={c.background}

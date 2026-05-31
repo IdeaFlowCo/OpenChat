@@ -24,6 +24,7 @@ import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import type { NavProp, RouteProps } from '../navigation/types';
+import { setActiveConversationForNotifications } from '../services/notifications';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
 
@@ -93,9 +94,15 @@ export function ChatScreen() {
   const typingTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Activate this conversation in context on mount; clear on unmount.
+  // Also tell the notification service so it can suppress foreground banners
+  // for messages arriving in the conversation the user is already viewing.
   useEffect(() => {
     setActiveConversation(conversationId);
-    return () => { setActiveConversation(null); };
+    setActiveConversationForNotifications(conversationId);
+    return () => {
+      setActiveConversation(null);
+      setActiveConversationForNotifications(null);
+    };
   }, [conversationId, setActiveConversation]);
 
   const isGroup = conversation?.type === 'group';
