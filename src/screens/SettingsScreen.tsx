@@ -1,16 +1,21 @@
 /**
  * Settings screen — for now just the theme toggle (OpenChat-bji), expo-
- * secure-store status (OpenChat-ghr), and a sign-out button. Reached via
- * a gear icon in the Conversations header.
+ * secure-store status (OpenChat-ghr), notifications permission UI
+ * (OpenChat-jzc), and a sign-out button. Reached via a gear icon in the
+ * Conversations header.
  *
  * Designed so the surface is easy to extend: add a new row, the screen
  * just grows downward.
  */
 
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import * as Notifications from 'expo-notifications';
+import { useFocusEffect } from '@react-navigation/native';
 import { useTheme, ThemePref } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
+import { registerForPushNotificationsAsync } from '../services/notifications';
 
 const OPTIONS: { value: ThemePref; label: string; hint: string }[] = [
   { value: 'system', label: 'System', hint: 'Follow your phone' },
@@ -18,10 +23,42 @@ const OPTIONS: { value: ThemePref; label: string; hint: string }[] = [
   { value: 'dark', label: 'Dark', hint: '' },
 ];
 
+type NotifStatus = 'granted' | 'denied' | 'undetermined' | 'unknown';
+
 export function SettingsScreen() {
   const { preference, setPreference, scheme } = useTheme();
   const { currentUser, signOut } = useChat();
   const c = getColors(scheme);
+
+  // Notification permission status — re-polled whenever this screen gains
+  // focus, so if the user toggles iOS Settings → OpenChat → Notifications
+  // and returns to the app, we reflect the new state without a restart.
+  const [notifStatus, setNotifStatus] = useState<NotifStatus>('unknown');
+  const refreshNotif = useCallback(async () => {
+    if (Platform.OS === 'web') return;
+    try {
+      const s = await Notifications.getPermissionsAsync();
+      // expo-notifications PermissionStatus is one of granted/denied/undetermined.
+      setNotifStatus(s.status as NotifStatus);
+    } catch {
+      setNotifStatus('unknown');
+    }
+  }, []);
+  useFocusEffect(useCallback(() => { void refreshNotif(); }, [refreshNotif]));
+
+  const handleEnableNotifications = useCallback(async () => {
+    // First-time path (undetermined): triggers the iOS prompt via
+    // registerForPushNotificationsAsync, which also POSTs the resulting
+    // Expo token to the server. Refresh the displayed status after.
+    await registerForPushNotificationsAsync();
+    await refreshNotif();
+  }, [refreshNotif]);
+
+  const handleOpenSystemSettings = useCallback(() => {
+    // iOS won't re-prompt after denial — user has to flip the toggle in
+    // iOS Settings → OpenChat → Notifications. Deep-link them there.
+    void Linking.openSettings();
+  }, []);
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
@@ -64,6 +101,52 @@ export function SettingsScreen() {
         </View>
       </View>
 
+      {Platform.OS !== 'web' && (
+        <View style={styles.section}>
+          <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>NOTIFICATIONS</Text>
+          <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+            {notifStatus === 'granted' && (
+              <View style={[styles.optionRow, styles.notifRow]}>
+                <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>Notifications are on</Text>
+                <Text style={{ color: c.primary, fontSize: 18 }}>✓</Text>
+              </View>
+            )}
+            {notifStatus === 'undetermined' && (
+              <TouchableOpacity
+                style={[styles.optionRow, styles.notifRow]}
+                onPress={handleEnableNotifications}
+                activeOpacity={0.7}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.optionLabel, { color: c.primary }]}>Enable notifications</Text>
+                  <Text style={[styles.optionHint, { color: c.textSecondary }]}>Get pinged when you receive a message</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            {notifStatus === 'denied' && (
+              <TouchableOpacity
+                style={[styles.optionRow, styles.notifRow]}
+                onPress={handleOpenSystemSettings}
+                activeOpacity={0.7}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Notifications are off</Text>
+                  <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                    Tap to open {Platform.OS === 'ios' ? 'iOS' : 'system'} Settings and enable
+                  </Text>
+                </View>
+                <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+              </TouchableOpacity>
+            )}
+            {(notifStatus === 'unknown' || notifStatus === undefined) && (
+              <View style={[styles.optionRow, styles.notifRow]}>
+                <Text style={[styles.optionLabel, { color: c.textMuted, flex: 1 }]}>Checking…</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      )}
+
       <View style={styles.section}>
         <TouchableOpacity
           style={[styles.dangerBtn, { borderColor: c.danger }]}
@@ -100,6 +183,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
+  notifRow: { minHeight: 56 },
   optionLabel: { fontSize: 16, fontWeight: '500' },
   optionHint: { fontSize: 12, marginTop: 2 },
   radio: {
