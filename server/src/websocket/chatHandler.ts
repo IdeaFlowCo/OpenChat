@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
 import { validateToken, AuthUser } from '../middleware/auth.js';
+import { sendPushToUser } from '../services/push.js';
 
 interface AuthenticatedSocket extends Socket {
   user?: AuthUser;
@@ -189,6 +190,14 @@ export function setupChatSocket(io: Server): void {
         io.to(`conversation:${conversationId}`).emit('message:new', message);
 
         callback?.({ success: true, message });
+
+        // Fan-out push notifications to all OTHER participants. Fire-and-forget;
+        // never block the message:send response on push delivery.
+        // The mobile client's foreground handler suppresses the banner when the
+        // user is already viewing the conversation. (OpenChat-vg7)
+        fanoutPushForMessage(conversationId, userId, message).catch((err) => {
+          console.warn('[push] fanout error:', err);
+        });
       } catch (error) {
         console.error('Error sending message:', error);
         callback?.({ error: 'Failed to send message' });
@@ -312,6 +321,69 @@ async function broadcastPresenceToContacts(io: Server, userId: string, status: s
         }
       }
     }
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Send push notifications to every participant of a conversation except the
+ * sender. Title is the sender name (falling back to email), body is the
+ * message preview. Data carries conversationId + messageId so the mobile
+ * client can navigate to the right thread on tap.
+ *
+ * Fire-and-forget — logs but never throws to the caller.
+ */
+async function fanoutPushForMessage(
+  conversationId: string,
+  senderId: string,
+  message: unknown
+): Promise<void> {
+  const m = message as {
+    id?: string;
+    content?: string;
+    sender?: { name?: string; email?: string };
+  };
+  const session = getDriver().session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (c:Conversation {id: $conversationId})
+      OPTIONAL MATCH (other:User)-[:PARTICIPATES_IN]->(c)
+      WHERE other.id <> $senderId
+      RETURN c { .title, .type } AS conv, collect(other.id) AS recipientIds
+      `,
+      { conversationId, senderId }
+    );
+    if (result.records.length === 0) return;
+    const recipientIds = (result.records[0].get('recipientIds') as string[]) || [];
+    const conv = result.records[0].get('conv') as { title?: string; type?: string } | null;
+    if (recipientIds.length === 0) return;
+
+    const senderName = (m.sender?.name || m.sender?.email || 'Someone').trim();
+    const title =
+      conv?.type === 'group' && conv.title
+        ? `${senderName} in ${conv.title}`
+        : senderName;
+    const body = (m.content || '').slice(0, 200);
+
+    await Promise.all(
+      recipientIds.map((uid) =>
+        sendPushToUser(uid, {
+          title,
+          body,
+          tag: `conv:${conversationId}`,
+          data: {
+            type: 'message',
+            conversationId,
+            messageId: m.id,
+          },
+        }).catch((err) => {
+          console.warn(`[push] send to ${uid} failed:`, err);
+          return { delivered: 0, removed: 0, failed: 1 };
+        })
+      )
+    );
   } finally {
     await session.close();
   }

@@ -111,6 +111,74 @@ router.delete('/subscribe', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
+// Native (Expo) push token registration — OpenChat-vg7.
+// Body: { token, platform: 'ios' | 'android' }
+// Stored as (User)-[:HAS_PUSH_TOKEN]->(NativePushToken {userId, platform, token}).
+// Keyed by (userId, platform) so re-registering on the same device replaces
+// the previous token (Expo can rotate tokens after app reinstall, etc.).
+router.post('/register-native', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { token, platform } = req.body as { token?: string; platform?: string };
+
+  if (!token?.trim() || !platform?.trim()) {
+    res.status(400).json({ error: 'token and platform required' });
+    return;
+  }
+  if (platform !== 'ios' && platform !== 'android') {
+    res.status(400).json({ error: "platform must be 'ios' or 'android'" });
+    return;
+  }
+
+  const session = getDriver().session();
+  try {
+    const now = new Date().toISOString();
+    await session.run(
+      `
+      MATCH (u:User {id: $userId})
+      MERGE (u)-[:HAS_PUSH_TOKEN]->(t:NativePushToken {userId: $userId, platform: $platform})
+        ON CREATE SET t.createdAt = datetime($now)
+      SET t.token = $token,
+          t.updatedAt = datetime($now)
+      `,
+      { userId, platform, token: token.trim(), now }
+    );
+    res.status(204).end();
+  } catch (error) {
+    console.error('[push] register-native error:', error);
+    res.status(500).json({ error: 'Failed to register native push token' });
+  } finally {
+    await session.close();
+  }
+});
+
+// Deregister — used at logout. Body: { platform: 'ios' | 'android' }
+router.delete('/register-native', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { platform } = req.body as { platform?: string };
+
+  if (!platform || (platform !== 'ios' && platform !== 'android')) {
+    res.status(400).json({ error: "platform must be 'ios' or 'android'" });
+    return;
+  }
+
+  const session = getDriver().session();
+  try {
+    await session.run(
+      `
+      MATCH (t:NativePushToken {userId: $userId, platform: $platform})
+      DETACH DELETE t
+      `,
+      { userId, platform }
+    );
+    res.status(204).end();
+  } catch (error) {
+    console.error('[push] deregister-native error:', error);
+    res.status(500).json({ error: 'Failed to deregister native push token' });
+  } finally {
+    await session.close();
+  }
+});
+
 // Debug — list caller's own subscriptions.
 router.get('/subscriptions', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
