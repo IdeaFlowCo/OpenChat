@@ -14,7 +14,7 @@ import * as Google from 'expo-auth-session/providers/google';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../contexts/ThemeContext';
-import { loginWithPassword, googleExchange, GOOGLE_CLIENT_ID } from '../api/client';
+import { loginWithPassword, googleIdTokenExchange, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
 
@@ -46,40 +46,49 @@ export function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
-  // Google OAuth — mirrors chat.globalbr.ai's "Continue with Google" button.
-  // The native flow asks for an authorization code, then POSTs it to the same
-  // /api/auth/google/exchange endpoint the web client uses. The server holds
-  // GOOGLE_CLIENT_SECRET; the client never sees it.
+  // Google OAuth — iOS native flow.
   //
-  // The redirect URI is `com.jacobcole.openchat:/oauth2redirect` (derived from
-  // `expo.scheme` in app.json). That URI must be added to the GCP OAuth
-  // client's authorized redirect URIs or you'll get redirect_uri_mismatch.
+  // Google rejects custom-scheme redirect URIs (com.jacobcole.openchat:/...)
+  // on Web-type OAuth clients. So on iOS we use a SEPARATE iOS-type client
+  // (GOOGLE_IOS_CLIENT_ID, created 2026-05-31). The iOS flow has no client
+  // secret — expo-auth-session uses PKCE and returns the ID token directly.
+  // We then POST the ID token to /api/auth/google/idtoken-exchange where
+  // the server verifies it against Google's certs and MERGEs the User.
+  //
+  // The Web flow (GOOGLE_CLIENT_ID + code + secret + /google/exchange) is
+  // still used at chat.globalbr.ai and the RN-web build of this app served
+  // at /m — but only on a non-iOS platform.
   const googleRedirectUri = AuthSession.makeRedirectUri({ scheme: 'openchat' });
   const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest({
-    iosClientId: GOOGLE_CLIENT_ID,
-    androidClientId: GOOGLE_CLIENT_ID,
+    iosClientId: GOOGLE_IOS_CLIENT_ID,
+    androidClientId: GOOGLE_IOS_CLIENT_ID, // TODO: separate Android client when Android ships
     webClientId: GOOGLE_CLIENT_ID,
-    clientId: GOOGLE_CLIENT_ID,
+    clientId: GOOGLE_IOS_CLIENT_ID,
     scopes: ['openid', 'email', 'profile'],
-    // We want a server-side exchange, so DON'T let the hook auto-swap the code
-    // — keep the raw `code` param so we can POST it to /api/auth/google/exchange.
-    shouldAutoExchangeCode: false,
+    // Native iOS: we want the ID token back. expo-auth-session handles PKCE.
+    shouldAutoExchangeCode: true,
     redirectUri: googleRedirectUri,
   });
 
   useEffect(() => {
     if (!googleResponse) return;
     if (googleResponse.type === 'success') {
-      const code = googleResponse.params?.code;
-      if (!code) {
-        Alert.alert('Google sign-in failed', 'Google did not return an authorization code.');
+      // Either authentication.idToken (when shouldAutoExchangeCode=true on
+      // native) or params.id_token (rare implicit fallback) carries the ID
+      // token we POST to the server.
+      const authResp = googleResponse as unknown as {
+        authentication?: { idToken?: string };
+        params?: { id_token?: string };
+      };
+      const idToken = authResp.authentication?.idToken || authResp.params?.id_token;
+      if (!idToken) {
+        Alert.alert('Google sign-in failed', 'Google did not return an ID token.');
         setGoogleLoading(false);
         return;
       }
       (async () => {
         try {
-          await googleExchange(code, googleRedirectUri);
-          // Flip auth state — same hand-off as the password path.
+          await googleIdTokenExchange(idToken);
           await bootstrapIfAuthed();
         } catch (err) {
           Alert.alert(
@@ -100,7 +109,7 @@ export function LoginScreen() {
       // 'cancel' / 'dismiss' / 'locked' — user backed out.
       setGoogleLoading(false);
     }
-  }, [googleResponse, googleRedirectUri, bootstrapIfAuthed]);
+  }, [googleResponse, bootstrapIfAuthed]);
 
   const handleGoogleSignIn = async () => {
     if (googleLoading || loading) return;

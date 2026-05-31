@@ -218,17 +218,23 @@ async function request<T>(
 }
 
 /**
- * Public Google OAuth client ID (PROD). Safe to commit — this is the same
- * client the web app uses for "Continue with Google" at chat.globalbr.ai. The
- * client SECRET stays server-side and is only used by the /api/auth/google/exchange
- * route. Native iOS uses this client (with `com.jacobcole.openchat:/oauth2redirect`
- * registered as an authorized redirect URI on the GCP OAuth client).
+ * Public Google OAuth client IDs (PROD). Safe to commit — these are public.
  *
- * Override at build time via EXPO_PUBLIC_GOOGLE_CLIENT_ID for dev / staging.
+ * GOOGLE_CLIENT_ID is the Web client (used by chat.globalbr.ai). NOT used on
+ *   iOS — Google rejects custom-scheme redirect URIs on Web-type clients.
+ * GOOGLE_IOS_CLIENT_ID is the iOS-type client created 2026-05-31. Bundle ID
+ *   com.jacobcole.openchat. No client secret (PKCE). This is what
+ *   expo-auth-session uses for the iOS sign-in flow.
+ *
+ * Override at build time via EXPO_PUBLIC_* env vars for dev / staging.
  */
 export const GOOGLE_CLIENT_ID =
   process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ||
   '874749606899-f2epm744j73anm2dnf59j6igehhlku0a.apps.googleusercontent.com';
+
+export const GOOGLE_IOS_CLIENT_ID =
+  process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ||
+  '874749606899-ajd7segoct156poo3gbeoefg3s349626.apps.googleusercontent.com';
 
 /**
  * Exchange a Google authorization code for an OpenChat JWT + user. Hits the
@@ -248,6 +254,42 @@ export async function googleExchange(
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ code, redirectUri }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try {
+      const j = JSON.parse(text);
+      msg = j.error || j.message || text;
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(`Google sign-in failed (${res.status}): ${msg}`);
+  }
+  const body = await res.json();
+  const user: CurrentUser = {
+    userId: body.user.id,
+    email: body.user.email,
+    name: body.user.name,
+  };
+  await setSession(body.token, user);
+  return { user, token: body.token };
+}
+
+/**
+ * Exchange a Google ID token for an OpenChat JWT + user. This is the iOS
+ * native path — expo-auth-session/providers/google with the iOS clientId
+ * returns the ID token directly (PKCE, no secret). We POST it to the
+ * dedicated server endpoint which verifies against Google's certs and
+ * MERGEs the user by email (same User node as the web flow lands on).
+ */
+export async function googleIdTokenExchange(
+  idToken: string
+): Promise<{ user: CurrentUser; token: string }> {
+  const res = await fetch(`${OPENCHAT_URL}/api/auth/google/idtoken-exchange`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ idToken }),
   });
   if (!res.ok) {
     const text = await res.text();
