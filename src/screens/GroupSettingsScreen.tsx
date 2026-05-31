@@ -88,12 +88,19 @@ export function GroupSettingsScreen() {
     setSavingTitle(true);
     try {
       await renameConversation(conversationId, trimmed);
+      // Light-touch success feedback: the title in the header + chat list
+      // updates via the conversation:updated socket event, but the user is on
+      // this screen, so confirm explicitly so they know the save landed.
+      Alert.alert('Group renamed', `Now called "${trimmed || 'Group'}".`);
     } catch (err) {
       Alert.alert('Rename failed', err instanceof Error ? err.message : String(err));
     } finally {
       setSavingTitle(false);
     }
   };
+
+  // True when the input differs from the persisted title — drives the Save button.
+  const titleDirty = draftTitle.trim() !== (conversation.title || '').trim();
 
   const onAdd = async (u: User) => {
     setAdding(u.id);
@@ -169,7 +176,7 @@ export function GroupSettingsScreen() {
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
-            <Text style={[styles.section, { color: c.textSecondary }]}>NAME</Text>
+            <Text style={[styles.section, { color: c.textSecondary }]}>GROUP NAME</Text>
             <View style={styles.row}>
               <TextInput
                 style={[styles.input, {
@@ -177,18 +184,39 @@ export function GroupSettingsScreen() {
                   color: c.textPrimary,
                   borderColor: c.border,
                   flex: 1,
+                  opacity: isOwner ? 1 : 0.6,
                 }]}
                 value={draftTitle}
                 onChangeText={setDraftTitle}
                 editable={isOwner}
                 placeholder="Group name (optional)"
                 placeholderTextColor={c.textMuted}
-                onBlur={saveTitle}
                 onSubmitEditing={saveTitle}
                 returnKeyType="done"
               />
               {savingTitle && <ActivityIndicator color={c.primary} style={{ marginLeft: 8 }} />}
             </View>
+            {isOwner && (
+              <TouchableOpacity
+                onPress={saveTitle}
+                disabled={!titleDirty || savingTitle}
+                style={[
+                  styles.saveBtn,
+                  {
+                    backgroundColor: titleDirty && !savingTitle ? c.primary : c.surfaceElevated,
+                    borderColor: c.border,
+                    opacity: titleDirty && !savingTitle ? 1 : 0.5,
+                  },
+                ]}
+              >
+                <Text style={{
+                  color: titleDirty && !savingTitle ? '#fff' : c.textSecondary,
+                  fontWeight: '600',
+                }}>
+                  {savingTitle ? 'Saving…' : 'Save name'}
+                </Text>
+              </TouchableOpacity>
+            )}
             {!isOwner && (
               <Text style={[styles.hint, { color: c.textMuted }]}>Only the owner can rename the group.</Text>
             )}
@@ -317,6 +345,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   hint: { fontSize: 12, marginTop: 4 },
+  saveBtn: {
+    marginTop: 10,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+  },
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
