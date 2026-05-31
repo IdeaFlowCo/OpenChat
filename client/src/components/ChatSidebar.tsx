@@ -3,7 +3,7 @@ import { useChat } from '../contexts/ChatContext';
 import { useTheme, ThemePreference } from '../contexts/ThemeContext';
 import { ConversationList } from './ConversationList';
 import { PresenceIndicator } from './PresenceIndicator';
-import { User } from '../api';
+import { api, User, SearchResults } from '../api';
 import { toastError } from '../utils/toastError';
 import { BotBadge } from './BotBadge';
 
@@ -84,6 +84,12 @@ export function ChatSidebar() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  // Global search: separate state from the contact-picker search so the
+  // top-of-sidebar search stays alive when the user opens the picker (and
+  // vice versa). Both share the same 300ms debounce — different sources.
+  const [globalSearchTerm, setGlobalSearchTerm] = useState('');
+  const [globalSearchResults, setGlobalSearchResults] = useState<SearchResults | null>(null);
+  const [isGlobalSearching, setIsGlobalSearching] = useState(false);
   const [status, setStatus] = useState<'available' | 'away' | 'busy' | 'invisible'>('available');
   const [statusMessage, setStatusMessage] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -112,6 +118,7 @@ export function ChatSidebar() {
 
   // Debounce search term (300ms)
   const debouncedSearch = useDebounce(searchTerm, 300);
+  const debouncedGlobalSearch = useDebounce(globalSearchTerm, 300);
 
   // Perform search when debounced term changes
   useEffect(() => {
@@ -134,6 +141,32 @@ export function ChatSidebar() {
 
     performSearch();
   }, [debouncedSearch, pickerMode, searchContacts]);
+
+  // Global search effect. Mirrors the contact-picker pattern, but hits the
+  // unified /api/chat/search endpoint and renders three sections (messages,
+  // conversations, contacts). The server rejects queries shorter than 2
+  // characters with an empty bucket — we skip the network round-trip in
+  // that case for snappier feedback.
+  useEffect(() => {
+    let cancelled = false;
+    const q = debouncedGlobalSearch.trim();
+    if (q.length < 2) {
+      setGlobalSearchResults(null);
+      setIsGlobalSearching(false);
+      return;
+    }
+    setIsGlobalSearching(true);
+    api.search({ q, scope: 'global', limit: 20 })
+      .then(results => { if (!cancelled) setGlobalSearchResults(results); })
+      .catch(err => {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : 'Search failed';
+        toastError(msg, { id: 'global-search' });
+        setGlobalSearchResults({ messages: [], conversations: [], contacts: [] });
+      })
+      .finally(() => { if (!cancelled) setIsGlobalSearching(false); });
+    return () => { cancelled = true; };
+  }, [debouncedGlobalSearch]);
 
   useEffect(() => {
     if (!isConnected) return;
@@ -225,6 +258,45 @@ export function ChatSidebar() {
   };
 
   const isContactSelected = (id: string) => selectedContacts.some(c => c.id === id);
+
+  // Global search result click handlers. Each one shuts the search panel
+  // (clear the input) and routes the user to the right place. We don't
+  // try to scroll to the matching message id yet — opening the
+  // conversation is enough for v1; per-message highlight is a follow-up.
+  const clearGlobalSearch = () => {
+    setGlobalSearchTerm('');
+    setGlobalSearchResults(null);
+  };
+
+  const handleSearchOpenConversation = (conversationId: string) => {
+    setActiveConversation(conversationId);
+    clearGlobalSearch();
+  };
+
+  const handleSearchOpenContact = async (contact: User) => {
+    try {
+      const conv = await createConversation([contact.id]);
+      setActiveConversation(conv.id);
+      clearGlobalSearch();
+    } catch (e) {
+      toastError(e instanceof Error ? e.message : 'Failed to start chat', { id: 'start-chat' });
+    }
+  };
+
+  // Trim+slice helper: keep snippets short and stable for layout.
+  const messagePreview = (content: string, q: string): string => {
+    const trimmed = content.replace(/\s+/g, ' ').trim();
+    if (trimmed.length <= 120) return trimmed;
+    // Try to center the snippet on the first match for readability.
+    const lower = trimmed.toLowerCase();
+    const idx = lower.indexOf(q.toLowerCase());
+    if (idx < 0) return trimmed.slice(0, 120) + '…';
+    const start = Math.max(0, idx - 40);
+    const end = Math.min(trimmed.length, start + 120);
+    return (start > 0 ? '…' : '') + trimmed.slice(start, end) + (end < trimmed.length ? '…' : '');
+  };
+
+  const globalSearchActive = debouncedGlobalSearch.trim().length >= 2;
 
   return (
     <div className="flex-1 flex flex-col bg-white dark:bg-slate-900 min-h-0">
@@ -518,8 +590,176 @@ export function ChatSidebar() {
           </div>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto min-h-0">
-          <ConversationList />
+        <>
+          {/* Global search input — top of sidebar, above the conversation list. */}
+          <div className="px-3 md:px-4 pt-3 pb-2 border-b border-gray-200 dark:border-slate-800">
+            <div className="relative">
+              <input
+                type="search"
+                value={globalSearchTerm}
+                onChange={(e) => setGlobalSearchTerm(e.target.value)}
+                placeholder="Search messages, people, groups…"
+                className="w-full pl-8 pr-8 py-2 min-h-[36px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
+                aria-label="Search"
+              />
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-slate-500 pointer-events-none text-sm">
+                🔍
+              </span>
+              {globalSearchTerm && (
+                <button
+                  type="button"
+                  onClick={clearGlobalSearch}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-200 text-sm"
+                  aria-label="Clear search"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {globalSearchActive ? (
+              <SearchResultsPanel
+                query={debouncedGlobalSearch.trim()}
+                results={globalSearchResults}
+                isLoading={isGlobalSearching}
+                onOpenConversation={handleSearchOpenConversation}
+                onOpenContact={handleSearchOpenContact}
+                messagePreview={messagePreview}
+              />
+            ) : (
+              <ConversationList />
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Results panel — rendered when there's an active global search query.
+// Three labeled sections; each is omitted when empty (UX cleaner than
+// "Conversations: (none)" everywhere). If all three are empty after the
+// network round-trip completes, we surface a single "no matches" line.
+interface SearchResultsPanelProps {
+  query: string;
+  results: SearchResults | null;
+  isLoading: boolean;
+  onOpenConversation: (conversationId: string) => void;
+  onOpenContact: (contact: User) => void;
+  messagePreview: (content: string, q: string) => string;
+}
+
+function SearchResultsPanel({ query, results, isLoading, onOpenConversation, onOpenContact, messagePreview }: SearchResultsPanelProps) {
+  // While loading the *first* result for a given query, results === null —
+  // show a skeleton. On subsequent re-queries (typing keeps changing the
+  // term), we keep the previous results visible so the panel doesn't flash.
+  if (!results && isLoading) {
+    return (
+      <div className="p-4 text-center text-gray-500 dark:text-slate-400">
+        <div className="animate-pulse">Searching…</div>
+      </div>
+    );
+  }
+  if (!results) {
+    return null;
+  }
+
+  const { messages, conversations, contacts } = results;
+  const empty = messages.length === 0 && conversations.length === 0 && contacts.length === 0;
+  if (empty) {
+    return (
+      <div className="p-4 text-center text-gray-500 dark:text-slate-400">
+        No matches for "{query}"
+      </div>
+    );
+  }
+
+  const sectionHeader = (label: string) => (
+    <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400 bg-gray-50 dark:bg-slate-800/50 sticky top-0">
+      {label}
+    </div>
+  );
+
+  return (
+    <div className="bg-white dark:bg-slate-900">
+      {conversations.length > 0 && (
+        <div>
+          {sectionHeader('Conversations')}
+          {conversations.map(conv => {
+            const title = conv.title?.trim() || (conv.participants || []).map(p => p.name || p.email).join(', ') || 'Untitled';
+            const subtitle = (conv.participants || []).map(p => p.name || p.email).join(', ');
+            return (
+              <div
+                key={conv.id}
+                onClick={() => onOpenConversation(conv.id)}
+                className="p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 active:bg-gray-100 dark:active:bg-slate-700 border-b border-gray-100 dark:border-slate-800"
+              >
+                <div className="font-medium text-gray-900 dark:text-slate-100 truncate">
+                  {title}
+                  <span className="ml-2 text-xs text-gray-400 dark:text-slate-500 font-normal">
+                    {conv.type === 'group' ? 'group' : 'direct'}
+                  </span>
+                </div>
+                {subtitle && (
+                  <div className="text-sm text-gray-500 dark:text-slate-400 truncate">{subtitle}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {messages.length > 0 && (
+        <div>
+          {sectionHeader('Messages')}
+          {messages.map(msg => {
+            const convTitle = msg.conversationTitle?.trim() || (msg.conversationType === 'group' ? 'Untitled group' : 'Direct message');
+            const senderName = msg.sender?.name || msg.sender?.email || 'Unknown';
+            return (
+              <div
+                key={msg.id}
+                onClick={() => onOpenConversation(msg.conversationId)}
+                className="p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 active:bg-gray-100 dark:active:bg-slate-700 border-b border-gray-100 dark:border-slate-800"
+              >
+                <div className="text-xs text-gray-500 dark:text-slate-400 truncate">
+                  <span className="font-medium">{senderName}</span>
+                  <span className="mx-1">in</span>
+                  <span>{convTitle}</span>
+                </div>
+                <div className="text-sm text-gray-700 dark:text-slate-300 mt-0.5">
+                  {messagePreview(msg.content, query)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {contacts.length > 0 && (
+        <div>
+          {sectionHeader('Contacts')}
+          {contacts.map(c => (
+            <div
+              key={c.id}
+              onClick={() => onOpenContact(c)}
+              className="p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 active:bg-gray-100 dark:active:bg-slate-700 border-b border-gray-100 dark:border-slate-800"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-gray-300 dark:bg-slate-700 flex items-center justify-center text-gray-600 dark:text-slate-300 font-medium">
+                  {(c.name || c.email).charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-gray-900 dark:text-slate-100 truncate flex items-center">
+                    <span className="truncate">{c.name || c.email}</span>
+                    <BotBadge user={c} />
+                  </div>
+                  <div className="text-sm text-gray-500 dark:text-slate-400 truncate">{c.email}</div>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

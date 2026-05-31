@@ -641,6 +641,151 @@ router.get('/contacts', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/chat/search - Unified search across messages, conversations, and contacts
+//
+// Query params:
+//   q              - search text (required)
+//   scope          - 'global' | 'conversation' (default 'global')
+//   conversationId - required when scope='conversation'
+//   limit          - per-bucket cap (default 20, max 100)
+//
+// Authorization:
+//   - Messages: only ones in conversations where the requesting user
+//     PARTICIPATES_IN. The :PARTICIPATES_IN filter in the Cypher is the
+//     access-control boundary; without it this endpoint would leak every
+//     message in the graph.
+//   - Conversations: same — only conversations the user is a member of are
+//     considered, and we match by title.
+//   - Contacts: all users by name/email (already public-by-design via
+//     /contacts).
+//
+// Backed by CONTAINS (case-insensitive via toLower) rather than a Neo4j
+// full-text index. Reasoning: CONTAINS works against the existing schema
+// without a migration, and the message corpus is small for now. We can
+// add a fulltext index in a follow-up pass once volume justifies it.
+router.get('/search', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const rawQ = (req.query.q ?? '') as string;
+  const q = typeof rawQ === 'string' ? rawQ.trim() : '';
+  const scope = (req.query.scope as string) === 'conversation' ? 'conversation' : 'global';
+  const conversationId = req.query.conversationId as string | undefined;
+  const rawLimit = parseInt(req.query.limit as string, 10);
+  const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 20, 1), 100);
+
+  if (!q) {
+    res.status(400).json({ error: 'q is required' });
+    return;
+  }
+  // Guardrail: refuse single-character queries. CONTAINS on a single char
+  // scans almost every message; we keep it cheap. Two chars is a reasonable
+  // floor for "intent to search".
+  if (q.length < 2) {
+    res.json({ messages: [], conversations: [], contacts: [] });
+    return;
+  }
+  if (scope === 'conversation' && !conversationId) {
+    res.status(400).json({ error: 'conversationId is required when scope=conversation' });
+    return;
+  }
+
+  const session = getDriver().session();
+  try {
+    if (scope === 'conversation') {
+      // Verify access first to keep the not-found / forbidden cases separable
+      // from "empty results".
+      const accessCheck = await session.run(`
+        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+        RETURN c
+      `, { userId, conversationId });
+
+      if (accessCheck.records.length === 0) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+
+      const result = await session.run(`
+        MATCH (m:Message {conversationId: $conversationId})
+        WHERE m.deletedAt IS NULL
+          AND toLower(m.content) CONTAINS toLower($q)
+        MATCH (sender:User {id: m.senderId})
+        RETURN m {
+          .id, .content, .conversationId, .senderId, .createdAt,
+          sender: sender { .id, .name, .email, .isBot }
+        } AS message
+        ORDER BY m.createdAt DESC
+        LIMIT $limit
+      `, { conversationId, q, limit: neo4j.int(limit) });
+
+      const messages = result.records.map(r => toJS(r.get('message')));
+      res.json({ messages, conversations: [], contacts: [] });
+      return;
+    }
+
+    // Global scope: run three independent searches in parallel.
+    //
+    // Notes:
+    // - Messages query filters on PARTICIPATES_IN, so a user can never get
+    //   back a message from a conversation they're not in.
+    // - Conversations matches on the conversation TITLE only (participant
+    //   names already surface via the contacts bucket; layering them in
+    //   here causes confusing double-counted results).
+    // - Contacts excludes self, matching the existing /contacts behavior.
+    const [messagesResult, conversationsResult, contactsResult] = await Promise.all([
+      session.run(`
+        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)<-[:IN_CONVERSATION]-(m:Message)
+        WHERE m.deletedAt IS NULL
+          AND toLower(m.content) CONTAINS toLower($q)
+        MATCH (sender:User {id: m.senderId})
+        RETURN m {
+          .id, .content, .conversationId, .senderId, .createdAt,
+          sender: sender { .id, .name, .email, .isBot },
+          conversationTitle: c.title,
+          conversationType: c.type
+        } AS message
+        ORDER BY m.createdAt DESC
+        LIMIT $limit
+      `, { userId, q, limit: neo4j.int(limit) }),
+
+      session.run(`
+        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
+        WHERE c.title IS NOT NULL
+          AND toLower(c.title) CONTAINS toLower($q)
+        CALL {
+          WITH c
+          MATCH (participant:User)-[:PARTICIPATES_IN]->(c)
+          RETURN collect(participant { .id, .name, .email, .isBot })[0..3] AS participants
+        }
+        RETURN c {
+          .id, .title, .type, .lastMessageAt, .lastMessagePreview,
+          participants: participants
+        } AS conversation
+        ORDER BY c.lastMessageAt DESC
+        LIMIT $limit
+      `, { userId, q, limit: neo4j.int(limit) }),
+
+      session.run(`
+        MATCH (u:User)
+        WHERE u.id <> $userId
+          AND (toLower(u.name) CONTAINS toLower($q) OR toLower(u.email) CONTAINS toLower($q))
+        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
+        ORDER BY u.name
+        LIMIT $limit
+      `, { userId, q, limit: neo4j.int(limit) }),
+    ]);
+
+    const messages = messagesResult.records.map(r => toJS(r.get('message')));
+    const conversations = conversationsResult.records.map(r => toJS(r.get('conversation')));
+    const contacts = contactsResult.records.map(r => toJS(r.get('user')));
+
+    res.json({ messages, conversations, contacts });
+  } catch (error) {
+    console.error('Error performing search:', error);
+    res.status(500).json({ error: 'Search failed' });
+  } finally {
+    await session.close();
+  }
+});
+
 // GET /api/chat/users/by-email/:email - Look up user by exact email
 router.get('/users/by-email/:email', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
