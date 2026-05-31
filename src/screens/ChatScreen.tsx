@@ -27,6 +27,7 @@ import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import type { NavProp, RouteProps } from '../navigation/types';
 import { setActiveConversationForNotifications } from '../services/notifications';
+import { colorForUserId } from '../utils/colorForUserId';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
 
@@ -56,7 +57,11 @@ interface RenderRow {
   message?: Message & { _failed?: boolean };
   label?: string;
   isOwn?: boolean;
+  /** First message of a run from this author (after a different author / day break). */
   showSender?: boolean;
+  /** Last message of a run from this author (next message is different author / day / EOF).
+   *  Used to render the avatar only on the bottom of a run in group chats. */
+  isLastInRun?: boolean;
 }
 
 function buildRows(messages: Message[], myId: string | undefined): RenderRow[] {
@@ -64,12 +69,26 @@ function buildRows(messages: Message[], myId: string | undefined): RenderRow[] {
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
     const prev = messages[i - 1];
+    const next = messages[i + 1];
     if (!prev || !sameDay(prev.createdAt, m.createdAt)) {
       out.push({ type: 'day', key: `day-${m.createdAt}`, label: dayLabel(m.createdAt) });
     }
     const isOwn = m.senderId === myId;
     const showSender = !isOwn && (!prev || prev.senderId !== m.senderId);
-    out.push({ type: 'message', key: m.id, message: m as Message & { _failed?: boolean }, isOwn, showSender });
+    // "Last in run" = there is no next message, or the next is a different
+    // author, or there's a day break between them. We pin the avatar here so
+    // consecutive bubbles from the same author don't repeat the avatar.
+    const isLastInRun = !next
+      || next.senderId !== m.senderId
+      || !sameDay(m.createdAt, next.createdAt);
+    out.push({
+      type: 'message',
+      key: m.id,
+      message: m as Message & { _failed?: boolean },
+      isOwn,
+      showSender,
+      isLastInRun,
+    });
   }
   return out;
 }
@@ -256,8 +275,25 @@ export function ChatScreen() {
             const m = item.message!;
             const isOwn = !!item.isOwn;
             const failed = !!m._failed;
+            // WhatsApp-style identification for group chats: colored sender
+            // name on the first message of a run, small avatar on the LAST
+            // message of a run. We still reserve the avatar slot on the
+            // non-last messages so the bubbles stay vertically aligned.
+            const showGroupAvatar = isGroup && !isOwn;
+            const senderColor = colorForUserId(m.senderId, scheme);
             return (
-              <View style={[styles.row, { justifyContent: isOwn ? 'flex-end' : 'flex-start' }]}>
+              <View style={[styles.row, { justifyContent: isOwn ? 'flex-end' : 'flex-start', alignItems: 'flex-end' }]}>
+                {showGroupAvatar && (
+                  <View style={styles.avatarSlot}>
+                    {item.isLastInRun && (
+                      <Avatar
+                        name={m.sender?.name}
+                        email={m.sender?.email}
+                        size={28}
+                      />
+                    )}
+                  </View>
+                )}
                 <View
                   style={[
                     styles.bubble,
@@ -271,7 +307,10 @@ export function ChatScreen() {
                   ]}
                 >
                   {item.showSender && m.sender && (
-                    <Text style={[styles.sender, { color: c.textSecondary }]}>
+                    <Text style={[
+                      styles.sender,
+                      { color: isGroup ? senderColor : c.textSecondary },
+                    ]}>
                       {m.sender.name || m.sender.email}
                     </Text>
                   )}
@@ -321,7 +360,10 @@ export function ChatScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  row: { flexDirection: 'row' },
+  row: { flexDirection: 'row', gap: 6 },
+  // Fixed-width slot so bubbles stay vertically aligned regardless of whether
+  // the avatar is rendered on this row of the run.
+  avatarSlot: { width: 28, alignItems: 'center', justifyContent: 'flex-end' },
   bubble: {
     maxWidth: '78%',
     paddingHorizontal: 14,
