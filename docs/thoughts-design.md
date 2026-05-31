@@ -84,7 +84,9 @@ Status-having kinds use `previousId` for superseded chains (decisions) and a sep
 
 ---
 
-## Decisions resolved (2026-05-30 voice convo)
+## Decisions resolved
+
+### From 2026-05-30 voice convo
 
 | # | Decision | Resolution |
 |---|---|---|
@@ -96,6 +98,22 @@ Status-having kinds use `previousId` for superseded chains (decisions) and a sep
 | D6 | Where do open-to-self threads ("I owe Eric a reply") and unresolved-questions-from-a-conversation live? | **Flow into the personal stream by default**, with the conv-id in their refExtra so chat surfacing can find them. |
 | D7 | Real-time strategy? | **Three tiers, ship sequentially.** v1: 5-min cron sync. v1.5: bd hooks for <1s. v2: socket.io fan-out. |
 | D8 | Default state of source toggles for a new user? | **note:on, memory:on, issue:off, snippet:on** for new users. Jacob's account override: issue:on. |
+
+### From 2026-05-31 voice convo (refining codex's pushback)
+
+| # | Decision | Resolution |
+|---|---|---|
+| D9 | Tag capture syntax — start-of-message only (codex), or anywhere in message? | **Anywhere.** A message can contain `... and #idea this is the gist ...` and the tagged span gets captured. We accept the slightly-magical parsing in exchange for ergonomic chat. Mitigation: capture creates a `:Thought` that's clearly attributed back to the source message + clearly affords undo. |
+| D10 | Status on Thought items — only on status-having kinds (D5 had this), or on everything? | **Every item can carry a status.** Status enum: `null` (or `'not-an-issue'` — they're equivalent), `done`, `not-done`, `in-progress`, `acknowledged`. A `kind: 'fact'` item normally has `status: null` but the user can promote it (mark a fact as "acknowledged" e.g.) without changing kind. Simpler than D5's "status only on kind=decision/commitment/reminder." |
+| D11 | "Note captured in a group, but kept private to me" — codex flagged this as a real distinction your visibility-set can't express. | **Defer to a future ticket** (OpenChat-3kr.6 — see Open Questions). v1 ships with: if you `#idea` inside a group, item is visible-to-the-group by default. Going private-from-a-group is a v2 affordance. Long-form: revisit when we need it, possibly bringing in codex's `homeScope` + `visibility` two-axis model if the simpler single-axis can't grow into it cleanly. |
+
+### From codex 2026-05-31 review (incorporated)
+
+- **`:Thought` is too narrow a name.** Codex prefers `:StreamItem` / `:MemoryItem` with `kind` + tags as annotations. Adopting — schema uses `:StreamItem` going forward; "Thoughts" stays as the user-facing feature name.
+- **Provenance fields are first-class:** `sourceMessageId`, `sourceConversationId`, `sourceChannel`, `captureMethod` — added to schema below.
+- **Author identity split:** `createdByUserId` (who actually typed/extracted) and `ownedByUserId` (whose stream it belongs to). Identical for manual capture; diverge when an agent captures for a human.
+- **Tag normalization deferred** — store strings as-typed for v1; build a canonical lowercased index when needed.
+- **Edit / delete policy v1:** edit allowed on manual items by `createdByUserId`. Delete = soft (`hidden=true`). Synced sources read-only.
 
 ---
 
@@ -136,30 +154,53 @@ If Jacob authored a thought visible to a group and then leaves the group: do his
 
 ---
 
-## Data model (Neo4j, target shape)
+## Data model (Neo4j, target shape, updated 2026-05-31)
 
 ```cypher
-(:Thought {
+(:StreamItem {
   id: string,
-  authorUserId: string,                // immutable
-  kind: 'fact' | 'decision' | 'commitment' | 'reminder' | 'observation',
+  // Identity / ownership
+  createdByUserId: string,             // who actually typed/extracted
+  ownedByUserId: string,               // whose stream this lives in (= creator for manual; diverges when agent captures for human)
+  // Type + status
+  kind: 'fact' | 'decision' | 'commitment' | 'reminder' | 'observation' | 'note',
+  status: 'done' | 'not-done' | 'in-progress' | 'acknowledged' | null,
   content: string,
-  source: 'manual' | 'extraction' | 'bd-sync' | 'chat-snippet',
-  refKind: 'message' | 'memory' | 'issue' | null,
+  tags: string[],                      // ['idea', 'todo', 'book', ...] — as-typed in v1, normalized later
+  // Provenance — first-class (codex pushback)
+  source: 'manual' | 'tagged-from-chat' | 'extraction' | 'bd-sync' | 'chat-snippet',
+  sourceMessageId: string | null,      // the chat message that produced this, if any
+  sourceConversationId: string | null,
+  sourceChannel: 'openchat' | 'imessage-bridge' | 'cli' | null,
+  captureMethod: 'composer' | 'inline-tag' | 'agent-suggestion' | 'bulk-sync' | null,
+  // Legacy / cross-refs
+  refKind: 'memory' | 'issue' | null,
   refId: string | null,
   refExtra: string (JSON),             // {bd status, conv-id, etc.}
+  // Lifecycle
   createdAtSource: datetime,
-  capturedAt: datetime,                // feed sort key (when entered stream)
+  capturedAt: datetime,                // feed sort key (when entered owner's stream)
   updatedAt: datetime,
-  hidden: boolean,
+  hidden: boolean,                     // soft-delete
   previousId: string | null,           // for decision supersession chains
-  closedAt: datetime | null,           // for commitment/reminder done state
+  closedAt: datetime | null,           // for status transitions to terminal state
 })
 
-(:User)-[:AUTHORED]->(:Thought)
-(:Thought)-[:VISIBLE_TO]->(:User)
-(:Thought)-[:VISIBLE_TO]->(:Conversation)
+(:User)-[:CREATED]->(:StreamItem)         // immutable creator
+(:User)-[:OWNS_STREAM_ITEM]->(:StreamItem) // mutable owner (rare moves)
+(:StreamItem)-[:VISIBLE_TO]->(:User)
+(:StreamItem)-[:VISIBLE_TO]->(:Conversation)
+(:StreamItem)-[:FROM_MESSAGE]->(:Message)  // when sourceMessageId is set
 ```
+
+**Naming note:** the storage node is `:StreamItem` (codex's recommendation — more accurate for the heterogeneous payload). The user-facing feature stays "Thoughts" (the tab, the verb "capture a thought", etc.).
+
+**Status semantics:**
+- `null` means "no lifecycle" — applies to most facts/observations
+- `done` / `not-done` are the basic todo binary; `not-done` is the active state
+- `in-progress` for things you've started but haven't finished
+- `acknowledged` for things you've seen / decided to engage with but no further state yet
+- Any kind can carry any status (per D10) — kind and status are orthogonal axes
 
 Idempotent upsert for synced sources by `(authorUserId, refKind, refId)`. Manual notes get a fresh nanoid.
 
