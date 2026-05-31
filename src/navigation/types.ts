@@ -12,6 +12,7 @@ export type RootStackParamList = {
   NewConversation: undefined;
   GroupSettings: { conversationId: string };
   Settings: undefined;
+  Search: undefined;
 };
 
 export type NavProp<T extends keyof RootStackParamList> = NativeStackNavigationProp<RootStackParamList, T>;

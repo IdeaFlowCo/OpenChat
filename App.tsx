@@ -25,6 +25,7 @@ import { ChatScreen } from './src/screens/ChatScreen';
 import { NewConversationScreen } from './src/screens/NewConversationScreen';
 import { GroupSettingsScreen } from './src/screens/GroupSettingsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
+import { SearchScreen } from './src/screens/SearchScreen';
 import { getColors } from './src/theme/colors';
 import type { RootStackParamList } from './src/navigation/types';
 
@@ -94,6 +95,11 @@ function Shell() {
               name="Settings"
               component={SettingsScreen}
               options={{ title: 'Settings' }}
+            />
+            <Stack.Screen
+              name="Search"
+              component={SearchScreen}
+              options={{ title: 'Search', presentation: 'modal' }}
             />
           </>
         )}

@@ -301,6 +301,37 @@ export async function loginWithPassword(
   return { user, token: body.accessToken };
 }
 
+/**
+ * Search response shape — mirrors server/src/routes/chat.ts → GET /search.
+ * Three buckets returned together so the UI can render one combined search
+ * panel without three separate round-trips.
+ */
+export interface SearchMessageHit {
+  id: string;
+  content: string;
+  conversationId: string;
+  senderId: string;
+  createdAt: string;
+  sender?: { id: string; name?: string; email: string; isBot?: boolean };
+  conversationTitle?: string | null;
+  conversationType?: 'direct' | 'group';
+}
+
+export interface SearchConversationHit {
+  id: string;
+  title?: string | null;
+  type: 'direct' | 'group';
+  lastMessageAt?: string;
+  lastMessagePreview?: string;
+  participants?: Array<{ id: string; name?: string; email: string; isBot?: boolean }>;
+}
+
+export interface SearchResults {
+  messages: SearchMessageHit[];
+  conversations: SearchConversationHit[];
+  contacts: User[];
+}
+
 export const api = {
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
   getConversation: (conversationId: string) =>
@@ -333,4 +364,21 @@ export const api = {
     request<{ ok: boolean }>(`/api/chat/conversations/${conversationId}/participants/${userId}`, {
       method: 'DELETE',
     }),
+  /**
+   * Combined search across messages, conversations, and contacts. Server
+   * filters by the caller's participant access — no leaks. `q` must be at
+   * least 2 chars (server returns empty buckets for shorter queries).
+   */
+  search: (params: {
+    q: string;
+    scope?: 'global' | 'conversation';
+    conversationId?: string;
+    limit?: number;
+  }) => {
+    const qs = new URLSearchParams({ q: params.q });
+    if (params.scope) qs.set('scope', params.scope);
+    if (params.conversationId) qs.set('conversationId', params.conversationId);
+    if (params.limit) qs.set('limit', String(params.limit));
+    return request<SearchResults>(`/api/chat/search?${qs.toString()}`);
+  },
 };

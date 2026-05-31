@@ -76,13 +76,22 @@ export function ConversationsScreen() {
         </View>
       ),
       headerRight: () => (
-        <TouchableOpacity
-          onPress={() => navigation.navigate('NewConversation')}
-          accessibilityLabel="New conversation"
-          style={{ paddingHorizontal: 8, paddingVertical: 4 }}
-        >
-          <Text style={{ color: c.primary, fontSize: 28, lineHeight: 28, fontWeight: '300' }}>＋</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Search')}
+            accessibilityLabel="Search"
+            style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+          >
+            <Text style={{ color: c.primary, fontSize: 20 }}>🔍</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('NewConversation')}
+            accessibilityLabel="New conversation"
+            style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+          >
+            <Text style={{ color: c.primary, fontSize: 28, lineHeight: 28, fontWeight: '300' }}>＋</Text>
+          </TouchableOpacity>
+        </View>
       ),
       headerLeft: () => (
         <TouchableOpacity
