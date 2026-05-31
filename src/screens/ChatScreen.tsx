@@ -8,7 +8,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   StyleSheet,
   Text,
@@ -25,11 +28,17 @@ import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
+import { NewMessagesPill } from '../components/NewMessagesPill';
 import type { NavProp, RouteProps } from '../navigation/types';
 import { setActiveConversationForNotifications } from '../services/notifications';
 import { colorForUserId } from '../utils/colorForUserId';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
+
+// Distance from the bottom (in px) within which we consider the user to be
+// "at bottom" — i.e. they want to see new messages as they arrive. Beyond
+// this, they're reading history and we shouldn't yank their scroll.
+const AT_BOTTOM_THRESHOLD_PX = 100;
 
 function sameDay(a: string, b: string): boolean {
   const da = new Date(a), db = new Date(b);
@@ -121,12 +130,34 @@ export function ChatScreen() {
   const listRef = useRef<FlatList<RenderRow>>(null);
   const typingTimer = useRef<NodeJS.Timeout | null>(null);
 
+  // ── Scroll behavior ────────────────────────────────────────────────────────
+  // We track "is the user near the bottom?" both as a ref (for synchronous
+  // reads inside onScroll / the messages effect, without re-creating handlers
+  // each render) AND as a state (so the NewMessagesPill can react). The ref
+  // is the source of truth for decisions; the state is for rendering only.
+  const isAtBottomRef = useRef(true);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
+  // Tracks message count from the previous render so we can detect grew-by-N.
+  const prevLenRef = useRef(0);
+  // Initial-mount / conversation-switch flag: first scroll should be
+  // non-animated, and we should not count "new" messages as unread.
+  const initialScrollDoneRef = useRef(false);
+
   // Activate this conversation in context on mount; clear on unmount.
   // Also tell the notification service so it can suppress foreground banners
   // for messages arriving in the conversation the user is already viewing.
   useEffect(() => {
     setActiveConversation(conversationId);
     setActiveConversationForNotifications(conversationId);
+    // Reset scroll bookkeeping whenever the conversation changes — opening
+    // a fresh thread should start "at bottom" with no unread badge, regardless
+    // of where we were in the previous thread.
+    isAtBottomRef.current = true;
+    setIsAtBottom(true);
+    setUnreadCount(0);
+    prevLenRef.current = 0;
+    initialScrollDoneRef.current = false;
     return () => {
       setActiveConversation(null);
       setActiveConversationForNotifications(null);
@@ -190,11 +221,79 @@ export function ChatScreen() {
 
   const rows = useMemo(() => buildRows(messages, currentUser?.userId), [messages, currentUser?.userId]);
 
-  // Scroll to bottom when new messages arrive (length grew) or first load.
+  // At-bottom-aware scroll. Rules:
+  //   R7. Initial mount / conversation switch → jump to bottom, no animation.
+  //   R6. Own message just sent → always scroll to bottom (we know the user
+  //       wants to see what they sent).
+  //   R2. Otherwise, if the user was at the bottom → animated scrollToEnd.
+  //       If they were reading history → leave their scroll alone and bump
+  //       the unread count instead (R4 surfaces the pill).
+  // We read isAtBottomRef.current — that reflects the state BEFORE the new
+  // message arrived, which is exactly the signal we want.
   useEffect(() => {
-    const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: messages.length > 1 }), 50);
-    return () => clearTimeout(t);
-  }, [messages.length]);
+    const len = messages.length;
+    const prevLen = prevLenRef.current;
+    prevLenRef.current = len;
+    if (len === 0) return;
+
+    // First render with messages → snap to bottom, no animation, no unread.
+    if (!initialScrollDoneRef.current) {
+      initialScrollDoneRef.current = true;
+      isAtBottomRef.current = true;
+      setIsAtBottom(true);
+      const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 50);
+      return () => clearTimeout(t);
+    }
+
+    if (len <= prevLen) return; // message deleted / no growth — do nothing
+    const grew = len - prevLen;
+    const latest = messages[len - 1];
+    const isOwn = latest?.senderId === currentUser?.userId;
+
+    if (isOwn || isAtBottomRef.current) {
+      const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
+      return () => clearTimeout(t);
+    }
+
+    // User is reading history — bump unread by however many messages arrived
+    // in this batch (typically 1, but websocket can deliver bursts).
+    setUnreadCount(c => c + grew);
+  }, [messages, currentUser?.userId]);
+
+  // R3. Manual scroll handler — compute distance-from-bottom and update both
+  // the ref (synchronous, used by the messages effect above) and state (for
+  // the pill render). Reset unread when the user returns to the bottom.
+  const handleScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    const distanceFromBottom =
+      contentSize.height - contentOffset.y - layoutMeasurement.height;
+    const atBottom = distanceFromBottom < AT_BOTTOM_THRESHOLD_PX;
+    const wasAtBottom = isAtBottomRef.current;
+    isAtBottomRef.current = atBottom;
+    if (atBottom !== wasAtBottom) setIsAtBottom(atBottom);
+    if (atBottom && !wasAtBottom) setUnreadCount(0);
+  };
+
+  // R5. Pill tap → scroll to latest. onScroll will fire as the scroll
+  // animates and naturally flip isAtBottom + clear unreadCount.
+  const handlePillPress = () => {
+    listRef.current?.scrollToEnd({ animated: true });
+  };
+
+  // Keyboard show: when iOS keyboard pushes the composer up, the visible
+  // area of the list shrinks. If the user WAS at the bottom, they should
+  // stay pinned there after the layout settles. (If they were reading
+  // history, leave them alone.)
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      if (isAtBottomRef.current) {
+        // Defer past the layout animation so contentSize reflects the new
+        // (smaller) layout before we scroll.
+        setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 50);
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   const handleTextChange = (next: string) => {
     setText(next);
@@ -256,12 +355,19 @@ export function ChatScreen() {
           <ActivityIndicator color={c.primary} />
         </View>
       ) : (
+        // Wrap the list + floating pill in a flex:1 relative container so the
+        // pill's absolute positioning is anchored to the message-area bottom
+        // (i.e. just above the composer), not to the whole KeyboardAvoidingView.
+        <View style={styles.listWrap}>
         <FlatList
           ref={listRef}
           data={rows}
           keyExtractor={r => r.key}
           contentContainerStyle={{ padding: 12, gap: 6 }}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          onScroll={handleScroll}
+          // Throttle scroll events to ~60fps; high enough to catch the
+          // user reaching bottom quickly, low enough not to thrash JS.
+          scrollEventThrottle={16}
           renderItem={({ item }) => {
             if (item.type === 'day') {
               return (
@@ -327,6 +433,10 @@ export function ChatScreen() {
             );
           }}
         />
+        {unreadCount > 0 && !isAtBottom && (
+          <NewMessagesPill count={unreadCount} onPress={handlePillPress} />
+        )}
+        </View>
       )}
 
       {!!typingLabel && (
@@ -359,6 +469,7 @@ export function ChatScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  listWrap: { flex: 1, position: 'relative' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   row: { flexDirection: 'row', gap: 6 },
   // Fixed-width slot so bubbles stay vertically aligned regardless of whether
