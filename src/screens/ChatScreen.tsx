@@ -22,7 +22,6 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useHeaderHeight } from '@react-navigation/elements';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Conversation, Message } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
@@ -108,13 +107,14 @@ export function ChatScreen() {
   const { conversationId } = route.params;
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  // Dynamic keyboard offset: nav-stack header + safe-area top inset. On iPhone
-  // 14 this is ~44 + ~47 ≈ 91, which matches what the old hardcoded 90
-  // approximated — but now it's device-correct (notched vs non-notched, large
-  // text settings, modal vs root, etc.).
+  // Dynamic keyboard offset for KeyboardAvoidingView. This is the distance
+  // from the top of the screen to the top of the KAV — i.e. the height of
+  // the nav-stack header. `useHeaderHeight()` already INCLUDES the safe-area
+  // top inset on notched devices; adding insets.top on top of it double-counts
+  // (~47px on iPhone 14), causing KAV to overestimate keyboard intrusion and
+  // leave an empty gap below the composer when the keyboard opens.
   const headerHeight = useHeaderHeight();
-  const insets = useSafeAreaInsets();
-  const kbOffset = Platform.OS === 'ios' ? headerHeight + insets.top : 0;
+  const kbOffset = Platform.OS === 'ios' ? headerHeight : 0;
   const {
     currentUser, conversations, messages, loadingMessages,
     setActiveConversation, sendMessage, presence, typingByConv, reportTyping,
