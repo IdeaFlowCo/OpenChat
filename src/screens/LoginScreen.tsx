@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -10,10 +10,16 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import * as Google from 'expo-auth-session/providers/google';
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../contexts/ThemeContext';
-import { loginWithPassword } from '../api/client';
+import { loginWithPassword, googleExchange, GOOGLE_CLIENT_ID } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
+
+// Required for the in-app browser to dismiss properly after the OAuth round-trip.
+WebBrowser.maybeCompleteAuthSession();
 
 // Quick-login test accounts. Only rendered when EXPO_PUBLIC_SHOW_TEST_LOGINS is
 // truthy (default 'true' for dev via .env). Production EAS builds set it to
@@ -38,6 +44,78 @@ export function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  // Google OAuth — mirrors chat.globalbr.ai's "Continue with Google" button.
+  // The native flow asks for an authorization code, then POSTs it to the same
+  // /api/auth/google/exchange endpoint the web client uses. The server holds
+  // GOOGLE_CLIENT_SECRET; the client never sees it.
+  //
+  // The redirect URI is `com.jacobcole.openchat:/oauth2redirect` (derived from
+  // `expo.scheme` in app.json). That URI must be added to the GCP OAuth
+  // client's authorized redirect URIs or you'll get redirect_uri_mismatch.
+  const googleRedirectUri = AuthSession.makeRedirectUri({ scheme: 'openchat' });
+  const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest({
+    iosClientId: GOOGLE_CLIENT_ID,
+    androidClientId: GOOGLE_CLIENT_ID,
+    webClientId: GOOGLE_CLIENT_ID,
+    clientId: GOOGLE_CLIENT_ID,
+    scopes: ['openid', 'email', 'profile'],
+    // We want a server-side exchange, so DON'T let the hook auto-swap the code
+    // — keep the raw `code` param so we can POST it to /api/auth/google/exchange.
+    shouldAutoExchangeCode: false,
+    redirectUri: googleRedirectUri,
+  });
+
+  useEffect(() => {
+    if (!googleResponse) return;
+    if (googleResponse.type === 'success') {
+      const code = googleResponse.params?.code;
+      if (!code) {
+        Alert.alert('Google sign-in failed', 'Google did not return an authorization code.');
+        setGoogleLoading(false);
+        return;
+      }
+      (async () => {
+        try {
+          await googleExchange(code, googleRedirectUri);
+          // Flip auth state — same hand-off as the password path.
+          await bootstrapIfAuthed();
+        } catch (err) {
+          Alert.alert(
+            'Google sign-in failed',
+            err instanceof Error ? err.message : String(err)
+          );
+        } finally {
+          setGoogleLoading(false);
+        }
+      })();
+    } else if (googleResponse.type === 'error') {
+      Alert.alert(
+        'Google sign-in failed',
+        googleResponse.error?.message || 'Google returned an error.'
+      );
+      setGoogleLoading(false);
+    } else {
+      // 'cancel' / 'dismiss' / 'locked' — user backed out.
+      setGoogleLoading(false);
+    }
+  }, [googleResponse, googleRedirectUri, bootstrapIfAuthed]);
+
+  const handleGoogleSignIn = async () => {
+    if (googleLoading || loading) return;
+    if (!googleRequest) {
+      Alert.alert('Google sign-in unavailable', 'Sign-in request is not ready yet. Please try again.');
+      return;
+    }
+    setGoogleLoading(true);
+    try {
+      await promptGoogle();
+    } catch (err) {
+      Alert.alert('Google sign-in failed', err instanceof Error ? err.message : String(err));
+      setGoogleLoading(false);
+    }
+  };
 
   const doLogin = async (e: string, p: string): Promise<void> => {
     setLoading(true);
@@ -72,6 +150,33 @@ export function LoginScreen() {
         <Text style={[styles.subtitle, { color: c.textSecondary }]}>
           Real-time messaging powered by the Global Brain
         </Text>
+
+        <TouchableOpacity
+          style={[
+            styles.googleButton,
+            { borderColor: c.border, opacity: (googleLoading || loading || !googleRequest) ? 0.6 : 1 },
+          ]}
+          onPress={handleGoogleSignIn}
+          disabled={googleLoading || loading || !googleRequest}
+          accessibilityLabel="Continue with Google"
+        >
+          {googleLoading ? (
+            <ActivityIndicator color="#1f1f1f" />
+          ) : (
+            <>
+              <View style={styles.googleGlyph}>
+                <Text style={styles.googleGlyphText}>G</Text>
+              </View>
+              <Text style={styles.googleButtonText}>Continue with Google</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        <View style={styles.orRow}>
+          <View style={[styles.orLine, { backgroundColor: c.border }]} />
+          <Text style={[styles.orLabel, { color: c.textMuted }]}>or</Text>
+          <View style={[styles.orLine, { backgroundColor: c.border }]} />
+        </View>
 
         <TextInput
           style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
@@ -137,7 +242,7 @@ export function LoginScreen() {
         )}
 
         <Text style={[styles.footer, { color: c.textMuted }]}>
-          Uses your Noos credentials. Google + phone sign-in coming soon.
+          Uses your Noos credentials. Phone sign-in coming soon.
         </Text>
       </View>
     </KeyboardAvoidingView>
@@ -183,4 +288,46 @@ const styles = StyleSheet.create({
   },
   quickButtonText: { fontSize: 15, fontWeight: '600' },
   quickButtonSub: { fontSize: 11, marginTop: 2 },
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 10,
+    minHeight: 48,
+  },
+  googleGlyph: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // The web button uses the multi-color Google "G" SVG. Mobile uses a simple
+  // Google-blue glyph as a stand-in — visually close enough without pulling in
+  // an SVG dependency.
+  googleGlyphText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#4285F4',
+    lineHeight: 22,
+  },
+  googleButtonText: {
+    color: '#1f1f1f',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  orRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginVertical: 4,
+  },
+  orLine: { flex: 1, height: StyleSheet.hairlineWidth },
+  orLabel: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6 },
 });

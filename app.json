@@ -38,7 +38,8 @@
       "baseUrl": "/m"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-web-browser"
     ]
   }
 }

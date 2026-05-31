@@ -217,6 +217,59 @@ async function request<T>(
   return (await res.json()) as T;
 }
 
+/**
+ * Public Google OAuth client ID (PROD). Safe to commit — this is the same
+ * client the web app uses for "Continue with Google" at chat.globalbr.ai. The
+ * client SECRET stays server-side and is only used by the /api/auth/google/exchange
+ * route. Native iOS uses this client (with `com.jacobcole.openchat:/oauth2redirect`
+ * registered as an authorized redirect URI on the GCP OAuth client).
+ *
+ * Override at build time via EXPO_PUBLIC_GOOGLE_CLIENT_ID for dev / staging.
+ */
+export const GOOGLE_CLIENT_ID =
+  process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ||
+  '874749606899-f2epm744j73anm2dnf59j6igehhlku0a.apps.googleusercontent.com';
+
+/**
+ * Exchange a Google authorization code for an OpenChat JWT + user. Hits the
+ * SAME server endpoint the web client uses (`POST /api/auth/google/exchange`).
+ * The server holds GOOGLE_CLIENT_SECRET and performs the actual token swap
+ * with Google, then mints an OpenChat JWT.
+ *
+ * On success the session is persisted via setSession() — identical to the
+ * loginWithPassword side-effect — so callers can then invoke
+ * ChatProvider.bootstrapIfAuthed() to flip the navigator into the authed stack.
+ */
+export async function googleExchange(
+  code: string,
+  redirectUri: string
+): Promise<{ user: CurrentUser; token: string }> {
+  const res = await fetch(`${OPENCHAT_URL}/api/auth/google/exchange`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code, redirectUri }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try {
+      const j = JSON.parse(text);
+      msg = j.error || j.message || text;
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(`Google sign-in failed (${res.status}): ${msg}`);
+  }
+  const body = await res.json();
+  const user: CurrentUser = {
+    userId: body.user.id,
+    email: body.user.email,
+    name: body.user.name,
+  };
+  await setSession(body.token, user);
+  return { user, token: body.token };
+}
+
 // Auth — uses Noos directly for now (mirrors what the web client does via SSO).
 export async function loginWithPassword(
   email: string,
