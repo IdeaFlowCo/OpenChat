@@ -14,7 +14,14 @@
       "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": ["remote-notification"],
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "com.googleusercontent.apps.874749606899-ajd7segoct156poo3gbeoefg3s349626"
+            ]
+          }
+        ]
       }
     },
     "android": {

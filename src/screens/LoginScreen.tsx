@@ -11,7 +11,8 @@ import {
   Platform,
 } from 'react-native';
 import * as Google from 'expo-auth-session/providers/google';
-import * as AuthSession from 'expo-auth-session';
+// AuthSession previously used for makeRedirectUri — removed; Google.useAuthRequest
+// auto-derives the iOS redirect URI from iosClientId.
 import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../contexts/ThemeContext';
 import { loginWithPassword, googleIdTokenExchange, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '../api/client';
@@ -55,10 +56,17 @@ export function LoginScreen() {
   // We then POST the ID token to /api/auth/google/idtoken-exchange where
   // the server verifies it against Google's certs and MERGEs the User.
   //
+  // CRITICAL — DO NOT pass `redirectUri` here. Google's iOS OAuth client
+  // requires the redirect URI to be the reverse-client-id format
+  // (com.googleusercontent.apps.874749606899-...:/oauthredirect). The
+  // Google.useAuthRequest provider auto-derives this from iosClientId when
+  // redirectUri is omitted. Passing our app's custom scheme (openchat:/...)
+  // breaks with redirect_uri_mismatch (verified empirically on build 14).
+  // The reverse-client-id is registered as a CFBundleURLScheme in app.json
+  // so iOS deep-links the callback back to the app correctly.
+  //
   // The Web flow (GOOGLE_CLIENT_ID + code + secret + /google/exchange) is
-  // still used at chat.globalbr.ai and the RN-web build of this app served
-  // at /m — but only on a non-iOS platform.
-  const googleRedirectUri = AuthSession.makeRedirectUri({ scheme: 'openchat' });
+  // still used at chat.globalbr.ai and the RN-web build at /m on web.
   const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest({
     iosClientId: GOOGLE_IOS_CLIENT_ID,
     androidClientId: GOOGLE_IOS_CLIENT_ID, // TODO: separate Android client when Android ships
@@ -67,7 +75,7 @@ export function LoginScreen() {
     scopes: ['openid', 'email', 'profile'],
     // Native iOS: we want the ID token back. expo-auth-session handles PKCE.
     shouldAutoExchangeCode: true,
-    redirectUri: googleRedirectUri,
+    // redirectUri intentionally omitted — see comment above.
   });
 
   useEffect(() => {
