@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
+import { OAuth2Client, TokenPayload } from 'google-auth-library';
 import { getDriver } from '../db.js';
 import { requireAuth, AuthUser } from '../middleware/auth.js';
 
@@ -415,6 +416,125 @@ router.post('/google/exchange', async (req: Request, res: Response) => {
     });
   } catch (e) {
     console.error('Google sign-in: failed to upsert user:', e);
+    res.status(500).json({ error: 'Sign-in failed' });
+  } finally {
+    await session.close();
+  }
+});
+
+/**
+ * POST /api/auth/google/idtoken-exchange
+ * Body: { idToken: string }
+ *
+ * Native mobile path for "Sign in with Google" — used by the iOS app (and any
+ * future Android client). On iOS the OAuth client is type=iOS (no client
+ * secret; PKCE). The mobile app uses expo-auth-session to talk to Google
+ * directly and receives an ID token. The mobile then POSTs that ID token
+ * here for verification + session creation.
+ *
+ * Why a separate endpoint from /google/exchange: that one swaps an auth CODE
+ * using the Web client's secret. iOS clients have no secret. The two flows
+ * land at the same user record (MERGE by email) so a person who signed up on
+ * the web and then signs in on iOS gets the same identity.
+ *
+ * Accepted audiences (`aud` claim on the ID token):
+ *   - GOOGLE_CLIENT_ID         (Web client; used if anything else does an
+ *                              ID-token flow in the future)
+ *   - GOOGLE_IOS_CLIENT_ID     (iOS client created for this app)
+ */
+router.post('/google/idtoken-exchange', async (req: Request, res: Response) => {
+  const webClientId = process.env.GOOGLE_CLIENT_ID;
+  const iosClientId = process.env.GOOGLE_IOS_CLIENT_ID;
+  if (!webClientId && !iosClientId) {
+    res.status(503).json({ error: 'Google sign-in not configured on this server' });
+    return;
+  }
+
+  const { idToken } = (req.body ?? {}) as { idToken?: string };
+  if (!idToken || typeof idToken !== 'string') {
+    res.status(400).json({ error: 'idToken is required' });
+    return;
+  }
+
+  const acceptedAudiences = [iosClientId, webClientId].filter(Boolean) as string[];
+
+  // 1. Verify the ID token against Google's certs. OAuth2Client.verifyIdToken
+  // checks: signature against current Google JWKS, issuer (accounts.google.com),
+  // expiry, and that `aud` matches one of our accepted audiences.
+  const client = new OAuth2Client();
+  let payload: TokenPayload | undefined;
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken,
+      audience: acceptedAudiences,
+    });
+    payload = ticket.getPayload();
+  } catch (e) {
+    console.error('Google ID token verify failed:', e instanceof Error ? e.message : e);
+    res.status(401).json({ error: 'Invalid Google ID token' });
+    return;
+  }
+
+  if (!payload || !payload.email) {
+    res.status(400).json({ error: 'Google ID token did not include an email' });
+    return;
+  }
+
+  // 2. MERGE the user — same Cypher as /google/exchange.
+  const session = getDriver().session();
+  try {
+    const now = new Date().toISOString();
+    const displayName = payload.name
+      || [payload.given_name, payload.family_name].filter(Boolean).join(' ')
+      || payload.email;
+
+    const result = await session.run(`
+      MERGE (u:User {email: $email})
+      ON CREATE SET
+        u.id = $id,
+        u.name = $name,
+        u.createdAt = datetime($now),
+        u.presenceStatus = 'available',
+        u.lastSeenAt = datetime($now),
+        u.googleSub = $sub,
+        u.googleEmailVerified = $emailVerified,
+        u.avatarUrl = $picture,
+        u.signupProvider = 'google-ios'
+      ON MATCH SET
+        u.lastSeenAt = datetime($now),
+        u.presenceStatus = 'available',
+        u.googleSub = coalesce(u.googleSub, $sub),
+        u.googleEmailVerified = coalesce(u.googleEmailVerified, $emailVerified),
+        u.avatarUrl = coalesce(u.avatarUrl, $picture)
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot } AS user
+    `, {
+      email: payload.email,
+      name: displayName,
+      id: nanoid(),
+      now,
+      sub: payload.sub,
+      emailVerified: payload.email_verified ?? false,
+      picture: payload.picture ?? null,
+    });
+
+    const user = toJS(result.records[0].get('user')) as {
+      id: string; email: string; name: string;
+    };
+
+    const token = jwt.sign(
+      { userId: user.id, email: user.email } as AuthUser,
+      getJwtSecret(),
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      token,
+      user,
+      expiresIn: 7 * 24 * 60 * 60,
+      provider: 'google-ios',
+    });
+  } catch (e) {
+    console.error('Google iOS sign-in: failed to upsert user:', e);
     res.status(500).json({ error: 'Sign-in failed' });
   } finally {
     await session.close();
