@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -191,6 +192,17 @@ export function NewConversationScreen() {
               <Text style={{ color: c.textSecondary, marginTop: 24 }}>
                 {query ? `No contacts found for "${query}"` : 'No contacts yet'}
               </Text>
+              {!query && Platform.OS !== 'web' && (
+                <TouchableOpacity
+                  style={[styles.scanBtn, { borderColor: c.primary }]}
+                  onPress={() => navigation.navigate('ScanQr')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={{ color: c.primary, fontWeight: '600', fontSize: 15 }}>
+                    Scan QR code
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           }
           renderItem={({ item }) => {
@@ -319,6 +331,14 @@ const styles = StyleSheet.create({
   createBtn: {
     paddingVertical: 14,
     borderRadius: 12,
+    alignItems: 'center',
+  },
+  scanBtn: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
     alignItems: 'center',
   },
 });

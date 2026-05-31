@@ -32,6 +32,8 @@ import { NewConversationScreen } from './src/screens/NewConversationScreen';
 import { GroupSettingsScreen } from './src/screens/GroupSettingsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { SearchScreen } from './src/screens/SearchScreen';
+import { MyQrCodeScreen } from './src/screens/MyQrCodeScreen';
+import { ScanQrScreen } from './src/screens/ScanQrScreen';
 import { getColors } from './src/theme/colors';
 import type { RootStackParamList } from './src/navigation/types';
 
@@ -127,6 +129,16 @@ function Shell() {
               name="Search"
               component={SearchScreen}
               options={{ title: 'Search', presentation: 'modal' }}
+            />
+            <Stack.Screen
+              name="MyQrCode"
+              component={MyQrCodeScreen}
+              options={{ title: 'My QR Code', presentation: 'modal' }}
+            />
+            <Stack.Screen
+              name="ScanQr"
+              component={ScanQrScreen}
+              options={{ title: 'Scan QR', presentation: 'modal', headerShown: false }}
             />
           </>
         )}

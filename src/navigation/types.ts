@@ -13,6 +13,8 @@ export type RootStackParamList = {
   GroupSettings: { conversationId: string };
   Settings: undefined;
   Search: undefined;
+  MyQrCode: undefined;
+  ScanQr: undefined;
 };
 
 export type NavProp<T extends keyof RootStackParamList> = NativeStackNavigationProp<RootStackParamList, T>;

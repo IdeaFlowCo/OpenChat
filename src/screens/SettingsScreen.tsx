@@ -12,9 +12,11 @@ import { useCallback, useState } from 'react';
 import { Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { useFocusEffect } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { useTheme, ThemePref } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
+import type { NavProp } from '../navigation/types';
 import { registerForPushNotificationsAsync } from '../services/notifications';
 
 const OPTIONS: { value: ThemePref; label: string; hint: string }[] = [
@@ -26,6 +28,7 @@ const OPTIONS: { value: ThemePref; label: string; hint: string }[] = [
 type NotifStatus = 'granted' | 'denied' | 'undetermined' | 'unknown';
 
 export function SettingsScreen() {
+  const navigation = useNavigation<NavProp<'Settings'>>();
   const { preference, setPreference, scheme } = useTheme();
   const { currentUser, signOut } = useChat();
   const c = getColors(scheme);
@@ -146,6 +149,43 @@ export function SettingsScreen() {
           </View>
         </View>
       )}
+
+      <View style={styles.section}>
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>CONTACTS</Text>
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <TouchableOpacity
+            style={[
+              styles.optionRow,
+              { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth },
+            ]}
+            onPress={() => navigation.navigate('MyQrCode')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>My QR code</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                Let others add you by scanning
+              </Text>
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+          {Platform.OS !== 'web' && (
+            <TouchableOpacity
+              style={styles.optionRow}
+              onPress={() => navigation.navigate('ScanQr')}
+              activeOpacity={0.7}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Scan QR</Text>
+                <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                  Add someone by scanning their code
+                </Text>
+              </View>
+              <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
 
       <View style={styles.section}>
         <TouchableOpacity
