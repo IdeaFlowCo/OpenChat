@@ -37,6 +37,8 @@ export type RootStackParamList = {
   GroupInvitePreview: { token: string };
   /** Forward picker — select conversation to forward a message into (OpenChat-hhc). */
   ForwardPicker: { messageId: string };
+  /** Contact profile — opened by tapping the DM header. */
+  ContactProfile: { userId: string };
 };
 
 // ── Thoughts stack (OpenChat-zi1) ─────────────────────────────────────────────

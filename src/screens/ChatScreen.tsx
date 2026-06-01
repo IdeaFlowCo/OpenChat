@@ -421,8 +421,14 @@ export function ChatScreen() {
     navigation.setOptions({
       headerTitle: () => (
         <TouchableOpacity
-          onPress={() => isGroup && navigation.navigate('GroupSettings', { conversationId })}
-          disabled={!isGroup}
+          onPress={() => {
+            if (isGroup) {
+              navigation.navigate('GroupSettings', { conversationId });
+            } else if (other?.id) {
+              navigation.navigate('ContactProfile', { userId: other.id });
+            }
+          }}
+          disabled={!isGroup && !other?.id}
           activeOpacity={0.7}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '80%' }}
         >
@@ -439,7 +445,7 @@ export function ChatScreen() {
               </Text>
               {!isGroup && <BotBadge isBot={other?.isBot} compact />}
               {isGroup && containsBot && <BotBadge isBot compact />}
-              {isGroup && (
+              {(isGroup || other?.id) && (
                 <Text style={{ color: c.textMuted, marginLeft: 4 }}>ⓘ</Text>
               )}
             </View>

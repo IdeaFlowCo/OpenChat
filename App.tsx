@@ -51,6 +51,7 @@ import { ProfileEditScreen } from './src/screens/ProfileEditScreen';
 import { GroupInviteScreen } from './src/screens/GroupInviteScreen';
 import { GroupInvitePreviewScreen } from './src/screens/GroupInvitePreviewScreen';
 import { ForwardPickerScreen } from './src/screens/ForwardPickerScreen';
+import { ContactProfileScreen } from './src/screens/ContactProfileScreen';
 import { ThoughtsScreen } from './src/screens/ThoughtsScreen';
 import { AddEditThoughtScreen } from './src/screens/AddEditThoughtScreen';
 import { getColors } from './src/theme/colors';
@@ -147,6 +148,12 @@ function ChatsNavigator({ currentUser, c }: {
         name="ForwardPicker"
         component={ForwardPickerScreen}
         options={{ title: 'Forward to…', presentation: 'modal' }}
+      />
+      {/* Contact profile — tap DM header to open */}
+      <ChatsStack.Screen
+        name="ContactProfile"
+        component={ContactProfileScreen}
+        options={{ title: 'Contact info' }}
       />
     </ChatsStack.Navigator>
   );
