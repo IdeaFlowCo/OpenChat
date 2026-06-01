@@ -3,7 +3,7 @@ import { PresenceIndicator } from './PresenceIndicator';
 import { BotBadge } from './BotBadge';
 
 export function ConversationList() {
-  const { conversations, activeConversationId, setActiveConversation, presence, currentUser, unreadByConv } = useChat();
+  const { conversations, activeConversationId, setActiveConversation, presence, currentUser, unreadByConv, typingUsers } = useChat();
 
   const getOtherParticipant = (conv: typeof conversations[0]) => {
     const participants = conv.participants || [];
@@ -49,6 +49,12 @@ export function ConversationList() {
         const unread = unreadByConv.get(conv.id) ?? 0;
         const hasUnread = unread > 0 && !isActive;
 
+        // Check if any non-self user is typing in this conversation.
+        const typingSet = typingUsers.get(conv.id);
+        const someoneTyping = typingSet
+          ? Array.from(typingSet).some(id => id !== currentUser?.userId)
+          : false;
+
         return (
           <div
             key={conv.id}
@@ -88,11 +94,15 @@ export function ConversationList() {
                     )}
                   </span>
                 </div>
-                {conv.lastMessagePreview && (
+                {someoneTyping ? (
+                  <p className="text-sm truncate text-blue-500 dark:text-blue-400 italic">
+                    typing…
+                  </p>
+                ) : conv.lastMessagePreview ? (
                   <p className={`text-sm truncate ${hasUnread ? 'text-gray-700 dark:text-slate-300 font-medium' : 'text-gray-500 dark:text-slate-400'}`}>
                     {conv.lastMessagePreview}
                   </p>
-                )}
+                ) : null}
               </div>
             </div>
           </div>
