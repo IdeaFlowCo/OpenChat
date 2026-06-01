@@ -108,6 +108,16 @@ export interface ReactionSummary {
   byMe: boolean;
 }
 
+/** Open Graph / Twitter card preview data (OpenChat-hq2). */
+export interface LinkPreview {
+  url: string;
+  title?: string | null;
+  description?: string | null;
+  image?: string | null;
+  siteName?: string | null;
+  fetchedAt: string;
+}
+
 export interface Message {
   id: string;
   content: string;
@@ -136,14 +146,25 @@ export interface Message {
   attachments?: Attachment[];
   /** User IDs mentioned in this message via @-mentions (OpenChat-0jy). */
   mentions?: string[];
+  /** Open Graph link preview cards (OpenChat-hq2). */
+  linkPreviews?: LinkPreview[];
+  /** Forwarding fields (OpenChat-hhc). Set when this message was forwarded. */
+  forwardedFromMessageId?: string;
+  forwardedFromSenderId?: string;
+  /** Display-name snapshot of the original sender at forward time. */
+  forwardedFromSenderName?: string;
 }
 
-/** Single image attachment (OpenChat-6bg). */
+/** Single attachment — image or audio (OpenChat-6bg, OpenChat-xxc). */
 export interface Attachment {
   url: string;
   mimeType: string;
+  /** For image attachments. */
   width?: number;
   height?: number;
+  /** For audio attachments (OpenChat-xxc). */
+  type?: 'audio';
+  durationMs?: number;
 }
 
 export interface CurrentUser {
@@ -443,6 +464,20 @@ export interface SearchResults {
   messages: SearchMessageHit[];
   conversations: SearchConversationHit[];
   contacts: User[];
+}
+
+// ── Thoughts (OpenChat-zi1) ───────────────────────────────────────────────────
+
+export type ThoughtKind = 'fact' | 'decision' | 'commitment' | 'reminder' | 'observation';
+export type ThoughtStatus = 'none' | 'open' | 'closed';
+
+export interface Thought {
+  id: string;
+  text: string;
+  kind: ThoughtKind;
+  status: ThoughtStatus;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const api = {
@@ -772,4 +807,60 @@ export const api = {
       `/api/chat/conversations/${conversationId}/invites/${token}`,
       { method: 'DELETE' }
     ),
+
+  // ── Message forwarding (OpenChat-hhc) ─────────────────────────────────────
+
+  /**
+   * Forward a message to another conversation. The server creates a new
+   * Message in the target conversation with forwardedFrom* fields set.
+   * POST /api/chat/messages/:id/forward
+   */
+  forwardMessage: (messageId: string, toConversationId: string) =>
+    request<Message>(`/api/chat/messages/${messageId}/forward`, {
+      method: 'POST',
+      body: JSON.stringify({ toConversationId }),
+    }),
+
+  // ── Thoughts (OpenChat-zi1) ────────────────────────────────────────────────
+
+  /** List my thoughts, newest first. */
+  getThoughts: (opts?: { limit?: number; before?: string }) => {
+    const qs = new URLSearchParams();
+    if (opts?.limit) qs.set('limit', String(opts.limit));
+    if (opts?.before) qs.set('before', opts.before);
+    const q = qs.toString();
+    return request<Thought[]>(`/api/thoughts${q ? `?${q}` : ''}`);
+  },
+
+  /** Create a new thought. */
+  createThought: (body: { text: string; kind?: ThoughtKind; status?: ThoughtStatus }) =>
+    request<Thought>('/api/thoughts', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** Update an existing thought. */
+  updateThought: (
+    id: string,
+    fields: { text?: string; kind?: ThoughtKind; status?: ThoughtStatus }
+  ) =>
+    request<Thought>(`/api/thoughts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(fields),
+    }),
+
+  /** Delete a thought (204 response → returns void). */
+  deleteThought: async (id: string): Promise<void> => {
+    const token = await getToken();
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (token) headers['authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${OPENCHAT_URL}/api/thoughts/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new ApiError(res.status, `${res.status}: ${text}`, text);
+    }
+  },
 };

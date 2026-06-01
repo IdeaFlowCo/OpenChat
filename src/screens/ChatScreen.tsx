@@ -41,12 +41,20 @@ import type { NavProp, RouteProps } from '../navigation/types';
 import { setActiveConversationForNotifications } from '../services/notifications';
 import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
-import { pickImage, uploadImage, PickedAsset } from '../services/attachments';
+import { pickImage, uploadImage, PickedAsset, uploadAudio } from '../services/attachments';
+import { startRecording, stopRecording, cancelRecording } from '../services/audioRecorder';
+import type { Recording } from '../services/audioRecorder';
+import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
 import { MentionAutocomplete, MentionCandidate } from '../components/MentionAutocomplete';
 import { TransformButton } from '../components/TransformButton';
+import { LinkPreviewCard } from '../components/LinkPreviewCard';
 import type { Participant } from '../api/client';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
+
+// ── Voice message constants (OpenChat-xxc) ─────────────────────────────────
+const MAX_RECORDING_MS = 5 * 60 * 1000; // 5 minutes cap
+const CANCEL_DRAG_PX = 80; // horizontal drag distance to cancel recording
 
 // Distance from the bottom (in px) within which we consider the user to be
 // "at bottom" — i.e. they want to see new messages as they arrive. Beyond
@@ -243,6 +251,16 @@ export function ChatScreen() {
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   // fullscreen viewer
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
+
+  // ── Voice recording state (OpenChat-xxc) ───────────────────────────────────
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingCancelled, setRecordingCancelled] = useState(false);
+  const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
+  const recordingRef = useRef<Recording | null>(null);
+  const recordingStartTimeRef = useRef<number>(0);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingMaxTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const micPressStartXRef = useRef<number>(0);
 
   // ── Toast state ────────────────────────────────────────────────────────────
   const [toastVisible, setToastVisible] = useState(false);
@@ -633,6 +651,87 @@ export function ChatScreen() {
     if (asset) setPendingAsset(asset);
   }, [sending, uploadingAttachment]);
 
+  // ── Voice recording handlers (OpenChat-xxc) ──────────────────────────────
+
+  /** Called when the mic button is pressed in. Starts recording. */
+  const handleMicPressIn = useCallback(async (pageX: number) => {
+    if (sending || uploadingAttachment || isRecording || Platform.OS === 'web') return;
+    micPressStartXRef.current = pageX;
+    setRecordingCancelled(false);
+    setRecordingElapsedMs(0);
+
+    try {
+      const rec = await startRecording();
+      recordingRef.current = rec;
+      recordingStartTimeRef.current = Date.now();
+      setIsRecording(true);
+
+      // Elapsed-time ticker (updates every 100 ms).
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingElapsedMs(Date.now() - recordingStartTimeRef.current);
+      }, 100);
+
+      // Hard cap at 5 minutes.
+      recordingMaxTimerRef.current = setTimeout(() => {
+        void handleMicPressOut(false);
+      }, MAX_RECORDING_MS);
+    } catch (err) {
+      console.warn('[voice] startRecording error:', err);
+      setIsRecording(false);
+    }
+  }, [sending, uploadingAttachment, isRecording]);
+
+  /** Called when the mic button is released. Stops and sends (or cancels). */
+  const handleMicPressOut = useCallback(async (wasCancelled: boolean) => {
+    if (!isRecording && !recordingRef.current) return;
+
+    // Clear timers.
+    if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+    if (recordingMaxTimerRef.current) { clearTimeout(recordingMaxTimerRef.current); recordingMaxTimerRef.current = null; }
+
+    const rec = recordingRef.current;
+    recordingRef.current = null;
+    setIsRecording(false);
+
+    if (!rec) return;
+
+    if (wasCancelled) {
+      setRecordingCancelled(true);
+      setTimeout(() => setRecordingCancelled(false), 1200); // show cancel feedback briefly
+      await cancelRecording(rec);
+      return;
+    }
+
+    // Stop and send.
+    let uri: string;
+    let durationMs: number;
+    try {
+      const result = await stopRecording(rec);
+      uri = result.uri;
+      durationMs = result.durationMs;
+    } catch (err) {
+      console.warn('[voice] stopRecording error:', err);
+      return;
+    }
+
+    // Ignore extremely short recordings (< 500 ms — likely accidental tap).
+    if (durationMs < 500) return;
+
+    setSending(true);
+    try {
+      const att = await uploadAudio(uri, durationMs);
+      await sendMessage('', replyTo?.messageId, [att]);
+      setReplyTo(null);
+      hapticSend();
+    } catch (err) {
+      console.warn('[voice] upload/send error:', err);
+      Alert.alert('Voice message failed', 'Could not send the voice message. Please try again.');
+    } finally {
+      setSending(false);
+      setRecordingElapsedMs(0);
+    }
+  }, [isRecording, sendMessage, replyTo, hapticSend]);
+
   const handleSend = async () => {
     const trimmed = text.trim();
     const hasAttachment = !!pendingAsset;
@@ -747,6 +846,11 @@ export function ChatScreen() {
     }
     showToast("Thanks — we've received your report");
   }, [showToast]);
+
+  // Forward: navigate to conversation picker modal (OpenChat-hhc).
+  const handleForward = useCallback((messageId: string) => {
+    navigation.navigate('ForwardPicker', { messageId });
+  }, [navigation]);
 
   // ── Scroll to quoted message ───────────────────────────────────────────────
   const scrollToMessage = useCallback((messageId: string) => {
@@ -917,6 +1021,12 @@ export function ChatScreen() {
                       </Text>
                     </TouchableOpacity>
                   )}
+                  {/* Forwarded-from label (OpenChat-hhc) */}
+                  {!!m.forwardedFromMessageId && (
+                    <Text style={[styles.forwardedLabel, { color: isOwn ? 'rgba(255,255,255,0.7)' : c.textMuted }]} numberOfLines={1}>
+                      {'↪ Forwarded from '}{m.forwardedFromSenderName || 'Unknown'}
+                    </Text>
+                  )}
                   {item.showSender && m.sender && (
                     <Text style={[
                       styles.sender,
@@ -925,8 +1035,21 @@ export function ChatScreen() {
                       {m.sender.name || m.sender.email}
                     </Text>
                   )}
-                  {/* Image attachments (OpenChat-6bg) */}
+                  {/* Attachments: audio (OpenChat-xxc) or image (OpenChat-6bg) */}
                   {m.attachments?.map((att, i) => {
+                    // ── Audio attachment ────────────────────────────────────
+                    if (att.type === 'audio') {
+                      return (
+                        <VoiceMessageBubble
+                          key={i}
+                          messageId={m.id}
+                          url={att.url}
+                          durationMs={att.durationMs ?? 0}
+                          isOwn={isOwn}
+                        />
+                      );
+                    }
+                    // ── Image attachment ────────────────────────────────────
                     const aspectRatio = att.width && att.height ? att.width / att.height : 1;
                     return (
                       <TouchableOpacity
@@ -1103,9 +1226,34 @@ export function ChatScreen() {
         </View>
       )}
 
+      {/* Recording overlay — shown while mic is held (OpenChat-xxc) */}
+      {isRecording && (
+        <View style={[styles.recordingBar, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <View style={[styles.recordingDot, { backgroundColor: '#ef4444' }]} />
+          <Text style={{ color: c.textPrimary, fontSize: 14, fontWeight: '500', marginLeft: 8 }}>
+            {(() => {
+              const totalSec = Math.floor(recordingElapsedMs / 1000);
+              const min = Math.floor(totalSec / 60);
+              const sec = totalSec % 60;
+              return `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+            })()}
+          </Text>
+          <Text style={{ color: c.textMuted, fontSize: 12, marginLeft: 12 }}>
+            {'← Slide to cancel'}
+          </Text>
+        </View>
+      )}
+
+      {/* Cancel feedback — shown briefly after drag-cancel (OpenChat-xxc) */}
+      {recordingCancelled && (
+        <View style={[styles.recordingBar, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <Text style={{ color: c.textMuted, fontSize: 14 }}>🗑 Recording cancelled</Text>
+        </View>
+      )}
+
       <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
-        {/* Attachment pick button (OpenChat-6bg) — hidden in edit mode */}
-        {!editingMessage && (
+        {/* Attachment pick button (OpenChat-6bg) — hidden in edit mode or while recording */}
+        {!editingMessage && !isRecording && (
           <TouchableOpacity
             onPress={handlePickAttachment}
             disabled={sending || uploadingAttachment}
@@ -1124,8 +1272,8 @@ export function ChatScreen() {
           placeholderTextColor={c.textMuted}
           multiline
         />
-        {/* Transform sparkle button (OpenChat-8a0) — hidden in edit mode */}
-        {!editingMessage && (
+        {/* Transform sparkle button (OpenChat-8a0) — hidden in edit mode or while recording */}
+        {!editingMessage && !isRecording && (
           <TransformButton
             text={text}
             disabled={!text.trim() || sending}
@@ -1133,18 +1281,55 @@ export function ChatScreen() {
             onError={showToast}
           />
         )}
-        <TouchableOpacity
-          style={[styles.send, { backgroundColor: c.primary, opacity: (!text.trim() && !pendingAsset) || sending ? 0.5 : 1 }]}
-          onPress={handleSend}
-          disabled={(!text.trim() && !pendingAsset) || sending}
-          accessibilityLabel="Send message"
-        >
-          {(sending && uploadingAttachment) ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={{ color: '#fff', fontWeight: '600' }}>Send</Text>
-          )}
-        </TouchableOpacity>
+        {/*
+          Mic button (OpenChat-xxc): shown on native when text is empty and not editing.
+          Hold to record; drag left > 80px to cancel.
+          On web, always hidden (Platform.OS === 'web').
+        */}
+        {!editingMessage && !text.trim() && !pendingAsset && Platform.OS !== 'web' && (
+          <View
+            onTouchStart={(e) => { void handleMicPressIn(e.nativeEvent.pageX); }}
+            onTouchEnd={() => { void handleMicPressOut(false); }}
+            onTouchMove={(e) => {
+              const dx = micPressStartXRef.current - e.nativeEvent.pageX;
+              if (dx > CANCEL_DRAG_PX && isRecording) {
+                void handleMicPressOut(true);
+              }
+            }}
+            onTouchCancel={() => { void handleMicPressOut(true); }}
+            style={[
+              styles.send,
+              {
+                backgroundColor: isRecording ? '#ef4444' : c.primary,
+                opacity: sending ? 0.5 : 1,
+                alignItems: 'center',
+                justifyContent: 'center',
+              },
+            ]}
+            accessible
+            accessibilityLabel="Hold to record voice message"
+            accessibilityRole="button"
+          >
+            <Text style={{ fontSize: 18, color: '#fff' }}>
+              {isRecording ? '🔴' : '🎤'}
+            </Text>
+          </View>
+        )}
+        {/* Send button: shown when there is text or a pending asset */}
+        {(!!text.trim() || !!pendingAsset || editingMessage) && (
+          <TouchableOpacity
+            style={[styles.send, { backgroundColor: c.primary, opacity: (!text.trim() && !pendingAsset) || sending ? 0.5 : 1 }]}
+            onPress={handleSend}
+            disabled={(!text.trim() && !pendingAsset) || sending}
+            accessibilityLabel="Send message"
+          >
+            {(sending && uploadingAttachment) ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={{ color: '#fff', fontWeight: '600' }}>Send</Text>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Fullscreen image viewer modal (OpenChat-6bg) */}
@@ -1176,7 +1361,7 @@ export function ChatScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Message action sheet (OpenChat-uxj, OpenChat-46p, OpenChat-wgl, OpenChat-q9h, OpenChat-7bd) */}
+      {/* Message action sheet (OpenChat-uxj, OpenChat-46p, OpenChat-wgl, OpenChat-q9h, OpenChat-7bd, OpenChat-hhc) */}
       <MessageActionSheet
         visible={actionSheetVisible}
         message={actionSheetMessage}
@@ -1184,6 +1369,7 @@ export function ChatScreen() {
         senderName={actionSheetSenderName}
         onDismiss={() => setActionSheetVisible(false)}
         onReply={handleReply}
+        onForward={handleForward}
         onEdit={handleEdit}
         onDelete={handleDelete}
         onReact={handleReact}
@@ -1213,6 +1399,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   sender: { fontSize: 12, marginBottom: 2, fontWeight: '500' },
+  forwardedLabel: { fontSize: 11, fontStyle: 'italic', marginBottom: 3 },
   bubbleFooter: { marginTop: 4, flexDirection: 'row', alignItems: 'center' },
   dayWrap: {
     flexDirection: 'row',
@@ -1301,6 +1488,19 @@ const styles = StyleSheet.create({
     paddingRight: 2,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
+  },
+  // Voice recording feedback bar (OpenChat-xxc)
+  recordingBar: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  recordingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
   attachmentImage: {
     width: '100%',

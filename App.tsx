@@ -1,21 +1,23 @@
 /**
- * App entry. Sets up ThemeProvider + ChatProvider and a native-stack navigator
- * with these routes:
- *   Login              → email / password sign-in
- *   Conversations      → list + compose entry point
- *   Chat               → message thread + tappable header
- *   NewConversation    → contact picker (DM or group)
- *   GroupSettings      → rename, members, add, remove, leave
- *   Settings           → theme toggle (Light/Dark/System), sign-out
+ * App entry. Sets up ThemeProvider + ChatProvider and navigation:
+ *
+ *   Unauthenticated:
+ *     Login  → email / password / Google / Apple sign-in
+ *     Onboarding (once, first sign-in)
+ *
+ *   Authenticated — bottom tabs (OpenChat-zi1):
+ *     Chats tab  → Conversations stack (all pre-existing chat screens)
+ *     Thoughts tab → Thoughts stack (personal notes feed)
  *
  * The "is the user signed in?" gate is driven by ChatContext.isAuthed.
  */
 
 import { useEffect, useState } from 'react';
-import { StatusBar, StyleSheet, View } from 'react-native';
+import { StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 import { ChatProvider, useChat } from './src/contexts/ChatContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
@@ -48,12 +50,209 @@ import { BlockedUsersScreen } from './src/screens/BlockedUsersScreen';
 import { ProfileEditScreen } from './src/screens/ProfileEditScreen';
 import { GroupInviteScreen } from './src/screens/GroupInviteScreen';
 import { GroupInvitePreviewScreen } from './src/screens/GroupInvitePreviewScreen';
+import { ForwardPickerScreen } from './src/screens/ForwardPickerScreen';
+import { ThoughtsScreen } from './src/screens/ThoughtsScreen';
+import { AddEditThoughtScreen } from './src/screens/AddEditThoughtScreen';
 import { getColors } from './src/theme/colors';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { PushSoftAsk } from './src/components/PushSoftAsk';
-import type { RootStackParamList } from './src/navigation/types';
+import type {
+  RootStackParamList,
+  ThoughtsStackParamList,
+  TabParamList,
+} from './src/navigation/types';
 
-const Stack = createNativeStackNavigator<RootStackParamList>();
+const ChatsStack = createNativeStackNavigator<RootStackParamList>();
+const ThoughtsStack = createNativeStackNavigator<ThoughtsStackParamList>();
+const Tab = createBottomTabNavigator<TabParamList>();
+
+// ── Chats stack — all pre-existing chat screens ──────────────────────────────
+
+function ChatsNavigator({ currentUser, c }: {
+  currentUser: { email?: string } | null;
+  c: ReturnType<typeof getColors>;
+}) {
+  return (
+    <ChatsStack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: c.surface },
+        headerTitleStyle: { color: c.textPrimary },
+        headerTintColor: c.primary,
+        contentStyle: { backgroundColor: c.background },
+      }}
+    >
+      <ChatsStack.Screen
+        name="Conversations"
+        component={ConversationsScreen}
+        options={{ title: `Chats${currentUser?.email ? ` · ${currentUser.email}` : ''}` }}
+      />
+      <ChatsStack.Screen
+        name="Chat"
+        component={ChatScreen}
+        options={{ title: '' /* set dynamically in screen */ }}
+      />
+      <ChatsStack.Screen
+        name="NewConversation"
+        component={NewConversationScreen}
+        options={{ title: 'New Chat', presentation: 'modal' }}
+      />
+      <ChatsStack.Screen
+        name="GroupSettings"
+        component={GroupSettingsScreen}
+        options={{ title: 'Group Info' }}
+      />
+      <ChatsStack.Screen
+        name="Settings"
+        component={SettingsScreen}
+        options={{ title: 'Settings' }}
+      />
+      <ChatsStack.Screen
+        name="Search"
+        component={SearchScreen}
+        options={{ title: 'Search', presentation: 'modal' }}
+      />
+      <ChatsStack.Screen
+        name="MyQrCode"
+        component={MyQrCodeScreen}
+        options={{ title: 'My QR Code', presentation: 'modal' }}
+      />
+      <ChatsStack.Screen
+        name="ScanQr"
+        component={ScanQrScreen}
+        options={{ title: 'Scan QR', presentation: 'modal', headerShown: false }}
+      />
+      <ChatsStack.Screen
+        name="BlockedUsers"
+        component={BlockedUsersScreen}
+        options={{ title: 'Blocked users' }}
+      />
+      <ChatsStack.Screen
+        name="ProfileEdit"
+        component={ProfileEditScreen}
+        options={{ title: 'Edit Profile', presentation: 'modal' }}
+      />
+      {/* Group invite flow (OpenChat-240) */}
+      <ChatsStack.Screen
+        name="GroupInvite"
+        component={GroupInviteScreen}
+        options={{ title: 'Invite to Group', presentation: 'modal' }}
+      />
+      <ChatsStack.Screen
+        name="GroupInvitePreview"
+        component={GroupInvitePreviewScreen}
+        options={{ title: 'Join Group', presentation: 'modal' }}
+      />
+      {/* Forward picker (OpenChat-hhc) */}
+      <ChatsStack.Screen
+        name="ForwardPicker"
+        component={ForwardPickerScreen}
+        options={{ title: 'Forward to…', presentation: 'modal' }}
+      />
+    </ChatsStack.Navigator>
+  );
+}
+
+// ── Thoughts stack (OpenChat-zi1) ─────────────────────────────────────────────
+
+function ThoughtsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
+  return (
+    <ThoughtsStack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: c.surface },
+        headerTitleStyle: { color: c.textPrimary },
+        headerTintColor: c.primary,
+        contentStyle: { backgroundColor: c.background },
+      }}
+    >
+      <ThoughtsStack.Screen
+        name="ThoughtsList"
+        component={ThoughtsScreen}
+        options={{ title: 'Thoughts' }}
+      />
+      <ThoughtsStack.Screen
+        name="AddEditThought"
+        component={AddEditThoughtScreen}
+        options={({ route }) =>
+          ({
+            title: route.params?.thought ? 'Edit Thought' : 'New Thought',
+            presentation: 'modal',
+          })
+        }
+      />
+    </ThoughtsStack.Navigator>
+  );
+}
+
+// ── Tab icon helper ────────────────────────────────────────────────────────────
+
+function TabIcon({ label, focused, color }: { label: string; focused: boolean; color: string }) {
+  return (
+    <Text
+      style={{
+        fontSize: focused ? 22 : 20,
+        color,
+        lineHeight: 26,
+      }}
+    >
+      {label}
+    </Text>
+  );
+}
+
+// ── Authenticated tab navigator ───────────────────────────────────────────────
+
+function AuthedTabs({
+  currentUser,
+  c,
+}: {
+  currentUser: { email?: string } | null;
+  c: ReturnType<typeof getColors>;
+}) {
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: { backgroundColor: c.surface, borderTopColor: c.border },
+        tabBarActiveTintColor: c.primary,
+        tabBarInactiveTintColor: c.textMuted,
+      }}
+    >
+      <Tab.Screen
+        name="ChatsTab"
+        options={{
+          tabBarLabel: 'Chats',
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon label="💬" focused={focused} color={color} />
+          ),
+        }}
+      >
+        {() => <ChatsNavigator currentUser={currentUser} c={c} />}
+      </Tab.Screen>
+      <Tab.Screen
+        name="ThoughtsTab"
+        options={{
+          tabBarLabel: 'Thoughts',
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon label="💭" focused={focused} color={color} />
+          ),
+        }}
+      >
+        {() => <ThoughtsNavigator c={c} />}
+      </Tab.Screen>
+    </Tab.Navigator>
+  );
+}
+
+// ── Shell — root unauthenticated/onboarding stack + authed tab navigator ─────
+
+// We need a separate root stack for Login + Onboarding. Once authed, the tab
+// navigator is shown without a header.
+type RootAuthStack = {
+  Login: undefined;
+  Onboarding: undefined;
+  Main: undefined;
+};
+const RootStack = createNativeStackNavigator<RootAuthStack>();
 
 function Shell() {
   const { scheme } = useTheme();
@@ -82,20 +281,12 @@ function Shell() {
     });
   }, [isAuthed]);
 
-  // Configure notification foreground / tap handlers once at mount. Safe to call
-  // on web (no-op there). The tap listener is set up here (vs. inside the
-  // signed-in branch) because notifications can arrive while the user is on
-  // the Login screen too — we still want the navigator to react if they're
-  // signed in by the time they tap. (OpenChat-vg7)
+  // Configure notification foreground / tap handlers once at mount.
   useEffect(() => {
     configureNotificationHandlers();
     const sub = addNotificationTapListener();
     return () => { sub?.remove(); };
   }, []);
-
-  // Push registration is now triggered by PushSoftAsk (OpenChat-9mo) —
-  // the soft-ask card is shown 5s after sign-in and only calls
-  // registerForPushNotificationsAsync() when the user taps "Turn on".
 
   const baseNav = scheme === 'dark' ? DarkTheme : DefaultTheme;
   const navTheme = {
@@ -117,97 +308,27 @@ function Shell() {
         backgroundColor={c.background}
       />
       <OfflineBanner />
-      {/* Suppress PushSoftAsk while onboarding is in progress — the Notifications
-          step in OnboardingScreen handles the prompt instead. */}
       <PushSoftAsk isAuthed={isAuthed && onboardingDone} />
-      <Stack.Navigator
-        screenOptions={{
-          headerStyle: { backgroundColor: c.surface },
-          headerTitleStyle: { color: c.textPrimary },
-          headerTintColor: c.primary,
-          contentStyle: { backgroundColor: c.background },
-        }}
-      >
+
+      <RootStack.Navigator screenOptions={{ headerShown: false }}>
         {!isAuthed ? (
-          <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+          <RootStack.Screen name="Login" component={LoginScreen} />
         ) : (
           <>
-            {/* Onboarding: show once when authed but not yet completed (OpenChat-x2s).
-                onboardingChecked===null means still loading from AsyncStorage — we render
-                Onboarding optimistically in that brief window (it checks internally and
-                calls finish() immediately if onboarding was already done, but the replace()
-                would flicker, so instead we wait for the check before rendering anything). */}
-            {isAuthed && onboardingChecked && !onboardingDone && (
-              <Stack.Screen
+            {/* Show Onboarding if authed but not yet completed. */}
+            {isAuthed && onboardingChecked && !onboardingDone ? (
+              <RootStack.Screen
                 name="Onboarding"
                 component={OnboardingScreen}
-                options={{ headerShown: false, animation: 'fade' }}
+                options={{ animation: 'fade' }}
               />
-            )}
-            <Stack.Screen
-              name="Conversations"
-              component={ConversationsScreen}
-              options={{ title: `Chats${currentUser ? ` · ${currentUser.email}` : ''}` }}
-            />
-            <Stack.Screen
-              name="Chat"
-              component={ChatScreen}
-              options={{ title: '' /* set dynamically in screen */ }}
-            />
-            <Stack.Screen
-              name="NewConversation"
-              component={NewConversationScreen}
-              options={{ title: 'New Chat', presentation: 'modal' }}
-            />
-            <Stack.Screen
-              name="GroupSettings"
-              component={GroupSettingsScreen}
-              options={{ title: 'Group Info' }}
-            />
-            <Stack.Screen
-              name="Settings"
-              component={SettingsScreen}
-              options={{ title: 'Settings' }}
-            />
-            <Stack.Screen
-              name="Search"
-              component={SearchScreen}
-              options={{ title: 'Search', presentation: 'modal' }}
-            />
-            <Stack.Screen
-              name="MyQrCode"
-              component={MyQrCodeScreen}
-              options={{ title: 'My QR Code', presentation: 'modal' }}
-            />
-            <Stack.Screen
-              name="ScanQr"
-              component={ScanQrScreen}
-              options={{ title: 'Scan QR', presentation: 'modal', headerShown: false }}
-            />
-            <Stack.Screen
-              name="BlockedUsers"
-              component={BlockedUsersScreen}
-              options={{ title: 'Blocked users' }}
-            />
-            <Stack.Screen
-              name="ProfileEdit"
-              component={ProfileEditScreen}
-              options={{ title: 'Edit Profile', presentation: 'modal' }}
-            />
-            {/* Group invite flow (OpenChat-240) */}
-            <Stack.Screen
-              name="GroupInvite"
-              component={GroupInviteScreen}
-              options={{ title: 'Invite to Group', presentation: 'modal' }}
-            />
-            <Stack.Screen
-              name="GroupInvitePreview"
-              component={GroupInvitePreviewScreen}
-              options={{ title: 'Join Group', presentation: 'modal' }}
-            />
+            ) : null}
+            <RootStack.Screen name="Main">
+              {() => <AuthedTabs currentUser={currentUser} c={c} />}
+            </RootStack.Screen>
           </>
         )}
-      </Stack.Navigator>
+      </RootStack.Navigator>
     </NavigationContainer>
   );
 }

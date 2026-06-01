@@ -2,8 +2,9 @@
  * MessageActionSheet — modal bottom sheet that appears on long-press of a
  * message bubble in ChatScreen.
  *
- * Actions (OpenChat-uxj, OpenChat-46p, OpenChat-wgl, OpenChat-q9h, OpenChat-7bd):
+ * Actions (OpenChat-uxj, OpenChat-46p, OpenChat-wgl, OpenChat-q9h, OpenChat-7bd, OpenChat-hhc):
  *   Reply         — always shown; sets composer replyTo state
+ *   Forward       — always shown (own and others'); opens ForwardPickerScreen
  *   Edit          — own messages only; enters edit mode in composer
  *   Delete        — own messages only; confirms then soft-deletes
  *   React         — always shown; shows inline emoji picker
@@ -43,6 +44,8 @@ interface Props {
   onDismiss: () => void;
   /** Reply action — sets replyTo in composer */
   onReply: (data: ReplyToData) => void;
+  /** Forward action — opens ForwardPickerScreen (OpenChat-hhc) */
+  onForward: (messageId: string) => void;
   /** Edit action (own messages) — enters edit mode in composer */
   onEdit: (message: Message) => void;
   /** Delete action (own messages) — confirms and calls back */
@@ -65,6 +68,7 @@ export function MessageActionSheet({
   senderName,
   onDismiss,
   onReply,
+  onForward,
   onEdit,
   onDelete,
   onReact,
@@ -93,6 +97,12 @@ export function MessageActionSheet({
       content: message.content,
     });
     handleDismiss();
+  };
+
+  const handleForwardPress = () => {
+    if (!message) return;
+    handleDismiss();
+    onForward(message.id);
   };
 
   const handleEditPress = () => {
@@ -284,6 +294,18 @@ export function MessageActionSheet({
               >
                 <Text style={styles.actionIcon}>↩</Text>
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Reply</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Forward — always shown (own and others'), skip if deleted (OpenChat-hhc) */}
+            {!message.deletedAt && (
+              <TouchableOpacity
+                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={handleForwardPress}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.actionIcon}>↪</Text>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Forward</Text>
               </TouchableOpacity>
             )}
 
