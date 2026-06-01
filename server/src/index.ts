@@ -75,12 +75,20 @@ app.get('/health', (_req, res) => {
 // takes precedence over any /about path the Vite client might claim.
 const landingHtmlPath = path.join(__dirname, 'landing.html');
 const landingIconPath = path.join(__dirname, 'landing-icon.png');
+const landingQrPath = path.join(__dirname, 'qr-chat-globalbrai.svg');
 app.get(['/', '/about'], (_req, res) => {
   res.sendFile(landingHtmlPath);
 });
 app.get('/about/icon.png', (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.sendFile(landingIconPath);
+});
+// Shareable QR for chat.globalbr.ai (OpenChat-84u). Static SVG generated
+// once at build time; cache long since the URL it encodes never changes.
+app.get('/about/qr.svg', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.sendFile(landingQrPath);
 });
 
 // /about/connect-your-bot — agent integration guide (OpenChat-7c9).
