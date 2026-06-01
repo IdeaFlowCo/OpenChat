@@ -5,6 +5,10 @@
  * Mirrors the web ChatContext at flinch-sequel/client/src/contexts/ChatContext.tsx
  * but trimmed for mobile + no DOM. The screens consume `useChat()` for state
  * and actions; they shouldn't subscribe to socket events directly.
+ *
+ * Reconnect catch-up (OpenChat-qz0): on socket reconnect (not first connect),
+ * we call GET /api/chat/messages/since to fetch messages missed during the
+ * disconnect window and merge them into local state.
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
@@ -67,6 +71,9 @@ interface ChatContextValue {
   setActiveConversation: (id: string | null) => void;
   messages: Message[]; // for the active conversation
   loadingMessages: boolean;
+  loadOlderMessages: (conversationId: string) => Promise<void>;
+  hasMoreMessages: boolean;
+  loadingOlderMessages: boolean;
   sendMessage: (content: string, replyToId?: string, attachments?: Attachment[]) => Promise<void>;
 
   // Edit / delete messages (OpenChat-q9h)
@@ -104,6 +111,11 @@ interface ChatContextValue {
 
   // Profile editing (OpenChat-tml)
   updateProfile: (fields: { name?: string; statusMessage?: string }) => Promise<void>;
+
+  // Reconnect catch-up (OpenChat-qz0)
+  // convIds that received new messages during a recent reconnect catch-up.
+  // Used by the conversation list to briefly pulse those rows.
+  reconnectNewConvIds: Set<string>;
 
   // Lifecycle
   signOut: () => Promise<void>;
@@ -144,6 +156,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  // Pagination state (OpenChat-vjc)
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
 
   const [presence, setPresence] = useState<Map<string, { status: string; statusMessage?: string }>>(new Map());
   const [typingByConv, setTypingByConv] = useState<Map<string, Set<string>>>(new Map());
@@ -170,6 +185,23 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Debounce ref: per-convId timer so we coalesce rapid markRead calls.
   const markReadTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
+  // ── Reconnect catch-up (OpenChat-qz0) ───────────────────────────────────────
+  //
+  // lastSyncAt: the most recent timestamp at which we were definitively in sync.
+  // Updated on every message:new socket event AND on initial conversation load.
+  // Initialized to the current time at bootstrap so a first-ever connect doesn't
+  // try to fetch all messages since epoch.
+  const lastSyncAtRef = useRef<string>(new Date().toISOString());
+
+  // wasEverConnected: becomes true on the first 'connect' event. After that,
+  // every subsequent 'connect' is a RECONNECT and should trigger catch-up.
+  const wasEverConnectedRef = useRef<boolean>(false);
+
+  // reconnectNewConvIds: conversations that received messages during the last
+  // catch-up. Cleared automatically after 3 seconds (enough for a pulse animation).
+  const [reconnectNewConvIds, setReconnectNewConvIds] = useState<Set<string>>(new Set());
+  // ────────────────────────────────────────────────────────────────────────────
+
   const refreshConversations = useCallback(async () => {
     try {
       const data = await api.getConversations();
@@ -195,6 +227,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       console.warn('[ChatContext] socket connect failed during bootstrap:', e);
     }
     await refreshConversations();
+    // Seed lastSyncAt from now so that on reconnect we only fetch messages
+    // that arrived after this bootstrap, not everything since epoch.
+    lastSyncAtRef.current = new Date().toISOString();
     // Fetch AI disclosure status (OpenChat-ds3). Non-fatal if it fails.
     try {
       const ds = await api.getAiDisclosureStatus();
@@ -214,8 +249,98 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const sock = getSocket();
     if (!sock) return;
 
-    const onConnect = () => setIsConnected(true);
-    const onDisconnect = () => setIsConnected(false);
+    const currentUserId = currentUser?.userId;
+
+    const onConnect = () => {
+      setIsConnected(true);
+
+      if (wasEverConnectedRef.current) {
+        // This is a RECONNECT. Fetch missed messages.
+        const since = lastSyncAtRef.current;
+        console.log('[ChatContext] reconnect — fetching messages since', since);
+        api.messagesSince(since).then(({ messages: missed, truncated }) => {
+          if (truncated) {
+            // Too many messages to merge; fall back to a full refresh.
+            console.warn('[ChatContext] reconnect catch-up truncated — doing full refresh');
+            void refreshConversations();
+            return;
+          }
+          if (missed.length === 0) return;
+
+          const newConvIds = new Set<string>();
+
+          // Merge messages into the active conversation's list (deduplicated).
+          const activeId = activeConvIdRef.current;
+          if (activeId) {
+            const forActive = missed.filter(m => m.conversationId === activeId);
+            if (forActive.length > 0) {
+              setMessages(prev => {
+                const existingIds = new Set(prev.map(m => m.id));
+                const fresh = forActive.filter(m => !existingIds.has(m.id));
+                if (fresh.length === 0) return prev;
+                // Insert in chronological order: prev is oldest→newest already.
+                return [...prev, ...fresh].sort((a, b) =>
+                  new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+                );
+              });
+            }
+          }
+
+          // Update conversation list previews and unread counters.
+          setConversations(prev => {
+            let next = [...prev];
+            for (const msg of missed) {
+              const idx = next.findIndex(c => c.id === msg.conversationId);
+              if (idx >= 0) {
+                const updated = {
+                  ...next[idx],
+                  lastMessagePreview: msg.content.slice(0, 100),
+                  lastMessageAt: msg.createdAt,
+                };
+                next[idx] = updated;
+                newConvIds.add(msg.conversationId);
+              }
+            }
+            return sortByRecent(next);
+          });
+
+          // Bump unread counters for non-active conversations where someone
+          // else sent messages.
+          const activeId2 = activeConvIdRef.current;
+          setUnreadByConv(prev => {
+            const next = new Map(prev);
+            for (const msg of missed) {
+              if (msg.conversationId !== activeId2 && msg.senderId !== currentUserId) {
+                next.set(msg.conversationId, (next.get(msg.conversationId) ?? 0) + 1);
+              }
+            }
+            return next;
+          });
+
+          // Pulse the affected conversation rows for ~3s.
+          if (newConvIds.size > 0) {
+            setReconnectNewConvIds(newConvIds);
+            setTimeout(() => setReconnectNewConvIds(new Set()), 3000);
+          }
+
+          // Advance the sync cursor.
+          const latest = missed[missed.length - 1].createdAt;
+          if (latest) lastSyncAtRef.current = latest;
+        }).catch(err => {
+          console.warn('[ChatContext] reconnect messagesSince failed:', err);
+          // On error, fall back to a full conversation refresh so we're not stale.
+          void refreshConversations();
+        });
+      }
+
+      wasEverConnectedRef.current = true;
+    };
+
+    const onDisconnect = () => {
+      setIsConnected(false);
+      // Record the disconnect time as the start of the gap window.
+      lastSyncAtRef.current = new Date().toISOString();
+    };
 
     const onMessage = (msg: Message) => {
       // If this is the active conversation, append to message list.
@@ -235,6 +360,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           next.set(msg.conversationId, (next.get(msg.conversationId) ?? 0) + 1);
           return next;
         });
+      }
+      // Advance the sync cursor so we don't re-fetch this message on next reconnect.
+      if (msg.createdAt && msg.createdAt > lastSyncAtRef.current) {
+        lastSyncAtRef.current = msg.createdAt;
       }
     };
 
@@ -400,7 +529,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sock.off('read:updated', onReadUpdated);
       sock.off('user:profile-updated', onProfileUpdated);
     };
-  }, [isAuthed, currentUser?.userId]);
+  }, [isAuthed, currentUser?.userId, refreshConversations]);
 
   // setActiveConversation: clears unread, joins/leaves rooms, loads messages.
   const setActiveConversation = useCallback((id: string | null) => {
@@ -419,16 +548,54 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         return next;
       });
       setLoadingMessages(true);
+      setHasMoreMessages(false);
       api.getMessages(id)
-        .then(msgs => {
-          if (activeConvIdRef.current === id) setMessages(msgs);
+        .then(({ messages: msgs, hasMore }) => {
+          if (activeConvIdRef.current === id) {
+            setMessages(msgs);
+            setHasMoreMessages(hasMore);
+            // Advance sync cursor to the most recent message in this conversation.
+            if (msgs.length > 0) {
+              const latest = msgs[msgs.length - 1].createdAt;
+              if (latest && latest > lastSyncAtRef.current) {
+                lastSyncAtRef.current = latest;
+              }
+            }
+          }
         })
         .catch(err => console.warn('[ChatContext] loadMessages failed:', err))
         .finally(() => setLoadingMessages(false));
     } else {
       setMessages([]);
+      setHasMoreMessages(false);
     }
   }, []);
+
+  // Load older messages for the active conversation (OpenChat-vjc).
+  // Uses the createdAt of the earliest currently-loaded message as the cursor.
+  // Prepends results to the message list; deduplicates by id in case of overlap.
+  const loadOlderMessages = useCallback(async (conversationId: string) => {
+    if (loadingOlderMessages || !hasMoreMessages) return;
+    // Find the oldest message currently in state (messages are sorted oldest→newest).
+    const oldest = messages[0];
+    if (!oldest) return;
+    setLoadingOlderMessages(true);
+    try {
+      const { messages: older, hasMore } = await api.getMessagesBefore(conversationId, oldest.createdAt);
+      if (activeConvIdRef.current === conversationId) {
+        setMessages(prev => {
+          const existingIds = new Set(prev.map(m => m.id));
+          const newMsgs = older.filter(m => !existingIds.has(m.id));
+          return [...newMsgs, ...prev];
+        });
+        setHasMoreMessages(hasMore);
+      }
+    } catch (err) {
+      console.warn('[ChatContext] loadOlderMessages failed:', err);
+    } finally {
+      setLoadingOlderMessages(false);
+    }
+  }, [loadingOlderMessages, hasMoreMessages, messages]);
 
   // Optimistic send: append a local message immediately, then replace with
   // server canonical on success. Accepts optional replyToId for threaded replies
@@ -689,6 +856,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setConversations([]);
     setConversationsLoaded(false);
     setMessages([]);
+    setHasMoreMessages(false);
+    setLoadingOlderMessages(false);
     setActiveConversationIdState(null);
     setPresence(new Map());
     setTypingByConv(new Map());
@@ -696,6 +865,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setAiDisclosureAcceptedAt(null);
     setReadByOthers(new Map());
     setOnlineUsers(new Map());
+    setReconnectNewConvIds(new Set());
+    wasEverConnectedRef.current = false;
+    lastSyncAtRef.current = new Date().toISOString();
   }, []);
 
   // 401/403 cascade. Any API call that gets back a token-expired response
@@ -710,7 +882,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     currentUser, isAuthed, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
-    activeConversationId, setActiveConversation, messages, loadingMessages, sendMessage,
+    activeConversationId, setActiveConversation, messages, loadingMessages,
+    loadOlderMessages, hasMoreMessages, loadingOlderMessages,
+    sendMessage,
     editMessage, deleteMessage,
     toggleReaction,
     blockUser,
@@ -719,12 +893,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     mutedConvs, muteConv,
     readByOthers, onlineUsers, markConversationRead,
     updateProfile,
+    reconnectNewConvIds,
     signOut, bootstrapIfAuthed,
   }), [
     currentUser, isAuthed, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
-    activeConversationId, setActiveConversation, messages, loadingMessages, sendMessage,
+    activeConversationId, setActiveConversation, messages, loadingMessages,
+    loadOlderMessages, hasMoreMessages, loadingOlderMessages,
+    sendMessage,
     editMessage, deleteMessage,
     toggleReaction,
     blockUser,
@@ -733,6 +910,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     mutedConvs, muteConv,
     readByOthers, onlineUsers, markConversationRead,
     updateProfile,
+    reconnectNewConvIds,
     signOut, bootstrapIfAuthed,
   ]);
 

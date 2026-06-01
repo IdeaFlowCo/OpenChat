@@ -4,11 +4,15 @@
  * Now driven entirely by ChatContext (no per-screen socket subscriptions).
  * Adds a compose button in the header, unread pills, presence dots, and a
  * bot badge for DMs whose other party is a bot.
+ *
+ * Reconnect catch-up (OpenChat-qz0): rows that received new messages during
+ * a reconnect catch-up briefly pulse with a highlight background.
  */
 
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -55,6 +59,115 @@ function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
   return `${others[0]}, ${others[1]} +${others.length - 2}`;
 }
 
+// ── ConvRow ───────────────────────────────────────────────────────────────────
+// Renders a single conversation row. When `pulseIn` flips to true, runs a
+// brief opacity flash to indicate that new messages arrived during reconnect.
+interface ConvRowProps {
+  item: Conversation;
+  currentUser: CurrentUser | null;
+  unread: number;
+  isMuted: boolean;
+  someoneTyping: boolean;
+  presenceStatus?: string;
+  isBot?: boolean;
+  pulseIn: boolean;
+  primaryColor: string;
+  dividerColor: string;
+  textPrimary: string;
+  textSecondary: string;
+  textMuted: string;
+  onPress: () => void;
+}
+
+function ConvRow({
+  item, currentUser, unread, isMuted, someoneTyping,
+  presenceStatus, isBot, pulseIn,
+  primaryColor, dividerColor, textPrimary, textSecondary, textMuted,
+  onPress,
+}: ConvRowProps) {
+  const title = getDisplayTitle(item, currentUser);
+  const other = item.type === 'direct' ? getOther(item, currentUser) : null;
+  const bgAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!pulseIn) return;
+    // Flash: fade to highlight then fade out.
+    Animated.sequence([
+      Animated.timing(bgAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+      Animated.timing(bgAnim, { toValue: 0, duration: 1800, useNativeDriver: true }),
+    ]).start();
+  }, [pulseIn, bgAnim]);
+
+  return (
+    <View>
+      {/* Highlight overlay (sits behind the row content) */}
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            backgroundColor: primaryColor,
+            opacity: bgAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.12] }),
+          },
+        ]}
+        pointerEvents="none"
+      />
+      <TouchableOpacity
+        style={[styles.row, { borderColor: dividerColor }]}
+        onPress={onPress}
+        activeOpacity={0.7}
+      >
+        <Avatar
+          name={item.type === 'direct' ? (other?.name || other?.email) : title}
+          email={other?.email}
+          isBot={isBot}
+          presenceStatus={item.type === 'direct' ? presenceStatus : undefined}
+          size={48}
+        />
+        <View style={{ flex: 1 }}>
+          <View style={styles.rowTop}>
+            <View style={styles.titleRow}>
+              <Text
+                style={[
+                  styles.rowTitle,
+                  { color: textPrimary, fontWeight: unread > 0 ? '700' : '600' },
+                ]}
+                numberOfLines={1}
+              >
+                {title}
+              </Text>
+              {item.type === 'direct' && <BotBadge isBot={isBot} compact />}
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              {isMuted && (
+                <Text style={{ fontSize: 11, color: textMuted }}>🔕</Text>
+              )}
+              <Text style={[styles.rowTime, { color: textMuted }]}>
+                {formatTime(item.lastMessageAt)}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.previewRow}>
+            <Text
+              style={[
+                styles.rowPreview,
+                { color: unread > 0 ? textPrimary : textSecondary, fontWeight: unread > 0 ? '500' : '400' },
+              ]}
+              numberOfLines={1}
+            >
+              {someoneTyping ? 'typing…' : (item.lastMessagePreview || (item.type === 'group' ? 'Group conversation' : ''))}
+            </Text>
+            {unread > 0 && (
+              <View style={[styles.unreadPill, { backgroundColor: primaryColor }]}>
+                <Text style={styles.unreadPillText}>{unread > 99 ? '99+' : String(unread)}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export function ConversationsScreen() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -62,6 +175,7 @@ export function ConversationsScreen() {
   const {
     currentUser, conversations, conversationsLoaded, refreshConversations,
     isConnected, presence, unreadByConv, typingByConv, signOut, mutedConvs,
+    reconnectNewConvIds,
   } = useChat();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -150,70 +264,32 @@ export function ConversationsScreen() {
           </View>
         }
         renderItem={({ item }) => {
-          const title = getDisplayTitle(item, currentUser);
           const other = item.type === 'direct' ? getOther(item, currentUser) : null;
           const unread = unreadByConv.get(item.id) ?? 0;
           const live = other ? presence.get(other.id) : null;
           const typingSet = typingByConv.get(item.id);
-          const someoneTyping = typingSet && typingSet.size > 0
+          const someoneTyping = typingSet != null && typingSet.size > 0
             && Array.from(typingSet).some(uid => uid !== currentUser?.userId);
-          // Muted indicator (OpenChat-aes)
           const mutedUntil = mutedConvs[item.id];
           const isMuted = mutedUntil === 'always' || (!!mutedUntil && new Date(mutedUntil) > new Date());
+          const pulseIn = reconnectNewConvIds.has(item.id);
           return (
-            <TouchableOpacity
-              style={[styles.row, { borderColor: c.divider }]}
+            <ConvRow
+              item={item}
+              currentUser={currentUser}
+              unread={unread}
+              isMuted={isMuted}
+              someoneTyping={someoneTyping}
+              presenceStatus={live?.status || other?.presenceStatus}
+              isBot={other?.isBot}
+              pulseIn={pulseIn}
+              primaryColor={c.primary}
+              dividerColor={c.divider}
+              textPrimary={c.textPrimary}
+              textSecondary={c.textSecondary}
+              textMuted={c.textMuted}
               onPress={() => navigation.navigate('Chat', { conversationId: item.id })}
-              activeOpacity={0.7}
-            >
-              <Avatar
-                name={item.type === 'direct' ? (other?.name || other?.email) : title}
-                email={other?.email}
-                isBot={other?.isBot}
-                presenceStatus={item.type === 'direct' ? (live?.status || other?.presenceStatus) : undefined}
-                size={48}
-              />
-              <View style={{ flex: 1 }}>
-                <View style={styles.rowTop}>
-                  <View style={styles.titleRow}>
-                    <Text
-                      style={[
-                        styles.rowTitle,
-                        { color: c.textPrimary, fontWeight: unread > 0 ? '700' : '600' },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {title}
-                    </Text>
-                    {item.type === 'direct' && <BotBadge isBot={other?.isBot} compact />}
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    {isMuted && (
-                      <Text style={{ fontSize: 11, color: c.textMuted }}>🔕</Text>
-                    )}
-                    <Text style={[styles.rowTime, { color: c.textMuted }]}>
-                      {formatTime(item.lastMessageAt)}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.previewRow}>
-                  <Text
-                    style={[
-                      styles.rowPreview,
-                      { color: unread > 0 ? c.textPrimary : c.textSecondary, fontWeight: unread > 0 ? '500' : '400' },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {someoneTyping ? 'typing…' : (item.lastMessagePreview || (item.type === 'group' ? 'Group conversation' : ''))}
-                  </Text>
-                  {unread > 0 && (
-                    <View style={[styles.unreadPill, { backgroundColor: c.primary }]}>
-                      <Text style={styles.unreadPillText}>{unread > 99 ? '99+' : String(unread)}</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            </TouchableOpacity>
+            />
           );
         }}
       />
