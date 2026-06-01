@@ -387,7 +387,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Load messages for a conversation
   const loadMessages = useCallback(async (conversationId: string) => {
     try {
-      const data = await api.getMessages(conversationId);
+      const { messages: data } = await api.getMessages(conversationId);
       setMessages(data);
     } catch (e) {
       console.error('Failed to load messages:', e);

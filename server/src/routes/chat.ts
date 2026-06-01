@@ -593,7 +593,11 @@ router.get('/conversations/:id/messages', requireAuth, async (req: Request, res:
       }
       return msg;
     }).reverse();
-    res.json(messages);
+    // hasMore: if we got exactly `limit` records back, there are probably older
+    // messages. We don't run a separate COUNT query for perf — one extra fetch
+    // that returns 0 rows is the acceptable edge case.
+    const hasMore = result.records.length === limit;
+    res.json({ messages, hasMore });
   } catch (error) {
     console.error('Error fetching messages:', error);
     res.status(500).json({ error: 'Failed to fetch messages' });
@@ -1539,6 +1543,94 @@ router.post('/attachments/presign', requireAuth, async (req: Request, res: Respo
   } catch (err) {
     console.error('[attachments] presign error:', err);
     res.status(500).json({ error: 'Failed to generate upload URL' });
+  }
+});
+
+// ─── Reconnect catch-up (OpenChat-qz0) ──────────────────────────────────────
+//
+// GET /api/chat/messages/since?since=<ISO>&limit=500
+//
+// Returns all messages across every conversation the requester participates in
+// where createdAt > since, ordered chronologically. Used by the mobile app to
+// recover missed messages after a socket reconnect.
+//
+// Hard cap at 500 messages. Anything beyond that is unusual — if we hit the
+// cap we log a warning server-side so the operator knows a client has a large
+// gap. The client should fall back to a full refreshConversations() when the
+// cap is hit (the response includes a `truncated: true` flag).
+//
+// NOTE: No message retention window is enforced today. If one is added in the
+// future, callers whose `since` pre-dates it should receive the oldest
+// available messages (i.e. NOT an error) and a `retention_truncated: true`
+// flag so the client knows a full re-fetch is advisable.
+//
+// Uses the message_createdAt range index (see migration comment below).
+// If the index doesn't exist yet the query will still work via a full scan,
+// just more slowly. The index is created idempotently at server startup via
+// db.ts — see ensureMessageCreatedAtIndex() below — or can be run manually:
+//   CREATE RANGE INDEX message_createdAt FOR (m:Message) ON (m.createdAt)
+router.get('/messages/since', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const sinceRaw = req.query.since as string | undefined;
+
+  if (!sinceRaw || typeof sinceRaw !== 'string') {
+    res.status(400).json({ error: 'since (ISO timestamp) is required' });
+    return;
+  }
+
+  // Validate it's a parseable ISO date.
+  const sinceDate = new Date(sinceRaw);
+  if (isNaN(sinceDate.getTime())) {
+    res.status(400).json({ error: 'since must be a valid ISO timestamp' });
+    return;
+  }
+
+  const HARD_CAP = 500;
+
+  const session = getDriver().session();
+  try {
+    const result = await session.run(`
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)<-[:IN_CONVERSATION]-(m:Message)
+      WHERE m.createdAt > datetime($since)
+        AND m.deletedAt IS NULL
+      MATCH (sender:User {id: m.senderId})
+      CALL {
+        WITH m
+        OPTIONAL MATCH (reactor:User)-[r:REACTED]->(m)
+        WITH r.emoji AS emoji, count(*) AS cnt, collect(reactor.id) AS reactors
+        WHERE emoji IS NOT NULL
+        RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors }) AS reactions
+      }
+      RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions } AS message
+      ORDER BY m.createdAt ASC
+      LIMIT $cap
+    `, {
+      userId,
+      since: sinceRaw,
+      cap: neo4j.int(HARD_CAP + 1), // fetch one extra to detect truncation
+    });
+
+    const rawMessages = result.records.map(r => {
+      const msg = toJS(r.get('message')) as Record<string, unknown>;
+      if (msg && typeof msg.attachments === 'string') {
+        try { msg.attachments = JSON.parse(msg.attachments as string); } catch { /* leave as string */ }
+      }
+      return msg;
+    });
+
+    const truncated = rawMessages.length > HARD_CAP;
+    const messages = truncated ? rawMessages.slice(0, HARD_CAP) : rawMessages;
+
+    if (truncated) {
+      console.warn(`[messages/since] userId=${userId} hit the ${HARD_CAP}-message cap (since=${sinceRaw}). Client should do a full refresh.`);
+    }
+
+    res.json({ messages, truncated });
+  } catch (error) {
+    console.error('Error fetching messages since:', error);
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  } finally {
+    await session.close();
   }
 });
 

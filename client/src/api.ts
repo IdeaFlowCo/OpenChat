@@ -429,7 +429,7 @@ class ApiClient {
     });
   }
 
-  async getMessages(conversationId: string, limit = 50, before?: string): Promise<Message[]> {
+  async getMessages(conversationId: string, limit = 50, before?: string): Promise<{ messages: Message[]; hasMore: boolean }> {
     const params = new URLSearchParams({ limit: String(limit) });
     if (before) params.append('before', before);
     return this.fetch(`/conversations/${conversationId}/messages?${params}`);
