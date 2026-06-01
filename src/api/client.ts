@@ -754,6 +754,27 @@ export const api = {
       onlineMap: Record<string, boolean>;
     }>(`/api/chat/conversations/${conversationId}/read`, { method: 'PATCH' }),
 
+  // ── Mute / unmute conversation (OpenChat-aes) ───────────────────────────
+  /**
+   * Set this user's mute state on a conversation. mutedUntil is one of:
+   *   - null       → unmute
+   *   - 'always'   → mute indefinitely
+   *   - Date       → mute until that point in time
+   * Server persists on the PARTICIPATES_IN edge and respects it during
+   * push-notification fanout (mentioned users break through mute).
+   * PATCH /api/chat/conversations/:id/participants/me
+   */
+  setConversationMute: (conversationId: string, mutedUntil: Date | 'always' | null) => {
+    const body =
+      mutedUntil === null   ? { mutedUntil: null }
+    : mutedUntil === 'always' ? { mutedUntil: 'always' as const }
+    :                          { mutedUntil: mutedUntil.toISOString() };
+    return request<{ conversationId: string; mutedUntil: string | null }>(
+      `/api/chat/conversations/${conversationId}/participants/me`,
+      { method: 'PATCH', body: JSON.stringify(body) }
+    );
+  },
+
   // ── Profile editing (OpenChat-tml) ──────────────────────────────────────
 
   /**

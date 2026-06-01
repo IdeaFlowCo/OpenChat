@@ -775,10 +775,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Mute / unmute a conversation (OpenChat-aes). Local-only for now; server
-  // endpoint (PATCH /api/chat/conversations/:id/participants/me { mutedUntil })
-  // can be wired in a follow-up once the server side lands.
+  // Mute / unmute a conversation (OpenChat-aes). Now multi-device synced:
+  // we optimistically update local state + AsyncStorage, then fire the
+  // server PATCH to set rel.mutedUntil on the PARTICIPATES_IN edge so
+  // other devices pick it up on next /conversations refresh AND the
+  // server-side push fanout filters muted recipients.
   const muteConv = useCallback(async (convId: string, until: Date | 'always' | null) => {
+    // Optimistic local update — keep the AsyncStorage path for offline use
+    // and immediate UI response.
     await muteConvStorage(convId, until);
     setMutedConvs(prev => {
       const next = { ...prev };
@@ -791,6 +795,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
+    // Fire-and-forget server sync. Failure leaves local state correct;
+    // a future /conversations refresh will reconcile.
+    try {
+      await api.setConversationMute(convId, until);
+    } catch (err) {
+      console.warn('[mute] server sync failed (local state preserved):', err);
+    }
   }, []);
 
   // Mark conversation as read (OpenChat-0nj).
