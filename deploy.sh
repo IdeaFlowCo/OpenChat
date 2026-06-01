@@ -23,7 +23,7 @@ rm -rf client-mobile/dist
 mkdir -p client-mobile/dist
 if [ -d "$MOBILE_REPO" ]; then
   echo "Building openchat-mobile (RN-web) from $MOBILE_REPO..."
-  (cd "$MOBILE_REPO" && npx expo export --platform web --output-dir dist-web)
+  (cd "$MOBILE_REPO" && npx expo export --platform web --output-dir dist-web --clear)
   cp -r "$MOBILE_REPO/dist-web/." client-mobile/dist/
 else
   echo "openchat-mobile repo not found at $MOBILE_REPO — /m will serve a placeholder."
@@ -46,7 +46,7 @@ rm -rf client-mobile-desktop/dist
 mkdir -p client-mobile-desktop/dist
 if [ -d "$MOBILE_DESKTOP_REPO" ]; then
   echo "Building openchat-mobile-desktop (RN-web, responsive) from $MOBILE_DESKTOP_REPO..."
-  (cd "$MOBILE_DESKTOP_REPO" && npx expo export --platform web --output-dir dist-web)
+  (cd "$MOBILE_DESKTOP_REPO" && npx expo export --platform web --output-dir dist-web --clear)
   cp -r "$MOBILE_DESKTOP_REPO/dist-web/." client-mobile-desktop/dist/
 else
   echo "openchat-mobile-desktop repo not found at $MOBILE_DESKTOP_REPO — /d will serve a placeholder."
