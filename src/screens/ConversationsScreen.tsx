@@ -185,7 +185,7 @@ export function ConversationsScreen() {
         <View style={{ alignItems: 'center' }}>
           <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary }}>Chats</Text>
           <Text style={{ fontSize: 11, color: c.textSecondary }}>
-            {currentUser?.email}  ·  {isConnected ? '🟢 connected' : '⚪ connecting…'}
+            {currentUser?.email}  ·  {isConnected ? '🟢 connected' : '⚪ offline — reconnecting'}
           </Text>
         </View>
       ),

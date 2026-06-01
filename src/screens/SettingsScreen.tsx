@@ -9,17 +9,19 @@
  */
 
 import { useCallback, useState } from 'react';
-import { Alert, Linking, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme, ThemePref } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
-import { api } from '../api/client';
+import { api, ExportRangeKey } from '../api/client';
 import { getColors } from '../theme/colors';
 import type { NavProp } from '../navigation/types';
 import { registerForPushNotificationsAsync } from '../services/notifications';
+import { ExportSheet } from '../components/ExportSheet';
+import { saveJsonDownload } from '../services/exportDownload';
 
 const OPTIONS: { value: ThemePref; label: string; hint: string }[] = [
   { value: 'system', label: 'System', hint: 'Follow your phone' },
@@ -32,13 +34,15 @@ type NotifStatus = 'granted' | 'denied' | 'undetermined' | 'unknown';
 export function SettingsScreen() {
   const navigation = useNavigation<NavProp<'Settings'>>();
   const { preference, setPreference, scheme } = useTheme();
-  const { currentUser, signOut } = useChat();
+  const { currentUser, isConnected, signOut } = useChat();
   const c = getColors(scheme);
 
   // Account deletion (OpenChat-nhy)
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [exportSheetVisible, setExportSheetVisible] = useState(false);
+  const [exportBusyRange, setExportBusyRange] = useState<ExportRangeKey | null>(null);
 
   const handleDeleteAccount = useCallback(() => {
     // First confirmation alert
@@ -128,8 +132,33 @@ export function SettingsScreen() {
     void Linking.openSettings();
   }, []);
 
+  const handleAccountExport = useCallback(async (range: ExportRangeKey) => {
+    if (!isConnected || exportBusyRange) return;
+    setExportBusyRange(range);
+    try {
+      const download = await api.exportAccount(range);
+      const filename = await saveJsonDownload(download.filename, download.text);
+      setExportSheetVisible(false);
+      Alert.alert('Export ready', `${filename} has been prepared.`);
+    } catch (err) {
+      Alert.alert(
+        'Export failed',
+        !isConnected
+          ? 'OpenChat is offline. Reconnect, then try the export again.'
+          : err instanceof Error
+            ? err.message
+            : 'Could not export your account data.'
+      );
+    } finally {
+      setExportBusyRange(null);
+    }
+  }, [exportBusyRange, isConnected]);
+
   return (
-    <View style={[styles.root, { backgroundColor: c.background }]}>
+    <ScrollView
+      style={[styles.root, { backgroundColor: c.background }]}
+      contentContainerStyle={styles.content}
+    >
       {currentUser && (
         <View style={styles.section}>
           <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>ACCOUNT</Text>
@@ -154,6 +183,25 @@ export function SettingsScreen() {
           </View>
         </View>
       )}
+
+      <View style={styles.section}>
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>DATA</Text>
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => setExportSheetVisible(true)}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Export my data</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                Download messages, thoughts, settings, and account metadata
+              </Text>
+            </View>
+            <Text style={{ color: c.primary, fontSize: 18 }}>↓</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
 
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>APPEARANCE</Text>
@@ -380,6 +428,16 @@ export function SettingsScreen() {
         {Platform.OS !== 'web' && ` (${Constants.expoConfig?.ios?.buildNumber ?? Constants.expoConfig?.android?.versionCode ?? '?'})`}
       </Text>
 
+      <ExportSheet
+        visible={exportSheetVisible}
+        title="Export my data"
+        subtitle="Download a JSON bundle of your OpenChat account. Pick a recent window or all available history."
+        disabledReason={!isConnected ? 'OpenChat is offline. Downloads need a live connection.' : null}
+        busyRange={exportBusyRange}
+        onClose={() => !exportBusyRange && setExportSheetVisible(false)}
+        onExport={handleAccountExport}
+      />
+
       {/* Android delete-account confirmation modal (fallback for platforms without Alert.prompt) */}
       <Modal
         visible={deleteModalVisible}
@@ -419,12 +477,13 @@ export function SettingsScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
+  root: { flex: 1 },
+  content: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32 },
   section: { marginBottom: 24 },
   sectionLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
   row: {

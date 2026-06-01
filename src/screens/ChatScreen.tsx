@@ -26,7 +26,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useHeaderHeight } from '@react-navigation/elements';
-import { Attachment, Conversation, Message, api } from '../api/client';
+import { Attachment, Conversation, ExportRangeKey, Message, api } from '../api/client';
 import { MessageActionSheet, ReplyToData } from '../components/MessageActionSheet';
 import { ReactionsBar } from '../components/ReactionsBar';
 import { ToastMessage } from '../components/ToastMessage';
@@ -49,6 +49,8 @@ import { MentionAutocomplete, MentionCandidate } from '../components/MentionAuto
 import { TransformButton } from '../components/TransformButton';
 import { LinkPreviewCard } from '../components/LinkPreviewCard';
 import type { Participant } from '../api/client';
+import { ExportSheet } from '../components/ExportSheet';
+import { saveJsonDownload } from '../services/exportDownload';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
 
@@ -206,7 +208,7 @@ export function ChatScreen() {
   const headerHeight = useHeaderHeight();
   const kbOffset = Platform.OS === 'ios' ? headerHeight : 0;
   const {
-    currentUser, conversations, messages, loadingMessages,
+    currentUser, conversations, messages, loadingMessages, isConnected,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     setActiveConversation, sendMessage, editMessage, deleteMessage, toggleReaction,
     presence, typingByConv, reportTyping,
@@ -367,6 +369,31 @@ export function ChatScreen() {
 
   // Mute menu logic (OpenChat-aes)
   const isMuted = !!mutedConvs[conversationId];
+  const [exportSheetVisible, setExportSheetVisible] = useState(false);
+  const [exportBusyRange, setExportBusyRange] = useState<ExportRangeKey | null>(null);
+
+  const handleConversationExport = useCallback(async (range: ExportRangeKey) => {
+    if (!isConnected || exportBusyRange) return;
+    setExportBusyRange(range);
+    try {
+      const download = await api.exportConversation(conversationId, range);
+      const filename = await saveJsonDownload(download.filename, download.text);
+      setExportSheetVisible(false);
+      showToast(`Export ready: ${filename}`);
+    } catch (err) {
+      console.warn('[ChatScreen] export failed:', err);
+      Alert.alert(
+        'Export failed',
+        !isConnected
+          ? 'OpenChat is offline. Reconnect, then try the export again.'
+          : err instanceof Error
+            ? err.message
+            : 'Could not export this conversation.'
+      );
+    } finally {
+      setExportBusyRange(null);
+    }
+  }, [conversationId, exportBusyRange, isConnected, showToast]);
 
   const showMuteMenu = () => {
     const muteLabel = isMuted ? 'Unmute' : 'Mute';
@@ -463,19 +490,28 @@ export function ChatScreen() {
         </TouchableOpacity>
       ),
       headerRight: () => (
-        <TouchableOpacity
-          onPress={showMuteMenu}
-          accessibilityLabel={isMuted ? 'Unmute conversation' : 'Mute conversation'}
-          style={{ paddingHorizontal: 8, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-        >
-          {isMuted && (
-            <Text style={{ fontSize: 14, color: c.textMuted }}>🔕</Text>
-          )}
-          <Text style={{ color: c.textSecondary, fontSize: 20, lineHeight: 22 }}>⋯</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity
+            onPress={() => setExportSheetVisible(true)}
+            accessibilityLabel="Export conversation"
+            style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+          >
+            <Text style={{ color: c.primary, fontSize: 18 }}>↓</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={showMuteMenu}
+            accessibilityLabel={isMuted ? 'Unmute conversation' : 'Mute conversation'}
+            style={{ paddingHorizontal: 8, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+          >
+            {isMuted && (
+              <Text style={{ fontSize: 14, color: c.textMuted }}>🔕</Text>
+            )}
+            <Text style={{ color: c.textSecondary, fontSize: 20, lineHeight: 22 }}>⋯</Text>
+          </TouchableOpacity>
+        </View>
       ),
     });
-  }, [navigation, isGroup, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.textPrimary, c.textSecondary, c.textMuted, containsBot, isMuted, showMuteMenu]);
+  }, [navigation, isGroup, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.primary, c.textPrimary, c.textSecondary, c.textMuted, containsBot, isMuted, showMuteMenu]);
 
   const rows = useMemo(() => {
     const built = buildRows(messages, currentUser?.userId);
@@ -751,6 +787,10 @@ export function ChatScreen() {
     const trimmed = text.trim();
     const hasAttachment = !!pendingAsset;
     if (!trimmed && !hasAttachment || sending) return;
+    if (!isConnected) {
+      Alert.alert('Offline', 'OpenChat is offline. Your message was not sent. Reconnect, then try again.');
+      return;
+    }
     setSending(true);
 
     // Edit mode: PATCH existing message (OpenChat-q9h). Attachments not editable.
@@ -923,6 +963,16 @@ export function ChatScreen() {
       keyboardVerticalOffset={kbOffset}
     >
       {showAiDisclosure && <AiDisclosureBanner />}
+
+      <ExportSheet
+        visible={exportSheetVisible}
+        title="Export conversation"
+        subtitle="Download this chat as JSON. Choose a recent window or the full available history."
+        disabledReason={!isConnected ? 'OpenChat is offline. Downloads need a live connection.' : null}
+        busyRange={exportBusyRange}
+        onClose={() => !exportBusyRange && setExportSheetVisible(false)}
+        onExport={handleConversationExport}
+      />
 
       {loadingMessages && messages.length === 0 ? (
         <View style={styles.center}>

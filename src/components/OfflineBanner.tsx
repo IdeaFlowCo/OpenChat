@@ -1,6 +1,6 @@
 /**
  * Thin yellow strip shown below the nav header when the socket has been
- * disconnected for more than 5 seconds (OpenChat-5ay).
+ * disconnected for more than 3 seconds (OpenChat-5ay).
  *
  * Subscribes to ChatContext.isConnected. Renders nothing while connected or
  * within the 5-second grace window (avoids flashing on brief blips).
@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useChat } from '../contexts/ChatContext';
 
-const DELAY_MS = 5000;
+const DELAY_MS = 3000;
 
 export function OfflineBanner() {
   const { isConnected, isAuthed } = useChat();
@@ -55,7 +55,7 @@ export function OfflineBanner() {
 
   return (
     <View style={styles.banner}>
-      <Text style={styles.text}>You're offline — reconnecting…</Text>
+      <Text style={styles.text}>Offline. Sending and downloads are paused while OpenChat reconnects.</Text>
     </View>
   );
 }

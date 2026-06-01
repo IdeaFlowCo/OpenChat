@@ -506,6 +506,50 @@ export interface AgentKeyCreateResult {
   expiresAt?: string | null;
 }
 
+export type ExportRangeKey = 'last_hour' | 'last_day' | 'last_week' | 'last_month' | 'all_time';
+
+export const EXPORT_RANGE_OPTIONS: Array<{ key: ExportRangeKey; label: string; detail: string }> = [
+  { key: 'last_hour', label: 'Last hour', detail: 'The latest messages and activity' },
+  { key: 'last_day', label: 'Last day', detail: 'Everything from the past 24 hours' },
+  { key: 'last_week', label: 'Last week', detail: 'The past 7 days' },
+  { key: 'last_month', label: 'Last month', detail: 'The past 30 days' },
+  { key: 'all_time', label: 'All time', detail: 'Your full available history' },
+];
+
+export interface JsonDownload {
+  filename: string;
+  text: string;
+}
+
+function filenameFromDisposition(value: string | null, fallback: string): string {
+  if (!value) return fallback;
+  const match = value.match(/filename="([^"]+)"/i) || value.match(/filename=([^;]+)/i);
+  return match?.[1]?.trim() || fallback;
+}
+
+async function requestJsonDownload(path: string, fallbackFilename: string): Promise<JsonDownload> {
+  const token = await getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers.authorization = `Bearer ${token}`;
+  const res = await fetch(`${OPENCHAT_URL}${path}`, { headers });
+  const text = await res.text();
+  if (!res.ok) {
+    let msg = text;
+    try {
+      const j = JSON.parse(text);
+      msg = j.error || j.message || text;
+    } catch {
+      /* not JSON */
+    }
+    if (res.status === 401 || res.status === 403) emitAuthExpired();
+    throw new ApiError(res.status, `${res.status}: ${msg}`, text);
+  }
+  return {
+    filename: filenameFromDisposition(res.headers.get('content-disposition'), fallbackFilename),
+    text,
+  };
+}
+
 export const api = {
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
   getConversation: (conversationId: string) =>
@@ -917,4 +961,18 @@ export const api = {
   /** Revoke an agent key immediately. */
   revokeAgentKey: (id: string) =>
     request<{ ok: boolean }>(`/api/agent-keys/${id}`, { method: 'DELETE' }),
+
+  // ── Data export (OpenChat export UX) ─────────────────────────────────────
+
+  exportConversation: (conversationId: string, range: ExportRangeKey) =>
+    requestJsonDownload(
+      `/api/chat/conversations/${conversationId}/export?range=${encodeURIComponent(range)}`,
+      `openchat-conversation-${range}.json`
+    ),
+
+  exportAccount: (range: ExportRangeKey) =>
+    requestJsonDownload(
+      `/api/auth/export?range=${encodeURIComponent(range)}`,
+      `openchat-account-${range}.json`
+    ),
 };
