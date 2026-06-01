@@ -13,11 +13,22 @@ import { useChat } from '../contexts/ChatContext';
 const DELAY_MS = 5000;
 
 export function OfflineBanner() {
-  const { isConnected } = useChat();
+  const { isConnected, isAuthed } = useChat();
   const [showBanner, setShowBanner] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    // Don't show on the Login screen — there's no socket connection pre-auth,
+    // so "offline" is meaningless there. The banner is for confirming the
+    // chat connection is healthy *after* sign-in.
+    if (!isAuthed) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      setShowBanner(false);
+      return;
+    }
     if (isConnected) {
       // Clear any pending show timer and hide immediately.
       if (timerRef.current) {
@@ -38,7 +49,7 @@ export function OfflineBanner() {
         timerRef.current = null;
       }
     };
-  }, [isConnected]);
+  }, [isConnected, isAuthed]);
 
   if (!showBanner) return null;
 
