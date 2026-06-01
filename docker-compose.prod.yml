@@ -31,6 +31,9 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - GOOGLE_IOS_CLIENT_ID=${GOOGLE_IOS_CLIENT_ID:-}
+      # Agent API key encryption secret (OpenChat-7c9). 32-byte hex string.
+      # Generate: openssl rand -hex 32 >> /opt/openchat/.env
+      - OC_KEY_ENCRYPTION_SECRET=${OC_KEY_ENCRYPTION_SECRET:-}
     networks:
       - app_network
 
