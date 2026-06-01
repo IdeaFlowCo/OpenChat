@@ -9,6 +9,7 @@ import { initDatabase, closeDatabase } from './db.js';
 import authRoutes from './routes/auth.js';
 import chatRoutes from './routes/chat.js';
 import clientLogsRoutes from './routes/clientLogs.js';
+import agentKeysRoutes from './routes/agentKeys.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -60,6 +61,7 @@ app.use(express.static(clientDistPath));
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/client-logs', clientLogsRoutes);
+app.use('/api/agent-keys', agentKeysRoutes);
 
 // Make io available to HTTP route handlers (e.g. to emit conversation:created
 // when a new conversation is created via POST /api/chat/conversations).

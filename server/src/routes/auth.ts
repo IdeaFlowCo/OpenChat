@@ -2,9 +2,11 @@ import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
-import { requireAuth, AuthUser } from '../middleware/auth.js';
+import { requireCapability, AuthUser } from '../middleware/auth.js';
 
 const router = Router();
+const readProfile = requireCapability('read_profile');
+const managePresence = requireCapability('manage_presence');
 function getJwtSecret(): string {
   return process.env.JWT_SECRET || 'dev-secret-change-me';
 }
@@ -102,7 +104,7 @@ router.post('/dev-login', async (req: Request, res: Response) => {
 /**
  * GET /api/auth/me - Get current user info
  */
-router.get('/me', requireAuth, async (req: Request, res: Response) => {
+router.get('/me', readProfile, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
 
@@ -131,7 +133,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
  * POST /api/auth/logout - Mark user as offline
  * (Token invalidation would require a blocklist in production)
  */
-router.post('/logout', requireAuth, async (req: Request, res: Response) => {
+router.post('/logout', managePresence, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
 

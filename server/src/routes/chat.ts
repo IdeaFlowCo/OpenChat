@@ -3,10 +3,15 @@ import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
 import neo4j from 'neo4j-driver';
 import { getDriver } from '../db.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireCapability } from '../middleware/auth.js';
 import { joinUserSocketsToConversation, leaveUserSocketsFromConversation } from '../websocket/chatHandler.js';
 
 const router = Router();
+const readChat = requireCapability('read_chat');
+const writeChat = requireCapability('write_chat');
+const manageConversations = requireCapability('manage_conversations');
+const manageParticipants = requireCapability('manage_participants');
+const managePresence = requireCapability('manage_presence');
 
 // Emit conversation:created to every participant's per-user room. Clients
 // (including the picortex bot) listen for this event and immediately join
@@ -55,7 +60,7 @@ function toJS(value: unknown): unknown {
 }
 
 // GET /api/chat/conversations - List user's conversations
-router.get('/conversations', requireAuth, async (req: Request, res: Response) => {
+router.get('/conversations', readChat, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
 
@@ -92,7 +97,7 @@ router.get('/conversations', requireAuth, async (req: Request, res: Response) =>
 });
 
 // POST /api/chat/conversations - Create a conversation (1:1 or group)
-router.post('/conversations', requireAuth, async (req: Request, res: Response) => {
+router.post('/conversations', manageConversations, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { participantIds, title, type = 'direct' } = req.body;
@@ -222,7 +227,7 @@ function emitConversationUpdated(
 }
 
 // PATCH /api/chat/conversations/:id - Update title (owner-only for groups)
-router.patch('/conversations/:id', requireAuth, async (req: Request, res: Response) => {
+router.patch('/conversations/:id', manageConversations, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const id = req.params.id as string;
@@ -268,7 +273,7 @@ router.patch('/conversations/:id', requireAuth, async (req: Request, res: Respon
 });
 
 // POST /api/chat/conversations/:id/participants - Add a member (owner-only, group only)
-router.post('/conversations/:id/participants', requireAuth, async (req: Request, res: Response) => {
+router.post('/conversations/:id/participants', manageParticipants, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const id = req.params.id as string;
@@ -352,7 +357,7 @@ router.post('/conversations/:id/participants', requireAuth, async (req: Request,
 });
 
 // DELETE /api/chat/conversations/:id/participants/:userId - Remove member or leave
-router.delete('/conversations/:id/participants/:userId', requireAuth, async (req: Request, res: Response) => {
+router.delete('/conversations/:id/participants/:userId', manageParticipants, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const callerId = req.user!.userId;
   const id = req.params.id as string;
@@ -440,7 +445,7 @@ router.delete('/conversations/:id/participants/:userId', requireAuth, async (req
 });
 
 // GET /api/chat/conversations/:id - Get conversation with participants
-router.get('/conversations/:id', requireAuth, async (req: Request, res: Response) => {
+router.get('/conversations/:id', readChat, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id } = req.params;
@@ -469,7 +474,7 @@ router.get('/conversations/:id', requireAuth, async (req: Request, res: Response
 });
 
 // GET /api/chat/conversations/:id/messages - Get messages (paginated)
-router.get('/conversations/:id/messages', requireAuth, async (req: Request, res: Response) => {
+router.get('/conversations/:id/messages', readChat, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id } = req.params;
@@ -518,7 +523,7 @@ router.get('/conversations/:id/messages', requireAuth, async (req: Request, res:
 });
 
 // POST /api/chat/conversations/:id/messages - Send a message
-router.post('/conversations/:id/messages', requireAuth, async (req: Request, res: Response) => {
+router.post('/conversations/:id/messages', writeChat, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id: conversationId } = req.params;
@@ -582,7 +587,7 @@ router.post('/conversations/:id/messages', requireAuth, async (req: Request, res
 
 // GET /api/chat/contacts - Get all users (for starting conversations)
 // Supports ?q=search to filter by name or email (case-insensitive)
-router.get('/contacts', requireAuth, async (req: Request, res: Response) => {
+router.get('/contacts', readChat, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const searchQuery = req.query.q as string | undefined;
@@ -615,7 +620,7 @@ router.get('/contacts', requireAuth, async (req: Request, res: Response) => {
 });
 
 // GET /api/chat/users/by-email/:email - Look up user by exact email
-router.get('/users/by-email/:email', requireAuth, async (req: Request, res: Response) => {
+router.get('/users/by-email/:email', readChat, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const { email } = req.params;
 
@@ -641,7 +646,7 @@ router.get('/users/by-email/:email', requireAuth, async (req: Request, res: Resp
 });
 
 // PUT /api/chat/presence - Update own presence
-router.put('/presence', requireAuth, async (req: Request, res: Response) => {
+router.put('/presence', managePresence, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { presenceStatus, statusMessage } = req.body;
