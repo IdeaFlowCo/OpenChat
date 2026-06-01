@@ -16,6 +16,9 @@
     },
     "production": {
       "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_SHOW_TEST_LOGINS": "false"
+      },
       "ios": {
         "buildConfiguration": "Release"
       }
