@@ -47,6 +47,7 @@ import type { Recording } from '../services/audioRecorder';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
 import { MentionAutocomplete, MentionCandidate } from '../components/MentionAutocomplete';
 import { TransformButton } from '../components/TransformButton';
+import { NVCComposerModal } from '../components/NVCComposerModal';
 import { LinkPreviewCard } from '../components/LinkPreviewCard';
 import type { Participant } from '../api/client';
 import { ExportSheet } from '../components/ExportSheet';
@@ -255,6 +256,10 @@ export function ChatScreen({
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+
+  // NVC composer modal (OpenChat-3kr.2) — Observation / Feeling / Need /
+  // Request scaffold. Optional mode for difficult conversations.
+  const [nvcVisible, setNvcVisible] = useState(false);
 
   // ── @-mention autocomplete state (OpenChat-0jy) ────────────────────────────
   // mentionQuery: the text typed after the triggering '@' at the cursor position.
@@ -1389,6 +1394,19 @@ export function ChatScreen({
             onError={showToast}
           />
         )}
+        {/* NVC composer button (OpenChat-3kr.2) — opens the 4-field
+            Observation/Feeling/Need/Request scaffold modal. Hidden in
+            edit mode or while voice-recording. */}
+        {!editingMessage && !isRecording && (
+          <TouchableOpacity
+            onPress={() => setNvcVisible(true)}
+            disabled={sending}
+            style={{ paddingHorizontal: 8, paddingVertical: 8 }}
+            accessibilityLabel="NVC compose"
+          >
+            <Text style={{ fontSize: 18, opacity: sending ? 0.4 : 1 }}>💙</Text>
+          </TouchableOpacity>
+        )}
         {/*
           Mic button (OpenChat-xxc): shown on native when text is empty and not editing.
           Hold to record; drag left > 80px to cancel.
@@ -1487,6 +1505,22 @@ export function ChatScreen({
 
       {/* In-app toast for report confirmation */}
       <ToastMessage visible={toastVisible} message={toastMsg} />
+
+      {/* NVC composer modal (OpenChat-3kr.2). On submit it stuffs the
+          assembled message into the composer's `text` state — the user can
+          still tweak before tapping Send, OR they can pre-empt that and we
+          send immediately. Default: stuff and let user hit Send so they
+          have one more chance to revise (NVC self-empathy moment). */}
+      <NVCComposerModal
+        visible={nvcVisible}
+        onCancel={() => setNvcVisible(false)}
+        onSubmit={(assembled) => {
+          setText(assembled);
+          setNvcVisible(false);
+          // Focus the composer so the user can revise before sending.
+          setTimeout(() => textInputRef.current?.focus(), 80);
+        }}
+      />
     </KeyboardAvoidingView>
   );
 }
