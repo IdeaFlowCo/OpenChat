@@ -193,10 +193,42 @@ function buildRows(messages: Message[], myId: string | undefined): RenderRow[] {
   return out;
 }
 
-export function ChatScreen() {
+/**
+ * ChatScreen props (OpenChat-601.2):
+ *
+ * The component is mounted in two contexts now:
+ *   1. /m/ + native — as a stack screen via ChatsNavigator. Reads
+ *      conversationId from the route, configures the native-stack header
+ *      via navigation.setOptions.
+ *   2. /d/ — embedded inside MasterDetailLayout's right pane. The parent
+ *      passes conversationId via props and asks us to skip header setup
+ *      via `embedded` (the master-detail provides its own chrome).
+ *
+ * Both contexts share the same body: the entire message thread, composer,
+ * action sheet, reactions, transforms, voice / image / link previews,
+ * mention autocomplete, etc. — giving /d/ full feature parity with /m/.
+ */
+interface ChatScreenProps {
+  /** Override conversationId. Required when used outside the Chat route. */
+  conversationId?: string;
+  /** When true, skip navigation.setOptions (parent owns the chrome). */
+  embedded?: boolean;
+}
+
+export function ChatScreen({
+  conversationId: conversationIdProp,
+  embedded = false,
+}: ChatScreenProps = {}) {
   const navigation = useNavigation<NavProp<'Chat'>>();
-  const route = useRoute<RouteProps<'Chat'>>();
-  const { conversationId } = route.params;
+  // Read route params defensively: when embedded inside MasterDetailLayout
+  // we're under a different route name ('Conversations'), so the Chat
+  // params shape isn't available. Fall back to the prop.
+  const routeRaw = useRoute();
+  const conversationId =
+    conversationIdProp
+    ?? (routeRaw.name === 'Chat'
+        ? ((routeRaw.params as { conversationId?: string } | undefined)?.conversationId ?? '')
+        : '');
   const { scheme } = useTheme();
   const c = getColors(scheme);
   // Dynamic keyboard offset for KeyboardAvoidingView. This is the distance
@@ -445,6 +477,8 @@ export function ChatScreen() {
   };
 
   useLayoutEffect(() => {
+    // Embedded in MasterDetailLayout — the parent owns the chrome.
+    if (embedded) return;
     navigation.setOptions({
       headerTitle: () => (
         <TouchableOpacity
@@ -511,7 +545,7 @@ export function ChatScreen() {
         </View>
       ),
     });
-  }, [navigation, isGroup, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.primary, c.textPrimary, c.textSecondary, c.textMuted, containsBot, isMuted, showMuteMenu]);
+  }, [embedded, navigation, isGroup, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.primary, c.textPrimary, c.textSecondary, c.textMuted, containsBot, isMuted, showMuteMenu]);
 
   const rows = useMemo(() => {
     const built = buildRows(messages, currentUser?.userId);

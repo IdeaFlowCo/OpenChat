@@ -10,7 +10,9 @@
  *
  * The right pane shows either:
  *   - an empty state ("Select a conversation"), or
- *   - <ChatPane showInlineHeader/> for the active conversation
+ *   - <ChatScreen conversationId={...} embedded /> — the same full-feature
+ *     screen mobile uses, parameterized to skip its native-stack header
+ *     (OpenChat-601.2)
  *
  * Active conversation lives in ChatContext (activeConversationId), set by
  * row press. Each switch remounts the pane via React's `key=` so the
@@ -47,7 +49,12 @@ import { getColors } from '../theme/colors';
 // Metro on web resolves identically; on native the dep graph never reaches
 // these files because nothing in native code imports MasterDetailLayout.
 import { ConversationList } from './ConversationList.web';
-import { ChatPane } from './ChatPane.web';
+// /d/ right pane renders the same ChatScreen that /m/ uses — with full
+// feature parity (voice / preview / transform / forwarding / reactions /
+// edit / delete / mentions / attachments / read receipts / pagination).
+// Pass embedded=true so it doesn't try to configure a stack header
+// (MasterDetailLayout owns the chrome). OpenChat-601.2.
+import { ChatScreen } from '../screens/ChatScreen';
 import type { NavProp } from '../navigation/types';
 
 const SIDEBAR_WIDTH_EXPANDED = 320;
@@ -293,11 +300,10 @@ export function MasterDetailLayout() {
 
       <View style={[styles.detail, { backgroundColor: c.background }]}>
         {activeConversationId ? (
-          <ChatPane
+          <ChatScreen
             key={activeConversationId}
             conversationId={activeConversationId}
-            showInlineHeader
-            onOpenGroupSettings={openGroupSettings}
+            embedded
           />
         ) : (
           <View style={styles.emptyDetail}>
