@@ -16,6 +16,19 @@ import { uploadAsync, FileSystemUploadType } from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { api, Attachment } from '../api/client';
 
+// ── Audio MIME helpers ────────────────────────────────────────────────────────
+
+/** Infer a sensible MIME type from a local audio URI. */
+function mimeTypeFromUri(uri: string): string {
+  const lower = uri.toLowerCase();
+  if (lower.endsWith('.m4a') || lower.endsWith('.aac')) return 'audio/m4a';
+  if (lower.endsWith('.mp3')) return 'audio/mpeg';
+  if (lower.endsWith('.wav')) return 'audio/wav';
+  if (lower.endsWith('.webm')) return 'audio/webm';
+  // Default to m4a — that's what our recorder produces on iOS/Android.
+  return 'audio/m4a';
+}
+
 export interface PickedAsset {
   uri: string;
   mimeType: string;
@@ -115,5 +128,63 @@ export async function uploadImage(asset: PickedAsset): Promise<Attachment> {
     mimeType: asset.mimeType,
     width: asset.width || undefined,
     height: asset.height || undefined,
+  };
+}
+
+/**
+ * Upload a recorded audio file to GCS via a presigned PUT URL.
+ * Returns an Attachment descriptor with type:'audio' ready to embed in a message.
+ *
+ * Max size enforced server-side is 10 MB; we check here too for a fast failure.
+ */
+export async function uploadAudio(
+  localUri: string,
+  durationMs: number
+): Promise<Attachment> {
+  const mimeType = mimeTypeFromUri(localUri);
+  const filename = `voice_${Date.now()}.m4a`;
+
+  // Fetch the file size. expo-file-system is available on native; on web we
+  // don't expose the mic button so this path is native-only.
+  let sizeBytes = 1;
+  if (Platform.OS !== 'web') {
+    try {
+      const { getInfoAsync } = await import('expo-file-system/legacy');
+      const info = await getInfoAsync(localUri);
+      if (info.exists && 'size' in info && typeof info.size === 'number') {
+        sizeBytes = info.size;
+      }
+    } catch {
+      // Fall through — server cap still protects us.
+    }
+  }
+
+  const MAX_AUDIO_BYTES = 10 * 1024 * 1024; // 10 MB
+  if (sizeBytes > MAX_AUDIO_BYTES) {
+    throw new Error('Voice message is too large (max 10 MB)');
+  }
+
+  // 1. Get presigned PUT URL.
+  const { putUrl, getUrl } = await api.presignAttachment({
+    filename,
+    mimeType,
+    sizeBytes,
+  });
+
+  // 2. Upload binary content.
+  const uploadResult = await uploadAsync(putUrl, localUri, {
+    httpMethod: 'PUT',
+    uploadType: FileSystemUploadType.BINARY_CONTENT,
+    headers: { 'Content-Type': mimeType },
+  });
+  if (uploadResult.status < 200 || uploadResult.status >= 300) {
+    throw new Error(`Audio upload failed: ${uploadResult.status}`);
+  }
+
+  return {
+    type: 'audio',
+    url: getUrl,
+    mimeType,
+    durationMs,
   };
 }

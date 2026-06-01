@@ -20,6 +20,7 @@
         "UIBackgroundModes": ["remote-notification"],
         "NSCameraUsageDescription": "OpenChat uses the camera to scan QR codes for adding contacts and joining group chats.",
         "NSPhotoLibraryUsageDescription": "OpenChat uses your photo library so you can share images in chats.",
+        "NSMicrophoneUsageDescription": "OpenChat uses the microphone to record voice messages.",
         "CFBundleURLTypes": [
           {
             "CFBundleURLSchemes": [
