@@ -11,6 +11,7 @@
     "seed": "tsx src/seed-test-data.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.91.1",
     "@aws-sdk/client-s3": "^3.1040.0",
     "@aws-sdk/s3-request-presigner": "^3.1040.0",
     "cors": "^2.8.5",
