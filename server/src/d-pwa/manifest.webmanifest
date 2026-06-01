@@ -1,0 +1,40 @@
+{
+  "name": "OpenChat",
+  "short_name": "OpenChat",
+  "description": "Real-time messaging built for you and your agents — voice notes, link previews, reactions, and Claude / Cursor / Codex agents via MCP.",
+  "id": "/d/",
+  "start_url": "/d/",
+  "scope": "/d/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0c18",
+  "theme_color": "#5664e2",
+  "icons": [
+    {
+      "src": "/d/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/d/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/d/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["productivity", "social", "communication"],
+  "shortcuts": [
+    {
+      "name": "New conversation",
+      "url": "/d/?action=new",
+      "description": "Start a new chat"
+    }
+  ]
+}

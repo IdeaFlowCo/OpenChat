@@ -95,6 +95,37 @@ if [ -d "$MOBILE_REPO" ]; then
 
   echo "  ✓ /m/ references only /m/ paths"
   echo "  ✓ /d/ references only /d/ paths"
+
+  # ── PWA assets for /d/ (OpenChat-3rw) ────────────────────────────────────
+  # Make /d/ installable from Chrome / Edge / Brave / Safari Sonoma+.
+  # Copies a manifest, service worker, and icons into the deployed /d/ dist,
+  # and injects the <link rel="manifest"> + sw registration into index.html
+  # at build time so the same RN-web bundle becomes an installable app.
+  echo ""
+  echo "── Injecting PWA manifest + sw into /d/ build ──"
+
+  PWA_SRC="$(pwd)/server/src/d-pwa"
+  if [ -d "$PWA_SRC" ]; then
+    cp "$PWA_SRC/manifest.webmanifest" client-mobile-desktop/dist/manifest.webmanifest
+    cp "$PWA_SRC/sw.js"                client-mobile-desktop/dist/sw.js
+    cp "$PWA_SRC/icon-192.png"         client-mobile-desktop/dist/icon-192.png
+    cp "$PWA_SRC/icon-512.png"         client-mobile-desktop/dist/icon-512.png
+
+    # Inject PWA tags before </head> on /d/ index.html. Uses a portable
+    # perl one-liner so it works on both macOS BSD sed and GNU sed.
+    perl -i -pe '
+      s|</head>|<link rel="manifest" href="/d/manifest.webmanifest"><meta name="theme-color" content="#5664e2"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="OpenChat"><link rel="apple-touch-icon" href="/d/icon-192.png"><script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/d/sw.js",{scope:"/d/"}).catch(function(e){console.warn("SW registration failed",e)})})}</script></head>|
+    ' client-mobile-desktop/dist/index.html
+
+    if grep -q "manifest.webmanifest" client-mobile-desktop/dist/index.html; then
+      echo "  ✓ PWA manifest + sw injected into /d/ index.html"
+    else
+      echo "ERROR: PWA injection failed — </head> not matched in dist-web-d/index.html"
+      exit 1
+    fi
+  else
+    echo "  (skip — server/src/d-pwa/ not present; PWA install will not be available)"
+  fi
 else
   echo ""
   echo "openchat-mobile repo not found at $MOBILE_REPO — /m and /d will serve placeholders."
