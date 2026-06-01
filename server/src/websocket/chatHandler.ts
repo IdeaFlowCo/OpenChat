@@ -16,6 +16,12 @@ const socketConversations = new Map<string, Set<string>>(); // socketId -> conve
 const userSockets = new Map<string, Set<string>>(); // userId -> socketIds
 const socketUsers = new Map<string, string>(); // socketId -> userId
 
+// Export the user-presence map so HTTP route handlers can check online status
+// for "delivered" inference without a DB round-trip.
+export function isUserOnline(userId: string): boolean {
+  return (userSockets.get(userId)?.size ?? 0) > 0;
+}
+
 // Force-join a user's live sockets to a conversation room. Used when a
 // member is added to a group: their existing connection should immediately
 // start receiving message:new without waiting for them to click the conv.

@@ -156,6 +156,78 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
+ * PATCH /api/auth/me — Update current user's profile (OpenChat-tml)
+ * Body: { name?: string, statusMessage?: string }
+ *
+ * Persists name and/or statusMessage. Emits `user:profile-updated` via
+ * Socket.IO to all users who share a conversation with the editor so their
+ * UIs can refresh participant info without polling.
+ */
+router.patch('/me', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const { name, statusMessage } = (req.body ?? {}) as {
+    name?: string;
+    statusMessage?: string;
+  };
+
+  if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+    res.status(400).json({ error: 'name must be a non-empty string' });
+    return;
+  }
+
+  try {
+    const now = new Date().toISOString();
+    const result = await session.run(`
+      MATCH (u:User {id: $userId})
+      SET u.name = CASE WHEN $name IS NOT NULL THEN $name ELSE u.name END,
+          u.statusMessage = CASE WHEN $statusMessage IS NOT NULL THEN $statusMessage ELSE u.statusMessage END,
+          u.updatedAt = datetime($now)
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot } AS user
+    `, {
+      userId,
+      name: name?.trim() ?? null,
+      statusMessage: statusMessage ?? null,
+      now,
+    });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const user = toJS(result.records[0].get('user')) as Record<string, unknown>;
+
+    // Broadcast to anyone who shares a conversation with this user so their
+    // participant lists and DM headers update in real time.
+    const io = req.app.get('io') as unknown as import('socket.io').Server | undefined;
+    if (io) {
+      // Find all conversation-room members who share a conversation.
+      const convResult = await session.run(`
+        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
+        RETURN DISTINCT c.id AS conversationId
+      `, { userId });
+
+      for (const r of convResult.records) {
+        const convId = r.get('conversationId') as string;
+        io.to(`conversation:${convId}`).emit('user:profile-updated', {
+          userId,
+          name: user.name,
+          statusMessage: user.statusMessage,
+        });
+      }
+    }
+
+    res.json(user);
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    res.status(500).json({ error: 'Failed to update profile' });
+  } finally {
+    await session.close();
+  }
+});
+
+/**
  * POST /api/auth/logout - Mark user as offline
  * (Token invalidation would require a blocklist in production)
  */

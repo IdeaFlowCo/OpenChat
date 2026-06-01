@@ -2,9 +2,30 @@ import { Router, Request, Response } from 'express';
 import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
 import neo4j from 'neo4j-driver';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
-import { joinUserSocketsToConversation, leaveUserSocketsFromConversation } from '../websocket/chatHandler.js';
+import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline } from '../websocket/chatHandler.js';
+
+// ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
+let _s3: S3Client | null = null;
+function getS3(): S3Client {
+  if (_s3) return _s3;
+  const endpoint = process.env.S3_ENDPOINT;
+  const region = process.env.AWS_REGION || 'auto';
+  _s3 = new S3Client({
+    region,
+    ...(endpoint ? { endpoint, forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true' } : {}),
+    credentials: process.env.AWS_ACCESS_KEY_ID
+      ? {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+        }
+      : undefined,
+  });
+  return _s3;
+}
 
 const router = Router();
 
@@ -536,27 +557,104 @@ router.get('/conversations/:id/messages', requireAuth, async (req: Request, res:
     const query = before
       ? `
         MATCH (m:Message {conversationId: $id})
-        WHERE m.createdAt < datetime($before) AND m.deletedAt IS NULL
+        WHERE m.createdAt < datetime($before)
         MATCH (sender:User {id: m.senderId})
-        RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+        CALL {
+          WITH m
+          OPTIONAL MATCH (reactor:User)-[r:REACTED]->(m)
+          WITH r.emoji AS emoji, count(*) AS cnt, collect(reactor.id) AS reactors
+          WHERE emoji IS NOT NULL
+          RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors }) AS reactions
+        }
+        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
       `
       : `
         MATCH (m:Message {conversationId: $id})
-        WHERE m.deletedAt IS NULL
         MATCH (sender:User {id: m.senderId})
-        RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+        CALL {
+          WITH m
+          OPTIONAL MATCH (reactor:User)-[r:REACTED]->(m)
+          WITH r.emoji AS emoji, count(*) AS cnt, collect(reactor.id) AS reactors
+          WHERE emoji IS NOT NULL
+          RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors }) AS reactions
+        }
+        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
       `;
 
-    const result = await session.run(query, { id, limit: neo4j.int(limit), before });
-    const messages = result.records.map(r => toJS(r.get('message'))).reverse();
+    const result = await session.run(query, { id, limit: neo4j.int(limit), before, userId });
+    const messages = result.records.map(r => {
+      const msg = toJS(r.get('message')) as Record<string, unknown>;
+      if (msg && typeof msg.attachments === 'string') {
+        try { msg.attachments = JSON.parse(msg.attachments as string); } catch { /* leave as string */ }
+      }
+      return msg;
+    }).reverse();
     res.json(messages);
   } catch (error) {
     console.error('Error fetching messages:', error);
     res.status(500).json({ error: 'Failed to fetch messages' });
+  } finally {
+    await session.close();
+  }
+});
+
+// PATCH /api/chat/conversations/:id/read — mark caller's lastReadAt = now (OpenChat-0nj)
+// Also returns per-participant lastReadAt map and online status so the client
+// can infer tick state without a separate round-trip.
+router.patch('/conversations/:id/read', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const { id: conversationId } = req.params;
+  const now = new Date().toISOString();
+
+  try {
+    // Verify user is participant and update their lastReadAt on the edge.
+    const check = await session.run(`
+      MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+      SET rel.lastReadAt = datetime($now)
+      RETURN c
+    `, { userId, conversationId, now });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    // Fetch all participant lastReadAt values to include in the emit.
+    const participantResult = await session.run(`
+      MATCH (u:User)-[rel:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+      RETURN u.id AS userId, rel.lastReadAt AS lastReadAt
+    `, { conversationId });
+
+    const readMap: Record<string, string | null> = {};
+    const onlineMap: Record<string, boolean> = {};
+    for (const r of participantResult.records) {
+      const uid = r.get('userId') as string;
+      const raw = r.get('lastReadAt');
+      readMap[uid] = raw ? toJS(raw) as string : null;
+      onlineMap[uid] = isUserOnline(uid);
+    }
+
+    const io = req.app.get('io') as IOServer | undefined;
+    if (io) {
+      // Emit to all participants in the conversation room.
+      io.to(`conversation:${conversationId}`).emit('read:updated', {
+        conversationId,
+        userId,
+        lastReadAt: now,
+        readMap,
+        onlineMap,
+      });
+    }
+
+    res.json({ ok: true, lastReadAt: now, readMap, onlineMap });
+  } catch (error) {
+    console.error('Error marking read:', error);
+    res.status(500).json({ error: 'Failed to mark read' });
   } finally {
     await session.close();
   }
@@ -567,11 +665,29 @@ router.post('/conversations/:id/messages', requireAuth, async (req: Request, res
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id: conversationId } = req.params;
-  const { content, messageType = 'text' } = req.body;
+  const { content, messageType = 'text', attachments } = req.body;
 
-  if (!content || typeof content !== 'string') {
-    res.status(400).json({ error: 'content is required' });
+  // Allow either content OR attachments (images can be sent without caption).
+  const hasContent = content && typeof content === 'string' && content.trim();
+  const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+  if (!hasContent && !hasAttachments) {
+    res.status(400).json({ error: 'content or attachments is required' });
     return;
+  }
+
+  // Validate attachments shape if present
+  if (hasAttachments) {
+    for (const a of attachments as unknown[]) {
+      const att = a as Record<string, unknown>;
+      if (!att.url || typeof att.url !== 'string') {
+        res.status(400).json({ error: 'Each attachment must have a url' });
+        return;
+      }
+      if (!att.mimeType || typeof att.mimeType !== 'string') {
+        res.status(400).json({ error: 'Each attachment must have a mimeType' });
+        return;
+      }
+    }
   }
 
   try {
@@ -588,6 +704,12 @@ router.post('/conversations/:id/messages', requireAuth, async (req: Request, res
 
     const messageId = nanoid();
     const now = new Date().toISOString();
+    // Use caption or fallback for preview
+    const messageContent = hasContent ? (content as string).trim() : '';
+    // attachmentsJson stored as a JSON string in Neo4j
+    const attachmentsJson = hasAttachments ? JSON.stringify(attachments) : null;
+    // lastMessagePreview for image-only messages
+    const preview = messageContent || (hasAttachments ? '📷 Photo' : '');
 
     const result = await session.run(`
       MATCH (c:Conversation {id: $conversationId})
@@ -598,25 +720,32 @@ router.post('/conversations/:id/messages', requireAuth, async (req: Request, res
         senderId: $senderId,
         conversationId: $conversationId,
         messageType: $messageType,
-        createdAt: datetime($now)
+        createdAt: datetime($now),
+        attachments: $attachmentsJson
       })
       CREATE (m)-[:IN_CONVERSATION]->(c)
       CREATE (sender)-[:SENT]->(m)
       SET c.updatedAt = datetime($now),
           c.lastMessageAt = datetime($now),
-          c.lastMessagePreview = left($content, 100)
+          c.lastMessagePreview = left($preview, 100)
       RETURN m { .*, sender: sender { .id, .name, .email } } AS message
     `, {
       id: messageId,
-      content,
+      content: messageContent,
       senderId: userId,
       conversationId,
       messageType,
-      now
+      now,
+      attachmentsJson,
+      preview,
     });
 
-    const message = toJS(result.records[0].get('message'));
-    res.status(201).json(message);
+    const raw = toJS(result.records[0].get('message')) as Record<string, unknown>;
+    // Parse attachments JSON string back to array for the response
+    if (raw && typeof raw.attachments === 'string') {
+      try { raw.attachments = JSON.parse(raw.attachments as string); } catch { /* leave as string */ }
+    }
+    res.status(201).json(raw);
   } catch (error) {
     console.error('Error sending message:', error);
     res.status(500).json({ error: 'Failed to send message' });
@@ -1088,4 +1217,330 @@ router.post('/ai-disclosure-accept', requireAuth, async (req: Request, res: Resp
   }
 });
 
+// ─── Edit / Delete messages (OpenChat-q9h) ───────────────────────────────────
+
+// Helper: load participant IDs of a conversation for socket fanout.
+async function loadParticipantIds(
+  session: ReturnType<ReturnType<typeof getDriver>['session']>,
+  conversationId: string
+): Promise<string[]> {
+  const result = await session.run(`
+    MATCH (u:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+    RETURN u.id AS uid
+  `, { conversationId });
+  return result.records.map(r => r.get('uid') as string);
+}
+
+// Emit message:updated to all participants of a conversation.
+function emitMessageUpdated(
+  io: IOServer | undefined,
+  conversationId: string,
+  participantIds: string[],
+  message: unknown
+): void {
+  if (!io) return;
+  // Emit to the conversation room (sockets already joined).
+  io.to(`conversation:${conversationId}`).emit('message:updated', message);
+  // Also emit to per-user rooms so participants who aren't in the room get it.
+  for (const uid of participantIds) {
+    io.to(`user:${uid}`).emit('message:updated', message);
+  }
+}
+
+// Emit message:reactions-updated to all participants.
+function emitReactionsUpdated(
+  io: IOServer | undefined,
+  conversationId: string,
+  participantIds: string[],
+  payload: unknown
+): void {
+  if (!io) return;
+  io.to(`conversation:${conversationId}`).emit('message:reactions-updated', payload);
+  for (const uid of participantIds) {
+    io.to(`user:${uid}`).emit('message:reactions-updated', payload);
+  }
+}
+
+// PATCH /api/chat/messages/:id — edit own message (owner-only)
+router.patch('/messages/:id', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const messageId = req.params.id as string;
+  const { content } = req.body as { content?: string };
+
+  if (!content || typeof content !== 'string' || !content.trim()) {
+    res.status(400).json({ error: 'content is required' });
+    return;
+  }
+
+  try {
+    // Verify ownership and get conversationId
+    const check = await session.run(`
+      MATCH (m:Message {id: $messageId})
+      WHERE m.senderId = $userId AND m.deletedAt IS NULL
+      RETURN m.conversationId AS conversationId
+    `, { messageId, userId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Message not found or not yours' });
+      return;
+    }
+
+    const conversationId = check.records[0].get('conversationId') as string;
+    const now = new Date().toISOString();
+
+    const result = await session.run(`
+      MATCH (m:Message {id: $messageId})
+      MATCH (sender:User {id: m.senderId})
+      SET m.content = $content, m.editedAt = datetime($now)
+      RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+    `, { messageId, content: content.trim(), now });
+
+    const message = toJS(result.records[0].get('message'));
+
+    // Broadcast to all conversation participants
+    const io = req.app.get('io') as IOServer | undefined;
+    const participantIds = await loadParticipantIds(session, conversationId);
+    emitMessageUpdated(io, conversationId, participantIds, message);
+
+    res.json(message);
+  } catch (error) {
+    console.error('Error editing message:', error);
+    res.status(500).json({ error: 'Failed to edit message' });
+  } finally {
+    await session.close();
+  }
+});
+
+// DELETE /api/chat/messages/:id — soft-delete own message (owner-only)
+router.delete('/messages/:id', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const messageId = req.params.id as string;
+
+  try {
+    // Verify ownership
+    const check = await session.run(`
+      MATCH (m:Message {id: $messageId})
+      WHERE m.senderId = $userId
+      RETURN m.conversationId AS conversationId
+    `, { messageId, userId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Message not found or not yours' });
+      return;
+    }
+
+    const conversationId = check.records[0].get('conversationId') as string;
+    const now = new Date().toISOString();
+
+    const result = await session.run(`
+      MATCH (m:Message {id: $messageId})
+      MATCH (sender:User {id: m.senderId})
+      SET m.content = 'Message deleted',
+          m.deletedAt = datetime($now),
+          m.attachments = null
+      RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+    `, { messageId, now });
+
+    const message = toJS(result.records[0].get('message'));
+
+    const io = req.app.get('io') as IOServer | undefined;
+    const participantIds = await loadParticipantIds(session, conversationId);
+    emitMessageUpdated(io, conversationId, participantIds, message);
+
+    res.json(message);
+  } catch (error) {
+    console.error('Error deleting message:', error);
+    res.status(500).json({ error: 'Failed to delete message' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ─── Reactions (OpenChat-7bd) ─────────────────────────────────────────────────
+
+// Helper: aggregate reactions on a message for the requesting user.
+async function getReactionSummary(
+  session: ReturnType<ReturnType<typeof getDriver>['session']>,
+  messageId: string,
+  userId: string
+): Promise<Array<{ emoji: string; count: number; byMe: boolean }>> {
+  const result = await session.run(`
+    MATCH (u:User)-[r:REACTED]->(m:Message {id: $messageId})
+    WITH r.emoji AS emoji, count(*) AS cnt, collect(u.id) AS reactors
+    RETURN emoji, cnt, $userId IN reactors AS byMe
+    ORDER BY emoji
+  `, { messageId, userId });
+  return result.records.map(rec => ({
+    emoji: rec.get('emoji') as string,
+    count: (rec.get('cnt') as { toNumber: () => number }).toNumber?.() ?? Number(rec.get('cnt')),
+    byMe: rec.get('byMe') as boolean,
+  }));
+}
+
+// POST /api/chat/messages/:id/reactions — add reaction (idempotent)
+router.post('/messages/:id/reactions', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const messageId = req.params.id as string;
+  const { emoji } = req.body as { emoji?: string };
+
+  const ALLOWED_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+  if (!emoji || !ALLOWED_EMOJI.includes(emoji)) {
+    res.status(400).json({ error: `emoji must be one of: ${ALLOWED_EMOJI.join(' ')}` });
+    return;
+  }
+
+  try {
+    // Verify user is participant in the conversation containing this message
+    const check = await session.run(`
+      MATCH (m:Message {id: $messageId})
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: m.conversationId})
+      RETURN m.conversationId AS conversationId
+    `, { messageId, userId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Message not found or not accessible' });
+      return;
+    }
+
+    const conversationId = check.records[0].get('conversationId') as string;
+    const now = new Date().toISOString();
+
+    // MERGE so re-adding same emoji is idempotent
+    await session.run(`
+      MATCH (u:User {id: $userId}), (m:Message {id: $messageId})
+      MERGE (u)-[r:REACTED {emoji: $emoji}]->(m)
+      ON CREATE SET r.createdAt = datetime($now)
+    `, { userId, messageId, emoji, now });
+
+    const reactions = await getReactionSummary(session, messageId, userId);
+
+    const io = req.app.get('io') as IOServer | undefined;
+    const participantIds = await loadParticipantIds(session, conversationId);
+    const payload = { messageId, conversationId, reactions };
+    emitReactionsUpdated(io, conversationId, participantIds, payload);
+
+    res.status(201).json({ reactions });
+  } catch (error) {
+    console.error('Error adding reaction:', error);
+    res.status(500).json({ error: 'Failed to add reaction' });
+  } finally {
+    await session.close();
+  }
+});
+
+// DELETE /api/chat/messages/:id/reactions/:emoji — remove own reaction
+router.delete('/messages/:id/reactions/:emoji', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const messageId = req.params.id as string;
+  const emoji = decodeURIComponent(req.params.emoji as string);
+
+  try {
+    // Verify access
+    const check = await session.run(`
+      MATCH (m:Message {id: $messageId})
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: m.conversationId})
+      RETURN m.conversationId AS conversationId
+    `, { messageId, userId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Message not found or not accessible' });
+      return;
+    }
+
+    const conversationId = check.records[0].get('conversationId') as string;
+
+    await session.run(`
+      MATCH (u:User {id: $userId})-[r:REACTED {emoji: $emoji}]->(m:Message {id: $messageId})
+      DELETE r
+    `, { userId, messageId, emoji });
+
+    const reactions = await getReactionSummary(session, messageId, userId);
+
+    const io = req.app.get('io') as IOServer | undefined;
+    const participantIds = await loadParticipantIds(session, conversationId);
+    const payload = { messageId, conversationId, reactions };
+    emitReactionsUpdated(io, conversationId, participantIds, payload);
+
+    res.json({ reactions });
+  } catch (error) {
+    console.error('Error removing reaction:', error);
+    res.status(500).json({ error: 'Failed to remove reaction' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ─── Attachments (OpenChat-6bg) ──────────────────────────────────────────────
+
+const ALLOWED_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+]);
+const MAX_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
+
+// POST /api/chat/attachments/presign
+// Body: { filename: string, mimeType: string, sizeBytes: number }
+// Returns: { putUrl, getUrl, key }
+router.post('/attachments/presign', requireAuth, async (req: Request, res: Response) => {
+  const bucket = process.env.S3_BUCKET;
+  if (!bucket) {
+    res.status(503).json({ error: 'File uploads are not configured on this server' });
+    return;
+  }
+
+  const { filename, mimeType, sizeBytes } = req.body as {
+    filename?: string;
+    mimeType?: string;
+    sizeBytes?: number;
+  };
+
+  if (!filename || typeof filename !== 'string') {
+    res.status(400).json({ error: 'filename is required' });
+    return;
+  }
+  if (!mimeType || !ALLOWED_MIME_TYPES.has(mimeType)) {
+    res.status(400).json({
+      error: `mimeType must be one of: ${[...ALLOWED_MIME_TYPES].join(', ')}`,
+    });
+    return;
+  }
+  if (typeof sizeBytes !== 'number' || sizeBytes <= 0 || sizeBytes > MAX_SIZE_BYTES) {
+    res.status(400).json({ error: `sizeBytes must be between 1 and ${MAX_SIZE_BYTES}` });
+    return;
+  }
+
+  // Build a storage key: attachments/<userId>/<nanoid>/<sanitised filename>
+  const userId = req.user!.userId;
+  const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 128);
+  const key = `attachments/${userId}/${nanoid()}/${safeFilename}`;
+
+  try {
+    const s3 = getS3();
+    const command = new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ContentType: mimeType,
+      ContentLength: sizeBytes,
+    });
+    const putUrl = await getSignedUrl(s3, command, { expiresIn: 300 }); // 5 minutes
+
+    // Public GET URL (bucket is public-read)
+    const endpoint = process.env.S3_ENDPOINT || 'https://storage.googleapis.com';
+    const getUrl = `${endpoint}/${bucket}/${key}`;
+
+    res.json({ putUrl, getUrl, key });
+  } catch (err) {
+    console.error('[attachments] presign error:', err);
+    res.status(500).json({ error: 'Failed to generate upload URL' });
+  }
+});
+
 export default router;
+
