@@ -91,6 +91,24 @@ app.get('/about/qr.svg', (_req, res) => {
   res.sendFile(landingQrPath);
 });
 
+// Apple App Site Association (OpenChat-84u.1). Enables Universal Links so
+// tapping https://chat.globalbr.ai/i/<token> or .../u/<id> in Messages /
+// Mail / Safari opens the native OpenChat app when installed, instead of
+// landing in mobile Safari. Apple fetches this file once when the app is
+// installed and caches it.
+//
+// MUST be served:
+//   - at /.well-known/apple-app-site-association (no extension in URL)
+//   - with Content-Type: application/json
+//   - over HTTPS (we're behind Cloudflare → nginx, so this is fine)
+//   - without redirects
+const aasaPath = path.join(__dirname, 'well-known', 'apple-app-site-association.json');
+app.get('/.well-known/apple-app-site-association', (_req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.sendFile(aasaPath);
+});
+
 // /about/connect-your-bot — agent integration guide (OpenChat-7c9).
 // Rendered once at startup from docs/connect-your-bot.md so updates only need
 // a redeploy, not new route code. Wrapped in the same dark-violet shell as

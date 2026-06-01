@@ -1,0 +1,23 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "JESMXK96LG.com.jacobcole.openchat",
+        "paths": [
+          "/i/*",
+          "/u/*"
+        ],
+        "components": [
+          { "/": "/i/*", "comment": "Group invite deep links" },
+          { "/": "/u/*", "comment": "Per-user add deep links" }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": [
+      "JESMXK96LG.com.jacobcole.openchat"
+    ]
+  }
+}
