@@ -7,6 +7,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline } from '../websocket/chatHandler.js';
+import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPreview.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
 let _s3: S3Client | null = null;
@@ -593,6 +594,19 @@ router.get('/conversations/:id/messages', requireAuth, async (req: Request, res:
       }
       return msg;
     }).reverse();
+
+    // Attach link previews (OpenChat-hq2)
+    if (messages.length > 0) {
+      const ids = messages.map(m => m.id as string);
+      const previewMap = await loadPreviewsForMessages(ids);
+      for (const msg of messages) {
+        const previews = previewMap.get(msg.id as string);
+        if (previews && previews.length > 0) {
+          msg.linkPreviews = previews;
+        }
+      }
+    }
+
     // hasMore: if we got exactly `limit` records back, there are probably older
     // messages. We don't run a separate COUNT query for perf — one extra fetch
     // that returns 0 rows is the acceptable edge case.
@@ -749,6 +763,13 @@ router.post('/conversations/:id/messages', requireAuth, async (req: Request, res
     if (raw && typeof raw.attachments === 'string') {
       try { raw.attachments = JSON.parse(raw.attachments as string); } catch { /* leave as string */ }
     }
+
+    // Async link preview fetch — non-blocking (OpenChat-hq2)
+    const io = req.app.get('io') as IOServer | undefined;
+    if (io) {
+      processLinkPreviews(io, raw.id as string, conversationId as string, content as string);
+    }
+
     res.status(201).json(raw);
   } catch (error) {
     console.error('Error sending message:', error);

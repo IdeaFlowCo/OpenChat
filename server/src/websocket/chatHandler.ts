@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
 import { validateToken, AuthUser } from '../middleware/auth.js';
 import { sendPushToUser } from '../services/push.js';
+import { processLinkPreviews } from '../services/linkPreview.js';
 
 interface AuthenticatedSocket extends Socket {
   user?: AuthUser;
@@ -251,6 +252,9 @@ export function setupChatSocket(io: Server): void {
 
         // Broadcast to all participants in the conversation
         io.to(`conversation:${conversationId}`).emit('message:new', message);
+
+        // Async link preview fetch — non-blocking (OpenChat-hq2)
+        processLinkPreviews(io, messageId, conversationId, content);
 
         callback?.({ success: true, message });
 
