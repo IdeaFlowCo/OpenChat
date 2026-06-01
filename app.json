@@ -19,6 +19,7 @@
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": ["remote-notification"],
         "NSCameraUsageDescription": "OpenChat uses the camera to scan QR codes for adding contacts and joining group chats.",
+        "NSPhotoLibraryUsageDescription": "OpenChat uses your photo library so you can share images in chats.",
         "CFBundleURLTypes": [
           {
             "CFBundleURLSchemes": [
@@ -53,6 +54,7 @@
       "expo-secure-store",
       "expo-web-browser",
       "expo-camera",
+      "expo-image-picker",
       "expo-apple-authentication",
       [
         "expo-notifications",

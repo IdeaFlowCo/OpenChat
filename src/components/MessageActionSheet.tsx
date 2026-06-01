@@ -2,12 +2,13 @@
  * MessageActionSheet — modal bottom sheet that appears on long-press of a
  * message bubble in ChatScreen.
  *
- * Actions shipped (OpenChat-uxj, OpenChat-46p, OpenChat-wgl):
- *   Reply         — sets composer replyTo state, dismisses sheet
- *   Block <name>  — only on others' messages; confirms then calls api.blockUser
- *   Report        — only on others' messages; sub-sheet for reason then submits
- *
- * Future hooks (Edit, Delete, React) are listed in comments but not rendered.
+ * Actions (OpenChat-uxj, OpenChat-46p, OpenChat-wgl, OpenChat-q9h, OpenChat-7bd):
+ *   Reply         — always shown; sets composer replyTo state
+ *   Edit          — own messages only; enters edit mode in composer
+ *   Delete        — own messages only; confirms then soft-deletes
+ *   React         — always shown; shows inline emoji picker
+ *   Block <name>  — others' messages only
+ *   Report        — others' messages only; sub-sheet for reason
  */
 
 import { useState } from 'react';
@@ -24,7 +25,8 @@ import {
 } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
-import { Message } from '../api/client';
+import { Message, ReactionSummary } from '../api/client';
+import { ReactionPicker } from './ReactionPicker';
 
 export interface ReplyToData {
   messageId: string;
@@ -41,6 +43,12 @@ interface Props {
   onDismiss: () => void;
   /** Reply action — sets replyTo in composer */
   onReply: (data: ReplyToData) => void;
+  /** Edit action (own messages) — enters edit mode in composer */
+  onEdit: (message: Message) => void;
+  /** Delete action (own messages) — confirms and calls back */
+  onDelete: (messageId: string) => void;
+  /** React action — called with the emoji string */
+  onReact: (messageId: string, emoji: string) => void;
   /** Block action — called with the sender's userId */
   onBlock: (userId: string, displayName: string) => void;
   /** Report action — called with messageId, reason, and optional freeform */
@@ -57,14 +65,17 @@ export function MessageActionSheet({
   senderName,
   onDismiss,
   onReply,
+  onEdit,
+  onDelete,
+  onReact,
   onBlock,
   onReport,
 }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
 
-  // Sub-sheet state: null = main, 'report' = report picker, 'other' = freeform
-  const [subSheet, setSubSheet] = useState<null | 'report' | 'other'>(null);
+  // Sub-sheet state: null = main, 'report' = report picker, 'other' = freeform, 'react' = emoji picker
+  const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react'>(null);
   const [freeformText, setFreeformText] = useState('');
 
   const handleDismiss = () => {
@@ -81,6 +92,37 @@ export function MessageActionSheet({
       senderName: senderName,
       content: message.content,
     });
+    handleDismiss();
+  };
+
+  const handleEditPress = () => {
+    if (!message) return;
+    onEdit(message);
+    handleDismiss();
+  };
+
+  const handleDeletePress = () => {
+    if (!message) return;
+    Alert.alert(
+      'Delete this message?',
+      'This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            handleDismiss();
+            onDelete(message.id);
+          },
+        },
+      ]
+    );
+  };
+
+  const handleReactPick = (emoji: string) => {
+    if (!message) return;
+    onReact(message.id, emoji);
     handleDismiss();
   };
 
@@ -206,6 +248,12 @@ export function MessageActionSheet({
     );
   }
 
+  // Derive which reactions the current user already has on this message.
+  // This info is used to highlight active emoji in the picker.
+  const myReactions = (message.reactions ?? [])
+    .filter((r: ReactionSummary) => r.byMe)
+    .map((r: ReactionSummary) => r.emoji);
+
   // ── Main action sheet ──────────────────────────────────────────────────────
   return (
     <Modal transparent animationType="fade" visible={visible} onRequestClose={handleDismiss}>
@@ -220,19 +268,48 @@ export function MessageActionSheet({
                 {senderName}
               </Text>
               <Text style={[styles.previewContent, { color: c.textPrimary }]} numberOfLines={2}>
-                {message.content}
+                {message.deletedAt ? 'Message deleted' : message.content}
               </Text>
             </View>
 
-            {/* Reply — always shown */}
-            <TouchableOpacity
-              style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-              onPress={handleReply}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.actionIcon}>↩</Text>
-              <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Reply</Text>
-            </TouchableOpacity>
+            {/* Inline emoji reaction picker — always shown (OpenChat-7bd) */}
+            <ReactionPicker myReactions={myReactions} onPick={handleReactPick} />
+
+            {/* Reply — always shown (skip if message is deleted) */}
+            {!message.deletedAt && (
+              <TouchableOpacity
+                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={handleReply}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.actionIcon}>↩</Text>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Reply</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Edit — own non-deleted messages only (OpenChat-q9h) */}
+            {isOwn && !message.deletedAt && (
+              <TouchableOpacity
+                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={handleEditPress}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.actionIcon}>✎</Text>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Edit message</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Delete — own messages only (OpenChat-q9h) */}
+            {isOwn && !message.deletedAt && (
+              <TouchableOpacity
+                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={handleDeletePress}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.actionIcon}>🗑</Text>
+                <Text style={[styles.actionLabel, { color: c.danger }]}>Delete message</Text>
+              </TouchableOpacity>
+            )}
 
             {/* Block — only on others' messages */}
             {!isOwn && (
@@ -259,10 +336,6 @@ export function MessageActionSheet({
                 <Text style={[styles.actionLabel, { color: c.danger }]}>Report message</Text>
               </TouchableOpacity>
             )}
-
-            {/* Future: Edit own message — hook placeholder, not rendered */}
-            {/* Future: Delete own message — hook placeholder, not rendered */}
-            {/* Future: React with emoji — hook placeholder, not rendered */}
 
             <TouchableOpacity
               style={[styles.cancelRow, { borderColor: c.border }]}

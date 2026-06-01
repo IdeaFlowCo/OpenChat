@@ -688,6 +688,8 @@ export function ChatScreen() {
                     )}
                   </View>
                 )}
+                {/* Column wrapper so ReactionsBar renders below the bubble */}
+                <View style={{ flexDirection: 'column', maxWidth: '78%', alignItems: isOwn ? 'flex-end' : 'flex-start' }}>
                 <TouchableOpacity
                   activeOpacity={0.85}
                   onLongPress={() => handleLongPress(m, isOwn, m.sender?.name || m.sender?.email || '')}
@@ -759,15 +761,19 @@ export function ChatScreen() {
                       </TouchableOpacity>
                     );
                   })}
-                  {!!m.content && (
-                    <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 16 }}>
-                      {m.content}
-                    </Text>
-                  )}
+                  {/* Deleted: muted italic tombstone (OpenChat-q9h) */}
+                  {m.deletedAt
+                    ? <Text style={{ color: isOwn ? 'rgba(255,255,255,0.55)' : c.textMuted, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
+                    : (!!m.content && <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 16 }}>{m.content}</Text>)
+                  }
                   <View style={styles.bubbleFooter}>
                     <Text style={{ color: isOwn ? 'rgba(255,255,255,0.7)' : c.textMuted, fontSize: 10 }}>
                       {failed ? 'Failed to send' : formatTime(m.createdAt)}
                     </Text>
+                    {/* Edited tag (OpenChat-q9h) */}
+                    {!!(m.editedAt && !m.deletedAt) && (
+                      <Text style={{ color: isOwn ? 'rgba(255,255,255,0.6)' : c.textMuted, fontSize: 10, marginLeft: 4, fontStyle: 'italic' }}>edited</Text>
+                    )}
                     {/* Tick marks for own DM messages (OpenChat-0nj). Only shown
                         after the local-optimistic id is replaced by a real server id. */}
                     {isOwn && !isGroup && !failed && !m.id.startsWith('local-') && (() => {
@@ -782,6 +788,11 @@ export function ChatScreen() {
                     })()}
                   </View>
                 </TouchableOpacity>
+                {/* Reactions bar below bubble (OpenChat-7bd) */}
+                {!!(m.reactions && m.reactions.length > 0) && (
+                  <ReactionsBar reactions={m.reactions!} isOwn={isOwn} onToggle={(emoji) => void handleReact(m.id, emoji)} />
+                )}
+                </View>{/* end column wrapper */}
               </View>
             );
           }}
@@ -795,6 +806,26 @@ export function ChatScreen() {
       {!!typingLabel && (
         <View style={[styles.typingBar, { backgroundColor: c.surface, borderColor: c.border }]}>
           <Text style={{ color: c.textSecondary, fontSize: 12 }}>{typingLabel}</Text>
+        </View>
+      )}
+
+      {/* Edit mode bar — shown above composer when editing (OpenChat-q9h) */}
+      {editingMessage && (
+        <View style={[styles.replyBar, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <View style={[styles.replyBarAccent, { backgroundColor: c.primary }]} />
+          <View style={{ flex: 1, marginLeft: 8 }}>
+            <Text style={[styles.replyBarAuthor, { color: c.primary }]}>Editing message</Text>
+            <Text style={[styles.replyBarContent, { color: c.textSecondary }]} numberOfLines={1}>
+              {editingMessage.content}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => { setEditingMessage(null); setText(''); }}
+            style={styles.replyBarClose}
+            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+          >
+            <Text style={{ color: c.textMuted, fontSize: 22, lineHeight: 26 }}>×</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -820,7 +851,45 @@ export function ChatScreen() {
         </View>
       )}
 
+      {/* Pending attachment preview bar (OpenChat-6bg) */}
+      {pendingAsset && (
+        <View style={[styles.attachmentPreviewBar, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <Image
+            source={{ uri: pendingAsset.uri }}
+            style={styles.attachmentPreviewThumb}
+            resizeMode="cover"
+          />
+          <View style={{ flex: 1, marginLeft: 8 }}>
+            <Text style={{ color: c.textPrimary, fontSize: 13 }} numberOfLines={1}>
+              {pendingAsset.fileName}
+            </Text>
+            <Text style={{ color: c.textSecondary, fontSize: 11 }}>
+              {pendingAsset.width && pendingAsset.height ? `${pendingAsset.width}×${pendingAsset.height}` : 'Image'}
+              {pendingAsset.fileSize ? `  •  ${(pendingAsset.fileSize / 1024).toFixed(0)} KB` : ''}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setPendingAsset(null)}
+            style={styles.replyBarClose}
+            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+          >
+            <Text style={{ color: c.textMuted, fontSize: 22, lineHeight: 26 }}>×</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
+        {/* Attachment pick button (OpenChat-6bg) — hidden in edit mode */}
+        {!editingMessage && (
+          <TouchableOpacity
+            onPress={handlePickAttachment}
+            disabled={sending || uploadingAttachment}
+            style={[styles.attachBtn, { opacity: sending || uploadingAttachment ? 0.4 : 1 }]}
+            accessibilityLabel="Attach image"
+          >
+            <Text style={{ fontSize: 22 }}>📎</Text>
+          </TouchableOpacity>
+        )}
         <TextInput
           style={[styles.input, { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border }]}
           value={text}
@@ -830,14 +899,47 @@ export function ChatScreen() {
           multiline
         />
         <TouchableOpacity
-          style={[styles.send, { backgroundColor: c.primary, opacity: !text.trim() || sending ? 0.5 : 1 }]}
+          style={[styles.send, { backgroundColor: c.primary, opacity: (!text.trim() && !pendingAsset) || sending ? 0.5 : 1 }]}
           onPress={handleSend}
-          disabled={!text.trim() || sending}
+          disabled={(!text.trim() && !pendingAsset) || sending}
           accessibilityLabel="Send message"
         >
-          <Text style={{ color: '#fff', fontWeight: '600' }}>Send</Text>
+          {(sending && uploadingAttachment) ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={{ color: '#fff', fontWeight: '600' }}>Send</Text>
+          )}
         </TouchableOpacity>
       </View>
+
+      {/* Fullscreen image viewer modal (OpenChat-6bg) */}
+      <Modal
+        visible={!!fullscreenImage}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFullscreenImage(null)}
+      >
+        <TouchableOpacity
+          style={styles.fullscreenOverlay}
+          activeOpacity={1}
+          onPress={() => setFullscreenImage(null)}
+        >
+          {fullscreenImage && (
+            <Image
+              source={{ uri: fullscreenImage }}
+              style={styles.fullscreenImage}
+              resizeMode="contain"
+            />
+          )}
+          <TouchableOpacity
+            style={styles.fullscreenClose}
+            onPress={() => setFullscreenImage(null)}
+            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+          >
+            <Text style={{ color: '#fff', fontSize: 28, lineHeight: 32 }}>×</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Message action sheet (OpenChat-uxj, OpenChat-46p, OpenChat-wgl, OpenChat-q9h, OpenChat-7bd) */}
       <MessageActionSheet
@@ -869,7 +971,8 @@ const styles = StyleSheet.create({
   // the avatar is rendered on this row of the run.
   avatarSlot: { width: 28, alignItems: 'center', justifyContent: 'flex-end' },
   bubble: {
-    maxWidth: '78%',
+    // maxWidth is controlled by the column wrapper that also contains ReactionsBar
+    width: '100%',
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 18,
@@ -942,6 +1045,49 @@ const styles = StyleSheet.create({
   replyBarContent: { fontSize: 12 },
   replyBarClose: {
     paddingLeft: 12,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  // Attachment styles (OpenChat-6bg)
+  attachmentPreviewBar: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  attachmentPreviewThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 6,
+  },
+  attachBtn: {
+    paddingBottom: 6,
+    paddingRight: 2,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  attachmentImage: {
+    width: '100%',
+    borderRadius: 10,
+    overflow: 'hidden' as const,
+  },
+  fullscreenOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  fullscreenImage: {
+    width: '100%',
+    height: '100%',
+  },
+  fullscreenClose: {
+    position: 'absolute' as const,
+    top: 52,
+    right: 20,
+    width: 40,
+    height: 40,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
