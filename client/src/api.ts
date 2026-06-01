@@ -503,6 +503,34 @@ class ApiClient {
     });
   }
 
+  // ── Group invite endpoints (OpenChat-240) ──────────────────────────────────
+
+  async createInvite(
+    conversationId: string,
+    opts?: { expiresInDays?: number; maxUses?: number }
+  ): Promise<{ token: string; url: string; expiresAt: string; usesLeft: number }> {
+    return this.fetch(`/conversations/${conversationId}/invites`, {
+      method: 'POST',
+      body: JSON.stringify(opts ?? {}),
+    });
+  }
+
+  async getInvitePreview(
+    token: string
+  ): Promise<{ conversationId: string; conversationTitle: string | null; memberCount: number; expiresAt: string }> {
+    return this.fetch(`/invites/${token}`);
+  }
+
+  async acceptInvite(
+    token: string
+  ): Promise<{ conversationId: string; conversation: Conversation }> {
+    return this.fetch(`/invites/${token}/accept`, { method: 'POST' });
+  }
+
+  async revokeInvite(conversationId: string, token: string): Promise<{ ok: boolean }> {
+    return this.fetch(`/conversations/${conversationId}/invites/${token}`, { method: 'DELETE' });
+  }
+
   // === Auth endpoints (via Noos) ===
 
   async login(email: string, password: string): Promise<AuthResult> {

@@ -109,6 +109,15 @@ app.set('io', io);
 // Setup WebSocket handlers
 setupChatSocket(io);
 
+// Group invite deep-link: /i/<token> → serve the web SPA which handles this
+// route via the React Router /i/:token route. The SPA reads the token from the
+// URL and calls GET /api/chat/invites/:token to show the preview. (OpenChat-240)
+app.get('/i/:token', (_req, res, next) => {
+  res.sendFile(path.join(clientDistPath, 'index.html'), (err) => {
+    if (err) next();
+  });
+});
+
 // SPA fallback - serve index.html for all non-API routes
 app.use((_req, res) => {
   res.sendFile(path.join(clientDistPath, 'index.html'));

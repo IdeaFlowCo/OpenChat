@@ -1634,5 +1634,331 @@ router.get('/messages/since', requireAuth, async (req: Request, res: Response) =
   }
 });
 
+// ── Group Invite Routes (OpenChat-240) ──────────────────────────────────────
+
+// POST /api/chat/conversations/:id/invites — owner-only, create or return active invite
+router.post('/conversations/:id/invites', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const convId = req.params.id as string;
+  const { expiresInDays = 7, maxUses = 50 } = req.body as { expiresInDays?: number; maxUses?: number };
+
+  try {
+    // Verify caller is owner of a group
+    const check = await session.run(`
+      MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $convId})
+      RETURN c.type AS type, rel.role AS role
+    `, { userId, convId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    const role = check.records[0].get('role');
+    const type = check.records[0].get('type');
+    if (type !== 'group') {
+      res.status(400).json({ error: 'Invites are only for group conversations' });
+      return;
+    }
+    if (role !== 'owner') {
+      res.status(403).json({ error: 'Only the group owner can create invites' });
+      return;
+    }
+
+    // Check for an existing active non-expired invite from this owner
+    const existing = await session.run(`
+      MATCH (c:Conversation {id: $convId})-[:HAS_INVITE]->(inv:GroupInvite {createdBy: $userId})
+      WHERE inv.revokedAt IS NULL
+        AND datetime(inv.expiresAt) > datetime()
+        AND inv.usesLeft > 0
+      RETURN inv
+      ORDER BY inv.createdAt DESC
+      LIMIT 1
+    `, { convId, userId });
+
+    if (existing.records.length > 0) {
+      const inv = toJS(existing.records[0].get('inv').properties) as Record<string, unknown>;
+      const token = inv.token as string;
+      res.json({
+        token,
+        url: `https://chat.globalbr.ai/i/${token}`,
+        expiresAt: inv.expiresAt,
+        usesLeft: inv.usesLeft,
+      });
+      return;
+    }
+
+    // Create new invite
+    const token = nanoid(32);
+    const now = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString();
+
+    await session.run(`
+      MATCH (c:Conversation {id: $convId})
+      CREATE (inv:GroupInvite {
+        token: $token,
+        conversationId: $convId,
+        createdBy: $userId,
+        createdAt: datetime($now),
+        expiresAt: datetime($expiresAt),
+        usesLeft: $maxUses
+      })
+      CREATE (c)-[:HAS_INVITE]->(inv)
+    `, { convId, token, userId, now, expiresAt, maxUses: neo4j.int(maxUses) });
+
+    res.status(201).json({
+      token,
+      url: `https://chat.globalbr.ai/i/${token}`,
+      expiresAt,
+      usesLeft: maxUses,
+    });
+  } catch (error) {
+    console.error('Error creating invite:', error);
+    res.status(500).json({ error: 'Failed to create invite' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/conversations/:id/invites — owner-only, list active invites
+router.get('/conversations/:id/invites', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const convId = req.params.id as string;
+
+  try {
+    const check = await session.run(`
+      MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $convId})
+      RETURN rel.role AS role
+    `, { userId, convId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    if (check.records[0].get('role') !== 'owner') {
+      res.status(403).json({ error: 'Only the group owner can list invites' });
+      return;
+    }
+
+    const result = await session.run(`
+      MATCH (c:Conversation {id: $convId})-[:HAS_INVITE]->(inv:GroupInvite)
+      WHERE inv.revokedAt IS NULL AND datetime(inv.expiresAt) > datetime()
+      RETURN inv
+      ORDER BY inv.createdAt DESC
+    `, { convId });
+
+    const invites = result.records.map(r => {
+      const props = toJS(r.get('inv').properties) as Record<string, unknown>;
+      return {
+        token: props.token,
+        url: `https://chat.globalbr.ai/i/${props.token}`,
+        expiresAt: props.expiresAt,
+        usesLeft: props.usesLeft,
+        createdAt: props.createdAt,
+      };
+    });
+
+    res.json(invites);
+  } catch (error) {
+    console.error('Error listing invites:', error);
+    res.status(500).json({ error: 'Failed to list invites' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/invites/:token — any authed user, preview invite
+router.get('/invites/:token', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const token = req.params.token as string;
+
+  try {
+    const result = await session.run(`
+      MATCH (c:Conversation)-[:HAS_INVITE]->(inv:GroupInvite {token: $token})
+      RETURN inv, c.id AS conversationId, c.title AS conversationTitle
+    `, { token });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'Invite not found' });
+      return;
+    }
+
+    const rec = result.records[0];
+    const inv = toJS(rec.get('inv').properties) as Record<string, unknown>;
+    const conversationId = rec.get('conversationId') as string;
+    const conversationTitle = rec.get('conversationTitle') as string | null;
+
+    if (inv.revokedAt) {
+      res.status(410).json({ error: 'This invite has been revoked' });
+      return;
+    }
+    const usesLeft = typeof inv.usesLeft === 'object' && inv.usesLeft !== null && 'toNumber' in (inv.usesLeft as object)
+      ? (inv.usesLeft as { toNumber: () => number }).toNumber()
+      : (inv.usesLeft as number);
+    if (usesLeft <= 0) {
+      res.status(410).json({ error: 'This invite has reached its maximum uses' });
+      return;
+    }
+    const expiresAt = inv.expiresAt as string;
+    if (new Date(expiresAt) < new Date()) {
+      res.status(410).json({ error: 'This invite has expired' });
+      return;
+    }
+
+    // Get member count (no PII)
+    const countResult = await session.run(`
+      MATCH (:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+      RETURN count(*) AS memberCount
+    `, { conversationId });
+    const memberCount = countResult.records[0]?.get('memberCount')?.toNumber?.() ?? 0;
+
+    res.json({
+      conversationId,
+      conversationTitle,
+      memberCount,
+      expiresAt,
+    });
+  } catch (error) {
+    console.error('Error fetching invite:', error);
+    res.status(500).json({ error: 'Failed to fetch invite' });
+  } finally {
+    await session.close();
+  }
+});
+
+// POST /api/chat/invites/:token/accept — any authed user, join via invite
+router.post('/invites/:token/accept', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const token = req.params.token as string;
+
+  try {
+    const result = await session.run(`
+      MATCH (c:Conversation)-[:HAS_INVITE]->(inv:GroupInvite {token: $token})
+      RETURN inv, c.id AS conversationId
+    `, { token });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'Invite not found' });
+      return;
+    }
+
+    const rec = result.records[0];
+    const inv = toJS(rec.get('inv').properties) as Record<string, unknown>;
+    const conversationId = rec.get('conversationId') as string;
+
+    if (inv.revokedAt) {
+      res.status(410).json({ error: 'This invite has been revoked' });
+      return;
+    }
+    const usesLeft = typeof inv.usesLeft === 'object' && inv.usesLeft !== null && 'toNumber' in (inv.usesLeft as object)
+      ? (inv.usesLeft as { toNumber: () => number }).toNumber()
+      : (inv.usesLeft as number);
+    if (usesLeft <= 0) {
+      res.status(410).json({ error: 'This invite has reached its maximum uses' });
+      return;
+    }
+    const expiresAt = inv.expiresAt as string;
+    if (new Date(expiresAt) < new Date()) {
+      res.status(410).json({ error: 'This invite has expired' });
+      return;
+    }
+
+    // Check if already a participant — idempotent
+    const alreadyIn = await session.run(`
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+      RETURN c
+    `, { userId, conversationId });
+
+    const now = new Date().toISOString();
+
+    if (alreadyIn.records.length === 0) {
+      // Add the user (MERGE so it's safe if there's a race)
+      await session.run(`
+        MATCH (c:Conversation {id: $conversationId})
+        MATCH (u:User {id: $userId})
+        MERGE (u)-[rel:PARTICIPATES_IN]->(c)
+          ON CREATE SET rel.joinedAt = datetime($now), rel.role = 'member'
+        SET c.updatedAt = datetime($now)
+      `, { conversationId, userId, now });
+
+      // Decrement usesLeft on the invite
+      await session.run(`
+        MATCH (inv:GroupInvite {token: $token})
+        SET inv.usesLeft = inv.usesLeft - 1
+      `, { token });
+    }
+
+    // Load full conversation and emit participant:added
+    const conversation = await loadConversation(session, conversationId);
+    const io = req.app.get('io') as IOServer | undefined;
+    if (io && conversation && alreadyIn.records.length === 0) {
+      joinUserSocketsToConversation(io, userId, conversationId);
+      const participants = (conversation.participants as Array<{ user?: { id?: string } }>) || [];
+      const seen = new Set<string>();
+      for (const p of participants) {
+        const pid = p?.user?.id;
+        if (!pid || seen.has(pid)) continue;
+        seen.add(pid);
+        io.to(`user:${pid}`).emit('participant:added', {
+          conversationId,
+          conversation,
+          userId,
+        });
+      }
+    }
+
+    res.json({ conversationId, conversation });
+  } catch (error) {
+    console.error('Error accepting invite:', error);
+    res.status(500).json({ error: 'Failed to accept invite' });
+  } finally {
+    await session.close();
+  }
+});
+
+// DELETE /api/chat/conversations/:id/invites/:token — owner-only, revoke invite
+router.delete('/conversations/:id/invites/:token', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const convId = req.params.id as string;
+  const token = req.params.token as string;
+
+  try {
+    const check = await session.run(`
+      MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $convId})
+      RETURN rel.role AS role
+    `, { userId, convId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    if (check.records[0].get('role') !== 'owner') {
+      res.status(403).json({ error: 'Only the group owner can revoke invites' });
+      return;
+    }
+
+    const result = await session.run(`
+      MATCH (c:Conversation {id: $convId})-[:HAS_INVITE]->(inv:GroupInvite {token: $token})
+      SET inv.revokedAt = datetime($now)
+      RETURN inv
+    `, { convId, token, now: new Date().toISOString() });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'Invite not found' });
+      return;
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Error revoking invite:', error);
+    res.status(500).json({ error: 'Failed to revoke invite' });
+  } finally {
+    await session.close();
+  }
+});
+
 export default router;
 
