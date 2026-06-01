@@ -39,11 +39,16 @@ module.exports = {
       supportsTablet: true,
       bundleIdentifier: 'com.jacobcole.openchat',
       buildNumber: '1',
-      // Apple Universal Links — taps on https://chat.globalbr.ai/i/<token>
-      // and .../u/<id> open the native app when installed (OpenChat-84u.1).
-      // Apple verifies these via /.well-known/apple-app-site-association
-      // on the openchat server.
-      associatedDomains: ['applinks:chat.globalbr.ai'],
+      // NOTE — associatedDomains intentionally commented out for now.
+      // Adding it requires enabling the 'Associated Domains' capability on
+      // the App ID via the Apple Developer Portal (or ASC API). Without
+      // that, EAS Build fails generating the provisioning profile (saw on
+      // build 40, 2026-06-01). Universal Links are tracked in OpenChat-84u.2
+      // for proper provisioning + re-enable. The openchat:// URL scheme +
+      // AASA file + web window.location parsing already cover the deep-
+      // link UX without Apple-side capability work.
+      //
+      // associatedDomains: ['applinks:chat.globalbr.ai'],
       entitlements: {
         'com.apple.developer.applesignin': ['Default'],
       },
