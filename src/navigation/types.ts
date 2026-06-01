@@ -17,6 +17,8 @@ export type RootStackParamList = {
   ScanQr: undefined;
   /** Blocked users management screen (OpenChat-46p). */
   BlockedUsers: undefined;
+  /** Profile editing screen (OpenChat-tml). */
+  ProfileEdit: undefined;
 };
 
 export type NavProp<T extends keyof RootStackParamList> = NativeStackNavigationProp<RootStackParamList, T>;

@@ -131,9 +131,25 @@ export function SettingsScreen() {
     <View style={[styles.root, { backgroundColor: c.background }]}>
       {currentUser && (
         <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>SIGNED IN AS</Text>
-          <View style={[styles.row, { backgroundColor: c.surface, borderColor: c.border }]}>
-            <Text style={[styles.rowText, { color: c.textPrimary }]}>{currentUser.email}</Text>
+          <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>ACCOUNT</Text>
+          <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+            {/* Edit profile (OpenChat-tml) */}
+            <TouchableOpacity
+              style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+              onPress={() => navigation.navigate('ProfileEdit')}
+              activeOpacity={0.7}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Edit profile</Text>
+                <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                  {currentUser.name ? currentUser.name : 'Set your display name'}
+                </Text>
+              </View>
+              <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            </TouchableOpacity>
+            <View style={[styles.optionRow]}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>{currentUser.email}</Text>
+            </View>
           </View>
         </View>
       )}

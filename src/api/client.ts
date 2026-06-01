@@ -101,6 +101,13 @@ export interface Conversation {
   createdAt?: string;
 }
 
+/** Aggregated reaction summary for a single emoji on a message. */
+export interface ReactionSummary {
+  emoji: string;
+  count: number;
+  byMe: boolean;
+}
+
 export interface Message {
   id: string;
   content: string;
@@ -109,6 +116,8 @@ export interface Message {
   messageType?: string;
   createdAt: string;
   editedAt?: string;
+  /** Set when the message has been soft-deleted. */
+  deletedAt?: string;
   sender?: { id: string; name?: string; email: string };
   /** ID of the message this message is replying to (OpenChat-uxj).
    *  Server support is a follow-up ticket; field is passed through on send
@@ -121,6 +130,18 @@ export interface Message {
     senderId: string;
     sender?: { id: string; name?: string; email: string };
   };
+  /** Aggregated reaction summary (OpenChat-7bd). */
+  reactions?: ReactionSummary[];
+  /** Image attachments (OpenChat-6bg). */
+  attachments?: Attachment[];
+}
+
+/** Single image attachment (OpenChat-6bg). */
+export interface Attachment {
+  url: string;
+  mimeType: string;
+  width?: number;
+  height?: number;
 }
 
 export interface CurrentUser {
@@ -428,10 +449,21 @@ export const api = {
     request<Conversation>(`/api/chat/conversations/${conversationId}`),
   getMessages: (conversationId: string) =>
     request<Message[]>(`/api/chat/conversations/${conversationId}/messages`),
-  sendMessage: (conversationId: string, content: string) =>
+  sendMessage: (conversationId: string, content: string, attachments?: Attachment[]) =>
     request<Message>(`/api/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, ...(attachments?.length ? { attachments } : {}) }),
+    }),
+
+  /**
+   * Request a presigned PUT URL for an image upload. (OpenChat-6bg)
+   * Returns { putUrl, getUrl, key } — putUrl is the presigned GCS URL,
+   * getUrl is the public-read download URL to store on the message.
+   */
+  presignAttachment: (params: { filename: string; mimeType: string; sizeBytes: number }) =>
+    request<{ putUrl: string; getUrl: string; key: string }>('/api/chat/attachments/presign', {
+      method: 'POST',
+      body: JSON.stringify(params),
     }),
   getContacts: (q?: string) =>
     request<User[]>(`/api/chat/contacts${q ? `?q=${encodeURIComponent(q)}` : ''}`),
@@ -554,6 +586,80 @@ export const api = {
    */
   listBlocked: () =>
     request<User[]>('/api/chat/blocks'),
+
+  // ── Edit / Delete messages (OpenChat-q9h) ───────────────────────────────────
+
+  /**
+   * Edit own message. Owner-only. Sets editedAt on the message.
+   * PATCH /api/chat/messages/:id
+   */
+  editMessage: (messageId: string, content: string) =>
+    request<Message>(`/api/chat/messages/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ content }),
+    }),
+
+  /**
+   * Soft-delete own message. Replaces content with "Message deleted".
+   * DELETE /api/chat/messages/:id
+   */
+  deleteMessage: (messageId: string) =>
+    request<Message>(`/api/chat/messages/${messageId}`, { method: 'DELETE' }),
+
+  // ── Reactions (OpenChat-7bd) ─────────────────────────────────────────────────
+
+  /**
+   * Add a reaction to a message (idempotent — re-adding same emoji is no-op).
+   * POST /api/chat/messages/:id/reactions
+   */
+  addReaction: (messageId: string, emoji: string) =>
+    request<{ reactions: ReactionSummary[] }>(`/api/chat/messages/${messageId}/reactions`, {
+      method: 'POST',
+      body: JSON.stringify({ emoji }),
+    }),
+
+  /**
+   * Remove own reaction from a message.
+   * DELETE /api/chat/messages/:id/reactions/:emoji
+   */
+  removeReaction: (messageId: string, emoji: string) =>
+    request<{ reactions: ReactionSummary[] }>(
+      `/api/chat/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`,
+      { method: 'DELETE' }
+    ),
+
+  // ── Read receipts (OpenChat-0nj) ────────────────────────────────────────
+
+  /**
+   * Mark the conversation as read by the current user. Returns `lastReadAt`
+   * plus per-participant `readMap` and `onlineMap`.
+   * PATCH /api/chat/conversations/:id/read
+   */
+  markRead: (conversationId: string) =>
+    request<{
+      ok: boolean;
+      lastReadAt: string;
+      readMap: Record<string, string | null>;
+      onlineMap: Record<string, boolean>;
+    }>(`/api/chat/conversations/${conversationId}/read`, { method: 'PATCH' }),
+
+  // ── Profile editing (OpenChat-tml) ──────────────────────────────────────
+
+  /**
+   * Update the current user's display name and/or status message.
+   * PATCH /api/auth/me
+   */
+  updateProfile: (fields: { name?: string; statusMessage?: string }) =>
+    request<{
+      id: string;
+      email: string;
+      name?: string;
+      statusMessage?: string;
+      avatarUrl?: string;
+    }>('/api/auth/me', {
+      method: 'PATCH',
+      body: JSON.stringify(fields),
+    }),
 
   // ── Report message / user (OpenChat-wgl) ────────────────────────────────
 

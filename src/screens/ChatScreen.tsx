@@ -10,8 +10,10 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
+  Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -24,8 +26,9 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useHeaderHeight } from '@react-navigation/elements';
-import { Conversation, Message, api } from '../api/client';
+import { Attachment, Conversation, Message, api } from '../api/client';
 import { MessageActionSheet, ReplyToData } from '../components/MessageActionSheet';
+import { ReactionsBar } from '../components/ReactionsBar';
 import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
@@ -38,6 +41,7 @@ import type { NavProp, RouteProps } from '../navigation/types';
 import { setActiveConversationForNotifications } from '../services/notifications';
 import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
+import { pickImage, uploadImage, PickedAsset } from '../services/attachments';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
 
@@ -124,8 +128,10 @@ export function ChatScreen() {
   const kbOffset = Platform.OS === 'ios' ? headerHeight : 0;
   const {
     currentUser, conversations, messages, loadingMessages,
-    setActiveConversation, sendMessage, presence, typingByConv, reportTyping,
+    setActiveConversation, sendMessage, editMessage, deleteMessage, toggleReaction,
+    presence, typingByConv, reportTyping,
     aiDisclosureAcceptedAt, mutedConvs, muteConv, blockUser,
+    readByOthers, onlineUsers, markConversationRead,
   } = useChat();
 
   const conversation = useMemo<Conversation | undefined>(
@@ -138,7 +144,7 @@ export function ChatScreen() {
   const listRef = useRef<FlatList<RenderRow>>(null);
   const typingTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // ── ActionSheet state (OpenChat-uxj, OpenChat-46p, OpenChat-wgl) ──────────
+  // ── ActionSheet state (OpenChat-uxj, OpenChat-46p, OpenChat-wgl, OpenChat-q9h, OpenChat-7bd)
   const [actionSheetVisible, setActionSheetVisible] = useState(false);
   const [actionSheetMessage, setActionSheetMessage] = useState<Message | null>(null);
   const [actionSheetIsOwn, setActionSheetIsOwn] = useState(false);
@@ -146,6 +152,17 @@ export function ChatScreen() {
 
   // ── Reply state ────────────────────────────────────────────────────────────
   const [replyTo, setReplyTo] = useState<ReplyToData | null>(null);
+
+  // ── Edit mode state (OpenChat-q9h) ─────────────────────────────────────────
+  // When set, the composer is in "edit" mode: Send = PATCH, Escape = cancel.
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+
+  // ── Attachment state (OpenChat-6bg) ────────────────────────────────────────
+  // pendingAsset: picked but not yet uploaded (shown as preview above composer)
+  const [pendingAsset, setPendingAsset] = useState<PickedAsset | null>(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  // fullscreen viewer
+  const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
 
   // ── Toast state ────────────────────────────────────────────────────────────
   const [toastVisible, setToastVisible] = useState(false);
@@ -182,6 +199,8 @@ export function ChatScreen() {
   useEffect(() => {
     setActiveConversation(conversationId);
     setActiveConversationForNotifications(conversationId);
+    // Mark as read when the user opens the conversation (OpenChat-0nj).
+    markConversationRead(conversationId);
     // Reset scroll bookkeeping whenever the conversation changes — opening
     // a fresh thread should start "at bottom" with no unread badge, regardless
     // of where we were in the previous thread.
@@ -194,7 +213,7 @@ export function ChatScreen() {
       setActiveConversation(null);
       setActiveConversationForNotifications(null);
     };
-  }, [conversationId, setActiveConversation]);
+  }, [conversationId, setActiveConversation, markConversationRead]);
 
   const isGroup = conversation?.type === 'group';
   const other = !isGroup ? conversation?.participants?.find(p => p.user.id !== currentUser?.userId)?.user : null;
@@ -374,7 +393,8 @@ export function ChatScreen() {
 
   // Haptic feedback on incoming messages (OpenChat-o8m).
   // Fires when a new message arrives in this (active) conversation from
-  // someone other than the current user.
+  // someone other than the current user. Also marks the conversation as
+  // read so the other party's tick can advance to "read" (OpenChat-0nj).
   const prevLenForHapticRef = useRef(0);
   useEffect(() => {
     const len = messages.length;
@@ -383,9 +403,11 @@ export function ChatScreen() {
       if (latest && latest.senderId !== currentUser?.userId) {
         hapticReceive();
       }
+      // Mark read whenever new messages arrive while we're in the thread.
+      markConversationRead(conversationId);
     }
     prevLenForHapticRef.current = len;
-  }, [messages, currentUser?.userId]);
+  }, [messages, currentUser?.userId, conversationId, markConversationRead]);
 
   // R3. Manual scroll handler — compute distance-from-bottom and update both
   // the ref (synchronous, used by the messages effect above) and state (for
@@ -435,21 +457,59 @@ export function ChatScreen() {
     }
   };
 
+  // ── Attachment pick handler (OpenChat-6bg) ────────────────────────────────
+  const handlePickAttachment = useCallback(async () => {
+    if (sending || uploadingAttachment) return;
+    const asset = await pickImage();
+    if (asset) setPendingAsset(asset);
+  }, [sending, uploadingAttachment]);
+
   const handleSend = async () => {
     const trimmed = text.trim();
-    if (!trimmed || sending) return;
+    const hasAttachment = !!pendingAsset;
+    if (!trimmed && !hasAttachment || sending) return;
     setSending(true);
+
+    // Edit mode: PATCH existing message (OpenChat-q9h). Attachments not editable.
+    if (editingMessage) {
+      const msgId = editingMessage.id;
+      setText('');
+      setEditingMessage(null);
+      try {
+        await editMessage(msgId, trimmed);
+      } catch (err) {
+        console.warn('[ChatScreen] edit failed:', err);
+        Alert.alert('Error', 'Could not save your edit. Please try again.');
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
     const currentReplyToId = replyTo?.messageId;
+    const assetToUpload = pendingAsset;
     setText('');
     setReplyTo(null);
+    setPendingAsset(null);
     if (typingTimer.current) clearTimeout(typingTimer.current);
     reportTyping(conversationId, false);
+
     try {
-      await sendMessage(trimmed, currentReplyToId);
-      hapticSend(); // light impact on successful send (iOS only)
+      let attachments: Attachment[] | undefined;
+      if (assetToUpload) {
+        setUploadingAttachment(true);
+        try {
+          const att = await uploadImage(assetToUpload);
+          attachments = [att];
+        } finally {
+          setUploadingAttachment(false);
+        }
+      }
+      await sendMessage(trimmed, currentReplyToId, attachments);
+      hapticSend();
     } catch (err) {
-      // The context already tagged the optimistic message _failed=true.
       console.warn('[ChatScreen] send failed:', err);
+      Alert.alert('Upload failed', 'Could not send the image. Please try again.');
     } finally {
       setSending(false);
     }
@@ -467,6 +527,33 @@ export function ChatScreen() {
   const handleReply = useCallback((data: ReplyToData) => {
     setReplyTo(data);
   }, []);
+
+  // Edit: load message content into composer in edit mode (OpenChat-q9h).
+  const handleEdit = useCallback((message: Message) => {
+    setEditingMessage(message);
+    setReplyTo(null);
+    setText(message.content);
+  }, []);
+
+  // Delete: soft-delete via context (OpenChat-q9h).
+  const handleDelete = useCallback(async (messageId: string) => {
+    try {
+      await deleteMessage(messageId);
+    } catch (err) {
+      console.warn('[ChatScreen] delete failed:', err);
+      Alert.alert('Error', 'Could not delete the message. Please try again.');
+    }
+  }, [deleteMessage]);
+
+  // React: toggle emoji reaction (OpenChat-7bd).
+  const handleReact = useCallback(async (messageId: string, emoji: string) => {
+    try {
+      await toggleReaction(messageId, emoji);
+    } catch (err) {
+      console.warn('[ChatScreen] reaction failed:', err);
+    }
+  }, [toggleReaction]);
+
 
   const handleBlock = useCallback(async (userId: string, displayName: string) => {
     try {
@@ -518,6 +605,23 @@ export function ChatScreen() {
   }, [otherTypers, conversation]);
 
   const showAiDisclosure = containsBot && !aiDisclosureAcceptedAt;
+
+  // Read-receipt tick state for own DM messages (OpenChat-0nj).
+  // Returns 'sent' | 'delivered' | 'read'.
+  // - 'read': the other participant's lastReadAt >= message.createdAt
+  // - 'delivered': other user is currently online (has a socket)
+  // - 'sent': fallback (message id confirmed by server)
+  const getTickState = useCallback((msg: Message): 'sent' | 'delivered' | 'read' => {
+    if (isGroup) return 'sent'; // v1: skip group read receipts
+    if (!other) return 'sent';
+    const convReadMap = readByOthers.get(conversationId);
+    if (convReadMap) {
+      const otherLastRead = convReadMap.get(other.id);
+      if (otherLastRead && otherLastRead >= msg.createdAt) return 'read';
+    }
+    if (onlineUsers.get(other.id) === true) return 'delivered';
+    return 'sent';
+  }, [isGroup, other, readByOthers, onlineUsers, conversationId]);
 
   return (
     <KeyboardAvoidingView
@@ -634,13 +738,48 @@ export function ChatScreen() {
                       {m.sender.name || m.sender.email}
                     </Text>
                   )}
-                  <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 16 }}>
-                    {m.content}
-                  </Text>
+                  {/* Image attachments (OpenChat-6bg) */}
+                  {m.attachments?.map((att, i) => {
+                    const aspectRatio = att.width && att.height ? att.width / att.height : 1;
+                    return (
+                      <TouchableOpacity
+                        key={i}
+                        onPress={() => setFullscreenImage(att.url)}
+                        activeOpacity={0.85}
+                        style={{ marginBottom: m.content ? 6 : 0 }}
+                      >
+                        <Image
+                          source={{ uri: att.url }}
+                          style={[
+                            styles.attachmentImage,
+                            { aspectRatio: Math.min(Math.max(aspectRatio, 0.5), 2) },
+                          ]}
+                          resizeMode="cover"
+                        />
+                      </TouchableOpacity>
+                    );
+                  })}
+                  {!!m.content && (
+                    <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 16 }}>
+                      {m.content}
+                    </Text>
+                  )}
                   <View style={styles.bubbleFooter}>
                     <Text style={{ color: isOwn ? 'rgba(255,255,255,0.7)' : c.textMuted, fontSize: 10 }}>
                       {failed ? 'Failed to send' : formatTime(m.createdAt)}
                     </Text>
+                    {/* Tick marks for own DM messages (OpenChat-0nj). Only shown
+                        after the local-optimistic id is replaced by a real server id. */}
+                    {isOwn && !isGroup && !failed && !m.id.startsWith('local-') && (() => {
+                      const tick = getTickState(m);
+                      if (tick === 'read') {
+                        return <Text style={{ color: '#4FC3F7', fontSize: 10, marginLeft: 3 }}>✓✓</Text>;
+                      }
+                      if (tick === 'delivered') {
+                        return <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, marginLeft: 3 }}>✓✓</Text>;
+                      }
+                      return <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 10, marginLeft: 3 }}>✓</Text>;
+                    })()}
                   </View>
                 </TouchableOpacity>
               </View>
@@ -700,7 +839,7 @@ export function ChatScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Message action sheet (OpenChat-uxj, OpenChat-46p, OpenChat-wgl) */}
+      {/* Message action sheet (OpenChat-uxj, OpenChat-46p, OpenChat-wgl, OpenChat-q9h, OpenChat-7bd) */}
       <MessageActionSheet
         visible={actionSheetVisible}
         message={actionSheetMessage}
@@ -708,6 +847,9 @@ export function ChatScreen() {
         senderName={actionSheetSenderName}
         onDismiss={() => setActionSheetVisible(false)}
         onReply={handleReply}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+        onReact={handleReact}
         onBlock={handleBlock}
         onReport={handleReport}
       />
@@ -733,7 +875,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   sender: { fontSize: 12, marginBottom: 2, fontWeight: '500' },
-  bubbleFooter: { marginTop: 4 },
+  bubbleFooter: { marginTop: 4, flexDirection: 'row', alignItems: 'center' },
   dayWrap: {
     flexDirection: 'row',
     alignItems: 'center',

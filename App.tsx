@@ -43,6 +43,7 @@ import { SearchScreen } from './src/screens/SearchScreen';
 import { MyQrCodeScreen } from './src/screens/MyQrCodeScreen';
 import { ScanQrScreen } from './src/screens/ScanQrScreen';
 import { BlockedUsersScreen } from './src/screens/BlockedUsersScreen';
+import { ProfileEditScreen } from './src/screens/ProfileEditScreen';
 import { getColors } from './src/theme/colors';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { PushSoftAsk } from './src/components/PushSoftAsk';
@@ -151,6 +152,11 @@ function Shell() {
               name="BlockedUsers"
               component={BlockedUsersScreen}
               options={{ title: 'Blocked users' }}
+            />
+            <Stack.Screen
+              name="ProfileEdit"
+              component={ProfileEditScreen}
+              options={{ title: 'Edit Profile', presentation: 'modal' }}
             />
           </>
         )}

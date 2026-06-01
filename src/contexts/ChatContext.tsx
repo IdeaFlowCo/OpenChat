@@ -15,9 +15,11 @@ import {
 } from '../services/notifications';
 import {
   api,
+  Attachment,
   Conversation,
   CurrentUser,
   Message,
+  ReactionSummary,
   User,
   getUser,
   getToken,
@@ -65,7 +67,14 @@ interface ChatContextValue {
   setActiveConversation: (id: string | null) => void;
   messages: Message[]; // for the active conversation
   loadingMessages: boolean;
-  sendMessage: (content: string, replyToId?: string) => Promise<void>;
+  sendMessage: (content: string, replyToId?: string, attachments?: Attachment[]) => Promise<void>;
+
+  // Edit / delete messages (OpenChat-q9h)
+  editMessage: (messageId: string, content: string) => Promise<void>;
+  deleteMessage: (messageId: string) => Promise<void>;
+
+  // Reactions (OpenChat-7bd)
+  toggleReaction: (messageId: string, emoji: string) => Promise<void>;
 
   // Block (OpenChat-46p)
   blockUser: (userId: string) => Promise<void>;
@@ -85,6 +94,16 @@ interface ChatContextValue {
   // Mute (OpenChat-aes) — local-only until server endpoint exists
   mutedConvs: Record<string, string>; // convId → ISO expiry or 'always'
   muteConv: (convId: string, until: Date | 'always' | null) => Promise<void>;
+
+  // Read receipts (OpenChat-0nj)
+  // readByOthers[convId][userId] = ISO timestamp when that user last read the conv.
+  readByOthers: Map<string, Map<string, string>>;
+  // onlineUsers[userId] = true if that user currently has an active socket.
+  onlineUsers: Map<string, boolean>;
+  markConversationRead: (conversationId: string) => void;
+
+  // Profile editing (OpenChat-tml)
+  updateProfile: (fields: { name?: string; statusMessage?: string }) => Promise<void>;
 
   // Lifecycle
   signOut: () => Promise<void>;
@@ -142,6 +161,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // Mute map (OpenChat-aes) — local-only; server integration deferred.
   const [mutedConvs, setMutedConvs] = useState<Record<string, string>>({});
+
+  // Read receipts (OpenChat-0nj)
+  // readByOthers[convId][userId] = ISO when that user last read the conv.
+  const [readByOthers, setReadByOthers] = useState<Map<string, Map<string, string>>>(new Map());
+  // onlineUsers[userId] = whether they have an active socket right now.
+  const [onlineUsers, setOnlineUsers] = useState<Map<string, boolean>>(new Map());
+  // Debounce ref: per-convId timer so we coalesce rapid markRead calls.
+  const markReadTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const refreshConversations = useCallback(async () => {
     try {
@@ -276,9 +303,75 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       });
     };
 
+    // read:updated — another participant marked the conversation read (OpenChat-0nj)
+    const onReadUpdated = (e: {
+      conversationId: string;
+      userId: string;
+      lastReadAt: string;
+      readMap?: Record<string, string | null>;
+      onlineMap?: Record<string, boolean>;
+    }) => {
+      setReadByOthers(prev => {
+        const next = new Map(prev);
+        const convMap = new Map(prev.get(e.conversationId) ?? []);
+        convMap.set(e.userId, e.lastReadAt);
+        // If the server sent the full map, seed it in one pass.
+        if (e.readMap) {
+          for (const [uid, ts] of Object.entries(e.readMap)) {
+            if (ts) convMap.set(uid, ts);
+          }
+        }
+        next.set(e.conversationId, convMap);
+        return next;
+      });
+      if (e.onlineMap) {
+        setOnlineUsers(prev => {
+          const next = new Map(prev);
+          for (const [uid, online] of Object.entries(e.onlineMap!)) {
+            next.set(uid, online);
+          }
+          return next;
+        });
+      }
+    };
+
+    // user:profile-updated — someone in a shared conv updated their name/status (OpenChat-tml)
+    const onProfileUpdated = (e: { userId: string; name?: string; statusMessage?: string }) => {
+      // Update participant info in every conversation that has this user.
+      setConversations(prev => prev.map(conv => {
+        if (!conv.participants?.some(p => p.user.id === e.userId)) return conv;
+        return {
+          ...conv,
+          participants: conv.participants.map(p =>
+            p.user.id === e.userId
+              ? { ...p, user: { ...p.user, name: e.name ?? p.user.name, statusMessage: e.statusMessage ?? p.user.statusMessage } }
+              : p
+          ),
+        };
+      }));
+    };
+
+    // message:updated — edit or soft-delete (OpenChat-q9h)
+    const onMessageUpdated = (msg: Message) => {
+      if (msg.conversationId === activeConvIdRef.current) {
+        setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, ...msg } : m));
+      }
+    };
+
+    // message:reactions-updated — reaction add/remove (OpenChat-7bd)
+    const onReactionsUpdated = (payload: { messageId: string; conversationId: string; reactions: ReactionSummary[] }) => {
+      if (payload.conversationId === activeConvIdRef.current) {
+        setMessages(prev => prev.map(m =>
+          m.id === payload.messageId ? { ...m, reactions: payload.reactions } : m
+        ));
+      }
+    };
+
     sock.on('connect', onConnect);
     sock.on('disconnect', onDisconnect);
     sock.on('message:new', onMessage);
+    sock.on('message:updated', onMessageUpdated);
+    sock.on('message:reactions-updated', onReactionsUpdated);
     sock.on('conversation:created', onConversationCreated);
     sock.on('conversation:updated', onConversationUpdated);
     sock.on('participant:added', onParticipantAdded);
@@ -286,6 +379,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     sock.on('typing:start', onTypingStart);
     sock.on('typing:stop', onTypingStop);
     sock.on('presence:updated', onPresence);
+    sock.on('read:updated', onReadUpdated);
+    sock.on('user:profile-updated', onProfileUpdated);
 
     setIsConnected(sock.connected);
 
@@ -293,6 +388,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sock.off('connect', onConnect);
       sock.off('disconnect', onDisconnect);
       sock.off('message:new', onMessage);
+      sock.off('message:updated', onMessageUpdated);
+      sock.off('message:reactions-updated', onReactionsUpdated);
       sock.off('conversation:created', onConversationCreated);
       sock.off('conversation:updated', onConversationUpdated);
       sock.off('participant:added', onParticipantAdded);
@@ -300,6 +397,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sock.off('typing:start', onTypingStart);
       sock.off('typing:stop', onTypingStop);
       sock.off('presence:updated', onPresence);
+      sock.off('read:updated', onReadUpdated);
+      sock.off('user:profile-updated', onProfileUpdated);
     };
   }, [isAuthed, currentUser?.userId]);
 
@@ -335,9 +434,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // server canonical on success. Accepts optional replyToId for threaded replies
   // (OpenChat-uxj). Server support is a follow-up; the field is passed through
   // in the socket payload so it round-trips once the server handles it.
-  const sendMessage = useCallback(async (content: string, replyToId?: string) => {
+  const sendMessage = useCallback(async (content: string, replyToId?: string, attachments?: Attachment[]) => {
     const id = activeConvIdRef.current;
-    if (!id || !content.trim()) return;
+    const hasText = !!content.trim();
+    const hasAttachments = !!attachments?.length;
+    if (!id || (!hasText && !hasAttachments)) return;
+
     const optimistic: Message = {
       id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       content,
@@ -346,8 +448,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       createdAt: new Date().toISOString(),
       sender: currentUser ? { id: currentUser.userId, email: currentUser.email, name: currentUser.name } : undefined,
       replyToId,
+      attachments,
     };
     setMessages(prev => [...prev, optimistic]);
+
+    // If there are attachments, always use REST (socket path doesn't carry them).
+    if (hasAttachments) {
+      try {
+        const real = await api.sendMessage(id, content, attachments);
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.id !== optimistic.id);
+          return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
+        });
+      } catch (e2) {
+        console.warn('[ChatContext] attachment message send failed:', e2);
+        setMessages(prev => prev.map(m => m.id === optimistic.id ? { ...m, _failed: true } as Message & { _failed?: boolean } : m));
+        throw e2;
+      }
+      return;
+    }
+
+    // Text-only path: try socket first, fall back to REST.
     try {
       const real = await wsSend(id, content, replyToId);
       // Replace the optimistic placeholder with the server message.
@@ -423,6 +544,36 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     else emitTypingStop(conversationId);
   }, []);
 
+  // Edit own message (OpenChat-q9h). Calls PATCH; server emits message:updated
+  // which the socket handler picks up and updates local state.
+  const editMessage = useCallback(async (messageId: string, content: string) => {
+    const updated = await api.editMessage(messageId, content);
+    // Optimistic local update (socket event will also arrive for other clients).
+    setMessages(prev => prev.map(m => m.id === messageId ? { ...m, ...updated } : m));
+  }, []);
+
+  // Soft-delete own message (OpenChat-q9h). Calls DELETE; server emits message:updated.
+  const deleteMessage = useCallback(async (messageId: string) => {
+    const updated = await api.deleteMessage(messageId);
+    setMessages(prev => prev.map(m => m.id === messageId ? { ...m, ...updated } : m));
+  }, []);
+
+  // Toggle reaction (OpenChat-7bd). Adds if not present, removes if byMe already.
+  const toggleReaction = useCallback(async (messageId: string, emoji: string) => {
+    // Find current state of this reaction for the current user.
+    const msg = messages.find(m => m.id === messageId);
+    const existing = msg?.reactions?.find(r => r.emoji === emoji);
+    let result: { reactions: ReactionSummary[] };
+    if (existing?.byMe) {
+      result = await api.removeReaction(messageId, emoji);
+    } else {
+      result = await api.addReaction(messageId, emoji);
+    }
+    setMessages(prev => prev.map(m =>
+      m.id === messageId ? { ...m, reactions: result.reactions } : m
+    ));
+  }, [messages]);
+
   // Block user (OpenChat-46p). Calls API, then removes the DM conversation
   // with that user from the local list so the UI updates immediately.
   const blockUser = useCallback(async (userId: string) => {
@@ -461,6 +612,74 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Mark conversation as read (OpenChat-0nj).
+  // Debounced 500ms so we don't hammer the server on every incoming message
+  // while the user is actively in the conversation.
+  const markConversationRead = useCallback((conversationId: string) => {
+    const timers = markReadTimers.current;
+    const existing = timers.get(conversationId);
+    if (existing) clearTimeout(existing);
+    const t = setTimeout(() => {
+      timers.delete(conversationId);
+      api.markRead(conversationId)
+        .then(res => {
+          // Seed readByOthers from the response's readMap.
+          setReadByOthers(prev => {
+            const next = new Map(prev);
+            const convMap = new Map(prev.get(conversationId) ?? []);
+            for (const [uid, ts] of Object.entries(res.readMap)) {
+              if (ts) convMap.set(uid, ts);
+            }
+            next.set(conversationId, convMap);
+            return next;
+          });
+          setOnlineUsers(prev => {
+            const next = new Map(prev);
+            for (const [uid, online] of Object.entries(res.onlineMap)) {
+              next.set(uid, online);
+            }
+            return next;
+          });
+          // Also clear the unread badge for this conversation.
+          setUnreadByConv(curr => {
+            if (!curr.has(conversationId)) return curr;
+            const next = new Map(curr);
+            next.delete(conversationId);
+            return next;
+          });
+        })
+        .catch(err => console.warn('[ChatContext] markRead failed:', err));
+    }, 500);
+    timers.set(conversationId, t);
+  }, []);
+
+  // Update own profile (OpenChat-tml).
+  const updateProfile = useCallback(async (fields: { name?: string; statusMessage?: string }) => {
+    const updated = await api.updateProfile(fields);
+    // Optimistically patch currentUser in memory so the UI sees the change immediately.
+    setCurrentUser(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        name: updated.name ?? prev.name,
+      };
+    });
+    // Also update the user's own participant entry in conversations.
+    if (currentUser) {
+      setConversations(prev => prev.map(conv => {
+        if (!conv.participants?.some(p => p.user.id === currentUser.userId)) return conv;
+        return {
+          ...conv,
+          participants: conv.participants.map(p =>
+            p.user.id === currentUser.userId
+              ? { ...p, user: { ...p.user, name: updated.name ?? p.user.name, statusMessage: updated.statusMessage ?? p.user.statusMessage } }
+              : p
+          ),
+        };
+      }));
+    }
+  }, [currentUser]);
+
   const signOut = useCallback(async () => {
     try { emitPresenceUpdate('offline'); } catch { /* best effort */ }
     disconnect();
@@ -475,6 +694,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setTypingByConv(new Map());
     setUnreadByConv(new Map());
     setAiDisclosureAcceptedAt(null);
+    setReadByOthers(new Map());
+    setOnlineUsers(new Map());
   }, []);
 
   // 401/403 cascade. Any API call that gets back a token-expired response
@@ -490,20 +711,28 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, setActiveConversation, messages, loadingMessages, sendMessage,
+    editMessage, deleteMessage,
+    toggleReaction,
     blockUser,
     presence, typingByConv, reportTyping, unreadByConv,
     aiDisclosureAcceptedAt, acceptAiDisclosure,
     mutedConvs, muteConv,
+    readByOthers, onlineUsers, markConversationRead,
+    updateProfile,
     signOut, bootstrapIfAuthed,
   }), [
     currentUser, isAuthed, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, setActiveConversation, messages, loadingMessages, sendMessage,
+    editMessage, deleteMessage,
+    toggleReaction,
     blockUser,
     presence, typingByConv, reportTyping, unreadByConv,
     aiDisclosureAcceptedAt, acceptAiDisclosure,
     mutedConvs, muteConv,
+    readByOthers, onlineUsers, markConversationRead,
+    updateProfile,
     signOut, bootstrapIfAuthed,
   ]);
 
