@@ -4,25 +4,30 @@ const API_BASE = '/api/chat';
 const AUTH_BASE = '/api/auth';
 const NOOS_URL = import.meta.env.VITE_NOOS_URL || 'https://globalbr.ai';
 
-export class ApiError extends Error {
-  status: number;
-  statusText: string;
+// Storage keys are centralized to keep clearAuth() and any future migrations
+// honest. If you add a new openchat_* key, add it here too. See OpenChat-2zr.
+const TOKEN_KEY = 'openchat_token';
+const REFRESH_TOKEN_KEY = 'openchat_refresh_token';
+const USER_KEY = 'openchat_user';
 
-  constructor(message: string, status: number, statusText: string) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.statusText = statusText;
-  }
-}
+// Window CustomEvent names. Consumed by ChatContext to keep React state in
+// sync with the auth layer. (api.ts can't depend on React/Router, hence the
+// event-bus dodge — codex review 2026-05-30 noted this is the pragmatic
+// boundary and acceptable as long as we use narrow, typed events.)
+//
+// Detail shapes:
+//   noos:token-refreshed  → { token: string }
+//   noos:auth-expired     → {}
+export const AUTH_EVENT_TOKEN_REFRESHED = 'noos:token-refreshed';
+export const AUTH_EVENT_AUTH_EXPIRED = 'noos:auth-expired';
 
-export function isAuthError(error: unknown): boolean {
-  return error instanceof ApiError && (error.status === 401 || error.status === 403);
-}
-
-function isAuthStatus(status: number): boolean {
-  return status === 401 || status === 403;
-}
+// Hard ceiling on consecutive refreshes between any two successful API
+// calls. See `consecutiveRefreshes` field docs in ApiClient. Reaching the
+// limit means refresh is "succeeding" against Noos but every refreshed
+// token still gets rejected downstream — usually a config bug, not
+// something a user can fix from the client, so we stop churning and force
+// a clean logout.
+const REFRESH_LOOP_LIMIT = 3;
 
 export interface User {
   id: string;
@@ -63,72 +68,316 @@ export interface Conversation {
   participants?: { user: User; role: string }[];
 }
 
+/**
+ * Server-side search result shape (server/src/routes/chat.ts → GET /search).
+ *
+ * Message hits include the conversation's title + type so the UI can render
+ * "Re: birthday plans (group)" without a separate lookup. Conversation hits
+ * include up to 3 participants for the same "show me who's in here at a
+ * glance" reason — full participant data still comes from the conversation
+ * detail endpoint when the user opens it.
+ */
+export interface SearchMessageHit {
+  id: string;
+  content: string;
+  conversationId: string;
+  senderId: string;
+  createdAt: string;
+  sender?: { id: string; name: string; email: string };
+  conversationTitle?: string | null;
+  conversationType?: 'direct' | 'group';
+}
+
+export interface SearchConversationHit {
+  id: string;
+  title?: string | null;
+  type: 'direct' | 'group';
+  lastMessageAt?: string;
+  lastMessagePreview?: string;
+  participants?: Array<{ id: string; name: string; email: string }>;
+}
+
+export interface SearchResults {
+  messages: SearchMessageHit[];
+  conversations: SearchConversationHit[];
+  contacts: User[];
+}
+
+// Auth response shape from Noos. We standardize on this from login,
+// register, sso-exchange, and refresh.
+export interface AuthResult {
+  token: string;
+  refreshToken?: string;
+  user: User;
+}
+
+export class ApiError extends Error {
+  status: number;
+  statusText: string;
+  constructor(message: string, status: number, statusText: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.statusText = statusText;
+  }
+}
+
+export function isAuthError(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403);
+}
+
 class ApiClient {
   private token: string | null = null;
   private authErrorHandler: (() => void) | null = null;
-
-  setToken(token: string | null) {
-    this.token = token;
-  }
 
   setAuthErrorHandler(handler: (() => void) | null) {
     this.authErrorHandler = handler;
   }
 
+  // Single-flight refresh: if a refresh is already in flight, all callers
+  // await the same promise. Without this, a cold-load that fires 5 parallel
+  // requests at the API will race 5 refresh calls — Noos rotates refresh
+  // tokens (deletes the old RefreshToken before generating a new one in
+  // src/routes/auth.ts), so 4 of 5 would fail and trigger a spurious logout
+  // even though the 5th succeeded. See codex review 2026-05-30.
+  private refreshPromise: Promise<boolean> | null = null;
+
+  // Idempotent "auth has terminally expired" signal. Without this, a
+  // failed refresh that's the recovery target of 10 concurrent 401s would
+  // dispatch 10 noos:auth-expired events and the ChatContext listener
+  // would call logout() 10 times.
+  private authExpiredEmitted = false;
+
+  // Refresh-loop guard. Counts successful refreshes that have NOT been
+  // followed by any successful API call. The socket hook re-attempts a
+  // refresh on every `Invalid token` connect_error, and a successful
+  // refresh causes React to remount the effect (resetting any
+  // per-effect-run flag). Without a session-scoped guard, a chat-server
+  // that consistently rejects every new access token (e.g. JWT_SECRET
+  // mismatch between Noos and the chat server, or a clock skew) would
+  // churn refresh tokens forever. After REFRESH_LOOP_LIMIT consecutive
+  // refreshes with no API success in between, we surrender — force
+  // auth-expired so the user is sent to login instead of spinning. See
+  // codex review 2026-05-30.
+  private consecutiveRefreshes = 0;
+
+  setToken(token: string | null) {
+    this.token = token;
+    // Allow the same in-process ApiClient instance to recover after a fresh
+    // login by re-arming the auth-expired latch.
+    if (token) this.authExpiredEmitted = false;
+  }
+
   private getToken() {
-    return this.token;
+    if (this.token) return this.token;
+    try {
+      const stored = localStorage.getItem(TOKEN_KEY);
+      if (stored) {
+        this.token = stored;
+        return stored;
+      }
+    } catch {
+      // localStorage may be unavailable in some environments.
+    }
+    return null;
   }
 
-  private async toApiError(response: Response, fallbackMessage: string): Promise<ApiError> {
-    const error = await response.json().catch(() => ({ error: fallbackMessage }));
-    const apiError = new ApiError(error.error || fallbackMessage, response.status, response.statusText);
-    if (isAuthStatus(response.status)) {
-      this.authErrorHandler?.();
+  private getRefreshToken(): string | null {
+    try {
+      return localStorage.getItem(REFRESH_TOKEN_KEY);
+    } catch {
+      return null;
     }
-    return apiError;
   }
 
-  private async fetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    };
+  /**
+   * Wipe every `openchat_*` key we know about. Called on terminal refresh
+   * failure and on explicit logout. Centralized so future keys don't leak
+   * across sessions (the prior logout() left openchat_refresh_token in
+   * place, which is a real fish-hook for the next user of a shared device).
+   */
+  private clearAuth(): void {
+    this.token = null;
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+    } catch {
+      // localStorage unavailable — best effort.
+    }
+  }
 
-    const token = this.getToken();
-    if (token) {
-      (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
+  private emitTokenRefreshed(token: string): void {
+    if (typeof window === 'undefined') return;
+    try {
+      window.dispatchEvent(
+        new CustomEvent(AUTH_EVENT_TOKEN_REFRESHED, { detail: { token } })
+      );
+    } catch {
+      // Older browsers may lack CustomEvent constructor; non-fatal.
+    }
+  }
+
+  private emitAuthExpired(): void {
+    if (this.authExpiredEmitted) return;
+    this.authExpiredEmitted = true;
+    if (this.authErrorHandler) {
+      try { this.authErrorHandler(); } catch { /* non-fatal */ }
+    }
+    if (typeof window === 'undefined') return;
+    try {
+      window.dispatchEvent(new CustomEvent(AUTH_EVENT_AUTH_EXPIRED));
+    } catch {
+      // Non-fatal.
+    }
+  }
+
+  /**
+   * Single-flight refresh. Returns true if a fresh access token is now
+   * stored and in-memory; false if refresh failed (and clearAuth() +
+   * emitAuthExpired() have already fired).
+   *
+   * Multiple concurrent callers (REST + Socket + presence) share the same
+   * promise so we hit /auth/refresh exactly once per refresh cycle.
+   */
+  async refreshAccessToken(): Promise<boolean> {
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+    this.refreshPromise = this.doRefresh().finally(() => {
+      this.refreshPromise = null;
+    });
+    return this.refreshPromise;
+  }
+
+  private async doRefresh(): Promise<boolean> {
+    // Refresh-loop guard: if we've already refreshed N times in a row
+    // without any successful API call (REST 2xx, which would reset the
+    // counter via maybeResetRefreshLoop()), the new token is being
+    // rejected as fast as we mint it. Force-expire to break the loop.
+    if (this.consecutiveRefreshes >= REFRESH_LOOP_LIMIT) {
+      this.clearAuth();
+      this.emitAuthExpired();
+      return false;
+    }
+    this.consecutiveRefreshes++;
+
+    const refreshToken = this.getRefreshToken();
+    if (!refreshToken) {
+      this.clearAuth();
+      this.emitAuthExpired();
+      return false;
     }
 
-    const url = `${API_BASE}${path}`;
+    const url = `${NOOS_URL}/api/auth/refresh`;
     let response: Response;
     try {
       response = await fetch(url, {
-        ...options,
-        headers,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
       });
     } catch (error) {
-      reportFetchError({
-        url,
-        method: options.method || 'GET',
-        error,
-      });
-      throw error;
+      reportFetchError({ url, method: 'POST', error });
+      this.clearAuth();
+      this.emitAuthExpired();
+      return false;
     }
 
     if (!response.ok) {
-      reportHttpError({
-        url,
-        method: options.method || 'GET',
-        status: response.status,
-        statusText: response.statusText,
-      });
-      throw await this.toApiError(response, 'Request failed');
+      // Don't report this as an httpError — it's an expected 4xx when
+      // the refresh token has itself expired. Logs would just be noisy.
+      this.clearAuth();
+      this.emitAuthExpired();
+      return false;
     }
 
+    const data = await response.json().catch(() => null);
+    if (!data?.accessToken) {
+      this.clearAuth();
+      this.emitAuthExpired();
+      return false;
+    }
+
+    // Noos rotates refresh tokens — persist the new one.
+    this.token = data.accessToken;
+    try {
+      localStorage.setItem(TOKEN_KEY, data.accessToken);
+      if (data.refreshToken) {
+        localStorage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
+      }
+    } catch {
+      // localStorage unavailable — token still works for this session.
+    }
+
+    this.emitTokenRefreshed(data.accessToken);
+    return true;
+  }
+
+  private async fetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const url = `${API_BASE}${path}`;
+    const doFetch = async (token: string | null): Promise<Response> => {
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      };
+      if (token) {
+        (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
+      }
+      return fetch(url, { ...options, headers });
+    };
+
+    let response: Response;
+    try {
+      response = await doFetch(this.getToken());
+    } catch (error) {
+      reportFetchError({ url, method: options.method || 'GET', error });
+      throw error;
+    }
+
+    // On 401: try a single-flight refresh and retry once. If refresh
+    // succeeds, the retry gets the new token from this.getToken(). If it
+    // fails, refreshAccessToken() has already emitted noos:auth-expired
+    // (which ChatContext will translate to logout + redirect), so we just
+    // surface the 401 as-is for the caller.
+    if (response.status === 401) {
+      const refreshed = await this.refreshAccessToken();
+      if (refreshed) {
+        try {
+          response = await doFetch(this.getToken());
+        } catch (error) {
+          reportFetchError({ url, method: options.method || 'GET', error });
+          throw error;
+        }
+      }
+    }
+
+    if (!response.ok) {
+      // Don't double-report a 401 that we already attempted to recover
+      // from; the original 401 isn't actionable telemetry. Anything else
+      // (or a still-401 after refresh, which means the new token is also
+      // somehow rejected) is.
+      if (response.status !== 401) {
+        reportHttpError({
+          url,
+          method: options.method || 'GET',
+          status: response.status,
+          statusText: response.statusText,
+        });
+      }
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || 'Request failed');
+    }
+
+    // Any successful API call proves the current token is honored by the
+    // backend. Reset the refresh-loop counter so the next legitimate
+    // 401-after-15-min-of-use still gets the full retry budget.
+    this.consecutiveRefreshes = 0;
     return response.json();
   }
 
-  // Conversations
+  // === REST endpoints ===
+
   async getConversations(): Promise<Conversation[]> {
     return this.fetch('/conversations');
   }
@@ -144,7 +393,6 @@ class ApiClient {
     return this.fetch(`/conversations/${id}`);
   }
 
-  // Group: rename
   async updateConversation(id: string, patch: { title?: string }): Promise<Conversation> {
     return this.fetch(`/conversations/${id}`, {
       method: 'PATCH',
@@ -152,7 +400,6 @@ class ApiClient {
     });
   }
 
-  // Group: add member (owner-only)
   async addParticipant(conversationId: string, userId: string): Promise<Conversation> {
     return this.fetch(`/conversations/${conversationId}/participants`, {
       method: 'POST',
@@ -160,51 +407,84 @@ class ApiClient {
     });
   }
 
-  // Group: remove member (owner can remove anyone; member can remove self = leave)
-  async removeParticipant(conversationId: string, userId: string): Promise<{ ok: true }> {
+  async removeParticipant(conversationId: string, userId: string): Promise<Conversation> {
     return this.fetch(`/conversations/${conversationId}/participants/${userId}`, {
       method: 'DELETE',
     });
   }
 
-  // Messages
-  async getMessages(conversationId: string, before?: string): Promise<Message[]> {
-    const params = new URLSearchParams();
-    if (before) params.set('before', before);
-    const query = params.toString() ? `?${params.toString()}` : '';
-    return this.fetch(`/conversations/${conversationId}/messages${query}`);
+  async leaveConversation(conversationId: string): Promise<{ left: true }> {
+    return this.fetch(`/conversations/${conversationId}/leave`, {
+      method: 'POST',
+    });
   }
 
-  async sendMessage(conversationId: string, content: string): Promise<Message> {
+  async getMessages(conversationId: string, limit = 50, before?: string): Promise<Message[]> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (before) params.append('before', before);
+    return this.fetch(`/conversations/${conversationId}/messages?${params}`);
+  }
+
+  async sendMessage(conversationId: string, content: string, messageType = 'text'): Promise<Message> {
     return this.fetch(`/conversations/${conversationId}/messages`, {
       method: 'POST',
+      body: JSON.stringify({ content, messageType }),
+    });
+  }
+
+  async editMessage(conversationId: string, messageId: string, content: string): Promise<Message> {
+    return this.fetch(`/conversations/${conversationId}/messages/${messageId}`, {
+      method: 'PATCH',
       body: JSON.stringify({ content }),
     });
   }
 
-  // Contacts
+  async deleteMessage(conversationId: string, messageId: string): Promise<{ deleted: true }> {
+    return this.fetch(`/conversations/${conversationId}/messages/${messageId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async searchUsers(query: string): Promise<User[]> {
+    return this.fetch(`/users/search?q=${encodeURIComponent(query)}`);
+  }
+
   async getContacts(search?: string): Promise<User[]> {
-    const params = new URLSearchParams();
-    if (search) params.set('q', search);
-    const query = params.toString() ? `?${params.toString()}` : '';
-    return this.fetch(`/contacts${query}`);
+    const path = search ? `/contacts?q=${encodeURIComponent(search)}` : '/contacts';
+    return this.fetch(path);
   }
 
-  // User lookup by email
-  async getUserByEmail(email: string): Promise<User> {
-    return this.fetch(`/users/by-email/${encodeURIComponent(email)}`);
+  /**
+   * Unified search across messages, conversations, and contacts.
+   *
+   * Server: GET /api/chat/search (see server/src/routes/chat.ts).
+   * Returns three buckets — each capped at the requested `limit`.
+   * Server enforces participant-level access on messages/conversations,
+   * so the client doesn't need to filter again.
+   */
+  async search(params: {
+    q: string;
+    scope?: 'global' | 'conversation';
+    conversationId?: string;
+    limit?: number;
+  }): Promise<SearchResults> {
+    const qs = new URLSearchParams({ q: params.q });
+    if (params.scope) qs.set('scope', params.scope);
+    if (params.conversationId) qs.set('conversationId', params.conversationId);
+    if (params.limit) qs.set('limit', String(params.limit));
+    return this.fetch(`/search?${qs.toString()}`);
   }
 
-  // Presence
-  async updatePresence(presenceStatus?: string, statusMessage?: string): Promise<User> {
+  async updatePresence(presenceStatus: string, statusMessage?: string): Promise<void> {
     return this.fetch('/presence', {
       method: 'PUT',
       body: JSON.stringify({ presenceStatus, statusMessage }),
     });
   }
 
-  // Auth - Login via Noos
-  async login(email: string, password: string): Promise<{ token: string; user: User; refreshToken?: string }> {
+  // === Auth endpoints (via Noos) ===
+
+  async login(email: string, password: string): Promise<AuthResult> {
     const url = `${NOOS_URL}/api/auth/login`;
     let response: Response;
     try {
@@ -232,12 +512,11 @@ class ApiClient {
     const data = await response.json();
     return {
       token: data.accessToken,
+      refreshToken: data.refreshToken,
       user: data.user,
-      refreshToken: data.refreshToken
     };
   }
 
-  // Dev login (for development without password)
   async devLogin(email: string, name?: string): Promise<{ token: string; user: User; expiresIn: number }> {
     const url = `${AUTH_BASE}/dev-login`;
     let response: Response;
@@ -266,8 +545,7 @@ class ApiClient {
     return response.json();
   }
 
-  // Register via Noos
-  async register(email: string, password: string, name: string): Promise<{ token: string; user: User }> {
+  async register(email: string, password: string, name: string): Promise<AuthResult> {
     const url = `${NOOS_URL}/api/auth/register`;
     let response: Response;
     try {
@@ -295,17 +573,24 @@ class ApiClient {
     const data = await response.json();
     return {
       token: data.accessToken,
-      user: data.user
+      refreshToken: data.refreshToken,
+      user: data.user,
     };
   }
 
+  /**
+   * Get the authenticated user. The endpoint lives at `${AUTH_BASE}/me`, not
+   * `${API_BASE}/me`. The prior implementation used
+   * `this.fetch('/me'.replace('/chat', '/auth'))` which silently expanded
+   * to `/api/chat/me` (the .replace matched nothing in just '/me'). Tried
+   * via this.fetch the call would 404 and bubble as "Request failed".
+   * See codex review 2026-05-30.
+   */
   async getMe(): Promise<User> {
     const url = `${AUTH_BASE}/me`;
+    const headers: HeadersInit = { 'Content-Type': 'application/json' };
     const token = this.getToken();
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    };
+    if (token) (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
 
     let response: Response;
     try {
@@ -315,19 +600,40 @@ class ApiClient {
       throw error;
     }
 
-    if (!response.ok) {
-      reportHttpError({
-        url,
-        method: 'GET',
-        status: response.status,
-        statusText: response.statusText,
-      });
-      throw await this.toApiError(response, 'Request failed');
+    // Same 401-then-refresh-then-retry pattern as the chat fetch wrapper.
+    if (response.status === 401) {
+      const refreshed = await this.refreshAccessToken();
+      if (refreshed) {
+        const retryHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+        const newToken = this.getToken();
+        if (newToken) retryHeaders['Authorization'] = `Bearer ${newToken}`;
+        try {
+          response = await fetch(url, { headers: retryHeaders });
+        } catch (error) {
+          reportFetchError({ url, method: 'GET', error });
+          throw error;
+        }
+      }
     }
 
+    if (!response.ok) {
+      if (response.status !== 401) {
+        reportHttpError({ url, method: 'GET', status: response.status, statusText: response.statusText });
+      }
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || 'Request failed');
+    }
+
+    this.consecutiveRefreshes = 0;
     return response.json();
   }
 
+  /**
+   * Log out. Best-effort: tells the server to invalidate the refresh
+   * token, then clears local state. The server call is non-blocking from
+   * the caller's perspective — failure (e.g. already-expired access
+   * token, network down) does not prevent local cleanup.
+   */
   async logout(): Promise<void> {
     const url = `${AUTH_BASE}/logout`;
     try {
@@ -338,10 +644,10 @@ class ApiClient {
           ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
         },
       });
-    } catch (error) {
-      reportFetchError({ url, method: 'POST', error });
-      throw error;
+    } catch {
+      // Ignore; we're tearing down regardless.
     }
+    this.clearAuth();
   }
 
   // Ask our server for the Google authorization URL. The server holds the
@@ -392,8 +698,10 @@ class ApiClient {
     return response.json();
   }
 
-  // Exchange SSO code/token from Noos for full auth tokens
-  async ssoExchange(payload: { code?: string; token?: string }): Promise<{ token: string; user: User }> {
+  // Exchange SSO code/token from Noos for full auth tokens. Returns AuthResult
+  // (including refreshToken) so callers can persist it — was previously
+  // dropping refreshToken on the floor; see OpenChat-bo6.
+  async ssoExchange(payload: { code?: string; token?: string }): Promise<AuthResult> {
     const url = `${NOOS_URL}/api/auth/sso-exchange`;
     let response: Response;
     try {
@@ -419,10 +727,10 @@ class ApiClient {
     }
 
     const data = await response.json();
-    // Return in format compatible with our auth system
     return {
       token: data.accessToken,
-      user: data.user
+      refreshToken: data.refreshToken,
+      user: data.user,
     };
   }
 }

@@ -54,6 +54,9 @@ interface ChatContextValue {
   typingUsers: Map<string, Set<string>>; // conversationId -> userIds
   startTyping: (conversationId: string) => void;
   stopTyping: (conversationId: string) => void;
+
+  // Unread counts per conversation (OpenChat-yg8)
+  unreadByConv: Map<string, number>;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -544,6 +547,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     typingUsers,
     startTyping,
     stopTyping,
+    unreadByConv: new Map<string, number>(),
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
