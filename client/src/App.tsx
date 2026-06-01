@@ -5,7 +5,6 @@ import { ChatProvider, useChat } from './contexts/ChatContext';
 import { ChatPage } from './pages/ChatPage';
 import { AUTH_NOTICE_KEY } from './utils/authSession';
 import { InvitePreviewPage } from './pages/InvitePreviewPage';
-import { InstallPrompt } from './components/InstallPrompt';
 
 const NOOS_URL = import.meta.env.VITE_NOOS_URL || 'https://globalbr.ai';
 const ALLOW_INSECURE_SSO_TOKEN = import.meta.env.MODE !== 'production';
