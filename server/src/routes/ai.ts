@@ -116,14 +116,20 @@ router.post('/transform', requireAuth, async (req: Request, res: Response) => {
 
     const block = message.content[0];
     if (!block || block.type !== 'text') {
-      res.status(500).json({ error: 'Unexpected response from AI' });
+      res.status(500).json({ error: 'Unexpected response from AI (no text block)' });
       return;
     }
 
     res.json({ rewritten: block.text.trim() });
   } catch (err) {
+    // Surface a useful error message in the response body so the client can
+    // show what actually broke. Anthropic SDK errors have .status and
+    // .message; everything else falls through to err.message.
     console.error('[ai/transform] Anthropic error:', err);
-    res.status(500).json({ error: 'Failed to transform message' });
+    const e = err as { status?: number; message?: string; error?: { message?: string } };
+    const status = typeof e.status === 'number' ? e.status : 500;
+    const message = e.error?.message || e.message || 'Failed to transform message';
+    res.status(status).json({ error: message });
   }
 });
 
