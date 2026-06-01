@@ -66,14 +66,16 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Project landing page (/about) — single static HTML + the app icon.
+// Project landing page (/, /about) — OpenChat-e4n moved / to landing.
+// Single static HTML + the app icon. Legacy Vite web client is now at
+// /legacy (see below).
 // Lists every version of OpenChat (iOS TestFlight, Android APK, Mobile Web,
 // Desktop Web) so we have one shareable URL that branches to all platforms.
 // Must be registered BEFORE express.static(clientDistPath) below so it
 // takes precedence over any /about path the Vite client might claim.
 const landingHtmlPath = path.join(__dirname, 'landing.html');
 const landingIconPath = path.join(__dirname, 'landing-icon.png');
-app.get('/about', (_req, res) => {
+app.get(['/', '/about'], (_req, res) => {
   res.sendFile(landingHtmlPath);
 });
 app.get('/about/icon.png', (_req, res) => {
@@ -170,9 +172,35 @@ app.get('/about/connect-your-bot', (_req, res) => {
   res.type('html').send(renderConnectBotHtml());
 });
 
-// Serve static files from client build (production)
+// Serve static files from client build (production).
+// This is the LEGACY Vite/React web client. The canonical new clients are
+// /m (RN-web mobile) and /d (RN-web desktop). We keep the legacy client
+// reachable at every path it used to claim (for bookmarks + the /i/<token>
+// group-invite deep link), but the discoverable entry point is now /legacy.
 const clientDistPath = path.join(__dirname, '..', '..', 'client', 'dist');
 app.use(express.static(clientDistPath));
+
+// /legacy — official entry point to the legacy Vite web client.
+// Injects a small "deprecated" banner across the top of the SPA shell so
+// users know the new app is at /m, /d, or the home page. The SPA still
+// runs underneath; React Router takes over for sub-routes.
+let legacyShellCache: string | null = null;
+function getLegacyShell(): string {
+  if (legacyShellCache) return legacyShellCache;
+  try {
+    const html = readFileSync(path.join(clientDistPath, 'index.html'), 'utf8');
+    const banner = `<div id="oc-legacy-banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%);color:#fff;font:600 13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;padding:8px 16px;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;box-shadow:0 2px 12px rgba(0,0,0,0.25);"><span>You're on the legacy OpenChat web client.</span><a href="/" style="color:#fff;text-decoration:underline;font-weight:700;">Go to the new app →</a></div><style>body{padding-top:42px !important;}</style>`;
+    legacyShellCache = html.replace('<body>', `<body>${banner}`);
+    return legacyShellCache;
+  } catch {
+    // If the legacy build is missing, fall back to a tiny placeholder
+    // that just links to the new app.
+    return `<!doctype html><html><body><p>The legacy web client is not built. <a href="/">Go to OpenChat</a>.</p></body></html>`;
+  }
+}
+app.get(/^\/legacy(\/|$)/, (_req, res) => {
+  res.type('html').send(getLegacyShell());
+});
 
 // Optional RN-web build of openchat-mobile, mounted at /m/*. Lets us experiment
 // with the React Native app on the web without disturbing the existing /
