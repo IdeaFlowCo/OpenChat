@@ -176,6 +176,49 @@ export function setupChatSocket(io: Server): void {
         const messageId = nanoid();
         const now = new Date().toISOString();
 
+        // --- Mention parsing (OpenChat-0jy) ---
+        // Only parse mentions in group conversations; DMs don't need them.
+        // We resolve @Name tokens to participant userIds by name match so the
+        // stored list survives display-name changes in rendering logic.
+        const convCheckResult = await session.run(`
+          MATCH (c:Conversation {id: $conversationId})
+          RETURN c.type AS convType
+        `, { conversationId });
+        const convType = convCheckResult.records[0]?.get('convType') as string | null;
+        const isGroupConv = convType === 'group';
+
+        let mentionedUserIds: string[] = [];
+        if (isGroupConv) {
+          const mentionTokens = [...content.matchAll(/@([\w-]+(?:\s+[\w-]+)?)/g)].map(m => m[1]);
+          if (mentionTokens.length > 0) {
+            // Resolve each token to a participant by case-insensitive name match.
+            // We fetch all participants at once and do the match in JS to avoid
+            // multiple round-trips. Names with spaces are intentionally supported
+            // (e.g. "@Alice Smith") but single-word tokens (e.g. "@alice") also work.
+            const participantsResult = await session.run(`
+              MATCH (p:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+              WHERE p.id <> $senderId
+              RETURN p.id AS pid, p.name AS pname, p.email AS pemail
+            `, { conversationId, senderId: userId });
+            const participants = participantsResult.records.map(r => ({
+              id: r.get('pid') as string,
+              name: (r.get('pname') as string | null) || '',
+              email: (r.get('pemail') as string | null) || '',
+            }));
+            for (const token of mentionTokens) {
+              const lower = token.toLowerCase();
+              const matched = participants.find(p =>
+                p.name.toLowerCase() === lower ||
+                p.name.toLowerCase().startsWith(lower) ||
+                p.email.split('@')[0].toLowerCase() === lower
+              );
+              if (matched && !mentionedUserIds.includes(matched.id)) {
+                mentionedUserIds.push(matched.id);
+              }
+            }
+          }
+        }
+
         const result = await session.run(`
           MATCH (c:Conversation {id: $conversationId})
           MATCH (sender:User {id: $senderId})
@@ -185,6 +228,7 @@ export function setupChatSocket(io: Server): void {
             senderId: $senderId,
             conversationId: $conversationId,
             messageType: $messageType,
+            mentions: $mentions,
             createdAt: datetime($now)
           })
           CREATE (m)-[:IN_CONVERSATION]->(c)
@@ -199,6 +243,7 @@ export function setupChatSocket(io: Server): void {
           senderId: userId,
           conversationId,
           messageType,
+          mentions: mentionedUserIds,
           now
         });
 
@@ -213,7 +258,7 @@ export function setupChatSocket(io: Server): void {
         // never block the message:send response on push delivery.
         // The mobile client's foreground handler suppresses the banner when the
         // user is already viewing the conversation. (OpenChat-vg7)
-        fanoutPushForMessage(conversationId, userId, message).catch((err) => {
+        fanoutPushForMessage(conversationId, userId, message, mentionedUserIds).catch((err) => {
           console.warn('[push] fanout error:', err);
         });
       } catch (error) {
@@ -350,12 +395,18 @@ async function broadcastPresenceToContacts(io: Server, userId: string, status: s
  * message preview. Data carries conversationId + messageId so the mobile
  * client can navigate to the right thread on tap.
  *
+ * For mentioned users in group chats the notification body reads:
+ *   "You were mentioned in {convTitle} by {senderName}: {preview}"
+ * vs the default "{senderName} in {convTitle}: {preview}".
+ *
  * Fire-and-forget — logs but never throws to the caller.
+ * OpenChat-0jy: added mentionedUserIds param.
  */
 async function fanoutPushForMessage(
   conversationId: string,
   senderId: string,
-  message: unknown
+  message: unknown,
+  mentionedUserIds: string[] = []
 ): Promise<void> {
   const m = message as {
     id?: string;
@@ -379,28 +430,43 @@ async function fanoutPushForMessage(
     if (recipientIds.length === 0) return;
 
     const senderName = (m.sender?.name || m.sender?.email || 'Someone').trim();
-    const title =
-      conv?.type === 'group' && conv.title
-        ? `${senderName} in ${conv.title}`
-        : senderName;
-    const body = (m.content || '').slice(0, 200);
+    const preview = (m.content || '').slice(0, 140);
+    const mentionSet = new Set(mentionedUserIds);
 
     await Promise.all(
-      recipientIds.map((uid) =>
-        sendPushToUser(uid, {
+      recipientIds.map((uid) => {
+        const isMentioned = mentionSet.has(uid);
+        let title: string;
+        let body: string;
+
+        if (isMentioned && conv?.type === 'group') {
+          // Mention-specific copy (OpenChat-0jy)
+          const convTitle = conv.title ? ` in ${conv.title}` : '';
+          title = `${senderName}${convTitle}`;
+          body = `You were mentioned by ${senderName}: ${preview}`;
+        } else {
+          title =
+            conv?.type === 'group' && conv.title
+              ? `${senderName} in ${conv.title}`
+              : senderName;
+          body = preview;
+        }
+
+        return sendPushToUser(uid, {
           title,
           body,
           tag: `conv:${conversationId}`,
           data: {
-            type: 'message',
+            type: isMentioned ? 'mention' : 'message',
             conversationId,
             messageId: m.id,
+            isMention: isMentioned,
           },
         }).catch((err) => {
           console.warn(`[push] send to ${uid} failed:`, err);
           return { delivered: 0, removed: 0, failed: 1 };
-        })
-      )
+        });
+      })
     );
   } finally {
     await session.close();
