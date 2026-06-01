@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
 import { OAuth2Client, TokenPayload } from 'google-auth-library';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { getDriver } from '../db.js';
 import { requireAuth, AuthUser } from '../middleware/auth.js';
 
@@ -538,6 +539,208 @@ router.post('/google/idtoken-exchange', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Sign-in failed' });
   } finally {
     await session.close();
+  }
+});
+
+/**
+ * DELETE /api/auth/me — Account deletion (OpenChat-nhy)
+ *
+ * Atomically:
+ *   1. Redact all of this user's messages (content → 'Message deleted', etc.)
+ *   2. Delete NativePushToken nodes
+ *   3. Delete the User node (which cascades :PARTICIPATES_IN, :BLOCKED, etc.)
+ *
+ * Returns 204 on success. Emits `user:deleted` via Socket.IO so other clients
+ * can refresh their views.
+ */
+router.delete('/me', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+
+  try {
+    const now = new Date().toISOString();
+
+    // Run everything in a single write transaction for atomicity.
+    await session.executeWrite(async (tx) => {
+      // 1. Redact messages authored by this user.
+      await tx.run(`
+        MATCH (m:Message {senderId: $userId})
+        SET m.content    = 'Message deleted',
+            m.senderName = 'Former user',
+            m.editedAt   = datetime($now),
+            m.replyToId  = null
+      `, { userId, now });
+
+      // 2. Delete NativePushToken nodes belonging to this user.
+      await tx.run(`
+        MATCH (t:NativePushToken {userId: $userId})
+        DETACH DELETE t
+      `, { userId });
+
+      // 3. Delete the User node (and all its relationships).
+      await tx.run(`
+        MATCH (u:User {id: $userId})
+        DETACH DELETE u
+      `, { userId });
+    });
+
+    // Emit so other connected clients refresh conversations / participant lists.
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('user:deleted', { userId });
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting account:', error);
+    res.status(500).json({ error: 'Account deletion failed' });
+  } finally {
+    await session.close();
+  }
+});
+
+// Apple JWKS — cached per process, refreshes automatically via jose.
+const APPLE_JWKS = createRemoteJWKSet(
+  new URL('https://appleid.apple.com/auth/keys')
+);
+const APPLE_ISSUER = 'https://appleid.apple.com';
+
+/**
+ * POST /api/auth/apple/idtoken-exchange — Sign in with Apple (OpenChat-c08)
+ * Body: { identityToken: string, fullName?: { givenName, familyName }, email? }
+ *
+ * Verifies the Apple-issued JWT, MERGEs the User by email (or appleSub when
+ * email is a private relay address), and returns the same token+user shape as
+ * the Google exchange endpoints.
+ */
+router.post('/apple/idtoken-exchange', async (req: Request, res: Response) => {
+  const bundleId = process.env.APPLE_BUNDLE_ID || 'com.jacobcole.openchat';
+
+  const {
+    identityToken,
+    fullName,
+    email: bodyEmail,
+  } = (req.body ?? {}) as {
+    identityToken?: string;
+    fullName?: { givenName?: string; familyName?: string };
+    email?: string;
+  };
+
+  if (!identityToken || typeof identityToken !== 'string') {
+    res.status(400).json({ error: 'identityToken is required' });
+    return;
+  }
+
+  // 1. Verify the identity token via Apple's JWKS.
+  let payload: Record<string, unknown>;
+  try {
+    const { payload: p } = await jwtVerify(identityToken, APPLE_JWKS, {
+      issuer: APPLE_ISSUER,
+      audience: bundleId,
+    });
+    payload = p as Record<string, unknown>;
+  } catch (e) {
+    console.error('Apple ID token verify failed:', e instanceof Error ? e.message : e);
+    res.status(401).json({ error: 'Invalid Apple identity token' });
+    return;
+  }
+
+  const appleSub = payload.sub as string | undefined;
+  if (!appleSub) {
+    res.status(400).json({ error: 'Apple token missing sub claim' });
+    return;
+  }
+
+  // email claim may be absent (Hide My Email) or a private relay address.
+  const tokenEmail = payload.email as string | undefined;
+  const email = tokenEmail || bodyEmail || null;
+  const isPrivateRelay = email?.endsWith('@privaterelay.appleid.com') ?? false;
+
+  // Derive a display name from the one-time fullName payload Apple sends on
+  // first sign-in. On subsequent sign-ins fullName is empty — we preserve
+  // whatever was stored on first sign-in via ON MATCH coalesce.
+  const displayName =
+    [fullName?.givenName, fullName?.familyName].filter(Boolean).join(' ').trim() ||
+    (email && !isPrivateRelay ? email : null) ||
+    'Apple User';
+
+  const dbSession = getDriver().session();
+  try {
+    const now = new Date().toISOString();
+
+    // MERGE strategy:
+    //   - If we have a real email → merge by email (links to existing account)
+    //   - If email is hidden → merge by appleSub (no cross-provider linking possible)
+    const mergeQuery = email && !isPrivateRelay
+      ? `
+        MERGE (u:User {email: $email})
+        ON CREATE SET
+          u.id = $id,
+          u.name = $name,
+          u.createdAt = datetime($now),
+          u.presenceStatus = 'available',
+          u.lastSeenAt = datetime($now),
+          u.appleSub = $appleSub,
+          u.signupProvider = 'apple'
+        ON MATCH SET
+          u.lastSeenAt = datetime($now),
+          u.presenceStatus = 'available',
+          u.appleSub = coalesce(u.appleSub, $appleSub),
+          u.name = CASE WHEN u.name IS NULL OR u.name = '' THEN $name ELSE u.name END
+        RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot } AS user
+      `
+      : `
+        MERGE (u:User {appleSub: $appleSub})
+        ON CREATE SET
+          u.id = $id,
+          u.name = $name,
+          u.email = $email,
+          u.createdAt = datetime($now),
+          u.presenceStatus = 'available',
+          u.lastSeenAt = datetime($now),
+          u.signupProvider = 'apple'
+        ON MATCH SET
+          u.lastSeenAt = datetime($now),
+          u.presenceStatus = 'available',
+          u.email = coalesce(u.email, $email),
+          u.name = CASE WHEN u.name IS NULL OR u.name = '' THEN $name ELSE u.name END
+        RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot } AS user
+      `;
+
+    const result = await dbSession.run(mergeQuery, {
+      email: email ?? null,
+      appleSub,
+      name: displayName,
+      id: nanoid(),
+      now,
+    });
+
+    if (result.records.length === 0) {
+      res.status(500).json({ error: 'Failed to create or find user' });
+      return;
+    }
+
+    const user = toJS(result.records[0].get('user')) as {
+      id: string; email: string; name: string;
+    };
+
+    const token = jwt.sign(
+      { userId: user.id, email: user.email } as AuthUser,
+      getJwtSecret(),
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      token,
+      user,
+      expiresIn: 7 * 24 * 60 * 60,
+      provider: 'apple',
+    });
+  } catch (e) {
+    console.error('Apple sign-in: failed to upsert user:', e);
+    res.status(500).json({ error: 'Sign-in failed' });
+  } finally {
+    await dbSession.close();
   }
 });
 
