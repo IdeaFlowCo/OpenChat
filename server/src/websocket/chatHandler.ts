@@ -419,18 +419,38 @@ async function fanoutPushForMessage(
   };
   const session = getDriver().session();
   try {
+    // OpenChat-aes: collect each non-sender's mutedUntil so we can filter
+    // out muted recipients before fanning out. mutedUntil is either:
+    //   - null (not muted)
+    //   - 'always' (muted indefinitely → never push)
+    //   - ISO timestamp (muted until that point → check against now)
     const result = await session.run(
       `
       MATCH (c:Conversation {id: $conversationId})
-      OPTIONAL MATCH (other:User)-[:PARTICIPATES_IN]->(c)
+      OPTIONAL MATCH (other:User)-[rel:PARTICIPATES_IN]->(c)
       WHERE other.id <> $senderId
-      RETURN c { .title, .type } AS conv, collect(other.id) AS recipientIds
+      RETURN c { .title, .type } AS conv,
+             collect({ id: other.id, mutedUntil: rel.mutedUntil }) AS recipients
       `,
       { conversationId, senderId }
     );
     if (result.records.length === 0) return;
-    const recipientIds = (result.records[0].get('recipientIds') as string[]) || [];
+    const rawRecipients = (result.records[0].get('recipients') as Array<{ id: string; mutedUntil: string | null }>) || [];
     const conv = result.records[0].get('conv') as { title?: string; type?: string } | null;
+    const now = Date.now();
+    // Mentioned users break through mute (standard chat-app behavior:
+    // muting silences the room but @-mentions are explicit attention asks).
+    const mentionAllowSet = new Set(mentionedUserIds);
+    const recipientIds = rawRecipients
+      .filter((r) => {
+        if (!r.id) return false;
+        if (mentionAllowSet.has(r.id)) return true;
+        if (!r.mutedUntil) return true;
+        if (r.mutedUntil === 'always') return false;
+        const until = Date.parse(r.mutedUntil);
+        return Number.isNaN(until) ? true : now >= until;
+      })
+      .map((r) => r.id);
     if (recipientIds.length === 0) return;
 
     const senderName = (m.sender?.name || m.sender?.email || 'Someone').trim();

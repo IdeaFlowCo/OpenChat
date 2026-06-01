@@ -117,7 +117,7 @@ router.get('/conversations', resolveActor, async (req: Request, res: Response) =
 
   try {
     const result = await session.run(`
-      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
+      MATCH (u:User {id: $userId})-[myRel:PARTICIPATES_IN]->(c:Conversation)
       // Omit DM conversations where the other participant has blocked me
       WHERE NOT (
         c.type = 'direct'
@@ -148,7 +148,10 @@ router.get('/conversations', resolveActor, async (req: Request, res: Response) =
         .*,
         lastMessage: lastMessage { .content, .senderId, .createdAt },
         participants: participants,
-        containsBot: containsBot
+        containsBot: containsBot,
+        // OpenChat-aes: per-user mute state on the PARTICIPATES_IN edge.
+        // Returns ISO timestamp, the literal 'always', or null.
+        mutedUntil: myRel.mutedUntil
       } AS conversation
       ORDER BY c.lastMessageAt DESC
     `, { userId });
@@ -319,6 +322,61 @@ function emitConversationUpdated(
   // in a non-participant viewer state — edge case but cheap)
   io.to(`conversation:${conversationId}`).emit('conversation:updated', { conversationId, conversation });
 }
+
+// PATCH /api/chat/conversations/:id/participants/me — set mute state for
+// the calling user on this conversation (OpenChat-aes). Body:
+//   { mutedUntil: ISO-8601 string | 'always' | null }
+// Stored as a property on the user's PARTICIPATES_IN edge. Other devices
+// of the same user pick it up on next /conversations refresh.
+router.patch('/conversations/:id/participants/me', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const id = req.params.id as string;
+  const { mutedUntil } = (req.body ?? {}) as { mutedUntil?: string | null };
+
+  // Validate: either null (unmute), 'always' (forever), or an ISO timestamp
+  // in the future. Reject obvious garbage early.
+  let muteValue: string | null;
+  if (mutedUntil === null || mutedUntil === undefined) {
+    muteValue = null;
+  } else if (typeof mutedUntil !== 'string') {
+    res.status(400).json({ error: 'mutedUntil must be a string, "always", or null' });
+    return;
+  } else if (mutedUntil === 'always') {
+    muteValue = 'always';
+  } else {
+    const parsed = Date.parse(mutedUntil);
+    if (Number.isNaN(parsed)) {
+      res.status(400).json({ error: 'mutedUntil must be a valid ISO-8601 string, "always", or null' });
+      return;
+    }
+    muteValue = new Date(parsed).toISOString();
+  }
+
+  try {
+    const result = await session.run(
+      `MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
+       SET rel.mutedUntil = $muteValue
+       RETURN rel.mutedUntil AS mutedUntil, c.id AS conversationId`,
+      { userId, id, muteValue }
+    );
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    res.json({
+      conversationId: result.records[0].get('conversationId'),
+      mutedUntil: result.records[0].get('mutedUntil'),
+    });
+  } catch (error) {
+    console.error('Error updating mute state:', error);
+    res.status(500).json({ error: 'Failed to update mute state' });
+  } finally {
+    await session.close();
+  }
+});
 
 // PATCH /api/chat/conversations/:id - Update title (owner-only for groups)
 router.patch('/conversations/:id', requireAuth, async (req: Request, res: Response) => {
