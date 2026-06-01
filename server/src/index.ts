@@ -63,6 +63,21 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Project landing page (/about) — single static HTML + the app icon.
+// Lists every version of OpenChat (iOS TestFlight, Android APK, Mobile Web,
+// Desktop Web) so we have one shareable URL that branches to all platforms.
+// Must be registered BEFORE express.static(clientDistPath) below so it
+// takes precedence over any /about path the Vite client might claim.
+const landingHtmlPath = path.join(__dirname, 'landing.html');
+const landingIconPath = path.join(__dirname, 'landing-icon.png');
+app.get('/about', (_req, res) => {
+  res.sendFile(landingHtmlPath);
+});
+app.get('/about/icon.png', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(landingIconPath);
+});
+
 // Serve static files from client build (production)
 const clientDistPath = path.join(__dirname, '..', '..', 'client', 'dist');
 app.use(express.static(clientDistPath));
