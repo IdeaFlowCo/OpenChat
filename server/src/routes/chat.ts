@@ -683,6 +683,25 @@ router.get('/conversations/:id/messages', requireAuth, async (req: Request, res:
       return;
     }
 
+    // OpenChat-uxj: hydrate reply target inline so clients render reply
+    // quote bubbles without an extra round-trip per message.
+    const replyHydrate = `
+        CALL {
+          WITH m
+          OPTIONAL MATCH (reply:Message {id: m.replyToId})
+          OPTIONAL MATCH (replySender:User)-[:SENT]->(reply)
+          RETURN CASE
+            WHEN reply IS NULL THEN NULL
+            ELSE {
+              id: reply.id,
+              content: left(reply.content, 200),
+              senderId: reply.senderId,
+              sender: { id: replySender.id, name: replySender.name, email: replySender.email },
+              messageType: reply.messageType
+            }
+          END AS replyTo
+        }`;
+
     const query = before
       ? `
         MATCH (m:Message {conversationId: $id})
@@ -695,7 +714,8 @@ router.get('/conversations/:id/messages', requireAuth, async (req: Request, res:
           WHERE emoji IS NOT NULL
           RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors }) AS reactions
         }
-        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions } AS message
+        ${replyHydrate}
+        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions, replyTo: replyTo } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
       `
@@ -709,7 +729,8 @@ router.get('/conversations/:id/messages', requireAuth, async (req: Request, res:
           WHERE emoji IS NOT NULL
           RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors }) AS reactions
         }
-        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions } AS message
+        ${replyHydrate}
+        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions, replyTo: replyTo } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
       `;
@@ -811,13 +832,21 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id: conversationId } = req.params;
-  const { content, messageType = 'text', attachments } = req.body;
+  const { content, messageType = 'text', attachments, replyToId } = req.body;
 
   // Allow either content OR attachments (images can be sent without caption).
   const hasContent = content && typeof content === 'string' && content.trim();
   const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
   if (!hasContent && !hasAttachments) {
     res.status(400).json({ error: 'content or attachments is required' });
+    return;
+  }
+
+  // Validate replyToId shape if present (OpenChat-uxj). We verify it
+  // points to a real message in the SAME conversation below — pre-check
+  // here just rejects obvious bad input early.
+  if (replyToId !== undefined && replyToId !== null && typeof replyToId !== 'string') {
+    res.status(400).json({ error: 'replyToId must be a string' });
     return;
   }
 
@@ -848,6 +877,21 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       return;
     }
 
+    // Validate replyToId points to a message in THIS conversation
+    // (OpenChat-uxj). Cross-conversation replies are rejected — they'd
+    // leak content from a chat the recipients aren't part of.
+    if (replyToId) {
+      const replyCheck = await session.run(
+        `MATCH (m:Message {id: $replyToId})-[:IN_CONVERSATION]->(c:Conversation {id: $conversationId})
+         RETURN m.id AS id`,
+        { replyToId, conversationId }
+      );
+      if (replyCheck.records.length === 0) {
+        res.status(400).json({ error: 'replyToId does not point to a message in this conversation' });
+        return;
+      }
+    }
+
     const messageId = nanoid();
     const now = new Date().toISOString();
     // Use caption or fallback for preview
@@ -867,14 +911,33 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         conversationId: $conversationId,
         messageType: $messageType,
         createdAt: datetime($now),
-        attachments: $attachmentsJson
+        attachments: $attachmentsJson,
+        replyToId: $replyToId
       })
       CREATE (m)-[:IN_CONVERSATION]->(c)
       CREATE (sender)-[:SENT]->(m)
       SET c.updatedAt = datetime($now),
           c.lastMessageAt = datetime($now),
           c.lastMessagePreview = left($preview, 100)
-      RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+      // OpenChat-uxj: hydrate the reply target so clients can render the
+      // quote bubble without an extra fetch.
+      WITH m, sender
+      OPTIONAL MATCH (reply:Message {id: m.replyToId})
+      OPTIONAL MATCH (replySender:User)-[:SENT]->(reply)
+      RETURN m {
+        .*,
+        sender: sender { .id, .name, .email },
+        replyTo: CASE
+          WHEN reply IS NULL THEN NULL
+          ELSE {
+            id: reply.id,
+            content: left(reply.content, 200),
+            senderId: reply.senderId,
+            senderName: replySender.name,
+            messageType: reply.messageType
+          }
+        END
+      } AS message
     `, {
       id: messageId,
       content: messageContent,
@@ -883,6 +946,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       messageType,
       now,
       attachmentsJson,
+      replyToId: replyToId ?? null,
       preview,
     });
 
