@@ -45,6 +45,14 @@ export interface User {
   isBot?: boolean;
 }
 
+/** Single image attachment on a message (OpenChat-6bg). */
+export interface Attachment {
+  url: string;
+  mimeType: string;
+  width?: number;
+  height?: number;
+}
+
 export interface Message {
   id: string;
   content: string;
@@ -54,6 +62,8 @@ export interface Message {
   createdAt: string;
   editedAt?: string;
   sender?: User;
+  /** Image attachments (OpenChat-6bg). */
+  attachments?: Attachment[];
 }
 
 export interface Conversation {
@@ -425,10 +435,21 @@ class ApiClient {
     return this.fetch(`/conversations/${conversationId}/messages?${params}`);
   }
 
-  async sendMessage(conversationId: string, content: string, messageType = 'text'): Promise<Message> {
+  async sendMessage(conversationId: string, content: string, messageType = 'text', attachments?: Attachment[]): Promise<Message> {
     return this.fetch(`/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ content, messageType }),
+      body: JSON.stringify({ content, messageType, ...(attachments?.length ? { attachments } : {}) }),
+    });
+  }
+
+  /**
+   * Get a presigned PUT URL for uploading an image attachment. (OpenChat-6bg)
+   * Returns { putUrl, getUrl, key }.
+   */
+  async presignAttachment(params: { filename: string; mimeType: string; sizeBytes: number }): Promise<{ putUrl: string; getUrl: string; key: string }> {
+    return this.fetch('/attachments/presign', {
+      method: 'POST',
+      body: JSON.stringify(params),
     });
   }
 

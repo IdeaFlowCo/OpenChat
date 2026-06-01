@@ -61,7 +61,24 @@ export function MessageList() {
                   {sender.name || sender.email}
                 </div>
               )}
-              <p className="break-words">{message.content}</p>
+              {/* Image attachments (OpenChat-6bg) */}
+              {message.attachments?.map((att, i) => (
+                <a
+                  key={i}
+                  href={att.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block mb-1"
+                >
+                  <img
+                    src={att.url}
+                    alt="Attachment"
+                    className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                    style={att.width && att.height ? { aspectRatio: `${att.width}/${att.height}` } : undefined}
+                  />
+                </a>
+              ))}
+              {message.content && <p className="break-words">{message.content}</p>}
               <div
                 className={`text-xs mt-1 ${
                   isOwn ? 'text-blue-100' : 'text-gray-400 dark:text-slate-500'

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import toast from 'react-hot-toast';
-import { api, Conversation, isAuthError, Message, User } from '../api';
+import { api, Attachment, Conversation, isAuthError, Message, User } from '../api';
 import { useChatSocket } from '../hooks/useChatSocket';
 import {
   clearStoredSession,
@@ -38,7 +38,7 @@ interface ChatContextValue {
 
   // Messages
   messages: Message[];
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, attachments?: Attachment[]) => Promise<void>;
   loadMessages: (conversationId: string) => Promise<void>;
 
   // Contacts
@@ -457,9 +457,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, [currentUser?.userId]);
 
-  // Send message
-  const sendMessage = useCallback(async (content: string) => {
+  // Send message (with optional image attachments — OpenChat-6bg)
+  const sendMessage = useCallback(async (content: string, attachments?: Attachment[]) => {
     if (!activeConversationId) return;
+    // If there are attachments, bypass the socket path and always use REST
+    // (socket doesn't carry attachment data).
+    if (attachments?.length) {
+      const message = await api.sendMessage(activeConversationId, content, undefined, attachments);
+      setMessages(prev => [...prev, message]);
+      return;
+    }
     try {
       await socketSendMessage(activeConversationId, content);
     } catch (e) {
