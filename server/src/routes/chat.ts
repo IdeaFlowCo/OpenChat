@@ -538,7 +538,8 @@ router.post('/conversations/:id/messages', writeChat, async (req: Request, res: 
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id: conversationId } = req.params;
-  const { content, messageType = 'text' } = req.body;
+  const { content: rawContent, text, messageType = 'text' } = req.body;
+  const content = rawContent ?? text;
 
   if (!content || typeof content !== 'string') {
     res.status(400).json({ error: 'content is required' });
