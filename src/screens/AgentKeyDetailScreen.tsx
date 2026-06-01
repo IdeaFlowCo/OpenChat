@@ -20,6 +20,7 @@ import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/nativ
 import { useTheme } from '../contexts/ThemeContext';
 import { api, AgentKey, OPENCHAT_URL } from '../api/client';
 import { getColors } from '../theme/colors';
+import { McpSetupCard } from '../components/McpSetupCard';
 import type { NavProp, RouteProps } from '../navigation/types';
 
 function timeAgo(iso: string): string {
@@ -178,6 +179,10 @@ export function AgentKeyDetailScreen() {
           >
             <Text style={[styles.actionBtnText, { color: c.textPrimary }]}>Copy curl snippet</Text>
           </TouchableOpacity>
+
+          {/* Bi-directional MCP setup snippets. Pre-fills with the real key
+              once the user has tapped "View full key", otherwise placeholders. */}
+          <McpSetupCard apiKey={plainKey} />
 
           <TouchableOpacity
             style={[styles.actionBtn, { backgroundColor: c.dangerMuted, borderColor: c.danger }]}

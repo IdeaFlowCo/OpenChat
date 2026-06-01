@@ -20,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { api, AgentKeyCreateResult, OPENCHAT_URL } from '../api/client';
 import { getColors } from '../theme/colors';
+import { McpSetupCard } from '../components/McpSetupCard';
 import type { NavProp } from '../navigation/types';
 
 const ALL_SCOPES = ['read', 'write'] as const;
@@ -117,8 +118,11 @@ export function AddAgentKeyScreen() {
           <Text style={[styles.btnText, { color: c.textPrimary }]}>Copy curl snippet</Text>
         </TouchableOpacity>
 
+        {/* Bi-directional MCP setup snippets — Claude Desktop, Cursor, Codex, … */}
+        <McpSetupCard apiKey={created.key} />
+
         <TouchableOpacity
-          style={[styles.btn, { marginTop: 8 }]}
+          style={[styles.btn, { marginTop: 12 }]}
           onPress={() => navigation.goBack()}
         >
           <Text style={[styles.btnText, { color: c.primary }]}>Done</Text>
