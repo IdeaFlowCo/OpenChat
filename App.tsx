@@ -52,6 +52,9 @@ import { GroupInviteScreen } from './src/screens/GroupInviteScreen';
 import { GroupInvitePreviewScreen } from './src/screens/GroupInvitePreviewScreen';
 import { ForwardPickerScreen } from './src/screens/ForwardPickerScreen';
 import { ContactProfileScreen } from './src/screens/ContactProfileScreen';
+import { AgentKeysScreen } from './src/screens/AgentKeysScreen';
+import { AddAgentKeyScreen } from './src/screens/AddAgentKeyScreen';
+import { AgentKeyDetailScreen } from './src/screens/AgentKeyDetailScreen';
 import { ThoughtsScreen } from './src/screens/ThoughtsScreen';
 import { AddEditThoughtScreen } from './src/screens/AddEditThoughtScreen';
 import { getColors } from './src/theme/colors';
@@ -154,6 +157,22 @@ function ChatsNavigator({ currentUser, c }: {
         name="ContactProfile"
         component={ContactProfileScreen}
         options={{ title: 'Contact info' }}
+      />
+      {/* Agent API keys (OpenChat-7c9) */}
+      <ChatsStack.Screen
+        name="AgentKeys"
+        component={AgentKeysScreen}
+        options={{ title: 'Agent Keys' }}
+      />
+      <ChatsStack.Screen
+        name="AddAgentKey"
+        component={AddAgentKeyScreen}
+        options={{ title: 'New Agent Key', presentation: 'modal' }}
+      />
+      <ChatsStack.Screen
+        name="AgentKeyDetail"
+        component={AgentKeyDetailScreen}
+        options={{ title: 'Key Details' }}
       />
     </ChatsStack.Navigator>
   );

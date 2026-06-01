@@ -308,6 +308,26 @@ export function SettingsScreen() {
         </View>
       </View>
 
+      {/* Developer section — Agent keys (OpenChat-7c9) */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>DEVELOPER</Text>
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => navigation.navigate('AgentKeys')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Agent keys</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                Connect a bot or script via API key
+              </Text>
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Legal & Account section (OpenChat-nhy + OpenChat-wfz) */}
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>LEGAL & ACCOUNT</Text>

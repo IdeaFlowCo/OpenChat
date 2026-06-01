@@ -39,6 +39,12 @@ export type RootStackParamList = {
   ForwardPicker: { messageId: string };
   /** Contact profile — opened by tapping the DM header. */
   ContactProfile: { userId: string };
+  /** Agent API keys list (OpenChat-7c9). */
+  AgentKeys: undefined;
+  /** Create a new agent key. */
+  AddAgentKey: undefined;
+  /** Detail view for a single agent key. */
+  AgentKeyDetail: { keyId: string };
 };
 
 // ── Thoughts stack (OpenChat-zi1) ─────────────────────────────────────────────

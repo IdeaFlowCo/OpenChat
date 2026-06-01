@@ -480,6 +480,32 @@ export interface Thought {
   updatedAt: string;
 }
 
+// ── Agent key types (OpenChat-7c9) ────────────────────────────────────────────
+
+export interface AgentKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  scopes: string[];
+  agentName?: string | null;
+  agentVersion?: string | null;
+  createdAt: string;
+  lastUsedAt?: string | null;
+  expiresAt?: string | null;
+  revokedAt?: string | null;
+}
+
+/** Returned from createAgentKey — includes the full plaintext key. */
+export interface AgentKeyCreateResult {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  key: string;
+  scopes: string[];
+  createdAt: string;
+  expiresAt?: string | null;
+}
+
 export const api = {
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
   getConversation: (conversationId: string) =>
@@ -863,4 +889,32 @@ export const api = {
       throw new ApiError(res.status, `${res.status}: ${text}`, text);
     }
   },
+
+  // ── Agent API keys (OpenChat-7c9) ────────────────────────────────────────
+
+  /** List the caller's agent keys (no plaintext). */
+  listAgentKeys: () => request<AgentKey[]>('/api/agent-keys'),
+
+  /**
+   * Create a new agent key. Returns the full plaintext key once.
+   * (Re-viewable via revealAgentKey after creation.)
+   */
+  createAgentKey: (params: {
+    name: string;
+    scopes?: string[];
+    agentName?: string;
+    expiresAt?: string;
+  }) =>
+    request<AgentKeyCreateResult>('/api/agent-keys', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
+  /** Reveal the full plaintext key (writes audit log). */
+  revealAgentKey: (id: string) =>
+    request<{ id: string; name: string; key: string }>(`/api/agent-keys/${id}/reveal`),
+
+  /** Revoke an agent key immediately. */
+  revokeAgentKey: (id: string) =>
+    request<{ ok: boolean }>(`/api/agent-keys/${id}`, { method: 'DELETE' }),
 };
