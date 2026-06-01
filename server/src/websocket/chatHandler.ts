@@ -144,14 +144,26 @@ export function setupChatSocket(io: Server): void {
 
       const session = getDriver().session();
       try {
-        // Verify and create message
+        // Verify participation AND check for block (OpenChat-46p):
+        // If any recipient in a direct conversation has blocked the sender,
+        // silently drop the message (no error to sender).
         const check = await session.run(`
           MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-          RETURN c
+          RETURN c,
+            exists {
+              MATCH (other:User)-[:PARTICIPATES_IN]->(c)
+              WHERE other.id <> $userId AND (other)-[:BLOCKED]->(u)
+            } AS blockedBySomeone
         `, { userId, conversationId });
 
         if (check.records.length === 0) {
           callback?.({ error: 'Not a participant' });
+          return;
+        }
+
+        // Silently drop if blocked — return success to sender but don't persist or fan out.
+        if (check.records[0].get('blockedBySomeone') === true) {
+          callback?.({ success: true, dropped: true });
           return;
         }
 

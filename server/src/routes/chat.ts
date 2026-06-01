@@ -55,6 +55,8 @@ function toJS(value: unknown): unknown {
 }
 
 // GET /api/chat/conversations - List user's conversations
+// Omits DM conversations where the other participant has blocked me (OpenChat-46p).
+// Includes containsBot field (OpenChat-ds3).
 router.get('/conversations', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
@@ -62,6 +64,15 @@ router.get('/conversations', requireAuth, async (req: Request, res: Response) =>
   try {
     const result = await session.run(`
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
+      // Omit DM conversations where the other participant has blocked me
+      WHERE NOT (
+        c.type = 'direct'
+        AND EXISTS {
+          MATCH (other:User)-[:PARTICIPATES_IN]->(c)
+          WHERE other.id <> $userId
+            AND (other)-[:BLOCKED]->(u)
+        }
+      )
       CALL {
         WITH c
         OPTIONAL MATCH (c)<-[:IN_CONVERSATION]-(m:Message)
@@ -73,10 +84,17 @@ router.get('/conversations', requireAuth, async (req: Request, res: Response) =>
         MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
         RETURN collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
       }
+      CALL {
+        WITH c
+        OPTIONAL MATCH (bot:User)-[:PARTICIPATES_IN]->(c)
+        WHERE bot.isBot = true
+        RETURN count(bot) > 0 AS containsBot
+      }
       RETURN c {
         .*,
         lastMessage: lastMessage { .content, .senderId, .createdAt },
-        participants: participants
+        participants: participants,
+        containsBot: containsBot
       } AS conversation
       ORDER BY c.lastMessageAt DESC
     `, { userId });
@@ -840,6 +858,231 @@ router.put('/presence', requireAuth, async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error updating presence:', error);
     res.status(500).json({ error: 'Failed to update presence' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ─── Block / unblock (OpenChat-46p) ─────────────────────────────────────────
+
+// POST /api/chat/users/:id/block
+router.post('/users/:id/block', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const myId = req.user!.userId;
+  const targetId = req.params.id as string;
+
+  if (myId === targetId) {
+    res.status(400).json({ error: 'Cannot block yourself' });
+    return;
+  }
+
+  try {
+    const now = new Date().toISOString();
+    await session.run(`
+      MATCH (me:User {id: $myId}), (target:User {id: $targetId})
+      MERGE (me)-[r:BLOCKED]->(target)
+      ON CREATE SET r.createdAt = datetime($now)
+    `, { myId, targetId, now });
+    res.status(201).json({ blocked: true, targetId });
+  } catch (error) {
+    console.error('Error blocking user:', error);
+    res.status(500).json({ error: 'Failed to block user' });
+  } finally {
+    await session.close();
+  }
+});
+
+// DELETE /api/chat/users/:id/block
+router.delete('/users/:id/block', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const myId = req.user!.userId;
+  const targetId = req.params.id as string;
+
+  try {
+    await session.run(`
+      MATCH (me:User {id: $myId})-[r:BLOCKED]->(target:User {id: $targetId})
+      DELETE r
+    `, { myId, targetId });
+    res.status(200).json({ blocked: false, targetId });
+  } catch (error) {
+    console.error('Error unblocking user:', error);
+    res.status(500).json({ error: 'Failed to unblock user' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/blocks — returns list of users I have blocked
+router.get('/blocks', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const myId = req.user!.userId;
+
+  try {
+    const result = await session.run(`
+      MATCH (me:User {id: $myId})-[r:BLOCKED]->(target:User)
+      RETURN target { .id, .name, .email, .presenceStatus, .isBot } AS user, r.createdAt AS blockedAt
+      ORDER BY r.createdAt DESC
+    `, { myId });
+    const blocks = result.records.map(r => ({
+      user: toJS(r.get('user')),
+      blockedAt: toJS(r.get('blockedAt')),
+    }));
+    res.json(blocks);
+  } catch (error) {
+    console.error('Error fetching blocks:', error);
+    res.status(500).json({ error: 'Failed to fetch blocks' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ─── Reports (OpenChat-wgl) ──────────────────────────────────────────────────
+
+// POST /api/chat/reports
+router.post('/reports', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const reporterId = req.user!.userId;
+  const { targetType, targetId, reason, freeform } = (req.body ?? {}) as {
+    targetType?: string;
+    targetId?: string;
+    reason?: string;
+    freeform?: string;
+  };
+
+  if (!targetType || !['message', 'user'].includes(targetType)) {
+    res.status(400).json({ error: 'targetType must be "message" or "user"' });
+    return;
+  }
+  if (!targetId || typeof targetId !== 'string') {
+    res.status(400).json({ error: 'targetId is required' });
+    return;
+  }
+
+  try {
+    const now = new Date().toISOString();
+    const reportId = nanoid();
+
+    await session.run(`
+      CREATE (r:Report {
+        id: $id,
+        reporterId: $reporterId,
+        targetType: $targetType,
+        targetId: $targetId,
+        reason: $reason,
+        freeform: $freeform,
+        createdAt: datetime($now),
+        status: 'open'
+      })
+    `, {
+      id: reportId,
+      reporterId,
+      targetType,
+      targetId,
+      reason: reason ?? null,
+      freeform: freeform ?? null,
+      now,
+    });
+
+    // Post to Slack webhook if configured — fire-and-forget, never error the caller.
+    const webhookUrl = process.env.REPORT_SLACK_WEBHOOK_URL;
+    if (webhookUrl) {
+      const payload = {
+        text: `*New ${targetType} report* (id: ${reportId})`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `*New ${targetType} report*\nReporter: \`${reporterId}\`\nTarget: \`${targetId}\`\nReason: ${reason ?? '—'}\nFreeform: ${freeform ?? '—'}`,
+            },
+          },
+        ],
+      };
+      fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch((err) => {
+        console.warn('[reports] Slack webhook failed:', err);
+      });
+    } else {
+      console.log(`[reports] New report ${reportId}: ${targetType} ${targetId} by ${reporterId}`);
+    }
+
+    res.status(201).json({ id: reportId });
+  } catch (error) {
+    console.error('Error creating report:', error);
+    res.status(500).json({ error: 'Failed to create report' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/reports/mine — user's own past reports
+router.get('/reports/mine', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const reporterId = req.user!.userId;
+
+  try {
+    const result = await session.run(`
+      MATCH (r:Report {reporterId: $reporterId})
+      RETURN r { .id, .targetType, .targetId, .reason, .freeform, .createdAt, .status } AS report
+      ORDER BY r.createdAt DESC
+    `, { reporterId });
+    const reports = result.records.map(r => toJS(r.get('report')));
+    res.json(reports);
+  } catch (error) {
+    console.error('Error fetching reports:', error);
+    res.status(500).json({ error: 'Failed to fetch reports' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ─── AI disclosure (OpenChat-ds3) ────────────────────────────────────────────
+
+// GET /api/chat/ai-disclosure-status
+router.get('/ai-disclosure-status', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+
+  try {
+    const result = await session.run(`
+      MATCH (u:User {id: $userId})
+      RETURN u.aiDisclosureAcceptedAt AS acceptedAt
+    `, { userId });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const raw = result.records[0].get('acceptedAt');
+    const acceptedAt = raw ? toJS(raw) : null;
+    res.json({ acceptedAt });
+  } catch (error) {
+    console.error('Error fetching AI disclosure status:', error);
+    res.status(500).json({ error: 'Failed to fetch disclosure status' });
+  } finally {
+    await session.close();
+  }
+});
+
+// POST /api/chat/ai-disclosure-accept
+router.post('/ai-disclosure-accept', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+
+  try {
+    const now = new Date().toISOString();
+    await session.run(`
+      MATCH (u:User {id: $userId})
+      SET u.aiDisclosureAcceptedAt = datetime($now)
+    `, { userId, now });
+    res.json({ acceptedAt: now });
+  } catch (error) {
+    console.error('Error accepting AI disclosure:', error);
+    res.status(500).json({ error: 'Failed to accept disclosure' });
   } finally {
     await session.close();
   }
