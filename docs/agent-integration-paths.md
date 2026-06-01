@@ -1,18 +1,40 @@
 # Agent integration paths — decision pending
 
-> **Status:** unresolved as of 2026-06-01. Three different ways for an
-> "agent" to talk to OpenChat exist or have existed. Pick one canonical
-> path. Captured here so the discussion does not get re-litigated.
+> **Status:** revised 2026-06-01 after Codex second opinion. Three different
+> ways for an "agent" to talk to OpenChat exist. Paths 2 and 3 cover
+> **different use cases** and should both ship. Path 1 (picortex) is the
+> legacy implementation of path 2; it gets retired after path 2 deploys.
+> Captured here so the discussion does not get re-litigated.
 
 ## TL;DR
 
-Three paths exist, only the third is the one I'd ship long-term:
+Three paths exist; **two are kept (different use cases)**, one is retired:
 
-| # | Path | Identity model | Status | Verdict |
-|---|---|---|---|---|
-| 1 | **picortex** (`~/code/picortex`, deployed on picortex-v1 GCP VM) | One shared bot user `picortex_bot_7ecd2883dbd5ceef` in Neo4j | Running in production. @mention triggers a reply. | **Retire** with a deprecation date |
-| 2 | **openchat-agent** (`~/code/openchat-agent`) | Same shared bot user as picortex | Built 2026-05-31 morning, never deployed. ~450 SLOC. | **Archive** — superseded by path 3 |
-| 3 | **openchat-mcp-server** + agent API keys | Per-user `oc_…` key. Agent acts AS the user. | Shipped 2026-06-01. GitHub: <https://github.com/tmad4000/openchat-mcp-server>. In-app UI in `AgentKeysScreen`. | **Canonical** going forward |
+| # | Path | Identity model | Use case | Status | Verdict |
+|---|---|---|---|---|---|
+| 1 | **picortex** (`~/code/picortex`, deployed on picortex-v1 GCP VM) | One shared bot user `picortex_bot_7ecd2883dbd5ceef` in Neo4j | "Shared assistant in our group, responds to @mentions" | Running in production. @mention triggers a reply. | **Retire** after path 2 deploys. Legacy multi-channel baggage (Linq + Element). |
+| 2 | **openchat-agent** (`~/code/openchat-agent`) | Same shared bot user as picortex | **Same use case as picortex** — shared room-level participant | Built 2026-05-31 morning, never deployed. ~450 SLOC, OpenChat-native, no Linq baggage. | **Deploy** on a fresh isolated VM. Replaces picortex's OpenChat slice. |
+| 3 | **openchat-mcp-server** + agent API keys | Per-user `oc_…` key. Agent acts AS the user. | "MY agent uses MY chats when I ask it to" — single-user, on-demand | Shipped 2026-06-01. GitHub: <https://github.com/tmad4000/openchat-mcp-server>. In-app UI in `AgentKeysScreen`. | **Canonical for per-user integration.** Complementary to path 2, not a replacement. |
+
+## Why both 2 and 3 (corrected — earlier draft was wrong)
+
+The original 2026-06-01 draft of this doc said path 3 superseded path 2 and
+recommended archiving openchat-agent. That was wrong. The Codex review at
+`/tmp/codex-agent-paths-review/ANSWER.md` corrected the framing:
+
+- **Path 3 (MCP)** = "my agent reads/sends MY chats when I prompt it." Single
+  user. Requires the user to install an MCP client (Claude Desktop, Cursor,
+  etc.), mint a key, paste config. Agent acts as that user, can only do
+  things the user can do.
+- **Path 2 (shared bot)** = "there is a participant in this room that anyone
+  can address, with no per-user setup." Stable room-level actor with a
+  distinct identity. Group-scoped operator. Doesn't make any individual user
+  the "operator, credential holder, and failure domain" for the room's bot.
+
+A user running an MCP agent in "listen mode" does NOT substitute for the
+shared bot. It collapses the room-level affordance into one user's machine.
+
+These are two products, not two implementations of one product. Both stay.
 
 ## How we got here (timeline)
 
@@ -140,30 +162,42 @@ that fits the use case. MCP is *one* protocol. We default to recommending
 it because it covers the common case (LLM-client-driven agents) with
 zero glue code, but we do not require it.
 
-## Proposed decision
+## Proposed decision (revised after Codex review)
 
-1. **`openchat-mcp-server` is the canonical recommended integration path.**
-   The in-app Settings → Agent keys flow + the MCP snippets in
-   `AgentKeyDetailScreen` already point users at this.
-2. **picortex** stays running for backward compat with anyone who has it
-   wired into a group's @mentions, but is no longer documented as the
-   recommended path. Deprecation date: **2026-09-01** (3 months notice).
-   After that date, retire the `picortex_bot_…` Neo4j user and the
-   picortex-v1 GCP VM.
-3. **openchat-agent** is archived in place (`git mv ~/code/openchat-agent
-   ~/code/_archive/openchat-agent-2026-05-31` or equivalent). The repo
-   was a valid exercise but its premise — "we need a slimmer shared bot
-   user" — was wrong: we don't need a shared bot user at all.
-4. If a future "listen in real time" use case appears (a bot that proactively
-   reacts to group messages without being @mentioned), we file a new ticket
-   to design that and most likely add a new bot-WebSocket auth path that
-   reuses the agent-key infrastructure (e.g. an `oc_…` key with a
-   `listen` scope).
+1. **`openchat-mcp-server` is the canonical per-user integration path.**
+   For "MY agent uses MY chats." In-app Settings → Agent keys flow + the
+   MCP snippets in `AgentKeyDetailScreen` already point users at this.
+2. **`openchat-agent` is the canonical shared-bot path.** Deploy on a
+   **fresh isolated GCP e2-micro** (~$5/mo). Reuses
+   `picortex_bot_7ecd2883dbd5ceef` Neo4j identity + JWT. Tracked in
+   `OpenChat-p9y` (reconsider) and the deploy ticket spawned from it.
+   - **Why GCP e2-micro, not testcortex:** testcortex is on Jacob's
+     Tailscale network. Even with no shell tools today, agent capabilities
+     tend to grow; the right place to draw the security boundary is
+     before deploy, not after a compromise.
+   - **Why not co-host on picortex-v1:** defeats the isolation that
+     justifies retiring picortex.
+3. **picortex** runs as a temporary bridge until `openchat-agent` is
+   deployed and verified against the same bot identity. Then stop
+   picortex's OpenChat participation and decommission the picortex
+   GCP VM (target: ~2 weeks after openchat-agent deploys, not
+   2026-09-01 anymore).
+4. **Tool calling for the shared bot** is designed as explicit bot
+   capabilities (group-scoped operator, bounded actions, policy enforced
+   at the bot level — not inherited from any user's MCP client). Filed
+   as a follow-up ticket after openchat-agent v1 deploys.
+5. If a use case appears that fits neither pattern (e.g. a per-user
+   listening agent that watches all of a user's chats without
+   polling), we file a new ticket and most likely add a `listen` scope
+   to agent keys + bot-WebSocket auth.
 
 ## Open questions
 
 - Does any third party currently depend on picortex's @mention behavior
-  in a way that would break if it went away? (audit before 2026-09-01)
+  in a way that would break if it went away during the cutover?
 - Should the MCP server be published to npm as `@openchat/mcp-server` so
   the install string is shorter than `npx -y github:tmad4000/openchat-mcp-server`?
-- Should agent keys support a `listen` scope (WebSocket subscribe)?
+- Should agent keys support a `listen` scope (WebSocket subscribe) for
+  the "per-user listening agent" pattern from §5 above?
+- For the shared bot: keep `picortex_bot_…` identity (preserves history)
+  or fresh `openchat_assistant_…` identity (clean slate, no name baggage)?
