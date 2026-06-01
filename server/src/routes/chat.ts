@@ -1069,6 +1069,140 @@ router.get('/blocks', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+// ─── Forward message (OpenChat-hhc) ──────────────────────────────────────────
+
+// POST /api/chat/messages/:id/forward
+// Body: { toConversationId: string }
+// Creates a new Message in the target conversation, copying content/attachments
+// from the source and preserving the original sender via forwardedFrom* fields.
+// The forward chain always points to the ORIGINAL sender (not the most recent
+// forwarder), so forwarding a forwarded message keeps Alice's name visible.
+router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const sourceMessageId = req.params.id as string;
+  const { toConversationId } = (req.body ?? {}) as { toConversationId?: string };
+
+  if (!toConversationId || typeof toConversationId !== 'string') {
+    res.status(400).json({ error: 'toConversationId is required' });
+    return;
+  }
+
+  try {
+    // 1. Load source message and verify caller is a participant in its conversation.
+    const sourceResult = await session.run(`
+      MATCH (m:Message {id: $sourceMessageId})
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: m.conversationId})
+      MATCH (originalSender:User {id: m.senderId})
+      RETURN m {
+        .id, .content, .attachments, .conversationId,
+        .forwardedFromMessageId, .forwardedFromSenderId, .forwardedFromSenderName
+      } AS msg,
+      originalSender { .id, .name, .email } AS sender
+    `, { sourceMessageId, userId });
+
+    if (sourceResult.records.length === 0) {
+      res.status(404).json({ error: 'Message not found or not accessible' });
+      return;
+    }
+
+    const sourceMsg = toJS(sourceResult.records[0].get('msg')) as Record<string, unknown>;
+    const originalSender = toJS(sourceResult.records[0].get('sender')) as Record<string, string | undefined>;
+
+    // 2. Verify caller participates in the target conversation.
+    const targetCheck = await session.run(`
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $toConversationId})
+      RETURN c
+    `, { userId, toConversationId });
+
+    if (targetCheck.records.length === 0) {
+      res.status(404).json({ error: 'Target conversation not found or not accessible' });
+      return;
+    }
+
+    // 3. Resolve forwardedFrom* fields.
+    // If the source was already a forward, propagate ITS original sender (not
+    // the current sender). This keeps the forward chain pointing to Alice even
+    // if Bob forwarded Alice's message and Carol then forwards Bob's forward.
+    const forwardedFromMessageId = (sourceMsg.forwardedFromMessageId as string | null) ?? sourceMessageId;
+    const forwardedFromSenderId = (sourceMsg.forwardedFromSenderId as string | null) ?? (originalSender.id as string);
+    // Snapshot the display name at forward time from the current DB value.
+    const forwardedFromSenderName =
+      (sourceMsg.forwardedFromSenderName as string | null) ??
+      (originalSender.name as string | null) ??
+      (originalSender.email as string | null) ??
+      'Unknown';
+
+    // 4. Copy attachments (still references the same S3 objects — no re-upload).
+    const attachmentsRaw = sourceMsg.attachments;
+    let attachmentsJson: string | null = null;
+    if (typeof attachmentsRaw === 'string' && attachmentsRaw) {
+      attachmentsJson = attachmentsRaw; // already JSON string in DB
+    } else if (Array.isArray(attachmentsRaw) && attachmentsRaw.length > 0) {
+      attachmentsJson = JSON.stringify(attachmentsRaw);
+    }
+
+    const messageId = nanoid();
+    const now = new Date().toISOString();
+    const content = (sourceMsg.content as string) || '';
+    const preview = content || (attachmentsJson ? '📷 Photo' : '');
+
+    // 5. Create the new message in the target conversation.
+    const result = await session.run(`
+      MATCH (c:Conversation {id: $toConversationId})
+      MATCH (forwarder:User {id: $userId})
+      CREATE (m:Message {
+        id: $id,
+        content: $content,
+        senderId: $userId,
+        conversationId: $toConversationId,
+        messageType: 'text',
+        createdAt: datetime($now),
+        attachments: $attachmentsJson,
+        forwardedFromMessageId: $forwardedFromMessageId,
+        forwardedFromSenderId: $forwardedFromSenderId,
+        forwardedFromSenderName: $forwardedFromSenderName
+      })
+      CREATE (m)-[:IN_CONVERSATION]->(c)
+      CREATE (forwarder)-[:SENT]->(m)
+      SET c.updatedAt = datetime($now),
+          c.lastMessageAt = datetime($now),
+          c.lastMessagePreview = left($preview, 100)
+      RETURN m { .*, sender: forwarder { .id, .name, .email } } AS message
+    `, {
+      id: messageId,
+      content,
+      userId,
+      toConversationId,
+      now,
+      attachmentsJson,
+      forwardedFromMessageId,
+      forwardedFromSenderId,
+      forwardedFromSenderName,
+      preview,
+    });
+
+    const raw = toJS(result.records[0].get('message')) as Record<string, unknown>;
+    // Parse attachments JSON string back to array for the response.
+    if (raw && typeof raw.attachments === 'string') {
+      try { raw.attachments = JSON.parse(raw.attachments as string); } catch { /* leave */ }
+    }
+
+    // 6. Emit message:new to target conversation room.
+    const io = req.app.get('io') as IOServer | undefined;
+    if (io) {
+      io.to(`conversation:${toConversationId}`).emit('message:new', raw);
+    }
+
+    res.status(201).json(raw);
+  } catch (error) {
+    console.error('Error forwarding message:', error);
+    res.status(500).json({ error: 'Failed to forward message' });
+  } finally {
+    await session.close();
+  }
+});
+
 // ─── Reports (OpenChat-wgl) ──────────────────────────────────────────────────
 
 // POST /api/chat/reports
@@ -1480,14 +1614,30 @@ router.delete('/messages/:id/reactions/:emoji', requireAuth, async (req: Request
 
 // ─── Attachments (OpenChat-6bg) ──────────────────────────────────────────────
 
-const ALLOWED_MIME_TYPES = new Set([
+// Image MIME types allowed for upload (OpenChat-6bg).
+const IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
   'image/jpg',
   'image/png',
   'image/gif',
   'image/webp',
 ]);
-const MAX_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
+
+// Audio MIME types allowed for voice messages (OpenChat-xxc).
+const AUDIO_MIME_TYPES = new Set([
+  'audio/m4a',
+  'audio/mp4',
+  'audio/aac',
+  'audio/mpeg',
+  'audio/wav',
+  'audio/x-m4a',
+  'audio/webm',
+]);
+
+const ALLOWED_MIME_TYPES = new Set([...IMAGE_MIME_TYPES, ...AUDIO_MIME_TYPES]);
+
+const MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;  // 20 MB for images
+const MAX_AUDIO_SIZE_BYTES = 10 * 1024 * 1024;  // 10 MB for audio
 
 // POST /api/chat/attachments/presign
 // Body: { filename: string, mimeType: string, sizeBytes: number }
@@ -1515,15 +1665,22 @@ router.post('/attachments/presign', requireAuth, async (req: Request, res: Respo
     });
     return;
   }
-  if (typeof sizeBytes !== 'number' || sizeBytes <= 0 || sizeBytes > MAX_SIZE_BYTES) {
-    res.status(400).json({ error: `sizeBytes must be between 1 and ${MAX_SIZE_BYTES}` });
+
+  const maxSize = AUDIO_MIME_TYPES.has(mimeType)
+    ? MAX_AUDIO_SIZE_BYTES
+    : MAX_IMAGE_SIZE_BYTES;
+
+  if (typeof sizeBytes !== 'number' || sizeBytes <= 0 || sizeBytes > maxSize) {
+    res.status(400).json({ error: `sizeBytes must be between 1 and ${maxSize}` });
     return;
   }
 
   // Build a storage key: attachments/<userId>/<nanoid>/<sanitised filename>
+  // For audio, standardise the extension so GCS serves the correct Content-Type.
   const userId = req.user!.userId;
   const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 128);
-  const key = `attachments/${userId}/${nanoid()}/${safeFilename}`;
+  const audioSuffix = AUDIO_MIME_TYPES.has(mimeType) ? 'voice.m4a' : safeFilename;
+  const key = `attachments/${userId}/${nanoid()}/${AUDIO_MIME_TYPES.has(mimeType) ? audioSuffix : safeFilename}`;
 
   try {
     const s3 = getS3();

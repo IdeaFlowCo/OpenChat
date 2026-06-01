@@ -25,3 +25,5 @@
 {"id":"int-6f3f601a","kind":"field_change","created_at":"2026-06-01T05:35:23.182474Z","actor":"Jacob Cole","issue_id":"OpenChat-vjc","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-39c2ddb4","kind":"field_change","created_at":"2026-06-01T05:37:08.210728Z","actor":"Jacob Cole","issue_id":"OpenChat-qz0","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-77e45c8e","kind":"field_change","created_at":"2026-06-01T05:45:54.972808Z","actor":"Jacob Cole","issue_id":"OpenChat-89g","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-fc9e0b81","kind":"field_change","created_at":"2026-06-01T06:07:04.60726Z","actor":"Jacob Cole","issue_id":"OpenChat-5ew","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Duplicate of OpenChat-hhc; same description"}}
+{"id":"int-c0d770aa","kind":"field_change","created_at":"2026-06-01T06:10:25.398137Z","actor":"Jacob Cole","issue_id":"OpenChat-zln","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
