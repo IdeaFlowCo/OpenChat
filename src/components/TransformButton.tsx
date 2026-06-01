@@ -1,12 +1,14 @@
 /**
  * TransformButton — sparkle button in the composer toolbar.
  *
- * Tap opens an ActionSheet (iOS) or a modal picker (Android/web) with 5
- * transform options. Translate opens a second language picker.
+ * UX: tap the ✨ sparkle = run the DEFAULT transform (NVC). Tap the small
+ * ▾ chevron next to it = open the picker for other transforms (concise,
+ * formal, casual, translate). Translate opens a second language picker.
  *
  * Props:
  *   disabled   — true while text is empty or a request is in-flight
  *   onTransformed(text, label) — called with the rewritten text + label
+ *   onError(msg) — called with a user-visible error string
  */
 
 import React, { useState } from 'react';
@@ -37,6 +39,7 @@ interface Props {
   onError: (msg: string) => void;
 }
 
+const DEFAULT_TRANSFORM: TransformType = 'nvc';
 const TRANSFORMS: TransformType[] = ['nvc', 'concise', 'formal', 'casual', 'translate'];
 
 export function TransformButton({ text, disabled, onTransformed, onError }: Props) {
@@ -57,13 +60,22 @@ export function TransformButton({ text, disabled, onTransformed, onError }: Prop
         : TRANSFORM_LABELS[transform];
       onTransformed(rewritten, label);
     } catch (err) {
+      // Show the actual error so failures are debuggable rather than opaque.
+      // ApiError.message is already "{status}: {server-message}"; for any
+      // other error type we fall through to the JS error message string.
+      const baseMsg =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : String(err);
+      let userMsg = baseMsg;
       if (err instanceof ApiError && err.status === 429) {
-        onError('Rate limit reached. Try again in a minute.');
+        userMsg = 'Rate limit reached. Try again in a minute.';
       } else if (err instanceof ApiError && err.status === 503) {
-        onError('Transform feature is not available right now.');
-      } else {
-        onError('Transform failed. Please try again.');
+        userMsg = 'AI transform is not configured on the server yet.';
       }
+      onError(`Transform: ${userMsg}`);
     } finally {
       setLoading(false);
     }
@@ -116,18 +128,29 @@ export function TransformButton({ text, disabled, onTransformed, onError }: Prop
 
   return (
     <>
-      <TouchableOpacity
-        onPress={showTransformPicker}
-        disabled={disabled || loading}
-        style={[styles.btn, { opacity: disabled || loading ? 0.4 : 1 }]}
-        accessibilityLabel="Transform message"
-      >
-        {loading ? (
-          <ActivityIndicator size="small" color={c.primary} />
-        ) : (
-          <Text style={styles.sparkle}>✨</Text>
-        )}
-      </TouchableOpacity>
+      {/* Sparkle = run default (NVC); ▾ = open picker for other transforms */}
+      <View style={styles.btnGroup}>
+        <TouchableOpacity
+          onPress={() => void runTransform(DEFAULT_TRANSFORM)}
+          disabled={disabled || loading}
+          style={[styles.btnSparkle, { opacity: disabled || loading ? 0.4 : 1 }]}
+          accessibilityLabel={`Transform message (${TRANSFORM_LABELS[DEFAULT_TRANSFORM]})`}
+        >
+          {loading ? (
+            <ActivityIndicator size="small" color={c.primary} />
+          ) : (
+            <Text style={styles.sparkle}>✨</Text>
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={showTransformPicker}
+          disabled={disabled || loading}
+          style={[styles.btnChevron, { opacity: disabled || loading ? 0.4 : 1 }]}
+          accessibilityLabel="Choose transform"
+        >
+          <Text style={[styles.chevron, { color: c.textMuted }]}>▾</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Android/web: transform picker modal */}
       <Modal
@@ -201,12 +224,26 @@ export function TransformButton({ text, disabled, onTransformed, onError }: Prop
 }
 
 const styles = StyleSheet.create({
-  btn: {
+  btnGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingBottom: 6,
-    paddingRight: 2,
+  },
+  btnSparkle: {
+    paddingHorizontal: 4,
     width: 28,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  btnChevron: {
+    paddingHorizontal: 2,
+    paddingRight: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -4,
+  },
+  chevron: {
+    fontSize: 14,
   },
   sparkle: {
     fontSize: 20,
