@@ -34,9 +34,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
+import { OPENCHAT_URL } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
@@ -188,6 +189,28 @@ export function MasterDetailLayout() {
           { width: widthAnim, borderColor: c.border, backgroundColor: c.surface, opacity: storageReady ? 1 : 0 },
         ]}
       >
+        {/* Back-to-home bar (OpenChat-601.1). Top-of-sidebar affordance
+            so users in the master-detail view can always navigate back
+            to the OpenChat home page (chat.globalbr.ai/). Collapses to a
+            tiny icon when the sidebar is in icon-only mode. */}
+        <Pressable
+          onPress={() => void Linking.openURL(OPENCHAT_URL + '/')}
+          // @ts-ignore — title is a web-only DOM attr; RN-web passes through.
+          title="OpenChat home (chat.globalbr.ai)"
+          accessibilityLabel="OpenChat home"
+          style={[styles.homeBar, { borderColor: c.border }]}
+        >
+          {collapsed ? (
+            <Text style={{ color: c.primary, fontSize: 16 }}>↩</Text>
+          ) : (
+            <>
+              <Text style={{ color: c.primary, fontSize: 13, fontWeight: '600', marginRight: 6 }}>↩</Text>
+              <Text style={{ color: c.textSecondary, fontSize: 12, fontWeight: '500' }} numberOfLines={1}>
+                chat.globalbr.ai
+              </Text>
+            </>
+          )}
+        </Pressable>
         {collapsed ? (
           // Compact (icon-only) header: just the expand toggle + a new-chat
           // button. Everything else is hidden — clicking the toggle restores
@@ -317,6 +340,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
+  },
+  // Back-to-home bar at the top of the sidebar (OpenChat-601.1)
+  homeBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   detail: { flex: 1 },
   emptyDetail: { flex: 1, alignItems: 'center', justifyContent: 'center' },
