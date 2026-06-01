@@ -24,6 +24,81 @@ import { createNavigationContainerRef } from '@react-navigation/native';
 import { api } from '../api/client';
 import type { RootStackParamList } from '../navigation/types';
 
+// Muted conversations: convId → ISO expiry string (or 'always')
+const MUTED_CONVS_KEY = 'openchat_muted_convs';
+
+/** Check whether a conversation is currently muted. */
+export async function isConversationMuted(convId: string): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  try {
+    const raw = await AsyncStorage.getItem(MUTED_CONVS_KEY);
+    if (!raw) return false;
+    const map: Record<string, string> = JSON.parse(raw);
+    const until = map[convId];
+    if (!until) return false;
+    if (until === 'always') return true;
+    return new Date(until) > new Date();
+  } catch {
+    return false;
+  }
+}
+
+/** Synchronously check mute from an already-loaded mute map. */
+export function isConversationMutedSync(
+  map: Record<string, string>,
+  convId: string
+): boolean {
+  const until = map[convId];
+  if (!until) return false;
+  if (until === 'always') return true;
+  return new Date(until) > new Date();
+}
+
+/** Load the full mute map from storage. */
+export async function loadMutedConvs(): Promise<Record<string, string>> {
+  if (Platform.OS === 'web') return {};
+  try {
+    const raw = await AsyncStorage.getItem(MUTED_CONVS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Mute a conversation. Pass null to unmute. */
+export async function muteConversation(
+  convId: string,
+  until: Date | 'always' | null
+): Promise<void> {
+  if (Platform.OS === 'web') return;
+  try {
+    const raw = await AsyncStorage.getItem(MUTED_CONVS_KEY);
+    const map: Record<string, string> = raw ? JSON.parse(raw) : {};
+    if (until === null) {
+      delete map[convId];
+    } else if (until === 'always') {
+      map[convId] = 'always';
+    } else {
+      map[convId] = until.toISOString();
+    }
+    await AsyncStorage.setItem(MUTED_CONVS_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Set the app icon badge count (iOS). No-op on web or Android.
+ */
+export async function setUnreadBadgeCount(count: number): Promise<void> {
+  if (Platform.OS === 'web') return;
+  try {
+    await Notifications.setBadgeCountAsync(count);
+  } catch {
+    /* badge not available on all platforms/simulators */
+  }
+}
+
 const REGISTERED_TOKEN_KEY = 'openchat_native_push_token_registered';
 
 /** Set by App.tsx, used by the tap-handler to navigate. */
@@ -54,16 +129,20 @@ export function configureNotificationHandlers(): void {
   Notifications.setNotificationHandler({
     handleNotification: async (notification) => {
       const data = (notification.request.content.data || {}) as { conversationId?: string };
-      const inThisConv = !!data.conversationId && data.conversationId === activeConversationId;
+      const convId = data.conversationId;
+      const inThisConv = !!convId && convId === activeConversationId;
+      // Check mute status — suppress banner/sound if muted.
+      const muted = convId ? await isConversationMuted(convId) : false;
       // If the user is already viewing the conversation, suppress the banner +
       // sound (the in-app message:new socket event already updated the UI).
       // We still let it through silently so the system notification center has
       // a record — but no audible/visual alert.
+      const suppress = inThisConv || muted;
       return {
-        shouldShowBanner: !inThisConv,
-        shouldShowList: !inThisConv,
-        shouldPlaySound: !inThisConv,
-        shouldSetBadge: false,
+        shouldShowBanner: !suppress,
+        shouldShowList: !suppress,
+        shouldPlaySound: !suppress,
+        shouldSetBadge: true,
       };
     },
   });

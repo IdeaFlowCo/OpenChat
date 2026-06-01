@@ -69,15 +69,24 @@ export function leaveConversation(conversationId: string): void {
   socket?.emit('conversation:leave', conversationId);
 }
 
-export function sendMessage(conversationId: string, content: string): Promise<Message> {
+export function sendMessage(
+  conversationId: string,
+  content: string,
+  replyToId?: string
+): Promise<Message> {
   return new Promise((resolve, reject) => {
     if (!socket?.connected) {
       reject(new Error('Not connected'));
       return;
     }
+    const payload: { conversationId: string; content: string; replyToId?: string } = {
+      conversationId,
+      content,
+    };
+    if (replyToId) payload.replyToId = replyToId;
     socket.emit(
       'message:send',
-      { conversationId, content },
+      payload,
       (response: { success?: boolean; message?: Message; error?: string }) => {
         if (response?.error) reject(new Error(response.error));
         else if (response?.message) resolve(response.message);

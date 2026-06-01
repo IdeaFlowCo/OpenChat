@@ -22,11 +22,14 @@ import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import {
   configureNotificationHandlers,
   addNotificationTapListener,
-  registerForPushNotificationsAsync,
   navigationRef,
 } from './src/services/notifications';
 import { installClientLogger } from './src/services/clientLogger';
+import { initCrashReporting } from './src/services/crashReporting';
 
+// Init crash reporting FIRST so even early-boot errors reach Sentry (OpenChat-7um).
+// No-op if EXPO_PUBLIC_SENTRY_DSN is unset.
+initCrashReporting();
 // Install the client logger before anything else mounts so even early-boot
 // errors are captured (OpenChat-e5v).
 installClientLogger();
@@ -40,6 +43,8 @@ import { SearchScreen } from './src/screens/SearchScreen';
 import { MyQrCodeScreen } from './src/screens/MyQrCodeScreen';
 import { ScanQrScreen } from './src/screens/ScanQrScreen';
 import { getColors } from './src/theme/colors';
+import { OfflineBanner } from './src/components/OfflineBanner';
+import { PushSoftAsk } from './src/components/PushSoftAsk';
 import type { RootStackParamList } from './src/navigation/types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -64,15 +69,9 @@ function Shell() {
     return () => { sub?.remove(); };
   }, []);
 
-  // Register for push notifications once the user is signed in. Re-runs when
-  // the user logs in or out. Idempotent — the service short-circuits if the
-  // current Expo push token is already cached as registered.
-  useEffect(() => {
-    if (!isAuthed) return;
-    void registerForPushNotificationsAsync().catch((err) => {
-      console.warn('[notifications] registration error:', err);
-    });
-  }, [isAuthed]);
+  // Push registration is now triggered by PushSoftAsk (OpenChat-9mo) —
+  // the soft-ask card is shown 5s after sign-in and only calls
+  // registerForPushNotificationsAsync() when the user taps "Turn on".
 
   const baseNav = scheme === 'dark' ? DarkTheme : DefaultTheme;
   const navTheme = {
@@ -93,6 +92,8 @@ function Shell() {
         barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'}
         backgroundColor={c.background}
       />
+      <OfflineBanner />
+      <PushSoftAsk isAuthed={isAuthed} />
       <Stack.Navigator
         screenOptions={{
           headerStyle: { backgroundColor: c.surface },
