@@ -134,6 +134,8 @@ export interface Message {
   reactions?: ReactionSummary[];
   /** Image attachments (OpenChat-6bg). */
   attachments?: Attachment[];
+  /** User IDs mentioned in this message via @-mentions (OpenChat-0jy). */
+  mentions?: string[];
 }
 
 /** Single image attachment (OpenChat-6bg). */
@@ -448,7 +450,11 @@ export const api = {
   getConversation: (conversationId: string) =>
     request<Conversation>(`/api/chat/conversations/${conversationId}`),
   getMessages: (conversationId: string) =>
-    request<Message[]>(`/api/chat/conversations/${conversationId}/messages`),
+    request<{ messages: Message[]; hasMore: boolean }>(`/api/chat/conversations/${conversationId}/messages`),
+  getMessagesBefore: (conversationId: string, before: string, limit = 50) =>
+    request<{ messages: Message[]; hasMore: boolean }>(
+      `/api/chat/conversations/${conversationId}/messages?before=${encodeURIComponent(before)}&limit=${limit}`
+    ),
   sendMessage: (conversationId: string, content: string, attachments?: Attachment[]) =>
     request<Message>(`/api/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
@@ -678,4 +684,22 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
     }),
+
+  // ── Reconnect catch-up (OpenChat-qz0) ───────────────────────────────────
+
+  /**
+   * Fetch all messages newer than `since` across every conversation the
+   * current user participates in. Called on socket reconnect to recover
+   * messages missed during a disconnect window.
+   *
+   * GET /api/chat/messages/since?since=<ISO>
+   *
+   * Returns `{ messages, truncated }`. When `truncated` is true, more than
+   * 500 messages arrived during the gap — the caller should fall back to a
+   * full `refreshConversations()` instead of trying to merge.
+   */
+  messagesSince: (since: string) =>
+    request<{ messages: Message[]; truncated: boolean }>(
+      `/api/chat/messages/since?since=${encodeURIComponent(since)}`
+    ),
 };

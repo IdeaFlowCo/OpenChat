@@ -4,7 +4,7 @@
  * context list so we stay in sync with rename / participant changes.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -42,6 +42,8 @@ import { setActiveConversationForNotifications } from '../services/notifications
 import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
 import { pickImage, uploadImage, PickedAsset } from '../services/attachments';
+import { MentionAutocomplete, MentionCandidate } from '../components/MentionAutocomplete';
+import type { Participant } from '../api/client';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
 
@@ -68,6 +70,74 @@ function dayLabel(iso: string): string {
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/**
+ * Renders message content with @Name tokens highlighted in the sender's color
+ * when the name matches a conversation participant (OpenChat-0jy).
+ *
+ * Returns an array of React Native <Text> elements that can be nested inside
+ * a parent <Text> node.
+ */
+function renderContentWithMentions(
+  content: string,
+  participants: Participant[],
+  baseColor: string,
+  scheme: 'light' | 'dark'
+): React.ReactElement {
+  // Build a name → userId map for quick lookup.
+  const nameMap = new Map<string, string>();
+  for (const p of participants) {
+    const displayName = p.user.name || p.user.email.split('@')[0] || p.user.email;
+    nameMap.set(displayName.toLowerCase(), p.user.id);
+    // Also map by email local part as fallback.
+    const localPart = p.user.email.split('@')[0].toLowerCase();
+    if (!nameMap.has(localPart)) nameMap.set(localPart, p.user.id);
+  }
+
+  const parts: React.ReactElement[] = [];
+  const regex = /@([\w-]+(?:\s+[\w-]+)?)/g;
+  let last = 0;
+  let match: RegExpExecArray | null;
+  let idx = 0;
+
+  while ((match = regex.exec(content)) !== null) {
+    const token = match[1];
+    const userId = nameMap.get(token.toLowerCase());
+    if (!userId) continue; // not a known participant — treat as plain text
+
+    // Text before this token
+    if (match.index > last) {
+      parts.push(
+        <Text key={`plain-${idx++}`} style={{ color: baseColor }}>
+          {content.slice(last, match.index)}
+        </Text>
+      );
+    }
+
+    const mentionColor = colorForUserId(userId, scheme);
+    parts.push(
+      <Text key={`mention-${idx++}`} style={{ color: mentionColor, fontWeight: '700' }}>
+        @{token}
+      </Text>
+    );
+    last = match.index + match[0].length;
+  }
+
+  // Remaining plain text
+  if (last < content.length) {
+    parts.push(
+      <Text key={`plain-${idx++}`} style={{ color: baseColor }}>
+        {content.slice(last)}
+      </Text>
+    );
+  }
+
+  if (parts.length === 0) {
+    return <Text style={{ color: baseColor }}>{content}</Text>;
+  }
+
+  return <Text>{parts}</Text>;
 }
 
 interface RenderRow {
@@ -128,6 +198,7 @@ export function ChatScreen() {
   const kbOffset = Platform.OS === 'ios' ? headerHeight : 0;
   const {
     currentUser, conversations, messages, loadingMessages,
+    loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     setActiveConversation, sendMessage, editMessage, deleteMessage, toggleReaction,
     presence, typingByConv, reportTyping,
     aiDisclosureAcceptedAt, mutedConvs, muteConv, blockUser,
@@ -141,6 +212,14 @@ export function ChatScreen() {
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+
+  // ── @-mention autocomplete state (OpenChat-0jy) ────────────────────────────
+  // mentionQuery: the text typed after the triggering '@' at the cursor position.
+  // null when no active mention trigger is in progress.
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  // Tracks the char-offset of the '@' that triggered the current mention pick.
+  const mentionAtOffset = useRef<number>(-1);
+  const textInputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList<RenderRow>>(null);
   const typingTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -192,6 +271,9 @@ export function ChatScreen() {
   // Initial-mount / conversation-switch flag: first scroll should be
   // non-animated, and we should not count "new" messages as unread.
   const initialScrollDoneRef = useRef(false);
+  // Set to true by loadOlderMessages so the messages effect doesn't fire
+  // scroll-to-end or unread bump when older messages are prepended (OpenChat-vjc).
+  const prependingOlderRef = useRef(false);
 
   // Activate this conversation in context on mount; clear on unmount.
   // Also tell the notification service so it can suppress foreground banners
@@ -217,6 +299,14 @@ export function ChatScreen() {
 
   const isGroup = conversation?.type === 'group';
   const other = !isGroup ? conversation?.participants?.find(p => p.user.id !== currentUser?.userId)?.user : null;
+
+  // Participants eligible for @-mention — all except self (OpenChat-0jy).
+  const mentionableParticipants = useMemo(() => {
+    if (!isGroup) return [];
+    return (conversation?.participants || []).filter(
+      p => p.user.id !== currentUser?.userId
+    );
+  }, [isGroup, conversation?.participants, currentUser?.userId]);
   const headerTitle = useMemo(() => {
     if (!conversation) return '';
     if (conversation.title) return conversation.title;
@@ -378,6 +468,14 @@ export function ChatScreen() {
 
     if (len <= prevLen) return; // message deleted / no growth — do nothing
     const grew = len - prevLen;
+
+    // Older messages were prepended — skip scroll and unread bump (OpenChat-vjc).
+    // maintainVisibleContentPosition handles keeping the scroll position stable.
+    if (prependingOlderRef.current) {
+      prependingOlderRef.current = false;
+      return;
+    }
+
     const latest = messages[len - 1];
     const isOwn = latest?.senderId === currentUser?.userId;
 
@@ -409,6 +507,17 @@ export function ChatScreen() {
     prevLenForHapticRef.current = len;
   }, [messages, currentUser?.userId, conversationId, markConversationRead]);
 
+  // When loadingOlderMessages transitions false→false (completed), flag the
+  // next messages update as a prepend so the scroll/unread effect ignores it (OpenChat-vjc).
+  const wasLoadingOlderRef = useRef(false);
+  useEffect(() => {
+    if (wasLoadingOlderRef.current && !loadingOlderMessages) {
+      // Older messages just finished loading — next messages change is a prepend.
+      prependingOlderRef.current = true;
+    }
+    wasLoadingOlderRef.current = loadingOlderMessages;
+  }, [loadingOlderMessages]);
+
   // R3. Manual scroll handler — compute distance-from-bottom and update both
   // the ref (synchronous, used by the messages effect above) and state (for
   // the pill render). Reset unread when the user returns to the bottom.
@@ -421,6 +530,11 @@ export function ChatScreen() {
     isAtBottomRef.current = atBottom;
     if (atBottom !== wasAtBottom) setIsAtBottom(atBottom);
     if (atBottom && !wasAtBottom) setUnreadCount(0);
+
+    // Load older messages when user scrolls near the top (OpenChat-vjc).
+    if (contentOffset.y < 200 && hasMoreMessages && !loadingOlderMessages) {
+      void loadOlderMessages(conversationId);
+    }
   };
 
   // R5. Pill tap → scroll to latest. onScroll will fire as the scroll
@@ -455,7 +569,38 @@ export function ChatScreen() {
       if (typingTimer.current) clearTimeout(typingTimer.current);
       reportTyping(conversationId, false);
     }
+
+    // @-mention trigger detection (OpenChat-0jy) — groups only.
+    // Look for an unfinished @token at the end of the string (or at the
+    // current known cursor position). We use a simple regex: the substring
+    // from the last '@' that isn't preceded by a word char and isn't
+    // followed by a space (i.e. the token is still being typed).
+    if (isGroup) {
+      const match = next.match(/@([\w-]*)$/);
+      if (match) {
+        // The '@' is at index (next.length - 1 - match[1].length - 1 + 1)
+        mentionAtOffset.current = next.length - 1 - match[1].length;
+        setMentionQuery(match[1]);
+      } else {
+        mentionAtOffset.current = -1;
+        setMentionQuery(null);
+      }
+    }
   };
+
+  const handleMentionSelect = useCallback((candidate: MentionCandidate) => {
+    // Replace "@prefix" with "@DisplayName " in the text.
+    const atOffset = mentionAtOffset.current;
+    if (atOffset < 0) return;
+    const before = text.slice(0, atOffset); // text before the '@'
+    const insertion = `@${candidate.displayName} `;
+    const newText = before + insertion;
+    setText(newText);
+    setMentionQuery(null);
+    mentionAtOffset.current = -1;
+    // Focus the input so the user can keep typing after selection.
+    textInputRef.current?.focus();
+  }, [text]);
 
   // ── Attachment pick handler (OpenChat-6bg) ────────────────────────────────
   const handlePickAttachment = useCallback(async () => {
@@ -491,6 +636,8 @@ export function ChatScreen() {
     setText('');
     setReplyTo(null);
     setPendingAsset(null);
+    setMentionQuery(null);
+    mentionAtOffset.current = -1;
     if (typingTimer.current) clearTimeout(typingTimer.current);
     reportTyping(conversationId, false);
 
@@ -650,6 +797,17 @@ export function ChatScreen() {
           // user reaching bottom quickly, low enough not to thrash JS.
           scrollEventThrottle={16}
           onScrollToIndexFailed={() => { /* target not in window — ignore */ }}
+          // Spinner at the top while loading older messages (OpenChat-vjc).
+          ListHeaderComponent={
+            loadingOlderMessages ? (
+              <View style={{ paddingVertical: 12, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color={c.primary} />
+              </View>
+            ) : null
+          }
+          // Preserve scroll position when older messages are prepended (OpenChat-vjc).
+          // maintainVisibleContentPosition keeps the first visible item in place on iOS.
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           // Empty-state placeholder when the thread has no messages (OpenChat-0kl).
           ListEmptyComponent={
             !loadingMessages ? (
@@ -764,7 +922,18 @@ export function ChatScreen() {
                   {/* Deleted: muted italic tombstone (OpenChat-q9h) */}
                   {m.deletedAt
                     ? <Text style={{ color: isOwn ? 'rgba(255,255,255,0.55)' : c.textMuted, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
-                    : (!!m.content && <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 16 }}>{m.content}</Text>)
+                    : (!!m.content && (
+                        isGroup
+                          ? <Text style={{ fontSize: 16 }}>
+                              {renderContentWithMentions(
+                                m.content,
+                                mentionableParticipants,
+                                isOwn ? c.bubbleOwnText : c.bubbleOtherText,
+                                scheme
+                              )}
+                            </Text>
+                          : <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 16 }}>{m.content}</Text>
+                      ))
                   }
                   <View style={styles.bubbleFooter}>
                     <Text style={{ color: isOwn ? 'rgba(255,255,255,0.7)' : c.textMuted, fontSize: 10 }}>
@@ -878,6 +1047,16 @@ export function ChatScreen() {
         </View>
       )}
 
+      {/* @-mention autocomplete dropdown — only shown in group chats (OpenChat-0jy) */}
+      {isGroup && mentionQuery !== null && (
+        <MentionAutocomplete
+          query={mentionQuery}
+          participants={mentionableParticipants}
+          onSelect={handleMentionSelect}
+          scheme={scheme}
+        />
+      )}
+
       <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
         {/* Attachment pick button (OpenChat-6bg) — hidden in edit mode */}
         {!editingMessage && (
@@ -891,6 +1070,7 @@ export function ChatScreen() {
           </TouchableOpacity>
         )}
         <TextInput
+          ref={textInputRef}
           style={[styles.input, { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border }]}
           value={text}
           onChangeText={handleTextChange}
