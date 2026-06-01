@@ -12,6 +12,33 @@ function getJwtSecret(): string {
 }
 const NOOS_URL = process.env.NOOS_URL || 'http://localhost:52743';
 
+const EXPORT_RANGES = {
+  last_hour: { label: 'Last hour', ms: 60 * 60 * 1000 },
+  last_day: { label: 'Last day', ms: 24 * 60 * 60 * 1000 },
+  last_week: { label: 'Last week', ms: 7 * 24 * 60 * 60 * 1000 },
+  last_month: { label: 'Last month', ms: 30 * 24 * 60 * 60 * 1000 },
+  all_time: { label: 'All time', ms: null },
+} as const;
+
+type ExportRange = keyof typeof EXPORT_RANGES;
+
+function parseExportRange(raw: unknown): ExportRange | null {
+  const value = typeof raw === 'string' ? raw : 'last_day';
+  return value in EXPORT_RANGES ? value as ExportRange : null;
+}
+
+function exportSince(range: ExportRange): string | null {
+  const ms = EXPORT_RANGES[range].ms;
+  if (ms === null) return null;
+  return new Date(Date.now() - ms).toISOString();
+}
+
+function sendJsonDownload(res: Response, filename: string, payload: unknown): void {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.json(payload);
+}
+
 // Google OAuth — see OpenChat-hwi epic. Client created in GCP project
 // boreal-conquest-464203-v2; secret lives in server/.env (and on M5 at
 // ~/.config/openchat-accounts.json for the human reference copy).
@@ -150,6 +177,128 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching user:', error);
     res.status(500).json({ error: 'Failed to fetch user' });
+  } finally {
+    await session.close();
+  }
+});
+
+/**
+ * GET /api/auth/export?range=last_day
+ *
+ * Download an account-scoped JSON bundle: profile, conversations the caller is
+ * still a participant in, matching messages for the selected range, thoughts,
+ * blocked users, and non-secret agent key metadata if present.
+ */
+router.get('/export', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const range = parseExportRange(req.query.range);
+
+  if (!range) {
+    res.status(400).json({ error: `range must be one of: ${Object.keys(EXPORT_RANGES).join(', ')}` });
+    return;
+  }
+
+  const since = exportSince(range);
+
+  try {
+    const result = await session.run(`
+      MATCH (u:User {id: $userId})
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:PARTICIPATES_IN]->(c:Conversation)
+        WITH collect(c { .id, .title, .type, .createdAt, .updatedAt, .lastMessageAt, .lastMessagePreview }) AS conversations
+        RETURN conversations
+      }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:PARTICIPATES_IN]->(c:Conversation)<-[:IN_CONVERSATION]-(m:Message)
+        WHERE $since IS NULL OR m.createdAt >= datetime($since)
+        OPTIONAL MATCH (sender:User {id: m.senderId})
+        WITH m, sender
+        ORDER BY m.createdAt ASC
+        RETURN collect(m {
+          .*,
+          sender: sender { .id, .name, .email, .isBot }
+        }) AS messages
+      }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:HAS_THOUGHT]->(t:Thought)
+        WHERE $since IS NULL OR t.createdAt >= datetime($since)
+        WITH t ORDER BY t.createdAt ASC
+        RETURN collect(t { .id, .text, .kind, .status, .createdAt, .updatedAt }) AS thoughts
+      }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:BLOCKED]->(blocked:User)
+        RETURN collect(blocked { .id, .name, .email }) AS blockedUsers
+      }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:OWNS_AGENT_KEY]->(ak)
+        RETURN collect(ak {
+          .id,
+          .name,
+          .keyPrefix,
+          .scopes,
+          .agentName,
+          .agentVersion,
+          .createdAt,
+          .lastUsedAt,
+          .expiresAt,
+          .revokedAt
+        }) AS agentKeys
+      }
+      RETURN u {
+        .id,
+        .email,
+        .name,
+        .presenceStatus,
+        .statusMessage,
+        .avatarUrl,
+        .createdAt,
+        .updatedAt,
+        .onboardedAt
+      } AS user,
+      conversations,
+      messages,
+      thoughts,
+      blockedUsers,
+      agentKeys
+    `, { userId, since });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const record = result.records[0];
+    const messages = (toJS(record.get('messages')) as Record<string, unknown>[])
+      .filter((m) => m && Object.keys(m).length > 0)
+      .map((msg) => {
+        if (typeof msg.attachments === 'string') {
+          try { msg.attachments = JSON.parse(msg.attachments); } catch { /* leave raw */ }
+        }
+        return msg;
+      });
+
+    const exportedAt = new Date().toISOString();
+    sendJsonDownload(res, `openchat-account-${range}.json`, {
+      schema: 'openchat.account_export.v1',
+      exportedAt,
+      range: { key: range, label: EXPORT_RANGES[range].label, since },
+      user: toJS(record.get('user')),
+      conversations: (toJS(record.get('conversations')) as unknown[]).filter(Boolean),
+      messageCount: messages.length,
+      messages,
+      thoughts: (toJS(record.get('thoughts')) as unknown[]).filter(Boolean),
+      blockedUsers: (toJS(record.get('blockedUsers')) as unknown[]).filter(Boolean),
+      agentKeys: (toJS(record.get('agentKeys')) as unknown[]).filter(Boolean),
+    });
+  } catch (error) {
+    console.error('Error exporting account:', error);
+    res.status(500).json({ error: 'Failed to export account data' });
   } finally {
     await session.close();
   }

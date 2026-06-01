@@ -31,6 +31,37 @@ function getS3(): S3Client {
 
 const router = Router();
 
+const EXPORT_RANGES = {
+  last_hour: { label: 'Last hour', ms: 60 * 60 * 1000 },
+  last_day: { label: 'Last day', ms: 24 * 60 * 60 * 1000 },
+  last_week: { label: 'Last week', ms: 7 * 24 * 60 * 60 * 1000 },
+  last_month: { label: 'Last month', ms: 30 * 24 * 60 * 60 * 1000 },
+  all_time: { label: 'All time', ms: null },
+} as const;
+
+type ExportRange = keyof typeof EXPORT_RANGES;
+
+function parseExportRange(raw: unknown): ExportRange | null {
+  const value = typeof raw === 'string' ? raw : 'last_day';
+  return value in EXPORT_RANGES ? value as ExportRange : null;
+}
+
+function exportSince(range: ExportRange): string | null {
+  const ms = EXPORT_RANGES[range].ms;
+  if (ms === null) return null;
+  return new Date(Date.now() - ms).toISOString();
+}
+
+function safeFilenamePart(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'conversation';
+}
+
+function sendJsonDownload(res: Response, filename: string, payload: unknown): void {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.json(payload);
+}
+
 // Emit conversation:created to every participant's per-user room. Clients
 // (including the picortex bot) listen for this event and immediately join
 // the new conversation's room so the very first message isn't dropped.
@@ -531,6 +562,102 @@ router.get('/conversations/:id', requireAuth, async (req: Request, res: Response
   } catch (error) {
     console.error('Error fetching conversation:', error);
     res.status(500).json({ error: 'Failed to fetch conversation' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/conversations/:id/export?range=last_day
+// Download a user's copy of one conversation's recent history. The participant
+// check mirrors the read endpoints; no messages from conversations the user
+// is no longer in are exported.
+router.get('/conversations/:id/export', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const { id } = req.params;
+  const range = parseExportRange(req.query.range);
+
+  if (!range) {
+    res.status(400).json({ error: `range must be one of: ${Object.keys(EXPORT_RANGES).join(', ')}` });
+    return;
+  }
+
+  const since = exportSince(range);
+
+  try {
+    const result = await session.run(`
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $id})
+      CALL {
+        WITH c
+        MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
+        RETURN collect({
+          user: participant { .id, .name, .email, .isBot },
+          role: rel.role,
+          joinedAt: rel.joinedAt
+        }) AS participants
+      }
+      CALL {
+        WITH c
+        MATCH (m:Message {conversationId: c.id})
+        WHERE $since IS NULL OR m.createdAt >= datetime($since)
+        MATCH (sender:User {id: m.senderId})
+        OPTIONAL MATCH (reactor:User)-[reaction:REACTED]->(m)
+        WITH m, sender, collect({
+          emoji: reaction.emoji,
+          userId: reactor.id,
+          name: reactor.name,
+          email: reactor.email
+        }) AS rawReactions
+        RETURN collect(m {
+          .*,
+          sender: sender { .id, .name, .email, .isBot },
+          reactions: [r IN rawReactions WHERE r.emoji IS NOT NULL]
+        }) AS messages
+      }
+      RETURN c { .*, participants: participants } AS conversation, messages
+    `, { userId, id, since });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    const conversation = toJS(result.records[0].get('conversation')) as Record<string, unknown>;
+    const messages = (toJS(result.records[0].get('messages')) as Record<string, unknown>[])
+      .map((msg) => {
+        if (typeof msg.attachments === 'string') {
+          try { msg.attachments = JSON.parse(msg.attachments); } catch { /* leave raw */ }
+        }
+        return msg;
+      })
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+
+    if (messages.length > 0) {
+      const previewMap = await loadPreviewsForMessages(messages.map(m => m.id as string));
+      for (const msg of messages) {
+        const previews = previewMap.get(msg.id as string);
+        if (previews?.length) msg.linkPreviews = previews;
+      }
+    }
+
+    const title = typeof conversation.title === 'string' && conversation.title.trim()
+      ? conversation.title
+      : conversation.type === 'direct'
+        ? 'direct-chat'
+        : 'group-chat';
+    const exportedAt = new Date().toISOString();
+
+    sendJsonDownload(res, `openchat-${safeFilenamePart(title)}-${range}.json`, {
+      schema: 'openchat.conversation_export.v1',
+      exportedAt,
+      range: { key: range, label: EXPORT_RANGES[range].label, since },
+      conversation,
+      messageCount: messages.length,
+      messages,
+    });
+  } catch (error) {
+    console.error('Error exporting conversation:', error);
+    res.status(500).json({ error: 'Failed to export conversation' });
   } finally {
     await session.close();
   }
@@ -2140,4 +2267,3 @@ router.delete('/conversations/:id/invites/:token', requireAuth, async (req: Requ
 });
 
 export default router;
-
