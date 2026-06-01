@@ -23,10 +23,11 @@ import { useChat } from '../contexts/ChatContext';
 // Required for the in-app browser to dismiss properly after the OAuth round-trip.
 WebBrowser.maybeCompleteAuthSession();
 
-// Quick-login test accounts. Only rendered when EXPO_PUBLIC_SHOW_TEST_LOGINS is
-// truthy (default 'true' for dev via .env). Production EAS builds set it to
-// 'false' so the buttons don't ship. Mirrors the Noos web pattern in
-// `~/code/noos/client/src/components/Login.tsx` (the VITE_SHOW_TEST_LOGINS gate).
+// Quick-login test accounts. Only rendered when EXPO_PUBLIC_SHOW_TEST_LOGINS
+// is explicitly set to 'true'. Default is OFF so production builds — both EAS
+// (iOS TestFlight) AND the openchat-server's web bundles at /m/ and /d/ —
+// never accidentally ship the Alice/Bob buttons. Dev/local users who want
+// them must set EXPO_PUBLIC_SHOW_TEST_LOGINS=true in their .env or shell.
 //
 // IMPORTANT: these passwords are PUBLIC test creds — they are intentionally
 // committed (alice/bob are seed accounts on production Noos). Never put any
@@ -37,7 +38,7 @@ const TEST_ACCOUNTS: TestAccount[] = [
   { label: 'Bob', email: 'bob@noos.app', password: 'password123' },
 ];
 const SHOW_TEST_LOGINS =
-  (process.env.EXPO_PUBLIC_SHOW_TEST_LOGINS ?? 'true').toLowerCase() !== 'false';
+  (process.env.EXPO_PUBLIC_SHOW_TEST_LOGINS ?? 'false').toLowerCase() === 'true';
 
 export function LoginScreen() {
   const { scheme } = useTheme();
