@@ -43,6 +43,7 @@ import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
 import { pickImage, uploadImage, PickedAsset } from '../services/attachments';
 import { MentionAutocomplete, MentionCandidate } from '../components/MentionAutocomplete';
+import { TransformButton } from '../components/TransformButton';
 import type { Participant } from '../api/client';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
@@ -254,6 +255,24 @@ export function ChatScreen() {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastVisible(false), 3200);
   }, []);
+
+  // ── Transform banner state (OpenChat-8a0) ──────────────────────────────────
+  // originalText: the text before the transform (for Undo).
+  // transformLabel: display label shown in the banner, e.g. "NVC Rewrite".
+  const [originalText, setOriginalText] = useState<string | null>(null);
+  const [transformLabel, setTransformLabel] = useState<string>('');
+
+  const handleTransformed = useCallback((rewrittenText: string, label: string) => {
+    setOriginalText(text);
+    setTransformLabel(label);
+    setText(rewrittenText);
+  }, [text]);
+
+  const handleTransformUndo = useCallback(() => {
+    if (originalText !== null) setText(originalText);
+    setOriginalText(null);
+    setTransformLabel('');
+  }, [originalText]);
 
   // Map from messageId → row index for scroll-to-quoted.
   const messageIndexRef = useRef<Map<string, number>>(new Map());
@@ -560,6 +579,11 @@ export function ChatScreen() {
 
   const handleTextChange = (next: string) => {
     setText(next);
+    // Dismiss transform banner on any manual edit — the user has moved on.
+    if (originalText !== null) {
+      setOriginalText(null);
+      setTransformLabel('');
+    }
     // Typing throttle: emit typing:start on first keystroke, auto-stop after silence.
     if (next.length > 0) {
       reportTyping(conversationId, true);
@@ -638,6 +662,9 @@ export function ChatScreen() {
     setPendingAsset(null);
     setMentionQuery(null);
     mentionAtOffset.current = -1;
+    // Dismiss transform banner on send (intentional commit of the transform).
+    setOriginalText(null);
+    setTransformLabel('');
     if (typingTimer.current) clearTimeout(typingTimer.current);
     reportTyping(conversationId, false);
 
@@ -1057,6 +1084,25 @@ export function ChatScreen() {
         />
       )}
 
+      {/* Transform banner — shown above composer after a transform (OpenChat-8a0) */}
+      {originalText !== null && (
+        <View style={[styles.replyBar, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <View style={[styles.replyBarAccent, { backgroundColor: c.primary }]} />
+          <View style={{ flex: 1, marginLeft: 8 }}>
+            <Text style={[styles.replyBarAuthor, { color: c.primary }]}>
+              ✨ Transformed via {transformLabel}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={handleTransformUndo}
+            style={[styles.replyBarClose, { paddingLeft: 12 }]}
+            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+          >
+            <Text style={{ color: c.primary, fontSize: 13, fontWeight: '600' }}>Undo</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
         {/* Attachment pick button (OpenChat-6bg) — hidden in edit mode */}
         {!editingMessage && (
@@ -1078,6 +1124,15 @@ export function ChatScreen() {
           placeholderTextColor={c.textMuted}
           multiline
         />
+        {/* Transform sparkle button (OpenChat-8a0) — hidden in edit mode */}
+        {!editingMessage && (
+          <TransformButton
+            text={text}
+            disabled={!text.trim() || sending}
+            onTransformed={handleTransformed}
+            onError={showToast}
+          />
+        )}
         <TouchableOpacity
           style={[styles.send, { backgroundColor: c.primary, opacity: (!text.trim() && !pendingAsset) || sending ? 0.5 : 1 }]}
           onPress={handleSend}
