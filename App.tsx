@@ -25,6 +25,11 @@ import {
   registerForPushNotificationsAsync,
   navigationRef,
 } from './src/services/notifications';
+import { installClientLogger } from './src/services/clientLogger';
+
+// Install the client logger before anything else mounts so even early-boot
+// errors are captured (OpenChat-e5v).
+installClientLogger();
 import { LoginScreen } from './src/screens/LoginScreen';
 import { ConversationsScreen } from './src/screens/ConversationsScreen';
 import { ChatScreen } from './src/screens/ChatScreen';
