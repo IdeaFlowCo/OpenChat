@@ -11,6 +11,7 @@
 import { useCallback, useState } from 'react';
 import { Alert, Linking, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme, ThemePref } from '../contexts/ThemeContext';
@@ -334,7 +335,10 @@ export function SettingsScreen() {
         </TouchableOpacity>
       </View>
 
-      <Text style={[styles.versionFooter, { color: c.textMuted }]}>OpenChat mobile · v0.1.0</Text>
+      <Text style={[styles.versionFooter, { color: c.textMuted }]}>
+        OpenChat mobile · v{Constants.expoConfig?.version ?? '?'}
+        {Platform.OS !== 'web' && ` (${Constants.expoConfig?.ios?.buildNumber ?? Constants.expoConfig?.android?.versionCode ?? '?'})`}
+      </Text>
 
       {/* Android delete-account confirmation modal (fallback for platforms without Alert.prompt) */}
       <Modal
