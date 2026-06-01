@@ -31,7 +31,6 @@ import { initCrashReporting } from './src/services/crashReporting';
 import { hasCompletedOnboarding } from './src/services/onboarding';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
-import { ConversationsScreen } from './src/screens/ConversationsScreen';
 
 // Init crash reporting FIRST so even early-boot errors reach Sentry (OpenChat-7um).
 // No-op if EXPO_PUBLIC_SENTRY_DSN is unset.
@@ -39,7 +38,15 @@ initCrashReporting();
 // Install the client logger before anything else mounts so even early-boot
 // errors are captured (OpenChat-e5v).
 installClientLogger();
-import { ChatScreen } from './src/screens/ChatScreen';
+// HomeScreen replaces a direct ConversationsScreen import at the
+// "Conversations" stack key (OpenChat-601). On native + narrow web it
+// re-exports ConversationsScreen; on web ≥900px it renders the
+// MasterDetailLayout side-by-side view. ChatScreenRouter wraps ChatScreen
+// with the same pattern — desktop-web swaps activeConversationId instead
+// of pushing a Chat screen.
+import { HomeScreen } from './src/screens/HomeScreen';
+import { ChatScreenRouter } from './src/screens/ChatScreenRouter';
+import { KeyboardShortcutsScreen } from './src/screens/KeyboardShortcutsScreen';
 import { NewConversationScreen } from './src/screens/NewConversationScreen';
 import { GroupSettingsScreen } from './src/screens/GroupSettingsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
@@ -87,12 +94,12 @@ function ChatsNavigator({ currentUser, c }: {
     >
       <ChatsStack.Screen
         name="Conversations"
-        component={ConversationsScreen}
+        component={HomeScreen}
         options={{ title: `Chats${currentUser?.email ? ` · ${currentUser.email}` : ''}` }}
       />
       <ChatsStack.Screen
         name="Chat"
-        component={ChatScreen}
+        component={ChatScreenRouter}
         options={{ title: '' /* set dynamically in screen */ }}
       />
       <ChatsStack.Screen
@@ -173,6 +180,13 @@ function ChatsNavigator({ currentUser, c }: {
         name="AgentKeyDetail"
         component={AgentKeyDetailScreen}
         options={{ title: 'Key Details' }}
+      />
+      {/* Desktop keyboard shortcuts cheat-sheet (OpenChat-601). Opens via
+          Cmd-/ on the master-detail layout. Native shim returns null. */}
+      <ChatsStack.Screen
+        name="KeyboardShortcuts"
+        component={KeyboardShortcutsScreen}
+        options={{ title: 'Keyboard shortcuts', presentation: 'modal' }}
       />
     </ChatsStack.Navigator>
   );

@@ -45,6 +45,9 @@ export type RootStackParamList = {
   AddAgentKey: undefined;
   /** Detail view for a single agent key. */
   AgentKeyDetail: { keyId: string };
+  /** Desktop keyboard shortcuts cheat-sheet (OpenChat-601). Only reachable
+   *  from the master-detail desktop layout via Cmd-/; native is a no-op. */
+  KeyboardShortcuts: undefined;
 };
 
 // ── Thoughts stack (OpenChat-zi1) ─────────────────────────────────────────────
