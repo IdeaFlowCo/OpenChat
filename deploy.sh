@@ -49,14 +49,23 @@ if [ -d "$MOBILE_DESKTOP_REPO" ]; then
   (cd "$MOBILE_DESKTOP_REPO" && npx expo export --platform web --output-dir dist-web --clear)
   cp -r "$MOBILE_DESKTOP_REPO/dist-web/." client-mobile-desktop/dist/
 else
-  echo "openchat-mobile-desktop repo not found at $MOBILE_DESKTOP_REPO — /d will serve a placeholder."
-  cat > client-mobile-desktop/dist/index.html <<'PLACEHOLDER_HTML'
+  echo "openchat-mobile-desktop repo not found at $MOBILE_DESKTOP_REPO — using openchat-mobile RN-web build for /d."
+  if [ -f client-mobile/dist/index.html ]; then
+    cp -r client-mobile/dist/. client-mobile-desktop/dist/
+    # The Expo export was built with baseUrl=/m. For the /d mount, rewrite
+    # top-level static asset references so the same checked-in RN app can serve
+    # both web entrypoints instead of letting /d drift from an untracked fork.
+    find client-mobile-desktop/dist -type f \( -name '*.html' -o -name '*.json' \) -print0 \
+      | xargs -0 perl -pi -e 's#/m/#/d/#g; s#"/m"#"/d"#g'
+  else
+    cat > client-mobile-desktop/dist/index.html <<'PLACEHOLDER_HTML'
 <!doctype html><meta charset=utf-8><title>OpenChat /d</title>
 <body style="font-family:system-ui;padding:2rem;max-width:40rem;margin:0 auto;color:#444">
-<h1>/d placeholder</h1>
-<p>The desktop-responsive React Native web build isn't present in this deploy. Set <code>MOBILE_DESKTOP_REPO</code> on the deploy host (or place a sibling <code>openchat-mobile-desktop/</code> checkout next to <code>openchat/</code>) and redeploy.</p>
+<h1>/d unavailable</h1>
+<p>The React Native web build was not present in this deploy package.</p>
 </body>
 PLACEHOLDER_HTML
+  fi
 fi
 
 # Create deployment package
