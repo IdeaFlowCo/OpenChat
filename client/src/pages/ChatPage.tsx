@@ -4,6 +4,7 @@ import { ChatSidebar } from '../components/ChatSidebar';
 import { MessageList } from '../components/MessageList';
 import { MessageInput } from '../components/MessageInput';
 import { GroupSettings } from '../components/GroupSettings';
+import { userDisplayName } from '../utils/userDisplay';
 
 export function ChatPage() {
   const { loadConversations, activeConversationId, setActiveConversation, conversations, isConnected, currentUser } = useChat();
@@ -15,6 +16,10 @@ export function ChatPage() {
 
   const activeConversation = conversations.find(c => c.id === activeConversationId);
   const isGroup = activeConversation?.type === 'group';
+  const directParticipant = activeConversation?.type === 'direct'
+    ? activeConversation.participants?.find(p => p.user.id !== currentUser?.userId)?.user
+      || activeConversation.participants?.find(p => p.user.id === currentUser?.userId)?.user
+    : null;
 
   // On mobile, the layout is a stack: list OR chat. On md+, side-by-side.
   // hasActive controls which pane is visible on small screens.
@@ -56,9 +61,9 @@ export function ChatPage() {
                   <h2 className="font-semibold truncate">
                     {activeConversation.title ||
                       (activeConversation.type === 'direct'
-                        ? activeConversation.participants?.find(p => p.user.id !== currentUser?.userId)?.user.name
-                          || activeConversation.participants?.find(p => p.user.id !== currentUser?.userId)?.user.email
-                          || 'Chat'
+                        ? directParticipant
+                          ? userDisplayName(directParticipant, currentUser)
+                          : 'Chat'
                         : 'Group Chat')}
                   </h2>
                   {activeConversation.participants && activeConversation.participants.length > 0 && (
@@ -66,8 +71,7 @@ export function ChatPage() {
                       {isGroup
                         ? `${activeConversation.participants.length} members`
                         : activeConversation.participants
-                            .filter(p => p.user.id !== currentUser?.userId)
-                            .map(p => p.user.name || p.user.email)
+                            .map(p => userDisplayName(p.user, currentUser))
                             .join(', ')}
                     </p>
                   )}

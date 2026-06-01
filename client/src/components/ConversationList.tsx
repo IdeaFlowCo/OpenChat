@@ -1,12 +1,14 @@
 import { useChat } from '../contexts/ChatContext';
 import { PresenceIndicator } from './PresenceIndicator';
+import { userDisplayName } from '../utils/userDisplay';
 
 export function ConversationList() {
   const { conversations, activeConversationId, setActiveConversation, presence, currentUser } = useChat();
 
   const getOtherParticipant = (conv: typeof conversations[0]) => {
     const participants = conv.participants || [];
-    return participants.find(p => p.user.id !== currentUser?.userId)?.user;
+    return participants.find(p => p.user.id !== currentUser?.userId)?.user
+      || participants.find(p => p.user.id === currentUser?.userId)?.user;
   };
 
   const getConversationTitle = (conv: typeof conversations[0]) => {
@@ -69,7 +71,11 @@ export function ConversationList() {
 
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-center">
-                  <span className="font-medium truncate">{getConversationTitle(conv)}</span>
+                  <span className="font-medium truncate">
+                    {conv.type === 'direct' && other
+                      ? userDisplayName(other, currentUser)
+                      : getConversationTitle(conv)}
+                  </span>
                   <span className="text-xs text-gray-400">{formatTime(conv.lastMessageAt)}</span>
                 </div>
                 {conv.lastMessagePreview && (

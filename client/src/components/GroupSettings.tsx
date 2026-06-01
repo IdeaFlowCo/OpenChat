@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { useChat } from '../contexts/ChatContext';
 import { Conversation, User } from '../api';
 import { PresenceIndicator } from './PresenceIndicator';
+import { userDisplayName } from '../utils/userDisplay';
 
 interface GroupSettingsProps {
   open: boolean;
@@ -107,7 +108,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
       await addParticipant(conversation.id, user.id);
       setSearch('');
       setResults([]);
-      toast.success(`Added ${user.name || user.email}`);
+        toast.success(`Added ${userDisplayName(user, currentUser)}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to add member');
     } finally {
@@ -258,7 +259,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
                             {(u.name || u.email).charAt(0).toUpperCase()}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate">{u.name || u.email}</div>
+                            <div className="font-medium truncate">{userDisplayName(u, currentUser)}</div>
                             <div className="text-xs text-gray-500 truncate">{u.email}</div>
                           </div>
                           <span className="text-blue-600 text-sm font-medium">Add</span>
@@ -289,7 +290,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-medium truncate">
-                        {u.name || u.email}{isMe && <span className="text-gray-400 font-normal"> (you)</span>}
+                        {userDisplayName(u, currentUser)}
                       </div>
                       <div className="text-xs text-gray-500 truncate">
                         {u.email}{p.role === 'owner' && <span className="ml-1 text-blue-600">· owner</span>}

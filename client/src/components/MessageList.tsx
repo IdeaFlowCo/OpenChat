@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useChat } from '../contexts/ChatContext';
+import { userDisplayName } from '../utils/userDisplay';
 
 export function MessageList() {
   const { messages, currentUser, typingUsers, activeConversationId, contacts } = useChat();
@@ -42,7 +43,9 @@ export function MessageList() {
     <div className="flex-1 overflow-y-auto p-4 space-y-3">
       {messages.map((message) => {
         const isOwn = message.senderId === currentUser?.userId;
-        const sender = message.sender;
+        const sender = message.sender || (isOwn && currentUser
+          ? { id: currentUser.userId, email: currentUser.email, name: currentUser.name || currentUser.email }
+          : undefined);
 
         return (
           <div
@@ -56,9 +59,9 @@ export function MessageList() {
                   : 'bg-gray-100 text-gray-900 rounded-bl-md'
               }`}
             >
-              {!isOwn && sender && (
-                <div className="text-xs font-medium text-gray-500 mb-1">
-                  {sender.name || sender.email}
+              {sender && (
+                <div className={`text-xs font-medium mb-1 ${isOwn ? 'text-blue-100' : 'text-gray-500'}`}>
+                  {userDisplayName(sender, currentUser)}
                 </div>
               )}
               <p className="break-words">{message.content}</p>

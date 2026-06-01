@@ -4,6 +4,13 @@ import { useChat } from '../contexts/ChatContext';
 import { ConversationList } from './ConversationList';
 import { PresenceIndicator } from './PresenceIndicator';
 import { User } from '../api';
+import {
+  currentUserAsContact,
+  isSelfSearch,
+  isSelfUser,
+  rankSelfFirst,
+  userDisplayName,
+} from '../utils/userDisplay';
 
 // Environment detection for context-aware UI
 type AppEnvironment = 'tailscale' | 'localhost' | 'production';
@@ -123,14 +130,17 @@ export function ChatSidebar() {
       setIsSearching(true);
       try {
         const results = await searchContacts(debouncedSearch);
-        setSearchResults(results);
+        const withSelf = currentUser && isSelfSearch(debouncedSearch) && !results.some(u => u.id === currentUser.userId)
+          ? [currentUserAsContact(currentUser), ...results]
+          : results;
+        setSearchResults(rankSelfFirst(withSelf, currentUser));
       } finally {
         setIsSearching(false);
       }
     };
 
     performSearch();
-  }, [debouncedSearch, pickerMode, searchContacts]);
+  }, [debouncedSearch, pickerMode, searchContacts, currentUser]);
 
   useEffect(() => {
     if (!isConnected) return;
@@ -399,11 +409,11 @@ export function ChatSidebar() {
                         key={c.id}
                         className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs"
                       >
-                        {c.name || c.email}
+                        {userDisplayName(c, currentUser)}
                         <button
                           onClick={() => setSelectedContacts(prev => prev.filter(x => x.id !== c.id))}
                           className="hover:text-blue-900"
-                          aria-label={`Remove ${c.name || c.email}`}
+                          aria-label={`Remove ${userDisplayName(c, currentUser)}`}
                         >
                           ×
                         </button>
@@ -458,7 +468,7 @@ export function ChatSidebar() {
                           checked={selected}
                           readOnly
                           className="w-5 h-5 accent-blue-500 pointer-events-none"
-                          aria-label={`Select ${contact.name || contact.email}`}
+                          aria-label={`Select ${userDisplayName(contact, currentUser)}`}
                         />
                       )}
                       <div className="relative">
@@ -473,7 +483,14 @@ export function ChatSidebar() {
                         </div>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium">{contact.name || contact.email}</div>
+                        <div className="font-medium">
+                          {userDisplayName(contact, currentUser)}
+                          {isSelfUser(contact, currentUser) && (
+                            <span className="ml-2 rounded-full bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700">
+                              self
+                            </span>
+                          )}
+                        </div>
                         <div className="text-sm text-gray-500 truncate">{contact.email}</div>
                         {contactPresence?.statusMessage && (
                           <div className="text-xs text-gray-400 truncate">

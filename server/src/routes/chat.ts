@@ -111,9 +111,20 @@ router.post('/conversations', manageConversations, async (req: Request, res: Res
   if (type === 'direct' && participantIds.length === 1) {
     const otherId = participantIds[0];
     const existing = await session.run(`
-      MATCH (u1:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {type: 'direct'})<-[:PARTICIPATES_IN]-(u2:User {id: $otherId})
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
+      WHERE c.type = 'direct'
       WITH c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}) AS participants
+      WITH c, participants, [p IN participants | p.user.id] AS participantIds
+      WHERE (
+        $otherId = $userId
+        AND size(participantIds) = 1
+        AND $userId IN participantIds
+      ) OR (
+        $otherId <> $userId
+        AND size(participantIds) = 2
+        AND $userId IN participantIds
+        AND $otherId IN participantIds
+      )
       RETURN c {
         .*,
         participants: participants
@@ -591,15 +602,22 @@ router.get('/contacts', readChat, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const searchQuery = req.query.q as string | undefined;
+  const normalizedSearch = (searchQuery || '').trim().toLowerCase();
+  const isSelfSearch = normalizedSearch === 'self' || normalizedSearch === 'me';
 
   try {
     const query = searchQuery
       ? `
         MATCH (u:User)
-        WHERE u.id <> $userId
-          AND (toLower(u.name) CONTAINS toLower($search) OR toLower(u.email) CONTAINS toLower($search))
+        WHERE (
+            u.id <> $userId
+            AND (toLower(u.name) CONTAINS toLower($search) OR toLower(u.email) CONTAINS toLower($search))
+          ) OR (
+            $isSelfSearch = true
+            AND u.id = $userId
+          )
         RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt } AS user
-        ORDER BY u.name
+        ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
       `
       : `
         MATCH (u:User)
@@ -608,7 +626,7 @@ router.get('/contacts', readChat, async (req: Request, res: Response) => {
         ORDER BY u.name
       `;
 
-    const result = await session.run(query, { userId, search: searchQuery || '' });
+    const result = await session.run(query, { userId, search: searchQuery || '', isSelfSearch });
     const contacts = result.records.map(r => toJS(r.get('user')));
     res.json(contacts);
   } catch (error) {
