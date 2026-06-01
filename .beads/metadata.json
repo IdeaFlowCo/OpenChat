@@ -1,4 +1,7 @@
 {
-  "database": "beads.db",
-  "jsonl_export": "issues.jsonl"
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "openchat",
+  "project_id": "59bda25f-a74b-4f00-a0b4-f8579fe912ee"
 }
