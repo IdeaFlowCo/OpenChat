@@ -9,12 +9,13 @@
  */
 
 import { useCallback, useState } from 'react';
-import { Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme, ThemePref } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
+import { api } from '../api/client';
 import { getColors } from '../theme/colors';
 import type { NavProp } from '../navigation/types';
 import { registerForPushNotificationsAsync } from '../services/notifications';
@@ -32,6 +33,69 @@ export function SettingsScreen() {
   const { preference, setPreference, scheme } = useTheme();
   const { currentUser, signOut } = useChat();
   const c = getColors(scheme);
+
+  // Account deletion (OpenChat-nhy)
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteAccount = useCallback(() => {
+    // First confirmation alert
+    Alert.alert(
+      'Delete your account?',
+      'This deletes your profile and replaces your sent messages with \'Message deleted\'. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            // Second confirmation: iOS uses Alert.prompt; Android uses modal
+            if (Platform.OS === 'ios') {
+              Alert.prompt(
+                'Type DELETE to confirm',
+                'Enter DELETE to permanently delete your account.',
+                async (input) => {
+                  if (input !== 'DELETE') return;
+                  setDeleting(true);
+                  try {
+                    await api.deleteAccount();
+                    await signOut();
+                  } catch (err) {
+                    Alert.alert('Error', err instanceof Error ? err.message : 'Failed to delete account.');
+                  } finally {
+                    setDeleting(false);
+                  }
+                },
+                'plain-text'
+              );
+            } else {
+              // Android fallback: modal with TextInput
+              setDeleteConfirmText('');
+              setDeleteModalVisible(true);
+            }
+          },
+        },
+      ]
+    );
+  }, [signOut]);
+
+  const handleDeleteConfirmAndroid = useCallback(async () => {
+    if (deleteConfirmText !== 'DELETE') {
+      Alert.alert('Incorrect', 'You must type DELETE exactly.');
+      return;
+    }
+    setDeleteModalVisible(false);
+    setDeleting(true);
+    try {
+      await api.deleteAccount();
+      await signOut();
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to delete account.');
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleteConfirmText, signOut]);
 
   // Notification permission status — re-polled whenever this screen gains
   // focus, so if the user toggles iOS Settings → OpenChat → Notifications
@@ -187,6 +251,44 @@ export function SettingsScreen() {
         </View>
       </View>
 
+      {/* Legal & Account section (OpenChat-nhy + OpenChat-wfz) */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>LEGAL & ACCOUNT</Text>
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          {/* Privacy Policy (OpenChat-wfz) */}
+          <TouchableOpacity
+            style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+            onPress={() => Linking.openURL('https://chat.globalbr.ai/legal/privacy')}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>Privacy Policy</Text>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+
+          {/* Terms of Service (OpenChat-wfz) */}
+          <TouchableOpacity
+            style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+            onPress={() => Linking.openURL('https://chat.globalbr.ai/legal/terms')}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>Terms of Service</Text>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+
+          {/* Delete account (OpenChat-nhy) */}
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={handleDeleteAccount}
+            disabled={deleting}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.optionLabel, { color: c.danger, flex: 1 }]}>
+              {deleting ? 'Deleting…' : 'Delete my account'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <View style={styles.section}>
         <TouchableOpacity
           style={[styles.dangerBtn, { borderColor: c.danger }]}
@@ -197,6 +299,46 @@ export function SettingsScreen() {
       </View>
 
       <Text style={[styles.versionFooter, { color: c.textMuted }]}>OpenChat mobile · v0.1.0</Text>
+
+      {/* Android delete-account confirmation modal (fallback for platforms without Alert.prompt) */}
+      <Modal
+        visible={deleteModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { backgroundColor: c.surface, borderColor: c.border }]}>
+            <Text style={[styles.modalTitle, { color: c.textPrimary }]}>Confirm account deletion</Text>
+            <Text style={[styles.modalBody, { color: c.textSecondary }]}>
+              Type DELETE (all caps) to permanently delete your account.
+            </Text>
+            <TextInput
+              style={[styles.modalInput, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
+              value={deleteConfirmText}
+              onChangeText={setDeleteConfirmText}
+              placeholder="DELETE"
+              placeholderTextColor={c.textMuted}
+              autoCapitalize="characters"
+              autoCorrect={false}
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalBtn, { borderColor: c.border, borderWidth: 1 }]}
+                onPress={() => setDeleteModalVisible(false)}
+              >
+                <Text style={{ color: c.textPrimary, fontWeight: '600' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: c.danger }]}
+                onPress={handleDeleteConfirmAndroid}
+              >
+                <Text style={{ color: '#fff', fontWeight: '600' }}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -242,4 +384,39 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   versionFooter: { fontSize: 11, textAlign: 'center', marginTop: 8 },
+  // Android delete-account confirmation modal styles
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 20,
+    gap: 12,
+  },
+  modalTitle: { fontSize: 17, fontWeight: '700' },
+  modalBody: { fontSize: 14, lineHeight: 20 },
+  modalInput: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    fontSize: 16,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  modalBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
 });
