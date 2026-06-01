@@ -9,6 +9,11 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import {
+  setUnreadBadgeCount,
+  loadMutedConvs,
+  muteConversation as muteConvStorage,
+} from '../services/notifications';
+import {
   api,
   Conversation,
   CurrentUser,
@@ -60,7 +65,10 @@ interface ChatContextValue {
   setActiveConversation: (id: string | null) => void;
   messages: Message[]; // for the active conversation
   loadingMessages: boolean;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, replyToId?: string) => Promise<void>;
+
+  // Block (OpenChat-46p)
+  blockUser: (userId: string) => Promise<void>;
 
   // Presence & typing
   presence: Map<string, { status: string; statusMessage?: string }>;
@@ -69,6 +77,14 @@ interface ChatContextValue {
 
   // Unread counters
   unreadByConv: Map<string, number>;
+
+  // AI disclosure (OpenChat-ds3)
+  aiDisclosureAcceptedAt: string | null;
+  acceptAiDisclosure: () => Promise<void>;
+
+  // Mute (OpenChat-aes) — local-only until server endpoint exists
+  mutedConvs: Record<string, string>; // convId → ISO expiry or 'always'
+  muteConv: (convId: string, until: Date | 'always' | null) => Promise<void>;
 
   // Lifecycle
   signOut: () => Promise<void>;
@@ -114,6 +130,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [typingByConv, setTypingByConv] = useState<Map<string, Set<string>>>(new Map());
   const [unreadByConv, setUnreadByConv] = useState<Map<string, number>>(new Map());
 
+  // Sync total unread count to the app icon badge (OpenChat-9sp).
+  // setUnreadBadgeCount is a no-op on web.
+  useEffect(() => {
+    const total = Array.from(unreadByConv.values()).reduce((sum, n) => sum + n, 0);
+    void setUnreadBadgeCount(total);
+  }, [unreadByConv]);
+
+  // AI disclosure (OpenChat-ds3)
+  const [aiDisclosureAcceptedAt, setAiDisclosureAcceptedAt] = useState<string | null>(null);
+
+  // Mute map (OpenChat-aes) — local-only; server integration deferred.
+  const [mutedConvs, setMutedConvs] = useState<Record<string, string>>({});
+
   const refreshConversations = useCallback(async () => {
     try {
       const data = await api.getConversations();
@@ -139,6 +168,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       console.warn('[ChatContext] socket connect failed during bootstrap:', e);
     }
     await refreshConversations();
+    // Fetch AI disclosure status (OpenChat-ds3). Non-fatal if it fails.
+    try {
+      const ds = await api.getAiDisclosureStatus();
+      setAiDisclosureAcceptedAt(ds.acceptedAt);
+    } catch {
+      /* non-fatal — banner will show until server is updated */
+    }
+    // Load mute map from AsyncStorage (OpenChat-aes). Non-fatal.
+    const muted = await loadMutedConvs();
+    setMutedConvs(muted);
     return true;
   }, [refreshConversations]);
 
@@ -293,8 +332,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Optimistic send: append a local message immediately, then replace with
-  // server canonical on success.
-  const sendMessage = useCallback(async (content: string) => {
+  // server canonical on success. Accepts optional replyToId for threaded replies
+  // (OpenChat-uxj). Server support is a follow-up; the field is passed through
+  // in the socket payload so it round-trips once the server handles it.
+  const sendMessage = useCallback(async (content: string, replyToId?: string) => {
     const id = activeConvIdRef.current;
     if (!id || !content.trim()) return;
     const optimistic: Message = {
@@ -304,10 +345,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       senderId: currentUser?.userId || 'me',
       createdAt: new Date().toISOString(),
       sender: currentUser ? { id: currentUser.userId, email: currentUser.email, name: currentUser.name } : undefined,
+      replyToId,
     };
     setMessages(prev => [...prev, optimistic]);
     try {
-      const real = await wsSend(id, content);
+      const real = await wsSend(id, content, replyToId);
       // Replace the optimistic placeholder with the server message.
       setMessages(prev => {
         const filtered = prev.filter(m => m.id !== optimistic.id);
@@ -381,6 +423,44 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     else emitTypingStop(conversationId);
   }, []);
 
+  // Block user (OpenChat-46p). Calls API, then removes the DM conversation
+  // with that user from the local list so the UI updates immediately.
+  const blockUser = useCallback(async (userId: string) => {
+    await api.blockUser(userId);
+    // Remove any direct conversation with the blocked user from the list.
+    setConversations(prev => prev.filter(conv => {
+      if (conv.type !== 'direct') return true;
+      return !conv.participants?.some(p => p.user.id === userId);
+    }));
+  }, []);
+
+  const acceptAiDisclosure = useCallback(async () => {
+    try {
+      const res = await api.acceptAiDisclosure();
+      setAiDisclosureAcceptedAt(res.acceptedAt);
+    } catch (err) {
+      console.warn('[ChatContext] acceptAiDisclosure failed:', err);
+    }
+  }, []);
+
+  // Mute / unmute a conversation (OpenChat-aes). Local-only for now; server
+  // endpoint (PATCH /api/chat/conversations/:id/participants/me { mutedUntil })
+  // can be wired in a follow-up once the server side lands.
+  const muteConv = useCallback(async (convId: string, until: Date | 'always' | null) => {
+    await muteConvStorage(convId, until);
+    setMutedConvs(prev => {
+      const next = { ...prev };
+      if (until === null) {
+        delete next[convId];
+      } else if (until === 'always') {
+        next[convId] = 'always';
+      } else {
+        next[convId] = until.toISOString();
+      }
+      return next;
+    });
+  }, []);
+
   const signOut = useCallback(async () => {
     try { emitPresenceUpdate('offline'); } catch { /* best effort */ }
     disconnect();
@@ -394,6 +474,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setPresence(new Map());
     setTypingByConv(new Map());
     setUnreadByConv(new Map());
+    setAiDisclosureAcceptedAt(null);
   }, []);
 
   // 401/403 cascade. Any API call that gets back a token-expired response
@@ -409,14 +490,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, setActiveConversation, messages, loadingMessages, sendMessage,
+    blockUser,
     presence, typingByConv, reportTyping, unreadByConv,
+    aiDisclosureAcceptedAt, acceptAiDisclosure,
+    mutedConvs, muteConv,
     signOut, bootstrapIfAuthed,
   }), [
     currentUser, isAuthed, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, setActiveConversation, messages, loadingMessages, sendMessage,
+    blockUser,
     presence, typingByConv, reportTyping, unreadByConv,
+    aiDisclosureAcceptedAt, acceptAiDisclosure,
+    mutedConvs, muteConv,
     signOut, bootstrapIfAuthed,
   ]);
 

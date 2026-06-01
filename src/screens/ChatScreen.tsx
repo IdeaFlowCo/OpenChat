@@ -26,10 +26,12 @@ import { Conversation, Message } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
+import { AiDisclosureBanner } from '../components/AiDisclosureBanner';
 import { BotBadge } from '../components/BotBadge';
 import { NewMessagesPill } from '../components/NewMessagesPill';
 import type { NavProp, RouteProps } from '../navigation/types';
 import { setActiveConversationForNotifications } from '../services/notifications';
+import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
@@ -118,6 +120,7 @@ export function ChatScreen() {
   const {
     currentUser, conversations, messages, loadingMessages,
     setActiveConversation, sendMessage, presence, typingByConv, reportTyping,
+    aiDisclosureAcceptedAt,
   } = useChat();
 
   const conversation = useMemo<Conversation | undefined>(
@@ -178,6 +181,12 @@ export function ChatScreen() {
     return `${others[0]} +${others.length - 1}`;
   }, [conversation, isGroup, other, currentUser?.userId]);
 
+  // Does this conversation include any bot participant? (OpenChat-ds3)
+  const containsBot = useMemo(
+    () => conversation?.participants?.some(p => p.user.isBot) ?? false,
+    [conversation]
+  );
+
   useLayoutEffect(() => {
     navigation.setOptions({
       headerTitle: () => (
@@ -199,6 +208,7 @@ export function ChatScreen() {
                 {headerTitle}
               </Text>
               {!isGroup && <BotBadge isBot={other?.isBot} compact />}
+              {isGroup && containsBot && <BotBadge isBot compact />}
               {isGroup && (
                 <Text style={{ color: c.textMuted, marginLeft: 4 }}>ⓘ</Text>
               )}
@@ -217,7 +227,7 @@ export function ChatScreen() {
         </TouchableOpacity>
       ),
     });
-  }, [navigation, isGroup, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.textPrimary, c.textSecondary, c.textMuted]);
+  }, [navigation, isGroup, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.textPrimary, c.textSecondary, c.textMuted, containsBot]);
 
   const rows = useMemo(() => buildRows(messages, currentUser?.userId), [messages, currentUser?.userId]);
 
@@ -344,12 +354,16 @@ export function ChatScreen() {
     return `${names.length} people are typing…`;
   }, [otherTypers, conversation]);
 
+  const showAiDisclosure = containsBot && !aiDisclosureAcceptedAt;
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.root, { backgroundColor: c.background }]}
       keyboardVerticalOffset={kbOffset}
     >
+      {showAiDisclosure && <AiDisclosureBanner />}
+
       {loadingMessages && messages.length === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator color={c.primary} />
