@@ -14,8 +14,9 @@ import * as Google from 'expo-auth-session/providers/google';
 // AuthSession previously used for makeRedirectUri — removed; Google.useAuthRequest
 // auto-derives the iOS redirect URI from iosClientId.
 import * as WebBrowser from 'expo-web-browser';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { useTheme } from '../contexts/ThemeContext';
-import { loginWithPassword, googleIdTokenExchange, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '../api/client';
+import { loginWithPassword, googleIdTokenExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
 
@@ -46,6 +47,7 @@ export function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
 
   // Google OAuth — iOS native flow.
   //
@@ -119,6 +121,34 @@ export function LoginScreen() {
     }
   }, [googleResponse, bootstrapIfAuthed]);
 
+  // Apple Sign-In — iOS only. (OpenChat-c08)
+  const handleAppleSignIn = async () => {
+    if (appleLoading || googleLoading || loading) return;
+    setAppleLoading(true);
+    try {
+      const cred = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      if (!cred.identityToken) {
+        Alert.alert('Apple sign-in failed', 'Apple did not return an identity token.');
+        return;
+      }
+      await signInWithApple(cred.identityToken, cred.fullName, cred.email);
+      await bootstrapIfAuthed();
+    } catch (err: unknown) {
+      // User cancelled — err.code === 'ERR_REQUEST_CANCELED'. Don't alert on cancel.
+      const code = (err as { code?: string })?.code;
+      if (code !== 'ERR_REQUEST_CANCELED') {
+        Alert.alert('Apple sign-in failed', err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setAppleLoading(false);
+    }
+  };
+
   const handleGoogleSignIn = async () => {
     if (googleLoading || loading) return;
     if (!googleRequest) {
@@ -167,6 +197,24 @@ export function LoginScreen() {
         <Text style={[styles.subtitle, { color: c.textSecondary }]}>
           Real-time messaging powered by the Global Brain
         </Text>
+
+        {/* Sign in with Apple — iOS only. Apple requires SIWA to be at least as prominent
+            as any other social login, so it goes ABOVE Google. (OpenChat-c08) */}
+        {Platform.OS === 'ios' && (
+          appleLoading ? (
+            <View style={styles.appleButtonPlaceholder}>
+              <ActivityIndicator color="#fff" />
+            </View>
+          ) : (
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+              cornerRadius={10}
+              style={styles.appleButton}
+              onPress={handleAppleSignIn}
+            />
+          )
+        )}
 
         <TouchableOpacity
           style={[
@@ -338,6 +386,21 @@ const styles = StyleSheet.create({
     color: '#1f1f1f',
     fontSize: 15,
     fontWeight: '600',
+  },
+  // Apple Sign-In button. AppleAuthenticationButton requires an explicit height.
+  appleButton: {
+    width: '100%',
+    height: 48,
+    borderRadius: 10,
+  },
+  // Loading placeholder so the layout doesn't jump while the native sheet opens.
+  appleButtonPlaceholder: {
+    width: '100%',
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   orRow: {
     flexDirection: 'row',

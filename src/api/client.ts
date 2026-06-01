@@ -110,6 +110,17 @@ export interface Message {
   createdAt: string;
   editedAt?: string;
   sender?: { id: string; name?: string; email: string };
+  /** ID of the message this message is replying to (OpenChat-uxj).
+   *  Server support is a follow-up ticket; field is passed through on send
+   *  and stored locally on optimistic messages. */
+  replyToId?: string;
+  /** Embedded snapshot of the quoted message for rendering the reply header. */
+  replyTo?: {
+    id: string;
+    content: string;
+    senderId: string;
+    sender?: { id: string; name?: string; email: string };
+  };
 }
 
 export interface CurrentUser {
@@ -312,6 +323,43 @@ export async function googleIdTokenExchange(
   return { user, token: body.token };
 }
 
+/**
+ * Exchange an Apple identity token for an OpenChat JWT + user. (OpenChat-c08)
+ * iOS-only — expo-apple-authentication returns the identityToken after the
+ * native SIWA sheet completes. We POST it to the server which verifies against
+ * Apple's JWKS and MERGEs the User by email (or appleSub for Hide My Email).
+ */
+export async function signInWithApple(
+  identityToken: string,
+  fullName: { givenName?: string | null; familyName?: string | null } | null,
+  email: string | null
+): Promise<{ user: CurrentUser; token: string }> {
+  const res = await fetch(`${OPENCHAT_URL}/api/auth/apple/idtoken-exchange`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ identityToken, fullName, email }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try {
+      const j = JSON.parse(text);
+      msg = j.error || j.message || text;
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(`Apple sign-in failed (${res.status}): ${msg}`);
+  }
+  const body = await res.json();
+  const user: CurrentUser = {
+    userId: body.user.id,
+    email: body.user.email,
+    name: body.user.name,
+  };
+  await setSession(body.token, user);
+  return { user, token: body.token };
+}
+
 // Auth — uses Noos directly for now (mirrors what the web client does via SSO).
 export async function loginWithPassword(
   email: string,
@@ -461,4 +509,67 @@ export const api = {
     if (params.limit) qs.set('limit', String(params.limit));
     return request<SearchResults>(`/api/chat/search?${qs.toString()}`);
   },
+
+  /**
+   * Delete the authenticated user's account. Server replaces sent messages with
+   * "Message deleted" and removes the User node. (OpenChat-nhy)
+   */
+  deleteAccount: () =>
+    request<{ ok: boolean }>('/api/auth/me', { method: 'DELETE' }),
+
+  /**
+   * Check whether the current user has accepted the AI disclosure. (OpenChat-ds3)
+   * Returns `{ acceptedAt: string | null }`.
+   */
+  getAiDisclosureStatus: () =>
+    request<{ acceptedAt: string | null }>('/api/chat/ai-disclosure-status'),
+
+  /**
+   * Record acceptance of the AI disclosure. (OpenChat-ds3)
+   * Returns `{ acceptedAt: string }`.
+   */
+  acceptAiDisclosure: () =>
+    request<{ acceptedAt: string }>('/api/chat/ai-disclosure-accept', { method: 'POST' }),
+
+  // ── Block / unblock / list (OpenChat-46p) ───────────────────────────────
+
+  /**
+   * Block a user by their userId. Conversation with that user will be removed
+   * from the caller's conversation list server-side.
+   * POST /api/chat/users/:id/block
+   */
+  blockUser: (userId: string) =>
+    request<{ ok: boolean }>(`/api/chat/users/${userId}/block`, { method: 'POST' }),
+
+  /**
+   * Unblock a previously blocked user.
+   * DELETE /api/chat/users/:id/block
+   */
+  unblockUser: (userId: string) =>
+    request<{ ok: boolean }>(`/api/chat/users/${userId}/block`, { method: 'DELETE' }),
+
+  /**
+   * List all users blocked by the current user.
+   * GET /api/chat/blocks → User[]
+   */
+  listBlocked: () =>
+    request<User[]>('/api/chat/blocks'),
+
+  // ── Report message / user (OpenChat-wgl) ────────────────────────────────
+
+  /**
+   * Submit a report for a message or user.
+   * POST /api/chat/reports
+   * Body: { targetType, targetId, reason, freeform? }
+   */
+  submitReport: (params: {
+    targetType: 'message' | 'user';
+    targetId: string;
+    reason: string;
+    freeform?: string;
+  }) =>
+    request<{ ok: boolean }>('/api/chat/reports', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
 };

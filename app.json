@@ -12,6 +12,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.jacobcole.openchat",
       "buildNumber": "1",
+      "entitlements": {
+        "com.apple.developer.applesignin": ["Default"]
+      },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": ["remote-notification"],
@@ -50,6 +53,7 @@
       "expo-secure-store",
       "expo-web-browser",
       "expo-camera",
+      "expo-apple-authentication",
       [
         "expo-notifications",
         {
