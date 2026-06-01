@@ -5,6 +5,8 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import { readFileSync } from 'node:fs';
+import { marked } from 'marked';
 import { initDatabase, closeDatabase } from './db.js';
 import authRoutes from './routes/auth.js';
 import chatRoutes from './routes/chat.js';
@@ -77,6 +79,95 @@ app.get('/about', (_req, res) => {
 app.get('/about/icon.png', (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.sendFile(landingIconPath);
+});
+
+// /about/connect-your-bot — agent integration guide (OpenChat-7c9).
+// Rendered once at startup from docs/connect-your-bot.md so updates only need
+// a redeploy, not new route code. Wrapped in the same dark-violet shell as
+// the landing page for visual continuity.
+const connectBotMdPath = path.join(__dirname, 'docs', 'connect-your-bot.md');
+let connectBotHtmlCache: string | null = null;
+function renderConnectBotHtml(): string {
+  if (connectBotHtmlCache) return connectBotHtmlCache;
+  let body = '';
+  try {
+    const md = readFileSync(connectBotMdPath, 'utf8');
+    body = marked.parse(md, { async: false }) as string;
+  } catch (e) {
+    body = `<p>Failed to load docs: ${(e as Error).message}</p>`;
+  }
+  connectBotHtmlCache = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#5664e2">
+<title>Connect your agent — OpenChat</title>
+<meta name="description" content="Set up bi-directional MCP access to OpenChat. Claude Desktop, Cursor, Codex CLI, Claude Code — all supported via one config snippet.">
+<style>
+  :root { --bg:#0a0c18; --surface:rgba(255,255,255,0.04); --border:rgba(255,255,255,0.10);
+          --text:#f4f6ff; --text-dim:#9aa0c5; --accent:#7c80ff; --accent-2:#ad6cff;
+          --code-bg:#0f1230; --code-border:rgba(255,255,255,0.08); }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--text);
+              font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+              -webkit-font-smoothing:antialiased; line-height:1.6; }
+  body::before { content:""; position:fixed; inset:0; z-index:-1;
+    background:
+      radial-gradient(900px 600px at 20% -10%,#2a2475 0%,transparent 60%),
+      radial-gradient(800px 500px at 80% 10%,#6230a8 0%,transparent 55%),
+      var(--bg); }
+  .wrap { max-width:780px; margin:0 auto; padding:24px; }
+  .nav { padding:16px 0 32px; display:flex; align-items:center; gap:12px; }
+  .nav img { width:32px; height:32px; border-radius:8px; }
+  .nav a { color:var(--text-dim); text-decoration:none; font-weight:500; font-size:14px; }
+  .nav a:hover { color:var(--text); }
+  .nav .sep { color:var(--text-dim); opacity:0.4; }
+  .doc { padding:8px 0 64px; }
+  h1 { font-size:clamp(28px,4vw,40px); letter-spacing:-0.02em; margin:0 0 24px;
+       background:linear-gradient(180deg,#fff 0%,#c8cbff 130%);
+       -webkit-background-clip:text; background-clip:text; color:transparent; }
+  h2 { font-size:22px; margin:36px 0 12px; letter-spacing:-0.01em; color:var(--text); }
+  h3 { font-size:18px; margin:28px 0 10px; color:var(--text); }
+  h4 { font-size:15px; margin:18px 0 8px; color:var(--text-dim); }
+  p, li { color:var(--text); }
+  a { color:var(--accent); }
+  a:hover { color:#b9bcff; }
+  hr { border:none; border-top:1px solid var(--border); margin:36px 0; }
+  code { background:var(--code-bg); padding:2px 6px; border-radius:5px;
+         font-size:0.9em; border:1px solid var(--code-border);
+         font-family:"SF Mono",Menlo,Consolas,monospace; }
+  pre { background:var(--code-bg); padding:16px 18px; border-radius:10px;
+        border:1px solid var(--code-border); overflow-x:auto; margin:16px 0;
+        font-size:13px; line-height:1.5; }
+  pre code { background:transparent; padding:0; border:none; font-size:13px; }
+  table { width:100%; border-collapse:collapse; margin:16px 0; font-size:14px; }
+  th, td { padding:10px 14px; border-bottom:1px solid var(--border); text-align:left; }
+  th { color:var(--text-dim); font-weight:600; font-size:12px; letter-spacing:0.05em; text-transform:uppercase; }
+  blockquote { margin:16px 0; padding:12px 16px; border-left:3px solid var(--accent);
+               background:var(--surface); border-radius:0 8px 8px 0; color:var(--text-dim); }
+  ul, ol { padding-left:24px; }
+  li { margin:6px 0; }
+</style>
+</head><body>
+<div class="wrap">
+  <nav class="nav">
+    <a href="/about"><img src="/about/icon.png" alt="OpenChat"></a>
+    <a href="/about">Home</a>
+    <span class="sep">·</span>
+    <a href="/about/connect-your-bot">Connect your agent</a>
+    <span class="sep">·</span>
+    <a href="https://github.com/tmad4000/openchat-mcp-server" target="_blank" rel="noopener">MCP Server</a>
+  </nav>
+  <article class="doc">
+${body}
+  </article>
+</div>
+</body></html>`;
+  return connectBotHtmlCache;
+}
+app.get('/about/connect-your-bot', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.type('html').send(renderConnectBotHtml());
 });
 
 // Serve static files from client build (production)

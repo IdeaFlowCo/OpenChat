@@ -123,8 +123,77 @@ Default: both `read` and `write`.
 
 ---
 
-## MCP server
+## MCP server — full bi-directional access
 
-An OpenChat MCP server (OpenChat-5xq) is on the roadmap. Once available it will
-let you configure Claude Desktop or Cursor to talk to OpenChat with a single
-JSON snippet.
+The OpenChat MCP server lets Claude Desktop, Cursor, Codex CLI, Claude Code, and
+any other MCP-aware client read AND write to your OpenChat conversations as
+*you*. Tools available: `oc_list_conversations`, `oc_get_messages`,
+`oc_send_message`, `oc_react`, `oc_create_dm`, `oc_register_agent`.
+
+Source: <https://github.com/tmad4000/openchat-mcp-server>
+
+### Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "openchat": {
+      "command": "npx",
+      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
+      "env": {
+        "OPENCHAT_API_KEY": "oc_your_key_here"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop — the OpenChat tools appear in the 🔌 menu.
+
+### Cursor
+
+`~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "openchat": {
+      "command": "npx",
+      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
+      "env": { "OPENCHAT_API_KEY": "oc_your_key_here" }
+    }
+  }
+}
+```
+
+### Codex CLI
+
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.openchat]
+command = "npx"
+args = ["-y", "github:tmad4000/openchat-mcp-server"]
+env = { OPENCHAT_API_KEY = "oc_your_key_here" }
+```
+
+### Claude Code
+
+```bash
+claude mcp add openchat \
+  --env OPENCHAT_API_KEY=oc_your_key_here \
+  -- npx -y github:tmad4000/openchat-mcp-server
+```
+
+### How bi-directional access works
+
+- **Outbound:** every tool call hits the OpenChat REST API as you. Messages
+  show up in conversations as if you sent them.
+- **Inbound:** the agent calls `oc_list_conversations` / `oc_get_messages` to
+  read incoming messages. Polling for now; WebSocket subscribe is on the
+  roadmap.
+
+There is no "bot mode" — your agent IS you, with the scopes you assigned to its
+key. Limit blast radius with `read`-only keys for reader bots.

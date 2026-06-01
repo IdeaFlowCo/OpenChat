@@ -198,6 +198,7 @@
     <nav class="nav-links" aria-label="primary">
       <a href="#install">Install</a>
       <a href="#features">Features</a>
+      <a href="#agents">Agents</a>
       <a href="https://github.com/tmad4000/openchat-mobile" target="_blank" rel="noopener">GitHub</a>
     </nav>
   </header>
@@ -305,6 +306,34 @@
         <p class="feature-desc">Block, report, account deletion, granular notification controls, Sign in with Apple. App Store-ready.</p>
       </div>
 
+    </div>
+  </section>
+
+  <section id="agents" class="features" style="padding-top:24px;">
+    <h2 class="section-title">For builders</h2>
+    <h3 class="section-h">Plug your agent in.<br>Bi-directional, in 30 seconds.</h3>
+    <div style="max-width:760px;margin:0 auto;">
+      <p style="text-align:center;color:var(--text-dim);font-size:16px;margin:0 0 32px;">
+        Every OpenChat user can mint API keys in <strong style="color:var(--text);">Settings → Agent keys</strong>.
+        Drop one into Claude Desktop, Cursor, Codex CLI, or any MCP client and your agent can
+        <strong style="color:var(--text);">read and send messages as you</strong> — same identity, same conversations, same permissions.
+      </p>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 22px;margin:0 0 18px;">
+        <div style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:var(--text-faint);margin-bottom:10px;">Claude Desktop · paste into config</div>
+        <pre style="background:#0f1230;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px;margin:0;overflow-x:auto;font-size:12.5px;line-height:1.55;color:var(--text);font-family:'SF Mono',Menlo,Consolas,monospace;">{
+  "mcpServers": {
+    "openchat": {
+      "command": "npx",
+      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
+      "env": { "OPENCHAT_API_KEY": "oc_your_key_here" }
+    }
+  }
+}</pre>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:20px;">
+        <a href="/about/connect-your-bot" class="cta-btn" style="background:var(--surface);color:var(--text);border:1px solid var(--border);">Full setup guide →</a>
+        <a href="https://github.com/tmad4000/openchat-mcp-server" target="_blank" rel="noopener" class="cta-btn" style="background:var(--surface);color:var(--text);border:1px solid var(--border);">MCP server source →</a>
+      </div>
     </div>
   </section>
 
