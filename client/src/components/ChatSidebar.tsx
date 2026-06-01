@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { useChat } from '../contexts/ChatContext';
 import { ConversationList } from './ConversationList';
 import { PresenceIndicator } from './PresenceIndicator';
+import { SettingsModal } from './SettingsModal';
 import { User } from '../api';
 import {
   currentUserAsContact,
@@ -11,6 +12,11 @@ import {
   rankSelfFirst,
   userDisplayName,
 } from '../utils/userDisplay';
+import {
+  formatVersion,
+  readShowVersionInTopBar,
+  writeShowVersionInTopBar,
+} from '../utils/appVersion';
 
 // Environment detection for context-aware UI
 type AppEnvironment = 'tailscale' | 'localhost' | 'production';
@@ -62,9 +68,6 @@ function getInitials(user: { name?: string; email: string }): string {
   return name.substring(0, 2).toUpperCase();
 }
 
-// App version (sync with package.json)
-const APP_VERSION = '0.2.0';
-
 // Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -91,6 +94,8 @@ export function ChatSidebar() {
   const [status, setStatus] = useState<'available' | 'away' | 'busy' | 'invisible'>('available');
   const [statusMessage, setStatusMessage] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showVersionInTopBar, setShowVersionInTopBar] = useState(() => readShowVersionInTopBar());
   // Group-creation state
   const [selectedContacts, setSelectedContacts] = useState<User[]>([]);
   const [groupTitle, setGroupTitle] = useState('');
@@ -232,13 +237,22 @@ export function ChatSidebar() {
   };
 
   const isContactSelected = (id: string) => selectedContacts.some(c => c.id === id);
+  const handleShowVersionInTopBarChange = (value: boolean) => {
+    setShowVersionInTopBar(value);
+    writeShowVersionInTopBar(value);
+  };
 
   return (
     <div className="flex-1 flex flex-col bg-white min-h-0">
       {/* Header */}
       <div className="p-3 md:p-4 border-b border-gray-200 pt-safe">
         <div className="flex items-center justify-between mb-3 gap-2">
-          <h1 className="text-xl font-semibold">Chats</h1>
+          <div className="flex min-w-0 items-baseline gap-2">
+            <h1 className="text-xl font-semibold">Chats</h1>
+            {showVersionInTopBar && (
+              <span className="truncate text-xs font-medium text-gray-400">{formatVersion()}</span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => openPicker('direct')}
@@ -273,6 +287,16 @@ export function ChatSidebar() {
                       )}
                     </div>
                     <div className="py-1">
+                      <button
+                        type="button"
+                        className="block w-full px-3 py-3 text-left text-sm text-gray-700 hover:bg-gray-100 active:bg-gray-200"
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          setSettingsOpen(true);
+                        }}
+                      >
+                        Settings
+                      </button>
                       <a
                         href={serviceUrls.notes}
                         target="_blank"
@@ -308,9 +332,6 @@ export function ChatSidebar() {
                       >
                         🚪 Logout
                       </button>
-                    </div>
-                    <div className="border-t border-gray-100 px-3 py-2 text-center text-xs text-gray-400">
-                      v{APP_VERSION}
                     </div>
                   </div>
                 )}
@@ -510,6 +531,12 @@ export function ChatSidebar() {
           <ConversationList />
         </div>
       )}
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        showVersionInTopBar={showVersionInTopBar}
+        onShowVersionInTopBarChange={handleShowVersionInTopBarChange}
+      />
     </div>
   );
 }
