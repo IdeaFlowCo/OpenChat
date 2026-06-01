@@ -10,6 +10,7 @@
 
 import { Router, Request, Response } from 'express';
 import { nanoid } from 'nanoid';
+import neo4j from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -62,7 +63,10 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       ORDER BY t.createdAt DESC
       LIMIT $limit
       `,
-      { userId, before: before ?? undefined, limit }
+      // Neo4j's LIMIT clause requires a true integer; JS Number(50) gets
+      // serialized as 50.0 and Neo4j rejects it. Wrap via neo4j.int().
+      // Same pattern as server/src/routes/chat.ts:796.
+      { userId, before: before ?? undefined, limit: neo4j.int(limit) }
     );
 
     const thoughts = result.records.map((r) => toJS(r.get('thought')));
