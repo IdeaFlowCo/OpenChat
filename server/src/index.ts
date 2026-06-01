@@ -12,6 +12,7 @@ import clientLogsRoutes from './routes/clientLogs.js';
 import pushRoutes from './routes/push.js';
 import legalRoutes from './routes/legal.js';
 import aiRoutes from './routes/ai.js';
+import thoughtsRoutes from './routes/thoughts.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -98,6 +99,7 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/client-logs', clientLogsRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/thoughts', thoughtsRoutes);
 
 // Legal pages (OpenChat-wfz)
 app.use('/legal', legalRoutes);

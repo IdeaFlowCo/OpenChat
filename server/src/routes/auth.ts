@@ -662,6 +662,12 @@ router.delete('/me', requireAuth, async (req: Request, res: Response) => {
         DETACH DELETE t
       `, { userId });
 
+      // 2b. Delete Thought nodes owned by this user (OpenChat-zi1).
+      await tx.run(`
+        MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(th:Thought)
+        DETACH DELETE th
+      `, { userId });
+
       // 3. Delete the User node (and all its relationships).
       await tx.run(`
         MATCH (u:User {id: $userId})
