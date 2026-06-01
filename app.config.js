@@ -39,6 +39,11 @@ module.exports = {
       supportsTablet: true,
       bundleIdentifier: 'com.jacobcole.openchat',
       buildNumber: '1',
+      // Apple Universal Links — taps on https://chat.globalbr.ai/i/<token>
+      // and .../u/<id> open the native app when installed (OpenChat-84u.1).
+      // Apple verifies these via /.well-known/apple-app-site-association
+      // on the openchat server.
+      associatedDomains: ['applinks:chat.globalbr.ai'],
       entitlements: {
         'com.apple.developer.applesignin': ['Default'],
       },

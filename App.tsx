@@ -29,6 +29,10 @@ import {
 import { installClientLogger } from './src/services/clientLogger';
 import { initCrashReporting } from './src/services/crashReporting';
 import { hasCompletedOnboarding } from './src/services/onboarding';
+// Deep-link router (OpenChat-84u.1) — handles openchat:// scheme + Universal
+// Links to chat.globalbr.ai/{i,u}/<id>. Stashes the intent if unauthed so
+// post-OAuth replay lands the user on the right screen.
+import { installDeepLinkHandling, resumePendingIntent } from './src/services/deepLinks';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 
@@ -327,6 +331,25 @@ function Shell() {
     const sub = addNotificationTapListener();
     return () => { sub?.remove(); };
   }, []);
+
+  // Install deep-link handling (OpenChat-84u.1). Runs once at boot — covers
+  // cold-start URLs, running-app URLs (Linking 'url' event), and the web
+  // window.location case.
+  useEffect(() => {
+    const dispose = installDeepLinkHandling();
+    return dispose;
+  }, []);
+
+  // Resume any pending deep-link intent the moment the user becomes
+  // authenticated AND onboarded. Covers the canonical use case: unsigned-in
+  // user taps a share/invite link, lands on Login, OAuth → here.
+  useEffect(() => {
+    if (!isAuthed) return;
+    if (onboardingChecked && !onboardingDone) return;
+    // Small delay so navigation has a chance to settle.
+    const t = setTimeout(() => { void resumePendingIntent(); }, 300);
+    return () => clearTimeout(t);
+  }, [isAuthed, onboardingChecked, onboardingDone]);
 
   const baseNav = scheme === 'dark' ? DarkTheme : DefaultTheme;
   const navTheme = {
