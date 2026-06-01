@@ -357,19 +357,32 @@ export function SettingsScreen() {
         </View>
       </View>
 
-      {/* About / web version */}
+      {/* About / web version (OpenChat-e4n) */}
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>ABOUT</Text>
         <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <TouchableOpacity
+            style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+            onPress={() => Linking.openURL('https://chat.globalbr.ai/')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>OpenChat home page</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                chat.globalbr.ai · platform docs, agent setup, source
+              </Text>
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={styles.optionRow}
             onPress={() => Linking.openURL('https://chat.globalbr.ai/m/')}
             activeOpacity={0.7}
           >
             <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Visit web version</Text>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Open web app</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>
-                chat.globalbr.ai · open OpenChat in any browser
+                Use OpenChat in any browser
               </Text>
             </View>
             <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
