@@ -22,6 +22,7 @@ import {
   Attachment,
   Conversation,
   CurrentUser,
+  LinkPreview,
   Message,
   ReactionSummary,
   User,
@@ -496,11 +497,23 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
     };
 
+    // message:preview-ready — link preview fetched server-side (OpenChat-hq2)
+    const onPreviewReady = (payload: { messageId: string; preview: LinkPreview }) => {
+      setMessages(prev => prev.map(m => {
+        if (m.id !== payload.messageId) return m;
+        const existing = m.linkPreviews ?? [];
+        // Deduplicate by URL
+        if (existing.some(p => p.url === payload.preview.url)) return m;
+        return { ...m, linkPreviews: [...existing, payload.preview] };
+      }));
+    };
+
     sock.on('connect', onConnect);
     sock.on('disconnect', onDisconnect);
     sock.on('message:new', onMessage);
     sock.on('message:updated', onMessageUpdated);
     sock.on('message:reactions-updated', onReactionsUpdated);
+    sock.on('message:preview-ready', onPreviewReady);
     sock.on('conversation:created', onConversationCreated);
     sock.on('conversation:updated', onConversationUpdated);
     sock.on('participant:added', onParticipantAdded);
@@ -519,6 +532,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sock.off('message:new', onMessage);
       sock.off('message:updated', onMessageUpdated);
       sock.off('message:reactions-updated', onReactionsUpdated);
+      sock.off('message:preview-ready', onPreviewReady);
       sock.off('conversation:created', onConversationCreated);
       sock.off('conversation:updated', onConversationUpdated);
       sock.off('participant:added', onParticipantAdded);

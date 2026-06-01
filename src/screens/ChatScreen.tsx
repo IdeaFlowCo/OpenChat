@@ -261,6 +261,9 @@ export function ChatScreen() {
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const recordingMaxTimerRef = useRef<NodeJS.Timeout | null>(null);
   const micPressStartXRef = useRef<number>(0);
+  // Stable ref so the max-duration timer can call handleMicPressOut without
+  // a stale closure from handleMicPressIn's useCallback dependencies.
+  const handleMicPressOutRef = useRef<(wasCancelled: boolean) => Promise<void>>(async () => {});
 
   // ── Toast state ────────────────────────────────────────────────────────────
   const [toastVisible, setToastVisible] = useState(false);
@@ -671,9 +674,9 @@ export function ChatScreen() {
         setRecordingElapsedMs(Date.now() - recordingStartTimeRef.current);
       }, 100);
 
-      // Hard cap at 5 minutes.
+      // Hard cap at 5 minutes. Use ref to avoid stale closure.
       recordingMaxTimerRef.current = setTimeout(() => {
-        void handleMicPressOut(false);
+        void handleMicPressOutRef.current(false);
       }, MAX_RECORDING_MS);
     } catch (err) {
       console.warn('[voice] startRecording error:', err);
@@ -730,7 +733,13 @@ export function ChatScreen() {
       setSending(false);
       setRecordingElapsedMs(0);
     }
-  }, [isRecording, sendMessage, replyTo, hapticSend]);
+  }, [isRecording, sendMessage, replyTo]);
+
+  // Keep the ref up to date so the max-duration timer always calls the
+  // current version of handleMicPressOut.
+  useEffect(() => {
+    handleMicPressOutRef.current = handleMicPressOut;
+  }, [handleMicPressOut]);
 
   const handleSend = async () => {
     const trimmed = text.trim();
@@ -1111,6 +1120,15 @@ export function ChatScreen() {
                 {!!(m.reactions && m.reactions.length > 0) && (
                   <ReactionsBar reactions={m.reactions!} isOwn={isOwn} onToggle={(emoji) => void handleReact(m.id, emoji)} />
                 )}
+                {/* Link preview cards below bubble (OpenChat-hq2) */}
+                {!!(m.linkPreviews && m.linkPreviews.length > 0) && !m.deletedAt && m.linkPreviews.map((preview) => (
+                  <LinkPreviewCard
+                    key={preview.url}
+                    preview={preview}
+                    isOwn={isOwn}
+                    scheme={scheme}
+                  />
+                ))}
                 </View>{/* end column wrapper */}
               </View>
             );
