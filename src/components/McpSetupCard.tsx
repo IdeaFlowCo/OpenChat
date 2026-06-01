@@ -83,6 +83,30 @@ function hintFor(target: Target): string {
   }
 }
 
+/**
+ * One-shot prompt the user can paste into Claude Code (or any agent CLI).
+ * It includes the API key, a link to the human-readable setup guide, and
+ * instructions to verify the connection. The agent reads the guide, runs the
+ * `claude mcp add` command, restarts itself if needed, then calls
+ * `oc_list_conversations` to prove it works.
+ */
+function agentSetupPrompt(key: string, guideUrl: string): string {
+  return `Please set up the OpenChat MCP server in this environment so you can read and send messages from my OpenChat account on my behalf.
+
+Setup guide: ${guideUrl}
+
+My OpenChat API key:
+${key}
+
+Steps:
+1. Read the guide above to understand the available tools and how this MCP server works.
+2. Install + register the MCP server using the install form appropriate for this client (e.g. \`claude mcp add openchat --env OPENCHAT_API_KEY=<key> -- npx -y github:tmad4000/openchat-mcp-server\` for Claude Code).
+3. If the MCP server is registered correctly, call \`oc_list_conversations\` to verify it works and print the list of conversations.
+4. Tell me what you'd like me to do next — or wait for instructions.
+
+Treat the API key as a credential: write it to \`~/.openchat/credentials.json\` (mode 600) or pass via env var. Do not commit it to any repo.`;
+}
+
 interface Props {
   /** The plaintext API key. If null we render `oc_your_key_here` placeholders. */
   apiKey: string | null;
@@ -95,6 +119,13 @@ export function McpSetupCard({ apiKey }: Props) {
 
   const displayedKey = apiKey ?? 'oc_your_key_here';
   const snippet = snippetFor(active, displayedKey);
+  const guideUrl = `${OPENCHAT_URL}/about/connect-your-bot`;
+
+  // Hero one-shot prompt: user pastes this into Claude Code / Cursor /
+  // any agent and the agent does the rest. Disabled (visually) when we
+  // don't have the plaintext key — otherwise the agent would get a
+  // placeholder and fail.
+  const promptForAgent = agentSetupPrompt(displayedKey, guideUrl);
 
   return (
     <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -102,6 +133,45 @@ export function McpSetupCard({ apiKey }: Props) {
       <Text style={[styles.subtitle, { color: c.textSecondary }]}>
         Bi-directional read + write to your conversations.
         {apiKey ? '' : ' Reveal the key above to inline it into these snippets.'}
+      </Text>
+
+      {/* HERO: Copy a one-shot prompt that lets an AI agent set itself up. */}
+      <TouchableOpacity
+        style={[styles.heroBtn, { backgroundColor: c.primary, opacity: apiKey ? 1 : 0.55 }]}
+        onPress={() => {
+          if (!apiKey) {
+            Alert.alert('Reveal your key first', 'Tap "View full key" above so the prompt can include the real key.');
+            return;
+          }
+          Clipboard.setString(promptForAgent);
+          Alert.alert(
+            'Prompt copied',
+            'Paste it into Claude Code, Cursor, or any agent CLI. The agent will read the guide, register the MCP server, and verify the connection.'
+          );
+        }}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.heroBtnText}>📋  Copy setup prompt for AI agent</Text>
+        <Text style={styles.heroBtnSub}>One-shot — pastes into Claude Code &amp; it figures out the rest</Text>
+      </TouchableOpacity>
+
+      {/* Always-visible link to the full guide so users (and agents) can */}
+      {/* read it before or after pasting the prompt. */}
+      <TouchableOpacity
+        onPress={() => void Linking.openURL(guideUrl)}
+        activeOpacity={0.6}
+        style={styles.guideLinkRow}
+      >
+        <Text style={[styles.guideLinkText, { color: c.primary }]}>📖  Read the setup guide</Text>
+        <Text style={[styles.guideLinkUrl, { color: c.textMuted }]} numberOfLines={1}>
+          {guideUrl.replace(/^https?:\/\//, '')}
+        </Text>
+      </TouchableOpacity>
+
+      <View style={[styles.divider, { backgroundColor: c.border }]} />
+
+      <Text style={[styles.snippetsHeader, { color: c.textSecondary }]}>
+        Or paste a config snippet manually
       </Text>
 
       {/* Tab strip */}
@@ -174,6 +244,36 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 16, fontWeight: '700', marginBottom: 4 },
   subtitle: { fontSize: 13, marginBottom: 14, lineHeight: 18 },
+
+  // Hero CTA — "Copy setup prompt for AI agent"
+  heroBtn: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  heroBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  heroBtnSub: { color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 },
+
+  // Always-visible guide link
+  guideLinkRow: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    marginBottom: 6,
+  },
+  guideLinkText: { fontSize: 14, fontWeight: '600' },
+  guideLinkUrl: { fontSize: 11, marginTop: 2 },
+
+  divider: { height: StyleSheet.hairlineWidth, marginVertical: 12 },
+  snippetsHeader: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+
   tabRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

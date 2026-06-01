@@ -159,6 +159,27 @@ export function SettingsScreen() {
       style={[styles.root, { backgroundColor: c.background }]}
       contentContainerStyle={styles.content}
     >
+      {/*
+       * Hero: Agent keys (OpenChat-i9h).
+       * Top-of-settings placement because bi-directional agent access is
+       * OpenChat's main product differentiator. Replaces the buried
+       * "DEVELOPER → Agent keys" row.
+       */}
+      <TouchableOpacity
+        style={[styles.agentHero, { backgroundColor: c.primary }]}
+        onPress={() => navigation.navigate('AgentKeys')}
+        activeOpacity={0.88}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.agentHeroEyebrow}>OPENCHAT FOR AGENTS</Text>
+          <Text style={styles.agentHeroTitle}>Plug in Claude, Cursor, Codex</Text>
+          <Text style={styles.agentHeroSubtitle}>
+            Bi-directional MCP access · paste-into-Claude-Code prompt · 30-second setup
+          </Text>
+        </View>
+        <Text style={styles.agentHeroArrow}>→</Text>
+      </TouchableOpacity>
+
       {currentUser && (
         <View style={styles.section}>
           <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>ACCOUNT</Text>
@@ -356,25 +377,9 @@ export function SettingsScreen() {
         </View>
       </View>
 
-      {/* Developer section — Agent keys (OpenChat-7c9) */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>DEVELOPER</Text>
-        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <TouchableOpacity
-            style={styles.optionRow}
-            onPress={() => navigation.navigate('AgentKeys')}
-            activeOpacity={0.7}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Agent keys</Text>
-              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
-                Connect a bot or script via API key
-              </Text>
-            </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      {/* Agent keys (OpenChat-7c9) — promoted to the top of Settings as a
+          hero card (OpenChat-i9h). The hero is at the very top of this
+          screen; there is no longer a buried DEVELOPER row. */}
 
       {/* Legal & Account section (OpenChat-nhy + OpenChat-wfz) */}
       <View style={styles.section}>
@@ -484,6 +489,42 @@ export function SettingsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32 },
+
+  // Top-of-settings hero promoting Agent Keys (OpenChat-i9h)
+  agentHero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    borderRadius: 14,
+    marginBottom: 28,
+    gap: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  agentHeroEyebrow: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    marginBottom: 4,
+  },
+  agentHeroTitle: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+    marginBottom: 3,
+  },
+  agentHeroSubtitle: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  agentHeroArrow: { color: '#fff', fontSize: 22, fontWeight: '300' },
+
   section: { marginBottom: 24 },
   sectionLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
   row: {

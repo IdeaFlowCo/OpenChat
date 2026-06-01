@@ -10,6 +10,7 @@ import { useCallback, useState } from 'react';
 import {
   Alert,
   FlatList,
+  Linking,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -17,9 +18,11 @@ import {
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
-import { api, AgentKey } from '../api/client';
+import { api, AgentKey, OPENCHAT_URL } from '../api/client';
 import { getColors } from '../theme/colors';
 import type { NavProp } from '../navigation/types';
+
+const GUIDE_URL = `${OPENCHAT_URL}/about/connect-your-bot`;
 
 function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -97,19 +100,45 @@ export function AgentKeysScreen() {
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
+  // Persistent guide banner shown at the top of both the list and the
+  // empty state. Tapping it opens the human-readable setup guide in the
+  // device browser. Surfaces the agent-integration story even when the
+  // user hasn't minted any keys yet.
+  const GuideBanner = () => (
+    <TouchableOpacity
+      style={[styles.guideBanner, { backgroundColor: c.surface, borderColor: c.border }]}
+      onPress={() => void Linking.openURL(GUIDE_URL)}
+      activeOpacity={0.7}
+    >
+      <Text style={styles.guideEmoji}>📖</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.guideTitle, { color: c.textPrimary }]}>Setup guide</Text>
+        <Text style={[styles.guideHint, { color: c.textSecondary }]}>
+          Claude Desktop, Cursor, Codex CLI, Claude Code — paste-and-go
+        </Text>
+      </View>
+      <Text style={{ color: c.textMuted, fontSize: 18 }}>↗</Text>
+    </TouchableOpacity>
+  );
+
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
       {!loading && keys.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={[styles.emptyTitle, { color: c.textPrimary }]}>No keys yet</Text>
-          <Text style={[styles.emptyHint, { color: c.textSecondary }]}>
-            Tap + to create one for your bot or script.
-          </Text>
+          <GuideBanner />
+          <View style={{ alignItems: 'center', marginTop: 24 }}>
+            <Text style={[styles.emptyTitle, { color: c.textPrimary }]}>No keys yet</Text>
+            <Text style={[styles.emptyHint, { color: c.textSecondary }]}>
+              Tap + to create one for your bot or script.{'\n'}
+              Each key gives an agent bi-directional access to your conversations.
+            </Text>
+          </View>
         </View>
       ) : (
         <FlatList
           data={keys}
           keyExtractor={(k) => k.id}
+          ListHeaderComponent={<GuideBanner />}
           renderItem={({ item }) => (
             <KeyRow
               item={item}
@@ -142,7 +171,25 @@ const styles = StyleSheet.create({
   meta: { fontSize: 12 },
   badge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   badgeText: { fontSize: 11, fontWeight: '700' },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  empty: { flex: 1, justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 32 },
+
+  // Persistent setup-guide banner (OpenChat-i9h)
+  guideBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 6,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  guideEmoji: { fontSize: 22 },
+  guideTitle: { fontSize: 15, fontWeight: '600' },
+  guideHint: { fontSize: 12, marginTop: 2 },
+
   emptyTitle: { fontSize: 18, fontWeight: '600', marginBottom: 8 },
   emptyHint: { fontSize: 14, textAlign: 'center' },
   fab: {
