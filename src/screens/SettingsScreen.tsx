@@ -235,7 +235,10 @@ export function SettingsScreen() {
           </TouchableOpacity>
           {Platform.OS !== 'web' && (
             <TouchableOpacity
-              style={styles.optionRow}
+              style={[
+                styles.optionRow,
+                { borderTopColor: c.divider, borderTopWidth: StyleSheet.hairlineWidth },
+              ]}
               onPress={() => navigation.navigate('ScanQr')}
               activeOpacity={0.7}
             >
@@ -248,6 +251,23 @@ export function SettingsScreen() {
               <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
             </TouchableOpacity>
           )}
+          {/* Blocked users — OpenChat-46p */}
+          <TouchableOpacity
+            style={[
+              styles.optionRow,
+              { borderTopColor: c.divider, borderTopWidth: StyleSheet.hairlineWidth },
+            ]}
+            onPress={() => navigation.navigate('BlockedUsers')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Blocked users</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                Manage who you've blocked
+              </Text>
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
         </View>
       </View>
 

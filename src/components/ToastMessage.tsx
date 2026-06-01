@@ -6,10 +6,9 @@
  * We handle the fade animation internally.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
-import { getColors } from '../theme/colors';
 
 interface Props {
   visible: boolean;
@@ -19,22 +18,29 @@ interface Props {
 
 export function ToastMessage({ visible, message, duration = 2500 }: Props) {
   const { scheme } = useTheme();
-  const c = getColors(scheme);
   const opacity = useRef(new Animated.Value(0)).current;
+  // Track whether the toast should be in the render tree at all.
+  // We keep it mounted during the fade-out animation so it doesn't
+  // snap-disappear; we unmount after the animation completes.
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     if (visible) {
+      setMounted(true);
       Animated.sequence([
         Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
         Animated.delay(duration),
         Animated.timing(opacity, { toValue: 0, duration: 300, useNativeDriver: true }),
-      ]).start();
+      ]).start(({ finished }) => {
+        if (finished) setMounted(false);
+      });
     } else {
       opacity.setValue(0);
+      setMounted(false);
     }
   }, [visible, duration, opacity]);
 
-  if (!visible && opacity.__getValue() === 0) return null;
+  if (!mounted) return null;
 
   return (
     <Animated.View
@@ -44,7 +50,7 @@ export function ToastMessage({ visible, message, duration = 2500 }: Props) {
         { backgroundColor: scheme === 'dark' ? '#1e293b' : '#1f2937', opacity },
       ]}
     >
-      <Text style={[styles.text, { color: '#f1f5f9' }]}>{message}</Text>
+      <Text style={styles.text}>{message}</Text>
     </Animated.View>
   );
 }
@@ -69,5 +75,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     textAlign: 'center',
+    color: '#f1f5f9',
   },
 });

@@ -61,7 +61,7 @@ export function ConversationsScreen() {
   const navigation = useNavigation<NavProp<'Conversations'>>();
   const {
     currentUser, conversations, conversationsLoaded, refreshConversations,
-    isConnected, presence, unreadByConv, typingByConv, signOut,
+    isConnected, presence, unreadByConv, typingByConv, signOut, mutedConvs,
   } = useChat();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -157,6 +157,9 @@ export function ConversationsScreen() {
           const typingSet = typingByConv.get(item.id);
           const someoneTyping = typingSet && typingSet.size > 0
             && Array.from(typingSet).some(uid => uid !== currentUser?.userId);
+          // Muted indicator (OpenChat-aes)
+          const mutedUntil = mutedConvs[item.id];
+          const isMuted = mutedUntil === 'always' || (!!mutedUntil && new Date(mutedUntil) > new Date());
           return (
             <TouchableOpacity
               style={[styles.row, { borderColor: c.divider }]}
@@ -184,9 +187,14 @@ export function ConversationsScreen() {
                     </Text>
                     {item.type === 'direct' && <BotBadge isBot={other?.isBot} compact />}
                   </View>
-                  <Text style={[styles.rowTime, { color: c.textMuted }]}>
-                    {formatTime(item.lastMessageAt)}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    {isMuted && (
+                      <Text style={{ fontSize: 11, color: c.textMuted }}>🔕</Text>
+                    )}
+                    <Text style={[styles.rowTime, { color: c.textMuted }]}>
+                      {formatTime(item.lastMessageAt)}
+                    </Text>
+                  </View>
                 </View>
                 <View style={styles.previewRow}>
                   <Text

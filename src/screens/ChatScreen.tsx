@@ -4,9 +4,11 @@
  * context list so we stay in sync with rename / participant changes.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActionSheetIOS,
   ActivityIndicator,
+  Alert,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
@@ -22,13 +24,16 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useHeaderHeight } from '@react-navigation/elements';
-import { Conversation, Message } from '../api/client';
+import { Conversation, Message, api } from '../api/client';
+import { MessageActionSheet, ReplyToData } from '../components/MessageActionSheet';
+import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { AiDisclosureBanner } from '../components/AiDisclosureBanner';
 import { BotBadge } from '../components/BotBadge';
 import { NewMessagesPill } from '../components/NewMessagesPill';
+import { ChatEmptyState } from '../components/ChatEmptyState';
 import type { NavProp, RouteProps } from '../navigation/types';
 import { setActiveConversationForNotifications } from '../services/notifications';
 import { hapticSend, hapticReceive } from '../services/haptics';
@@ -120,7 +125,7 @@ export function ChatScreen() {
   const {
     currentUser, conversations, messages, loadingMessages,
     setActiveConversation, sendMessage, presence, typingByConv, reportTyping,
-    aiDisclosureAcceptedAt,
+    aiDisclosureAcceptedAt, mutedConvs, muteConv, blockUser,
   } = useChat();
 
   const conversation = useMemo<Conversation | undefined>(
@@ -132,6 +137,30 @@ export function ChatScreen() {
   const [sending, setSending] = useState(false);
   const listRef = useRef<FlatList<RenderRow>>(null);
   const typingTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // ── ActionSheet state (OpenChat-uxj, OpenChat-46p, OpenChat-wgl) ──────────
+  const [actionSheetVisible, setActionSheetVisible] = useState(false);
+  const [actionSheetMessage, setActionSheetMessage] = useState<Message | null>(null);
+  const [actionSheetIsOwn, setActionSheetIsOwn] = useState(false);
+  const [actionSheetSenderName, setActionSheetSenderName] = useState('');
+
+  // ── Reply state ────────────────────────────────────────────────────────────
+  const [replyTo, setReplyTo] = useState<ReplyToData | null>(null);
+
+  // ── Toast state ────────────────────────────────────────────────────────────
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMsg, setToastMsg] = useState('');
+  const toastTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMsg(msg);
+    setToastVisible(true);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastVisible(false), 3200);
+  }, []);
+
+  // Map from messageId → row index for scroll-to-quoted.
+  const messageIndexRef = useRef<Map<string, number>>(new Map());
 
   // ── Scroll behavior ────────────────────────────────────────────────────────
   // We track "is the user near the bottom?" both as a ref (for synchronous
@@ -187,6 +216,58 @@ export function ChatScreen() {
     [conversation]
   );
 
+  // Mute menu logic (OpenChat-aes)
+  const isMuted = !!mutedConvs[conversationId];
+
+  const showMuteMenu = () => {
+    const muteLabel = isMuted ? 'Unmute' : 'Mute';
+    const options = isMuted
+      ? ['Unmute', 'Cancel']
+      : ['For 1 hour', 'For 8 hours', 'Until tomorrow', 'Always', 'Cancel'];
+    const cancelIndex = options.length - 1;
+
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options, cancelButtonIndex: cancelIndex, title: isMuted ? 'Unmute conversation' : 'Mute notifications' },
+        async (idx) => {
+          if (idx === cancelIndex) return;
+          if (isMuted) {
+            await muteConv(conversationId, null);
+          } else {
+            const now = new Date();
+            let until: Date | 'always';
+            if (idx === 0) {
+              until = new Date(now.getTime() + 60 * 60 * 1000);
+            } else if (idx === 1) {
+              until = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+            } else if (idx === 2) {
+              const tomorrow = new Date(now);
+              tomorrow.setDate(tomorrow.getDate() + 1);
+              tomorrow.setHours(9, 0, 0, 0);
+              until = tomorrow;
+            } else {
+              until = 'always';
+            }
+            await muteConv(conversationId, until);
+          }
+        }
+      );
+    } else {
+      // Android: use Alert with a simple "mute always / unmute" fallback
+      Alert.alert(
+        isMuted ? 'Unmute conversation?' : 'Mute conversation?',
+        isMuted ? undefined : 'You will stop receiving notification banners for this chat.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: isMuted ? 'Unmute' : 'Mute always',
+            onPress: () => void muteConv(conversationId, isMuted ? null : 'always'),
+          },
+        ]
+      );
+    }
+  };
+
   useLayoutEffect(() => {
     navigation.setOptions({
       headerTitle: () => (
@@ -226,10 +307,31 @@ export function ChatScreen() {
           </View>
         </TouchableOpacity>
       ),
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={showMuteMenu}
+          accessibilityLabel={isMuted ? 'Unmute conversation' : 'Mute conversation'}
+          style={{ paddingHorizontal: 8, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+        >
+          {isMuted && (
+            <Text style={{ fontSize: 14, color: c.textMuted }}>🔕</Text>
+          )}
+          <Text style={{ color: c.textSecondary, fontSize: 20, lineHeight: 22 }}>⋯</Text>
+        </TouchableOpacity>
+      ),
     });
-  }, [navigation, isGroup, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.textPrimary, c.textSecondary, c.textMuted, containsBot]);
+  }, [navigation, isGroup, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.textPrimary, c.textSecondary, c.textMuted, containsBot, isMuted, showMuteMenu]);
 
-  const rows = useMemo(() => buildRows(messages, currentUser?.userId), [messages, currentUser?.userId]);
+  const rows = useMemo(() => {
+    const built = buildRows(messages, currentUser?.userId);
+    // Rebuild messageId → row index map for scroll-to-quoted.
+    const map = new Map<string, number>();
+    built.forEach((r, i) => {
+      if (r.type === 'message' && r.message) map.set(r.message.id, i);
+    });
+    messageIndexRef.current = map;
+    return built;
+  }, [messages, currentUser?.userId]);
 
   // At-bottom-aware scroll. Rules:
   //   R7. Initial mount / conversation switch → jump to bottom, no animation.
@@ -268,6 +370,21 @@ export function ChatScreen() {
     // User is reading history — bump unread by however many messages arrived
     // in this batch (typically 1, but websocket can deliver bursts).
     setUnreadCount(c => c + grew);
+  }, [messages, currentUser?.userId]);
+
+  // Haptic feedback on incoming messages (OpenChat-o8m).
+  // Fires when a new message arrives in this (active) conversation from
+  // someone other than the current user.
+  const prevLenForHapticRef = useRef(0);
+  useEffect(() => {
+    const len = messages.length;
+    if (len > prevLenForHapticRef.current) {
+      const latest = messages[len - 1];
+      if (latest && latest.senderId !== currentUser?.userId) {
+        hapticReceive();
+      }
+    }
+    prevLenForHapticRef.current = len;
   }, [messages, currentUser?.userId]);
 
   // R3. Manual scroll handler — compute distance-from-bottom and update both
@@ -322,11 +439,14 @@ export function ChatScreen() {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     setSending(true);
+    const currentReplyToId = replyTo?.messageId;
     setText('');
+    setReplyTo(null);
     if (typingTimer.current) clearTimeout(typingTimer.current);
     reportTyping(conversationId, false);
     try {
-      await sendMessage(trimmed);
+      await sendMessage(trimmed, currentReplyToId);
+      hapticSend(); // light impact on successful send (iOS only)
     } catch (err) {
       // The context already tagged the optimistic message _failed=true.
       console.warn('[ChatScreen] send failed:', err);
@@ -334,6 +454,49 @@ export function ChatScreen() {
       setSending(false);
     }
   };
+
+  // ── Long-press handler ─────────────────────────────────────────────────────
+  const handleLongPress = useCallback((m: Message, isOwn: boolean, senderName: string) => {
+    setActionSheetMessage(m);
+    setActionSheetIsOwn(isOwn);
+    setActionSheetSenderName(senderName);
+    setActionSheetVisible(true);
+  }, []);
+
+  // ── ActionSheet callbacks ──────────────────────────────────────────────────
+  const handleReply = useCallback((data: ReplyToData) => {
+    setReplyTo(data);
+  }, []);
+
+  const handleBlock = useCallback(async (userId: string, displayName: string) => {
+    try {
+      await blockUser(userId);
+      navigation.goBack();
+    } catch (err) {
+      console.warn('[ChatScreen] block failed:', err);
+      Alert.alert('Error', `Could not block ${displayName}. Please try again.`);
+    }
+  }, [blockUser, navigation]);
+
+  const handleReport = useCallback(async (messageId: string, reason: string, freeform?: string) => {
+    try {
+      await api.submitReport({ targetType: 'message', targetId: messageId, reason, freeform });
+    } catch (err) {
+      console.warn('[ChatScreen] report failed:', err);
+    }
+    showToast("Thanks — we've received your report");
+  }, [showToast]);
+
+  // ── Scroll to quoted message ───────────────────────────────────────────────
+  const scrollToMessage = useCallback((messageId: string) => {
+    const idx = messageIndexRef.current.get(messageId);
+    if (idx == null) return;
+    try {
+      listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.3 });
+    } catch {
+      // scrollToIndex can throw if item isn't rendered — ignore.
+    }
+  }, []);
 
   // Typing indicator (someone else)
   const otherTypers = useMemo(() => {
@@ -382,6 +545,13 @@ export function ChatScreen() {
           // Throttle scroll events to ~60fps; high enough to catch the
           // user reaching bottom quickly, low enough not to thrash JS.
           scrollEventThrottle={16}
+          onScrollToIndexFailed={() => { /* target not in window — ignore */ }}
+          // Empty-state placeholder when the thread has no messages (OpenChat-0kl).
+          ListEmptyComponent={
+            !loadingMessages ? (
+              <ChatEmptyState conversation={conversation} currentUser={currentUser} />
+            ) : null
+          }
           renderItem={({ item }) => {
             if (item.type === 'day') {
               return (
@@ -414,7 +584,10 @@ export function ChatScreen() {
                     )}
                   </View>
                 )}
-                <View
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onLongPress={() => handleLongPress(m, isOwn, m.sender?.name || m.sender?.email || '')}
+                  delayLongPress={350}
                   style={[
                     styles.bubble,
                     {
@@ -426,6 +599,33 @@ export function ChatScreen() {
                     },
                   ]}
                 >
+                  {/* Reply quote header — shown if this message is a reply (OpenChat-uxj) */}
+                  {m.replyToId && (
+                    <TouchableOpacity
+                      onPress={() => m.replyToId && scrollToMessage(m.replyToId)}
+                      activeOpacity={0.7}
+                      style={[
+                        styles.replyHeader,
+                        {
+                          borderLeftColor: isOwn ? 'rgba(255,255,255,0.6)' : c.primary,
+                          backgroundColor: isOwn ? 'rgba(255,255,255,0.15)' : c.surfaceElevated,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[styles.replyHeaderAuthor, { color: isOwn ? 'rgba(255,255,255,0.85)' : colorForUserId(m.replyTo?.senderId, scheme) }]}
+                        numberOfLines={1}
+                      >
+                        {m.replyTo?.sender?.name || m.replyTo?.sender?.email || 'Reply'}
+                      </Text>
+                      <Text
+                        style={[styles.replyHeaderContent, { color: isOwn ? 'rgba(255,255,255,0.7)' : c.textSecondary }]}
+                        numberOfLines={2}
+                      >
+                        {m.replyTo?.content || '…'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                   {item.showSender && m.sender && (
                     <Text style={[
                       styles.sender,
@@ -442,7 +642,7 @@ export function ChatScreen() {
                       {failed ? 'Failed to send' : formatTime(m.createdAt)}
                     </Text>
                   </View>
-                </View>
+                </TouchableOpacity>
               </View>
             );
           }}
@@ -456,6 +656,28 @@ export function ChatScreen() {
       {!!typingLabel && (
         <View style={[styles.typingBar, { backgroundColor: c.surface, borderColor: c.border }]}>
           <Text style={{ color: c.textSecondary, fontSize: 12 }}>{typingLabel}</Text>
+        </View>
+      )}
+
+      {/* Reply preview bar — shown above composer when replying (OpenChat-uxj) */}
+      {replyTo && (
+        <View style={[styles.replyBar, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <View style={[styles.replyBarAccent, { backgroundColor: colorForUserId(replyTo.senderId, scheme) }]} />
+          <View style={{ flex: 1, marginLeft: 8 }}>
+            <Text style={[styles.replyBarAuthor, { color: colorForUserId(replyTo.senderId, scheme) }]} numberOfLines={1}>
+              {replyTo.senderName}
+            </Text>
+            <Text style={[styles.replyBarContent, { color: c.textSecondary }]} numberOfLines={2}>
+              {replyTo.content}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setReplyTo(null)}
+            style={styles.replyBarClose}
+            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+          >
+            <Text style={{ color: c.textMuted, fontSize: 22, lineHeight: 26 }}>×</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -477,6 +699,21 @@ export function ChatScreen() {
           <Text style={{ color: '#fff', fontWeight: '600' }}>Send</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Message action sheet (OpenChat-uxj, OpenChat-46p, OpenChat-wgl) */}
+      <MessageActionSheet
+        visible={actionSheetVisible}
+        message={actionSheetMessage}
+        isOwn={actionSheetIsOwn}
+        senderName={actionSheetSenderName}
+        onDismiss={() => setActionSheetVisible(false)}
+        onReply={handleReply}
+        onBlock={handleBlock}
+        onReport={handleReport}
+      />
+
+      {/* In-app toast for report confirmation */}
+      <ToastMessage visible={toastVisible} message={toastMsg} />
     </KeyboardAvoidingView>
   );
 }
@@ -534,5 +771,36 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Inline reply header inside a bubble (OpenChat-uxj)
+  replyHeader: {
+    borderLeftWidth: 3,
+    paddingLeft: 8,
+    paddingVertical: 4,
+    marginBottom: 6,
+    borderRadius: 4,
+  },
+  replyHeaderAuthor: { fontSize: 12, fontWeight: '600' as const, marginBottom: 1 },
+  replyHeaderContent: { fontSize: 12 },
+  // Reply preview bar above composer
+  replyBar: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  replyBarAccent: {
+    width: 3,
+    alignSelf: 'stretch' as const,
+    borderRadius: 2,
+    minHeight: 30,
+  },
+  replyBarAuthor: { fontSize: 12, fontWeight: '600' as const, marginBottom: 1 },
+  replyBarContent: { fontSize: 12 },
+  replyBarClose: {
+    paddingLeft: 12,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
   },
 });

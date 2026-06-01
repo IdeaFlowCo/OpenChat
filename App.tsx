@@ -42,6 +42,7 @@ import { SettingsScreen } from './src/screens/SettingsScreen';
 import { SearchScreen } from './src/screens/SearchScreen';
 import { MyQrCodeScreen } from './src/screens/MyQrCodeScreen';
 import { ScanQrScreen } from './src/screens/ScanQrScreen';
+import { BlockedUsersScreen } from './src/screens/BlockedUsersScreen';
 import { getColors } from './src/theme/colors';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { PushSoftAsk } from './src/components/PushSoftAsk';
@@ -145,6 +146,11 @@ function Shell() {
               name="ScanQr"
               component={ScanQrScreen}
               options={{ title: 'Scan QR', presentation: 'modal', headerShown: false }}
+            />
+            <Stack.Screen
+              name="BlockedUsers"
+              component={BlockedUsersScreen}
+              options={{ title: 'Blocked users' }}
             />
           </>
         )}
