@@ -110,7 +110,7 @@ interface ChatContextValue {
   markConversationRead: (conversationId: string) => void;
 
   // Profile editing (OpenChat-tml)
-  updateProfile: (fields: { name?: string; statusMessage?: string }) => Promise<void>;
+  updateProfile: (fields: { name?: string; statusMessage?: string; avatarUrl?: string }) => Promise<void>;
 
   // Reconnect catch-up (OpenChat-qz0)
   // convIds that received new messages during a recent reconnect catch-up.
@@ -821,7 +821,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Update own profile (OpenChat-tml).
-  const updateProfile = useCallback(async (fields: { name?: string; statusMessage?: string }) => {
+  const updateProfile = useCallback(async (fields: { name?: string; statusMessage?: string; avatarUrl?: string }) => {
     const updated = await api.updateProfile(fields);
     // Optimistically patch currentUser in memory so the UI sees the change immediately.
     setCurrentUser(prev => {

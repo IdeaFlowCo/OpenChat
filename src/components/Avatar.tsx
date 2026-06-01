@@ -1,8 +1,10 @@
 /**
- * Avatar circle. Shows initials (or 🤖 for bots) over a soft colored
- * background, with an optional presence dot in the bottom-right.
+ * Avatar circle. Shows a photo (avatarUrl), initials, or 🤖 for bots,
+ * with an optional presence dot in the bottom-right.
+ *
+ * avatarUrl support added in OpenChat-x2s.
  */
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { PresenceDot, PresenceStatus } from './PresenceDot';
 import { getColors } from '../theme/colors';
@@ -14,6 +16,8 @@ interface Props {
   /** Pass a presence status to render the bottom-right dot. Hide by omitting. */
   presenceStatus?: PresenceStatus;
   size?: number;
+  /** If set, renders the photo instead of initials. (OpenChat-x2s) */
+  avatarUrl?: string;
 }
 
 function initials(name?: string, email?: string): string {
@@ -23,7 +27,7 @@ function initials(name?: string, email?: string): string {
   return seed.slice(0, 2).toUpperCase();
 }
 
-export function Avatar({ name, email, isBot, presenceStatus, size = 44 }: Props) {
+export function Avatar({ name, email, isBot, presenceStatus, size = 44, avatarUrl }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const dotSize = Math.max(8, Math.round(size / 4));
@@ -37,18 +41,26 @@ export function Avatar({ name, email, isBot, presenceStatus, size = 44 }: Props)
             height: size,
             borderRadius: size / 2,
             backgroundColor: isBot ? 'rgba(168, 85, 247, 0.18)' : c.surfaceElevated,
+            overflow: 'hidden',
           },
         ]}
       >
-        <Text
-          style={{
-            color: isBot ? '#7e22ce' : c.textSecondary,
-            fontWeight: '600',
-            fontSize: Math.round(size * 0.4),
-          }}
-        >
-          {isBot ? '🤖' : initials(name, email)}
-        </Text>
+        {avatarUrl ? (
+          <Image
+            source={{ uri: avatarUrl }}
+            style={{ width: size, height: size, borderRadius: size / 2 }}
+          />
+        ) : (
+          <Text
+            style={{
+              color: isBot ? '#7e22ce' : c.textSecondary,
+              fontWeight: '600',
+              fontSize: Math.round(size * 0.4),
+            }}
+          >
+            {isBot ? '🤖' : initials(name, email)}
+          </Text>
+        )}
       </View>
       {presenceStatus && (
         <View style={[styles.dotWrap, { width: dotSize + 4, height: dotSize + 4 }]}>
