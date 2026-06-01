@@ -7,6 +7,7 @@ import type { RouteProp } from '@react-navigation/native';
 
 export type RootStackParamList = {
   Login: undefined;
+  Onboarding: undefined;
   Conversations: undefined;
   Chat: { conversationId: string };
   NewConversation: undefined;
@@ -19,6 +20,10 @@ export type RootStackParamList = {
   BlockedUsers: undefined;
   /** Profile editing screen (OpenChat-tml). */
   ProfileEdit: undefined;
+  /** Group invite modal — owner can generate / copy / revoke invite (OpenChat-240). */
+  GroupInvite: { conversationId: string };
+  /** Group invite preview — shown after scanning a QR or opening an invite link (OpenChat-240). */
+  GroupInvitePreview: { token: string };
 };
 
 export type NavProp<T extends keyof RootStackParamList> = NativeStackNavigationProp<RootStackParamList, T>;

@@ -11,7 +11,7 @@
  * The "is the user signed in?" gate is driven by ChatContext.isAuthed.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { StatusBar, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
@@ -26,6 +26,10 @@ import {
 } from './src/services/notifications';
 import { installClientLogger } from './src/services/clientLogger';
 import { initCrashReporting } from './src/services/crashReporting';
+import { hasCompletedOnboarding } from './src/services/onboarding';
+import { LoginScreen } from './src/screens/LoginScreen';
+import { OnboardingScreen } from './src/screens/OnboardingScreen';
+import { ConversationsScreen } from './src/screens/ConversationsScreen';
 
 // Init crash reporting FIRST so even early-boot errors reach Sentry (OpenChat-7um).
 // No-op if EXPO_PUBLIC_SENTRY_DSN is unset.
@@ -33,8 +37,6 @@ initCrashReporting();
 // Install the client logger before anything else mounts so even early-boot
 // errors are captured (OpenChat-e5v).
 installClientLogger();
-import { LoginScreen } from './src/screens/LoginScreen';
-import { ConversationsScreen } from './src/screens/ConversationsScreen';
 import { ChatScreen } from './src/screens/ChatScreen';
 import { NewConversationScreen } from './src/screens/NewConversationScreen';
 import { GroupSettingsScreen } from './src/screens/GroupSettingsScreen';
@@ -44,6 +46,8 @@ import { MyQrCodeScreen } from './src/screens/MyQrCodeScreen';
 import { ScanQrScreen } from './src/screens/ScanQrScreen';
 import { BlockedUsersScreen } from './src/screens/BlockedUsersScreen';
 import { ProfileEditScreen } from './src/screens/ProfileEditScreen';
+import { GroupInviteScreen } from './src/screens/GroupInviteScreen';
+import { GroupInvitePreviewScreen } from './src/screens/GroupInvitePreviewScreen';
 import { getColors } from './src/theme/colors';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { PushSoftAsk } from './src/components/PushSoftAsk';
@@ -56,9 +60,27 @@ function Shell() {
   const c = getColors(scheme);
   const { isAuthed, bootstrapIfAuthed, currentUser } = useChat();
 
+  // Onboarding gate (OpenChat-x2s): null = not yet checked, true/false = result.
+  const [onboardingChecked, setOnboardingChecked] = useState<boolean | null>(null);
+  const [onboardingDone, setOnboardingDone] = useState(false);
+
   useEffect(() => {
     bootstrapIfAuthed();
   }, [bootstrapIfAuthed]);
+
+  // When the user becomes authed, check whether they've completed onboarding.
+  // Reset onboardingChecked when the user signs out (isAuthed → false).
+  useEffect(() => {
+    if (!isAuthed) {
+      setOnboardingChecked(null);
+      setOnboardingDone(false);
+      return;
+    }
+    hasCompletedOnboarding().then((done) => {
+      setOnboardingDone(done);
+      setOnboardingChecked(true);
+    });
+  }, [isAuthed]);
 
   // Configure notification foreground / tap handlers once at mount. Safe to call
   // on web (no-op there). The tap listener is set up here (vs. inside the
@@ -95,7 +117,9 @@ function Shell() {
         backgroundColor={c.background}
       />
       <OfflineBanner />
-      <PushSoftAsk isAuthed={isAuthed} />
+      {/* Suppress PushSoftAsk while onboarding is in progress — the Notifications
+          step in OnboardingScreen handles the prompt instead. */}
+      <PushSoftAsk isAuthed={isAuthed && onboardingDone} />
       <Stack.Navigator
         screenOptions={{
           headerStyle: { backgroundColor: c.surface },
@@ -108,6 +132,18 @@ function Shell() {
           <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
         ) : (
           <>
+            {/* Onboarding: show once when authed but not yet completed (OpenChat-x2s).
+                onboardingChecked===null means still loading from AsyncStorage — we render
+                Onboarding optimistically in that brief window (it checks internally and
+                calls finish() immediately if onboarding was already done, but the replace()
+                would flicker, so instead we wait for the check before rendering anything). */}
+            {isAuthed && onboardingChecked && !onboardingDone && (
+              <Stack.Screen
+                name="Onboarding"
+                component={OnboardingScreen}
+                options={{ headerShown: false, animation: 'fade' }}
+              />
+            )}
             <Stack.Screen
               name="Conversations"
               component={ConversationsScreen}
@@ -157,6 +193,17 @@ function Shell() {
               name="ProfileEdit"
               component={ProfileEditScreen}
               options={{ title: 'Edit Profile', presentation: 'modal' }}
+            />
+            {/* Group invite flow (OpenChat-240) */}
+            <Stack.Screen
+              name="GroupInvite"
+              component={GroupInviteScreen}
+              options={{ title: 'Invite to Group', presentation: 'modal' }}
+            />
+            <Stack.Screen
+              name="GroupInvitePreview"
+              component={GroupInvitePreviewScreen}
+              options={{ title: 'Join Group', presentation: 'modal' }}
             />
           </>
         )}

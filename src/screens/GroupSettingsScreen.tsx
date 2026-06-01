@@ -270,6 +270,14 @@ export function GroupSettingsScreen() {
               <>
                 <TouchableOpacity
                   style={[styles.addBtn, { borderColor: c.border, backgroundColor: c.surfaceElevated }]}
+                  onPress={() => navigation.navigate('GroupInvite', { conversationId })}
+                >
+                  <Text style={{ color: c.primary, fontWeight: '600' }}>
+                    Invite via QR / link
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.addBtn, { borderColor: c.border, backgroundColor: c.surfaceElevated, marginTop: 8 }]}
                   onPress={() => setShowAdd(v => !v)}
                 >
                   <Text style={{ color: c.primary, fontWeight: '600' }}>

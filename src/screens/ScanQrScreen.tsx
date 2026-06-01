@@ -67,11 +67,10 @@ export function ScanQrScreen() {
       }
 
       if (parsed.type === 'invite') {
-        Alert.alert(
-          'Not supported yet',
-          'Group invites are not supported yet. They are coming soon!',
-          [{ text: 'OK', onPress: () => { lastScannedRef.current = null; setProcessing(false); } }]
-        );
+        // Navigate to the invite preview screen. Replace so Back from preview
+        // doesn't land on the scanner.
+        navigation.replace('GroupInvitePreview', { token: parsed.token });
+        setProcessing(false);
         return;
       }
 

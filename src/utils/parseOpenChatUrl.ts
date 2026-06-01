@@ -34,12 +34,16 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
   }
 
   // https://chat.globalbr.ai/u/<userId>  (web fallback link)
+  // https://chat.globalbr.ai/i/<token>   (group invite web link)
   if (
     (url.protocol === 'https:' || url.protocol === 'http:') &&
     url.hostname === 'chat.globalbr.ai'
   ) {
-    const match = url.pathname.match(/^\/u\/(.+)$/);
-    if (match?.[1]) return { type: 'user', userId: match[1] };
+    const userMatch = url.pathname.match(/^\/u\/(.+)$/);
+    if (userMatch?.[1]) return { type: 'user', userId: userMatch[1] };
+
+    const inviteMatch = url.pathname.match(/^\/i\/(.+)$/);
+    if (inviteMatch?.[1]) return { type: 'invite', token: inviteMatch[1] };
   }
 
   return { type: 'unknown' };

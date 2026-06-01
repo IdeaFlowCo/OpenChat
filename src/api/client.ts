@@ -655,16 +655,33 @@ export const api = {
    * Update the current user's display name and/or status message.
    * PATCH /api/auth/me
    */
-  updateProfile: (fields: { name?: string; statusMessage?: string }) =>
+  updateProfile: (fields: {
+    name?: string;
+    statusMessage?: string;
+    avatarUrl?: string;
+    onboardingComplete?: boolean;
+  }) =>
     request<{
       id: string;
       email: string;
       name?: string;
       statusMessage?: string;
       avatarUrl?: string;
+      onboardedAt?: string;
     }>('/api/auth/me', {
       method: 'PATCH',
       body: JSON.stringify(fields),
+    }),
+
+  /**
+   * Request a presigned PUT URL for an avatar image upload (OpenChat-x2s).
+   * Reuses the same attachments/presign endpoint but is called from onboarding.
+   * Returns { putUrl, getUrl, key }.
+   */
+  presignAvatar: (params: { filename: string; mimeType: string; sizeBytes: number }) =>
+    request<{ putUrl: string; getUrl: string; key: string }>('/api/chat/attachments/presign', {
+      method: 'POST',
+      body: JSON.stringify(params),
     }),
 
   // ── Report message / user (OpenChat-wgl) ────────────────────────────────
@@ -701,5 +718,58 @@ export const api = {
   messagesSince: (since: string) =>
     request<{ messages: Message[]; truncated: boolean }>(
       `/api/chat/messages/since?since=${encodeURIComponent(since)}`
+    ),
+
+  // ── Group invite endpoints (OpenChat-240) ─────────────────────────────────
+
+  /**
+   * Create (or return active) invite for a group conversation. Owner-only.
+   * POST /api/chat/conversations/:id/invites
+   * Returns { token, url, expiresAt, usesLeft }.
+   */
+  createInvite: (
+    conversationId: string,
+    opts?: { expiresInDays?: number; maxUses?: number }
+  ) =>
+    request<{ token: string; url: string; expiresAt: string; usesLeft: number }>(
+      `/api/chat/conversations/${conversationId}/invites`,
+      {
+        method: 'POST',
+        body: JSON.stringify(opts ?? {}),
+      }
+    ),
+
+  /**
+   * Get invite preview — any authed user. No participant PII.
+   * GET /api/chat/invites/:token
+   * Returns { conversationId, conversationTitle, memberCount, expiresAt }.
+   */
+  getInvitePreview: (token: string) =>
+    request<{
+      conversationId: string;
+      conversationTitle: string | null;
+      memberCount: number;
+      expiresAt: string;
+    }>(`/api/chat/invites/${token}`),
+
+  /**
+   * Accept/join via invite token. Idempotent if already a member.
+   * POST /api/chat/invites/:token/accept
+   * Returns { conversationId, conversation }.
+   */
+  acceptInvite: (token: string) =>
+    request<{ conversationId: string; conversation: Conversation }>(
+      `/api/chat/invites/${token}/accept`,
+      { method: 'POST' }
+    ),
+
+  /**
+   * Revoke an invite. Owner-only.
+   * DELETE /api/chat/conversations/:id/invites/:token
+   */
+  revokeInvite: (conversationId: string, token: string) =>
+    request<{ ok: boolean }>(
+      `/api/chat/conversations/${conversationId}/invites/${token}`,
+      { method: 'DELETE' }
     ),
 };
