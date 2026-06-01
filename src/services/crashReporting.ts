@@ -110,15 +110,31 @@ export function initCrashReporting(): void {
   // Lazy require so that when the DSN is unset OR we are on web, the
   // @sentry/react-native module is NEVER touched by the bundler's resolution
   // graph. This is what keeps the web build from failing on tslib.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-  const Sentry = require('@sentry/react-native') as {
-    init: (opts: Record<string, unknown>) => void;
-  };
-
-  Sentry.init({
-    dsn: DSN,
-    environment: __DEV__ ? 'dev' : 'production',
-    tracesSampleRate: 0.1,
-    beforeSend: (event: SentryEventShape) => scrubPii(event),
-  });
+  //
+  // ALSO: the @sentry/react-native package is currently NOT installed as a
+  // dependency — its iOS native module (CocoaPod) caused C++ compilation
+  // failures in EAS Build (std::allocator + const T error in the profiling
+  // module). Until Sentry's iOS pod is fixed and we have a DSN, this require
+  // is wrapped in a try/catch so the absence of the package is a no-op rather
+  // than a crash. To re-enable: `npx expo install @sentry/react-native` and
+  // unset this comment block.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const Sentry = require('@sentry/react-native') as {
+      init: (opts: Record<string, unknown>) => void;
+    };
+    Sentry.init({
+      dsn: DSN,
+      environment: __DEV__ ? 'dev' : 'production',
+      tracesSampleRate: 0.1,
+      beforeSend: (event: SentryEventShape) => scrubPii(event),
+    });
+  } catch {
+    // Module not installed — silently no-op. scrubPii is still exported for
+    // future re-enable.
+  }
 }
+
+// Re-export scrubPii to suppress unused-export warnings once the require is
+// disabled. When Sentry is re-enabled the inline call above uses it.
+void scrubPii;
