@@ -6,6 +6,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { resolveActor } from '../middleware/resolveActor.js';
 import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline } from '../websocket/chatHandler.js';
 import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPreview.js';
 
@@ -79,7 +80,7 @@ function toJS(value: unknown): unknown {
 // GET /api/chat/conversations - List user's conversations
 // Omits DM conversations where the other participant has blocked me (OpenChat-46p).
 // Includes containsBot field (OpenChat-ds3).
-router.get('/conversations', requireAuth, async (req: Request, res: Response) => {
+router.get('/conversations', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
 
@@ -679,7 +680,7 @@ router.patch('/conversations/:id/read', requireAuth, async (req: Request, res: R
 });
 
 // POST /api/chat/conversations/:id/messages - Send a message
-router.post('/conversations/:id/messages', requireAuth, async (req: Request, res: Response) => {
+router.post('/conversations/:id/messages', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id: conversationId } = req.params;
@@ -1747,7 +1748,7 @@ router.post('/attachments/presign', requireAuth, async (req: Request, res: Respo
 // just more slowly. The index is created idempotently at server startup via
 // db.ts — see ensureMessageCreatedAtIndex() below — or can be run manually:
 //   CREATE RANGE INDEX message_createdAt FOR (m:Message) ON (m.createdAt)
-router.get('/messages/since', requireAuth, async (req: Request, res: Response) => {
+router.get('/messages/since', resolveActor, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const sinceRaw = req.query.since as string | undefined;
 
