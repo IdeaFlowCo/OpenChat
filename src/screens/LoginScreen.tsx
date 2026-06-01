@@ -8,8 +8,11 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Linking,
   Platform,
+  Share,
 } from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
 import * as Google from 'expo-auth-session/providers/google';
 // AuthSession previously used for makeRedirectUri — removed; Google.useAuthRequest
 // auto-derives the iOS redirect URI from iosClientId.
@@ -311,6 +314,38 @@ export function LoginScreen() {
           Uses your Noos credentials. Phone sign-in coming soon.
         </Text>
       </View>
+
+      {/* Share-the-app QR — only on native (web users don't need it).
+          Encodes the mobile web URL so the recipient can open OpenChat
+          immediately in their browser without installing. */}
+      {Platform.OS !== 'web' && (
+        <View style={styles.shareSection}>
+          <Text style={[styles.shareLabel, { color: c.textMuted }]}>SHARE OPENCHAT</Text>
+          <View style={[styles.shareCard, { backgroundColor: c.surface, borderColor: c.border }]}>
+            <View style={styles.qrWrap}>
+              {/* Light QR on a fixed white background so it scans reliably
+                  regardless of theme. Scanning takes you to the mobile web. */}
+              <QRCode value="https://chat.globalbr.ai/m/" size={120} backgroundColor="#ffffff" color="#000000" />
+            </View>
+            <View style={styles.shareTextBlock}>
+              <Text style={[styles.shareTitle, { color: c.textPrimary }]}>Scan to open on any phone</Text>
+              <TouchableOpacity
+                onPress={() => Linking.openURL('https://chat.globalbr.ai/m/')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.shareLink, { color: c.primary }]}>chat.globalbr.ai/m</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => Share.share({ message: 'Try OpenChat: https://chat.globalbr.ai/m/' })}
+                activeOpacity={0.7}
+                style={[styles.shareButton, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}
+              >
+                <Text style={[styles.shareButtonText, { color: c.textPrimary }]}>Share link</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -340,6 +375,34 @@ const styles = StyleSheet.create({
   },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   footer: { fontSize: 12, textAlign: 'center', marginTop: 8 },
+  shareSection: { marginTop: 24, alignItems: 'stretch' },
+  shareLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8, textAlign: 'center' },
+  shareCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 16,
+  },
+  qrWrap: {
+    padding: 6,
+    backgroundColor: '#ffffff',
+    borderRadius: 8,
+  },
+  shareTextBlock: { flex: 1, gap: 6 },
+  shareTitle: { fontSize: 14, fontWeight: '600' },
+  shareLink: { fontSize: 13 },
+  shareButton: {
+    marginTop: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+  },
+  shareButtonText: { fontSize: 13, fontWeight: '500' },
   quickLogin: { marginTop: 4 },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 12 },
   quickLabel: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, textAlign: 'center', marginBottom: 10 },
