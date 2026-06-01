@@ -156,23 +156,32 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
- * PATCH /api/auth/me — Update current user's profile (OpenChat-tml)
- * Body: { name?: string, statusMessage?: string }
+ * PATCH /api/auth/me — Update current user's profile (OpenChat-tml + OpenChat-x2s)
+ * Body: { name?: string, statusMessage?: string, avatarUrl?: string, onboardingComplete?: boolean }
  *
- * Persists name and/or statusMessage. Emits `user:profile-updated` via
- * Socket.IO to all users who share a conversation with the editor so their
- * UIs can refresh participant info without polling.
+ * Persists name, statusMessage, avatarUrl, and/or marks onboarding complete
+ * (sets `onboardedAt` to now on first call with onboardingComplete=true).
+ * Emits `user:profile-updated` via Socket.IO to all users who share a
+ * conversation with the editor so their UIs can refresh participant info
+ * without polling.
  */
 router.patch('/me', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
-  const { name, statusMessage } = (req.body ?? {}) as {
+  const { name, statusMessage, avatarUrl, onboardingComplete } = (req.body ?? {}) as {
     name?: string;
     statusMessage?: string;
+    avatarUrl?: string;
+    onboardingComplete?: boolean;
   };
 
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     res.status(400).json({ error: 'name must be a non-empty string' });
+    return;
+  }
+
+  if (avatarUrl !== undefined && typeof avatarUrl !== 'string') {
+    res.status(400).json({ error: 'avatarUrl must be a string' });
     return;
   }
 
@@ -182,12 +191,16 @@ router.patch('/me', requireAuth, async (req: Request, res: Response) => {
       MATCH (u:User {id: $userId})
       SET u.name = CASE WHEN $name IS NOT NULL THEN $name ELSE u.name END,
           u.statusMessage = CASE WHEN $statusMessage IS NOT NULL THEN $statusMessage ELSE u.statusMessage END,
+          u.avatarUrl = CASE WHEN $avatarUrl IS NOT NULL THEN $avatarUrl ELSE u.avatarUrl END,
+          u.onboardedAt = CASE WHEN $onboardingComplete = true AND u.onboardedAt IS NULL THEN datetime($now) ELSE u.onboardedAt END,
           u.updatedAt = datetime($now)
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot } AS user
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot, .onboardedAt } AS user
     `, {
       userId,
       name: name?.trim() ?? null,
       statusMessage: statusMessage ?? null,
+      avatarUrl: avatarUrl ?? null,
+      onboardingComplete: onboardingComplete === true,
       now,
     });
 
