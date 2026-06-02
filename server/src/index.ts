@@ -287,6 +287,15 @@ app.use((_req, res) => {
   res.sendFile(path.join(clientDistPath, 'index.html'));
 });
 
+// Error notifier (must come AFTER the SPA fallback, BEFORE any final
+// app.use). Pushes 5xx errors to Slack via SLACK_ERROR_WEBHOOK_URL with
+// in-memory rate limiting so a tight loop can't flood the channel.
+// Wrapping this around an error-middleware signature (4 args) means it
+// only catches errors that are `next(err)`'d — non-error normal traffic
+// flows through untouched. See server/src/services/errorNotifier.ts.
+import { errorNotifierMiddleware } from './services/errorNotifier.js';
+app.use(errorNotifierMiddleware);
+
 // Start server
 const PORT = parseInt(process.env.PORT || '41851', 10);
 

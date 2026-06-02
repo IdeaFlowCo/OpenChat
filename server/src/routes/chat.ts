@@ -9,6 +9,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { resolveActor } from '../middleware/resolveActor.js';
 import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline } from '../websocket/chatHandler.js';
 import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPreview.js';
+import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
 let _s3: S3Client | null = null;
@@ -1049,6 +1050,21 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     const io = req.app.get('io') as IOServer | undefined;
     if (io) {
       processLinkPreviews(io, raw.id as string, conversationId as string, content as string);
+    }
+
+    // Hashtag → Thought extraction (OpenChat-thoughts-from-tags). Best-
+    // effort: errors here log but never break the message send. Fired on
+    // a fresh session so we don't block the response.
+    if (messageContent) {
+      const tagSession = getDriver().session();
+      void createThoughtsFromMessageTags(tagSession, {
+        senderId: userId,
+        messageId: raw.id as string,
+        conversationId: conversationId as string,
+        content: messageContent,
+      })
+        .catch((err) => console.warn('[thought-from-tag] background create failed:', err))
+        .finally(() => { void tagSession.close(); });
     }
 
     res.status(201).json(raw);
