@@ -48,6 +48,9 @@ export type RootStackParamList = {
   /** Desktop keyboard shortcuts cheat-sheet (OpenChat-601). Only reachable
    *  from the master-detail desktop layout via Cmd-/; native is a no-op. */
   KeyboardShortcuts: undefined;
+  /** Unified OS permissions panel (notifications, mic, camera, photos) with
+   *  per-row re-request and open-settings affordances. */
+  Permissions: undefined;
 };
 
 // ── Thoughts stack (OpenChat-zi1) ─────────────────────────────────────────────

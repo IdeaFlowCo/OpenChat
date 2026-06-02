@@ -296,6 +296,22 @@ export function SettingsScreen() {
                 <Text style={[styles.optionLabel, { color: c.textMuted, flex: 1 }]}>Checking…</Text>
               </View>
             )}
+            {/* Unified permissions panel: notifications + mic + camera + photos
+                with re-request affordances. Surfaces here so users who arrive
+                looking for "where do I re-enable that thing I denied?" find it. */}
+            <TouchableOpacity
+              style={[styles.optionRow, { borderTopColor: c.divider, borderTopWidth: StyleSheet.hairlineWidth }]}
+              onPress={() => navigation.navigate('Permissions')}
+              activeOpacity={0.7}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.optionLabel, { color: c.textPrimary }]}>All permissions</Text>
+                <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                  Camera, microphone, photos, notifications — manage each
+                </Text>
+              </View>
+              <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            </TouchableOpacity>
           </View>
         </View>
       )}

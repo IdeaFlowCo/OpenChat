@@ -98,9 +98,21 @@ export function SearchScreen() {
   }, [query]);
 
   // Flatten the three buckets into a single FlatList with section headers.
+  // OpenChat-search-self: any contact hit whose id matches the current user
+  // becomes a top-level "You" section, separate from "People" — tap = self-DM.
   const rows: Row[] = useMemo(() => {
     if (!results) return [];
     const out: Row[] = [];
+
+    // Pull self-hit out of the contacts bucket so it gets a dedicated header.
+    const me = currentUser?.userId;
+    const selfHit = me ? results.contacts.find((u) => u.id === me) : undefined;
+    const otherContacts = me ? results.contacts.filter((u) => u.id !== me) : results.contacts;
+
+    if (selfHit) {
+      out.push({ kind: 'header', label: 'You', count: 1, key: 'h-you' });
+      out.push({ kind: 'contact', hit: selfHit });
+    }
     if (results.conversations.length > 0) {
       out.push({ kind: 'header', label: 'Conversations', count: results.conversations.length, key: 'h-conv' });
       for (const c of results.conversations) out.push({ kind: 'conv', hit: c });
@@ -109,12 +121,12 @@ export function SearchScreen() {
       out.push({ kind: 'header', label: 'Messages', count: results.messages.length, key: 'h-msg' });
       for (const m of results.messages) out.push({ kind: 'msg', hit: m });
     }
-    if (results.contacts.length > 0) {
-      out.push({ kind: 'header', label: 'People', count: results.contacts.length, key: 'h-people' });
-      for (const u of results.contacts) out.push({ kind: 'contact', hit: u });
+    if (otherContacts.length > 0) {
+      out.push({ kind: 'header', label: 'People', count: otherContacts.length, key: 'h-people' });
+      for (const u of otherContacts) out.push({ kind: 'contact', hit: u });
     }
     return out;
-  }, [results]);
+  }, [results, currentUser?.userId]);
 
   const openConversation = (conversationId: string) => {
     navigation.replace('Chat', { conversationId });

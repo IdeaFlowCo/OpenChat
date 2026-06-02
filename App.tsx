@@ -51,6 +51,7 @@ installClientLogger();
 import { HomeScreen } from './src/screens/HomeScreen';
 import { ChatScreenRouter } from './src/screens/ChatScreenRouter';
 import { KeyboardShortcutsScreen } from './src/screens/KeyboardShortcutsScreen';
+import { PermissionsScreen } from './src/screens/PermissionsScreen';
 import { NewConversationScreen } from './src/screens/NewConversationScreen';
 import { GroupSettingsScreen } from './src/screens/GroupSettingsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
@@ -191,6 +192,11 @@ function ChatsNavigator({ currentUser, c }: {
         name="KeyboardShortcuts"
         component={KeyboardShortcutsScreen}
         options={{ title: 'Keyboard shortcuts', presentation: 'modal' }}
+      />
+      <ChatsStack.Screen
+        name="Permissions"
+        component={PermissionsScreen}
+        options={{ title: 'Permissions' }}
       />
     </ChatsStack.Navigator>
   );
