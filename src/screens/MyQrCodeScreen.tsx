@@ -23,9 +23,13 @@ export function MyQrCodeScreen() {
   const { currentUser } = useChat();
 
   const userId = currentUser?.userId ?? '';
-  const deepLinkUrl = `openchat://user/${userId}?v=1`;
-  // Web fallback — used as the share URL and as a human-readable label.
-  const webUrl = `${OPENCHAT_URL}/u/${userId}`;
+  // HTTPS-only QR (OpenChat-qr-onboard, 2026-06-02):
+  // - With Associated Domains (OpenChat-84u.2): Universal Link opens app
+  // - Without app: Safari → server-rendered '/u/<id>' landing with intent
+  // Encoding openchat:// caused "Cannot open URL" for any user without the
+  // app — broken viral acquisition. Now both code paths use HTTPS.
+  const deepLinkUrl = `${OPENCHAT_URL}/u/${userId}`;
+  const webUrl = deepLinkUrl;
 
   const handleShare = async () => {
     try {
