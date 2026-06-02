@@ -177,9 +177,40 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
     return;
   }
 
-  // For direct messages, check if conversation already exists
+  // For direct messages, check if conversation already exists.
   if (type === 'direct' && participantIds.length === 1) {
     const otherId = participantIds[0];
+
+    // Self-DM dedupe (OpenChat-self-1, codex 2026-06-01): the two-user
+    // pattern below requires u1 != u2 in the graph. For a self-DM (one
+    // participant edge) it would never match → repeated POSTs would
+    // create duplicate self-DMs. Special-case before the normal path.
+    if (otherId === userId) {
+      const selfExisting = await session.run(`
+        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {type: 'direct'})
+        WHERE NOT EXISTS {
+          MATCH (other:User)-[:PARTICIPATES_IN]->(c) WHERE other.id <> $userId
+        }
+        MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
+        WITH c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
+        RETURN c { .*, participants: participants } AS conversation
+        LIMIT 1
+      `, { userId });
+
+      if (selfExisting.records.length > 0) {
+        const conv = toJS(selfExisting.records[0].get('conversation')) as Record<string, unknown> | null;
+        await session.close();
+        const io = req.app.get('io') as IOServer | undefined;
+        const existingId = typeof conv?.id === 'string' ? conv.id : null;
+        if (io && existingId) joinUserSocketsToConversation(io, userId, existingId);
+        res.json(conv);
+        return;
+      }
+      // No existing self-DM found → fall through to creation with the
+      // single-edge model (allParticipants below filters self → empty,
+      // then we add the one edge explicitly).
+    }
+
     const existing = await session.run(`
       MATCH (u1:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {type: 'direct'})<-[:PARTICIPATES_IN]-(u2:User {id: $otherId})
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
@@ -1185,12 +1216,18 @@ router.get('/search', requireAuth, async (req: Request, res: Response) => {
         LIMIT $limit
       `, { userId, q, limit: neo4j.int(limit) }),
 
+      // Contacts: case-insensitive CONTAINS on name OR email.
+      // OpenChat-search-self: includes SELF when the literal query matches the
+      // user's own name/email OR when the query is a reserved self-keyword
+      // ('me', 'self', 'myself'). Codex review 2026-06-01: dropping the
+      // u.id <> $userId exclusion does not leak — the response shape only
+      // contains data the user already has on their own profile.
       session.run(`
         MATCH (u:User)
-        WHERE u.id <> $userId
-          AND (toLower(u.name) CONTAINS toLower($q) OR toLower(u.email) CONTAINS toLower($q))
+        WHERE (toLower(u.name) CONTAINS toLower($q) OR toLower(u.email) CONTAINS toLower($q))
+           OR (u.id = $userId AND toLower($q) IN ['me', 'self', 'myself'])
         RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
-        ORDER BY u.name
+        ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
         LIMIT $limit
       `, { userId, q, limit: neo4j.int(limit) }),
     ]);
