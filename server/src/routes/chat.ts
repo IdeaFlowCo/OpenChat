@@ -1054,7 +1054,9 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
 
     // Hashtag → Thought extraction (OpenChat-thoughts-from-tags). Best-
     // effort: errors here log but never break the message send. Fired on
-    // a fresh session so we don't block the response.
+    // a fresh session so we don't block the response. Pass the IO server
+    // so each created Thought emits 'thought:created' to the sender's
+    // user room → Thoughts tab refreshes live without polling.
     if (messageContent) {
       const tagSession = getDriver().session();
       void createThoughtsFromMessageTags(tagSession, {
@@ -1062,6 +1064,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         messageId: raw.id as string,
         conversationId: conversationId as string,
         content: messageContent,
+        io,
       })
         .catch((err) => console.warn('[thought-from-tag] background create failed:', err))
         .finally(() => { void tagSession.close(); });

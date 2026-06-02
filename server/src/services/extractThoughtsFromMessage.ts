@@ -30,6 +30,7 @@
  */
 
 import type { Session } from 'neo4j-driver';
+import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
 
 const MAX_MESSAGE_LEN = 4000;
@@ -91,7 +92,15 @@ export function extractTagsFromMessage(content: string): ExtractedTag[] {
  */
 export async function createThoughtsFromMessageTags(
   session: Session,
-  params: { senderId: string; messageId: string; conversationId: string; content: string }
+  params: {
+    senderId: string;
+    messageId: string;
+    conversationId: string;
+    content: string;
+    /** Optional Socket.IO server — emits 'thought:created' to the sender's
+     *  user room so the Thoughts tab auto-refreshes without polling. */
+    io?: IOServer;
+  }
 ): Promise<string[]> {
   const tags = extractTagsFromMessage(params.content);
   if (tags.length === 0) return [];
@@ -128,6 +137,28 @@ export async function createThoughtsFromMessageTags(
       );
       createdIds.push(id);
       console.log(`[thought-from-tag] created Thought ${id} (kind=${tag.kind}) for user ${params.senderId} from message ${params.messageId}`);
+
+      // Emit to the sender's user room so the Thoughts tab can refresh
+      // without polling. Same room-naming pattern other emits use
+      // (chatHandler joins each user to `user:${userId}` on connect).
+      if (params.io) {
+        try {
+          params.io.to(`user:${params.senderId}`).emit('thought:created', {
+            thought: {
+              id,
+              text,
+              kind: tag.kind,
+              status: 'none',
+              createdAt: now,
+              updatedAt: now,
+              fromMessageId: params.messageId,
+              fromConversationId: params.conversationId,
+            },
+          });
+        } catch (e) {
+          console.warn('[thought-from-tag] socket emit failed:', e);
+        }
+      }
     } catch (err) {
       console.warn('[thought-from-tag] failed to create Thought for tag', tag.raw, err);
       // Continue with the other tags.
