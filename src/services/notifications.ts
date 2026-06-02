@@ -113,6 +113,10 @@ export const navigationRef = createNavigationContainerRef<RootStackParamList>();
  * ChatScreen calls setActiveConversation(id) in its mount effect.
  */
 let activeConversationId: string | null = null;
+export function getActiveConversationIdForNotifications(): string | null {
+  return activeConversationId;
+}
+
 export function setActiveConversationForNotifications(id: string | null): void {
   activeConversationId = id;
 }

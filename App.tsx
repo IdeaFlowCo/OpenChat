@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Platform, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -71,6 +71,7 @@ import { ThoughtsScreen } from './src/screens/ThoughtsScreen';
 import { AddEditThoughtScreen } from './src/screens/AddEditThoughtScreen';
 import { getColors } from './src/theme/colors';
 import { OfflineBanner } from './src/components/OfflineBanner';
+import { InAppMessageBanner } from './src/components/InAppMessageBanner';
 import { PushSoftAsk } from './src/components/PushSoftAsk';
 import type {
   RootStackParamList,
@@ -125,7 +126,15 @@ function ChatsNavigator({ currentUser, c }: {
       <ChatsStack.Screen
         name="Search"
         component={SearchScreen}
-        options={{ title: 'Search', presentation: 'modal' }}
+        options={{
+          title: 'Search',
+          // formSheet on iOS = card with dimmed backdrop, swipe-down to
+          // dismiss — much lighter than full-screen 'modal'. Matches iOS
+          // Settings / Mail / iMessage patterns. On Android falls back to
+          // a slide-up sheet via react-navigation; on web it renders like
+          // 'modal' (no formSheet support).
+          presentation: Platform.OS === 'ios' ? 'formSheet' : 'modal',
+        }}
       />
       <ChatsStack.Screen
         name="MyQrCode"
@@ -378,6 +387,11 @@ function Shell() {
       />
       <OfflineBanner />
       <PushSoftAsk isAuthed={isAuthed && onboardingDone} />
+      {/* In-app banner for messages arriving in a DIFFERENT conversation.
+          Matches iMessage/WhatsApp/Signal pattern — when you're in app but
+          not viewing the recipient chat, a small card slides down at the
+          top with sender + preview. Tap to switch; swipe up to dismiss. */}
+      <InAppMessageBanner />
 
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
         {!isAuthed ? (

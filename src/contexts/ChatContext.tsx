@@ -46,6 +46,7 @@ import {
   PresenceEvent,
   TypingEvent,
 } from '../api/socket';
+import { showInAppBanner } from '../components/InAppMessageBanner';
 
 type Status = 'available' | 'away' | 'busy' | 'invisible';
 
@@ -354,13 +355,29 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           ? { ...conv, lastMessagePreview: msg.content.slice(0, 100), lastMessageAt: msg.createdAt }
           : conv
       )));
-      // Unread bump: only if msg is for a non-active conv and not from us.
+      // Unread bump + in-app banner: only if msg is for a non-active conv and
+      // not from us. The banner component itself further filters muted convs.
       if (msg.conversationId !== activeConvIdRef.current && msg.senderId !== currentUser?.userId) {
         setUnreadByConv(prev => {
           const next = new Map(prev);
           next.set(msg.conversationId, (next.get(msg.conversationId) ?? 0) + 1);
           return next;
         });
+        // Slide-down banner with sender + preview. Matches iMessage/WhatsApp
+        // pattern when the user is in app but on a different chat. Best-
+        // effort lookup of sender display name from local state.
+        try {
+          const senderName = msg.sender?.name
+            || msg.sender?.email?.split('@')[0]
+            || 'Someone';
+          const preview = msg.content?.slice(0, 140) || '';
+          showInAppBanner({
+            conversationId: msg.conversationId,
+            senderName,
+            senderEmail: msg.sender?.email,
+            preview,
+          });
+        } catch { /* swallow — banner is a nice-to-have */ }
       }
       // Advance the sync cursor so we don't re-fetch this message on next reconnect.
       if (msg.createdAt && msg.createdAt > lastSyncAtRef.current) {
