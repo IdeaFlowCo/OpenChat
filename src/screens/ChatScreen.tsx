@@ -377,7 +377,18 @@ export function ChatScreen({
   }, [conversationId, setActiveConversation, markConversationRead]);
 
   const isGroup = conversation?.type === 'group';
-  const other = !isGroup ? conversation?.participants?.find(p => p.user.id !== currentUser?.userId)?.user : null;
+  // Self-DM detection: direct conversation with no participant other than me.
+  // Could be a single-edge self conversation or a degenerate 1-participant DM.
+  const isSelfDM = !isGroup
+    && !!conversation?.participants
+    && conversation.participants.every(p => p.user.id === currentUser?.userId);
+  // The 'other' user for a non-self DM. Self-DM = me, so I appear as the
+  // "other" so the header shows my own name + avatar instead of "Unknown".
+  const other = !isGroup
+    ? (isSelfDM
+        ? conversation?.participants?.[0]?.user
+        : conversation?.participants?.find(p => p.user.id !== currentUser?.userId)?.user)
+    : null;
 
   // Participants eligible for @-mention — all except self (OpenChat-0jy).
   const mentionableParticipants = useMemo(() => {
@@ -389,6 +400,8 @@ export function ChatScreen({
   const headerTitle = useMemo(() => {
     if (!conversation) return '';
     if (conversation.title) return conversation.title;
+    // Self-DM: WhatsApp-style "You" label. Matches the "Notes to self" pattern.
+    if (isSelfDM) return 'You';
     if (!isGroup) return other?.name || other?.email || 'Chat';
     const others = (conversation.participants || [])
       .filter(p => p.user.id !== currentUser?.userId)
@@ -396,7 +409,7 @@ export function ChatScreen({
     if (others.length === 0) return 'Group';
     if (others.length <= 2) return others.join(', ');
     return `${others[0]} +${others.length - 1}`;
-  }, [conversation, isGroup, other, currentUser?.userId]);
+  }, [conversation, isGroup, isSelfDM, other, currentUser?.userId]);
 
   // Does this conversation include any bot participant? (OpenChat-ds3)
   const containsBot = useMemo(
@@ -490,11 +503,14 @@ export function ChatScreen({
           onPress={() => {
             if (isGroup) {
               navigation.navigate('GroupSettings', { conversationId });
+            } else if (isSelfDM) {
+              // Self-DM header → open your own profile edit screen.
+              navigation.navigate('ProfileEdit');
             } else if (other?.id) {
               navigation.navigate('ContactProfile', { userId: other.id });
             }
           }}
-          disabled={!isGroup && !other?.id}
+          disabled={!isGroup && !isSelfDM && !other?.id}
           activeOpacity={0.7}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '80%' }}
         >
@@ -511,7 +527,7 @@ export function ChatScreen({
               </Text>
               {!isGroup && <BotBadge isBot={other?.isBot} compact />}
               {isGroup && containsBot && <BotBadge isBot compact />}
-              {(isGroup || other?.id) && (
+              {(isGroup || isSelfDM || other?.id) && (
                 <Text style={{ color: c.textMuted, marginLeft: 4 }}>ⓘ</Text>
               )}
             </View>
@@ -550,7 +566,7 @@ export function ChatScreen({
         </View>
       ),
     });
-  }, [embedded, navigation, isGroup, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.primary, c.textPrimary, c.textSecondary, c.textMuted, containsBot, isMuted, showMuteMenu]);
+  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.primary, c.textPrimary, c.textSecondary, c.textMuted, containsBot, isMuted, showMuteMenu]);
 
   const rows = useMemo(() => {
     const built = buildRows(messages, currentUser?.userId);
