@@ -7,7 +7,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { readFileSync } from 'node:fs';
 import { marked } from 'marked';
-import { initDatabase, closeDatabase } from './db.js';
+import { initDatabase, closeDatabase, getDriver } from './db.js';
 import authRoutes from './routes/auth.js';
 import chatRoutes from './routes/chat.js';
 import clientLogsRoutes from './routes/clientLogs.js';
@@ -89,6 +89,104 @@ app.get('/about/qr.svg', (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.setHeader('Content-Type', 'image/svg+xml');
   res.sendFile(landingQrPath);
+});
+
+// Per-user "add me" landing page (OpenChat-qr-onboard). Reached when a
+// non-installed user scans a personal QR (encoded as
+// https://chat.globalbr.ai/u/<userId>). Renders a small SSR page that
+// requires no JS to show the inviter's name + a clear sign-in / install
+// CTA carrying the intent forward via ?intent=add-user&id=<id>.
+//
+// Once Associated Domains (OpenChat-84u.2) is enabled, installed-app
+// users skip this page entirely — iOS opens OpenChat directly. This
+// page is the no-app fallback.
+app.get('/u/:userId', async (req, res, next) => {
+  const userId = req.params.userId as string;
+  if (!userId || userId.length < 4 || userId.length > 32) return next();
+  const session = getDriver().session();
+  try {
+    const result = await session.run(
+      `MATCH (u:User {id: $userId})
+       RETURN u { .id, .name, .email, .avatarUrl, .isBot } AS user LIMIT 1`,
+      { userId }
+    );
+    if (result.records.length === 0) return next();
+    const user = result.records[0].get('user') as {
+      id: string; name?: string | null; email: string;
+      avatarUrl?: string | null; isBot?: boolean | null;
+    };
+    const displayName = (user.name || user.email.split('@')[0] || 'OpenChat user');
+    const initial = (displayName[0] || '?').toUpperCase();
+    const intentQs = `?intent=add-user&id=${encodeURIComponent(userId)}`;
+    const safe = (s: string) => s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    const html = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#5664e2">
+<title>${safe(displayName)} on OpenChat</title>
+<meta name="description" content="${safe(displayName)} wants to add you on OpenChat.">
+<meta property="og:title" content="${safe(displayName)} on OpenChat">
+<meta property="og:description" content="${safe(displayName)} wants to add you on OpenChat. Tap to start a conversation.">
+<style>
+  :root { --bg:#0a0c18; --surface:rgba(255,255,255,0.05); --border:rgba(255,255,255,0.10);
+          --text:#f4f6ff; --text-dim:#9aa0c5; --accent:#7c80ff; --accent-bg:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%); }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased;
+              font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif; line-height:1.5; }
+  body::before { content:""; position:fixed; inset:0; z-index:-1;
+    background:
+      radial-gradient(700px 500px at 20% -10%,#2a2475 0%,transparent 60%),
+      radial-gradient(600px 500px at 80% 110%,#6230a8 0%,transparent 55%),
+      var(--bg); }
+  .wrap { max-width:480px; margin:0 auto; padding:48px 24px; text-align:center; }
+  .avatar { width:96px; height:96px; border-radius:50%; margin:0 auto 20px;
+            background:var(--accent-bg); color:#fff; font-size:42px; font-weight:700;
+            display:flex; align-items:center; justify-content:center;
+            box-shadow:0 14px 30px rgba(124,128,255,0.35); }
+  .name { font-size:24px; font-weight:700; margin:0 0 4px; letter-spacing:-0.01em; }
+  .invite { color:var(--text-dim); font-size:15px; margin:0 0 32px; }
+  .cta { display:block; padding:14px 22px; margin:10px 0; border-radius:12px;
+         font-weight:600; font-size:15px; text-decoration:none; }
+  .cta-primary { background:var(--accent-bg); color:#fff;
+                 box-shadow:0 8px 20px rgba(124,128,255,0.4); }
+  .cta-secondary { background:var(--surface); color:var(--text); border:1px solid var(--border); }
+  .cta-tiny { font-size:13px; color:var(--text-dim); padding:8px; }
+  .cta-tiny a { color:var(--accent); text-decoration:underline; }
+  .footer { font-size:11px; color:var(--text-dim); margin-top:30px; }
+  .footer a { color:var(--text-dim); }
+</style>
+</head><body>
+<div class="wrap">
+  ${user.avatarUrl
+    ? `<img class="avatar" style="object-fit:cover" src="${safe(user.avatarUrl)}" alt="${safe(displayName)}">`
+    : `<div class="avatar">${safe(initial)}</div>`}
+  <h1 class="name">${safe(displayName)}${user.isBot ? ' <span style="font-size:13px;color:var(--text-dim)">· bot</span>' : ''}</h1>
+  <p class="invite">wants to connect on OpenChat — tap below to start.</p>
+
+  <a class="cta cta-primary" href="/m/${intentQs}">Open in mobile web · sign in</a>
+  <a class="cta cta-secondary" href="/d/${intentQs}">Open on desktop web</a>
+  <a class="cta cta-secondary" href="https://testflight.apple.com/join/QvUPzDMY">Get the iOS app · TestFlight</a>
+
+  <p class="cta-tiny">Already have OpenChat? <a href="openchat://user/${encodeURIComponent(userId)}">Open the app directly</a></p>
+
+  <div class="footer">
+    <a href="/">chat.globalbr.ai</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
+  </div>
+</div></body></html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.send(html);
+  } catch (err) {
+    console.error('/u/:userId render error:', err);
+    next();
+  } finally {
+    await session.close();
+  }
 });
 
 // Apple App Site Association (OpenChat-84u.1). Enables Universal Links so
