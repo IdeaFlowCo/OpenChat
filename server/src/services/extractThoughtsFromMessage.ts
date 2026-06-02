@@ -97,6 +97,7 @@ export async function createThoughtsFromMessageTags(
   if (tags.length === 0) return [];
 
   const createdIds: string[] = [];
+  console.log(`[thought-from-tag] extracted ${tags.length} tag(s) from message ${params.messageId}:`, tags.map((t) => t.raw).join(', '));
   for (const tag of tags) {
     try {
       // Strip just THIS tag from the message; leave other tags in place so
@@ -126,6 +127,7 @@ export async function createThoughtsFromMessageTags(
         { id, senderId: params.senderId, messageId: params.messageId, text, kind: tag.kind, now }
       );
       createdIds.push(id);
+      console.log(`[thought-from-tag] created Thought ${id} (kind=${tag.kind}) for user ${params.senderId} from message ${params.messageId}`);
     } catch (err) {
       console.warn('[thought-from-tag] failed to create Thought for tag', tag.raw, err);
       // Continue with the other tags.
