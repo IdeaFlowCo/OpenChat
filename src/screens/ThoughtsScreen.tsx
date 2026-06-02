@@ -25,6 +25,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { fetchThoughts, deleteThought, Thought } from '../services/thoughts';
+import { getSocket } from '../api/socket';
 import type { ThoughtsNavProp } from '../navigation/types';
 
 // ── Badge colors ──────────────────────────────────────────────────────────────
@@ -162,6 +163,24 @@ export function ThoughtsScreen() {
 
   // Reload whenever the screen comes into focus (e.g., returning from add/edit).
   useFocusEffect(useCallback(() => { load(false); }, [load]));
+
+  // Live update on tag-generated Thoughts: server emits 'thought:created'
+  // when a chat message with a hashtag spawns a new Thought. Prepend so
+  // newest-first ordering matches the load() fetch.
+  useEffect(() => {
+    const sock = getSocket();
+    if (!sock) return;
+    const handler = (payload: { thought: Thought }) => {
+      if (!payload?.thought) return;
+      setThoughts((prev) => {
+        // Idempotency: if we already have it (e.g. focus-load raced), skip.
+        if (prev.some((t) => t.id === payload.thought.id)) return prev;
+        return [payload.thought, ...prev];
+      });
+    };
+    sock.on('thought:created', handler);
+    return () => { sock.off('thought:created', handler); };
+  }, []);
 
   const handleDelete = useCallback(async (id: string) => {
     try {
