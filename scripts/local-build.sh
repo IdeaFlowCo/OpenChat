@@ -79,7 +79,21 @@ eas build \
   --non-interactive \
   --message "$MSG"
 
+# ── Push the build to external testers ───────────────────────────────────────
+# eas auto-submits to App Store Connect, which makes the build VALID for
+# internal Founders testers within ~1 minute. External testers (Friends and
+# Family — Sandeep, Whimsi, Kristen, etc.) require:
+#   1. explicit assignment to the Friends and Family beta group
+#   2. Apple Beta App Review approval (24-48h typical)
+# Without this they'd never see the build. publish-to-testers.py polls until
+# ASC has the new build, then drives both steps via the ASC API. Safe to
+# run repeatedly; it noops on already-assigned / already-submitted builds.
+echo ""
+echo "──── publishing to external testers (Friends and Family) ────"
+chmod +x "$(dirname "$0")/publish-to-testers.py"
+python3 "$(dirname "$0")/publish-to-testers.py"
+
 echo ""
 echo "════ DONE ════"
-echo "Built locally on $(hostname). Auto-submission to TestFlight scheduled."
+echo "Built locally on $(hostname). On TestFlight for internal + external testers."
 echo "Check status:  eas submit:list --platform ios --limit 1"
