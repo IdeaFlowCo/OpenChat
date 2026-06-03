@@ -1,24 +1,38 @@
 #!/bin/bash
 # local-build.sh — build the iOS app on this Mac instead of EAS cloud.
-# No queue wait + no EAS credits used.
+# Works over plain SSH or NoMachine. No queue wait, no EAS credits used.
 #
-# Prereqs (all present on M3, verified 2026-06-02):
+# IMPORTANT: do NOT wrap this in tmux. The tmux daemon runs in a stale
+# macOS audit/security session that breaks keychain identity resolution
+# during codesign. Use plain SSH, or `nohup bash scripts/local-build.sh &`
+# if you want it backgrounded.
+#
+# Prereqs (verified 2026-06-03):
 #   - Xcode 26+ (xcode-select -p == /Applications/Xcode.app/Contents/Developer)
 #   - CocoaPods 1.16+
 #   - Node 18+
-#   - fastlane (brew install fastlane)
+#   - Apple Distribution cert in login keychain with codesign ACL granted
+#     (security set-key-partition-list -S apple-tool:,apple:,codesign:)
+#   - Provisioning profile installed at
+#     ~/Library/MobileDevice/Provisioning Profiles/<UUID>.mobileprovision
+#   - .credentials/Distribution.p12 + .credentials/Distribution.mobileprovision
+#     in the repo root (gitignored)
+#   - credentials.json in repo root with credentialsSource: local config
+#   - ~/.config/m3-login.txt with the login keychain password (mode 600)
 #
 # Usage:
-#   bash scripts/local-build.sh           # bump patch + build + auto-submit
-#   bash scripts/local-build.sh --no-bump # skip version bump (rebuild same version)
-#   bash scripts/local-build.sh --message "Build 46: foo"
+#   bash scripts/local-build.sh           # bump patch + build + submit
+#   bash scripts/local-build.sh --no-bump # rebuild same version
+#   bash scripts/local-build.sh --message "Build 50: foo"
 #
 # After completion:
-#   - .ipa is at $PWD/build-*.ipa
-#   - auto-submitted to TestFlight via EAS Submit (uses the ASC API key)
-#   - The build still appears in Expo's dashboard so 'eas build:list' shows it
+#   - .xcarchive is at ~/Library/Developer/Xcode/Archives/<date>/
+#   - .ipa is at ./build-<timestamp>.ipa
+#   - Auto-submitted to App Store Connect via the ASC API key
+#   - publish-to-testers.py assigns to Friends and Family + triggers Apple
+#     Beta App Review
 
-set -e
+set -o pipefail
 
 cd "$(dirname "$0")/.."
 
@@ -38,7 +52,43 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# ── Version bump (so each build has a unique number) ─────────────────────────
+# ── Refuse to run under tmux ─────────────────────────────────────────────────
+if [ -n "$TMUX" ]; then
+  echo "ERROR: this script must NOT be run inside a tmux session."
+  echo "       tmux's daemon retains a stale audit session that breaks"
+  echo "       codesign + keychain identity resolution."
+  echo "       Use plain SSH, or 'nohup bash scripts/local-build.sh &'."
+  exit 1
+fi
+
+# ── Pre-unlock login keychain so codesign can access the signing key ─────────
+LOGIN_PW_FILE="$HOME/.config/m3-login.txt"
+if [ ! -f "$LOGIN_PW_FILE" ]; then
+  echo "ERROR: $LOGIN_PW_FILE not found."
+  echo "       Create it (mode 600) with the M3 login keychain password:"
+  echo "         echo 'YOUR_PASSWORD' > $LOGIN_PW_FILE && chmod 600 $LOGIN_PW_FILE"
+  exit 1
+fi
+LOGIN_PW=$(cat "$LOGIN_PW_FILE")
+security unlock-keychain -p "$LOGIN_PW" "$HOME/Library/Keychains/login.keychain-db" || {
+  echo "ERROR: failed to unlock login keychain — check $LOGIN_PW_FILE"
+  exit 1
+}
+# Keep it unlocked during the build by extending the lock timeout
+security set-keychain-settings -lut 21600 "$HOME/Library/Keychains/login.keychain-db"
+
+# Background loop that re-unlocks periodically (in case Apple's tooling
+# re-locks it). Kill on exit.
+(
+  while true; do
+    sleep 60
+    security unlock-keychain -p "$LOGIN_PW" "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null
+  done
+) &
+UNLOCK_PID=$!
+trap "kill $UNLOCK_PID 2>/dev/null" EXIT
+
+# ── Version bump ─────────────────────────────────────────────────────────────
 if [ "$BUMP" = "1" ]; then
   echo "── bumping patch version ──"
   npm run bump:patch
@@ -49,7 +99,7 @@ if [ "$BUMP" = "1" ]; then
   git push 2>&1 | tail -2
 fi
 
-# ── ASC + Apple env vars (also used by EAS Submit step) ──────────────────────
+# ── ASC + Apple env vars (used by eas build and eas submit) ──────────────────
 export EXPO_ASC_API_KEY_PATH=/Users/jacobcole/.appstoreconnect/private_keys/AuthKey_KWJX4896S5.p8
 export EXPO_ASC_KEY_ID=KWJX4896S5
 export EXPO_ASC_ISSUER_ID=69a6de95-2833-47e3-e053-5b8c7c11a4d1
@@ -59,49 +109,89 @@ export EXPO_APPLE_TEAM_TYPE=COMPANY_OR_ORGANIZATION
 DEFAULT_MSG="Local build $(date +%Y-%m-%d) — built on $(hostname -s)"
 MSG="${MESSAGE:-$DEFAULT_MSG}"
 
+# Record the archive timestamp BEFORE running eas build so we can find
+# the new archive after the build (regardless of exportArchive failing).
+PRE_BUILD_TS=$(date +%s)
+
 echo ""
 echo "════ STARTING LOCAL EAS BUILD ════"
 echo "  Profile:  production"
 echo "  Platform: ios"
 echo "  Message:  $MSG"
-echo "  This runs on this Mac (not EAS cloud) — no queue, no credits."
 echo ""
 
-# ── Build (and auto-submit to TestFlight) ────────────────────────────────────
-# --local: build on this machine
-# --auto-submit: pipe the resulting .ipa to EAS Submit → App Store Connect
-# --non-interactive: don't prompt for anything (env vars cover it)
-IPA_OUT="./build-$(date +%Y%m%d-%H%M%S).ipa"
-
-# Step 1: build locally. EAS rejects --auto-submit when --local is set,
-# so we split into separate build + submit calls.
+# ── Build via eas build --local ──────────────────────────────────────────────
+# The build goes through compile/link/codesign/archive successfully on
+# Tahoe 26.2 over SSH. The final 'xcodebuild -exportArchive' step then fails
+# because macOS Tahoe's new openrsync rewrite doesn't accept the -E
+# (--extended-attributes) flag that Xcode's IDEDistributionCreateIPAStep
+# constructs. We tolerate that failure with `|| true` and do the IPA
+# packaging manually below.
+THROWAWAY_IPA="./build-throwaway-$(date +%Y%m%d-%H%M%S).ipa"
 eas build \
   --platform ios \
   --profile production \
   --local \
   --non-interactive \
-  --output "$IPA_OUT" \
-  --message "$MSG"
+  --output "$THROWAWAY_IPA" \
+  --message "$MSG" || true
 
-# Step 2: submit the resulting .ipa to App Store Connect.
+# ── Find the .xcarchive the build just produced ──────────────────────────────
+ARCHIVES_DIR="$HOME/Library/Developer/Xcode/Archives"
+LATEST_ARCHIVE=$(find "$ARCHIVES_DIR" -name "*.xcarchive" -newer /tmp/.eas-pre-build-marker 2>/dev/null | tail -1)
+if [ -z "$LATEST_ARCHIVE" ]; then
+  # Fallback: pick the newest archive from today's folder
+  TODAY=$(date +%Y-%m-%d)
+  LATEST_ARCHIVE=$(ls -td "$ARCHIVES_DIR/$TODAY"/*.xcarchive 2>/dev/null | head -1)
+fi
+if [ -z "$LATEST_ARCHIVE" ] || [ ! -d "$LATEST_ARCHIVE" ]; then
+  echo "ERROR: could not find a .xcarchive produced by this build."
+  echo "       Check eas build output above for the actual failure."
+  exit 1
+fi
 echo ""
-echo "──── submitting $IPA_OUT to App Store Connect ────"
+echo "── archive: $LATEST_ARCHIVE"
+
+APP="$LATEST_ARCHIVE/Products/Applications/OpenChat.app"
+if [ ! -d "$APP" ]; then
+  echo "ERROR: $APP not found inside archive."
+  exit 1
+fi
+
+# Verify the .app is signed with the right cert
+SIGN_AUTH=$(codesign -dvv "$APP" 2>&1 | grep "^Authority=" | head -1)
+echo "── signed by: $SIGN_AUTH"
+
+# ── Manually package into .ipa (replaces xcodebuild -exportArchive) ──────────
+IPA_OUT="./build-$(date +%Y%m%d-%H%M%S).ipa"
+echo ""
+echo "── packaging $APP → $IPA_OUT (manual zip; bypasses broken Tahoe rsync)"
+STAGE=$(mktemp -d -t eas-build-stage)
+mkdir -p "$STAGE/Payload"
+cp -R "$APP" "$STAGE/Payload/"
+(cd "$STAGE" && zip -qry "$IPA_OUT" Payload)
+mv "$STAGE/$IPA_OUT" "$(pwd)/$IPA_OUT"
+/bin/rm -rf "$STAGE"
+ls -la "$IPA_OUT"
+
+# Clean up the throwaway file that eas build was told to create but couldn't
+/bin/rm -f "$THROWAWAY_IPA"
+
+# ── Submit to App Store Connect ──────────────────────────────────────────────
+echo ""
+echo "── submitting $IPA_OUT to App Store Connect ──"
 eas submit \
   --platform ios \
   --path "$IPA_OUT" \
   --non-interactive
 
-# ── Push the build to external testers ───────────────────────────────────────
-# eas auto-submits to App Store Connect, which makes the build VALID for
-# internal Founders testers within ~1 minute. External testers (Friends and
-# Family — Sandeep, Whimsi, Kristen, etc.) require:
+# ── Push the build to external testers (Friends and Family) ─────────────────
+# eas submit makes the build VALID for internal Founders within ~1 minute.
+# External testers (Sandeep, Whimsi, Kristen, etc.) require:
 #   1. explicit assignment to the Friends and Family beta group
 #   2. Apple Beta App Review approval (24-48h typical)
-# Without this they'd never see the build. publish-to-testers.py polls until
-# ASC has the new build, then drives both steps via the ASC API. Safe to
-# run repeatedly; it noops on already-assigned / already-submitted builds.
 echo ""
-echo "──── publishing to external testers (Friends and Family) ────"
+echo "── publishing to external testers (Friends and Family) ──"
 chmod +x "$(dirname "$0")/publish-to-testers.py"
 python3 "$(dirname "$0")/publish-to-testers.py"
 
