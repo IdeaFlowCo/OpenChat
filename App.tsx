@@ -243,17 +243,62 @@ function ThoughtsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
 }
 
 // ── Tab icon helper ────────────────────────────────────────────────────────────
+//
+// OpenChat-65r: the active tab was nearly indistinguishable from the inactive
+// one (a 2-pt icon size bump + grey↔blue tint that's easy to miss on small
+// screens / low-contrast displays). The fix layers three signals on the active
+// tab so users can tell at a glance which feed they're in:
+//   1. Larger, bolder icon (font-weight 700, size 24 vs. 20)
+//   2. A soft cobalt-tinted pill background (c.primaryMuted) behind the icon
+//   3. Bold label text in the brand cobalt (c.primary)
 
-function TabIcon({ label, focused, color }: { label: string; focused: boolean; color: string }) {
+function TabIcon({ label, focused, color, c }: {
+  label: string;
+  focused: boolean;
+  color: string;
+  c: ReturnType<typeof getColors>;
+}) {
+  return (
+    <View
+      style={{
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: 44,
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        borderRadius: 14,
+        backgroundColor: focused ? c.primaryMuted : 'transparent',
+      }}
+    >
+      <Text
+        style={{
+          fontSize: focused ? 24 : 20,
+          color,
+          lineHeight: 28,
+          fontWeight: focused ? '700' : '400',
+        }}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+// Label paired with TabIcon: bold + brand-tint when focused, regular weight
+// when inactive. Pulling this out keeps the active-vs-inactive contrast
+// consistent across both tabs.
+function TabLabel({ text, focused, color }: { text: string; focused: boolean; color: string }) {
   return (
     <Text
       style={{
-        fontSize: focused ? 22 : 20,
+        fontSize: 12,
+        marginTop: 2,
         color,
-        lineHeight: 26,
+        fontWeight: focused ? '700' : '500',
+        letterSpacing: focused ? 0.2 : 0,
       }}
     >
-      {label}
+      {text}
     </Text>
   );
 }
@@ -272,16 +317,25 @@ function AuthedTabs({
       screenOptions={{
         headerShown: false,
         tabBarStyle: { backgroundColor: c.surface, borderTopColor: c.border },
+        // OpenChat-65r: use the brand cobalt (c.primary = #3b82f6) for the
+        // active tint — both icon + label inherit it. Inactive uses
+        // textSecondary (one step bolder than the old textMuted) so the
+        // contrast between focused and unfocused tabs is unambiguous in
+        // both light + dark mode.
         tabBarActiveTintColor: c.primary,
-        tabBarInactiveTintColor: c.textMuted,
+        tabBarInactiveTintColor: c.textSecondary,
+        tabBarLabelStyle: { fontSize: 12, fontWeight: '500' },
+        tabBarActiveBackgroundColor: 'transparent',
       }}
     >
       <Tab.Screen
         name="ChatsTab"
         options={{
-          tabBarLabel: 'Chats',
+          tabBarLabel: ({ focused, color }) => (
+            <TabLabel text="Chats" focused={focused} color={color} />
+          ),
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon label="💬" focused={focused} color={color} />
+            <TabIcon label="💬" focused={focused} color={color} c={c} />
           ),
         }}
       >
@@ -290,9 +344,11 @@ function AuthedTabs({
       <Tab.Screen
         name="ThoughtsTab"
         options={{
-          tabBarLabel: 'Thoughts',
+          tabBarLabel: ({ focused, color }) => (
+            <TabLabel text="Thoughts" focused={focused} color={color} />
+          ),
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon label="💭" focused={focused} color={color} />
+            <TabIcon label="💭" focused={focused} color={color} c={c} />
           ),
         }}
       >
