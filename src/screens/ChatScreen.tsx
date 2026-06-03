@@ -908,8 +908,14 @@ export function ChatScreen({
   }, []);
 
   // ── ActionSheet callbacks ──────────────────────────────────────────────────
+  // Setting the reply target also focuses the composer so the keyboard rises
+  // automatically — saves a redundant tap after picking "Reply" from the
+  // long-press menu or swiping a message (OpenChat-imt).
   const handleReply = useCallback((data: ReplyToData) => {
     setReplyTo(data);
+    // Defer focus until the next tick so the reply pill has a chance to mount
+    // (otherwise the layout shift can swallow the focus event on Android).
+    setTimeout(() => textInputRef.current?.focus(), 80);
   }, []);
 
   // Edit: load message content into composer in edit mode (OpenChat-q9h).
@@ -1113,6 +1119,14 @@ export function ChatScreen({
                       borderColor: failed ? c.danger : 'transparent',
                       borderWidth: failed ? 1 : 0,
                     },
+                    // Reply-message accent stripe (OpenChat-imt): a 3px colored
+                    // bar on the bubble's leading edge gives at-a-glance
+                    // distinction that this message is a reply. Stripe sits on
+                    // the LEFT for other-people's messages and the RIGHT for
+                    // own messages, matching the bubble's tail orientation.
+                    m.replyToId && !failed && (isOwn
+                      ? { borderRightWidth: 3, borderRightColor: 'rgba(255,255,255,0.55)' }
+                      : { borderLeftWidth: 3, borderLeftColor: c.primary }),
                   ]}
                 >
                   {/* Reply quote header — shown if this message is a reply (OpenChat-uxj) */}
