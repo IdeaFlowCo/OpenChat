@@ -208,12 +208,28 @@ export function ConversationsScreen() {
         </View>
       ),
       headerLeft: () => (
+        // OpenChat-8th: wrap in a pill (primaryMuted fill, c.primary icon)
+        // so the Settings affordance reads with the same visual weight as
+        // the right-side header pill (search + new-conversation) instead
+        // of looking like a hollow outlined circle.
         <TouchableOpacity
           onPress={() => navigation.navigate('Settings')}
           accessibilityLabel="Settings"
-          style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={{
+            marginLeft: 8,
+            minWidth: 44,
+            minHeight: 32,
+            paddingHorizontal: 12,
+            paddingVertical: 6,
+            borderRadius: 16,
+            backgroundColor: c.primaryMuted,
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexDirection: 'row',
+          }}
         >
-          <Text style={{ color: c.primary, fontSize: 20 }}>⚙︎</Text>
+          <Text style={{ color: c.primary, fontSize: 18, lineHeight: 20, fontWeight: '600' }}>⚙</Text>
         </TouchableOpacity>
       ),
     });
