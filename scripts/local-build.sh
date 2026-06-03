@@ -71,13 +71,25 @@ echo ""
 # --local: build on this machine
 # --auto-submit: pipe the resulting .ipa to EAS Submit → App Store Connect
 # --non-interactive: don't prompt for anything (env vars cover it)
+IPA_OUT="./build-$(date +%Y%m%d-%H%M%S).ipa"
+
+# Step 1: build locally. EAS rejects --auto-submit when --local is set,
+# so we split into separate build + submit calls.
 eas build \
   --platform ios \
   --profile production \
   --local \
-  --auto-submit \
   --non-interactive \
+  --output "$IPA_OUT" \
   --message "$MSG"
+
+# Step 2: submit the resulting .ipa to App Store Connect.
+echo ""
+echo "──── submitting $IPA_OUT to App Store Connect ────"
+eas submit \
+  --platform ios \
+  --path "$IPA_OUT" \
+  --non-interactive
 
 # ── Push the build to external testers ───────────────────────────────────────
 # eas auto-submits to App Store Connect, which makes the build VALID for
