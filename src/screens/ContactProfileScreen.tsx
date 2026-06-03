@@ -126,7 +126,7 @@ export function ContactProfileScreen() {
     <ScrollView style={[styles.root, { backgroundColor: c.background }]} contentContainerStyle={styles.content}>
       {/* Avatar + identity block */}
       <View style={styles.identity}>
-        <Avatar name={displayName} email={user.email} isBot={user.isBot} size={108} />
+        <Avatar name={displayName} email={user.email} isBot={user.isBot} avatarUrl={user.avatarUrl} size={108} />
         <View style={[styles.identityText]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             <Text style={[styles.name, { color: c.textPrimary }]} numberOfLines={1}>{displayName}</Text>
