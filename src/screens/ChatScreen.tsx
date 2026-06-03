@@ -518,6 +518,7 @@ export function ChatScreen({
             name={!isGroup ? (other?.name || other?.email) : headerTitle}
             email={other?.email}
             isBot={!isGroup ? other?.isBot : false}
+            avatarUrl={!isGroup ? other?.avatarUrl : undefined}
             size={28}
           />
           <View style={{ flexShrink: 1 }}>
