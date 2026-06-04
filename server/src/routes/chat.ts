@@ -1114,27 +1114,29 @@ router.get('/contacts', requireAuth, async (req: Request, res: Response) => {
   const isSelfSearch = normalizedSearch === 'self' || normalizedSearch === 'me';
 
   try {
-    const query = searchQuery
-      ? `
+    // Self is ALWAYS discoverable so you can DM yourself ("note to self"):
+    //  - empty query  -> everyone incl. you, you pinned first
+    //  - searching     -> others matching name/email, PLUS you if you match
+    //    name/email or typed the magic words "self"/"me". You always rank first.
+    const query = `
         MATCH (u:User)
-        WHERE (
+        WHERE
+          $search = ''
+          OR (
             u.id <> $userId
             AND (toLower(u.name) CONTAINS toLower($search) OR toLower(u.email) CONTAINS toLower($search))
-          ) OR (
-            $isSelfSearch = true
-            AND u.id = $userId
+          )
+          OR (
+            u.id = $userId
+            AND ($isSelfSearch = true
+                 OR toLower(u.name) CONTAINS toLower($search)
+                 OR toLower(u.email) CONTAINS toLower($search))
           )
         RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
         ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
-      `
-      : `
-        MATCH (u:User)
-        WHERE u.id <> $userId
-        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
-        ORDER BY u.name
       `;
 
-    const result = await session.run(query, { userId, search: searchQuery || '', isSelfSearch });
+    const result = await session.run(query, { userId, search: (searchQuery || '').trim(), isSelfSearch });
     const contacts = result.records.map(r => toJS(r.get('user')));
     res.json(contacts);
   } catch (error) {
