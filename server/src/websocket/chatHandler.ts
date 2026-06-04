@@ -4,6 +4,7 @@ import { getDriver } from '../db.js';
 import { validateToken, AuthUser } from '../middleware/auth.js';
 import { sendPushToUser } from '../services/push.js';
 import { processLinkPreviews } from '../services/linkPreview.js';
+import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
 
 interface AuthenticatedSocket extends Socket {
   user?: AuthUser;
@@ -284,6 +285,24 @@ export function setupChatSocket(io: Server): void {
 
         // Async link preview fetch — non-blocking (OpenChat-hq2)
         processLinkPreviews(io, messageId, conversationId, content);
+
+        // Hashtag → Thought extraction (openchat-1mo). This is the PRIMARY send
+        // path for both apps (web + mobile send via 'message:send'); the REST
+        // route was the only place this ran, so in-app #tags never created
+        // Thoughts. Mirror it here: best-effort, fresh session, never blocks the
+        // send; pass io so each Thought emits 'thought:created' live.
+        if (content) {
+          const tagSession = getDriver().session();
+          void createThoughtsFromMessageTags(tagSession, {
+            senderId: userId,
+            messageId,
+            conversationId,
+            content,
+            io,
+          })
+            .catch((err) => console.warn('[thought-from-tag] socket create failed:', err))
+            .finally(() => { void tagSession.close(); });
+        }
 
         callback?.({ success: true, message });
 
