@@ -1,4 +1,5 @@
 import { useState, FormEvent, useRef, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { useChat } from '../contexts/ChatContext';
 
 export function MessageInput() {
@@ -39,7 +40,16 @@ export function MessageInput() {
       stopTyping(activeConversationId);
       typingActiveRef.current = false;
     }
-    await sendMessage(content);
+    try {
+      // Both the WebSocket path and its REST fallback have to fail for this to
+      // throw (e.g. the user is fully offline). Don't lose what they typed:
+      // restore it to the composer and tell them, so they can retry instead of
+      // the message vanishing silently. See OpenChat-5q1.
+      await sendMessage(content);
+    } catch (err) {
+      setText((current) => (current ? current : content));
+      toast.error('Message not sent — check your connection and try again.');
+    }
   };
 
   const handleChange = (value: string) => {

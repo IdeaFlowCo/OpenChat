@@ -571,6 +571,17 @@ router.post('/conversations/:id/messages', requireAuth, async (req: Request, res
     });
 
     const message = toJS(result.records[0].get('message'));
+
+    // Broadcast to all participants in the conversation room, exactly like the
+    // WebSocket handler (chatHandler.ts message:send). Without this, messages
+    // sent via the REST fallback (used when a client's WebSocket is down — e.g.
+    // mobile users on a China VPN where the WS upgrade is blocked/reset) are
+    // persisted but NEVER delivered live to recipients. Clients dedupe by
+    // message.id, so the sender receiving its own broadcast is harmless.
+    // See OpenChat-5q1.
+    const io = req.app.get('io') as IOServer | undefined;
+    io?.to(`conversation:${conversationId}`).emit('message:new', message);
+
     res.status(201).json(message);
   } catch (error) {
     console.error('Error sending message:', error);
