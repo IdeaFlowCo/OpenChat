@@ -7,12 +7,16 @@
  * across concurrent sessions on the HTTP transport.
  *
  * Tools registered:
- *   oc_list_conversations  — list your conversations
- *   oc_get_messages        — recent messages from a conversation
- *   oc_send_message        — send a message (write)
- *   oc_react               — add emoji reaction (write)
- *   oc_create_dm           — start or retrieve a 1:1 DM (write)
- *   oc_register_agent      — mint a new agent API key (write)
+ *   oc_list_conversations   — list your conversations
+ *   oc_get_messages         — recent messages from a conversation
+ *   oc_send_message         — send a message (write)
+ *   oc_search_messages      — full-text search across messages/conversations/contacts
+ *   oc_list_contacts        — list/filter contacts
+ *   oc_create_conversation  — create a direct or group conversation (write)
+ *   oc_submit_feedback      — file feedback about OpenChat (write)
+ *   oc_react                — add emoji reaction (write)
+ *   oc_create_dm            — start or retrieve a 1:1 DM (write)
+ *   oc_register_agent       — mint a new agent API key (write)
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -25,6 +29,8 @@ import {
   type OpenChatConfig,
   type ConversationSummary,
   type Message,
+  type Contact,
+  type SearchMessageHit,
 } from './api.js';
 
 export const VERSION = '0.1.0';
@@ -84,6 +90,26 @@ function formatMessage(m: Message): string {
       ? ' ' + m.reactions.map((r) => `${r.emoji}×${r.count}`).join(' ')
       : '';
   return `[${m.id}]${time} ${sender}: ${m.content || '(no content)'}${reactions}`;
+}
+
+function formatSearchHit(m: SearchMessageHit): string {
+  const sender = m.sender?.name || m.sender?.email || m.senderId || 'unknown';
+  const time = m.createdAt ? ` [${m.createdAt}]` : '';
+  const convo = m.conversationTitle
+    ? ` in "${m.conversationTitle}"`
+    : m.conversationId
+      ? ` in conv ${m.conversationId}`
+      : '';
+  return `[${m.id}]${time} ${sender}${convo}: ${m.content || '(no content)'}`;
+}
+
+function formatContact(c: Contact): string {
+  const parts: string[] = [`id: ${c.id}`];
+  if (c.name) parts.push(`name: ${c.name}`);
+  if (c.email) parts.push(`email: ${c.email}`);
+  if (c.presenceStatus) parts.push(`presence: ${c.presenceStatus}`);
+  if (c.isBot) parts.push('bot');
+  return parts.join(' | ');
 }
 
 // ---- builder ----
@@ -194,6 +220,161 @@ export function buildServer(
         return textResult(
           `Message sent.\nid: ${msg.id}\ncreatedAt: ${msg.createdAt || 'unknown'}`
         );
+      } catch (e) {
+        return errorResult(e);
+      }
+    }
+  );
+
+  // ---- oc_search_messages ----
+  server.registerTool(
+    'oc_search_messages',
+    {
+      title: 'Search messages',
+      description:
+        'Full-text search across the messages, conversations, and contacts the authenticated user can see. ' +
+        'Maps to GET /api/chat/search. Returns matching message hits (with sender, conversation, and timestamp), ' +
+        'plus any matching conversations and contacts.',
+      inputSchema: {
+        query: z.string().min(1).describe('Search query string'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .optional()
+          .default(20)
+          .describe('Maximum number of message hits to return (default 20, max 200)'),
+      },
+    },
+    async ({ query, limit }) => {
+      try {
+        requireApiKey(api, 'Searching messages');
+        const result = await api.searchMessages(query, limit);
+        const messages = result.messages ?? [];
+        const conversations = result.conversations ?? [];
+        const contacts = result.contacts ?? [];
+
+        if (!messages.length && !conversations.length && !contacts.length) {
+          return textResult(`No results for "${query}".`);
+        }
+
+        const sections: string[] = [];
+        if (messages.length) {
+          sections.push(
+            `Messages (${messages.length}):\n` + messages.map(formatSearchHit).join('\n')
+          );
+        }
+        if (conversations.length) {
+          sections.push(
+            `Conversations (${conversations.length}):\n` +
+              conversations.map(formatConversation).join('\n')
+          );
+        }
+        if (contacts.length) {
+          sections.push(
+            `Contacts (${contacts.length}):\n` + contacts.map(formatContact).join('\n')
+          );
+        }
+        return textResult(`Results for "${query}":\n\n` + sections.join('\n\n'));
+      } catch (e) {
+        return errorResult(e);
+      }
+    }
+  );
+
+  // ---- oc_list_contacts ----
+  server.registerTool(
+    'oc_list_contacts',
+    {
+      title: 'List contacts',
+      description:
+        'List the contacts (users) available to the authenticated user. Maps to GET /api/chat/contacts. ' +
+        'Pass an optional query to filter by name or email; the special value "me" or "self" matches the caller. ' +
+        'Each entry includes id, name, email, and presence — use the id with oc_create_conversation.',
+      inputSchema: {
+        query: z
+          .string()
+          .optional()
+          .describe('Optional filter by name/email. "me" or "self" matches the caller.'),
+      },
+    },
+    async ({ query }) => {
+      try {
+        requireApiKey(api, 'Listing contacts');
+        const contacts = await api.listContacts(query);
+        if (!contacts.length) {
+          return textResult(query ? `No contacts match "${query}".` : 'No contacts found.');
+        }
+        return textResult(
+          `${contacts.length} contact(s):\n` + contacts.map(formatContact).join('\n')
+        );
+      } catch (e) {
+        return errorResult(e);
+      }
+    }
+  );
+
+  // ---- oc_create_conversation ----
+  server.registerTool(
+    'oc_create_conversation',
+    {
+      title: 'Create a conversation',
+      description:
+        'Create a new direct or group conversation. Maps to POST /api/chat/conversations. ' +
+        'Provide one or more participant user ids (find them with oc_list_contacts or oc_search_messages). ' +
+        'For a 1:1 DM by email address, prefer oc_create_dm. Returns the conversation id for oc_send_message.',
+      inputSchema: {
+        participantIds: z
+          .array(z.string().min(1))
+          .min(1)
+          .describe('User ids to include (the caller is added automatically)'),
+        title: z.string().optional().describe('Optional title (recommended for group conversations)'),
+        type: z
+          .enum(['direct', 'group'])
+          .optional()
+          .describe('Conversation type. Defaults server-side based on participant count.'),
+      },
+    },
+    async ({ participantIds, title, type }) => {
+      try {
+        requireApiKey(api, 'Creating conversations');
+        const conversation = await api.createConversation({ participantIds, title, type });
+        return textResult(
+          `Conversation ready.\nconversationId: ${conversation.id}` +
+            (conversation.title ? `\ntitle: ${conversation.title}` : '') +
+            (conversation.type ? `\ntype: ${conversation.type}` : '')
+        );
+      } catch (e) {
+        return errorResult(e);
+      }
+    }
+  );
+
+  // ---- oc_submit_feedback ----
+  server.registerTool(
+    'oc_submit_feedback',
+    {
+      title: 'Submit feedback',
+      description:
+        'File feedback (bug report, feature request, or note) about OpenChat. Maps to POST /api/feedback. ' +
+        'Returns a URL/id for the created feedback item when available.',
+      inputSchema: {
+        message: z.string().min(1).describe('The feedback message'),
+        context: z
+          .string()
+          .optional()
+          .describe('Optional extra context, e.g. page, conversation id, or steps to reproduce'),
+      },
+    },
+    async ({ message, context }) => {
+      try {
+        requireApiKey(api, 'Submitting feedback');
+        const result = await api.submitFeedback({ message, context });
+        const lines = ['Feedback submitted.'];
+        if (result?.id) lines.push(`id: ${result.id}`);
+        if (result?.url) lines.push(`url: ${result.url}`);
+        return textResult(lines.join('\n'));
       } catch (e) {
         return errorResult(e);
       }

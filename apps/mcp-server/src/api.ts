@@ -64,6 +64,32 @@ export interface User {
   [k: string]: unknown;
 }
 
+/** A contact returned by GET /api/chat/contacts. */
+export interface Contact {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+  presenceStatus?: string | null;
+  statusMessage?: string | null;
+  lastSeenAt?: string | null;
+  isBot?: boolean | null;
+  [k: string]: unknown;
+}
+
+/** A message hit returned inside the search response. */
+export interface SearchMessageHit extends Message {
+  conversationTitle?: string | null;
+  conversationType?: string | null;
+}
+
+/** Shape of GET /api/chat/search. */
+export interface SearchResult {
+  messages?: SearchMessageHit[];
+  conversations?: ConversationSummary[];
+  contacts?: Contact[];
+  [k: string]: unknown;
+}
+
 export class OpenChatApiError extends Error {
   constructor(
     public status: number,
@@ -182,6 +208,18 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
         `/api/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
         { body }
       ),
+
+    // ---- search ----
+    searchMessages: (q: string, limit?: number) =>
+      request<SearchResult>('GET', '/api/chat/search', { query: { q, limit } }),
+
+    // ---- contacts ----
+    listContacts: (q?: string) =>
+      request<Contact[]>('GET', '/api/chat/contacts', { query: { q } }),
+
+    // ---- feedback ----
+    submitFeedback: (body: { message: string; context?: string }) =>
+      request<{ url?: string; id?: string }>('POST', '/api/feedback', { body }),
 
     // ---- reactions ----
     addReaction: (messageId: string, emoji: string) =>

@@ -1,5 +1,5 @@
 {
-  "name": "@openchat/mcp-server",
+  "name": "openchat-mcp-server",
   "version": "0.1.0",
   "description": "Model Context Protocol server for OpenChat — lets Claude / Cursor / any MCP client list conversations, read and send messages, add reactions, and create DMs via the OpenChat API.",
   "type": "module",
@@ -9,10 +9,10 @@
   },
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "start:http": "node dist/http.js",
-    "dev": "tsc --watch",
-    "prepare": "npm run build"
+    "dev": "tsc --watch"
   },
   "keywords": [
     "mcp",

@@ -132,6 +132,10 @@ Set the API key one of three ways (checked in this order):
 | `oc_list_conversations` | List all your conversations (id, title, type, last message preview) |
 | `oc_get_messages(conversationId, limit?)` | Read recent messages from a conversation |
 | `oc_send_message(conversationId, text)` | Send a message to a conversation |
+| `oc_search_messages(query, limit?)` | Full-text search across messages, conversations, and contacts (`GET /api/chat/search`) |
+| `oc_list_contacts(query?)` | List/filter contacts by name or email; `me`/`self` matches the caller (`GET /api/chat/contacts`) |
+| `oc_create_conversation(participantIds, title?, type?)` | Create a direct or group conversation (`POST /api/chat/conversations`) |
+| `oc_submit_feedback(message, context?)` | File feedback about OpenChat (`POST /api/feedback`) |
 | `oc_react(messageId, emoji)` | Add an emoji reaction to a message |
 | `oc_create_dm(userEmail)` | Look up a user by email and start/return a 1:1 DM conversation |
 | `oc_register_agent(name, scopes?, expiresAt?)` | Mint a new agent API key under your account |
