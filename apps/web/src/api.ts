@@ -53,6 +53,44 @@ export interface Attachment {
   height?: number;
 }
 
+/** Open Graph link preview card attached to a message (OpenChat-hq2 / bmp.8). */
+export interface LinkPreview {
+  url: string;
+  title?: string | null;
+  description?: string | null;
+  image?: string | null;
+  siteName?: string | null;
+  fetchedAt: string;
+}
+
+/**
+ * Agent API key metadata (no plaintext). Mirrors mobile's AgentKey
+ * (apps/mobile/src/api/client.ts). Server: GET /api/agent-keys.
+ */
+export interface AgentKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  scopes: string[];
+  agentName?: string | null;
+  agentVersion?: string | null;
+  createdAt: string;
+  lastUsedAt?: string | null;
+  expiresAt?: string | null;
+  revokedAt?: string | null;
+}
+
+/** Data-export time windows. Mirrors mobile's ExportRangeKey. */
+export type ExportRangeKey = 'last_hour' | 'last_day' | 'last_week' | 'last_month' | 'all_time';
+
+export const EXPORT_RANGE_OPTIONS: Array<{ key: ExportRangeKey; label: string; detail: string }> = [
+  { key: 'last_hour', label: 'Last hour', detail: 'The latest messages and activity' },
+  { key: 'last_day', label: 'Last day', detail: 'Everything from the past 24 hours' },
+  { key: 'last_week', label: 'Last week', detail: 'The past 7 days' },
+  { key: 'last_month', label: 'Last month', detail: 'The past 30 days' },
+  { key: 'all_time', label: 'All time', detail: 'Your full available history' },
+];
+
 /** Aggregated reaction for a message (openchat-bmp.1). */
 export interface Reaction {
   emoji: string;
@@ -92,6 +130,14 @@ export interface Message {
   replyTo?: ReplyTo | null;
   /** Id of the message this is replying to (openchat-bmp.2). */
   replyToId?: string | null;
+  /** User IDs mentioned via @-mentions (openchat-bmp.8). */
+  mentions?: string[];
+  /** Open Graph link preview cards (openchat-bmp.8). */
+  linkPreviews?: LinkPreview[];
+  /** Forwarding provenance (OpenChat-hhc). Set when forwarded. */
+  forwardedFromMessageId?: string;
+  forwardedFromSenderId?: string;
+  forwardedFromSenderName?: string;
 }
 
 export interface Conversation {
@@ -104,6 +150,11 @@ export interface Conversation {
   lastMessagePreview?: string;
   lastMessage?: Message;
   participants?: { user: User; role: string }[];
+  /**
+   * Per-user mute state on the PARTICIPATES_IN edge (OpenChat-aes / bmp.5).
+   * null = not muted, 'always' = muted indefinitely, ISO-8601 = muted until.
+   */
+  mutedUntil?: string | null;
 }
 
 /**
@@ -914,6 +965,200 @@ class ApiClient {
       key: data.key,
       scopes: data.scopes ?? [],
     };
+  }
+
+  /**
+   * Authed fetch against an absolute (non-/api/chat) path, mirroring the
+   * 401-then-refresh-then-retry pattern used by getMe()/createAgentKey().
+   * Used for /api/agent-keys, /api/auth/*, /api/feedback, /api/assistant/*.
+   */
+  private async authedFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const buildHeaders = (): Record<string, string> => {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...((options.headers as Record<string, string>) || {}),
+      };
+      const token = this.getToken();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      return headers;
+    };
+
+    let response: Response;
+    try {
+      response = await fetch(path, { ...options, headers: buildHeaders() });
+    } catch (error) {
+      reportFetchError({ url: path, method: options.method || 'GET', error });
+      throw error;
+    }
+
+    if (response.status === 401) {
+      const refreshed = await this.refreshAccessToken();
+      if (refreshed) {
+        try {
+          response = await fetch(path, { ...options, headers: buildHeaders() });
+        } catch (error) {
+          reportFetchError({ url: path, method: options.method || 'GET', error });
+          throw error;
+        }
+      }
+    }
+
+    if (!response.ok) {
+      if (response.status !== 401) {
+        reportHttpError({ url: path, method: options.method || 'GET', status: response.status, statusText: response.statusText });
+      }
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || 'Request failed');
+    }
+
+    this.consecutiveRefreshes = 0;
+    // Some endpoints (DELETE/PATCH) may return 204/empty.
+    if (response.status === 204) return undefined as T;
+    return response.json().catch(() => undefined as T);
+  }
+
+  // ── Mute / unmute conversation (OpenChat-aes / bmp.5) ───────────────────
+  /**
+   * Set this user's mute state on a conversation.
+   *   null     → unmute
+   *   'always' → mute indefinitely
+   *   Date     → mute until that point in time
+   * PATCH /api/chat/conversations/:id/participants/me
+   */
+  async setConversationMute(conversationId: string, mutedUntil: Date | 'always' | null): Promise<{ conversationId: string; mutedUntil: string | null }> {
+    const body =
+      mutedUntil === null ? { mutedUntil: null }
+      : mutedUntil === 'always' ? { mutedUntil: 'always' as const }
+      : { mutedUntil: mutedUntil.toISOString() };
+    return this.fetch(`/conversations/${conversationId}/participants/me`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  }
+
+  // ── Block / unblock / list (OpenChat-46p / bmp.6) ───────────────────────
+  /** Block a user. POST /api/chat/users/:id/block */
+  async blockUser(userId: string): Promise<{ ok: boolean }> {
+    return this.fetch(`/users/${userId}/block`, { method: 'POST' });
+  }
+
+  /** Unblock a user. DELETE /api/chat/users/:id/block */
+  async unblockUser(userId: string): Promise<{ ok: boolean }> {
+    return this.fetch(`/users/${userId}/block`, { method: 'DELETE' });
+  }
+
+  /** List all blocked users. GET /api/chat/blocks → User[] */
+  async listBlocked(): Promise<User[]> {
+    return this.fetch('/blocks');
+  }
+
+  // ── Report (OpenChat-wgl) ───────────────────────────────────────────────
+  async submitReport(params: { targetType: 'message' | 'user'; targetId: string; reason: string; freeform?: string }): Promise<{ ok: boolean }> {
+    return this.fetch('/reports', { method: 'POST', body: JSON.stringify(params) });
+  }
+
+  // ── Forward a message to another conversation (OpenChat-hhc) ────────────
+  async forwardMessage(messageId: string, toConversationId: string): Promise<Message> {
+    return this.fetch(`/messages/${messageId}/forward`, {
+      method: 'POST',
+      body: JSON.stringify({ toConversationId }),
+    });
+  }
+
+  // ── Load-older / reconnect catch-up (bmp.9) ─────────────────────────────
+  /**
+   * Fetch all messages newer than `since` across every conversation. Called
+   * on socket reconnect to recover the gap. GET /api/chat/messages/since.
+   */
+  async messagesSince(since: string): Promise<{ messages: Message[]; truncated: boolean }> {
+    return this.fetch(`/messages/since?since=${encodeURIComponent(since)}`);
+  }
+
+  // ── Profile editing (OpenChat-tml / bmp.10) — PATCH /api/auth/me ─────────
+  async updateProfile(fields: { name?: string; statusMessage?: string; avatarUrl?: string }): Promise<User> {
+    return this.authedFetch(`${AUTH_BASE}/me`, { method: 'PATCH', body: JSON.stringify(fields) });
+  }
+
+  // ── Account deletion (OpenChat-nhy) — DELETE /api/auth/me ────────────────
+  async deleteAccount(): Promise<{ ok: boolean }> {
+    return this.authedFetch(`${AUTH_BASE}/me`, { method: 'DELETE' });
+  }
+
+  // ── Data export (account-level). GET /api/auth/export?range=… ────────────
+  // Returns { filename, text } so the caller can trigger a browser download.
+  async exportAccount(range: ExportRangeKey): Promise<{ filename: string; text: string }> {
+    const path = `${AUTH_BASE}/export?range=${encodeURIComponent(range)}`;
+    return this.downloadJson(path, `openchat-account-${range}.json`);
+  }
+
+  async exportConversation(conversationId: string, range: ExportRangeKey): Promise<{ filename: string; text: string }> {
+    const path = `${API_BASE}/conversations/${conversationId}/export?range=${encodeURIComponent(range)}`;
+    return this.downloadJson(path, `openchat-conversation-${range}.json`);
+  }
+
+  /** Authed JSON download with one refresh-retry. Reads the body as text so the caller can save it. */
+  private async downloadJson(path: string, fallbackFilename: string): Promise<{ filename: string; text: string }> {
+    const buildHeaders = (): Record<string, string> => {
+      const headers: Record<string, string> = {};
+      const token = this.getToken();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      return headers;
+    };
+    let response: Response;
+    try {
+      response = await fetch(path, { headers: buildHeaders() });
+    } catch (error) {
+      reportFetchError({ url: path, method: 'GET', error });
+      throw error;
+    }
+    if (response.status === 401) {
+      const refreshed = await this.refreshAccessToken();
+      if (refreshed) response = await fetch(path, { headers: buildHeaders() });
+    }
+    const text = await response.text();
+    if (!response.ok) {
+      let msg = text;
+      try { msg = JSON.parse(text).error || msg; } catch { /* not JSON */ }
+      throw new Error(msg || 'Export failed');
+    }
+    const disposition = response.headers.get('Content-Disposition');
+    const match = disposition?.match(/filename="?([^";]+)"?/i);
+    return { filename: match?.[1]?.trim() || fallbackFilename, text };
+  }
+
+  // ── Feedback (oc8.3) — POST /api/feedback ────────────────────────────────
+  async submitFeedback(message: string, context?: string): Promise<{ url?: string; id?: string }> {
+    return this.authedFetch('/api/feedback', { method: 'POST', body: JSON.stringify({ message, context }) });
+  }
+
+  // ── Agent keys management (OpenChat-7c9) ─────────────────────────────────
+  async listAgentKeys(): Promise<AgentKey[]> {
+    return this.authedFetch('/api/agent-keys');
+  }
+
+  async revealAgentKey(id: string): Promise<{ id: string; name: string; key: string }> {
+    return this.authedFetch(`/api/agent-keys/${id}/reveal`);
+  }
+
+  async revokeAgentKey(id: string): Promise<{ ok: boolean }> {
+    return this.authedFetch(`/api/agent-keys/${id}`, { method: 'DELETE' });
+  }
+
+  // ── Forward-to-agent (openchat-ug6) ──────────────────────────────────────
+  /**
+   * Ask the user's Assistant about a specific message. The server agent is
+   * building this endpoint in parallel; we code to the agreed contract:
+   *   POST /api/assistant/forward
+   *   { sourceConversationId, sourceMessageId, question? } -> { conversationId }
+   * The caller then navigates to the returned Assistant DM.
+   */
+  async forwardToAssistant(params: { sourceConversationId: string; sourceMessageId: string; question?: string }): Promise<{ conversationId: string }> {
+    return this.authedFetch('/api/assistant/forward', { method: 'POST', body: JSON.stringify(params) });
+  }
+
+  /** Idempotently open/create the caller's Assistant DM. POST /api/assistant/ensure. */
+  async ensureAssistant(): Promise<Conversation> {
+    return this.authedFetch('/api/assistant/ensure', { method: 'POST' });
   }
 }
 
