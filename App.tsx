@@ -252,6 +252,19 @@ function ThoughtsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
 //   1. Larger, bolder icon (font-weight 700, size 24 vs. 20)
 //   2. A soft cobalt-tinted pill background (c.primaryMuted) behind the icon
 //   3. Bold label text in the brand cobalt (c.primary)
+//
+// OpenChat (desktop-ux-audit): on DESKTOP web (≥900px) each tab item is ~half
+// the full screen width, so the small centered icon pill from OpenChat-65r is
+// a tiny dot floating in a huge tab item — proportionally far weaker than on a
+// phone (where the item is half a narrow screen). Two extra signals make the
+// active tab unambiguous at any item width:
+//   4. A full-item tinted active background (tabBarActiveBackgroundColor on the
+//      navigator) — fills the whole wide tab cell, not just a 44px pill.
+//   5. A 3px top accent bar (c.primary) on the active item, rendered here as an
+//      absolutely-positioned bar so it spans the item regardless of its width.
+//      This is the canonical desktop "selected tab" affordance.
+
+const TAB_INDICATOR_HEIGHT = 3;
 
 function TabIcon({ label, focused, color, c }: {
   label: string;
@@ -271,6 +284,23 @@ function TabIcon({ label, focused, color, c }: {
         backgroundColor: focused ? c.primaryMuted : 'transparent',
       }}
     >
+      {/* Top accent bar — the desktop-web "selected tab" indicator. Pinned to
+          the top of the tab item via a negative offset so it reads as a tab
+          underline regardless of how wide the item gets on large screens. */}
+      {focused && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: -8,
+            left: 0,
+            right: 0,
+            height: TAB_INDICATOR_HEIGHT,
+            borderRadius: TAB_INDICATOR_HEIGHT,
+            backgroundColor: c.primary,
+          }}
+        />
+      )}
       <Text
         style={{
           fontSize: focused ? 24 : 20,
@@ -326,7 +356,12 @@ function AuthedTabs({
         tabBarActiveTintColor: c.primary,
         tabBarInactiveTintColor: c.textSecondary,
         tabBarLabelStyle: { fontSize: 12, fontWeight: '500' },
-        tabBarActiveBackgroundColor: 'transparent',
+        // desktop-ux-audit: tint the WHOLE active tab cell (not just the icon
+        // pill). On desktop web each cell is ~half the screen, so a full-cell
+        // primaryMuted fill is the dominant "this tab is selected" signal;
+        // mobile cells are narrow enough that this reads as a subtle highlight.
+        // Safe in both light + dark (primaryMuted is a low-alpha cobalt wash).
+        tabBarActiveBackgroundColor: c.primaryMuted,
       }}
     >
       <Tab.Screen

@@ -35,7 +35,7 @@
  *     conversation
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Animated, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
@@ -61,6 +61,40 @@ const SIDEBAR_WIDTH_EXPANDED = 320;
 const SIDEBAR_WIDTH_COLLAPSED = 56;
 const SIDEBAR_ANIM_MS = 160;
 const STORAGE_KEY = 'openchat_sidebar_collapsed';
+
+/**
+ * Hover-aware icon button for the desktop sidebar header (desktop-ux-audit).
+ *
+ * The previous inline Pressables had no hover feedback and a small click
+ * target (~24px tall) — fine for touch, but on desktop web with a mouse you
+ * couldn't tell the cog / search / + were clickable until you clicked. This
+ * gives them a 32px-min target, a pointer cursor, and a surfaceElevated
+ * hover wash (light + dark safe). `title` is the native browser tooltip.
+ */
+function IconButton({
+  onPress, title, accessibilityLabel, hoverBg, children,
+}: {
+  onPress: () => void;
+  title: string;
+  accessibilityLabel: string;
+  hoverBg: string;
+  children: ReactNode;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <Pressable
+      onPress={onPress}
+      onHoverIn={Platform.OS === 'web' ? () => setHovered(true) : undefined}
+      onHoverOut={Platform.OS === 'web' ? () => setHovered(false) : undefined}
+      // @ts-ignore — title is a web-only DOM attr; RN-web passes through.
+      title={title}
+      accessibilityLabel={accessibilityLabel}
+      style={[styles.iconBtn, hovered ? { backgroundColor: hoverBg } : null]}
+    >
+      {children}
+    </Pressable>
+  );
+}
 
 export function MasterDetailLayout() {
   const { scheme } = useTheme();
@@ -223,69 +257,63 @@ export function MasterDetailLayout() {
           // button. Everything else is hidden — clicking the toggle restores
           // the full header.
           <View style={[styles.sidebarHeaderCompact, { borderColor: c.border }]}>
-            <Pressable
+            <IconButton
               onPress={toggleCollapsed}
-              // @ts-ignore — title is a web-only DOM attr; RN-web passes through.
               title="Expand sidebar"
-              style={styles.iconBtn}
               accessibilityLabel="Expand sidebar"
+              hoverBg={c.surfaceElevated}
             >
               <Text style={{ color: c.primary, fontSize: 18 }}>›</Text>
-            </Pressable>
-            <Pressable
+            </IconButton>
+            <IconButton
               onPress={openNew}
-              // @ts-ignore
               title="New conversation (⌘N)"
-              style={styles.iconBtn}
               accessibilityLabel="New conversation"
+              hoverBg={c.surfaceElevated}
             >
               <Text style={{ color: c.primary, fontSize: 22, lineHeight: 22, fontWeight: '300' }}>＋</Text>
-            </Pressable>
+            </IconButton>
           </View>
         ) : (
           <View style={[styles.sidebarHeader, { borderColor: c.border }]}>
-            <Pressable
+            <IconButton
               onPress={toggleCollapsed}
-              // @ts-ignore
               title="Collapse sidebar"
-              style={styles.iconBtn}
               accessibilityLabel="Collapse sidebar"
+              hoverBg={c.surfaceElevated}
             >
               <Text style={{ color: c.primary, fontSize: 18 }}>‹</Text>
-            </Pressable>
-            <Pressable
+            </IconButton>
+            <IconButton
               onPress={openSettings}
-              // @ts-ignore
               title="Settings (⌘,)"
-              style={styles.iconBtn}
               accessibilityLabel="Settings"
+              hoverBg={c.surfaceElevated}
             >
               <Text style={{ color: c.primary, fontSize: 20 }}>⚙︎</Text>
-            </Pressable>
+            </IconButton>
             <View style={{ flex: 1, alignItems: 'center' }}>
               <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary }}>Chats</Text>
               <Text style={{ fontSize: 11, color: c.textSecondary }} numberOfLines={1}>
                 {currentUser?.email}  ·  {isConnected ? '🟢 connected' : '⚪ connecting…'}
               </Text>
             </View>
-            <Pressable
+            <IconButton
               onPress={openSearch}
-              // @ts-ignore
               title="Search (⌘K)"
-              style={styles.iconBtn}
               accessibilityLabel="Search"
+              hoverBg={c.surfaceElevated}
             >
               <Text style={{ color: c.primary, fontSize: 18 }}>🔍</Text>
-            </Pressable>
-            <Pressable
+            </IconButton>
+            <IconButton
               onPress={openNew}
-              // @ts-ignore
               title="New conversation (⌘N)"
-              style={styles.iconBtn}
               accessibilityLabel="New conversation"
+              hoverBg={c.surfaceElevated}
             >
               <Text style={{ color: c.primary, fontSize: 26, lineHeight: 26, fontWeight: '300' }}>＋</Text>
-            </Pressable>
+            </IconButton>
           </View>
         )}
         <View style={{ flex: 1 }}>
@@ -343,9 +371,15 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   iconBtn: {
+    minWidth: 32,
+    minHeight: 32,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    // @ts-ignore — web-only: show a pointer so these read as clickable.
+    cursor: 'pointer',
   },
   // Back-to-home bar at the top of the sidebar (OpenChat-601.1)
   homeBar: {

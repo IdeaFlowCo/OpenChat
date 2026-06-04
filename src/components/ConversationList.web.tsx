@@ -85,9 +85,15 @@ function ConversationRow({ item, isActive, onPress, compact }: RowProps) {
   const someoneTyping = typingSet && typingSet.size > 0
     && Array.from(typingSet).some(uid => uid !== currentUser?.userId);
 
-  // Background priority: active > hover > default
+  // Background priority: active > hover > default.
+  // desktop-ux-audit: the active row previously used c.bubbleOther, which in
+  // LIGHT mode is gray-100 (#f3f4f6) — identical to the surfaceElevated hover
+  // wash, so the selected conversation was indistinguishable from a row you
+  // merely hovered. Use primaryMuted (a cobalt wash) for the active row so it
+  // is clearly distinct from hover in both light + dark, plus a left accent
+  // bar below for an unmistakable "this chat is open" marker.
   const rowBg = isActive
-    ? c.bubbleOther
+    ? c.primaryMuted
     : hovered
       ? c.surfaceElevated
       : 'transparent';
@@ -128,6 +134,12 @@ function ConversationRow({ item, isActive, onPress, compact }: RowProps) {
       onHoverOut={Platform.OS === 'web' ? () => setHovered(false) : undefined}
       style={[styles.row, { borderColor: c.divider, backgroundColor: rowBg }]}
     >
+      {isActive && (
+        <View
+          pointerEvents="none"
+          style={[styles.activeAccent, { backgroundColor: c.primary }]}
+        />
+      )}
       <Avatar
         name={item.type === 'direct' ? (other?.name || other?.email) : title}
         email={other?.email}
@@ -258,6 +270,16 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 12,
+    // @ts-ignore — web-only: rows are clickable, show a pointer cursor.
+    cursor: 'pointer',
+  },
+  // Left accent bar marking the active conversation row (desktop-ux-audit).
+  activeAccent: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
   },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   titleRow: { flex: 1, flexDirection: 'row', alignItems: 'center' },
@@ -278,6 +300,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 6,
+    // @ts-ignore — web-only: rows are clickable, show a pointer cursor.
+    cursor: 'pointer',
   },
   compactUnread: {
     position: 'absolute',
