@@ -1237,11 +1237,18 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
     //   here causes confusing double-counted results).
     // - Contacts excludes self, matching the existing /contacts behavior.
     const [messagesResult, conversationsResult, contactsResult] = await Promise.all([
+      // Match messages by the conversationId PROPERTY (always set), not the
+      // IN_CONVERSATION relationship — the socket send path and others only set
+      // the property, so a relationship join silently misses most messages.
       session.run(`
-        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)<-[:IN_CONVERSATION]-(m:Message)
-        WHERE m.deletedAt IS NULL
+        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
+        WITH collect(c.id) AS cids
+        MATCH (m:Message)
+        WHERE m.conversationId IN cids
+          AND m.deletedAt IS NULL
           AND toLower(m.content) CONTAINS toLower($q)
         MATCH (sender:User {id: m.senderId})
+        MATCH (c:Conversation {id: m.conversationId})
         RETURN m {
           .id, .content, .conversationId, .senderId, .createdAt,
           sender: sender { .id, .name, .email, .isBot },
