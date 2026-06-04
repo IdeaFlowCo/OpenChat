@@ -2,6 +2,21 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
+## 🔁 Web ↔ Mobile parity (MANDATORY)
+
+OpenChat ships across **two repos that must stay in sync**:
+
+| Repo | What it is | Surfaces |
+|------|-----------|----------|
+| `IdeaFlowCo/OpenChat` (this repo) | Node/Express + Neo4j **server**, legacy Vite **web** client, and the **deploy host** that `expo export`s openchat-mobile into `/m` and `/d` | `chat.globalbr.ai`, `/legacy` |
+| `tmad4000/openchat-mobile` (`~/code/openchat-mobile`) | React Native / Expo app | native iOS (TestFlight) + RN-web at **`/m`** (mobile web) and **`/d`** (desktop web) |
+
+**Rule: any user-facing chat change you make in one repo, you must also make in the other**, in the SAME work session, so native and web never drift. This includes composer behavior, send/receive, auth flows, message rendering, presence, etc. The backend is shared (one server), so server changes cover both — but **client changes do NOT cross repos automatically**.
+
+- After changing a feature here, ask: "does `openchat-mobile` have the same surface?" If yes, port it (and vice versa). `deploy.sh` rebuilds `/m`,`/d` from `~/code/openchat-mobile`, so a web deploy ships whatever is committed there.
+- **Platform-appropriate exceptions are fine** (just document them): e.g. Enter-to-send is **web-only** — on a native touch keyboard the return key stays a newline and sending is the send button. No hardware-keyboard Enter handling is needed.
+- Standing tracker: epic **openchat-3jq** ("keep web/mobile in sync").
+
 ## Quick Reference
 
 ```bash
