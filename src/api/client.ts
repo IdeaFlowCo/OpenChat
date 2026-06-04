@@ -663,6 +663,17 @@ export const api = {
     request<{ ok: boolean }>('/api/auth/me', { method: 'DELETE' }),
 
   /**
+   * Submit user feedback. Server creates a WorldIssueTracker issue (oc8.3) and
+   * returns its URL. Requires the server /api/feedback route (gated on the
+   * WIT_AGENT_KEY env var); returns 503 until that's configured/deployed.
+   */
+  submitFeedback: (message: string, context?: string) =>
+    request<{ url: string; id?: string }>('/api/feedback', {
+      method: 'POST',
+      body: JSON.stringify({ message, context }),
+    }),
+
+  /**
    * Check whether the current user has accepted the AI disclosure. (OpenChat-ds3)
    * Returns `{ acceptedAt: string | null }`.
    */

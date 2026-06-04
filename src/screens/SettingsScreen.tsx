@@ -44,6 +44,38 @@ export function SettingsScreen() {
   const [exportSheetVisible, setExportSheetVisible] = useState(false);
   const [exportBusyRange, setExportBusyRange] = useState<ExportRangeKey | null>(null);
 
+  // Send feedback -> server creates a WorldIssueTracker issue (oc8.3).
+  const [sendingFeedback, setSendingFeedback] = useState(false);
+  const handleSendFeedback = useCallback(() => {
+    const submit = async (message?: string) => {
+      const text = (message || '').trim();
+      if (!text) return;
+      setSendingFeedback(true);
+      try {
+        const { url } = await api.submitFeedback(text);
+        Alert.alert('Thanks!', `Your feedback was sent.${url ? `\n\n${url}` : ''}`);
+      } catch (err) {
+        Alert.alert(
+          'Couldn’t send feedback',
+          err instanceof Error ? err.message : 'Please try again later.'
+        );
+      } finally {
+        setSendingFeedback(false);
+      }
+    };
+    if (Platform.OS === 'ios') {
+      Alert.prompt(
+        'Send feedback',
+        'What’s working, broken, or missing?',
+        submit,
+        'plain-text'
+      );
+    } else {
+      // Android has no Alert.prompt; v1 falls back to the web tracker.
+      Linking.openURL('https://worldissuetracker.com');
+    }
+  }, []);
+
   const handleDeleteAccount = useCallback(() => {
     // First confirmation alert
     Alert.alert(
@@ -204,6 +236,28 @@ export function SettingsScreen() {
           </View>
         </View>
       )}
+
+      <View style={styles.section}>
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>FEEDBACK</Text>
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <TouchableOpacity
+            style={[styles.optionRow]}
+            onPress={handleSendFeedback}
+            disabled={sendingFeedback}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>
+                {sendingFeedback ? 'Sending…' : 'Send feedback'}
+              </Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                Report a bug or request a feature
+              </Text>
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
 
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>DATA</Text>
