@@ -9,14 +9,43 @@
 html, body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-  /* Prevent overscroll bounce + horizontal scroll on iOS */
-  overscroll-behavior-y: contain;
+  /* Block overscroll bounce + any document-level scroll on iOS. The chat
+     viewport is an internal scroll region inside MessageList; the document
+     itself MUST NOT scroll, or iOS will auto-scroll on input focus and push
+     the chat header above the URL bar. */
+  overscroll-behavior: none;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
 }
 
+/* iOS quirk (2026-05-30 v2 fix): position:fixed on the <html> element is
+   known-buggy on some iOS Safari versions — html IS the viewport, so
+   fixed-positioning it is undefined behavior. Pin BODY only, not html.
+   Per Jacob's iPhone test where the previous html+body fixed approach
+   still leaked iOS auto-scroll on input focus. WhatsApp Web mobile uses
+   body-only fixed. Also force-isolate body into its own compositing
+   layer (transform: translateZ(0)) so iOS can't apply its own implicit
+   transform to "scroll" the focused input into view. */
+body {
+  position: fixed;
+  inset: 0;
+  transform: translateZ(0);
+}
+
+/* --app-height is set by main.tsx via the visualViewport API. It tracks the
+   *actual* visible viewport — i.e. it SHRINKS when the iOS soft keyboard is
+   open. 100dvh does NOT shrink for the keyboard on iOS Safari. */
 #root {
-  /* 100dvh respects iOS dynamic toolbar; fallback to 100vh for older browsers */
+  position: absolute;
+  inset: 0;
+  /* Fallbacks for browsers w/o visualViewport JS (e.g. very old) */
   height: 100vh;
   height: 100dvh;
+  height: var(--app-height, 100dvh);
+  /* New compositing context isolates #root's layout from any iOS
+     scroll-into-view manipulation. */
+  isolation: isolate;
 }
 
 /* Mobile: 16px input font prevents iOS Safari from auto-zooming on focus.
@@ -34,13 +63,20 @@ html, body {
 }
 
 /* Safe-area helpers for iOS notch / home indicator. Tailwind doesn't ship
-   these by default so expose them as utilities. */
+   these by default so expose them as utilities.
+   .pt-safe / .pb-safe use max(env, 0.5rem) so that in non-notched contexts
+   (Safari tab, desktop) the element still gets a sane minimum 8px padding
+   — matching Tailwind's py-2 default. Without the max(), pt-safe would
+   clobber any Tailwind py- with 0px in non-notched contexts, leaving
+   chat headers flush against the URL bar. Per codex review 2026-05-30. */
 .pb-safe {
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 0.5rem);
 }
 .pt-safe {
-  padding-top: env(safe-area-inset-top, 0);
+  padding-top: max(env(safe-area-inset-top, 0px), 0.5rem);
 }
+/* Left/right have no sensible "minimum" — they only exist for landscape
+   notched devices. Keep them as raw env() and let zero pass through. */
 .pl-safe {
   padding-left: env(safe-area-inset-left, 0);
 }
@@ -49,4 +85,28 @@ html, body {
 }
 .h-safe-bottom {
   height: env(safe-area-inset-bottom, 0);
+}
+
+/* Typing indicator dot animation — staggered bounce for three dots */
+@keyframes typing-dot {
+  0%, 60%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  30% {
+    transform: scale(1.35);
+    opacity: 1;
+  }
+}
+
+/* Hide the Noos feedback widget on small screens while a conversation is
+   active. The widget is fixed bottom-right and floats into the chat area
+   when the keyboard is open; its `bottom: 80px` is independent of our
+   --app-height math so it does not lift correctly with the visualViewport.
+   Restored on desktop and on the conversation-list view. Per codex review
+   2026-05-30. */
+@media (max-width: 767px) {
+  html[data-active-conversation] #noos-feedback-widget {
+    display: none !important;
+  }
 }

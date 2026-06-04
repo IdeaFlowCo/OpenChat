@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#5664e2">
+<title>OpenChat — real-time messaging with AI built in</title>
+<meta name="description" content="OpenChat is a fast, modern messaging app with iMessage-quality UX and AI assistants you can invite into any conversation. Available on iOS, Android, and the web.">
+<meta property="og:title" content="OpenChat">
+<meta property="og:description" content="Real-time messaging with AI assistants you can invite into any chat.">
+<meta property="og:image" content="https://chat.globalbr.ai/about/icon.png">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --bg: #0a0c18;
+    --bg-2: #0f1230;
+    --surface: rgba(255,255,255,0.04);
+    --surface-strong: rgba(255,255,255,0.08);
+    --border: rgba(255,255,255,0.10);
+    --text: #f4f6ff;
+    --text-dim: #9aa0c5;
+    --text-faint: #5b6195;
+    --accent: #7c80ff;
+    --accent-2: #ad6cff;
+    --accent-bg: linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%);
+    --shadow-soft: 0 8px 24px rgba(0,0,0,0.32);
+    --shadow-strong: 0 24px 60px rgba(76,80,200,0.35);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    line-height: 1.5;
+    overflow-x: hidden;
+  }
+  /* Background — soft gradient orbs */
+  body::before {
+    content: "";
+    position: fixed; inset: 0; z-index: -1;
+    background:
+      radial-gradient(900px 600px at 20% -10%, #2a2475 0%, transparent 60%),
+      radial-gradient(800px 500px at 80% 10%, #6230a8 0%, transparent 55%),
+      radial-gradient(700px 600px at 50% 110%, #1c1f5e 0%, transparent 60%),
+      var(--bg);
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: #b9bcff; }
+
+  /* Layout */
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  header.nav {
+    padding: 24px 0; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; }
+  .brand img { width: 36px; height: 36px; border-radius: 9px; box-shadow: var(--shadow-soft); }
+  .brand-name { font-size: 17px; letter-spacing: -0.01em; }
+  .nav-links { display: flex; gap: 24px; align-items: center; }
+  .nav-links a { color: var(--text-dim); font-size: 14px; font-weight: 500; }
+  .nav-links a:hover { color: var(--text); }
+
+  /* Hero */
+  .hero { padding: 64px 0 56px; text-align: center; }
+  .hero .icon {
+    width: 128px; height: 128px; border-radius: 28px; box-shadow: var(--shadow-strong); margin-bottom: 28px;
+  }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--border);
+    font-size: 12px; color: var(--text-dim); margin-bottom: 20px;
+  }
+  .badge-dot { width: 6px; height: 6px; border-radius: 999px; background: #43d68b; box-shadow: 0 0 8px #43d68b; }
+  h1 {
+    font-size: clamp(36px, 6vw, 64px);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    line-height: 1.05;
+    margin: 0 0 16px;
+    background: linear-gradient(180deg, #ffffff 0%, #c8cbff 130%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .lede {
+    font-size: clamp(16px, 1.5vw, 19px);
+    color: var(--text-dim);
+    max-width: 640px;
+    margin: 0 auto 36px;
+  }
+
+  /* Platform grid */
+  .platforms { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; max-width: 920px; margin: 0 auto 24px; }
+  .platform {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+    padding: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    color: inherit;
+  }
+  .platform:hover {
+    transform: translateY(-2px);
+    border-color: rgba(173,108,255,0.5);
+    background: var(--surface-strong);
+  }
+  .platform-icon {
+    width: 36px; height: 36px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-bg);
+    font-size: 18px; font-weight: 700; color: #fff;
+    box-shadow: 0 6px 16px rgba(124,128,255,0.4);
+  }
+  .platform-name { font-size: 16px; font-weight: 600; color: var(--text); }
+  .platform-sub { font-size: 13px; color: var(--text-dim); }
+  .platform-cta {
+    margin-top: 6px;
+    font-size: 13px; font-weight: 600; color: var(--accent);
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .platform-cta::after { content: "→"; transition: transform 160ms ease; }
+  .platform:hover .platform-cta::after { transform: translateX(3px); }
+
+  /* Feature grid */
+  section.features { padding: 80px 0 56px; }
+  .section-title {
+    font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--text-faint); margin: 0 0 18px; text-align: center;
+  }
+  .section-h {
+    font-size: clamp(28px, 4vw, 42px); font-weight: 700;
+    text-align: center; margin: 0 0 48px;
+    letter-spacing: -0.02em; color: var(--text);
+  }
+  .feature-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr));
+    gap: 14px;
+  }
+  .feature {
+    padding: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+  }
+  .feature-emoji { font-size: 24px; margin-bottom: 12px; display: block; }
+  .feature-title { font-size: 16px; font-weight: 600; margin: 0 0 6px; color: var(--text); }
+  .feature-desc { font-size: 14px; color: var(--text-dim); margin: 0; line-height: 1.55; }
+
+  /* CTA banner */
+  .cta-banner {
+    text-align: center;
+    margin: 56px auto 0;
+    padding: 48px 32px;
+    background: var(--accent-bg);
+    border-radius: 24px;
+    box-shadow: var(--shadow-strong);
+    max-width: 880px;
+  }
+  .cta-banner h2 { font-size: clamp(24px, 3vw, 32px); font-weight: 700; margin: 0 0 8px; color: #fff; letter-spacing: -0.01em; }
+  .cta-banner p { color: rgba(255,255,255,0.85); margin: 0 0 24px; font-size: 15px; }
+  .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .cta-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 22px;
+    border-radius: 999px;
+    font-size: 14px; font-weight: 600;
+    background: #ffffff; color: #1a1a2e;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    transition: transform 160ms ease;
+  }
+  .cta-btn:hover { transform: translateY(-1px); color: #1a1a2e; }
+  .cta-btn.ghost { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.5); box-shadow: none; }
+  .cta-btn.ghost:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
+  /* Footer */
+  footer { padding: 56px 0 32px; text-align: center; }
+  footer .links { display: flex; gap: 28px; justify-content: center; flex-wrap: wrap; margin-bottom: 16px; }
+  footer .links a { color: var(--text-dim); font-size: 13px; }
+  footer .links a:hover { color: var(--text); }
+  footer .small { font-size: 12px; color: var(--text-faint); }
+
+  @media (max-width: 640px) {
+    .hero { padding: 40px 0 32px; }
+    .hero .icon { width: 96px; height: 96px; border-radius: 22px; }
+    .cta-banner { padding: 32px 20px; border-radius: 18px; }
+    .nav-links a:not(.brand) { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="nav">
+    <div class="brand">
+      <img src="/about/icon.png" alt="OpenChat" loading="eager">
+      <span class="brand-name">OpenChat</span>
+    </div>
+    <nav class="nav-links" aria-label="primary">
+      <a href="#install">Install</a>
+      <a href="#features">Features</a>
+      <a href="https://github.com/tmad4000/openchat-mobile" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <img src="/about/icon.png" alt="" class="icon" loading="eager">
+    <div class="badge"><span class="badge-dot"></span>Beta · TestFlight + Web · 30+ builds shipped</div>
+    <h1>Messaging that<br>actually feels good.</h1>
+    <p class="lede">
+      Real-time chat with iMessage-grade polish — read receipts, reactions, voice notes, link previews, and AI assistants you can invite into any conversation.
+    </p>
+  </section>
+
+  <section id="install">
+    <h2 class="section-title">Get OpenChat</h2>
+    <div class="platforms">
+
+      <a class="platform" href="https://testflight.apple.com/join/QvUPzDMY" target="_blank" rel="noopener">
+        <div class="platform-icon"></div>
+        <div class="platform-name">iOS · TestFlight</div>
+        <div class="platform-sub">Native app via Apple's beta program</div>
+        <span class="platform-cta">Join TestFlight</span>
+      </a>
+
+      <a class="platform" href="https://expo.dev/artifacts/eas/94tzwhaMkezUC89qCpXoXx.apk" target="_blank" rel="noopener">
+        <div class="platform-icon" style="background:linear-gradient(135deg,#3ddc84 0%,#26854f 100%);box-shadow:0 6px 16px rgba(61,220,132,0.4);">A</div>
+        <div class="platform-name">Android · APK</div>
+        <div class="platform-sub">Direct install — preview build</div>
+        <span class="platform-cta">Download APK</span>
+      </a>
+
+      <a class="platform" href="/m/" target="_blank" rel="noopener">
+        <div class="platform-icon" style="background:linear-gradient(135deg,#5fadf2 0%,#3a7ec1 100%);box-shadow:0 6px 16px rgba(95,173,242,0.4);">M</div>
+        <div class="platform-name">Mobile Web</div>
+        <div class="platform-sub">No install — works in any browser</div>
+        <span class="platform-cta">Open</span>
+      </a>
+
+      <a class="platform" href="/d/" target="_blank" rel="noopener">
+        <div class="platform-icon" style="background:linear-gradient(135deg,#b46cff 0%,#7c41cc 100%);box-shadow:0 6px 16px rgba(180,108,255,0.4);">D</div>
+        <div class="platform-name">Desktop Web</div>
+        <div class="platform-sub">Responsive layout with keyboard shortcuts</div>
+        <span class="platform-cta">Open</span>
+      </a>
+
+    </div>
+  </section>
+
+  <section id="features" class="features">
+    <h2 class="section-title">What's in the box</h2>
+    <h3 class="section-h">Every chat-app primitive,<br>polished and shipped.</h3>
+    <div class="feature-grid">
+
+      <div class="feature">
+        <span class="feature-emoji">💬</span>
+        <h4 class="feature-title">Real-time DMs &amp; groups</h4>
+        <p class="feature-desc">Socket.IO under the hood. Typing indicators, presence, read receipts in three shades (sent / delivered / read).</p>
+      </div>
+
+      <div class="feature">
+        <span class="feature-emoji">🤖</span>
+        <h4 class="feature-title">AI assistants in any chat</h4>
+        <p class="feature-desc">Invite an AI bot into a DM or group. Permission-gated, scope-aware, and clearly disclosed to all participants.</p>
+      </div>
+
+      <div class="feature">
+        <span class="feature-emoji">✨</span>
+        <h4 class="feature-title">Pre-send transforms</h4>
+        <p class="feature-desc">Tap the sparkle. NVC rewrite, make concise, more formal, more casual, or translate — all before you send.</p>
+      </div>
+
+      <div class="feature">
+        <span class="feature-emoji">🎙️</span>
+        <h4 class="feature-title">Voice notes</h4>
+        <p class="feature-desc">Hold to record, slide to cancel. Plays back inline with a waveform.</p>
+      </div>
+
+      <div class="feature">
+        <span class="feature-emoji">📎</span>
+        <h4 class="feature-title">Images &amp; link previews</h4>
+        <p class="feature-desc">Drop a photo, paste a URL — both render rich in the bubble. Open Graph metadata fetched server-side, cached.</p>
+      </div>
+
+      <div class="feature">
+        <span class="feature-emoji">😄</span>
+        <h4 class="feature-title">Reactions, replies, forwards</h4>
+        <p class="feature-desc">Tap-back any message, quote-reply with a tap, forward across conversations with one shot.</p>
+      </div>
+
+      <div class="feature">
+        <span class="feature-emoji">📷</span>
+        <h4 class="feature-title">QR add-user &amp; invite</h4>
+        <p class="feature-desc">Show your QR to be added instantly. Scan a group invite QR to join. No phone numbers required.</p>
+      </div>
+
+      <div class="feature">
+        <span class="feature-emoji">💭</span>
+        <h4 class="feature-title">Thoughts stream</h4>
+        <p class="feature-desc">A private feed for your facts, decisions, commitments, reminders. Just notes, for now — AI extraction later.</p>
+      </div>
+
+      <div class="feature">
+        <span class="feature-emoji">🛡️</span>
+        <h4 class="feature-title">Trust &amp; safety primitives</h4>
+        <p class="feature-desc">Block, report, account deletion, granular notification controls, Sign in with Apple. App Store-ready.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <div class="cta-banner">
+    <h2>Try it now — no install needed.</h2>
+    <p>Open the web version in your browser, or grab a build for your phone.</p>
+    <div class="cta-row">
+      <a class="cta-btn" href="/m/" target="_blank" rel="noopener">Open the web app</a>
+      <a class="cta-btn ghost" href="https://testflight.apple.com/join/QvUPzDMY" target="_blank" rel="noopener">Join iOS beta</a>
+    </div>
+  </div>
+
+  <footer>
+    <div class="links">
+      <a href="/legal/privacy">Privacy</a>
+      <a href="/legal/terms">Terms</a>
+      <a href="https://github.com/tmad4000/openchat-mobile" target="_blank" rel="noopener">Source</a>
+      <a href="mailto:support@chat.globalbr.ai">Contact</a>
+    </div>
+    <div class="small">© 2026 OpenChat · Built with Expo, React Native, Fastify, Neo4j</div>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -2,11 +2,65 @@ import { Router, Request, Response } from 'express';
 import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
 import neo4j from 'neo4j-driver';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
-import { joinUserSocketsToConversation, leaveUserSocketsFromConversation } from '../websocket/chatHandler.js';
+import { resolveActor } from '../middleware/resolveActor.js';
+import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline } from '../websocket/chatHandler.js';
+import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPreview.js';
+
+// ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
+let _s3: S3Client | null = null;
+function getS3(): S3Client {
+  if (_s3) return _s3;
+  const endpoint = process.env.S3_ENDPOINT;
+  const region = process.env.AWS_REGION || 'auto';
+  _s3 = new S3Client({
+    region,
+    ...(endpoint ? { endpoint, forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true' } : {}),
+    credentials: process.env.AWS_ACCESS_KEY_ID
+      ? {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+        }
+      : undefined,
+  });
+  return _s3;
+}
 
 const router = Router();
+
+const EXPORT_RANGES = {
+  last_hour: { label: 'Last hour', ms: 60 * 60 * 1000 },
+  last_day: { label: 'Last day', ms: 24 * 60 * 60 * 1000 },
+  last_week: { label: 'Last week', ms: 7 * 24 * 60 * 60 * 1000 },
+  last_month: { label: 'Last month', ms: 30 * 24 * 60 * 60 * 1000 },
+  all_time: { label: 'All time', ms: null },
+} as const;
+
+type ExportRange = keyof typeof EXPORT_RANGES;
+
+function parseExportRange(raw: unknown): ExportRange | null {
+  const value = typeof raw === 'string' ? raw : 'last_day';
+  return value in EXPORT_RANGES ? value as ExportRange : null;
+}
+
+function exportSince(range: ExportRange): string | null {
+  const ms = EXPORT_RANGES[range].ms;
+  if (ms === null) return null;
+  return new Date(Date.now() - ms).toISOString();
+}
+
+function safeFilenamePart(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'conversation';
+}
+
+function sendJsonDownload(res: Response, filename: string, payload: unknown): void {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.json(payload);
+}
 
 // Emit conversation:created to every participant's per-user room. Clients
 // (including the picortex bot) listen for this event and immediately join
@@ -55,13 +109,24 @@ function toJS(value: unknown): unknown {
 }
 
 // GET /api/chat/conversations - List user's conversations
-router.get('/conversations', requireAuth, async (req: Request, res: Response) => {
+// Omits DM conversations where the other participant has blocked me (OpenChat-46p).
+// Includes containsBot field (OpenChat-ds3).
+router.get('/conversations', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
 
   try {
     const result = await session.run(`
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
+      // Omit DM conversations where the other participant has blocked me
+      WHERE NOT (
+        c.type = 'direct'
+        AND EXISTS {
+          MATCH (other:User)-[:PARTICIPATES_IN]->(c)
+          WHERE other.id <> $userId
+            AND (other)-[:BLOCKED]->(u)
+        }
+      )
       CALL {
         WITH c
         OPTIONAL MATCH (c)<-[:IN_CONVERSATION]-(m:Message)
@@ -71,12 +136,19 @@ router.get('/conversations', requireAuth, async (req: Request, res: Response) =>
       CALL {
         WITH c
         MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-        RETURN collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}) AS participants
+        RETURN collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
+      }
+      CALL {
+        WITH c
+        OPTIONAL MATCH (bot:User)-[:PARTICIPATES_IN]->(c)
+        WHERE bot.isBot = true
+        RETURN count(bot) > 0 AS containsBot
       }
       RETURN c {
         .*,
         lastMessage: lastMessage { .content, .senderId, .createdAt },
-        participants: participants
+        participants: participants,
+        containsBot: containsBot
       } AS conversation
       ORDER BY c.lastMessageAt DESC
     `, { userId });
@@ -108,7 +180,7 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
     const existing = await session.run(`
       MATCH (u1:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {type: 'direct'})<-[:PARTICIPATES_IN]-(u2:User {id: $otherId})
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-      WITH c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}) AS participants
+      WITH c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
       RETURN c {
         .*,
         participants: participants
@@ -116,8 +188,22 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
     `, { userId, otherId });
 
     if (existing.records.length > 0) {
-      const conv = toJS(existing.records[0].get('conversation'));
+      const conv = toJS(existing.records[0].get('conversation')) as Record<string, unknown> | null;
       await session.close();
+      // Auto-join the live sockets of BOTH participants to the existing DM's
+      // conversation room. Without this, a client that re-requests a DM via
+      // POST /conversations (e.g. on first open from a fresh socket) and
+      // then immediately sends a message has the message broadcast to a
+      // conversation room nobody is in — recipient never sees it until they
+      // explicitly conversation:join. Same race as the group-creation
+      // auto-join below but for the dedupe path. Caught by multi-account
+      // e2e test (server/test-multi-account-e2e.mjs).
+      const io = req.app.get('io') as IOServer | undefined;
+      const existingId = typeof conv?.id === 'string' ? conv.id : null;
+      if (io && existingId) {
+        joinUserSocketsToConversation(io, userId, existingId);
+        joinUserSocketsToConversation(io, otherId, existingId);
+      }
       res.json(conv);
       return;
     }
@@ -144,7 +230,7 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
         joinedAt: datetime($now),
         role: CASE WHEN pid = $userId THEN 'owner' ELSE 'member' END
       }]->(c)
-      WITH c, collect({user: u {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}) AS participants
+      WITH c, collect({user: u {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
       RETURN c { .*, participants: participants } AS conversation
     `, {
       id: conversationId,
@@ -163,6 +249,19 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
     // per-user socket rooms so their clients can auto-join the new room.
     const io = req.app.get('io') as IOServer | undefined;
     emitConversationCreated(io, conversation);
+
+    // Force-join every participant's live sockets to the conversation room
+    // immediately. Without this, the very first message:send from the creator
+    // is broadcast to conversation:${id} *before* the other participants'
+    // clients react to conversation:created → conversation:join, and the
+    // message is dropped for them. (Same race as OpenChat-09h, but for group
+    // creation. POST /participants does this for add-member; creation needs
+    // it too.) See OpenChat-22u.
+    if (io) {
+      for (const pid of allParticipants) {
+        joinUserSocketsToConversation(io, pid, conversationId);
+      }
+    }
 
     res.status(201).json(conversation);
   } catch (error) {
@@ -185,7 +284,7 @@ async function loadConversation(
     OPTIONAL MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
     WITH c, collect(
       CASE WHEN participant IS NULL THEN NULL
-      ELSE {user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}
+      ELSE {user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}
       END
     ) AS rawParticipants
     WITH c, [p IN rawParticipants WHERE p IS NOT NULL] AS participants
@@ -449,7 +548,7 @@ router.get('/conversations/:id', requireAuth, async (req: Request, res: Response
     const result = await session.run(`
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $id})
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-      RETURN c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt}, role: rel.role}) AS participants
+      RETURN c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
     `, { userId, id });
 
     if (result.records.length === 0) {
@@ -463,6 +562,102 @@ router.get('/conversations/:id', requireAuth, async (req: Request, res: Response
   } catch (error) {
     console.error('Error fetching conversation:', error);
     res.status(500).json({ error: 'Failed to fetch conversation' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/conversations/:id/export?range=last_day
+// Download a user's copy of one conversation's recent history. The participant
+// check mirrors the read endpoints; no messages from conversations the user
+// is no longer in are exported.
+router.get('/conversations/:id/export', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const { id } = req.params;
+  const range = parseExportRange(req.query.range);
+
+  if (!range) {
+    res.status(400).json({ error: `range must be one of: ${Object.keys(EXPORT_RANGES).join(', ')}` });
+    return;
+  }
+
+  const since = exportSince(range);
+
+  try {
+    const result = await session.run(`
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $id})
+      CALL {
+        WITH c
+        MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
+        RETURN collect({
+          user: participant { .id, .name, .email, .isBot },
+          role: rel.role,
+          joinedAt: rel.joinedAt
+        }) AS participants
+      }
+      CALL {
+        WITH c
+        MATCH (m:Message {conversationId: c.id})
+        WHERE $since IS NULL OR m.createdAt >= datetime($since)
+        MATCH (sender:User {id: m.senderId})
+        OPTIONAL MATCH (reactor:User)-[reaction:REACTED]->(m)
+        WITH m, sender, collect({
+          emoji: reaction.emoji,
+          userId: reactor.id,
+          name: reactor.name,
+          email: reactor.email
+        }) AS rawReactions
+        RETURN collect(m {
+          .*,
+          sender: sender { .id, .name, .email, .isBot },
+          reactions: [r IN rawReactions WHERE r.emoji IS NOT NULL]
+        }) AS messages
+      }
+      RETURN c { .*, participants: participants } AS conversation, messages
+    `, { userId, id, since });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    const conversation = toJS(result.records[0].get('conversation')) as Record<string, unknown>;
+    const messages = (toJS(result.records[0].get('messages')) as Record<string, unknown>[])
+      .map((msg) => {
+        if (typeof msg.attachments === 'string') {
+          try { msg.attachments = JSON.parse(msg.attachments); } catch { /* leave raw */ }
+        }
+        return msg;
+      })
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+
+    if (messages.length > 0) {
+      const previewMap = await loadPreviewsForMessages(messages.map(m => m.id as string));
+      for (const msg of messages) {
+        const previews = previewMap.get(msg.id as string);
+        if (previews?.length) msg.linkPreviews = previews;
+      }
+    }
+
+    const title = typeof conversation.title === 'string' && conversation.title.trim()
+      ? conversation.title
+      : conversation.type === 'direct'
+        ? 'direct-chat'
+        : 'group-chat';
+    const exportedAt = new Date().toISOString();
+
+    sendJsonDownload(res, `openchat-${safeFilenamePart(title)}-${range}.json`, {
+      schema: 'openchat.conversation_export.v1',
+      exportedAt,
+      range: { key: range, label: EXPORT_RANGES[range].label, since },
+      conversation,
+      messageCount: messages.length,
+      messages,
+    });
+  } catch (error) {
+    console.error('Error exporting conversation:', error);
+    res.status(500).json({ error: 'Failed to export conversation' });
   } finally {
     await session.close();
   }
@@ -491,24 +686,60 @@ router.get('/conversations/:id/messages', requireAuth, async (req: Request, res:
     const query = before
       ? `
         MATCH (m:Message {conversationId: $id})
-        WHERE m.createdAt < datetime($before) AND m.deletedAt IS NULL
+        WHERE m.createdAt < datetime($before)
         MATCH (sender:User {id: m.senderId})
-        RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+        CALL {
+          WITH m
+          OPTIONAL MATCH (reactor:User)-[r:REACTED]->(m)
+          WITH r.emoji AS emoji, count(*) AS cnt, collect(reactor.id) AS reactors
+          WHERE emoji IS NOT NULL
+          RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors }) AS reactions
+        }
+        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
       `
       : `
         MATCH (m:Message {conversationId: $id})
-        WHERE m.deletedAt IS NULL
         MATCH (sender:User {id: m.senderId})
-        RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+        CALL {
+          WITH m
+          OPTIONAL MATCH (reactor:User)-[r:REACTED]->(m)
+          WITH r.emoji AS emoji, count(*) AS cnt, collect(reactor.id) AS reactors
+          WHERE emoji IS NOT NULL
+          RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors }) AS reactions
+        }
+        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
       `;
 
-    const result = await session.run(query, { id, limit: neo4j.int(limit), before });
-    const messages = result.records.map(r => toJS(r.get('message'))).reverse();
-    res.json(messages);
+    const result = await session.run(query, { id, limit: neo4j.int(limit), before, userId });
+    const messages = result.records.map(r => {
+      const msg = toJS(r.get('message')) as Record<string, unknown>;
+      if (msg && typeof msg.attachments === 'string') {
+        try { msg.attachments = JSON.parse(msg.attachments as string); } catch { /* leave as string */ }
+      }
+      return msg;
+    }).reverse();
+
+    // Attach link previews (OpenChat-hq2)
+    if (messages.length > 0) {
+      const ids = messages.map(m => m.id as string);
+      const previewMap = await loadPreviewsForMessages(ids);
+      for (const msg of messages) {
+        const previews = previewMap.get(msg.id as string);
+        if (previews && previews.length > 0) {
+          msg.linkPreviews = previews;
+        }
+      }
+    }
+
+    // hasMore: if we got exactly `limit` records back, there are probably older
+    // messages. We don't run a separate COUNT query for perf — one extra fetch
+    // that returns 0 rows is the acceptable edge case.
+    const hasMore = result.records.length === limit;
+    res.json({ messages, hasMore });
   } catch (error) {
     console.error('Error fetching messages:', error);
     res.status(500).json({ error: 'Failed to fetch messages' });
@@ -517,16 +748,92 @@ router.get('/conversations/:id/messages', requireAuth, async (req: Request, res:
   }
 });
 
-// POST /api/chat/conversations/:id/messages - Send a message
-router.post('/conversations/:id/messages', requireAuth, async (req: Request, res: Response) => {
+// PATCH /api/chat/conversations/:id/read — mark caller's lastReadAt = now (OpenChat-0nj)
+// Also returns per-participant lastReadAt map and online status so the client
+// can infer tick state without a separate round-trip.
+router.patch('/conversations/:id/read', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id: conversationId } = req.params;
-  const { content, messageType = 'text' } = req.body;
+  const now = new Date().toISOString();
 
-  if (!content || typeof content !== 'string') {
-    res.status(400).json({ error: 'content is required' });
+  try {
+    // Verify user is participant and update their lastReadAt on the edge.
+    const check = await session.run(`
+      MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+      SET rel.lastReadAt = datetime($now)
+      RETURN c
+    `, { userId, conversationId, now });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    // Fetch all participant lastReadAt values to include in the emit.
+    const participantResult = await session.run(`
+      MATCH (u:User)-[rel:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+      RETURN u.id AS userId, rel.lastReadAt AS lastReadAt
+    `, { conversationId });
+
+    const readMap: Record<string, string | null> = {};
+    const onlineMap: Record<string, boolean> = {};
+    for (const r of participantResult.records) {
+      const uid = r.get('userId') as string;
+      const raw = r.get('lastReadAt');
+      readMap[uid] = raw ? toJS(raw) as string : null;
+      onlineMap[uid] = isUserOnline(uid);
+    }
+
+    const io = req.app.get('io') as IOServer | undefined;
+    if (io) {
+      // Emit to all participants in the conversation room.
+      io.to(`conversation:${conversationId}`).emit('read:updated', {
+        conversationId,
+        userId,
+        lastReadAt: now,
+        readMap,
+        onlineMap,
+      });
+    }
+
+    res.json({ ok: true, lastReadAt: now, readMap, onlineMap });
+  } catch (error) {
+    console.error('Error marking read:', error);
+    res.status(500).json({ error: 'Failed to mark read' });
+  } finally {
+    await session.close();
+  }
+});
+
+// POST /api/chat/conversations/:id/messages - Send a message
+router.post('/conversations/:id/messages', resolveActor, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const { id: conversationId } = req.params;
+  const { content, messageType = 'text', attachments } = req.body;
+
+  // Allow either content OR attachments (images can be sent without caption).
+  const hasContent = content && typeof content === 'string' && content.trim();
+  const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+  if (!hasContent && !hasAttachments) {
+    res.status(400).json({ error: 'content or attachments is required' });
     return;
+  }
+
+  // Validate attachments shape if present
+  if (hasAttachments) {
+    for (const a of attachments as unknown[]) {
+      const att = a as Record<string, unknown>;
+      if (!att.url || typeof att.url !== 'string') {
+        res.status(400).json({ error: 'Each attachment must have a url' });
+        return;
+      }
+      if (!att.mimeType || typeof att.mimeType !== 'string') {
+        res.status(400).json({ error: 'Each attachment must have a mimeType' });
+        return;
+      }
+    }
   }
 
   try {
@@ -543,6 +850,12 @@ router.post('/conversations/:id/messages', requireAuth, async (req: Request, res
 
     const messageId = nanoid();
     const now = new Date().toISOString();
+    // Use caption or fallback for preview
+    const messageContent = hasContent ? (content as string).trim() : '';
+    // attachmentsJson stored as a JSON string in Neo4j
+    const attachmentsJson = hasAttachments ? JSON.stringify(attachments) : null;
+    // lastMessagePreview for image-only messages
+    const preview = messageContent || (hasAttachments ? '📷 Photo' : '');
 
     const result = await session.run(`
       MATCH (c:Conversation {id: $conversationId})
@@ -553,25 +866,39 @@ router.post('/conversations/:id/messages', requireAuth, async (req: Request, res
         senderId: $senderId,
         conversationId: $conversationId,
         messageType: $messageType,
-        createdAt: datetime($now)
+        createdAt: datetime($now),
+        attachments: $attachmentsJson
       })
       CREATE (m)-[:IN_CONVERSATION]->(c)
       CREATE (sender)-[:SENT]->(m)
       SET c.updatedAt = datetime($now),
           c.lastMessageAt = datetime($now),
-          c.lastMessagePreview = left($content, 100)
+          c.lastMessagePreview = left($preview, 100)
       RETURN m { .*, sender: sender { .id, .name, .email } } AS message
     `, {
       id: messageId,
-      content,
+      content: messageContent,
       senderId: userId,
       conversationId,
       messageType,
-      now
+      now,
+      attachmentsJson,
+      preview,
     });
 
-    const message = toJS(result.records[0].get('message'));
-    res.status(201).json(message);
+    const raw = toJS(result.records[0].get('message')) as Record<string, unknown>;
+    // Parse attachments JSON string back to array for the response
+    if (raw && typeof raw.attachments === 'string') {
+      try { raw.attachments = JSON.parse(raw.attachments as string); } catch { /* leave as string */ }
+    }
+
+    // Async link preview fetch — non-blocking (OpenChat-hq2)
+    const io = req.app.get('io') as IOServer | undefined;
+    if (io) {
+      processLinkPreviews(io, raw.id as string, conversationId as string, content as string);
+    }
+
+    res.status(201).json(raw);
   } catch (error) {
     console.error('Error sending message:', error);
     res.status(500).json({ error: 'Failed to send message' });
@@ -593,13 +920,13 @@ router.get('/contacts', requireAuth, async (req: Request, res: Response) => {
         MATCH (u:User)
         WHERE u.id <> $userId
           AND (toLower(u.name) CONTAINS toLower($search) OR toLower(u.email) CONTAINS toLower($search))
-        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt } AS user
+        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
         ORDER BY u.name
       `
       : `
         MATCH (u:User)
         WHERE u.id <> $userId
-        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt } AS user
+        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
         ORDER BY u.name
       `;
 
@@ -614,6 +941,151 @@ router.get('/contacts', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/chat/search - Unified search across messages, conversations, and contacts
+//
+// Query params:
+//   q              - search text (required)
+//   scope          - 'global' | 'conversation' (default 'global')
+//   conversationId - required when scope='conversation'
+//   limit          - per-bucket cap (default 20, max 100)
+//
+// Authorization:
+//   - Messages: only ones in conversations where the requesting user
+//     PARTICIPATES_IN. The :PARTICIPATES_IN filter in the Cypher is the
+//     access-control boundary; without it this endpoint would leak every
+//     message in the graph.
+//   - Conversations: same — only conversations the user is a member of are
+//     considered, and we match by title.
+//   - Contacts: all users by name/email (already public-by-design via
+//     /contacts).
+//
+// Backed by CONTAINS (case-insensitive via toLower) rather than a Neo4j
+// full-text index. Reasoning: CONTAINS works against the existing schema
+// without a migration, and the message corpus is small for now. We can
+// add a fulltext index in a follow-up pass once volume justifies it.
+router.get('/search', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const rawQ = (req.query.q ?? '') as string;
+  const q = typeof rawQ === 'string' ? rawQ.trim() : '';
+  const scope = (req.query.scope as string) === 'conversation' ? 'conversation' : 'global';
+  const conversationId = req.query.conversationId as string | undefined;
+  const rawLimit = parseInt(req.query.limit as string, 10);
+  const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 20, 1), 100);
+
+  if (!q) {
+    res.status(400).json({ error: 'q is required' });
+    return;
+  }
+  // Guardrail: refuse single-character queries. CONTAINS on a single char
+  // scans almost every message; we keep it cheap. Two chars is a reasonable
+  // floor for "intent to search".
+  if (q.length < 2) {
+    res.json({ messages: [], conversations: [], contacts: [] });
+    return;
+  }
+  if (scope === 'conversation' && !conversationId) {
+    res.status(400).json({ error: 'conversationId is required when scope=conversation' });
+    return;
+  }
+
+  const session = getDriver().session();
+  try {
+    if (scope === 'conversation') {
+      // Verify access first to keep the not-found / forbidden cases separable
+      // from "empty results".
+      const accessCheck = await session.run(`
+        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+        RETURN c
+      `, { userId, conversationId });
+
+      if (accessCheck.records.length === 0) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+
+      const result = await session.run(`
+        MATCH (m:Message {conversationId: $conversationId})
+        WHERE m.deletedAt IS NULL
+          AND toLower(m.content) CONTAINS toLower($q)
+        MATCH (sender:User {id: m.senderId})
+        RETURN m {
+          .id, .content, .conversationId, .senderId, .createdAt,
+          sender: sender { .id, .name, .email, .isBot }
+        } AS message
+        ORDER BY m.createdAt DESC
+        LIMIT $limit
+      `, { conversationId, q, limit: neo4j.int(limit) });
+
+      const messages = result.records.map(r => toJS(r.get('message')));
+      res.json({ messages, conversations: [], contacts: [] });
+      return;
+    }
+
+    // Global scope: run three independent searches in parallel.
+    //
+    // Notes:
+    // - Messages query filters on PARTICIPATES_IN, so a user can never get
+    //   back a message from a conversation they're not in.
+    // - Conversations matches on the conversation TITLE only (participant
+    //   names already surface via the contacts bucket; layering them in
+    //   here causes confusing double-counted results).
+    // - Contacts excludes self, matching the existing /contacts behavior.
+    const [messagesResult, conversationsResult, contactsResult] = await Promise.all([
+      session.run(`
+        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)<-[:IN_CONVERSATION]-(m:Message)
+        WHERE m.deletedAt IS NULL
+          AND toLower(m.content) CONTAINS toLower($q)
+        MATCH (sender:User {id: m.senderId})
+        RETURN m {
+          .id, .content, .conversationId, .senderId, .createdAt,
+          sender: sender { .id, .name, .email, .isBot },
+          conversationTitle: c.title,
+          conversationType: c.type
+        } AS message
+        ORDER BY m.createdAt DESC
+        LIMIT $limit
+      `, { userId, q, limit: neo4j.int(limit) }),
+
+      session.run(`
+        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
+        WHERE c.title IS NOT NULL
+          AND toLower(c.title) CONTAINS toLower($q)
+        CALL {
+          WITH c
+          MATCH (participant:User)-[:PARTICIPATES_IN]->(c)
+          RETURN collect(participant { .id, .name, .email, .isBot })[0..3] AS participants
+        }
+        RETURN c {
+          .id, .title, .type, .lastMessageAt, .lastMessagePreview,
+          participants: participants
+        } AS conversation
+        ORDER BY c.lastMessageAt DESC
+        LIMIT $limit
+      `, { userId, q, limit: neo4j.int(limit) }),
+
+      session.run(`
+        MATCH (u:User)
+        WHERE u.id <> $userId
+          AND (toLower(u.name) CONTAINS toLower($q) OR toLower(u.email) CONTAINS toLower($q))
+        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
+        ORDER BY u.name
+        LIMIT $limit
+      `, { userId, q, limit: neo4j.int(limit) }),
+    ]);
+
+    const messages = messagesResult.records.map(r => toJS(r.get('message')));
+    const conversations = conversationsResult.records.map(r => toJS(r.get('conversation')));
+    const contacts = contactsResult.records.map(r => toJS(r.get('user')));
+
+    res.json({ messages, conversations, contacts });
+  } catch (error) {
+    console.error('Error performing search:', error);
+    res.status(500).json({ error: 'Search failed' });
+  } finally {
+    await session.close();
+  }
+});
+
 // GET /api/chat/users/by-email/:email - Look up user by exact email
 router.get('/users/by-email/:email', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
@@ -622,7 +1094,7 @@ router.get('/users/by-email/:email', requireAuth, async (req: Request, res: Resp
   try {
     const result = await session.run(`
       MATCH (u:User {email: $email})
-      RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt } AS user
+      RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
     `, { email });
 
     if (result.records.length === 0) {
@@ -668,6 +1140,1127 @@ router.put('/presence', requireAuth, async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error updating presence:', error);
     res.status(500).json({ error: 'Failed to update presence' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ─── Block / unblock (OpenChat-46p) ─────────────────────────────────────────
+
+// POST /api/chat/users/:id/block
+router.post('/users/:id/block', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const myId = req.user!.userId;
+  const targetId = req.params.id as string;
+
+  if (myId === targetId) {
+    res.status(400).json({ error: 'Cannot block yourself' });
+    return;
+  }
+
+  try {
+    const now = new Date().toISOString();
+    await session.run(`
+      MATCH (me:User {id: $myId}), (target:User {id: $targetId})
+      MERGE (me)-[r:BLOCKED]->(target)
+      ON CREATE SET r.createdAt = datetime($now)
+    `, { myId, targetId, now });
+    res.status(201).json({ blocked: true, targetId });
+  } catch (error) {
+    console.error('Error blocking user:', error);
+    res.status(500).json({ error: 'Failed to block user' });
+  } finally {
+    await session.close();
+  }
+});
+
+// DELETE /api/chat/users/:id/block
+router.delete('/users/:id/block', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const myId = req.user!.userId;
+  const targetId = req.params.id as string;
+
+  try {
+    await session.run(`
+      MATCH (me:User {id: $myId})-[r:BLOCKED]->(target:User {id: $targetId})
+      DELETE r
+    `, { myId, targetId });
+    res.status(200).json({ blocked: false, targetId });
+  } catch (error) {
+    console.error('Error unblocking user:', error);
+    res.status(500).json({ error: 'Failed to unblock user' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/blocks — returns list of users I have blocked
+router.get('/blocks', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const myId = req.user!.userId;
+
+  try {
+    const result = await session.run(`
+      MATCH (me:User {id: $myId})-[r:BLOCKED]->(target:User)
+      RETURN target { .id, .name, .email, .presenceStatus, .isBot } AS user, r.createdAt AS blockedAt
+      ORDER BY r.createdAt DESC
+    `, { myId });
+    const blocks = result.records.map(r => ({
+      user: toJS(r.get('user')),
+      blockedAt: toJS(r.get('blockedAt')),
+    }));
+    res.json(blocks);
+  } catch (error) {
+    console.error('Error fetching blocks:', error);
+    res.status(500).json({ error: 'Failed to fetch blocks' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ─── Forward message (OpenChat-hhc) ──────────────────────────────────────────
+
+// POST /api/chat/messages/:id/forward
+// Body: { toConversationId: string }
+// Creates a new Message in the target conversation, copying content/attachments
+// from the source and preserving the original sender via forwardedFrom* fields.
+// The forward chain always points to the ORIGINAL sender (not the most recent
+// forwarder), so forwarding a forwarded message keeps Alice's name visible.
+router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const sourceMessageId = req.params.id as string;
+  const { toConversationId } = (req.body ?? {}) as { toConversationId?: string };
+
+  if (!toConversationId || typeof toConversationId !== 'string') {
+    res.status(400).json({ error: 'toConversationId is required' });
+    return;
+  }
+
+  try {
+    // 1. Load source message and verify caller is a participant in its conversation.
+    const sourceResult = await session.run(`
+      MATCH (m:Message {id: $sourceMessageId})
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: m.conversationId})
+      MATCH (originalSender:User {id: m.senderId})
+      RETURN m {
+        .id, .content, .attachments, .conversationId,
+        .forwardedFromMessageId, .forwardedFromSenderId, .forwardedFromSenderName
+      } AS msg,
+      originalSender { .id, .name, .email } AS sender
+    `, { sourceMessageId, userId });
+
+    if (sourceResult.records.length === 0) {
+      res.status(404).json({ error: 'Message not found or not accessible' });
+      return;
+    }
+
+    const sourceMsg = toJS(sourceResult.records[0].get('msg')) as Record<string, unknown>;
+    const originalSender = toJS(sourceResult.records[0].get('sender')) as Record<string, string | undefined>;
+
+    // 2. Verify caller participates in the target conversation.
+    const targetCheck = await session.run(`
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $toConversationId})
+      RETURN c
+    `, { userId, toConversationId });
+
+    if (targetCheck.records.length === 0) {
+      res.status(404).json({ error: 'Target conversation not found or not accessible' });
+      return;
+    }
+
+    // 3. Resolve forwardedFrom* fields.
+    // If the source was already a forward, propagate ITS original sender (not
+    // the current sender). This keeps the forward chain pointing to Alice even
+    // if Bob forwarded Alice's message and Carol then forwards Bob's forward.
+    const forwardedFromMessageId = (sourceMsg.forwardedFromMessageId as string | null) ?? sourceMessageId;
+    const forwardedFromSenderId = (sourceMsg.forwardedFromSenderId as string | null) ?? (originalSender.id as string);
+    // Snapshot the display name at forward time from the current DB value.
+    const forwardedFromSenderName =
+      (sourceMsg.forwardedFromSenderName as string | null) ??
+      (originalSender.name as string | null) ??
+      (originalSender.email as string | null) ??
+      'Unknown';
+
+    // 4. Copy attachments (still references the same S3 objects — no re-upload).
+    const attachmentsRaw = sourceMsg.attachments;
+    let attachmentsJson: string | null = null;
+    if (typeof attachmentsRaw === 'string' && attachmentsRaw) {
+      attachmentsJson = attachmentsRaw; // already JSON string in DB
+    } else if (Array.isArray(attachmentsRaw) && attachmentsRaw.length > 0) {
+      attachmentsJson = JSON.stringify(attachmentsRaw);
+    }
+
+    const messageId = nanoid();
+    const now = new Date().toISOString();
+    const content = (sourceMsg.content as string) || '';
+    const preview = content || (attachmentsJson ? '📷 Photo' : '');
+
+    // 5. Create the new message in the target conversation.
+    const result = await session.run(`
+      MATCH (c:Conversation {id: $toConversationId})
+      MATCH (forwarder:User {id: $userId})
+      CREATE (m:Message {
+        id: $id,
+        content: $content,
+        senderId: $userId,
+        conversationId: $toConversationId,
+        messageType: 'text',
+        createdAt: datetime($now),
+        attachments: $attachmentsJson,
+        forwardedFromMessageId: $forwardedFromMessageId,
+        forwardedFromSenderId: $forwardedFromSenderId,
+        forwardedFromSenderName: $forwardedFromSenderName
+      })
+      CREATE (m)-[:IN_CONVERSATION]->(c)
+      CREATE (forwarder)-[:SENT]->(m)
+      SET c.updatedAt = datetime($now),
+          c.lastMessageAt = datetime($now),
+          c.lastMessagePreview = left($preview, 100)
+      RETURN m { .*, sender: forwarder { .id, .name, .email } } AS message
+    `, {
+      id: messageId,
+      content,
+      userId,
+      toConversationId,
+      now,
+      attachmentsJson,
+      forwardedFromMessageId,
+      forwardedFromSenderId,
+      forwardedFromSenderName,
+      preview,
+    });
+
+    const raw = toJS(result.records[0].get('message')) as Record<string, unknown>;
+    // Parse attachments JSON string back to array for the response.
+    if (raw && typeof raw.attachments === 'string') {
+      try { raw.attachments = JSON.parse(raw.attachments as string); } catch { /* leave */ }
+    }
+
+    // 6. Emit message:new to target conversation room.
+    const io = req.app.get('io') as IOServer | undefined;
+    if (io) {
+      io.to(`conversation:${toConversationId}`).emit('message:new', raw);
+    }
+
+    res.status(201).json(raw);
+  } catch (error) {
+    console.error('Error forwarding message:', error);
+    res.status(500).json({ error: 'Failed to forward message' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ─── Reports (OpenChat-wgl) ──────────────────────────────────────────────────
+
+// POST /api/chat/reports
+router.post('/reports', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const reporterId = req.user!.userId;
+  const { targetType, targetId, reason, freeform } = (req.body ?? {}) as {
+    targetType?: string;
+    targetId?: string;
+    reason?: string;
+    freeform?: string;
+  };
+
+  if (!targetType || !['message', 'user'].includes(targetType)) {
+    res.status(400).json({ error: 'targetType must be "message" or "user"' });
+    return;
+  }
+  if (!targetId || typeof targetId !== 'string') {
+    res.status(400).json({ error: 'targetId is required' });
+    return;
+  }
+
+  try {
+    const now = new Date().toISOString();
+    const reportId = nanoid();
+
+    await session.run(`
+      CREATE (r:Report {
+        id: $id,
+        reporterId: $reporterId,
+        targetType: $targetType,
+        targetId: $targetId,
+        reason: $reason,
+        freeform: $freeform,
+        createdAt: datetime($now),
+        status: 'open'
+      })
+    `, {
+      id: reportId,
+      reporterId,
+      targetType,
+      targetId,
+      reason: reason ?? null,
+      freeform: freeform ?? null,
+      now,
+    });
+
+    // Post to Slack webhook if configured — fire-and-forget, never error the caller.
+    const webhookUrl = process.env.REPORT_SLACK_WEBHOOK_URL;
+    if (webhookUrl) {
+      const payload = {
+        text: `*New ${targetType} report* (id: ${reportId})`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `*New ${targetType} report*\nReporter: \`${reporterId}\`\nTarget: \`${targetId}\`\nReason: ${reason ?? '—'}\nFreeform: ${freeform ?? '—'}`,
+            },
+          },
+        ],
+      };
+      fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch((err) => {
+        console.warn('[reports] Slack webhook failed:', err);
+      });
+    } else {
+      console.log(`[reports] New report ${reportId}: ${targetType} ${targetId} by ${reporterId}`);
+    }
+
+    res.status(201).json({ id: reportId });
+  } catch (error) {
+    console.error('Error creating report:', error);
+    res.status(500).json({ error: 'Failed to create report' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/reports/mine — user's own past reports
+router.get('/reports/mine', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const reporterId = req.user!.userId;
+
+  try {
+    const result = await session.run(`
+      MATCH (r:Report {reporterId: $reporterId})
+      RETURN r { .id, .targetType, .targetId, .reason, .freeform, .createdAt, .status } AS report
+      ORDER BY r.createdAt DESC
+    `, { reporterId });
+    const reports = result.records.map(r => toJS(r.get('report')));
+    res.json(reports);
+  } catch (error) {
+    console.error('Error fetching reports:', error);
+    res.status(500).json({ error: 'Failed to fetch reports' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ─── AI disclosure (OpenChat-ds3) ────────────────────────────────────────────
+
+// GET /api/chat/ai-disclosure-status
+router.get('/ai-disclosure-status', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+
+  try {
+    const result = await session.run(`
+      MATCH (u:User {id: $userId})
+      RETURN u.aiDisclosureAcceptedAt AS acceptedAt
+    `, { userId });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const raw = result.records[0].get('acceptedAt');
+    const acceptedAt = raw ? toJS(raw) : null;
+    res.json({ acceptedAt });
+  } catch (error) {
+    console.error('Error fetching AI disclosure status:', error);
+    res.status(500).json({ error: 'Failed to fetch disclosure status' });
+  } finally {
+    await session.close();
+  }
+});
+
+// POST /api/chat/ai-disclosure-accept
+router.post('/ai-disclosure-accept', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+
+  try {
+    const now = new Date().toISOString();
+    await session.run(`
+      MATCH (u:User {id: $userId})
+      SET u.aiDisclosureAcceptedAt = datetime($now)
+    `, { userId, now });
+    res.json({ acceptedAt: now });
+  } catch (error) {
+    console.error('Error accepting AI disclosure:', error);
+    res.status(500).json({ error: 'Failed to accept disclosure' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ─── Edit / Delete messages (OpenChat-q9h) ───────────────────────────────────
+
+// Helper: load participant IDs of a conversation for socket fanout.
+async function loadParticipantIds(
+  session: ReturnType<ReturnType<typeof getDriver>['session']>,
+  conversationId: string
+): Promise<string[]> {
+  const result = await session.run(`
+    MATCH (u:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+    RETURN u.id AS uid
+  `, { conversationId });
+  return result.records.map(r => r.get('uid') as string);
+}
+
+// Emit message:updated to all participants of a conversation.
+function emitMessageUpdated(
+  io: IOServer | undefined,
+  conversationId: string,
+  participantIds: string[],
+  message: unknown
+): void {
+  if (!io) return;
+  // Emit to the conversation room (sockets already joined).
+  io.to(`conversation:${conversationId}`).emit('message:updated', message);
+  // Also emit to per-user rooms so participants who aren't in the room get it.
+  for (const uid of participantIds) {
+    io.to(`user:${uid}`).emit('message:updated', message);
+  }
+}
+
+// Emit message:reactions-updated to all participants.
+function emitReactionsUpdated(
+  io: IOServer | undefined,
+  conversationId: string,
+  participantIds: string[],
+  payload: unknown
+): void {
+  if (!io) return;
+  io.to(`conversation:${conversationId}`).emit('message:reactions-updated', payload);
+  for (const uid of participantIds) {
+    io.to(`user:${uid}`).emit('message:reactions-updated', payload);
+  }
+}
+
+// PATCH /api/chat/messages/:id — edit own message (owner-only)
+router.patch('/messages/:id', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const messageId = req.params.id as string;
+  const { content } = req.body as { content?: string };
+
+  if (!content || typeof content !== 'string' || !content.trim()) {
+    res.status(400).json({ error: 'content is required' });
+    return;
+  }
+
+  try {
+    // Verify ownership and get conversationId
+    const check = await session.run(`
+      MATCH (m:Message {id: $messageId})
+      WHERE m.senderId = $userId AND m.deletedAt IS NULL
+      RETURN m.conversationId AS conversationId
+    `, { messageId, userId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Message not found or not yours' });
+      return;
+    }
+
+    const conversationId = check.records[0].get('conversationId') as string;
+    const now = new Date().toISOString();
+
+    const result = await session.run(`
+      MATCH (m:Message {id: $messageId})
+      MATCH (sender:User {id: m.senderId})
+      SET m.content = $content, m.editedAt = datetime($now)
+      RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+    `, { messageId, content: content.trim(), now });
+
+    const message = toJS(result.records[0].get('message'));
+
+    // Broadcast to all conversation participants
+    const io = req.app.get('io') as IOServer | undefined;
+    const participantIds = await loadParticipantIds(session, conversationId);
+    emitMessageUpdated(io, conversationId, participantIds, message);
+
+    res.json(message);
+  } catch (error) {
+    console.error('Error editing message:', error);
+    res.status(500).json({ error: 'Failed to edit message' });
+  } finally {
+    await session.close();
+  }
+});
+
+// DELETE /api/chat/messages/:id — soft-delete own message (owner-only)
+router.delete('/messages/:id', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const messageId = req.params.id as string;
+
+  try {
+    // Verify ownership
+    const check = await session.run(`
+      MATCH (m:Message {id: $messageId})
+      WHERE m.senderId = $userId
+      RETURN m.conversationId AS conversationId
+    `, { messageId, userId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Message not found or not yours' });
+      return;
+    }
+
+    const conversationId = check.records[0].get('conversationId') as string;
+    const now = new Date().toISOString();
+
+    const result = await session.run(`
+      MATCH (m:Message {id: $messageId})
+      MATCH (sender:User {id: m.senderId})
+      SET m.content = 'Message deleted',
+          m.deletedAt = datetime($now),
+          m.attachments = null
+      RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+    `, { messageId, now });
+
+    const message = toJS(result.records[0].get('message'));
+
+    const io = req.app.get('io') as IOServer | undefined;
+    const participantIds = await loadParticipantIds(session, conversationId);
+    emitMessageUpdated(io, conversationId, participantIds, message);
+
+    res.json(message);
+  } catch (error) {
+    console.error('Error deleting message:', error);
+    res.status(500).json({ error: 'Failed to delete message' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ─── Reactions (OpenChat-7bd) ─────────────────────────────────────────────────
+
+// Helper: aggregate reactions on a message for the requesting user.
+async function getReactionSummary(
+  session: ReturnType<ReturnType<typeof getDriver>['session']>,
+  messageId: string,
+  userId: string
+): Promise<Array<{ emoji: string; count: number; byMe: boolean }>> {
+  const result = await session.run(`
+    MATCH (u:User)-[r:REACTED]->(m:Message {id: $messageId})
+    WITH r.emoji AS emoji, count(*) AS cnt, collect(u.id) AS reactors
+    RETURN emoji, cnt, $userId IN reactors AS byMe
+    ORDER BY emoji
+  `, { messageId, userId });
+  return result.records.map(rec => ({
+    emoji: rec.get('emoji') as string,
+    count: (rec.get('cnt') as { toNumber: () => number }).toNumber?.() ?? Number(rec.get('cnt')),
+    byMe: rec.get('byMe') as boolean,
+  }));
+}
+
+// POST /api/chat/messages/:id/reactions — add reaction (idempotent)
+router.post('/messages/:id/reactions', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const messageId = req.params.id as string;
+  const { emoji } = req.body as { emoji?: string };
+
+  const ALLOWED_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+  if (!emoji || !ALLOWED_EMOJI.includes(emoji)) {
+    res.status(400).json({ error: `emoji must be one of: ${ALLOWED_EMOJI.join(' ')}` });
+    return;
+  }
+
+  try {
+    // Verify user is participant in the conversation containing this message
+    const check = await session.run(`
+      MATCH (m:Message {id: $messageId})
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: m.conversationId})
+      RETURN m.conversationId AS conversationId
+    `, { messageId, userId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Message not found or not accessible' });
+      return;
+    }
+
+    const conversationId = check.records[0].get('conversationId') as string;
+    const now = new Date().toISOString();
+
+    // MERGE so re-adding same emoji is idempotent
+    await session.run(`
+      MATCH (u:User {id: $userId}), (m:Message {id: $messageId})
+      MERGE (u)-[r:REACTED {emoji: $emoji}]->(m)
+      ON CREATE SET r.createdAt = datetime($now)
+    `, { userId, messageId, emoji, now });
+
+    const reactions = await getReactionSummary(session, messageId, userId);
+
+    const io = req.app.get('io') as IOServer | undefined;
+    const participantIds = await loadParticipantIds(session, conversationId);
+    const payload = { messageId, conversationId, reactions };
+    emitReactionsUpdated(io, conversationId, participantIds, payload);
+
+    res.status(201).json({ reactions });
+  } catch (error) {
+    console.error('Error adding reaction:', error);
+    res.status(500).json({ error: 'Failed to add reaction' });
+  } finally {
+    await session.close();
+  }
+});
+
+// DELETE /api/chat/messages/:id/reactions/:emoji — remove own reaction
+router.delete('/messages/:id/reactions/:emoji', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const messageId = req.params.id as string;
+  const emoji = decodeURIComponent(req.params.emoji as string);
+
+  try {
+    // Verify access
+    const check = await session.run(`
+      MATCH (m:Message {id: $messageId})
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: m.conversationId})
+      RETURN m.conversationId AS conversationId
+    `, { messageId, userId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Message not found or not accessible' });
+      return;
+    }
+
+    const conversationId = check.records[0].get('conversationId') as string;
+
+    await session.run(`
+      MATCH (u:User {id: $userId})-[r:REACTED {emoji: $emoji}]->(m:Message {id: $messageId})
+      DELETE r
+    `, { userId, messageId, emoji });
+
+    const reactions = await getReactionSummary(session, messageId, userId);
+
+    const io = req.app.get('io') as IOServer | undefined;
+    const participantIds = await loadParticipantIds(session, conversationId);
+    const payload = { messageId, conversationId, reactions };
+    emitReactionsUpdated(io, conversationId, participantIds, payload);
+
+    res.json({ reactions });
+  } catch (error) {
+    console.error('Error removing reaction:', error);
+    res.status(500).json({ error: 'Failed to remove reaction' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ─── Attachments (OpenChat-6bg) ──────────────────────────────────────────────
+
+// Image MIME types allowed for upload (OpenChat-6bg).
+const IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+]);
+
+// Audio MIME types allowed for voice messages (OpenChat-xxc).
+const AUDIO_MIME_TYPES = new Set([
+  'audio/m4a',
+  'audio/mp4',
+  'audio/aac',
+  'audio/mpeg',
+  'audio/wav',
+  'audio/x-m4a',
+  'audio/webm',
+]);
+
+const ALLOWED_MIME_TYPES = new Set([...IMAGE_MIME_TYPES, ...AUDIO_MIME_TYPES]);
+
+const MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;  // 20 MB for images
+const MAX_AUDIO_SIZE_BYTES = 10 * 1024 * 1024;  // 10 MB for audio
+
+// POST /api/chat/attachments/presign
+// Body: { filename: string, mimeType: string, sizeBytes: number }
+// Returns: { putUrl, getUrl, key }
+router.post('/attachments/presign', requireAuth, async (req: Request, res: Response) => {
+  const bucket = process.env.S3_BUCKET;
+  if (!bucket) {
+    res.status(503).json({ error: 'File uploads are not configured on this server' });
+    return;
+  }
+
+  const { filename, mimeType, sizeBytes } = req.body as {
+    filename?: string;
+    mimeType?: string;
+    sizeBytes?: number;
+  };
+
+  if (!filename || typeof filename !== 'string') {
+    res.status(400).json({ error: 'filename is required' });
+    return;
+  }
+  if (!mimeType || !ALLOWED_MIME_TYPES.has(mimeType)) {
+    res.status(400).json({
+      error: `mimeType must be one of: ${[...ALLOWED_MIME_TYPES].join(', ')}`,
+    });
+    return;
+  }
+
+  const maxSize = AUDIO_MIME_TYPES.has(mimeType)
+    ? MAX_AUDIO_SIZE_BYTES
+    : MAX_IMAGE_SIZE_BYTES;
+
+  if (typeof sizeBytes !== 'number' || sizeBytes <= 0 || sizeBytes > maxSize) {
+    res.status(400).json({ error: `sizeBytes must be between 1 and ${maxSize}` });
+    return;
+  }
+
+  // Build a storage key: attachments/<userId>/<nanoid>/<sanitised filename>
+  // For audio, standardise the extension so GCS serves the correct Content-Type.
+  const userId = req.user!.userId;
+  const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 128);
+  const audioSuffix = AUDIO_MIME_TYPES.has(mimeType) ? 'voice.m4a' : safeFilename;
+  const key = `attachments/${userId}/${nanoid()}/${AUDIO_MIME_TYPES.has(mimeType) ? audioSuffix : safeFilename}`;
+
+  try {
+    const s3 = getS3();
+    const command = new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ContentType: mimeType,
+      ContentLength: sizeBytes,
+    });
+    const putUrl = await getSignedUrl(s3, command, { expiresIn: 300 }); // 5 minutes
+
+    // Public GET URL (bucket is public-read)
+    const endpoint = process.env.S3_ENDPOINT || 'https://storage.googleapis.com';
+    const getUrl = `${endpoint}/${bucket}/${key}`;
+
+    res.json({ putUrl, getUrl, key });
+  } catch (err) {
+    console.error('[attachments] presign error:', err);
+    res.status(500).json({ error: 'Failed to generate upload URL' });
+  }
+});
+
+// ─── Reconnect catch-up (OpenChat-qz0) ──────────────────────────────────────
+//
+// GET /api/chat/messages/since?since=<ISO>&limit=500
+//
+// Returns all messages across every conversation the requester participates in
+// where createdAt > since, ordered chronologically. Used by the mobile app to
+// recover missed messages after a socket reconnect.
+//
+// Hard cap at 500 messages. Anything beyond that is unusual — if we hit the
+// cap we log a warning server-side so the operator knows a client has a large
+// gap. The client should fall back to a full refreshConversations() when the
+// cap is hit (the response includes a `truncated: true` flag).
+//
+// NOTE: No message retention window is enforced today. If one is added in the
+// future, callers whose `since` pre-dates it should receive the oldest
+// available messages (i.e. NOT an error) and a `retention_truncated: true`
+// flag so the client knows a full re-fetch is advisable.
+//
+// Uses the message_createdAt range index (see migration comment below).
+// If the index doesn't exist yet the query will still work via a full scan,
+// just more slowly. The index is created idempotently at server startup via
+// db.ts — see ensureMessageCreatedAtIndex() below — or can be run manually:
+//   CREATE RANGE INDEX message_createdAt FOR (m:Message) ON (m.createdAt)
+router.get('/messages/since', resolveActor, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const sinceRaw = req.query.since as string | undefined;
+
+  if (!sinceRaw || typeof sinceRaw !== 'string') {
+    res.status(400).json({ error: 'since (ISO timestamp) is required' });
+    return;
+  }
+
+  // Validate it's a parseable ISO date.
+  const sinceDate = new Date(sinceRaw);
+  if (isNaN(sinceDate.getTime())) {
+    res.status(400).json({ error: 'since must be a valid ISO timestamp' });
+    return;
+  }
+
+  const HARD_CAP = 500;
+
+  const session = getDriver().session();
+  try {
+    const result = await session.run(`
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)<-[:IN_CONVERSATION]-(m:Message)
+      WHERE m.createdAt > datetime($since)
+        AND m.deletedAt IS NULL
+      MATCH (sender:User {id: m.senderId})
+      CALL {
+        WITH m
+        OPTIONAL MATCH (reactor:User)-[r:REACTED]->(m)
+        WITH r.emoji AS emoji, count(*) AS cnt, collect(reactor.id) AS reactors
+        WHERE emoji IS NOT NULL
+        RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors }) AS reactions
+      }
+      RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions } AS message
+      ORDER BY m.createdAt ASC
+      LIMIT $cap
+    `, {
+      userId,
+      since: sinceRaw,
+      cap: neo4j.int(HARD_CAP + 1), // fetch one extra to detect truncation
+    });
+
+    const rawMessages = result.records.map(r => {
+      const msg = toJS(r.get('message')) as Record<string, unknown>;
+      if (msg && typeof msg.attachments === 'string') {
+        try { msg.attachments = JSON.parse(msg.attachments as string); } catch { /* leave as string */ }
+      }
+      return msg;
+    });
+
+    const truncated = rawMessages.length > HARD_CAP;
+    const messages = truncated ? rawMessages.slice(0, HARD_CAP) : rawMessages;
+
+    if (truncated) {
+      console.warn(`[messages/since] userId=${userId} hit the ${HARD_CAP}-message cap (since=${sinceRaw}). Client should do a full refresh.`);
+    }
+
+    res.json({ messages, truncated });
+  } catch (error) {
+    console.error('Error fetching messages since:', error);
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  } finally {
+    await session.close();
+  }
+});
+
+// ── Group Invite Routes (OpenChat-240) ──────────────────────────────────────
+
+// POST /api/chat/conversations/:id/invites — owner-only, create or return active invite
+router.post('/conversations/:id/invites', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const convId = req.params.id as string;
+  const { expiresInDays = 7, maxUses = 50 } = req.body as { expiresInDays?: number; maxUses?: number };
+
+  try {
+    // Verify caller is owner of a group
+    const check = await session.run(`
+      MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $convId})
+      RETURN c.type AS type, rel.role AS role
+    `, { userId, convId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    const role = check.records[0].get('role');
+    const type = check.records[0].get('type');
+    if (type !== 'group') {
+      res.status(400).json({ error: 'Invites are only for group conversations' });
+      return;
+    }
+    if (role !== 'owner') {
+      res.status(403).json({ error: 'Only the group owner can create invites' });
+      return;
+    }
+
+    // Check for an existing active non-expired invite from this owner
+    const existing = await session.run(`
+      MATCH (c:Conversation {id: $convId})-[:HAS_INVITE]->(inv:GroupInvite {createdBy: $userId})
+      WHERE inv.revokedAt IS NULL
+        AND datetime(inv.expiresAt) > datetime()
+        AND inv.usesLeft > 0
+      RETURN inv
+      ORDER BY inv.createdAt DESC
+      LIMIT 1
+    `, { convId, userId });
+
+    if (existing.records.length > 0) {
+      const inv = toJS(existing.records[0].get('inv').properties) as Record<string, unknown>;
+      const token = inv.token as string;
+      res.json({
+        token,
+        url: `https://chat.globalbr.ai/i/${token}`,
+        expiresAt: inv.expiresAt,
+        usesLeft: inv.usesLeft,
+      });
+      return;
+    }
+
+    // Create new invite
+    const token = nanoid(32);
+    const now = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString();
+
+    await session.run(`
+      MATCH (c:Conversation {id: $convId})
+      CREATE (inv:GroupInvite {
+        token: $token,
+        conversationId: $convId,
+        createdBy: $userId,
+        createdAt: datetime($now),
+        expiresAt: datetime($expiresAt),
+        usesLeft: $maxUses
+      })
+      CREATE (c)-[:HAS_INVITE]->(inv)
+    `, { convId, token, userId, now, expiresAt, maxUses: neo4j.int(maxUses) });
+
+    res.status(201).json({
+      token,
+      url: `https://chat.globalbr.ai/i/${token}`,
+      expiresAt,
+      usesLeft: maxUses,
+    });
+  } catch (error) {
+    console.error('Error creating invite:', error);
+    res.status(500).json({ error: 'Failed to create invite' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/conversations/:id/invites — owner-only, list active invites
+router.get('/conversations/:id/invites', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const convId = req.params.id as string;
+
+  try {
+    const check = await session.run(`
+      MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $convId})
+      RETURN rel.role AS role
+    `, { userId, convId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    if (check.records[0].get('role') !== 'owner') {
+      res.status(403).json({ error: 'Only the group owner can list invites' });
+      return;
+    }
+
+    const result = await session.run(`
+      MATCH (c:Conversation {id: $convId})-[:HAS_INVITE]->(inv:GroupInvite)
+      WHERE inv.revokedAt IS NULL AND datetime(inv.expiresAt) > datetime()
+      RETURN inv
+      ORDER BY inv.createdAt DESC
+    `, { convId });
+
+    const invites = result.records.map(r => {
+      const props = toJS(r.get('inv').properties) as Record<string, unknown>;
+      return {
+        token: props.token,
+        url: `https://chat.globalbr.ai/i/${props.token}`,
+        expiresAt: props.expiresAt,
+        usesLeft: props.usesLeft,
+        createdAt: props.createdAt,
+      };
+    });
+
+    res.json(invites);
+  } catch (error) {
+    console.error('Error listing invites:', error);
+    res.status(500).json({ error: 'Failed to list invites' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/invites/:token — any authed user, preview invite
+router.get('/invites/:token', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const token = req.params.token as string;
+
+  try {
+    const result = await session.run(`
+      MATCH (c:Conversation)-[:HAS_INVITE]->(inv:GroupInvite {token: $token})
+      RETURN inv, c.id AS conversationId, c.title AS conversationTitle
+    `, { token });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'Invite not found' });
+      return;
+    }
+
+    const rec = result.records[0];
+    const inv = toJS(rec.get('inv').properties) as Record<string, unknown>;
+    const conversationId = rec.get('conversationId') as string;
+    const conversationTitle = rec.get('conversationTitle') as string | null;
+
+    if (inv.revokedAt) {
+      res.status(410).json({ error: 'This invite has been revoked' });
+      return;
+    }
+    const usesLeft = typeof inv.usesLeft === 'object' && inv.usesLeft !== null && 'toNumber' in (inv.usesLeft as object)
+      ? (inv.usesLeft as { toNumber: () => number }).toNumber()
+      : (inv.usesLeft as number);
+    if (usesLeft <= 0) {
+      res.status(410).json({ error: 'This invite has reached its maximum uses' });
+      return;
+    }
+    const expiresAt = inv.expiresAt as string;
+    if (new Date(expiresAt) < new Date()) {
+      res.status(410).json({ error: 'This invite has expired' });
+      return;
+    }
+
+    // Get member count (no PII)
+    const countResult = await session.run(`
+      MATCH (:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+      RETURN count(*) AS memberCount
+    `, { conversationId });
+    const memberCount = countResult.records[0]?.get('memberCount')?.toNumber?.() ?? 0;
+
+    res.json({
+      conversationId,
+      conversationTitle,
+      memberCount,
+      expiresAt,
+    });
+  } catch (error) {
+    console.error('Error fetching invite:', error);
+    res.status(500).json({ error: 'Failed to fetch invite' });
+  } finally {
+    await session.close();
+  }
+});
+
+// POST /api/chat/invites/:token/accept — any authed user, join via invite
+router.post('/invites/:token/accept', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const token = req.params.token as string;
+
+  try {
+    const result = await session.run(`
+      MATCH (c:Conversation)-[:HAS_INVITE]->(inv:GroupInvite {token: $token})
+      RETURN inv, c.id AS conversationId
+    `, { token });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'Invite not found' });
+      return;
+    }
+
+    const rec = result.records[0];
+    const inv = toJS(rec.get('inv').properties) as Record<string, unknown>;
+    const conversationId = rec.get('conversationId') as string;
+
+    if (inv.revokedAt) {
+      res.status(410).json({ error: 'This invite has been revoked' });
+      return;
+    }
+    const usesLeft = typeof inv.usesLeft === 'object' && inv.usesLeft !== null && 'toNumber' in (inv.usesLeft as object)
+      ? (inv.usesLeft as { toNumber: () => number }).toNumber()
+      : (inv.usesLeft as number);
+    if (usesLeft <= 0) {
+      res.status(410).json({ error: 'This invite has reached its maximum uses' });
+      return;
+    }
+    const expiresAt = inv.expiresAt as string;
+    if (new Date(expiresAt) < new Date()) {
+      res.status(410).json({ error: 'This invite has expired' });
+      return;
+    }
+
+    // Check if already a participant — idempotent
+    const alreadyIn = await session.run(`
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+      RETURN c
+    `, { userId, conversationId });
+
+    const now = new Date().toISOString();
+
+    if (alreadyIn.records.length === 0) {
+      // Add the user (MERGE so it's safe if there's a race)
+      await session.run(`
+        MATCH (c:Conversation {id: $conversationId})
+        MATCH (u:User {id: $userId})
+        MERGE (u)-[rel:PARTICIPATES_IN]->(c)
+          ON CREATE SET rel.joinedAt = datetime($now), rel.role = 'member'
+        SET c.updatedAt = datetime($now)
+      `, { conversationId, userId, now });
+
+      // Decrement usesLeft on the invite
+      await session.run(`
+        MATCH (inv:GroupInvite {token: $token})
+        SET inv.usesLeft = inv.usesLeft - 1
+      `, { token });
+    }
+
+    // Load full conversation and emit participant:added
+    const conversation = await loadConversation(session, conversationId);
+    const io = req.app.get('io') as IOServer | undefined;
+    if (io && conversation && alreadyIn.records.length === 0) {
+      joinUserSocketsToConversation(io, userId, conversationId);
+      const participants = (conversation.participants as Array<{ user?: { id?: string } }>) || [];
+      const seen = new Set<string>();
+      for (const p of participants) {
+        const pid = p?.user?.id;
+        if (!pid || seen.has(pid)) continue;
+        seen.add(pid);
+        io.to(`user:${pid}`).emit('participant:added', {
+          conversationId,
+          conversation,
+          userId,
+        });
+      }
+    }
+
+    res.json({ conversationId, conversation });
+  } catch (error) {
+    console.error('Error accepting invite:', error);
+    res.status(500).json({ error: 'Failed to accept invite' });
+  } finally {
+    await session.close();
+  }
+});
+
+// DELETE /api/chat/conversations/:id/invites/:token — owner-only, revoke invite
+router.delete('/conversations/:id/invites/:token', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const convId = req.params.id as string;
+  const token = req.params.token as string;
+
+  try {
+    const check = await session.run(`
+      MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $convId})
+      RETURN rel.role AS role
+    `, { userId, convId });
+
+    if (check.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    if (check.records[0].get('role') !== 'owner') {
+      res.status(403).json({ error: 'Only the group owner can revoke invites' });
+      return;
+    }
+
+    const result = await session.run(`
+      MATCH (c:Conversation {id: $convId})-[:HAS_INVITE]->(inv:GroupInvite {token: $token})
+      SET inv.revokedAt = datetime($now)
+      RETURN inv
+    `, { convId, token, now: new Date().toISOString() });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'Invite not found' });
+      return;
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Error revoking invite:', error);
+    res.status(500).json({ error: 'Failed to revoke invite' });
   } finally {
     await session.close();
   }

@@ -4,6 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import { ChatProvider, useChat } from './contexts/ChatContext';
 import { ChatPage } from './pages/ChatPage';
 import { AUTH_NOTICE_KEY } from './utils/authSession';
+import { InvitePreviewPage } from './pages/InvitePreviewPage';
 
 const NOOS_URL = import.meta.env.VITE_NOOS_URL || 'https://globalbr.ai';
 const ALLOW_INSECURE_SSO_TOKEN = import.meta.env.MODE !== 'production';
@@ -235,6 +236,11 @@ function AppRoutes() {
             <ChatPage />
           </ProtectedRoute>
         }
+      />
+      {/* Group invite preview (OpenChat-240) — auth handled inside the component */}
+      <Route
+        path="/i/:token"
+        element={<InvitePreviewPage />}
       />
     </Routes>
   );

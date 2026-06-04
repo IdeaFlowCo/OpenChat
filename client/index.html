@@ -3,7 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- interactive-widget=resizes-content asks the browser to actually shrink
+         the layout viewport when the on-screen keyboard appears (rather than
+         overlaying it). Combined with the --app-height JS in main.tsx (which
+         tracks visualViewport for browsers that ignore this hint, like iOS
+         Safari today), this prevents the chat area from sliding off-screen
+         under the keyboard. See OpenChat-ka1. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#3b82f6" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)" />
+    <!-- No-flash theme application. Reads localStorage.openchat_theme (one of
+         'light' | 'dark' | 'system'; default 'system') and toggles the .dark
+         class on <html> BEFORE React mounts. Without this, a dark-mode-saved
+         user sees a flash of light theme on cold load. See OpenChat-dpy. -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('openchat_theme') || 'system';
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var isDark = saved === 'dark' || (saved === 'system' && prefersDark);
+          if (isDark) document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
+    <meta name="description" content="OpenChat — real-time messaging powered by the Global Brain" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="OpenChat" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <title>OpenChat</title>
   </head>
   <body>

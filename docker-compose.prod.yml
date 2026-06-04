@@ -17,6 +17,23 @@ services:
       - NOOS_API_URL=${NOOS_API_URL:-http://noos_api:4000/api}
       - NOOS_URL=${NOOS_URL:-https://globalbr.ai}
       - OPENCHAT_URL=${OPENCHAT_URL:-https://chat.globalbr.ai}
+      - CORS_ORIGIN=${CORS_ORIGIN:-}
+      # Web Push (OpenChat-3fw). Generate keys via `npx web-push generate-vapid-keys`.
+      # docker-compose only forwards env vars explicitly listed here; without
+      # this, the push service silently no-ops (graceful, but invisible).
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-mailto:dev@globalbr.ai}
+      # Google OAuth (OpenChat-hwi). Client created in GCP project
+      # boreal-conquest-464203-v2 ("Noos / OpenChat"). Secret lives in
+      # the host .env for this docker-compose; same compose-forwarding
+      # caveat as the VAPID vars above — must be listed here.
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_IOS_CLIENT_ID=${GOOGLE_IOS_CLIENT_ID:-}
+      # Agent API key encryption secret (OpenChat-7c9). 32-byte hex string.
+      # Generate: openssl rand -hex 32 >> /opt/openchat/.env
+      - OC_KEY_ENCRYPTION_SECRET=${OC_KEY_ENCRYPTION_SECRET:-}
     networks:
       - app_network
 

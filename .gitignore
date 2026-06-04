@@ -9,3 +9,16 @@ dist/
 .dolt/
 *.db
 .beads-credential-key
+
+# Mobile (RN-web) build output — built by deploy.sh from ../openchat-mobile.
+client-mobile/dist/
+
+# TypeScript incremental build artifacts
+client/tsconfig.tsbuildinfo
+
+# Beads embedded dolt DB runtime files — don't commit
+.beads/embeddeddolt/
+.beads/backup/
+.beads/.jsonl.lock
+.beads/last-touched
+.beads/export-state.json

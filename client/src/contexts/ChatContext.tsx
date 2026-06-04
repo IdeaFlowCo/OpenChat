@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import toast from 'react-hot-toast';
-import { api, Conversation, isAuthError, Message, User } from '../api';
+import { api, Attachment, Conversation, isAuthError, Message, User } from '../api';
 import { useChatSocket } from '../hooks/useChatSocket';
 import {
   clearStoredSession,
@@ -19,6 +19,8 @@ interface ChatContextValue {
   noosRegister: (email: string, password: string, name: string) => Promise<void>;
   devLogin: (email: string, name?: string) => Promise<void>;
   ssoLogin: (payload: { code?: string; token?: string }) => Promise<void>;
+  startGoogleSignIn: (opts?: { redirect?: string }) => Promise<void>;
+  finishGoogleSignIn: (code: string, redirectUri: string) => Promise<void>;
   logout: () => void;
 
   // Connection
@@ -36,7 +38,7 @@ interface ChatContextValue {
 
   // Messages
   messages: Message[];
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, attachments?: Attachment[]) => Promise<void>;
   loadMessages: (conversationId: string) => Promise<void>;
 
   // Contacts
@@ -52,6 +54,9 @@ interface ChatContextValue {
   typingUsers: Map<string, Set<string>>; // conversationId -> userIds
   startTyping: (conversationId: string) => void;
   stopTyping: (conversationId: string) => void;
+
+  // Unread counts per conversation (OpenChat-yg8)
+  unreadByConv: Map<string, number>;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -305,6 +310,36 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('openchat_user', JSON.stringify(user));
   }, []);
 
+  // Google: kick off the OAuth redirect. We stash state + redirect target
+  // in sessionStorage; the callback page reads them.
+  const startGoogleSignIn = useCallback(async (opts?: { redirect?: string }) => {
+    const stateSeed = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+    const callbackUrl = new URL('/auth/google/callback', window.location.origin).toString();
+    const { url, state, redirectUri } = await api.googleAuthUrl({
+      state: stateSeed,
+      redirectUri: callbackUrl,
+    });
+    sessionStorage.setItem('openchat_google_oauth', JSON.stringify({
+      state,
+      redirectUri,
+      redirect: opts?.redirect || '/',
+    }));
+    window.location.assign(url);
+  }, []);
+
+  // Google: handle the OAuth callback — exchange code for a session.
+  const finishGoogleSignIn = useCallback(async (code: string, redirectUri: string) => {
+    const result = await api.googleExchange(code, redirectUri);
+    const user = { userId: result.user.id, email: result.user.email, name: result.user.name };
+    setCurrentUser(user);
+    setToken(result.token);
+    localStorage.setItem('openchat_token', result.token);
+    localStorage.setItem('openchat_user', JSON.stringify(user));
+    toast.success(`Signed in with Google as ${user.email}`);
+  }, []);
+
   // Logout
   const logout = useCallback(async () => {
     try {
@@ -352,7 +387,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Load messages for a conversation
   const loadMessages = useCallback(async (conversationId: string) => {
     try {
-      const data = await api.getMessages(conversationId);
+      const { messages: data } = await api.getMessages(conversationId);
       setMessages(data);
     } catch (e) {
       console.error('Failed to load messages:', e);
@@ -422,9 +457,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, [currentUser?.userId]);
 
-  // Send message
-  const sendMessage = useCallback(async (content: string) => {
+  // Send message (with optional image attachments — OpenChat-6bg)
+  const sendMessage = useCallback(async (content: string, attachments?: Attachment[]) => {
     if (!activeConversationId) return;
+    // If there are attachments, bypass the socket path and always use REST
+    // (socket doesn't carry attachment data).
+    if (attachments?.length) {
+      const message = await api.sendMessage(activeConversationId, content, undefined, attachments);
+      setMessages(prev => [...prev, message]);
+      return;
+    }
     try {
       await socketSendMessage(activeConversationId, content);
     } catch (e) {
@@ -489,6 +531,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     noosRegister,
     devLogin,
     ssoLogin,
+    startGoogleSignIn,
+    finishGoogleSignIn,
     logout,
     isConnected,
     conversations,
@@ -510,6 +554,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     typingUsers,
     startTyping,
     stopTyping,
+    unreadByConv: new Map<string, number>(),
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

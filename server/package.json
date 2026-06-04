@@ -5,25 +5,34 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && mkdir -p dist/legal && cp src/legal/*.md dist/legal/ && cp src/landing.html src/landing-icon.png dist/",
     "start": "node dist/index.js",
     "lint": "eslint src",
     "seed": "tsx src/seed-test-data.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.91.1",
+    "@aws-sdk/client-s3": "^3.1040.0",
+    "@aws-sdk/s3-request-presigner": "^3.1040.0",
+    "cheerio": "^1.2.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^5.0.1",
+    "google-auth-library": "^10.5.0",
+    "jose": "^5.10.0",
     "jsonwebtoken": "^9.0.2",
+    "marked": "^14.1.4",
     "nanoid": "^5.0.7",
     "neo4j-driver": "^5.27.0",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.10.5",
+    "@types/web-push": "^3.6.4",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

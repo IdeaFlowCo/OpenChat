@@ -53,6 +53,17 @@ export async function initDatabase(): Promise<void> {
       FOR (u:User) ON (u.presenceStatus)
     `);
 
+    // AgentKey constraints (OpenChat-7c9)
+    await session.run(`
+      CREATE CONSTRAINT agent_key_id IF NOT EXISTS
+      FOR (k:AgentKey) REQUIRE k.id IS UNIQUE
+    `);
+
+    await session.run(`
+      CREATE INDEX agent_key_prefix IF NOT EXISTS
+      FOR (k:AgentKey) ON (k.keyPrefix)
+    `);
+
     console.log('Database constraints and indexes initialized');
   } finally {
     await session.close();

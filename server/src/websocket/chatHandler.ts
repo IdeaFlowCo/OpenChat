@@ -2,6 +2,8 @@ import { Server, Socket } from 'socket.io';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
 import { validateToken, AuthUser } from '../middleware/auth.js';
+import { sendPushToUser } from '../services/push.js';
+import { processLinkPreviews } from '../services/linkPreview.js';
 
 interface AuthenticatedSocket extends Socket {
   user?: AuthUser;
@@ -14,6 +16,12 @@ const socketConversations = new Map<string, Set<string>>(); // socketId -> conve
 // Track user presence
 const userSockets = new Map<string, Set<string>>(); // userId -> socketIds
 const socketUsers = new Map<string, string>(); // socketId -> userId
+
+// Export the user-presence map so HTTP route handlers can check online status
+// for "delivered" inference without a DB round-trip.
+export function isUserOnline(userId: string): boolean {
+  return (userSockets.get(userId)?.size ?? 0) > 0;
+}
 
 // Force-join a user's live sockets to a conversation room. Used when a
 // member is added to a group: their existing connection should immediately
@@ -143,10 +151,16 @@ export function setupChatSocket(io: Server): void {
 
       const session = getDriver().session();
       try {
-        // Verify and create message
+        // Verify participation AND check for block (OpenChat-46p):
+        // If any recipient in a direct conversation has blocked the sender,
+        // silently drop the message (no error to sender).
         const check = await session.run(`
           MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-          RETURN c
+          RETURN c,
+            exists {
+              MATCH (other:User)-[:PARTICIPATES_IN]->(c)
+              WHERE other.id <> $userId AND (other)-[:BLOCKED]->(u)
+            } AS blockedBySomeone
         `, { userId, conversationId });
 
         if (check.records.length === 0) {
@@ -154,8 +168,57 @@ export function setupChatSocket(io: Server): void {
           return;
         }
 
+        // Silently drop if blocked — return success to sender but don't persist or fan out.
+        if (check.records[0].get('blockedBySomeone') === true) {
+          callback?.({ success: true, dropped: true });
+          return;
+        }
+
         const messageId = nanoid();
         const now = new Date().toISOString();
+
+        // --- Mention parsing (OpenChat-0jy) ---
+        // Only parse mentions in group conversations; DMs don't need them.
+        // We resolve @Name tokens to participant userIds by name match so the
+        // stored list survives display-name changes in rendering logic.
+        const convCheckResult = await session.run(`
+          MATCH (c:Conversation {id: $conversationId})
+          RETURN c.type AS convType
+        `, { conversationId });
+        const convType = convCheckResult.records[0]?.get('convType') as string | null;
+        const isGroupConv = convType === 'group';
+
+        let mentionedUserIds: string[] = [];
+        if (isGroupConv) {
+          const mentionTokens = [...content.matchAll(/@([\w-]+(?:\s+[\w-]+)?)/g)].map(m => m[1]);
+          if (mentionTokens.length > 0) {
+            // Resolve each token to a participant by case-insensitive name match.
+            // We fetch all participants at once and do the match in JS to avoid
+            // multiple round-trips. Names with spaces are intentionally supported
+            // (e.g. "@Alice Smith") but single-word tokens (e.g. "@alice") also work.
+            const participantsResult = await session.run(`
+              MATCH (p:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+              WHERE p.id <> $senderId
+              RETURN p.id AS pid, p.name AS pname, p.email AS pemail
+            `, { conversationId, senderId: userId });
+            const participants = participantsResult.records.map(r => ({
+              id: r.get('pid') as string,
+              name: (r.get('pname') as string | null) || '',
+              email: (r.get('pemail') as string | null) || '',
+            }));
+            for (const token of mentionTokens) {
+              const lower = token.toLowerCase();
+              const matched = participants.find(p =>
+                p.name.toLowerCase() === lower ||
+                p.name.toLowerCase().startsWith(lower) ||
+                p.email.split('@')[0].toLowerCase() === lower
+              );
+              if (matched && !mentionedUserIds.includes(matched.id)) {
+                mentionedUserIds.push(matched.id);
+              }
+            }
+          }
+        }
 
         const result = await session.run(`
           MATCH (c:Conversation {id: $conversationId})
@@ -166,6 +229,7 @@ export function setupChatSocket(io: Server): void {
             senderId: $senderId,
             conversationId: $conversationId,
             messageType: $messageType,
+            mentions: $mentions,
             createdAt: datetime($now)
           })
           CREATE (m)-[:IN_CONVERSATION]->(c)
@@ -180,6 +244,7 @@ export function setupChatSocket(io: Server): void {
           senderId: userId,
           conversationId,
           messageType,
+          mentions: mentionedUserIds,
           now
         });
 
@@ -188,7 +253,18 @@ export function setupChatSocket(io: Server): void {
         // Broadcast to all participants in the conversation
         io.to(`conversation:${conversationId}`).emit('message:new', message);
 
+        // Async link preview fetch — non-blocking (OpenChat-hq2)
+        processLinkPreviews(io, messageId, conversationId, content);
+
         callback?.({ success: true, message });
+
+        // Fan-out push notifications to all OTHER participants. Fire-and-forget;
+        // never block the message:send response on push delivery.
+        // The mobile client's foreground handler suppresses the banner when the
+        // user is already viewing the conversation. (OpenChat-vg7)
+        fanoutPushForMessage(conversationId, userId, message, mentionedUserIds).catch((err) => {
+          console.warn('[push] fanout error:', err);
+        });
       } catch (error) {
         console.error('Error sending message:', error);
         callback?.({ error: 'Failed to send message' });
@@ -312,6 +388,90 @@ async function broadcastPresenceToContacts(io: Server, userId: string, status: s
         }
       }
     }
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Send push notifications to every participant of a conversation except the
+ * sender. Title is the sender name (falling back to email), body is the
+ * message preview. Data carries conversationId + messageId so the mobile
+ * client can navigate to the right thread on tap.
+ *
+ * For mentioned users in group chats the notification body reads:
+ *   "You were mentioned in {convTitle} by {senderName}: {preview}"
+ * vs the default "{senderName} in {convTitle}: {preview}".
+ *
+ * Fire-and-forget — logs but never throws to the caller.
+ * OpenChat-0jy: added mentionedUserIds param.
+ */
+async function fanoutPushForMessage(
+  conversationId: string,
+  senderId: string,
+  message: unknown,
+  mentionedUserIds: string[] = []
+): Promise<void> {
+  const m = message as {
+    id?: string;
+    content?: string;
+    sender?: { name?: string; email?: string };
+  };
+  const session = getDriver().session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (c:Conversation {id: $conversationId})
+      OPTIONAL MATCH (other:User)-[:PARTICIPATES_IN]->(c)
+      WHERE other.id <> $senderId
+      RETURN c { .title, .type } AS conv, collect(other.id) AS recipientIds
+      `,
+      { conversationId, senderId }
+    );
+    if (result.records.length === 0) return;
+    const recipientIds = (result.records[0].get('recipientIds') as string[]) || [];
+    const conv = result.records[0].get('conv') as { title?: string; type?: string } | null;
+    if (recipientIds.length === 0) return;
+
+    const senderName = (m.sender?.name || m.sender?.email || 'Someone').trim();
+    const preview = (m.content || '').slice(0, 140);
+    const mentionSet = new Set(mentionedUserIds);
+
+    await Promise.all(
+      recipientIds.map((uid) => {
+        const isMentioned = mentionSet.has(uid);
+        let title: string;
+        let body: string;
+
+        if (isMentioned && conv?.type === 'group') {
+          // Mention-specific copy (OpenChat-0jy)
+          const convTitle = conv.title ? ` in ${conv.title}` : '';
+          title = `${senderName}${convTitle}`;
+          body = `You were mentioned by ${senderName}: ${preview}`;
+        } else {
+          title =
+            conv?.type === 'group' && conv.title
+              ? `${senderName} in ${conv.title}`
+              : senderName;
+          body = preview;
+        }
+
+        return sendPushToUser(uid, {
+          title,
+          body,
+          tag: `conv:${conversationId}`,
+          data: {
+            type: isMentioned ? 'mention' : 'message',
+            conversationId,
+            messageId: m.id,
+            isMention: isMentioned,
+          },
+        }).catch((err) => {
+          console.warn(`[push] send to ${uid} failed:`, err);
+          return { delivered: 0, removed: 0, failed: 1 };
+        });
+      })
+    );
   } finally {
     await session.close();
   }

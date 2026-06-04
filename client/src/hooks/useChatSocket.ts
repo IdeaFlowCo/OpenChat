@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { Message } from '../api';
+import { api, Message } from '../api';
 
 interface UseChatSocketOptions {
   token: string | null;
@@ -71,8 +71,34 @@ export function useChatSocket(options: UseChatSocketOptions) {
     // Surface WS handshake/connect failures to the browser console so
     // regressions (e.g. Cloudflare WebSocket upgrade disabled) don't
     // degrade silently. See OpenChat-0kv.
+    //
+    // OpenChat-2zr (2026-05-30): the chat server's auth middleware throws
+    // Error('Invalid token') when the JWT is expired or revoked
+    // (server/src/websocket/chatHandler.ts:64). When we see that specific
+    // message, take the same recovery path the REST layer does — attempt
+    // a single-flight refresh via api.refreshAccessToken(), then let the
+    // React `token` state update from the noos:token-refreshed listener
+    // in ChatProvider recreate this socket with the new auth. If refresh
+    // fails, api emits noos:auth-expired and ChatProvider logs the user
+    // out and routes to /login. Either way we get a real user-visible
+    // outcome instead of a perpetual "Reconnecting..." spinner.
+    //
+    // Note (codex impl review 2026-05-30): we deliberately do NOT scope
+    // a "tried-once-per-token" flag here. A successful refresh remounts
+    // this effect with the new token, which would reset any per-run
+    // flag — so a chat-server that rejects every refreshed token would
+    // loop forever. The loop guard lives in api.refreshAccessToken()
+    // instead (REFRESH_LOOP_LIMIT), which can correctly count refreshes
+    // across effect re-mounts and stop the cycle once we've burned
+    // enough refresh tokens without seeing any successful API call.
     socket.on('connect_error', (err) => {
       console.error('Socket connect_error:', err?.message || err, err);
+      if (err?.message === 'Invalid token') {
+        // Fire-and-forget; success → ChatProvider receives token-refreshed
+        // event → effect cleanup disconnects this socket and a fresh one
+        // mounts with the new token. Failure → ChatProvider logs out.
+        void api.refreshAccessToken();
+      }
     });
 
     socket.on('message:new', (message: Message) => {
