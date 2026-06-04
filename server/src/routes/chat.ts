@@ -164,7 +164,7 @@ router.get('/conversations', resolveActor, async (req: Request, res: Response) =
 });
 
 // POST /api/chat/conversations - Create a conversation (1:1 or group)
-router.post('/conversations', requireAuth, async (req: Request, res: Response) => {
+router.post('/conversations', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { participantIds, title, type = 'direct' } = req.body;
@@ -178,9 +178,20 @@ router.post('/conversations', requireAuth, async (req: Request, res: Response) =
   if (type === 'direct' && participantIds.length === 1) {
     const otherId = participantIds[0];
     const existing = await session.run(`
-      MATCH (u1:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {type: 'direct'})<-[:PARTICIPATES_IN]-(u2:User {id: $otherId})
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
+      WHERE c.type = 'direct'
       WITH c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
+      WITH c, participants, [p IN participants | p.user.id] AS participantIds
+      WHERE (
+        $otherId = $userId
+        AND size(participantIds) = 1
+        AND $userId IN participantIds
+      ) OR (
+        $otherId <> $userId
+        AND size(participantIds) = 2
+        AND $userId IN participantIds
+        AND $otherId IN participantIds
+      )
       RETURN c {
         .*,
         participants: participants
@@ -539,7 +550,7 @@ router.delete('/conversations/:id/participants/:userId', requireAuth, async (req
 });
 
 // GET /api/chat/conversations/:id - Get conversation with participants
-router.get('/conversations/:id', requireAuth, async (req: Request, res: Response) => {
+router.get('/conversations/:id', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id } = req.params;
@@ -664,7 +675,7 @@ router.get('/conversations/:id/export', requireAuth, async (req: Request, res: R
 });
 
 // GET /api/chat/conversations/:id/messages - Get messages (paginated)
-router.get('/conversations/:id/messages', requireAuth, async (req: Request, res: Response) => {
+router.get('/conversations/:id/messages', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id } = req.params;
@@ -811,7 +822,8 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id: conversationId } = req.params;
-  const { content, messageType = 'text', attachments } = req.body;
+  const { content: rawContent, text, messageType = 'text', attachments } = req.body;
+  const content = rawContent ?? text;
 
   // Allow either content OR attachments (images can be sent without caption).
   const hasContent = content && typeof content === 'string' && content.trim();
@@ -895,7 +907,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // Async link preview fetch — non-blocking (OpenChat-hq2)
     const io = req.app.get('io') as IOServer | undefined;
     if (io) {
-      processLinkPreviews(io, raw.id as string, conversationId as string, content as string);
+      processLinkPreviews(io, raw.id as string, conversationId as string, messageContent);
     }
 
     res.status(201).json(raw);
@@ -913,15 +925,22 @@ router.get('/contacts', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const searchQuery = req.query.q as string | undefined;
+  const normalizedSearch = (searchQuery || '').trim().toLowerCase();
+  const isSelfSearch = normalizedSearch === 'self' || normalizedSearch === 'me';
 
   try {
     const query = searchQuery
       ? `
         MATCH (u:User)
-        WHERE u.id <> $userId
-          AND (toLower(u.name) CONTAINS toLower($search) OR toLower(u.email) CONTAINS toLower($search))
+        WHERE (
+            u.id <> $userId
+            AND (toLower(u.name) CONTAINS toLower($search) OR toLower(u.email) CONTAINS toLower($search))
+          ) OR (
+            $isSelfSearch = true
+            AND u.id = $userId
+          )
         RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
-        ORDER BY u.name
+        ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
       `
       : `
         MATCH (u:User)
@@ -930,7 +949,7 @@ router.get('/contacts', requireAuth, async (req: Request, res: Response) => {
         ORDER BY u.name
       `;
 
-    const result = await session.run(query, { userId, search: searchQuery || '' });
+    const result = await session.run(query, { userId, search: searchQuery || '', isSelfSearch });
     const contacts = result.records.map(r => toJS(r.get('user')));
     res.json(contacts);
   } catch (error) {
@@ -1549,7 +1568,7 @@ function emitReactionsUpdated(
 }
 
 // PATCH /api/chat/messages/:id — edit own message (owner-only)
-router.patch('/messages/:id', requireAuth, async (req: Request, res: Response) => {
+router.patch('/messages/:id', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const messageId = req.params.id as string;
@@ -1600,7 +1619,7 @@ router.patch('/messages/:id', requireAuth, async (req: Request, res: Response) =
 });
 
 // DELETE /api/chat/messages/:id — soft-delete own message (owner-only)
-router.delete('/messages/:id', requireAuth, async (req: Request, res: Response) => {
+router.delete('/messages/:id', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const messageId = req.params.id as string;

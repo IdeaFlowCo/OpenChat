@@ -1,10 +1,12 @@
 import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import { marked } from 'marked';
 import { initDatabase, closeDatabase } from './db.js';
 import authRoutes from './routes/auth.js';
 import chatRoutes from './routes/chat.js';
@@ -77,6 +79,52 @@ app.get('/about', (_req, res) => {
 app.get('/about/icon.png', (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.sendFile(landingIconPath);
+});
+
+const connectBotMdPath = path.join(__dirname, 'docs', 'connect-your-bot.md');
+let connectBotHtmlCache: string | null = null;
+
+function renderConnectBotHtml(): string {
+  if (connectBotHtmlCache) return connectBotHtmlCache;
+  let body = '';
+  try {
+    body = marked.parse(readFileSync(connectBotMdPath, 'utf8'), { async: false }) as string;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    body = `<p>Failed to load docs: ${message}</p>`;
+  }
+
+  connectBotHtmlCache = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect your bot - OpenChat</title>
+<style>
+  :root { color-scheme: dark; --bg:#0a0c18; --surface:#12162a; --border:#29304f; --text:#f5f7ff; --muted:#a7aecf; --accent:#8ea2ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; }
+  main { max-width:820px; margin:0 auto; padding:32px 22px 72px; }
+  a { color:var(--accent); }
+  h1 { font-size:40px; line-height:1.1; margin:24px 0; }
+  h2 { margin-top:36px; }
+  p, li { color:var(--text); }
+  code { background:var(--surface); border:1px solid var(--border); border-radius:5px; padding:2px 5px; }
+  pre { overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px; }
+  pre code { border:0; padding:0; }
+  table { width:100%; border-collapse:collapse; margin:16px 0; }
+  th, td { border-bottom:1px solid var(--border); padding:9px 11px; text-align:left; }
+  th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+</style>
+</head>
+<body><main>${body}</main></body>
+</html>`;
+  return connectBotHtmlCache;
+}
+
+app.get('/about/connect-your-bot', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.type('html').send(renderConnectBotHtml());
 });
 
 // Serve static files from client build (production)

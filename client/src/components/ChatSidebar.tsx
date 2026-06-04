@@ -3,9 +3,23 @@ import { useChat } from '../contexts/ChatContext';
 import { useTheme, ThemePreference } from '../contexts/ThemeContext';
 import { ConversationList } from './ConversationList';
 import { PresenceIndicator } from './PresenceIndicator';
+import { SettingsModal } from './SettingsModal';
 import { api, User, SearchResults } from '../api';
 import { toastError } from '../utils/toastError';
 import { BotBadge } from './BotBadge';
+import type { CurrentUserLike } from '../utils/userDisplay';
+import {
+  currentUserAsContact,
+  isSelfSearch,
+  isSelfUser,
+  rankSelfFirst,
+  userDisplayName,
+} from '../utils/userDisplay';
+import {
+  formatVersion,
+  readShowVersionInTopBar,
+  writeShowVersionInTopBar,
+} from '../utils/appVersion';
 
 // Environment detection for context-aware UI
 type AppEnvironment = 'tailscale' | 'localhost' | 'production';
@@ -57,9 +71,6 @@ function getInitials(user: { name?: string; email: string }): string {
   return name.substring(0, 2).toUpperCase();
 }
 
-// App version (sync with package.json)
-const APP_VERSION = '0.2.0';
-
 // Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -93,6 +104,8 @@ export function ChatSidebar() {
   const [status, setStatus] = useState<'available' | 'away' | 'busy' | 'invisible'>('available');
   const [statusMessage, setStatusMessage] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showVersionInTopBar, setShowVersionInTopBar] = useState(() => readShowVersionInTopBar());
   // Group-creation state
   const [selectedContacts, setSelectedContacts] = useState<User[]>([]);
   const [groupTitle, setGroupTitle] = useState('');
@@ -133,14 +146,17 @@ export function ChatSidebar() {
       setIsSearching(true);
       try {
         const results = await searchContacts(debouncedSearch);
-        setSearchResults(results);
+        const withSelf = currentUser && isSelfSearch(debouncedSearch) && !results.some(u => u.id === currentUser.userId)
+          ? [currentUserAsContact(currentUser), ...results]
+          : results;
+        setSearchResults(rankSelfFirst(withSelf, currentUser));
       } finally {
         setIsSearching(false);
       }
     };
 
     performSearch();
-  }, [debouncedSearch, pickerMode, searchContacts]);
+  }, [debouncedSearch, pickerMode, searchContacts, currentUser]);
 
   // Global search effect. Mirrors the contact-picker pattern, but hits the
   // unified /api/chat/search endpoint and renders three sections (messages,
@@ -258,6 +274,10 @@ export function ChatSidebar() {
   };
 
   const isContactSelected = (id: string) => selectedContacts.some(c => c.id === id);
+  const handleShowVersionInTopBarChange = (value: boolean) => {
+    setShowVersionInTopBar(value);
+    writeShowVersionInTopBar(value);
+  };
 
   // Global search result click handlers. Each one shuts the search panel
   // (clear the input) and routes the user to the right place. We don't
@@ -303,7 +323,12 @@ export function ChatSidebar() {
       {/* Header */}
       <div className="p-3 md:p-4 border-b border-gray-200 dark:border-slate-800 pt-safe">
         <div className="flex items-center justify-between mb-3 gap-2">
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-slate-100">Chats</h1>
+          <div className="flex min-w-0 items-baseline gap-2">
+            <h1 className="text-xl font-semibold text-gray-900 dark:text-slate-100">Chats</h1>
+            {showVersionInTopBar && (
+              <span className="truncate text-xs font-medium text-gray-400 dark:text-slate-500">{formatVersion()}</span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => openPicker('direct')}
@@ -360,6 +385,15 @@ export function ChatSidebar() {
                       </div>
                     </div>
                     <div className="py-1">
+                      <button
+                        className="block w-full px-3 py-3 text-left text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 active:bg-gray-200 dark:active:bg-slate-700"
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          setSettingsOpen(true);
+                        }}
+                      >
+                        Settings
+                      </button>
                       <a
                         href={serviceUrls.notes}
                         target="_blank"
@@ -397,7 +431,7 @@ export function ChatSidebar() {
                       </button>
                     </div>
                     <div className="border-t border-gray-100 dark:border-slate-800 px-3 py-2 text-center text-xs text-gray-400 dark:text-slate-500">
-                      v{APP_VERSION}
+                      {formatVersion()}
                     </div>
                   </div>
                 )}
@@ -496,12 +530,12 @@ export function ChatSidebar() {
                         key={c.id}
                         className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs"
                       >
-                        {c.name || c.email}
+                        {userDisplayName(c, currentUser)}
                         <BotBadge user={c} compact />
                         <button
                           onClick={() => setSelectedContacts(prev => prev.filter(x => x.id !== c.id))}
                           className="hover:text-blue-900 dark:hover:text-blue-100"
-                          aria-label={`Remove ${c.name || c.email}`}
+                          aria-label={`Remove ${userDisplayName(c, currentUser)}`}
                         >
                           ×
                         </button>
@@ -556,7 +590,7 @@ export function ChatSidebar() {
                           checked={selected}
                           readOnly
                           className="w-5 h-5 accent-blue-500 pointer-events-none"
-                          aria-label={`Select ${contact.name || contact.email}`}
+                          aria-label={`Select ${userDisplayName(contact, currentUser)}`}
                         />
                       )}
                       <div className="relative">
@@ -572,7 +606,12 @@ export function ChatSidebar() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-gray-900 dark:text-slate-100 flex items-center">
-                          <span className="truncate">{contact.name || contact.email}</span>
+                          <span className="truncate">{userDisplayName(contact, currentUser)}</span>
+                          {isSelfUser(contact, currentUser) && (
+                            <span className="ml-2 rounded-full bg-blue-50 dark:bg-blue-900/40 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 dark:text-blue-300">
+                              self
+                            </span>
+                          )}
                           <BotBadge user={contact} />
                         </div>
                         <div className="text-sm text-gray-500 dark:text-slate-400 truncate">{contact.email}</div>
@@ -624,6 +663,7 @@ export function ChatSidebar() {
                 query={debouncedGlobalSearch.trim()}
                 results={globalSearchResults}
                 isLoading={isGlobalSearching}
+                currentUser={currentUser}
                 onOpenConversation={handleSearchOpenConversation}
                 onOpenContact={handleSearchOpenContact}
                 messagePreview={messagePreview}
@@ -634,6 +674,12 @@ export function ChatSidebar() {
           </div>
         </>
       )}
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        showVersionInTopBar={showVersionInTopBar}
+        onShowVersionInTopBarChange={handleShowVersionInTopBarChange}
+      />
     </div>
   );
 }
@@ -646,12 +692,13 @@ interface SearchResultsPanelProps {
   query: string;
   results: SearchResults | null;
   isLoading: boolean;
+  currentUser: CurrentUserLike | null | undefined;
   onOpenConversation: (conversationId: string) => void;
   onOpenContact: (contact: User) => void;
   messagePreview: (content: string, q: string) => string;
 }
 
-function SearchResultsPanel({ query, results, isLoading, onOpenConversation, onOpenContact, messagePreview }: SearchResultsPanelProps) {
+function SearchResultsPanel({ query, results, isLoading, currentUser, onOpenConversation, onOpenContact, messagePreview }: SearchResultsPanelProps) {
   // While loading the *first* result for a given query, results === null —
   // show a skeleton. On subsequent re-queries (typing keeps changing the
   // term), we keep the previous results visible so the panel doesn't flash.
@@ -752,7 +799,12 @@ function SearchResultsPanel({ query, results, isLoading, onOpenConversation, onO
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-gray-900 dark:text-slate-100 truncate flex items-center">
-                    <span className="truncate">{c.name || c.email}</span>
+                    <span className="truncate">{userDisplayName(c, currentUser)}</span>
+                    {isSelfUser(c, currentUser) && (
+                      <span className="ml-2 rounded-full bg-blue-50 dark:bg-blue-900/40 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 dark:text-blue-300">
+                        self
+                      </span>
+                    )}
                     <BotBadge user={c} />
                   </div>
                   <div className="text-sm text-gray-500 dark:text-slate-400 truncate">{c.email}</div>

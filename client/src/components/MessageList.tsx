@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useChat } from '../contexts/ChatContext';
 import { TypingBubble } from './TypingBubble';
+import { userDisplayName } from '../utils/userDisplay';
 
 // After this many ms without a typing:start heartbeat for a given user,
 // we treat them as no longer typing (client-side fallback for dropped
@@ -111,7 +112,9 @@ export function MessageList() {
     <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-slate-950">
       {messages.map((message) => {
         const isOwn = message.senderId === currentUser?.userId;
-        const sender = message.sender;
+        const sender = message.sender || (isOwn && currentUser
+          ? { id: currentUser.userId, email: currentUser.email, name: currentUser.name || currentUser.email }
+          : undefined);
 
         return (
           <div
@@ -125,9 +128,9 @@ export function MessageList() {
                   : 'bg-gray-100 dark:bg-slate-800 text-gray-900 dark:text-slate-100 rounded-bl-md'
               }`}
             >
-              {!isOwn && sender && (
-                <div className="text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">
-                  {sender.name || sender.email}
+              {sender && (
+                <div className={`text-xs font-medium mb-1 ${isOwn ? 'text-blue-100' : 'text-gray-500 dark:text-slate-400'}`}>
+                  {userDisplayName(sender, currentUser)}
                 </div>
               )}
               {/* Image attachments (OpenChat-6bg) */}

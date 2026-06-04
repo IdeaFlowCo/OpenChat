@@ -5,6 +5,7 @@ import { Conversation, User } from '../api';
 import { PresenceIndicator } from './PresenceIndicator';
 import { BotBadge } from './BotBadge';
 import { toastError } from '../utils/toastError';
+import { userDisplayName } from '../utils/userDisplay';
 
 interface GroupSettingsProps {
   open: boolean;
@@ -109,7 +110,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
       await addParticipant(conversation.id, user.id);
       setSearch('');
       setResults([]);
-      toast.success(`Added ${user.name || user.email}`);
+      toast.success(`Added ${userDisplayName(user, currentUser)}`);
     } catch (e) {
       toastError(e instanceof Error ? e.message : 'Failed to add member', { id: 'add-member' });
     } finally {
@@ -260,7 +261,9 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
                             {(u.name || u.email).charAt(0).toUpperCase()}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate text-gray-900 dark:text-slate-100">{u.name || u.email}</div>
+                            <div className="font-medium truncate text-gray-900 dark:text-slate-100">
+                              {userDisplayName(u, currentUser)}
+                            </div>
                             <div className="text-xs text-gray-500 dark:text-slate-400 truncate">{u.email}</div>
                           </div>
                           <span className="text-blue-600 dark:text-blue-400 text-sm font-medium">Add</span>
@@ -291,8 +294,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-medium truncate text-gray-900 dark:text-slate-100 flex items-center">
-                        <span className="truncate">{u.name || u.email}</span>
-                        {isMe && <span className="text-gray-400 dark:text-slate-500 font-normal ml-1">(you)</span>}
+                        <span className="truncate">{userDisplayName(u, currentUser)}</span>
                         <BotBadge user={u} compact />
                       </div>
                       <div className="text-xs text-gray-500 dark:text-slate-400 truncate">
@@ -301,7 +303,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
                     </div>
                     {canRemove && (
                       <button
-                        onClick={() => handleRemove(u.id, u.name || u.email)}
+                        onClick={() => handleRemove(u.id, userDisplayName(u, currentUser))}
                         disabled={busyUserId === u.id}
                         className="text-sm text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 active:text-red-900 px-2 py-1 min-h-[36px] disabled:opacity-50"
                       >

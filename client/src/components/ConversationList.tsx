@@ -1,13 +1,15 @@
 import { useChat } from '../contexts/ChatContext';
 import { PresenceIndicator } from './PresenceIndicator';
 import { BotBadge } from './BotBadge';
+import { userDisplayName } from '../utils/userDisplay';
 
 export function ConversationList() {
   const { conversations, activeConversationId, setActiveConversation, presence, currentUser, unreadByConv, typingUsers } = useChat();
 
   const getOtherParticipant = (conv: typeof conversations[0]) => {
     const participants = conv.participants || [];
-    return participants.find(p => p.user.id !== currentUser?.userId)?.user;
+    return participants.find(p => p.user.id !== currentUser?.userId)?.user
+      || participants.find(p => p.user.id === currentUser?.userId)?.user;
   };
 
   const getConversationTitle = (conv: typeof conversations[0]) => {
@@ -79,7 +81,11 @@ export function ConversationList() {
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-center">
                   <span className={`truncate flex items-center min-w-0 ${hasUnread ? 'font-semibold text-gray-900 dark:text-slate-50' : 'font-medium text-gray-900 dark:text-slate-100'}`}>
-                    <span className="truncate">{getConversationTitle(conv)}</span>
+                    <span className="truncate">
+                      {conv.type === 'direct' && other
+                        ? userDisplayName(other, currentUser)
+                        : getConversationTitle(conv)}
+                    </span>
                     {conv.type === 'direct' && other && <BotBadge user={other} compact />}
                   </span>
                   <span className="text-xs text-gray-400 dark:text-slate-500 shrink-0 ml-2 flex items-center gap-2">
