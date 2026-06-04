@@ -1,0 +1,42 @@
+{
+  "cli": {
+    "version": ">= 14.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development"
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview",
+      "ios": {
+        "simulator": false
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "channel": "production",
+      "env": {
+        "EXPO_PUBLIC_SHOW_TEST_LOGINS": "false"
+      },
+      "ios": {
+        "buildConfiguration": "Release"
+      },
+      "credentialsSource": "local"
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleTeamId": "JESMXK96LG",
+        "ascApiKeyPath": "/Users/jacobcole/.appstoreconnect/private_keys/AuthKey_KWJX4896S5.p8",
+        "ascApiKeyId": "KWJX4896S5",
+        "ascApiKeyIssuerId": "69a6de95-2833-47e3-e053-5b8c7c11a4d1",
+        "ascAppId": "6774991932"
+      }
+    }
+  }
+}
