@@ -12,6 +12,12 @@ interface UseChatSocketOptions {
   onConversationUpdated?: (data: { conversationId: string; conversation: unknown }) => void;
   onParticipantAdded?: (data: { conversationId: string; conversation: unknown }) => void;
   onParticipantRemoved?: (data: { conversationId: string; userId: string; conversation?: unknown }) => void;
+  /** A message was edited or soft-deleted (openchat-bmp.3). Payload is the full message. */
+  onMessageUpdated?: (message: Message) => void;
+  /** Reaction counts changed on a message (openchat-bmp.1). */
+  onReactionsUpdated?: (data: { messageId: string; conversationId: string; reactions: Array<{ emoji: string; count: number; byMe: boolean }> }) => void;
+  /** A participant marked the conversation read (openchat-bmp.4). */
+  onReadUpdated?: (data: { conversationId: string; userId: string; lastReadAt: string; readMap?: Record<string, string | null>; onlineMap?: Record<string, boolean> }) => void;
 }
 
 export function useChatSocket(options: UseChatSocketOptions) {
@@ -25,6 +31,9 @@ export function useChatSocket(options: UseChatSocketOptions) {
     onConversationUpdated,
     onParticipantAdded,
     onParticipantRemoved,
+    onMessageUpdated,
+    onReactionsUpdated,
+    onReadUpdated,
   } = options;
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -133,6 +142,18 @@ export function useChatSocket(options: UseChatSocketOptions) {
       onParticipantRemoved?.(data);
     });
 
+    socket.on('message:updated', (message: Message) => {
+      onMessageUpdated?.(message);
+    });
+
+    socket.on('message:reactions-updated', (data) => {
+      onReactionsUpdated?.(data);
+    });
+
+    socket.on('read:updated', (data) => {
+      onReadUpdated?.(data);
+    });
+
     socket.on('error', (error) => {
       console.error('Socket error:', error);
     });
@@ -177,6 +198,9 @@ export function useChatSocket(options: UseChatSocketOptions) {
     onConversationUpdated,
     onParticipantAdded,
     onParticipantRemoved,
+    onMessageUpdated,
+    onReactionsUpdated,
+    onReadUpdated,
   ]);
 
   const joinConversation = useCallback((conversationId: string) => {

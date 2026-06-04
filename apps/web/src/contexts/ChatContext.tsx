@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import toast from 'react-hot-toast';
 import { api, Attachment, Conversation, isAuthError, Message, User } from '../api';
 import { useChatSocket } from '../hooks/useChatSocket';
@@ -40,6 +40,13 @@ interface ChatContextValue {
   messages: Message[];
   sendMessage: (content: string, attachments?: Attachment[]) => Promise<void>;
   loadMessages: (conversationId: string) => Promise<void>;
+  editMessage: (messageId: string, content: string) => Promise<void>;
+  deleteMessage: (messageId: string) => Promise<void>;
+  toggleReaction: (messageId: string, emoji: string) => Promise<void>;
+
+  // Reply / quote (openchat-bmp.2)
+  replyTo: Message | null;
+  setReplyTo: (message: Message | null) => void;
 
   // Contacts
   contacts: User[];
@@ -55,8 +62,11 @@ interface ChatContextValue {
   startTyping: (conversationId: string) => void;
   stopTyping: (conversationId: string) => void;
 
-  // Unread counts per conversation (OpenChat-yg8)
+  // Unread counts per conversation (OpenChat-yg8 / openchat-bmp.4)
   unreadByConv: Map<string, number>;
+  // Per-conversation map of userId -> their lastReadAt ISO timestamp, used to
+  // render read receipts on the sender's own messages (openchat-bmp.4).
+  readReceiptsByConv: Map<string, Record<string, string | null>>;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -75,6 +85,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [contacts, setContacts] = useState<User[]>([]);
   const [presence, setPresence] = useState<Map<string, { status: string; statusMessage?: string }>>(new Map());
   const [typingUsers, setTypingUsers] = useState<Map<string, Set<string>>>(new Map());
+  const [unreadByConv, setUnreadByConv] = useState<Map<string, number>>(new Map());
+  const [readReceiptsByConv, setReadReceiptsByConv] = useState<Map<string, Record<string, string | null>>>(new Map());
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+
+  // Mirror the active conversation id into a ref so socket callbacks (whose
+  // identities we don't want to churn on every conversation switch) can read
+  // the latest value without being re-created. activeConversationId is the
+  // source of truth for React rendering; this ref is the source of truth for
+  // imperative socket-handler logic (unread bump, mark-read).
+  const activeConvRef = useRef<string | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
+  // markConversationRead is defined later; this ref lets the stable socket
+  // handler call the latest version without depending on it. (openchat-bmp.4)
+  const markConversationReadRef = useRef<((id: string) => void) | null>(null);
 
   const clearSession = useCallback(() => {
     setToken(null);
@@ -85,9 +109,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setContacts([]);
     setPresence(new Map());
     setTypingUsers(new Map());
+    setUnreadByConv(new Map());
+    setReadReceiptsByConv(new Map());
+    setReplyTo(null);
     clearStoredSession();
     api.setToken(null);
   }, []);
+
+  // Keep currentUserId ref in sync for use inside socket handlers.
+  useEffect(() => {
+    currentUserIdRef.current = currentUser?.userId ?? null;
+  }, [currentUser?.userId]);
 
   // Socket handlers
   const handleMessage = useCallback((message: Message) => {
@@ -111,7 +143,64 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
       return conv;
     }));
-  }, [activeConversationId]);
+
+    // Unread bookkeeping (openchat-bmp.4). Bump the per-conversation unread
+    // count when the message lands in a conversation that ISN'T currently
+    // open and wasn't sent by me. Use the refs so this callback keeps a
+    // stable identity (we don't want to tear down the socket on every
+    // conversation switch). If the conversation IS active, the read is
+    // immediate — handled by the markRead effect — so don't bump.
+    const isActive = message.conversationId === activeConvRef.current;
+    const isMine = message.senderId === currentUserIdRef.current;
+    if (!isActive && !isMine) {
+      setUnreadByConv(prev => {
+        const next = new Map(prev);
+        next.set(message.conversationId, (next.get(message.conversationId) ?? 0) + 1);
+        return next;
+      });
+    } else if (isActive && !isMine) {
+      // The conversation is open and someone else sent a message — mark read
+      // immediately so their tick advances to "read" (parity with mobile).
+      markConversationReadRef.current?.(message.conversationId);
+    }
+  }, []);
+
+  // Edit / soft-delete echo (openchat-bmp.3). Replace the message in place in
+  // the active conversation's list. We match on id; deletes arrive as a
+  // normal message with deletedAt set + content "Message deleted".
+  const handleMessageUpdated = useCallback((message: Message) => {
+    setMessages(prev => {
+      if (!prev.some(m => m.id === message.id)) return prev;
+      return prev.map(m => (m.id === message.id ? { ...m, ...message } : m));
+    });
+    // Refresh the sidebar preview if this was the latest message.
+    setConversations(prev => prev.map(conv => {
+      if (conv.id !== message.conversationId) return conv;
+      return { ...conv, lastMessagePreview: (message.content || '').slice(0, 100) };
+    }));
+  }, []);
+
+  // Reaction counts changed (openchat-bmp.1). Patch the reactions array on the
+  // target message if it's loaded.
+  const handleReactionsUpdated = useCallback((data: { messageId: string; conversationId: string; reactions: Message['reactions'] }) => {
+    setMessages(prev => prev.map(m => (m.id === data.messageId ? { ...m, reactions: data.reactions } : m)));
+  }, []);
+
+  // A participant marked the conversation read (openchat-bmp.4). Store their
+  // lastReadAt so the sender can render read receipts.
+  const handleReadUpdated = useCallback((data: { conversationId: string; readMap?: Record<string, string | null>; userId: string; lastReadAt: string }) => {
+    setReadReceiptsByConv(prev => {
+      const next = new Map(prev);
+      const existing = { ...(next.get(data.conversationId) ?? {}) };
+      if (data.readMap) {
+        next.set(data.conversationId, { ...existing, ...data.readMap });
+      } else {
+        existing[data.userId] = data.lastReadAt;
+        next.set(data.conversationId, existing);
+      }
+      return next;
+    });
+  }, []);
 
   const handleTypingStart = useCallback((data: { conversationId: string; userId: string }) => {
     setTypingUsers(prev => {
@@ -230,6 +319,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     onConversationUpdated: handleConversationUpdated,
     onParticipantAdded: handleParticipantAdded,
     onParticipantRemoved: handleParticipantRemoved,
+    onMessageUpdated: handleMessageUpdated,
+    onReactionsUpdated: handleReactionsUpdated,
+    onReadUpdated: handleReadUpdated,
   });
 
   // Set API token when auth changes
@@ -394,19 +486,53 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Mark a conversation read: clears the local unread badge and tells the
+  // server (which broadcasts read:updated so other participants can render
+  // read receipts). Best-effort — a failed PATCH just leaves the badge, and
+  // the next open retries. (openchat-bmp.4)
+  const markConversationRead = useCallback(async (id: string) => {
+    setUnreadByConv(prev => {
+      if (!prev.has(id)) return prev;
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+    try {
+      const result = await api.markConversationRead(id);
+      if (result?.readMap) {
+        setReadReceiptsByConv(prev => {
+          const next = new Map(prev);
+          next.set(id, { ...(next.get(id) ?? {}), ...result.readMap });
+          return next;
+        });
+      }
+    } catch (e) {
+      if (!isAuthError(e)) console.error('Failed to mark conversation read:', e);
+    }
+  }, []);
+
+  // Expose markConversationRead to the stable socket handler via ref.
+  useEffect(() => {
+    markConversationReadRef.current = markConversationRead;
+  }, [markConversationRead]);
+
   // Set active conversation
   const setActiveConversation = useCallback((id: string | null) => {
     if (activeConversationId) {
       leaveConversation(activeConversationId);
     }
     setActiveConversationId(id);
+    activeConvRef.current = id;
+    // Clear any pending reply when switching conversations.
+    setReplyTo(null);
     if (id) {
       joinConversation(id);
       loadMessages(id);
+      void markConversationRead(id);
     } else {
       setMessages([]);
     }
-  }, [activeConversationId, joinConversation, leaveConversation, loadMessages]);
+  }, [activeConversationId, joinConversation, leaveConversation, loadMessages, markConversationRead]);
 
   // Create conversation
   const createConversation = useCallback(async (participantIds: string[], title?: string, type?: 'direct' | 'group') => {
@@ -457,17 +583,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, [currentUser?.userId]);
 
-  // Send message (with optional image attachments — OpenChat-6bg)
+  // Send message (with optional image attachments — OpenChat-6bg, reply — bmp.2)
   const sendMessage = useCallback(async (content: string, attachments?: Attachment[]) => {
     if (!activeConversationId) return;
     // One idempotency key per logical message, shared by the WebSocket path and
     // the REST fallback, so a lost-ack retry can't persist two rows. See
     // OpenChat-60y.
     const messageId = crypto.randomUUID();
-    // If there are attachments, bypass the socket path and always use REST
-    // (socket doesn't carry attachment data). Still pass the idempotency id.
-    if (attachments?.length) {
-      const message = await api.sendMessage(activeConversationId, content, 'text', attachments, messageId);
+    const replyToId = replyTo?.id;
+    // Clear the reply composer immediately — the quote is captured in replyToId.
+    if (replyTo) setReplyTo(null);
+    // If there are attachments OR a reply target, use REST (the socket path
+    // carries neither attachments nor replyToId). Still pass the idempotency id.
+    if (attachments?.length || replyToId) {
+      const message = await api.sendMessage(activeConversationId, content, 'text', attachments, messageId, replyToId);
       setMessages(prev => (prev.some(m => m.id === message.id) ? prev : [...prev, message]));
       return;
     }
@@ -480,7 +609,42 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       const message = await api.sendMessage(activeConversationId, content, 'text', undefined, messageId);
       setMessages(prev => (prev.some(m => m.id === message.id) ? prev : [...prev, message]));
     }
-  }, [activeConversationId, socketSendMessage]);
+  }, [activeConversationId, socketSendMessage, replyTo]);
+
+  // Edit own message (openchat-bmp.3). Optimistic: patch locally, then PATCH.
+  // The server broadcasts message:updated so other clients converge.
+  const editMessage = useCallback(async (messageId: string, content: string) => {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    const updated = await api.editMessage(messageId, trimmed);
+    setMessages(prev => prev.map(m => (m.id === messageId ? { ...m, ...updated } : m)));
+  }, []);
+
+  // Delete own message (openchat-bmp.3). Soft-delete on the server; it returns
+  // the rewritten "Message deleted" message which we splice in.
+  const deleteMessage = useCallback(async (messageId: string) => {
+    const updated = await api.deleteMessage(messageId);
+    setMessages(prev => prev.map(m => (m.id === messageId ? { ...m, ...updated } : m)));
+  }, []);
+
+  // Toggle an emoji reaction (openchat-bmp.1). If I've already reacted with
+  // this emoji, remove it; otherwise add it. Optimistic update, reconciled by
+  // the server response + message:reactions-updated broadcast.
+  const toggleReaction = useCallback(async (messageId: string, emoji: string) => {
+    const target = messages.find(m => m.id === messageId);
+    const mine = target?.reactions?.find(r => r.emoji === emoji && r.byMe);
+    try {
+      const { reactions } = mine
+        ? await api.removeReaction(messageId, emoji)
+        : await api.addReaction(messageId, emoji);
+      setMessages(prev => prev.map(m => (m.id === messageId ? { ...m, reactions } : m)));
+    } catch (e) {
+      if (!isAuthError(e)) {
+        console.error('Failed to toggle reaction:', e);
+        toast.error('Could not update reaction');
+      }
+    }
+  }, [messages]);
 
   // Load contacts (optionally with search query)
   const loadContacts = useCallback(async (search?: string) => {
@@ -552,6 +716,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     messages,
     sendMessage,
     loadMessages,
+    editMessage,
+    deleteMessage,
+    toggleReaction,
+    replyTo,
+    setReplyTo,
     contacts,
     loadContacts,
     searchContacts,
@@ -560,7 +729,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     typingUsers,
     startTyping,
     stopTyping,
-    unreadByConv: new Map<string, number>(),
+    unreadByConv,
+    readReceiptsByConv,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

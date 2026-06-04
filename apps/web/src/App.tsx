@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { ChatProvider, useChat } from './contexts/ChatContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { ChatPage } from './pages/ChatPage';
 import { AUTH_NOTICE_KEY } from './utils/authSession';
 import { InvitePreviewPage } from './pages/InvitePreviewPage';
@@ -248,8 +249,9 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <ChatProvider>
-      <Toaster
+    <ThemeProvider>
+      <ChatProvider>
+        <Toaster
         position="top-right"
         toastOptions={{
           duration: 4000,
@@ -267,8 +269,9 @@ export default function App() {
             },
           },
         }}
-      />
-      <AppRoutes />
-    </ChatProvider>
+        />
+        <AppRoutes />
+      </ChatProvider>
+    </ThemeProvider>
   );
 }
