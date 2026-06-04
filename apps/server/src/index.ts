@@ -303,7 +303,10 @@ app.get('/about/connect-your-bot', (_req, res) => {
 // /m (RN-web mobile) and /d (RN-web desktop). We keep the legacy client
 // reachable at every path it used to claim (for bookmarks + the /i/<token>
 // group-invite deep link), but the discoverable entry point is now /legacy.
-const clientDistPath = path.join(__dirname, '..', '..', 'client', 'dist');
+// Monorepo layout: server runs from apps/server/dist, so the web build is a
+// sibling at apps/web/dist (../../web/dist), and the RN-web /m,/d builds live
+// at the repo root (../../../client-mobile{,-desktop}/dist).
+const clientDistPath = path.join(__dirname, '..', '..', 'web', 'dist');
 app.use(express.static(clientDistPath));
 
 // /legacy — official entry point to the legacy Vite web client.
@@ -333,7 +336,7 @@ app.get(/^\/legacy(\/|$)/, (_req, res) => {
 // client. Built by deploy.sh from sibling openchat-mobile repo via
 // `npx expo export --platform web` (with app.json experiments.baseUrl=/m).
 // If the dist directory is missing this just no-ops (404 under /m).
-const mobileDistPath = path.join(__dirname, '..', '..', 'client-mobile', 'dist');
+const mobileDistPath = path.join(__dirname, '..', '..', '..', 'client-mobile', 'dist');
 app.use('/m', express.static(mobileDistPath));
 // SPA fallback for the mobile app's own client-side routes. Only matches
 // /m and /m/<anything>; must run BEFORE the catch-all SPA fallback below.
@@ -346,7 +349,7 @@ app.get(/^\/m(\/|$)/, (_req, res, next) => {
 // Desktop-responsive RN-web build, mounted at /d/*. Same codebase as /m but
 // with a multi-pane master-detail layout above the 768px breakpoint. Built
 // from sibling openchat-mobile-desktop repo (experiments.baseUrl=/d).
-const mobileDesktopDistPath = path.join(__dirname, '..', '..', 'client-mobile-desktop', 'dist');
+const mobileDesktopDistPath = path.join(__dirname, '..', '..', '..', 'client-mobile-desktop', 'dist');
 app.use('/d', express.static(mobileDesktopDistPath));
 app.get(/^\/d(\/|$)/, (_req, res, next) => {
   res.sendFile(path.join(mobileDesktopDistPath, 'index.html'), (err) => {
