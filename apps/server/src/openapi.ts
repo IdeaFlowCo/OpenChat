@@ -90,18 +90,20 @@ export const openapiSpec = {
   ],
   paths: {
     '/health': {
-      get: { tags: ['Meta'], summary: 'Health check', security: [], responses: { '200': ok({ type: 'object' }) } },
+      get: { operationId: 'healthCheck', tags: ['Meta'], summary: 'Health check', security: [], responses: { '200': ok({ type: 'object' }) } },
     },
     '/api/auth/me': {
-      get: { tags: ['Account'], summary: 'Get the authenticated user', responses: { '200': ok({ type: 'object' }), '401': errResp('Unauthorized') } },
+      get: { operationId: 'getMe', tags: ['Account'], summary: 'Get the authenticated user (or agent-key owner)', responses: { '200': ok({ type: 'object' }), '401': errResp('Unauthorized') } },
     },
     '/api/chat/conversations': {
       get: {
+        operationId: 'listConversations',
         tags: ['Chat'],
         summary: "List the caller's conversations",
         responses: { '200': ok({ type: 'array', items: { $ref: '#/components/schemas/Conversation' } }), '401': errResp('Unauthorized') },
       },
       post: {
+        operationId: 'createConversation',
         tags: ['Chat'],
         summary: 'Create a conversation (direct or group)',
         description: 'For a self-DM, pass your own user id as the single participant.',
@@ -110,10 +112,11 @@ export const openapiSpec = {
       },
     },
     '/api/chat/conversations/{id}': {
-      get: { tags: ['Chat'], summary: 'Get a conversation with participants', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ $ref: '#/components/schemas/Conversation' }), '404': errResp('Not found') } },
+      get: { operationId: 'getConversation', tags: ['Chat'], summary: 'Get a conversation with participants', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ $ref: '#/components/schemas/Conversation' }), '404': errResp('Not found') } },
     },
     '/api/chat/conversations/{id}/messages': {
       get: {
+        operationId: 'listMessages',
         tags: ['Chat'],
         summary: 'Get messages in a conversation (paginated)',
         parameters: [
@@ -124,6 +127,7 @@ export const openapiSpec = {
         responses: { '200': ok({ type: 'object', properties: { messages: { type: 'array', items: { $ref: '#/components/schemas/Message' } }, hasMore: { type: 'boolean' } } }), '401': errResp('Unauthorized') },
       },
       post: {
+        operationId: 'sendMessage',
         tags: ['Chat'],
         summary: 'Send a message',
         description: 'Body accepts `content` (preferred) or `text` (alias). At least one of content/attachments required.',
@@ -134,6 +138,7 @@ export const openapiSpec = {
     },
     '/api/chat/messages/since': {
       get: {
+        operationId: 'pollMessagesSince',
         tags: ['Chat'],
         summary: 'Poll for new messages since a timestamp (across all conversations)',
         parameters: [{ name: 'since', in: 'query', required: true, schema: { type: 'string', format: 'date-time' } }],
@@ -141,31 +146,31 @@ export const openapiSpec = {
       },
     },
     '/api/chat/messages/{id}': {
-      patch: { tags: ['Chat'], summary: 'Edit your message', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: json({ type: 'object', properties: { content: { type: 'string' } }, required: ['content'] }) }, responses: { '200': ok({ $ref: '#/components/schemas/Message' }), '403': errResp('Not your message') } },
-      delete: { tags: ['Chat'], summary: 'Delete your message (soft delete)', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }), '403': errResp('Not your message') } },
+      patch: { operationId: 'editMessage', tags: ['Chat'], summary: 'Edit your message', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: json({ type: 'object', properties: { content: { type: 'string' } }, required: ['content'] }) }, responses: { '200': ok({ $ref: '#/components/schemas/Message' }), '403': errResp('Not your message') } },
+      delete: { operationId: 'deleteMessage', tags: ['Chat'], summary: 'Delete your message (soft delete)', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }), '403': errResp('Not your message') } },
     },
     '/api/chat/contacts': {
-      get: { tags: ['Chat'], summary: 'List users (for starting conversations)', parameters: [{ name: 'q', in: 'query', schema: { type: 'string' }, description: "Filter by name/email; 'self'/'me' matches the caller" }], responses: { '200': ok({ type: 'array', items: { type: 'object' } }) } },
+      get: { operationId: 'listContacts', tags: ['Chat'], summary: 'List users (for starting conversations)', parameters: [{ name: 'q', in: 'query', schema: { type: 'string' }, description: "Filter by name/email; 'self'/'me' matches the caller" }], responses: { '200': ok({ type: 'array', items: { type: 'object' } }) } },
     },
     '/api/chat/search': {
-      get: { tags: ['Chat'], summary: 'Search messages', parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }) } },
+      get: { operationId: 'searchMessages', tags: ['Chat'], summary: 'Search messages', parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }) } },
     },
     '/api/chat/presence': {
-      put: { tags: ['Chat'], summary: 'Update your presence', requestBody: { required: true, content: json({ type: 'object', properties: { presenceStatus: { type: 'string' }, statusMessage: { type: 'string' } } }) }, responses: { '200': ok({ type: 'object' }) } },
+      put: { operationId: 'updatePresence', tags: ['Chat'], summary: 'Update your presence', requestBody: { required: true, content: json({ type: 'object', properties: { presenceStatus: { type: 'string' }, statusMessage: { type: 'string' } } }) }, responses: { '200': ok({ type: 'object' }) } },
     },
     '/api/agent-keys': {
-      get: { tags: ['Agent keys'], summary: 'List your agent keys (no plaintext)', responses: { '200': ok({ type: 'array', items: { $ref: '#/components/schemas/AgentKey' } }) } },
-      post: { tags: ['Agent keys'], summary: 'Mint a new agent key', requestBody: { required: true, content: json({ type: 'object', properties: { name: { type: 'string' }, scopes: { type: 'array', items: { type: 'string', enum: ['read', 'write'] } }, expiresAt: { type: 'string', format: 'date-time' } }, required: ['name'] }) }, responses: { '201': ok({ allOf: [{ $ref: '#/components/schemas/AgentKey' }, { type: 'object', properties: { key: { type: 'string', description: 'plaintext, shown once' } } }] }, 'Created') } },
+      get: { operationId: 'listAgentKeys', tags: ['Agent keys'], summary: 'List your agent keys (no plaintext)', responses: { '200': ok({ type: 'array', items: { $ref: '#/components/schemas/AgentKey' } }) } },
+      post: { operationId: 'createAgentKey', tags: ['Agent keys'], summary: 'Mint a new agent key', requestBody: { required: true, content: json({ type: 'object', properties: { name: { type: 'string' }, scopes: { type: 'array', items: { type: 'string', enum: ['read', 'write'] } }, expiresAt: { type: 'string', format: 'date-time' } }, required: ['name'] }) }, responses: { '201': ok({ allOf: [{ $ref: '#/components/schemas/AgentKey' }, { type: 'object', properties: { key: { type: 'string', description: 'plaintext, shown once' } } }] }, 'Created') } },
     },
     '/api/agent-keys/{id}/reveal': {
-      get: { tags: ['Agent keys'], summary: 'Reveal the plaintext key (audit-logged)', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object', properties: { key: { type: 'string' } } }) } },
+      get: { operationId: 'revealAgentKey', tags: ['Agent keys'], summary: 'Reveal the plaintext key (audit-logged)', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object', properties: { key: { type: 'string' } } }) } },
     },
     '/api/agent-keys/{id}': {
-      patch: { tags: ['Agent keys'], summary: 'Rename or change scopes', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: json({ type: 'object', properties: { name: { type: 'string' }, scopes: { type: 'array', items: { type: 'string' } } } }) }, responses: { '200': ok({ $ref: '#/components/schemas/AgentKey' }) } },
-      delete: { tags: ['Agent keys'], summary: 'Revoke a key', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }) } },
+      patch: { operationId: 'updateAgentKey', tags: ['Agent keys'], summary: 'Rename or change scopes', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: json({ type: 'object', properties: { name: { type: 'string' }, scopes: { type: 'array', items: { type: 'string' } } } }) }, responses: { '200': ok({ $ref: '#/components/schemas/AgentKey' }) } },
+      delete: { operationId: 'revokeAgentKey', tags: ['Agent keys'], summary: 'Revoke a key', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }) } },
     },
     '/api/feedback': {
-      post: { tags: ['Feedback'], summary: 'Submit feedback → creates a WorldIssueTracker issue', requestBody: { required: true, content: json({ type: 'object', properties: { message: { type: 'string' }, context: { type: 'string' } }, required: ['message'] }) }, responses: { '201': ok({ type: 'object', properties: { url: { type: 'string' }, id: { type: 'string' } } }, 'Created'), '400': errResp('message required'), '503': errResp('Feedback not configured (WIT_AGENT_KEY unset)') } },
+      post: { operationId: 'submitFeedback', tags: ['Feedback'], summary: 'Submit feedback → creates a WorldIssueTracker issue', requestBody: { required: true, content: json({ type: 'object', properties: { message: { type: 'string' }, context: { type: 'string' } }, required: ['message'] }) }, responses: { '201': ok({ type: 'object', properties: { url: { type: 'string' }, id: { type: 'string' } } }, 'Created'), '400': errResp('message required'), '503': errResp('Feedback not configured (WIT_AGENT_KEY unset)') } },
     },
   },
 } as const;
