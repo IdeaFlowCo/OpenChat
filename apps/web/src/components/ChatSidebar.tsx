@@ -90,6 +90,10 @@ type PickerMode = 'closed' | 'direct' | 'group';
 
 export function ChatSidebar() {
   const { searchContacts, createConversation, setActiveConversation, presence, currentUser, isConnected, updatePresence, logout } = useChat();
+  // Full directory loaded when the picker opens, so users can browse people
+  // to DM without having to type first (openchat-2rn). Search narrows it.
+  const [allContacts, setAllContacts] = useState<User[]>([]);
+  const [loadingAllContacts, setLoadingAllContacts] = useState(false);
   const { preference: themePref, setPreference: setThemePref } = useTheme();
   const [pickerMode, setPickerMode] = useState<PickerMode>('closed');
   const [searchTerm, setSearchTerm] = useState('');
@@ -213,6 +217,13 @@ export function ChatSidebar() {
     setSelectedContacts([]);
     setGroupTitle('');
     setTimeout(() => searchInputRef.current?.focus(), 100);
+    // Browse the full directory (openchat-2rn): fetch all contacts so the
+    // empty-search state shows a list instead of "type to search".
+    setLoadingAllContacts(true);
+    searchContacts('')
+      .then(results => setAllContacts(rankSelfFirst(results, currentUser)))
+      .catch(() => setAllContacts([]))
+      .finally(() => setLoadingAllContacts(false));
   };
 
   const handleStatusChange = (nextStatus: 'available' | 'away' | 'busy' | 'invisible') => {
@@ -559,21 +570,27 @@ export function ChatSidebar() {
           </div>
 
           <div className="flex-1 overflow-y-auto bg-white dark:bg-slate-900">
-            {searchTerm.length === 0 ? (
-              <div className="p-4 text-center text-gray-500 dark:text-slate-400">
-                <p>Type to search for contacts</p>
-                <p className="text-sm mt-1">Search by name or email address</p>
-              </div>
-            ) : isSearching ? (
-              <div className="p-4 text-center text-gray-500 dark:text-slate-400">
-                <div className="animate-pulse">Searching...</div>
-              </div>
-            ) : searchResults.length === 0 ? (
-              <div className="p-4 text-center text-gray-500 dark:text-slate-400">
-                No contacts found for "{searchTerm}"
-              </div>
-            ) : (
-              searchResults.map((contact) => {
+            {(() => {
+              // When the search box is empty, browse the full directory
+              // (openchat-2rn); otherwise show search results.
+              const browsing = searchTerm.length === 0;
+              const list = browsing ? allContacts : searchResults;
+              const loading = browsing ? loadingAllContacts : isSearching;
+              if (loading) {
+                return (
+                  <div className="p-4 text-center text-gray-500 dark:text-slate-400">
+                    <div className="animate-pulse">{browsing ? 'Loading contacts…' : 'Searching...'}</div>
+                  </div>
+                );
+              }
+              if (list.length === 0) {
+                return (
+                  <div className="p-4 text-center text-gray-500 dark:text-slate-400">
+                    {browsing ? 'No contacts yet' : `No contacts found for "${searchTerm}"`}
+                  </div>
+                );
+              }
+              return list.map((contact) => {
                 const contactPresence = presence.get(contact.id);
                 const selected = isContactSelected(contact.id);
 
@@ -624,8 +641,8 @@ export function ChatSidebar() {
                     </div>
                   </div>
                 );
-              })
-            )}
+              });
+            })()}
           </div>
         </div>
       ) : (
