@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
+import toast from 'react-hot-toast';
 import { useChat } from '../contexts/ChatContext';
 import { TypingBubble } from './TypingBubble';
 import { LinkPreviewCard } from './LinkPreviewCard';
 import { MessageContent } from './MessageContent';
 import { userDisplayName } from '../utils/userDisplay';
-import type { Message } from '../api';
+import { api, type Message } from '../api';
 
 // Date separator label (bmp.8): "Today", "Yesterday", or a localized date.
 function dayKey(iso: string): string {
@@ -46,7 +47,11 @@ export function MessageList() {
     loadOlderMessages,
     hasMoreMessages,
     loadingOlder,
+    loadConversations,
+    setActiveConversation,
   } = useChat();
+  // "Ask my agent" in-flight message id (openchat-ug6).
+  const [askingAgentId, setAskingAgentId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Number of messages loaded last render — used to detect prepend (older) vs
@@ -217,6 +222,29 @@ export function MessageList() {
       await deleteMessage(m.id);
     } catch {
       /* errors surfaced by context */
+    }
+  };
+
+  // "Ask my agent" (openchat-ug6): forward the message to the user's Assistant
+  // and navigate to the Assistant DM. The server agent is building
+  // /api/assistant/forward in parallel; we code to the agreed contract and it
+  // lines up at integration.
+  const handleAskAgent = async (m: Message) => {
+    if (!activeConversationId || askingAgentId) return;
+    setOpenMenuId(null);
+    setAskingAgentId(m.id);
+    try {
+      const { conversationId } = await api.forwardToAssistant({
+        sourceConversationId: activeConversationId,
+        sourceMessageId: m.id,
+      });
+      // Make sure the Assistant DM is in the sidebar, then open it.
+      await loadConversations();
+      setActiveConversation(conversationId);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not ask your agent.');
+    } finally {
+      setAskingAgentId(null);
     }
   };
 
@@ -449,6 +477,14 @@ export function MessageList() {
                         className="block w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800"
                       >
                         ↩ Reply
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleAskAgent(message)}
+                        disabled={askingAgentId === message.id}
+                        className="block w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        🤖 {askingAgentId === message.id ? 'Asking…' : 'Ask my agent'}
                       </button>
                       {isOwn && (
                         <>
