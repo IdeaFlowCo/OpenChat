@@ -61,6 +61,43 @@ if [ -n "$TMUX" ]; then
   exit 1
 fi
 
+# ── Toolchain env guards (make headless / agent / nohup builds work) ─────────
+# 1) TMPDIR must NOT live under /tmp. EAS local build stages under $TMPDIR and
+#    hands Metro an ABSOLUTE --entry-file. macOS symlinks /tmp -> /private/tmp,
+#    so if $TMPDIR is /tmp/... Metro's realpath'd projectRoot (/private/tmp/...)
+#    disagrees with the /tmp-form entry path and bundling dies with:
+#      "Unable to resolve module /tmp/.../index.ts from /private/tmp/.../."
+#    Interactive shells use /var/folders/.../T (canonical) so they never hit it;
+#    agent shells often set TMPDIR=/tmp/... and do. Force a canonical $HOME dir.
+case "$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P)" in
+  /tmp|/tmp/*|/private/tmp|/private/tmp/*)
+    export TMPDIR="$HOME/.ocbuild-tmp"
+    mkdir -p "$TMPDIR"
+    echo "── TMPDIR repinned to $TMPDIR (avoids /tmp<->/private/tmp Metro bug) ──"
+    ;;
+esac
+
+# 2) Node must be an Expo-SDK-54-supported LTS (20/22/24). Homebrew's unversioned
+#    `node` keg auto-bumps to the latest (e.g. 25), which Metro rejects (same
+#    "Unable to resolve module index.ts" symptom) — and a bad keg link can even
+#    crash the `eas` CLI (Abort trap: 6 on libsimdjson). If the active node major
+#    is unsupported, prefer an installed LTS keg on PATH.
+NODE_MAJOR="$(node -v 2>/dev/null | sed 's/^v//; s/\..*//')"
+case "$NODE_MAJOR" in
+  20|22|24) : ;;  # supported
+  *)
+    for v in 22 20 24; do
+      if [ -x "/opt/homebrew/opt/node@$v/bin/node" ]; then
+        export PATH="/opt/homebrew/opt/node@$v/bin:$PATH"
+        echo "── Node v$NODE_MAJOR unsupported by Expo SDK 54; using node@$v on PATH ──"
+        echo "   NOTE: if the in-Xcode bundle phase still fails, make node@$v the"
+        echo "   default keg too:  brew unlink node; brew link --overwrite node@$v"
+        break
+      fi
+    done
+    ;;
+esac
+
 # ── Pre-unlock login keychain so codesign can access the signing key ─────────
 LOGIN_PW_FILE="$HOME/.config/m3-login.txt"
 if [ ! -f "$LOGIN_PW_FILE" ]; then
