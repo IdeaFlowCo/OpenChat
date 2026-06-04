@@ -115,6 +115,29 @@ function hintFor(target: Target): string {
   }
 }
 
+/**
+ * One-shot prompt for CODING agents (Claude Code, Cursor, Codex CLI): paste it
+ * and the agent installs + registers the OpenChat MCP server itself, then
+ * verifies. Lives in Advanced (the hero CTA is the tool-less REST blob for
+ * any LLM). Restored per Jacob 2026-06-04 (openchat-oc8.1).
+ */
+function agentSetupPrompt(key: string, guideUrl: string): string {
+  return `Please set up the OpenChat MCP server in this environment so you can read and send messages from my OpenChat account on my behalf.
+
+Setup guide: ${guideUrl}
+
+My OpenChat API key:
+${key}
+
+Steps:
+1. Read the guide above to understand the available tools and how this MCP server works.
+2. Install + register the MCP server using the install form appropriate for this client (e.g. \`claude mcp add openchat --env OPENCHAT_API_KEY=<key> -- npx -y github:tmad4000/openchat-mcp-server\` for Claude Code).
+3. If the MCP server is registered correctly, call \`oc_list_conversations\` to verify it works and print the list of conversations.
+4. Tell me what you'd like me to do next — or wait for instructions.
+
+Treat the API key as a credential: write it to \`~/.openchat/credentials.json\` (mode 600) or pass via env var. Do not commit it to any repo.`;
+}
+
 interface Props {
   /** The plaintext API key. If null we render `oc_your_key_here` placeholders. */
   apiKey: string | null;
@@ -191,6 +214,29 @@ export function McpSetupCard({ apiKey }: Props) {
 
       {advancedOpen && (
         <View style={styles.advancedBody}>
+          {/* One-shot prompt for coding agents (Claude Code / Cursor / Codex):
+              the agent installs the MCP server itself. */}
+          <TouchableOpacity
+            style={[styles.oneShotBtn, { borderColor: c.primary, opacity: apiKey ? 1 : 0.55 }]}
+            onPress={() => {
+              if (!apiKey) {
+                Alert.alert('Reveal your key first', 'Tap "View full key" above so the prompt can include the real key.');
+                return;
+              }
+              Clipboard.setString(agentSetupPrompt(displayedKey, guideUrl));
+              Alert.alert(
+                'One-shot prompt copied',
+                'Paste into Claude Code, Cursor, or any agent CLI — it installs the OpenChat MCP server and verifies the connection.'
+              );
+            }}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.oneShotText, { color: c.primary }]}>📋  Copy one-shot setup prompt (coding agents)</Text>
+            <Text style={[styles.oneShotSub, { color: c.textMuted }]}>Paste into Claude Code / Cursor / Codex — it installs the MCP server itself</Text>
+          </TouchableOpacity>
+
+          <Text style={[styles.snippetsHeader, { color: c.textSecondary }]}>Or paste a config snippet manually</Text>
+
           {/* Tab strip */}
           <View style={styles.tabRow}>
             {TABS.map((t) => {
@@ -297,6 +343,23 @@ const styles = StyleSheet.create({
   },
   advancedBody: {
     marginTop: 10,
+  },
+  oneShotBtn: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  oneShotText: { fontSize: 13, fontWeight: '700' },
+  oneShotSub: { fontSize: 11, marginTop: 2, textAlign: 'center' },
+  snippetsHeader: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 10,
   },
 
   tabRow: {
