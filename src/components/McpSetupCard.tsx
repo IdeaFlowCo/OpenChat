@@ -26,6 +26,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { OPENCHAT_URL } from '../api/client';
+import { buildAgentSetupBlob } from '../utils/agentSetupBlob';
 
 type Target = 'chatgpt' | 'claude' | 'cursor' | 'codex' | 'code' | 'curl';
 
@@ -46,29 +47,8 @@ function snippetFor(target: Target, key: string): string {
       // Tool-less prose blob: paste into a plain chat box (ChatGPT, Gemini,
       // Claude.ai — anything that can make HTTP requests or relay curl). No
       // MCP server, no shell, no file writes required. Self-contained.
-      return `You can now read and send messages on my OpenChat account by calling its REST API directly. No setup or tools to install — just make HTTPS requests with the header below.
-
-Base URL: ${OPENCHAT_URL}
-Auth (send on EVERY request): Authorization: Bearer ${k}
-
-What you can do:
-• List my conversations (start here):
-    GET /api/chat/conversations
-• Read a conversation's messages:
-    GET /api/chat/conversations/{conversationId}/messages
-• Send a message — you appear AS me, not as a separate bot:
-    POST /api/chat/conversations/{conversationId}/messages
-    JSON body: {"content": "your message text"}
-• Poll only new messages since a timestamp:
-    GET /api/chat/messages/since?since=2026-01-01T00:00:00Z
-
-Copy-paste example (send a message):
-    curl -H "Authorization: Bearer ${k}" -H "Content-Type: application/json" \\
-      -d '{"content":"Hello from my agent"}' \\
-      ${OPENCHAT_URL}/api/chat/conversations/CONVERSATION_ID/messages
-
-Treat the key as a secret — don't print it back or commit it anywhere.
-To begin: call GET /api/chat/conversations, show me the list, and ask which conversation I want you to use.`;
+      // Shared with the one-click "Copy agent setup" action in Settings.
+      return buildAgentSetupBlob(k, OPENCHAT_URL);
     case 'claude':
       return JSON.stringify({
         mcpServers: {
