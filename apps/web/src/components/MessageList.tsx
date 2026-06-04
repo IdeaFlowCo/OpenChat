@@ -1,8 +1,24 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useChat } from '../contexts/ChatContext';
 import { TypingBubble } from './TypingBubble';
+import { LinkPreviewCard } from './LinkPreviewCard';
+import { MessageContent } from './MessageContent';
 import { userDisplayName } from '../utils/userDisplay';
 import type { Message } from '../api';
+
+// Date separator label (bmp.8): "Today", "Yesterday", or a localized date.
+function dayKey(iso: string): string {
+  return new Date(iso).toDateString();
+}
+function dateSeparatorLabel(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' });
+}
 
 // After this many ms without a typing:start heartbeat for a given user,
 // we treat them as no longer typing (client-side fallback for dropped
@@ -156,6 +172,10 @@ export function MessageList() {
   // recent message that the other participant has read. We only annotate the
   // latest own read message (iMessage-style) to avoid a wall of ticks.
   const activeConv = conversations.find(c => c.id === activeConversationId);
+  // Participant display names used to highlight @mentions (bmp.8).
+  const mentionNames = (activeConv?.participants || [])
+    .map(p => p.user.name || p.user.email?.split('@')[0] || '')
+    .filter(Boolean);
   const isDirect = activeConv?.type === 'direct';
   const otherParticipant = isDirect
     ? activeConv?.participants?.find(p => p.user.id !== currentUser?.userId)?.user
@@ -234,11 +254,14 @@ export function MessageList() {
           </button>
         </div>
       )}
-      {messages.map((message) => {
+      {messages.map((message, mi) => {
         const isOwn = message.senderId === currentUser?.userId;
         const isDeleted = !!message.deletedAt;
         const isEditing = editingId === message.id;
         const menuOpen = openMenuId === message.id;
+        // Date separator before the first message of each day (bmp.8).
+        const prev = mi > 0 ? messages[mi - 1] : null;
+        const showDateSeparator = !prev || dayKey(prev.createdAt) !== dayKey(message.createdAt);
         const sender = message.sender || (isOwn && currentUser
           ? { id: currentUser.userId, email: currentUser.email, name: currentUser.name || currentUser.email }
           : undefined);
@@ -257,8 +280,15 @@ export function MessageList() {
           : null;
 
         return (
+          <Fragment key={message.id}>
+          {showDateSeparator && (
+            <div className="flex justify-center py-1">
+              <span className="rounded-full bg-gray-200/70 dark:bg-slate-800 px-3 py-0.5 text-[11px] font-medium text-gray-500 dark:text-slate-400">
+                {dateSeparatorLabel(message.createdAt)}
+              </span>
+            </div>
+          )}
           <div
-            key={message.id}
             className={`group flex ${isOwn ? 'justify-end' : 'justify-start'}`}
           >
             <div className={`flex flex-col max-w-[75%] ${isOwn ? 'items-end' : 'items-start'}`}>
@@ -287,6 +317,13 @@ export function MessageList() {
                   {sender && !isDeleted && (
                     <div className={`text-xs font-medium mb-1 ${isOwn ? 'text-blue-100' : 'text-gray-500 dark:text-slate-400'}`}>
                       {userDisplayName(sender, currentUser)}
+                    </div>
+                  )}
+
+                  {/* Forwarded provenance (OpenChat-hhc) */}
+                  {!isDeleted && message.forwardedFromMessageId && (
+                    <div className={`mb-1 text-xs italic ${isOwn ? 'text-blue-100' : 'text-gray-400 dark:text-slate-500'}`}>
+                      ↪ Forwarded{message.forwardedFromSenderName ? ` from ${message.forwardedFromSenderName}` : ''}
                     </div>
                   )}
 
@@ -351,8 +388,13 @@ export function MessageList() {
                       </div>
                     </div>
                   ) : (
-                    message.content && <p className="break-words whitespace-pre-wrap">{message.content}</p>
+                    message.content && <MessageContent content={message.content} isOwn={isOwn} mentionNames={mentionNames} />
                   )}
+
+                  {/* Open Graph link previews (bmp.8) */}
+                  {!isDeleted && !isEditing && message.linkPreviews?.map((preview, i) => (
+                    <LinkPreviewCard key={`${preview.url}-${i}`} preview={preview} isOwn={isOwn} />
+                  ))}
 
                   <div
                     className={`text-xs mt-1 flex items-center gap-1 ${
@@ -454,6 +496,7 @@ export function MessageList() {
               )}
             </div>
           </div>
+          </Fragment>
         );
       })}
 

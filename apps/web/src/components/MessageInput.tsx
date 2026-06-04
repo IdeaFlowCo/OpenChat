@@ -3,6 +3,11 @@ import toast from 'react-hot-toast';
 import { useChat } from '../contexts/ChatContext';
 import { Attachment, api as chatApi } from '../api';
 import { userDisplayName } from '../utils/userDisplay';
+import { MentionAutocomplete, MentionCandidate } from './MentionAutocomplete';
+
+// Match an in-progress @mention immediately before the cursor (bmp.8):
+// start-of-string or whitespace, then @, then the typed prefix (no spaces).
+const MENTION_RE = /(?:^|\s)@([^\s@]*)$/;
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
@@ -13,8 +18,13 @@ export function MessageInput() {
   const [pendingPreview, setPendingPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { sendMessage, activeConversationId, startTyping, stopTyping, replyTo, setReplyTo, currentUser, contacts } = useChat();
+  const { sendMessage, activeConversationId, startTyping, stopTyping, replyTo, setReplyTo, currentUser, contacts, conversations } = useChat();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // @mention autocomplete state (bmp.8). Active only in group conversations.
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const activeConv = conversations.find((c) => c.id === activeConversationId);
+  const isGroup = activeConv?.type === 'group';
+  const participants = activeConv?.participants ?? [];
   const typingTimeoutRef = useRef<number | null>(null);
   const typingActiveRef = useRef(false);
   const lastConversationRef = useRef<string | null>(null);
@@ -38,9 +48,10 @@ export function MessageInput() {
       typingActiveRef.current = false;
     }
     lastConversationRef.current = activeConversationId;
-    // Clear pending attachment on conversation switch
+    // Clear pending attachment + mention state on conversation switch
     setPendingFile(null);
     setPendingPreview(null);
+    setMentionQuery(null);
     return () => {
       if (typingTimeoutRef.current) {
         window.clearTimeout(typingTimeoutRef.current);
@@ -88,6 +99,7 @@ export function MessageInput() {
     const content = text.trim();
     const fileToUpload = pendingFile;
     setText('');
+    setMentionQuery(null);
     clearPendingFile();
 
     if (typingTimeoutRef.current) {
@@ -139,6 +151,11 @@ export function MessageInput() {
   // confirm an IME candidate must NOT send the message. keyCode 229 is the
   // legacy signal for the same "still composing" state.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape' && mentionQuery !== null) {
+      e.preventDefault();
+      setMentionQuery(null);
+      return;
+    }
     if (
       e.key === 'Enter' &&
       !e.shiftKey &&
@@ -150,8 +167,37 @@ export function MessageInput() {
     }
   };
 
+  const selectMention = (candidate: MentionCandidate) => {
+    const el = inputRef.current;
+    const cursor = el?.selectionStart ?? text.length;
+    const before = text.slice(0, cursor);
+    const after = text.slice(cursor);
+    const m = before.match(MENTION_RE);
+    if (!m) { setMentionQuery(null); return; }
+    // Replace the "@prefix" token (m[0] may include a leading space) with "@Name ".
+    const lead = m[0].startsWith('@') ? '' : m[0][0]; // preserve the leading whitespace if any
+    const start = before.length - m[0].length + lead.length;
+    const next = before.slice(0, start) + `@${candidate.displayName} ` + after;
+    setText(next);
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      el?.focus();
+      const pos = start + candidate.displayName.length + 2; // @ + name + space
+      el?.setSelectionRange(pos, pos);
+    });
+  };
+
+  const updateMentionQuery = (value: string) => {
+    if (!isGroup) { setMentionQuery(null); return; }
+    const el = inputRef.current;
+    const cursor = el?.selectionStart ?? value.length;
+    const m = value.slice(0, cursor).match(MENTION_RE);
+    setMentionQuery(m ? m[1] : null);
+  };
+
   const handleChange = (value: string) => {
     setText(value);
+    updateMentionQuery(value);
     if (!activeConversationId) return;
 
     if (typingTimeoutRef.current) {
@@ -233,6 +279,15 @@ export function MessageInput() {
             ×
           </button>
         </div>
+      )}
+      {/* @mention autocomplete (bmp.8) — group chats only */}
+      {isGroup && mentionQuery !== null && (
+        <MentionAutocomplete
+          query={mentionQuery}
+          participants={participants}
+          excludeUserId={currentUser?.userId}
+          onSelect={selectMention}
+        />
       )}
       <div className="flex gap-2 items-end">
         {/* Hidden file input */}
