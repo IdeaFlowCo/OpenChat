@@ -2,6 +2,7 @@ import { useState, FormEvent, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { useChat } from '../contexts/ChatContext';
 import { Attachment, api as chatApi } from '../api';
+import { userDisplayName } from '../utils/userDisplay';
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
@@ -12,7 +13,7 @@ export function MessageInput() {
   const [pendingPreview, setPendingPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { sendMessage, activeConversationId, startTyping, stopTyping } = useChat();
+  const { sendMessage, activeConversationId, startTyping, stopTyping, replyTo, setReplyTo, currentUser, contacts } = useChat();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimeoutRef = useRef<number | null>(null);
   const typingActiveRef = useRef(false);
@@ -47,6 +48,11 @@ export function MessageInput() {
       }
     };
   }, [activeConversationId, stopTyping]);
+
+  // Focus the composer when the user picks a message to reply to (bmp.2).
+  useEffect(() => {
+    if (replyTo) inputRef.current?.focus();
+  }, [replyTo]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -187,6 +193,30 @@ export function MessageInput() {
       onSubmit={handleSubmit}
       className="p-3 sm:p-4 pr-20 sm:pr-24 border-t border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 pb-[max(env(safe-area-inset-bottom,0),0.75rem)]"
     >
+      {/* Reply / quote preview (openchat-bmp.2). Sending consumes replyTo. */}
+      {replyTo && (
+        <div className="flex items-center gap-2 mb-2 p-2 bg-gray-50 dark:bg-slate-800 rounded-lg border-l-2 border-blue-500">
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-semibold text-blue-600 dark:text-blue-400 truncate">
+              Replying to {replyTo.sender
+                ? userDisplayName(replyTo.sender, currentUser)
+                : contacts.find(c => c.id === replyTo.senderId)?.name
+                  || (replyTo.senderId === currentUser?.userId ? 'yourself' : 'message')}
+            </div>
+            <div className="text-xs text-gray-500 dark:text-slate-400 truncate">
+              {replyTo.content || 'Attachment'}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setReplyTo(null)}
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 text-xl leading-none px-2"
+            aria-label="Cancel reply"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {/* Pending image preview (OpenChat-6bg) */}
       {pendingPreview && (
         <div className="flex items-center gap-2 mb-2 p-2 bg-gray-50 dark:bg-slate-800 rounded-lg">
