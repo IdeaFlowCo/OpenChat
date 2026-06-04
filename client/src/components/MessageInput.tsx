@@ -13,7 +13,7 @@ export function MessageInput() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { sendMessage, activeConversationId, startTyping, stopTyping } = useChat();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimeoutRef = useRef<number | null>(null);
   const typingActiveRef = useRef(false);
   const lastConversationRef = useRef<string | null>(null);
@@ -73,7 +73,7 @@ export function MessageInput() {
     setPendingPreview(null);
   };
 
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent | React.KeyboardEvent<HTMLTextAreaElement>) => {
     e.preventDefault();
     const hasText = !!text.trim();
     const hasFile = !!pendingFile;
@@ -125,6 +125,22 @@ export function MessageInput() {
       console.error('[MessageInput] send failed:', err);
       setText((current) => (current ? current : content));
       toast.error('Message not sent — check your connection and try again.');
+    }
+  };
+
+  // Enter sends; Shift+Enter inserts a newline. The isComposing guard is
+  // important for IME users (e.g. Chinese/Japanese input): pressing Enter to
+  // confirm an IME candidate must NOT send the message. keyCode 229 is the
+  // legacy signal for the same "still composing" state.
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      e.key === 'Enter' &&
+      !e.shiftKey &&
+      !e.nativeEvent.isComposing &&
+      e.nativeEvent.keyCode !== 229
+    ) {
+      e.preventDefault();
+      void handleSubmit(e);
     }
   };
 
@@ -207,16 +223,17 @@ export function MessageInput() {
         >
           <span className="text-xl">📎</span>
         </button>
-        <input
+        <textarea
           ref={inputRef}
-          type="text"
+          rows={1}
           value={text}
           onChange={(e) => handleChange(e.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="Type a message..."
-          enterKeyHint="send"
+          enterKeyHint="enter"
           autoComplete="off"
           autoCorrect="on"
-          className="flex-1 px-4 py-3 min-h-[44px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-full focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 text-base"
+          className="flex-1 resize-none px-4 py-3 min-h-[44px] max-h-40 overflow-y-auto leading-6 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-3xl focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 text-base"
         />
         <button
           type="submit"
