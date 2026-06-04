@@ -17,6 +17,9 @@ import aiRoutes from './routes/ai.js';
 import thoughtsRoutes from './routes/thoughts.js';
 import agentKeysRoutes from './routes/agentKeys.js';
 import feedbackRoutes from './routes/feedback.js';
+import assistantRoutes from './routes/assistant.js';
+import { ensureAssistantUser } from './services/assistant.js';
+import { ensureVectorIndex } from './services/embeddings.js';
 import { openapiSpec } from './openapi.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 
@@ -366,6 +369,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/thoughts', thoughtsRoutes);
 app.use('/api/agent-keys', agentKeysRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/assistant', assistantRoutes);
 
 // API reference (openchat-8md.1) — public spec + Redoc docs page.
 app.get('/api/openapi.json', (_req, res) => res.json(openapiSpec));
@@ -419,6 +423,24 @@ async function start() {
   try {
     await initDatabase();
     console.log('Connected to Neo4j database');
+
+    // In-app Assistant bot (openchat-bfn.3): ensure the singleton bot User
+    // exists so direct conversations can include it.
+    try {
+      await ensureAssistantUser();
+      console.log('Assistant bot user ensured');
+    } catch (e) {
+      console.error('Failed to ensure assistant user:', e);
+    }
+
+    // Semantic search (openchat-bfn.2): idempotently create the Message
+    // embedding vector index. Non-fatal — keyword search works regardless.
+    try {
+      await ensureVectorIndex();
+      console.log('Message embedding vector index ensured');
+    } catch (e) {
+      console.error('Failed to ensure vector index (semantic search may be unavailable):', e);
+    }
 
     httpServer.listen(PORT, () => {
       console.log(`OpenChat server running on http://localhost:${PORT}`);
