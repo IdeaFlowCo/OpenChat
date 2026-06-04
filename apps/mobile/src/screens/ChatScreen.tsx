@@ -969,6 +969,40 @@ export function ChatScreen({
     navigation.navigate('ForwardPicker', { messageId });
   }, [navigation]);
 
+  // ── Forward to private Assistant DM (openchat-ug6) ─────────────────────────
+  // Shared helper: posts to /api/assistant/forward and, on success, navigates
+  // the user into their Assistant conversation. PRIVATE — nothing is posted
+  // into the shared/source conversation.
+  const forwardToAssistant = useCallback(
+    async (message: Message, question?: string) => {
+      try {
+        const { conversationId: assistantConvId } = await api.forwardToAssistant({
+          sourceConversationId: conversationId,
+          sourceMessageId: message.id,
+          ...(question ? { question } : {}),
+        });
+        navigation.navigate('Chat', { conversationId: assistantConvId });
+      } catch (err) {
+        console.warn('[ChatScreen] forward-to-assistant failed:', err);
+        Alert.alert(
+          'Could not reach your assistant',
+          err instanceof Error ? err.message : 'Please try again.'
+        );
+      }
+    },
+    [conversationId, navigation]
+  );
+
+  const handleForwardToAssistant = useCallback(
+    (message: Message) => { void forwardToAssistant(message); },
+    [forwardToAssistant]
+  );
+
+  const handleAskAssistant = useCallback(
+    (message: Message, question: string) => { void forwardToAssistant(message, question); },
+    [forwardToAssistant]
+  );
+
   // ── Scroll to quoted message ───────────────────────────────────────────────
   const scrollToMessage = useCallback((messageId: string) => {
     const idx = messageIndexRef.current.get(messageId);
@@ -1540,6 +1574,8 @@ export function ChatScreen({
         onDismiss={() => setActionSheetVisible(false)}
         onReply={handleReply}
         onForward={handleForward}
+        onForwardToAssistant={handleForwardToAssistant}
+        onAskAssistant={handleAskAssistant}
         onEdit={handleEdit}
         onDelete={handleDelete}
         onReact={handleReact}

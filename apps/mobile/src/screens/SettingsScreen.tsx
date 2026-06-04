@@ -11,6 +11,7 @@
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Clipboard, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
@@ -213,6 +214,33 @@ export function SettingsScreen() {
       setExportBusyRange(null);
     }
   }, [exportBusyRange, isConnected]);
+
+  // ── App / update provenance (openchat-3jq.3) ──────────────────────────────
+  // Surface version + build number + OTA update channel so support can ask
+  // "what version are you on?" and get a precise answer. expo-updates exposes
+  // the running channel/runtimeVersion/updateId; expo-constants the native
+  // version + build number. All read-only.
+  const appVersion = Constants.expoConfig?.version ?? '?';
+  const buildNumber =
+    Constants.expoConfig?.ios?.buildNumber ??
+    (Constants.expoConfig?.android?.versionCode != null
+      ? String(Constants.expoConfig.android.versionCode)
+      : undefined) ??
+    '?';
+  // expo-updates: channel (production/preview/development), runtimeVersion, and
+  // the active update id. isEmbeddedLaunch => running the bundled JS (no OTA
+  // applied yet); otherwise an OTA bundle is live.
+  const updateChannel = Updates.channel ?? (Updates.isEnabled ? 'default' : 'none (dev)');
+  const runtimeVersion = Updates.runtimeVersion ?? appVersion;
+  const otaState = !Updates.isEnabled
+    ? 'OTA disabled (dev build)'
+    : Updates.isEmbeddedLaunch
+      ? 'Bundled JS (no OTA applied)'
+      : `OTA bundle ${Updates.updateId ? Updates.updateId.slice(0, 8) : 'active'}`;
+  const provenanceSummary =
+    Platform.OS === 'web'
+      ? `Web · v${appVersion}`
+      : `v${appVersion} (build ${buildNumber}) · channel ${updateChannel}`;
 
   return (
     <ScrollView
@@ -498,7 +526,7 @@ export function SettingsScreen() {
             <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.optionRow}
+            style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
             onPress={() => Linking.openURL('https://chat.globalbr.ai/m/')}
             activeOpacity={0.7}
           >
@@ -509,6 +537,34 @@ export function SettingsScreen() {
               </Text>
             </View>
             <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+
+          {/* App / update provenance (openchat-3jq.3). Tap to copy the full
+              version string for support / bug reports. */}
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => {
+              Clipboard.setString(provenanceSummary);
+              Alert.alert('Copied', provenanceSummary);
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>App version &amp; updates</Text>
+              {Platform.OS === 'web' ? (
+                <Text style={[styles.optionHint, { color: c.textSecondary }]}>Web · v{appVersion}</Text>
+              ) : (
+                <>
+                  <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                    v{appVersion} (build {buildNumber}) · runtime {runtimeVersion}
+                  </Text>
+                  <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                    Update channel: {updateChannel} · {otaState}
+                  </Text>
+                </>
+              )}
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 16 }}>⧉</Text>
           </TouchableOpacity>
         </View>
       </View>

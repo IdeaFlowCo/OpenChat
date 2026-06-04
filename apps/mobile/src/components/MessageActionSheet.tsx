@@ -46,6 +46,17 @@ interface Props {
   onReply: (data: ReplyToData) => void;
   /** Forward action — opens ForwardPickerScreen (OpenChat-hhc) */
   onForward: (messageId: string) => void;
+  /**
+   * Forward to the user's PRIVATE Assistant DM (openchat-ug6). Drops the
+   * quoted message into the Assistant conversation. Private — never posts
+   * into the shared conversation.
+   */
+  onForwardToAssistant: (message: Message) => void;
+  /**
+   * "Ask about this…" variant (openchat-ug6) — prompts for a question first,
+   * then forwards both the quoted message and the question to the Assistant.
+   */
+  onAskAssistant: (message: Message, question: string) => void;
   /** Edit action (own messages) — enters edit mode in composer */
   onEdit: (message: Message) => void;
   /** Delete action (own messages) — confirms and calls back */
@@ -69,6 +80,8 @@ export function MessageActionSheet({
   onDismiss,
   onReply,
   onForward,
+  onForwardToAssistant,
+  onAskAssistant,
   onEdit,
   onDelete,
   onReact,
@@ -78,13 +91,18 @@ export function MessageActionSheet({
   const { scheme } = useTheme();
   const c = getColors(scheme);
 
-  // Sub-sheet state: null = main, 'report' = report picker, 'other' = freeform, 'react' = emoji picker
-  const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react'>(null);
+  // Sub-sheet state: null = main, 'report' = report picker, 'other' = freeform,
+  // 'react' = emoji picker, 'assistant' = "ask about this" question prompt.
+  const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react' | 'assistant'>(null);
   const [freeformText, setFreeformText] = useState('');
+  // Separate state for the assistant-question input so it doesn't collide with
+  // the report freeform field.
+  const [assistantQuestion, setAssistantQuestion] = useState('');
 
   const handleDismiss = () => {
     setSubSheet(null);
     setFreeformText('');
+    setAssistantQuestion('');
     onDismiss();
   };
 
@@ -103,6 +121,24 @@ export function MessageActionSheet({
     if (!message) return;
     handleDismiss();
     onForward(message.id);
+  };
+
+  // "Forward to Assistant" — private, no prompt (openchat-ug6 v1 path).
+  const handleForwardToAssistantPress = () => {
+    if (!message) return;
+    const msg = message;
+    handleDismiss();
+    onForwardToAssistant(msg);
+  };
+
+  // "Ask about this…" — submit the typed question to the Assistant.
+  const handleAskAssistantSubmit = () => {
+    if (!message) return;
+    const q = assistantQuestion.trim();
+    if (!q) return;
+    const msg = message;
+    handleDismiss();
+    onAskAssistant(msg, q);
   };
 
   const handleEditPress = () => {
@@ -258,6 +294,53 @@ export function MessageActionSheet({
     );
   }
 
+  // ── "Ask about this…" assistant question prompt (openchat-ug6) ─────────────
+  if (subSheet === 'assistant') {
+    return (
+      <Modal transparent animationType="fade" visible={visible} onRequestClose={handleDismiss}>
+        <Pressable style={overlayStyle} onPress={handleDismiss}>
+          <Pressable onPress={() => { /* stop propagation */ }}>
+            <View style={sheetStyle}>
+              <View style={styles.handle} />
+              <Text style={[styles.title, { color: c.textPrimary }]}>Ask your assistant about this</Text>
+              <View style={[styles.preview, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
+                <Text style={[styles.previewSender, { color: c.textSecondary }]} numberOfLines={1}>
+                  {senderName}
+                </Text>
+                <Text style={[styles.previewContent, { color: c.textPrimary }]} numberOfLines={2}>
+                  {message.content}
+                </Text>
+              </View>
+              <TextInput
+                style={[
+                  styles.freeformInput,
+                  { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border },
+                ]}
+                placeholder="What do you want to ask about this message?"
+                placeholderTextColor={c.textMuted}
+                value={assistantQuestion}
+                onChangeText={setAssistantQuestion}
+                multiline
+                autoFocus
+              />
+              <TouchableOpacity
+                style={[styles.submitBtn, { backgroundColor: c.primary, opacity: assistantQuestion.trim() ? 1 : 0.5 }]}
+                onPress={handleAskAssistantSubmit}
+                disabled={!assistantQuestion.trim()}
+                activeOpacity={0.8}
+              >
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Send to assistant</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.cancelRow, { borderColor: c.border }]} onPress={handleDismiss} activeOpacity={0.7}>
+                <Text style={[styles.cancelLabel, { color: c.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    );
+  }
+
   // Derive which reactions the current user already has on this message.
   // This info is used to highlight active emoji in the picker.
   const myReactions = (message.reactions ?? [])
@@ -306,6 +389,34 @@ export function MessageActionSheet({
               >
                 <Text style={styles.actionIcon}>↪</Text>
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Forward</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Forward to Assistant — private "ask my agent" (openchat-ug6).
+                Always shown (own and others'), skip if deleted. Drops the
+                quoted message into the user's PRIVATE Assistant DM — never
+                posts back into this shared conversation. */}
+            {!message.deletedAt && (
+              <TouchableOpacity
+                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={handleForwardToAssistantPress}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.actionIcon}>🤖</Text>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Forward to Assistant</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Ask about this… — prompts for a question, then forwards both the
+                quoted message and the question to the private Assistant DM. */}
+            {!message.deletedAt && (
+              <TouchableOpacity
+                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={() => setSubSheet('assistant')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.actionIcon}>💬</Text>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Ask my agent about this…</Text>
               </TouchableOpacity>
             )}
 
