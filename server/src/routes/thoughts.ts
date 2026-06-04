@@ -52,13 +52,23 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const limit = Math.min(parseInt(String(req.query.limit || '50'), 10) || 50, 200);
   const before = typeof req.query.before === 'string' ? req.query.before : null;
+  // Search (?q=) — matches Thought text OR any of its tags (case-insensitive).
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : null;
+
+  const conds: string[] = [];
+  if (before) conds.push('t.createdAt < datetime($before)');
+  if (q)
+    conds.push(
+      '(toLower(t.text) CONTAINS toLower($q) OR any(tag IN coalesce(t.tags, []) WHERE toLower(tag) CONTAINS toLower($q)))'
+    );
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
 
   const session = getDriver().session();
   try {
     const result = await session.run(
       `
       MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought)
-      ${before ? 'WHERE t.createdAt < datetime($before)' : ''}
+      ${where}
       RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, tags: coalesce(t.tags, []) } AS thought
       ORDER BY t.createdAt DESC
       LIMIT $limit
@@ -66,7 +76,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       // Neo4j's LIMIT clause requires a true integer; JS Number(50) gets
       // serialized as 50.0 and Neo4j rejects it. Wrap via neo4j.int().
       // Same pattern as server/src/routes/chat.ts:796.
-      { userId, before: before ?? undefined, limit: neo4j.int(limit) }
+      { userId, before: before ?? undefined, q: q ?? undefined, limit: neo4j.int(limit) }
     );
 
     const thoughts = result.records.map((r) => toJS(r.get('thought')));

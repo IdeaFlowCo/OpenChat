@@ -119,10 +119,10 @@ export async function createThoughtsFromMessageTags(
   console.log(`[thought-from-tag] extracted ${tags.length} tag(s) from message ${params.messageId}:`, tags.map((t) => t.raw).join(', '));
   for (const tag of tags) {
     try {
-      // Strip just THIS tag from the message; leave other tags in place so
-      // the Thought text reflects what each tag covers individually.
-      const stripped = params.content.replace(tag.raw, '').replace(/\s+/g, ' ').trim();
-      const text = stripped.length > 0 ? stripped : params.content.trim();
+      // Keep the FULL message text incl. the hashtags (per Jacob 2026-06-04):
+      // the tag stays visible in the Thought, and is also elevated into the
+      // `tags` metadata below. Don't strip.
+      const text = params.content.trim();
       const id = nanoid();
       const now = new Date().toISOString();
       await session.run(
