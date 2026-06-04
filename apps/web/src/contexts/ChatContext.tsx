@@ -35,6 +35,13 @@ interface ChatContextValue {
   renameConversation: (id: string, title: string) => Promise<void>;
   addParticipant: (conversationId: string, userId: string) => Promise<void>;
   removeParticipant: (conversationId: string, userId: string) => Promise<void>;
+  setConversationMute: (conversationId: string, mutedUntil: Date | 'always' | null) => Promise<void>;
+  blockUser: (userId: string) => Promise<void>;
+
+  // Load-older pagination (bmp.9)
+  loadOlderMessages: () => Promise<void>;
+  hasMoreMessages: boolean;
+  loadingOlder: boolean;
 
   // Messages
   messages: Message[];
@@ -88,6 +95,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [unreadByConv, setUnreadByConv] = useState<Map<string, number>>(new Map());
   const [readReceiptsByConv, setReadReceiptsByConv] = useState<Map<string, Record<string, string | null>>>(new Map());
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  // Load-older pagination state (bmp.9).
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  // Timestamp of the newest message we've seen, for reconnect catch-up (bmp.9).
+  const lastMessageAtRef = useRef<string | null>(null);
 
   // Mirror the active conversation id into a ref so socket callbacks (whose
   // identities we don't want to churn on every conversation switch) can read
@@ -123,6 +135,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // Socket handlers
   const handleMessage = useCallback((message: Message) => {
+    // Track newest message timestamp for reconnect catch-up (bmp.9).
+    if (!lastMessageAtRef.current || message.createdAt > lastMessageAtRef.current) {
+      lastMessageAtRef.current = message.createdAt;
+    }
     setMessages(prev => {
       if (message.conversationId === activeConversationId) {
         // Add to current conversation
@@ -476,15 +492,46 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, [token]);
 
-  // Load messages for a conversation
+  // Load messages for a conversation (newest page)
   const loadMessages = useCallback(async (conversationId: string) => {
     try {
-      const { messages: data } = await api.getMessages(conversationId);
+      const { messages: data, hasMore } = await api.getMessages(conversationId);
       setMessages(data);
+      setHasMoreMessages(!!hasMore);
+      // Seed the newest-seen timestamp for reconnect catch-up (bmp.9).
+      const newest = data.length ? data[data.length - 1].createdAt : null;
+      if (newest) lastMessageAtRef.current = newest;
     } catch (e) {
       console.error('Failed to load messages:', e);
     }
   }, []);
+
+  // Load an older page of messages, prepending to the list (bmp.9). Uses the
+  // `before` cursor (oldest currently-loaded message id). listMessages returns
+  // messages oldest→newest, so the oldest is messages[0].
+  const loadOlderMessages = useCallback(async () => {
+    const convId = activeConvRef.current;
+    if (!convId || loadingOlder || !hasMoreMessages) return;
+    setLoadingOlder(true);
+    try {
+      const oldest = messages[0];
+      if (!oldest) return;
+      // Server's `before` is a createdAt cursor (WHERE m.createdAt < datetime($before)).
+      const { messages: older, hasMore } = await api.getMessages(convId, 50, oldest.createdAt);
+      setHasMoreMessages(!!hasMore);
+      if (older.length) {
+        setMessages(prev => {
+          const seen = new Set(prev.map(m => m.id));
+          const dedup = older.filter(m => !seen.has(m.id));
+          return [...dedup, ...prev];
+        });
+      }
+    } catch (e) {
+      console.error('Failed to load older messages:', e);
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [loadingOlder, hasMoreMessages, messages]);
 
   // Mark a conversation read: clears the local unread badge and tells the
   // server (which broadcasts read:updated so other participants can render
@@ -515,6 +562,44 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     markConversationReadRef.current = markConversationRead;
   }, [markConversationRead]);
+
+  // Reconnect catch-up (bmp.9). When the socket reconnects after a drop, fetch
+  // any messages that landed during the gap so we don't silently miss them.
+  // `truncated` means too many to merge — fall back to a full conversation
+  // refresh (and reload the active thread).
+  const wasConnectedRef = useRef(false);
+  useEffect(() => {
+    if (isConnected && !wasConnectedRef.current) {
+      // Transitioned disconnected → connected.
+      const since = lastMessageAtRef.current;
+      if (since && token) {
+        api.messagesSince(since)
+          .then(({ messages: missed, truncated }) => {
+            if (truncated) {
+              void loadConversations();
+              const active = activeConvRef.current;
+              if (active) void loadMessages(active);
+              return;
+            }
+            if (!missed.length) return;
+            const active = activeConvRef.current;
+            for (const m of missed) {
+              if (m.createdAt > (lastMessageAtRef.current ?? '')) lastMessageAtRef.current = m.createdAt;
+            }
+            // Append any missed messages for the active conversation.
+            setMessages(prev => {
+              const seen = new Set(prev.map(x => x.id));
+              const add = missed.filter(m => m.conversationId === active && !seen.has(m.id));
+              return add.length ? [...prev, ...add] : prev;
+            });
+            // Refresh sidebar previews/unread by reloading conversations.
+            void loadConversations();
+          })
+          .catch(e => { if (!isAuthError(e)) console.error('Reconnect catch-up failed:', e); });
+      }
+    }
+    wasConnectedRef.current = isConnected;
+  }, [isConnected, token, loadConversations, loadMessages]);
 
   // Set active conversation
   const setActiveConversation = useCallback((id: string | null) => {
@@ -582,6 +667,38 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }));
     }
   }, [currentUser?.userId]);
+
+  // Mute / unmute a conversation (bmp.5). Optimistic: update local mutedUntil,
+  // then PATCH. On failure, reload conversations to reconcile.
+  const setConversationMute = useCallback(async (conversationId: string, mutedUntil: Date | 'always' | null) => {
+    const optimistic = mutedUntil === null ? null : mutedUntil === 'always' ? 'always' : mutedUntil.toISOString();
+    setConversations(prev => prev.map(c => (c.id === conversationId ? { ...c, mutedUntil: optimistic } : c)));
+    try {
+      const res = await api.setConversationMute(conversationId, mutedUntil);
+      setConversations(prev => prev.map(c => (c.id === conversationId ? { ...c, mutedUntil: res.mutedUntil } : c)));
+    } catch (e) {
+      if (!isAuthError(e)) {
+        toast.error('Could not update mute');
+        void loadConversations();
+      }
+    }
+  }, [loadConversations]);
+
+  // Block a user (bmp.6). Removes any DM with them from the local list and
+  // closes it if open. Server also drops it server-side.
+  const blockUser = useCallback(async (userId: string) => {
+    await api.blockUser(userId);
+    setConversations(prev => prev.filter(c => {
+      if (c.type !== 'direct') return true;
+      return !(c.participants || []).some(p => p.user.id === userId);
+    }));
+    setActiveConversationId(curr => {
+      const conv = conversations.find(c => c.id === curr);
+      const isWithBlocked = conv?.type === 'direct' && (conv.participants || []).some(p => p.user.id === userId);
+      return isWithBlocked ? null : curr;
+    });
+    toast.success('User blocked');
+  }, [conversations]);
 
   // Send message (with optional image attachments — OpenChat-6bg, reply — bmp.2)
   const sendMessage = useCallback(async (content: string, attachments?: Attachment[]) => {
@@ -713,6 +830,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     renameConversation,
     addParticipant,
     removeParticipant,
+    setConversationMute,
+    blockUser,
+    loadOlderMessages,
+    hasMoreMessages,
+    loadingOlder,
     messages,
     sendMessage,
     loadMessages,

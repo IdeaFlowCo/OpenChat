@@ -89,6 +89,7 @@ export function ConversationList() {
                     {conv.type === 'direct' && other && <BotBadge user={other} compact />}
                   </span>
                   <span className="text-xs text-gray-400 dark:text-slate-500 shrink-0 ml-2 flex items-center gap-2">
+                    {conv.mutedUntil && <span title="Muted" aria-label="Muted">🔕</span>}
                     {formatTime(conv.lastMessageAt)}
                     {hasUnread && (
                       <span

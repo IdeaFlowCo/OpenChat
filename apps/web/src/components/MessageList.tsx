@@ -27,8 +27,17 @@ export function MessageList() {
     toggleReaction,
     setReplyTo,
     readReceiptsByConv,
+    loadOlderMessages,
+    hasMoreMessages,
+    loadingOlder,
   } = useChat();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Number of messages loaded last render — used to detect prepend (older) vs
+  // append (new) so we can preserve scroll position when loading older (bmp.9).
+  const prevCountRef = useRef(0);
+  const prevFirstIdRef = useRef<string | null>(null);
+  const prevScrollHeightRef = useRef(0);
 
   // Which message's action menu / reaction picker is open (by id).
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -74,10 +83,44 @@ export function MessageList() {
     };
   }, [activeConversationId]);
 
-  // Auto-scroll to bottom on new messages or typing change.
+  // Scroll management (bmp.9). Distinguish three cases:
+  //   1. Prepend (older page loaded): keep the viewport anchored so the user
+  //      doesn't get yanked — restore scrollTop by the height delta.
+  //   2. Append (new message / initial load): scroll to bottom.
+  //   3. No-op render: do nothing.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = scrollRef.current;
+    const firstId = messages[0]?.id ?? null;
+    const prepended =
+      messages.length > prevCountRef.current &&
+      prevFirstIdRef.current !== null &&
+      firstId !== prevFirstIdRef.current &&
+      // The previous first message still exists in the list (we added before it).
+      messages.some(m => m.id === prevFirstIdRef.current);
+
+    if (prepended && el) {
+      // Restore scroll position relative to the new content height.
+      const newHeight = el.scrollHeight;
+      el.scrollTop = newHeight - prevScrollHeightRef.current;
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    prevCountRef.current = messages.length;
+    prevFirstIdRef.current = firstId;
+    if (el) prevScrollHeightRef.current = el.scrollHeight;
   }, [messages]);
+
+  // Infinite-scroll trigger: when the user scrolls near the top and there are
+  // older messages, fetch the next page (bmp.9).
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el || loadingOlder || !hasMoreMessages) return;
+    if (el.scrollTop < 80) {
+      prevScrollHeightRef.current = el.scrollHeight;
+      void loadOlderMessages();
+    }
+  };
 
   // Close any open action menu when switching conversations.
   useEffect(() => {
@@ -174,7 +217,23 @@ export function MessageList() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-slate-950">
+    <div
+      ref={scrollRef}
+      onScroll={handleScroll}
+      className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-slate-950"
+    >
+      {hasMoreMessages && (
+        <div className="flex justify-center pb-1">
+          <button
+            type="button"
+            onClick={() => { if (scrollRef.current) prevScrollHeightRef.current = scrollRef.current.scrollHeight; void loadOlderMessages(); }}
+            disabled={loadingOlder}
+            className="rounded-full border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-1.5 text-xs font-medium text-gray-600 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-800 disabled:opacity-50"
+          >
+            {loadingOlder ? 'Loading…' : 'Load older messages'}
+          </button>
+        </div>
+      )}
       {messages.map((message) => {
         const isOwn = message.senderId === currentUser?.userId;
         const isDeleted = !!message.deletedAt;

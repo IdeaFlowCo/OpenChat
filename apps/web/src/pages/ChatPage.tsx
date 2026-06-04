@@ -1,15 +1,26 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useChat } from '../contexts/ChatContext';
 import { ChatSidebar } from '../components/ChatSidebar';
 import { MessageList } from '../components/MessageList';
 import { MessageInput } from '../components/MessageInput';
 import { GroupSettings } from '../components/GroupSettings';
+import { ContactProfilePanel } from '../components/ContactProfilePanel';
 import { BotBadge } from '../components/BotBadge';
+import { ConversationHeaderMenu } from '../components/ConversationHeaderMenu';
 import { userDisplayName } from '../utils/userDisplay';
 
 export function ChatPage() {
   const { loadConversations, activeConversationId, setActiveConversation, conversations, isConnected, currentUser } = useChat();
   const [groupSettingsOpen, setGroupSettingsOpen] = useState(false);
+  const [profilePanelOpen, setProfilePanelOpen] = useState(false);
+  // Close transient panels when switching conversations.
+  const lastConvRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastConvRef.current !== activeConversationId) {
+      setProfilePanelOpen(false);
+      lastConvRef.current = activeConversationId;
+    }
+  }, [activeConversationId]);
 
   useEffect(() => {
     loadConversations();
@@ -72,9 +83,12 @@ export function ChatPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => isGroup && setGroupSettingsOpen(true)}
-                  disabled={!isGroup}
-                  className={`flex-1 min-w-0 text-left ${isGroup ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 -mx-2 px-2 py-1 rounded' : 'cursor-default'}`}
+                  onClick={() => {
+                    if (isGroup) setGroupSettingsOpen(true);
+                    else if (directParticipant) setProfilePanelOpen(true);
+                  }}
+                  disabled={!isGroup && !directParticipant}
+                  className={`flex-1 min-w-0 text-left ${isGroup || directParticipant ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 -mx-2 px-2 py-1 rounded' : 'cursor-default'}`}
                 >
                   <h2 className="font-semibold truncate text-gray-900 dark:text-slate-100 flex items-center min-w-0">
                     <span className="truncate">
@@ -107,6 +121,9 @@ export function ChatPage() {
                 </button>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {activeConversation.mutedUntil && (
+                  <span className="text-gray-400 dark:text-slate-500" title="Muted" aria-label="Muted">🔕</span>
+                )}
                 {isConnected ? (
                   <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1" aria-label="Connected">
                     <span className="w-2 h-2 rounded-full bg-green-500"></span>
@@ -118,6 +135,11 @@ export function ChatPage() {
                     <span className="hidden sm:inline">Connecting...</span>
                   </span>
                 )}
+                <ConversationHeaderMenu
+                  conversation={activeConversation}
+                  directParticipant={directParticipant ?? null}
+                  onViewProfile={() => setProfilePanelOpen(true)}
+                />
               </div>
             </div>
 
@@ -140,6 +162,15 @@ export function ChatPage() {
           open={groupSettingsOpen}
           onClose={() => setGroupSettingsOpen(false)}
           conversation={activeConversation}
+        />
+      )}
+
+      {/* DM contact profile panel (bmp.6) */}
+      {activeConversation && activeConversation.type === 'direct' && directParticipant && (
+        <ContactProfilePanel
+          open={profilePanelOpen}
+          onClose={() => setProfilePanelOpen(false)}
+          user={directParticipant}
         />
       )}
     </div>
