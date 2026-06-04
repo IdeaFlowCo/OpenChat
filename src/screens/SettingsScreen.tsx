@@ -9,14 +9,15 @@
  */
 
 import { useCallback, useState } from 'react';
-import { Alert, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Clipboard, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme, ThemePref } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
-import { api, ExportRangeKey } from '../api/client';
+import { api, ExportRangeKey, OPENCHAT_URL } from '../api/client';
+import { buildAgentSetupBlob } from '../utils/agentSetupBlob';
 import { getColors } from '../theme/colors';
 import type { NavProp } from '../navigation/types';
 import { registerForPushNotificationsAsync } from '../services/notifications';
@@ -43,6 +44,33 @@ export function SettingsScreen() {
   const [deleting, setDeleting] = useState(false);
   const [exportSheetVisible, setExportSheetVisible] = useState(false);
   const [exportBusyRange, setExportBusyRange] = useState<ExportRangeKey | null>(null);
+
+  // One-click "Copy agent setup" (openchat-bbr): mints a key + copies the
+  // tool-less paste-anywhere REST blob. No navigation, no reveal step.
+  const [mintingSetup, setMintingSetup] = useState(false);
+  const handleCopyAgentSetup = useCallback(async () => {
+    if (mintingSetup) return;
+    setMintingSetup(true);
+    try {
+      const result = await api.createAgentKey({
+        name: `Quick setup ${new Date().toISOString().slice(0, 10)}`,
+        scopes: ['read', 'write'],
+      });
+      const blob = buildAgentSetupBlob(result.key, OPENCHAT_URL);
+      Clipboard.setString(blob);
+      Alert.alert(
+        'Agent setup copied',
+        'Paste it into ChatGPT, Claude, Gemini, or any chatbot — no install needed. The model will read and send messages on your behalf.'
+      );
+    } catch (err) {
+      Alert.alert(
+        'Could not create setup',
+        err instanceof Error ? err.message : 'Failed to mint an agent key. Please try again.'
+      );
+    } finally {
+      setMintingSetup(false);
+    }
+  }, [mintingSetup]);
 
   // Send feedback -> server creates a WorldIssueTracker issue (oc8.3).
   const [sendingFeedback, setSendingFeedback] = useState(false);
@@ -192,10 +220,35 @@ export function SettingsScreen() {
       contentContainerStyle={styles.content}
     >
       {/*
+       * One-click "Copy agent setup" (openchat-bbr).
+       * TRUE one-tap: mints a key + copies a paste-anywhere setup blob. No
+       * navigation, no reveal step. Sits above the Agent Keys hero (which
+       * remains for managing existing keys).
+       */}
+      <TouchableOpacity
+        style={[styles.copySetupBtn, { backgroundColor: c.primary, opacity: mintingSetup ? 0.6 : 1 }]}
+        onPress={handleCopyAgentSetup}
+        disabled={mintingSetup}
+        activeOpacity={0.85}
+      >
+        {mintingSetup ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <>
+            <Text style={styles.copySetupTitle}>📋  Copy agent setup</Text>
+            <Text style={styles.copySetupSub}>
+              Mints a key + copies a paste-anywhere setup for ChatGPT, Claude, any LLM
+            </Text>
+          </>
+        )}
+      </TouchableOpacity>
+
+      {/*
        * Hero: Agent keys (OpenChat-i9h).
        * Top-of-settings placement because bi-directional agent access is
        * OpenChat's main product differentiator. Replaces the buried
-       * "DEVELOPER → Agent keys" row.
+       * "DEVELOPER → Agent keys" row. Kept below the one-click action for
+       * managing (list/reveal/revoke) existing keys.
        */}
       <TouchableOpacity
         style={[styles.agentHero, { backgroundColor: c.primary }]}
@@ -572,6 +625,30 @@ export function SettingsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32 },
+
+  // One-click "Copy agent setup" primary action (openchat-bbr)
+  copySetupBtn: {
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 64,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  copySetupTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  copySetupSub: {
+    color: 'rgba(255,255,255,0.88)',
+    fontSize: 12,
+    marginTop: 3,
+    textAlign: 'center',
+    lineHeight: 16,
+  },
 
   // Top-of-settings hero promoting Agent Keys (OpenChat-i9h)
   agentHero: {
