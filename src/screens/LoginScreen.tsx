@@ -19,7 +19,7 @@ import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useTheme } from '../contexts/ThemeContext';
-import { loginWithPassword, googleIdTokenExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '../api/client';
+import { loginWithPassword, googleIdTokenExchange, googleExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, OPENCHAT_URL } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
 
@@ -52,6 +52,51 @@ export function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
+
+  // Web Google sign-in uses a full-page REDIRECT, not the expo-auth-session
+  // popup: Google's pages set Cross-Origin-Opener-Policy, which severs the
+  // popup from its opener so window.closed polling never resolves and the
+  // flow stalls. See openchat-n9a. Native (iOS) keeps the ID-token flow below.
+  const isWeb = Platform.OS === 'web';
+  const GOOGLE_WEB_STATE_KEY = 'openchat_google_web';
+
+  // Web: finish the redirect flow when we return from Google with ?code&state.
+  useEffect(() => {
+    if (!isWeb || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const returnedState = params.get('state');
+    if (!code) return;
+
+    // Strip the OAuth params immediately so a refresh can't replay the code
+    // (auth codes are single-use) and the URL stays clean.
+    const basePath = `/${window.location.pathname.split('/')[1] || ''}/`;
+    window.history.replaceState({}, '', basePath);
+
+    let stored: { state: string; redirectUri: string } | null = null;
+    try {
+      const raw = window.sessionStorage.getItem(GOOGLE_WEB_STATE_KEY);
+      stored = raw ? JSON.parse(raw) : null;
+    } catch { stored = null; }
+    window.sessionStorage.removeItem(GOOGLE_WEB_STATE_KEY);
+
+    if (!stored || !returnedState || returnedState !== stored.state) {
+      Alert.alert('Google sign-in failed', 'Session expired or state mismatch — please try again.');
+      return;
+    }
+
+    setGoogleLoading(true);
+    (async () => {
+      try {
+        await googleExchange(code, stored!.redirectUri);
+        await bootstrapIfAuthed();
+      } catch (err) {
+        Alert.alert('Google sign-in failed', err instanceof Error ? err.message : String(err));
+      } finally {
+        setGoogleLoading(false);
+      }
+    })();
+  }, [isWeb, bootstrapIfAuthed]);
 
   // Google OAuth — iOS native flow.
   //
@@ -155,6 +200,36 @@ export function LoginScreen() {
 
   const handleGoogleSignIn = async () => {
     if (googleLoading || loading) return;
+
+    // Web: full-page redirect via our server's /api/auth/google/url. The
+    // server holds the web client_id + secret and echoes our redirect_uri
+    // (https://chat.globalbr.ai/m/ or /d/, registered in the GCP OAuth client).
+    // On return, the useEffect above finishes the exchange. See openchat-n9a.
+    if (isWeb && typeof window !== 'undefined') {
+      setGoogleLoading(true);
+      try {
+        const seg = window.location.pathname.split('/')[1] || '';
+        const redirectUri = `${window.location.origin}/${seg}/`;
+        const state = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+          ? crypto.randomUUID()
+          : Math.random().toString(36).slice(2);
+        const resp = await fetch(
+          `${OPENCHAT_URL}/api/auth/google/url?redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`
+        );
+        if (!resp.ok) throw new Error(`Could not start Google sign-in (${resp.status})`);
+        const data = (await resp.json()) as { url: string; state?: string; redirectUri?: string };
+        window.sessionStorage.setItem(GOOGLE_WEB_STATE_KEY, JSON.stringify({
+          state: data.state || state,
+          redirectUri: data.redirectUri || redirectUri,
+        }));
+        window.location.href = data.url;
+      } catch (err) {
+        Alert.alert('Google sign-in failed', err instanceof Error ? err.message : String(err));
+        setGoogleLoading(false);
+      }
+      return;
+    }
+
     if (!googleRequest) {
       Alert.alert('Google sign-in unavailable', 'Sign-in request is not ready yet. Please try again.');
       return;
@@ -223,10 +298,10 @@ export function LoginScreen() {
         <TouchableOpacity
           style={[
             styles.googleButton,
-            { borderColor: c.border, opacity: (googleLoading || loading || !googleRequest) ? 0.6 : 1 },
+            { borderColor: c.border, opacity: (googleLoading || loading || (!isWeb && !googleRequest)) ? 0.6 : 1 },
           ]}
           onPress={handleGoogleSignIn}
-          disabled={googleLoading || loading || !googleRequest}
+          disabled={googleLoading || loading || (!isWeb && !googleRequest)}
           accessibilityLabel="Continue with Google"
         >
           {googleLoading ? (
