@@ -53,6 +53,26 @@ export interface Attachment {
   height?: number;
 }
 
+/** Aggregated reaction for a message (openchat-bmp.1). */
+export interface Reaction {
+  emoji: string;
+  count: number;
+  byMe: boolean;
+}
+
+/**
+ * Lightweight quoted target rendered as a reply preview (openchat-bmp.2).
+ * Hydrated server-side on the message read + send paths (OpenChat-uxj).
+ */
+export interface ReplyTo {
+  id: string;
+  content: string;
+  senderId: string;
+  sender?: { id: string; name?: string; email?: string };
+  senderName?: string;
+  messageType?: string;
+}
+
 export interface Message {
   id: string;
   content: string;
@@ -61,9 +81,17 @@ export interface Message {
   messageType: string;
   createdAt: string;
   editedAt?: string;
+  /** Soft-delete marker (server sets content to "Message deleted"). */
+  deletedAt?: string;
   sender?: User;
   /** Image attachments (OpenChat-6bg). */
   attachments?: Attachment[];
+  /** Aggregated emoji reactions (openchat-bmp.1). */
+  reactions?: Reaction[];
+  /** Quoted reply target (openchat-bmp.2). */
+  replyTo?: ReplyTo | null;
+  /** Id of the message this is replying to (openchat-bmp.2). */
+  replyToId?: string | null;
 }
 
 export interface Conversation {
@@ -459,14 +487,34 @@ class ApiClient {
     return this.fetch(`/conversations/${conversationId}/messages?${params}`);
   }
 
-  async sendMessage(conversationId: string, content: string, messageType = 'text', attachments?: Attachment[], id?: string): Promise<Message> {
+  async sendMessage(conversationId: string, content: string, messageType = 'text', attachments?: Attachment[], id?: string, replyToId?: string): Promise<Message> {
     // id is the client-generated idempotency key shared with the WebSocket path
     // so a WS-then-REST retry doesn't persist twice. See OpenChat-60y. The 15s
     // timeout keeps the REST fallback from hanging on a stalled mobile/VPN link.
     return this.fetch(`/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ content, messageType, ...(attachments?.length ? { attachments } : {}), id }),
+      body: JSON.stringify({ content, messageType, ...(attachments?.length ? { attachments } : {}), id, ...(replyToId ? { replyToId } : {}) }),
     }, 15000);
+  }
+
+  /** Mark the conversation read for the caller (OpenChat-0nj / openchat-bmp.4). */
+  async markConversationRead(conversationId: string): Promise<{ ok: true; lastReadAt: string; readMap: Record<string, string | null>; onlineMap: Record<string, boolean> }> {
+    return this.fetch(`/conversations/${conversationId}/read`, { method: 'PATCH' });
+  }
+
+  /** Add an emoji reaction to a message (openchat-bmp.1). */
+  async addReaction(messageId: string, emoji: string): Promise<{ reactions: Reaction[] }> {
+    return this.fetch(`/messages/${messageId}/reactions`, {
+      method: 'POST',
+      body: JSON.stringify({ emoji }),
+    });
+  }
+
+  /** Remove the caller's emoji reaction from a message (openchat-bmp.1). */
+  async removeReaction(messageId: string, emoji: string): Promise<{ reactions: Reaction[] }> {
+    return this.fetch(`/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`, {
+      method: 'DELETE',
+    });
   }
 
   /**
@@ -480,15 +528,18 @@ class ApiClient {
     });
   }
 
-  async editMessage(conversationId: string, messageId: string, content: string): Promise<Message> {
-    return this.fetch(`/conversations/${conversationId}/messages/${messageId}`, {
+  // Edit/delete hit the top-level /messages/:id routes (server/src/routes/chat.ts).
+  // They return the updated message (delete is a soft-delete that rewrites
+  // content to "Message deleted" and sets deletedAt). See openchat-bmp.3.
+  async editMessage(messageId: string, content: string): Promise<Message> {
+    return this.fetch(`/messages/${messageId}`, {
       method: 'PATCH',
       body: JSON.stringify({ content }),
     });
   }
 
-  async deleteMessage(conversationId: string, messageId: string): Promise<{ deleted: true }> {
-    return this.fetch(`/conversations/${conversationId}/messages/${messageId}`, {
+  async deleteMessage(messageId: string): Promise<Message> {
+    return this.fetch(`/messages/${messageId}`, {
       method: 'DELETE',
     });
   }
