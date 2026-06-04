@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Run from repo root.
+cd "$(dirname "$0")/.."
+
 SERVER_IP="3.216.129.34"
 SSH_KEY="~/.ssh/lightsail-noos.pem"
 REMOTE_USER="ubuntu"
@@ -9,21 +12,23 @@ APP_PORT="4001"
 
 echo "=== Deploying $APP_NAME to $SERVER_IP ==="
 
-# Build the legacy Vite client (served at /legacy/, kept for backward compat).
-echo "Building legacy Vite client..."
-VITE_NOOS_URL=https://globalbr.ai npm run build
+# Build the legacy Vite web client (served at /legacy/, kept for backward compat).
+echo "Building legacy Vite web client..."
+VITE_NOOS_URL=https://globalbr.ai npm run build --workspace=apps/web
+
+# Build the server (compiles TS + copies static assets into dist/).
+echo "Building server..."
+npm run build --workspace=apps/server
 
 # ────────────────────────────────────────────────────────────────────────────
-# RN-web builds (OpenChat-601): single openchat-mobile checkout, two exports.
+# RN-web builds (OpenChat-601): single openchat-mobile source, two exports.
 #
-# The desktop-responsive branch has been folded into main. /m/ and /d/ are now
-# the same app built twice — once with experiments.baseUrl=/m, once with /d.
-# baseUrl is gated by IS_WEB_BUILD in app.config.js so native (EAS) builds
-# never accidentally pick up a web baseUrl that would corrupt their deep
-# links + asset mapping.
+# Post-monorepo (openchat-3jq.5): the mobile app now lives in-repo at
+# apps/mobile (no longer a sibling repo). MOBILE_REPO defaults to that, but
+# can be overridden for backwards compat during the transition window.
 # ────────────────────────────────────────────────────────────────────────────
 
-MOBILE_REPO="${MOBILE_REPO:-$HOME/code/openchat-mobile}"
+MOBILE_REPO="${MOBILE_REPO:-$(pwd)/apps/mobile}"
 
 # Clean target dirs that go into the docker build context.
 rm -rf client-mobile/dist client-mobile-desktop/dist
@@ -104,7 +109,7 @@ if [ -d "$MOBILE_REPO" ]; then
   echo ""
   echo "── Injecting PWA manifest + sw into /d/ build ──"
 
-  PWA_SRC="$(pwd)/server/src/d-pwa"
+  PWA_SRC="$(pwd)/apps/server/src/d-pwa"
   if [ -d "$PWA_SRC" ]; then
     cp "$PWA_SRC/manifest.webmanifest" client-mobile-desktop/dist/manifest.webmanifest
     cp "$PWA_SRC/sw.js"                client-mobile-desktop/dist/sw.js
@@ -124,11 +129,11 @@ if [ -d "$MOBILE_REPO" ]; then
       exit 1
     fi
   else
-    echo "  (skip — server/src/d-pwa/ not present; PWA install will not be available)"
+    echo "  (skip — apps/server/src/d-pwa/ not present; PWA install will not be available)"
   fi
 else
   echo ""
-  echo "openchat-mobile repo not found at $MOBILE_REPO — /m and /d will serve placeholders."
+  echo "openchat-mobile source not found at $MOBILE_REPO — /m and /d will serve placeholders."
   PLACEHOLDER='<!doctype html><meta charset=utf-8><title>OpenChat</title><body style="font-family:system-ui;padding:2rem;max-width:40rem;margin:0 auto;color:#444"><h1>Build unavailable</h1><p>The RN-web build was not present in this deploy package.</p></body>'
   echo "$PLACEHOLDER" > client-mobile/dist/index.html
   echo "$PLACEHOLDER" > client-mobile-desktop/dist/index.html
@@ -137,15 +142,19 @@ fi
 # Create deployment package
 echo ""
 echo "Creating deployment package..."
+# Stage Dockerfile + docker-compose at the tar root so the remote extract
+# Just Works without restructuring on the server side.
+cp infra/Dockerfile /tmp/oc-Dockerfile
+cp infra/docker-compose.prod.yml /tmp/oc-docker-compose.prod.yml
+
 tar -czf /tmp/${APP_NAME}-deploy.tar.gz \
-  server/dist/ \
-  server/package*.json \
-  client/dist/ \
+  apps/server/dist/ \
+  apps/server/package*.json \
+  apps/web/dist/ \
   client-mobile/dist/ \
   client-mobile-desktop/dist/ \
   package*.json \
-  docker-compose.prod.yml \
-  Dockerfile
+  -C /tmp oc-docker-compose.prod.yml oc-Dockerfile
 
 # Copy to server
 echo "Copying to server..."
@@ -163,8 +172,9 @@ cd /opt/$APP_NAME
 # Extract deployment
 sudo tar -xzf /tmp/${APP_NAME}-deploy.tar.gz
 
-# Rename docker-compose file
-sudo mv docker-compose.prod.yml docker-compose.yml 2>/dev/null || true
+# Rename staged docker artifacts into place
+sudo mv oc-docker-compose.prod.yml docker-compose.yml 2>/dev/null || true
+sudo mv oc-Dockerfile Dockerfile 2>/dev/null || true
 
 # Create .env if not exists
 if [ ! -f .env ]; then

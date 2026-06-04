@@ -3,17 +3,19 @@
   "version": "0.2.2",
   "private": true,
   "workspaces": [
-    "server",
-    "client"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "dev:server": "npm run dev --workspace=server",
-    "dev:client": "npm run dev --workspace=client",
-    "build": "npm run build --workspaces",
-    "lint": "npm run lint --workspaces"
+    "dev:server": "npm run dev --workspace=apps/server",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "turbo": "^2.9.16"
   }
 }

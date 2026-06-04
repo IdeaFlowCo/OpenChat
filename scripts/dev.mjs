@@ -67,7 +67,7 @@ async function findFreePort(preferred, exclude = new Set()) {
 }
 
 async function start() {
-  const serverEnvFile = parseEnvFile(path.join(repoRoot, 'server', '.env'));
+  const serverEnvFile = parseEnvFile(path.join(repoRoot, 'apps', 'server', '.env'));
   const defaultServerPort = parsePort(
     process.env.OPENCHAT_SERVER_PORT || process.env.PORT || serverEnvFile.PORT,
     41851
@@ -106,13 +106,13 @@ async function start() {
     VITE_NOOS_URL: noosUrl,
   };
 
-  const serverProc = spawn('npm', ['run', 'dev', '--workspace=server'], {
+  const serverProc = spawn('npm', ['run', 'dev', '--workspace=apps/server'], {
     cwd: repoRoot,
     env: serverEnv,
     stdio: 'inherit',
   });
 
-  const clientProc = spawn('npm', ['run', 'dev', '--workspace=client'], {
+  const clientProc = spawn('npm', ['run', 'dev', '--workspace=apps/web'], {
     cwd: repoRoot,
     env: clientEnv,
     stdio: 'inherit',

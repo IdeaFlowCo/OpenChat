@@ -1,6 +1,24 @@
-// Minimal metro config that extends Expo's default.
-// Required by expo-doctor (otherwise EAS Build fails the doctor check on local builds).
-// Added 2026-06-02 after build 46 attempt hit this gate.
+// Monorepo-aware Metro config.
+// - watchFolders extends Metro's file watcher to the monorepo root so changes
+//   in /packages/* and root-hoisted deps are picked up.
+// - nodeModulesPaths lets Metro resolve packages from both the app's local
+//   node_modules and the root-hoisted node_modules.
+// - disableHierarchicalLookup prevents Metro from walking parent directories
+//   beyond the explicit paths above (avoids duplicate-package surprises with
+//   npm-hoisted deps).
+const path = require('path');
 const { getDefaultConfig } = require('expo/metro-config');
 
-module.exports = getDefaultConfig(__dirname);
+const projectRoot = __dirname;
+const workspaceRoot = path.resolve(projectRoot, '../..');
+
+const config = getDefaultConfig(projectRoot);
+
+config.watchFolders = [workspaceRoot];
+config.resolver.nodeModulesPaths = [
+  path.resolve(projectRoot, 'node_modules'),
+  path.resolve(workspaceRoot, 'node_modules'),
+];
+config.resolver.disableHierarchicalLookup = true;
+
+module.exports = config;
