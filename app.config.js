@@ -35,6 +35,20 @@ module.exports = {
     userInterfaceStyle: 'automatic',
     newArchEnabled: true,
 
+    // EAS Update (OTA) — ship JS/asset-only changes without a TestFlight build
+    // (oc8.2 / openchat-3jq.1). runtimeVersion=appVersion: an OTA update only
+    // reaches installs whose native app version matches, so we never push JS
+    // that's incompatible with the installed native runtime. checkAutomatically
+    // ON_LOAD: the app pulls a fresh bundle on launch. Native changes still
+    // require a new build (which bumps version -> new runtimeVersion).
+    updates: {
+      url: 'https://u.expo.dev/fc828863-4fa4-4b62-97f6-8c00ce1dffe3',
+      enabled: true,
+      checkAutomatically: 'ON_LOAD',
+      fallbackToCacheTimeout: 0,
+    },
+    runtimeVersion: { policy: 'appVersion' },
+
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.jacobcole.openchat',

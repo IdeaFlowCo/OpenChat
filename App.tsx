@@ -21,6 +21,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 import { ChatProvider, useChat } from './src/contexts/ChatContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
+import { UpdateBanner } from './src/components/UpdateBanner';
 import {
   configureNotificationHandlers,
   addNotificationTapListener,
@@ -477,6 +478,7 @@ function ShellWithBackground() {
   const c = getColors(scheme);
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
+      <UpdateBanner />
       <ChatProvider>
         <Shell />
       </ChatProvider>
