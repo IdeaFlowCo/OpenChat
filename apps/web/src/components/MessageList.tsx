@@ -1,8 +1,26 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import toast from 'react-hot-toast';
 import { useChat } from '../contexts/ChatContext';
 import { TypingBubble } from './TypingBubble';
+import { LinkPreviewCard } from './LinkPreviewCard';
+import { MessageContent } from './MessageContent';
+import { VoiceMessageBubble } from './VoiceMessageBubble';
 import { userDisplayName } from '../utils/userDisplay';
-import type { Message } from '../api';
+import { api, type Message } from '../api';
+
+// Date separator label (bmp.8): "Today", "Yesterday", or a localized date.
+function dayKey(iso: string): string {
+  return new Date(iso).toDateString();
+}
+function dateSeparatorLabel(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' });
+}
 
 // After this many ms without a typing:start heartbeat for a given user,
 // we treat them as no longer typing (client-side fallback for dropped
@@ -27,8 +45,21 @@ export function MessageList() {
     toggleReaction,
     setReplyTo,
     readReceiptsByConv,
+    loadOlderMessages,
+    hasMoreMessages,
+    loadingOlder,
+    loadConversations,
+    setActiveConversation,
   } = useChat();
+  // "Ask my agent" in-flight message id (openchat-ug6).
+  const [askingAgentId, setAskingAgentId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Number of messages loaded last render — used to detect prepend (older) vs
+  // append (new) so we can preserve scroll position when loading older (bmp.9).
+  const prevCountRef = useRef(0);
+  const prevFirstIdRef = useRef<string | null>(null);
+  const prevScrollHeightRef = useRef(0);
 
   // Which message's action menu / reaction picker is open (by id).
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -74,10 +105,44 @@ export function MessageList() {
     };
   }, [activeConversationId]);
 
-  // Auto-scroll to bottom on new messages or typing change.
+  // Scroll management (bmp.9). Distinguish three cases:
+  //   1. Prepend (older page loaded): keep the viewport anchored so the user
+  //      doesn't get yanked — restore scrollTop by the height delta.
+  //   2. Append (new message / initial load): scroll to bottom.
+  //   3. No-op render: do nothing.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = scrollRef.current;
+    const firstId = messages[0]?.id ?? null;
+    const prepended =
+      messages.length > prevCountRef.current &&
+      prevFirstIdRef.current !== null &&
+      firstId !== prevFirstIdRef.current &&
+      // The previous first message still exists in the list (we added before it).
+      messages.some(m => m.id === prevFirstIdRef.current);
+
+    if (prepended && el) {
+      // Restore scroll position relative to the new content height.
+      const newHeight = el.scrollHeight;
+      el.scrollTop = newHeight - prevScrollHeightRef.current;
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    prevCountRef.current = messages.length;
+    prevFirstIdRef.current = firstId;
+    if (el) prevScrollHeightRef.current = el.scrollHeight;
   }, [messages]);
+
+  // Infinite-scroll trigger: when the user scrolls near the top and there are
+  // older messages, fetch the next page (bmp.9).
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el || loadingOlder || !hasMoreMessages) return;
+    if (el.scrollTop < 80) {
+      prevScrollHeightRef.current = el.scrollHeight;
+      void loadOlderMessages();
+    }
+  };
 
   // Close any open action menu when switching conversations.
   useEffect(() => {
@@ -113,6 +178,10 @@ export function MessageList() {
   // recent message that the other participant has read. We only annotate the
   // latest own read message (iMessage-style) to avoid a wall of ticks.
   const activeConv = conversations.find(c => c.id === activeConversationId);
+  // Participant display names used to highlight @mentions (bmp.8).
+  const mentionNames = (activeConv?.participants || [])
+    .map(p => p.user.name || p.user.email?.split('@')[0] || '')
+    .filter(Boolean);
   const isDirect = activeConv?.type === 'direct';
   const otherParticipant = isDirect
     ? activeConv?.participants?.find(p => p.user.id !== currentUser?.userId)?.user
@@ -157,6 +226,29 @@ export function MessageList() {
     }
   };
 
+  // "Ask my agent" (openchat-ug6): forward the message to the user's Assistant
+  // and navigate to the Assistant DM. The server agent is building
+  // /api/assistant/forward in parallel; we code to the agreed contract and it
+  // lines up at integration.
+  const handleAskAgent = async (m: Message) => {
+    if (!activeConversationId || askingAgentId) return;
+    setOpenMenuId(null);
+    setAskingAgentId(m.id);
+    try {
+      const { conversationId } = await api.forwardToAssistant({
+        sourceConversationId: activeConversationId,
+        sourceMessageId: m.id,
+      });
+      // Make sure the Assistant DM is in the sidebar, then open it.
+      await loadConversations();
+      setActiveConversation(conversationId);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not ask your agent.');
+    } finally {
+      setAskingAgentId(null);
+    }
+  };
+
   if (messages.length === 0) {
     return (
       <div className="flex-1 flex flex-col overflow-y-auto bg-gray-50 dark:bg-slate-950">
@@ -174,12 +266,31 @@ export function MessageList() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-slate-950">
-      {messages.map((message) => {
+    <div
+      ref={scrollRef}
+      onScroll={handleScroll}
+      className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-slate-950"
+    >
+      {hasMoreMessages && (
+        <div className="flex justify-center pb-1">
+          <button
+            type="button"
+            onClick={() => { if (scrollRef.current) prevScrollHeightRef.current = scrollRef.current.scrollHeight; void loadOlderMessages(); }}
+            disabled={loadingOlder}
+            className="rounded-full border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-1.5 text-xs font-medium text-gray-600 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-800 disabled:opacity-50"
+          >
+            {loadingOlder ? 'Loading…' : 'Load older messages'}
+          </button>
+        </div>
+      )}
+      {messages.map((message, mi) => {
         const isOwn = message.senderId === currentUser?.userId;
         const isDeleted = !!message.deletedAt;
         const isEditing = editingId === message.id;
         const menuOpen = openMenuId === message.id;
+        // Date separator before the first message of each day (bmp.8).
+        const prev = mi > 0 ? messages[mi - 1] : null;
+        const showDateSeparator = !prev || dayKey(prev.createdAt) !== dayKey(message.createdAt);
         const sender = message.sender || (isOwn && currentUser
           ? { id: currentUser.userId, email: currentUser.email, name: currentUser.name || currentUser.email }
           : undefined);
@@ -198,8 +309,15 @@ export function MessageList() {
           : null;
 
         return (
+          <Fragment key={message.id}>
+          {showDateSeparator && (
+            <div className="flex justify-center py-1">
+              <span className="rounded-full bg-gray-200/70 dark:bg-slate-800 px-3 py-0.5 text-[11px] font-medium text-gray-500 dark:text-slate-400">
+                {dateSeparatorLabel(message.createdAt)}
+              </span>
+            </div>
+          )}
           <div
-            key={message.id}
             className={`group flex ${isOwn ? 'justify-end' : 'justify-start'}`}
           >
             <div className={`flex flex-col max-w-[75%] ${isOwn ? 'items-end' : 'items-start'}`}>
@@ -231,6 +349,13 @@ export function MessageList() {
                     </div>
                   )}
 
+                  {/* Forwarded provenance (OpenChat-hhc) */}
+                  {!isDeleted && message.forwardedFromMessageId && (
+                    <div className={`mb-1 text-xs italic ${isOwn ? 'text-blue-100' : 'text-gray-400 dark:text-slate-500'}`}>
+                      ↪ Forwarded{message.forwardedFromSenderName ? ` from ${message.forwardedFromSenderName}` : ''}
+                    </div>
+                  )}
+
                   {/* Quoted reply preview (openchat-bmp.2) */}
                   {message.replyTo && !isDeleted && (
                     <div
@@ -247,23 +372,37 @@ export function MessageList() {
                     </div>
                   )}
 
-                  {/* Image attachments (OpenChat-6bg) */}
-                  {!isDeleted && message.attachments?.map((att, i) => (
-                    <a
-                      key={i}
-                      href={att.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block mb-1"
-                    >
-                      <img
-                        src={att.url}
-                        alt="Attachment"
-                        className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity"
-                        style={att.width && att.height ? { aspectRatio: `${att.width}/${att.height}` } : undefined}
-                      />
-                    </a>
-                  ))}
+                  {/* Attachments: voice (OpenChat-xxc) or image (OpenChat-6bg) */}
+                  {!isDeleted && message.attachments?.map((att, i) => {
+                    const isAudio = att.type === 'audio' || att.mimeType?.startsWith('audio/');
+                    if (isAudio) {
+                      return (
+                        <VoiceMessageBubble
+                          key={i}
+                          url={att.url}
+                          durationMs={att.durationMs ?? 0}
+                          messageId={`${message.id}-${i}`}
+                          isOwn={isOwn}
+                        />
+                      );
+                    }
+                    return (
+                      <a
+                        key={i}
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block mb-1"
+                      >
+                        <img
+                          src={att.url}
+                          alt="Attachment"
+                          className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                          style={att.width && att.height ? { aspectRatio: `${att.width}/${att.height}` } : undefined}
+                        />
+                      </a>
+                    );
+                  })}
 
                   {isEditing ? (
                     <div className="flex flex-col gap-1">
@@ -292,8 +431,13 @@ export function MessageList() {
                       </div>
                     </div>
                   ) : (
-                    message.content && <p className="break-words whitespace-pre-wrap">{message.content}</p>
+                    message.content && <MessageContent content={message.content} isOwn={isOwn} mentionNames={mentionNames} />
                   )}
+
+                  {/* Open Graph link previews (bmp.8) */}
+                  {!isDeleted && !isEditing && message.linkPreviews?.map((preview, i) => (
+                    <LinkPreviewCard key={`${preview.url}-${i}`} preview={preview} isOwn={isOwn} />
+                  ))}
 
                   <div
                     className={`text-xs mt-1 flex items-center gap-1 ${
@@ -349,6 +493,14 @@ export function MessageList() {
                       >
                         ↩ Reply
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleAskAgent(message)}
+                        disabled={askingAgentId === message.id}
+                        className="block w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        🤖 {askingAgentId === message.id ? 'Asking…' : 'Ask my agent'}
+                      </button>
                       {isOwn && (
                         <>
                           <button
@@ -395,6 +547,7 @@ export function MessageList() {
               )}
             </div>
           </div>
+          </Fragment>
         );
       })}
 
