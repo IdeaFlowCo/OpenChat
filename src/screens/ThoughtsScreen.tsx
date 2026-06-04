@@ -101,15 +101,18 @@ function ThoughtCard({
       activeOpacity={0.7}
       style={[styles.card, { backgroundColor: surface, borderColor: border }]}
     >
-      {/* Header: badges + time */}
+      {/* Header: time leads; status + the kind pill float to the right. The
+          kind pill is hidden for 'observation' (the catch-all default for any
+          tag) to keep cards quiet — only meaningful types show. */}
       <View style={styles.cardHeader}>
-        <View style={[styles.badge, { backgroundColor: kindColor + '22' }]}>
-          <Text style={[styles.badgeText, { color: kindColor }]}>{kindLabel}</Text>
-        </View>
+        <Text style={[styles.time, { color: textMuted }]}>
+          {formatRelativeTime(item.createdAt)}
+        </Text>
         {item.status !== 'none' && (
           <View
             style={[
               styles.badge,
+              styles.headerRight,
               { backgroundColor: item.status === 'open' ? '#3b82f622' : '#6b728022' },
             ]}
           >
@@ -123,9 +126,11 @@ function ThoughtCard({
             </Text>
           </View>
         )}
-        <Text style={[styles.time, { color: textMuted }]}>
-          {formatRelativeTime(item.createdAt)}
-        </Text>
+        {item.kind !== 'observation' && (
+          <View style={[styles.badge, item.status === 'none' ? styles.headerRight : null, { backgroundColor: kindColor + '22' }]}>
+            <Text style={[styles.badgeText, { color: kindColor }]}>{kindLabel}</Text>
+          </View>
+        )}
       </View>
 
       {/* Body text */}
@@ -390,6 +395,9 @@ const styles = StyleSheet.create({
   },
   time: {
     fontSize: 11,
+  },
+  // Pushes the first trailing element (status or kind pill) to the right edge.
+  headerRight: {
     marginLeft: 'auto',
   },
   bodyText: {
