@@ -103,11 +103,18 @@ async function resolveAgentKey(fullKey: string): Promise<string | null> {
       cachedAt: Date.now(),
     });
 
-    // Update lastUsedAt asynchronously — don't block the request.
-    session.run(
-      `MATCH (k:AgentKey {keyPrefix: $keyPrefix}) SET k.lastUsedAt = $now`,
-      { keyPrefix, now: new Date().toISOString() }
-    ).catch(() => { /* best-effort */ });
+    // Update lastUsedAt asynchronously — don't block the request. Use a
+    // SEPARATE session: the main `session` is closed in the finally below, and
+    // a fire-and-forget query on a closing session throws "Queries cannot be
+    // run directly on a session with an open transaction".
+    const bgSession = getDriver().session();
+    bgSession
+      .run(
+        `MATCH (k:AgentKey {keyPrefix: $keyPrefix}) SET k.lastUsedAt = $now`,
+        { keyPrefix, now: new Date().toISOString() }
+      )
+      .catch(() => { /* best-effort */ })
+      .finally(() => bgSession.close());
 
     return ownerUserId;
   } finally {

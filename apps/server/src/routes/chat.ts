@@ -1236,11 +1236,19 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
     //   names already surface via the contacts bucket; layering them in
     //   here causes confusing double-counted results).
     // - Contacts excludes self, matching the existing /contacts behavior.
+    //
+    // Each query runs on its OWN session: a single Neo4j session cannot run
+    // multiple queries concurrently (Promise.all on one session throws
+    // "Queries cannot be run directly on a session with an open transaction").
+    const runQ = (cypher: string, params: Record<string, unknown>) => {
+      const s = getDriver().session();
+      return s.run(cypher, params).finally(() => s.close());
+    };
     const [messagesResult, conversationsResult, contactsResult] = await Promise.all([
       // Match messages by the conversationId PROPERTY (always set), not the
       // IN_CONVERSATION relationship — the socket send path and others only set
       // the property, so a relationship join silently misses most messages.
-      session.run(`
+      runQ(`
         MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
         WITH collect(c.id) AS cids
         MATCH (m:Message)
@@ -1259,7 +1267,7 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
         LIMIT $limit
       `, { userId, q, limit: neo4j.int(limit) }),
 
-      session.run(`
+      runQ(`
         MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
         WHERE c.title IS NOT NULL
           AND toLower(c.title) CONTAINS toLower($q)
@@ -1282,7 +1290,7 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
       // ('me', 'self', 'myself'). Codex review 2026-06-01: dropping the
       // u.id <> $userId exclusion does not leak — the response shape only
       // contains data the user already has on their own profile.
-      session.run(`
+      runQ(`
         MATCH (u:User)
         WHERE (toLower(u.name) CONTAINS toLower($q) OR toLower(u.email) CONTAINS toLower($q))
            OR (u.id = $userId AND toLower($q) IN ['me', 'self', 'myself'])
