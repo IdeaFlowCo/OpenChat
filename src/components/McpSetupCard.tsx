@@ -25,9 +25,10 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { OPENCHAT_URL } from '../api/client';
 
-type Target = 'claude' | 'cursor' | 'codex' | 'code' | 'curl';
+type Target = 'chatgpt' | 'claude' | 'cursor' | 'codex' | 'code' | 'curl';
 
 const TABS: { id: Target; label: string }[] = [
+  { id: 'chatgpt', label: 'ChatGPT / Any LLM' },
   { id: 'claude', label: 'Claude Desktop' },
   { id: 'cursor', label: 'Cursor' },
   { id: 'codex',  label: 'Codex CLI' },
@@ -38,6 +39,33 @@ const TABS: { id: Target; label: string }[] = [
 function snippetFor(target: Target, key: string): string {
   const k = key;
   switch (target) {
+    case 'chatgpt':
+      // Tool-less prose blob: paste into a plain chat box (ChatGPT, Gemini,
+      // Claude.ai — anything that can make HTTP requests or relay curl). No
+      // MCP server, no shell, no file writes required. Self-contained.
+      return `You can now read and send messages on my OpenChat account by calling its REST API directly. No setup or tools to install — just make HTTPS requests with the header below.
+
+Base URL: ${OPENCHAT_URL}
+Auth (send on EVERY request): Authorization: Bearer ${k}
+
+What you can do:
+• List my conversations (start here):
+    GET /api/chat/conversations
+• Read a conversation's messages:
+    GET /api/chat/conversations/{conversationId}/messages
+• Send a message — you appear AS me, not as a separate bot:
+    POST /api/chat/conversations/{conversationId}/messages
+    JSON body: {"content": "your message text"}
+• Poll only new messages since a timestamp:
+    GET /api/chat/messages/since?since=2026-01-01T00:00:00Z
+
+Copy-paste example (send a message):
+    curl -H "Authorization: Bearer ${k}" -H "Content-Type: application/json" \\
+      -d '{"content":"Hello from my agent"}' \\
+      ${OPENCHAT_URL}/api/chat/conversations/CONVERSATION_ID/messages
+
+Treat the key as a secret — don't print it back or commit it anywhere.
+To begin: call GET /api/chat/conversations, show me the list, and ask which conversation I want you to use.`;
     case 'claude':
       return JSON.stringify({
         mcpServers: {
@@ -75,6 +103,7 @@ env = { OPENCHAT_API_KEY = "${k}" }`;
 
 function hintFor(target: Target): string {
   switch (target) {
+    case 'chatgpt': return 'Paste into any chat box — ChatGPT, Gemini, Claude.ai. No install needed; the model talks to OpenChat over plain HTTPS. Works with any LLM that can make web requests.';
     case 'claude': return 'Paste into ~/Library/Application Support/Claude/claude_desktop_config.json, then restart Claude Desktop.';
     case 'cursor': return 'Paste into ~/.cursor/mcp.json (global) or .cursor/mcp.json (project), then reload.';
     case 'codex':  return 'Append to ~/.codex/config.toml.';
@@ -115,7 +144,7 @@ interface Props {
 export function McpSetupCard({ apiKey }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  const [active, setActive] = useState<Target>('claude');
+  const [active, setActive] = useState<Target>('chatgpt');
 
   const displayedKey = apiKey ?? 'oc_your_key_here';
   const snippet = snippetFor(active, displayedKey);
