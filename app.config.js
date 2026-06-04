@@ -28,7 +28,7 @@ module.exports = {
   expo: {
     name: 'OpenChat',
     slug: 'openchat-mobile',
-    version: '0.1.16',
+    version: '0.1.17',
     orientation: 'portrait',
     icon: './assets/icon.png',
     scheme: 'openchat',
