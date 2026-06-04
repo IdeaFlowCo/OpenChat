@@ -1415,6 +1415,19 @@ export function ChatScreen({
           placeholder="Type a message…"
           placeholderTextColor={c.textMuted}
           multiline
+          // Web (/m, /d): Enter sends, Shift+Enter inserts a newline. Guarded to
+          // web only — on a touch keyboard the return key must stay a newline
+          // (sending is the send button). The isComposing check keeps IME users
+          // (e.g. Chinese input) from sending while confirming a candidate.
+          // See openchat-4hq.
+          onKeyPress={(e) => {
+            if (Platform.OS !== 'web') return;
+            const ne = e.nativeEvent as unknown as KeyboardEvent;
+            if (ne.key === 'Enter' && !ne.shiftKey && !ne.isComposing) {
+              e.preventDefault();
+              void handleSend();
+            }
+          }}
         />
         {/* Transform sparkle button (OpenChat-8a0) — hidden in edit mode or while recording */}
         {!editingMessage && !isRecording && (
