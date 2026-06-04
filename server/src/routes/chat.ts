@@ -9,6 +9,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { resolveActor } from '../middleware/resolveActor.js';
 import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline, broadcastMessageToParticipants } from '../websocket/chatHandler.js';
 import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPreview.js';
+import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
 let _s3: S3Client | null = null;
@@ -117,7 +118,7 @@ router.get('/conversations', resolveActor, async (req: Request, res: Response) =
 
   try {
     const result = await session.run(`
-      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
+      MATCH (u:User {id: $userId})-[myRel:PARTICIPATES_IN]->(c:Conversation)
       // Omit DM conversations where the other participant has blocked me
       WHERE NOT (
         c.type = 'direct'
@@ -148,7 +149,10 @@ router.get('/conversations', resolveActor, async (req: Request, res: Response) =
         .*,
         lastMessage: lastMessage { .content, .senderId, .createdAt },
         participants: participants,
-        containsBot: containsBot
+        containsBot: containsBot,
+        // OpenChat-aes: per-user mute state on the PARTICIPATES_IN edge.
+        // Returns ISO timestamp, the literal 'always', or null.
+        mutedUntil: myRel.mutedUntil
       } AS conversation
       ORDER BY c.lastMessageAt DESC
     `, { userId });
@@ -174,9 +178,40 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
     return;
   }
 
-  // For direct messages, check if conversation already exists
+  // For direct messages, check if conversation already exists.
   if (type === 'direct' && participantIds.length === 1) {
     const otherId = participantIds[0];
+
+    // Self-DM dedupe (OpenChat-self-1, codex 2026-06-01): the two-user
+    // pattern below requires u1 != u2 in the graph. For a self-DM (one
+    // participant edge) it would never match → repeated POSTs would
+    // create duplicate self-DMs. Special-case before the normal path.
+    if (otherId === userId) {
+      const selfExisting = await session.run(`
+        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {type: 'direct'})
+        WHERE NOT EXISTS {
+          MATCH (other:User)-[:PARTICIPATES_IN]->(c) WHERE other.id <> $userId
+        }
+        MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
+        WITH c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
+        RETURN c { .*, participants: participants } AS conversation
+        LIMIT 1
+      `, { userId });
+
+      if (selfExisting.records.length > 0) {
+        const conv = toJS(selfExisting.records[0].get('conversation')) as Record<string, unknown> | null;
+        await session.close();
+        const io = req.app.get('io') as IOServer | undefined;
+        const existingId = typeof conv?.id === 'string' ? conv.id : null;
+        if (io && existingId) joinUserSocketsToConversation(io, userId, existingId);
+        res.json(conv);
+        return;
+      }
+      // No existing self-DM found → fall through to creation with the
+      // single-edge model (allParticipants below filters self → empty,
+      // then we add the one edge explicitly).
+    }
+
     const existing = await session.run(`
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
       WHERE c.type = 'direct'
@@ -330,6 +365,61 @@ function emitConversationUpdated(
   // in a non-participant viewer state — edge case but cheap)
   io.to(`conversation:${conversationId}`).emit('conversation:updated', { conversationId, conversation });
 }
+
+// PATCH /api/chat/conversations/:id/participants/me — set mute state for
+// the calling user on this conversation (OpenChat-aes). Body:
+//   { mutedUntil: ISO-8601 string | 'always' | null }
+// Stored as a property on the user's PARTICIPATES_IN edge. Other devices
+// of the same user pick it up on next /conversations refresh.
+router.patch('/conversations/:id/participants/me', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const id = req.params.id as string;
+  const { mutedUntil } = (req.body ?? {}) as { mutedUntil?: string | null };
+
+  // Validate: either null (unmute), 'always' (forever), or an ISO timestamp
+  // in the future. Reject obvious garbage early.
+  let muteValue: string | null;
+  if (mutedUntil === null || mutedUntil === undefined) {
+    muteValue = null;
+  } else if (typeof mutedUntil !== 'string') {
+    res.status(400).json({ error: 'mutedUntil must be a string, "always", or null' });
+    return;
+  } else if (mutedUntil === 'always') {
+    muteValue = 'always';
+  } else {
+    const parsed = Date.parse(mutedUntil);
+    if (Number.isNaN(parsed)) {
+      res.status(400).json({ error: 'mutedUntil must be a valid ISO-8601 string, "always", or null' });
+      return;
+    }
+    muteValue = new Date(parsed).toISOString();
+  }
+
+  try {
+    const result = await session.run(
+      `MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
+       SET rel.mutedUntil = $muteValue
+       RETURN rel.mutedUntil AS mutedUntil, c.id AS conversationId`,
+      { userId, id, muteValue }
+    );
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    res.json({
+      conversationId: result.records[0].get('conversationId'),
+      mutedUntil: result.records[0].get('mutedUntil'),
+    });
+  } catch (error) {
+    console.error('Error updating mute state:', error);
+    res.status(500).json({ error: 'Failed to update mute state' });
+  } finally {
+    await session.close();
+  }
+});
 
 // PATCH /api/chat/conversations/:id - Update title (owner-only for groups)
 router.patch('/conversations/:id', requireAuth, async (req: Request, res: Response) => {
@@ -694,6 +784,25 @@ router.get('/conversations/:id/messages', resolveActor, async (req: Request, res
       return;
     }
 
+    // OpenChat-uxj: hydrate reply target inline so clients render reply
+    // quote bubbles without an extra round-trip per message.
+    const replyHydrate = `
+        CALL {
+          WITH m
+          OPTIONAL MATCH (reply:Message {id: m.replyToId})
+          OPTIONAL MATCH (replySender:User)-[:SENT]->(reply)
+          RETURN CASE
+            WHEN reply IS NULL THEN NULL
+            ELSE {
+              id: reply.id,
+              content: left(reply.content, 200),
+              senderId: reply.senderId,
+              sender: { id: replySender.id, name: replySender.name, email: replySender.email },
+              messageType: reply.messageType
+            }
+          END AS replyTo
+        }`;
+
     const query = before
       ? `
         MATCH (m:Message {conversationId: $id})
@@ -706,7 +815,8 @@ router.get('/conversations/:id/messages', resolveActor, async (req: Request, res
           WHERE emoji IS NOT NULL
           RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors }) AS reactions
         }
-        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions } AS message
+        ${replyHydrate}
+        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions, replyTo: replyTo } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
       `
@@ -720,7 +830,8 @@ router.get('/conversations/:id/messages', resolveActor, async (req: Request, res
           WHERE emoji IS NOT NULL
           RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors }) AS reactions
         }
-        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions } AS message
+        ${replyHydrate}
+        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions, replyTo: replyTo } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
       `;
@@ -822,7 +933,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id: conversationId } = req.params;
-  const { content: rawContent, text, messageType = 'text', attachments, id: clientId } = req.body;
+  const { content: rawContent, text, messageType = 'text', attachments, id: clientId, replyToId } = req.body;
   const content = rawContent ?? text;
 
   // Allow either content OR attachments (images can be sent without caption).
@@ -830,6 +941,14 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
   const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
   if (!hasContent && !hasAttachments) {
     res.status(400).json({ error: 'content or attachments is required' });
+    return;
+  }
+
+  // Validate replyToId shape if present (OpenChat-uxj). We verify it
+  // points to a real message in the SAME conversation below — pre-check
+  // here just rejects obvious bad input early.
+  if (replyToId !== undefined && replyToId !== null && typeof replyToId !== 'string') {
+    res.status(400).json({ error: 'replyToId must be a string' });
     return;
   }
 
@@ -860,6 +979,21 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       return;
     }
 
+    // Validate replyToId points to a message in THIS conversation
+    // (OpenChat-uxj). Cross-conversation replies are rejected — they'd
+    // leak content from a chat the recipients aren't part of.
+    if (replyToId) {
+      const replyCheck = await session.run(
+        `MATCH (m:Message {id: $replyToId})-[:IN_CONVERSATION]->(c:Conversation {id: $conversationId})
+         RETURN m.id AS id`,
+        { replyToId, conversationId }
+      );
+      if (replyCheck.records.length === 0) {
+        res.status(400).json({ error: 'replyToId does not point to a message in this conversation' });
+        return;
+      }
+    }
+
     // Idempotency: use the client-supplied id (shared with the WebSocket path)
     // so a WS send whose ack was lost, then retried over this REST fallback,
     // collapses to one row via MERGE instead of persisting a duplicate with a
@@ -883,16 +1017,35 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         m.conversationId = $conversationId,
         m.messageType = $messageType,
         m.attachments = $attachmentsJson,
+        m.replyToId = $replyToId,
         m.createdAt = datetime($now)
       MERGE (m)-[:IN_CONVERSATION]->(c)
       MERGE (sender)-[:SENT]->(m)
       SET c.updatedAt = datetime($now),
           c.lastMessageAt = datetime($now),
           c.lastMessagePreview = left($preview, 100)
+      // OpenChat-uxj: hydrate the reply target so clients can render the
+      // quote bubble without an extra fetch. OpenChat-60y: also return the
+      // participant ids so we can fan out to per-user rooms.
       WITH c, m, sender
+      OPTIONAL MATCH (reply:Message {id: m.replyToId})
+      OPTIONAL MATCH (replySender:User)-[:SENT]->(reply)
       MATCH (p:User)-[:PARTICIPATES_IN]->(c)
-      RETURN m { .*, sender: sender { .id, .name, .email } } AS message,
-             collect(DISTINCT p.id) AS participantIds
+      RETURN m {
+        .*,
+        sender: sender { .id, .name, .email },
+        replyTo: CASE
+          WHEN reply IS NULL THEN NULL
+          ELSE {
+            id: reply.id,
+            content: left(reply.content, 200),
+            senderId: reply.senderId,
+            senderName: replySender.name,
+            messageType: reply.messageType
+          }
+        END
+      } AS message,
+      collect(DISTINCT p.id) AS participantIds
     `, {
       id: messageId,
       content: messageContent,
@@ -901,6 +1054,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       messageType,
       now,
       attachmentsJson,
+      replyToId: replyToId ?? null,
       preview,
     });
 
@@ -921,6 +1075,24 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // Async link preview fetch — non-blocking (OpenChat-hq2)
     if (io) {
       processLinkPreviews(io, message.id as string, conversationId as string, messageContent);
+    }
+
+    // Hashtag → Thought extraction (OpenChat-thoughts-from-tags). Best-
+    // effort: errors here log but never break the message send. Fired on
+    // a fresh session so we don't block the response. Pass the IO server
+    // so each created Thought emits 'thought:created' to the sender's
+    // user room → Thoughts tab refreshes live without polling.
+    if (messageContent) {
+      const tagSession = getDriver().session();
+      void createThoughtsFromMessageTags(tagSession, {
+        senderId: userId,
+        messageId: message.id as string,
+        conversationId: conversationId as string,
+        content: messageContent,
+        io,
+      })
+        .catch((err) => console.warn('[thought-from-tag] background create failed:', err))
+        .finally(() => { void tagSession.close(); });
     }
 
     res.status(201).json(message);
@@ -1095,12 +1267,18 @@ router.get('/search', requireAuth, async (req: Request, res: Response) => {
         LIMIT $limit
       `, { userId, q, limit: neo4j.int(limit) }),
 
+      // Contacts: case-insensitive CONTAINS on name OR email.
+      // OpenChat-search-self: includes SELF when the literal query matches the
+      // user's own name/email OR when the query is a reserved self-keyword
+      // ('me', 'self', 'myself'). Codex review 2026-06-01: dropping the
+      // u.id <> $userId exclusion does not leak — the response shape only
+      // contains data the user already has on their own profile.
       session.run(`
         MATCH (u:User)
-        WHERE u.id <> $userId
-          AND (toLower(u.name) CONTAINS toLower($q) OR toLower(u.email) CONTAINS toLower($q))
+        WHERE (toLower(u.name) CONTAINS toLower($q) OR toLower(u.email) CONTAINS toLower($q))
+           OR (u.id = $userId AND toLower($q) IN ['me', 'self', 'myself'])
         RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
-        ORDER BY u.name
+        ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
         LIMIT $limit
       `, { userId, q, limit: neo4j.int(limit) }),
     ]);

@@ -7,7 +7,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { marked } from 'marked';
-import { initDatabase, closeDatabase } from './db.js';
+import { initDatabase, closeDatabase, getDriver } from './db.js';
 import authRoutes from './routes/auth.js';
 import chatRoutes from './routes/chat.js';
 import clientLogsRoutes from './routes/clientLogs.js';
@@ -66,70 +66,265 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Project landing page (/about) — single static HTML + the app icon.
+// Project landing page (/, /about) — OpenChat-e4n moved / to landing.
+// Single static HTML + the app icon. Legacy Vite web client is now at
+// /legacy (see below).
 // Lists every version of OpenChat (iOS TestFlight, Android APK, Mobile Web,
 // Desktop Web) so we have one shareable URL that branches to all platforms.
 // Must be registered BEFORE express.static(clientDistPath) below so it
 // takes precedence over any /about path the Vite client might claim.
 const landingHtmlPath = path.join(__dirname, 'landing.html');
 const landingIconPath = path.join(__dirname, 'landing-icon.png');
-app.get('/about', (_req, res) => {
+const landingQrPath = path.join(__dirname, 'qr-chat-globalbrai.svg');
+app.get(['/', '/about'], (_req, res) => {
   res.sendFile(landingHtmlPath);
 });
 app.get('/about/icon.png', (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.sendFile(landingIconPath);
 });
+// Shareable QR for chat.globalbr.ai (OpenChat-84u). Static SVG generated
+// once at build time; cache long since the URL it encodes never changes.
+app.get('/about/qr.svg', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.sendFile(landingQrPath);
+});
 
+// Per-user "add me" landing page (OpenChat-qr-onboard). Reached when a
+// non-installed user scans a personal QR (encoded as
+// https://chat.globalbr.ai/u/<userId>). Renders a small SSR page that
+// requires no JS to show the inviter's name + a clear sign-in / install
+// CTA carrying the intent forward via ?intent=add-user&id=<id>.
+//
+// Once Associated Domains (OpenChat-84u.2) is enabled, installed-app
+// users skip this page entirely — iOS opens OpenChat directly. This
+// page is the no-app fallback.
+app.get('/u/:userId', async (req, res, next) => {
+  const userId = req.params.userId as string;
+  if (!userId || userId.length < 4 || userId.length > 32) return next();
+  const session = getDriver().session();
+  try {
+    const result = await session.run(
+      `MATCH (u:User {id: $userId})
+       RETURN u { .id, .name, .email, .avatarUrl, .isBot } AS user LIMIT 1`,
+      { userId }
+    );
+    if (result.records.length === 0) return next();
+    const user = result.records[0].get('user') as {
+      id: string; name?: string | null; email: string;
+      avatarUrl?: string | null; isBot?: boolean | null;
+    };
+    const displayName = (user.name || user.email.split('@')[0] || 'OpenChat user');
+    const initial = (displayName[0] || '?').toUpperCase();
+    const intentQs = `?intent=add-user&id=${encodeURIComponent(userId)}`;
+    const safe = (s: string) => s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    const html = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#5664e2">
+<title>${safe(displayName)} on OpenChat</title>
+<meta name="description" content="${safe(displayName)} wants to add you on OpenChat.">
+<meta property="og:title" content="${safe(displayName)} on OpenChat">
+<meta property="og:description" content="${safe(displayName)} wants to add you on OpenChat. Tap to start a conversation.">
+<style>
+  :root { --bg:#0a0c18; --surface:rgba(255,255,255,0.05); --border:rgba(255,255,255,0.10);
+          --text:#f4f6ff; --text-dim:#9aa0c5; --accent:#7c80ff; --accent-bg:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%); }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased;
+              font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif; line-height:1.5; }
+  body::before { content:""; position:fixed; inset:0; z-index:-1;
+    background:
+      radial-gradient(700px 500px at 20% -10%,#2a2475 0%,transparent 60%),
+      radial-gradient(600px 500px at 80% 110%,#6230a8 0%,transparent 55%),
+      var(--bg); }
+  .wrap { max-width:480px; margin:0 auto; padding:48px 24px; text-align:center; }
+  .avatar { width:96px; height:96px; border-radius:50%; margin:0 auto 20px;
+            background:var(--accent-bg); color:#fff; font-size:42px; font-weight:700;
+            display:flex; align-items:center; justify-content:center;
+            box-shadow:0 14px 30px rgba(124,128,255,0.35); }
+  .name { font-size:24px; font-weight:700; margin:0 0 4px; letter-spacing:-0.01em; }
+  .invite { color:var(--text-dim); font-size:15px; margin:0 0 32px; }
+  .cta { display:block; padding:14px 22px; margin:10px 0; border-radius:12px;
+         font-weight:600; font-size:15px; text-decoration:none; }
+  .cta-primary { background:var(--accent-bg); color:#fff;
+                 box-shadow:0 8px 20px rgba(124,128,255,0.4); }
+  .cta-secondary { background:var(--surface); color:var(--text); border:1px solid var(--border); }
+  .cta-tiny { font-size:13px; color:var(--text-dim); padding:8px; }
+  .cta-tiny a { color:var(--accent); text-decoration:underline; }
+  .footer { font-size:11px; color:var(--text-dim); margin-top:30px; }
+  .footer a { color:var(--text-dim); }
+</style>
+</head><body>
+<div class="wrap">
+  ${user.avatarUrl
+    ? `<img class="avatar" style="object-fit:cover" src="${safe(user.avatarUrl)}" alt="${safe(displayName)}">`
+    : `<div class="avatar">${safe(initial)}</div>`}
+  <h1 class="name">${safe(displayName)}${user.isBot ? ' <span style="font-size:13px;color:var(--text-dim)">· bot</span>' : ''}</h1>
+  <p class="invite">wants to connect on OpenChat — tap below to start.</p>
+
+  <a class="cta cta-primary" href="/m/${intentQs}">Open in mobile web · sign in</a>
+  <a class="cta cta-secondary" href="/d/${intentQs}">Open on desktop web</a>
+  <a class="cta cta-secondary" href="https://testflight.apple.com/join/QvUPzDMY">Get the iOS app · TestFlight</a>
+
+  <p class="cta-tiny">Already have OpenChat? <a href="openchat://user/${encodeURIComponent(userId)}">Open the app directly</a></p>
+
+  <div class="footer">
+    <a href="/">chat.globalbr.ai</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
+  </div>
+</div></body></html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.send(html);
+  } catch (err) {
+    console.error('/u/:userId render error:', err);
+    next();
+  } finally {
+    await session.close();
+  }
+});
+
+// Apple App Site Association (OpenChat-84u.1). Enables Universal Links so
+// tapping https://chat.globalbr.ai/i/<token> or .../u/<id> in Messages /
+// Mail / Safari opens the native OpenChat app when installed, instead of
+// landing in mobile Safari. Apple fetches this file once when the app is
+// installed and caches it.
+//
+// MUST be served:
+//   - at /.well-known/apple-app-site-association (no extension in URL)
+//   - with Content-Type: application/json
+//   - over HTTPS (we're behind Cloudflare → nginx, so this is fine)
+//   - without redirects
+const aasaPath = path.join(__dirname, 'well-known', 'apple-app-site-association.json');
+app.get('/.well-known/apple-app-site-association', (_req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.sendFile(aasaPath);
+});
+
+// /about/connect-your-bot — agent integration guide (OpenChat-7c9).
+// Rendered once at startup from docs/connect-your-bot.md so updates only need
+// a redeploy, not new route code. Wrapped in the same dark-violet shell as
+// the landing page for visual continuity.
 const connectBotMdPath = path.join(__dirname, 'docs', 'connect-your-bot.md');
 let connectBotHtmlCache: string | null = null;
-
 function renderConnectBotHtml(): string {
   if (connectBotHtmlCache) return connectBotHtmlCache;
   let body = '';
   try {
-    body = marked.parse(readFileSync(connectBotMdPath, 'utf8'), { async: false }) as string;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    body = `<p>Failed to load docs: ${message}</p>`;
+    const md = readFileSync(connectBotMdPath, 'utf8');
+    body = marked.parse(md, { async: false }) as string;
+  } catch (e) {
+    body = `<p>Failed to load docs: ${(e as Error).message}</p>`;
   }
-
   connectBotHtmlCache = `<!doctype html>
-<html lang="en">
-<head>
+<html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Connect your bot - OpenChat</title>
+<meta name="theme-color" content="#5664e2">
+<title>Connect your agent — OpenChat</title>
+<meta name="description" content="Set up bi-directional MCP access to OpenChat. Claude Desktop, Cursor, Codex CLI, Claude Code — all supported via one config snippet.">
 <style>
-  :root { color-scheme: dark; --bg:#0a0c18; --surface:#12162a; --border:#29304f; --text:#f5f7ff; --muted:#a7aecf; --accent:#8ea2ff; }
+  :root { --bg:#0a0c18; --surface:rgba(255,255,255,0.04); --border:rgba(255,255,255,0.10);
+          --text:#f4f6ff; --text-dim:#9aa0c5; --accent:#7c80ff; --accent-2:#ad6cff;
+          --code-bg:#0f1230; --code-border:rgba(255,255,255,0.08); }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; }
-  main { max-width:820px; margin:0 auto; padding:32px 22px 72px; }
-  a { color:var(--accent); }
-  h1 { font-size:40px; line-height:1.1; margin:24px 0; }
-  h2 { margin-top:36px; }
+  html,body { margin:0; background:var(--bg); color:var(--text);
+              font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+              -webkit-font-smoothing:antialiased; line-height:1.6; }
+  body::before { content:""; position:fixed; inset:0; z-index:-1;
+    background:
+      radial-gradient(900px 600px at 20% -10%,#2a2475 0%,transparent 60%),
+      radial-gradient(800px 500px at 80% 10%,#6230a8 0%,transparent 55%),
+      var(--bg); }
+  .wrap { max-width:780px; margin:0 auto; padding:24px; }
+  .nav { padding:16px 0 32px; display:flex; align-items:center; gap:12px; }
+  .nav img { width:32px; height:32px; border-radius:8px; }
+  .nav a { color:var(--text-dim); text-decoration:none; font-weight:500; font-size:14px; }
+  .nav a:hover { color:var(--text); }
+  .nav .sep { color:var(--text-dim); opacity:0.4; }
+  .doc { padding:8px 0 64px; }
+  h1 { font-size:clamp(28px,4vw,40px); letter-spacing:-0.02em; margin:0 0 24px;
+       background:linear-gradient(180deg,#fff 0%,#c8cbff 130%);
+       -webkit-background-clip:text; background-clip:text; color:transparent; }
+  h2 { font-size:22px; margin:36px 0 12px; letter-spacing:-0.01em; color:var(--text); }
+  h3 { font-size:18px; margin:28px 0 10px; color:var(--text); }
+  h4 { font-size:15px; margin:18px 0 8px; color:var(--text-dim); }
   p, li { color:var(--text); }
-  code { background:var(--surface); border:1px solid var(--border); border-radius:5px; padding:2px 5px; }
-  pre { overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px; }
-  pre code { border:0; padding:0; }
-  table { width:100%; border-collapse:collapse; margin:16px 0; }
-  th, td { border-bottom:1px solid var(--border); padding:9px 11px; text-align:left; }
-  th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  a { color:var(--accent); }
+  a:hover { color:#b9bcff; }
+  hr { border:none; border-top:1px solid var(--border); margin:36px 0; }
+  code { background:var(--code-bg); padding:2px 6px; border-radius:5px;
+         font-size:0.9em; border:1px solid var(--code-border);
+         font-family:"SF Mono",Menlo,Consolas,monospace; }
+  pre { background:var(--code-bg); padding:16px 18px; border-radius:10px;
+        border:1px solid var(--code-border); overflow-x:auto; margin:16px 0;
+        font-size:13px; line-height:1.5; }
+  pre code { background:transparent; padding:0; border:none; font-size:13px; }
+  table { width:100%; border-collapse:collapse; margin:16px 0; font-size:14px; }
+  th, td { padding:10px 14px; border-bottom:1px solid var(--border); text-align:left; }
+  th { color:var(--text-dim); font-weight:600; font-size:12px; letter-spacing:0.05em; text-transform:uppercase; }
+  blockquote { margin:16px 0; padding:12px 16px; border-left:3px solid var(--accent);
+               background:var(--surface); border-radius:0 8px 8px 0; color:var(--text-dim); }
+  ul, ol { padding-left:24px; }
+  li { margin:6px 0; }
 </style>
-</head>
-<body><main>${body}</main></body>
-</html>`;
+</head><body>
+<div class="wrap">
+  <nav class="nav">
+    <a href="/about"><img src="/about/icon.png" alt="OpenChat"></a>
+    <a href="/about">Home</a>
+    <span class="sep">·</span>
+    <a href="/about/connect-your-bot">Connect your agent</a>
+    <span class="sep">·</span>
+    <a href="https://github.com/tmad4000/openchat-mcp-server" target="_blank" rel="noopener">MCP Server</a>
+  </nav>
+  <article class="doc">
+${body}
+  </article>
+</div>
+</body></html>`;
   return connectBotHtmlCache;
 }
-
 app.get('/about/connect-your-bot', (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=300');
   res.type('html').send(renderConnectBotHtml());
 });
 
-// Serve static files from client build (production)
+// Serve static files from client build (production).
+// This is the LEGACY Vite/React web client. The canonical new clients are
+// /m (RN-web mobile) and /d (RN-web desktop). We keep the legacy client
+// reachable at every path it used to claim (for bookmarks + the /i/<token>
+// group-invite deep link), but the discoverable entry point is now /legacy.
 const clientDistPath = path.join(__dirname, '..', '..', 'client', 'dist');
 app.use(express.static(clientDistPath));
+
+// /legacy — official entry point to the legacy Vite web client.
+// Injects a small "deprecated" banner across the top of the SPA shell so
+// users know the new app is at /m, /d, or the home page. The SPA still
+// runs underneath; React Router takes over for sub-routes.
+let legacyShellCache: string | null = null;
+function getLegacyShell(): string {
+  if (legacyShellCache) return legacyShellCache;
+  try {
+    const html = readFileSync(path.join(clientDistPath, 'index.html'), 'utf8');
+    const banner = `<div id="oc-legacy-banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%);color:#fff;font:600 13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;padding:8px 16px;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;box-shadow:0 2px 12px rgba(0,0,0,0.25);"><span>You're on the legacy OpenChat web client.</span><a href="/" style="color:#fff;text-decoration:underline;font-weight:700;">Go to the new app →</a></div><style>body{padding-top:42px !important;}</style>`;
+    legacyShellCache = html.replace('<body>', `<body>${banner}`);
+    return legacyShellCache;
+  } catch {
+    // If the legacy build is missing, fall back to a tiny placeholder
+    // that just links to the new app.
+    return `<!doctype html><html><body><p>The legacy web client is not built. <a href="/">Go to OpenChat</a>.</p></body></html>`;
+  }
+}
+app.get(/^\/legacy(\/|$)/, (_req, res) => {
+  res.type('html').send(getLegacyShell());
+});
 
 // Optional RN-web build of openchat-mobile, mounted at /m/*. Lets us experiment
 // with the React Native app on the web without disturbing the existing /
@@ -189,6 +384,15 @@ app.get('/i/:token', (_req, res, next) => {
 app.use((_req, res) => {
   res.sendFile(path.join(clientDistPath, 'index.html'));
 });
+
+// Error notifier (must come AFTER the SPA fallback, BEFORE any final
+// app.use). Pushes 5xx errors to Slack via SLACK_ERROR_WEBHOOK_URL with
+// in-memory rate limiting so a tight loop can't flood the channel.
+// Wrapping this around an error-middleware signature (4 args) means it
+// only catches errors that are `next(err)`'d — non-error normal traffic
+// flows through untouched. See server/src/services/errorNotifier.ts.
+import { errorNotifierMiddleware } from './services/errorNotifier.js';
+app.use(errorNotifierMiddleware);
 
 // Start server
 const PORT = parseInt(process.env.PORT || '41851', 10);

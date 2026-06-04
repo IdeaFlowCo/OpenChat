@@ -34,6 +34,11 @@ services:
       # Agent API key encryption secret (OpenChat-7c9). 32-byte hex string.
       # Generate: openssl rand -hex 32 >> /opt/openchat/.env
       - OC_KEY_ENCRYPTION_SECRET=${OC_KEY_ENCRYPTION_SECRET:-}
+      # Error notifier — Slack Incoming Webhook URL. When set, server-side
+      # 5xx errors POST a rate-limited message to this URL (1 error per
+      # signature per 60s). Unset = silent (existing docker logs unchanged).
+      # See server/src/services/errorNotifier.ts.
+      - SLACK_ERROR_WEBHOOK_URL=${SLACK_ERROR_WEBHOOK_URL:-}
     networks:
       - app_network
 

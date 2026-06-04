@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc && mkdir -p dist/legal dist/docs && cp src/legal/*.md dist/legal/ && cp src/docs/connect-your-bot.md dist/docs/connect-your-bot.md && cp src/landing.html src/landing-icon.png dist/",
+    "build": "tsc && mkdir -p dist/legal dist/docs dist/well-known && cp src/legal/*.md dist/legal/ && cp src/landing.html src/landing-icon.png src/qr-chat-globalbrai.svg dist/ && cp src/well-known/apple-app-site-association.json dist/well-known/ && cp ../docs/connect-your-bot.md dist/docs/",
     "start": "node dist/index.js",
     "lint": "eslint src",
     "seed": "tsx src/seed-test-data.ts"

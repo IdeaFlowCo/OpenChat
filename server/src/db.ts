@@ -64,6 +64,15 @@ export async function initDatabase(): Promise<void> {
       FOR (k:AgentKey) ON (k.keyPrefix)
     `);
 
+    // Phone number hash index (OpenChat-xf4 prep) — zero-cost prophylactic
+    // so a future contacts-matching query (when/if phone sign-in ships) hits
+    // an index from day one. The field will only exist on User nodes after
+    // phone sign-in is enabled; the index is safe to create now.
+    await session.run(`
+      CREATE INDEX user_phone_hash IF NOT EXISTS
+      FOR (u:User) ON (u.phoneNumberHash)
+    `);
+
     console.log('Database constraints and indexes initialized');
   } finally {
     await session.close();

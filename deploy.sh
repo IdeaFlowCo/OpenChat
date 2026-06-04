@@ -9,66 +9,133 @@ APP_PORT="4001"
 
 echo "=== Deploying $APP_NAME to $SERVER_IP ==="
 
-# Build locally with production URLs
-echo "Building..."
+# Build the legacy Vite client (served at /legacy/, kept for backward compat).
+echo "Building legacy Vite client..."
 VITE_NOOS_URL=https://globalbr.ai npm run build
 
-# Build openchat-mobile (RN-web) if its repo is sitting alongside.
-# The web export lands at $MOBILE_REPO/dist-web; we copy it under
-# ./client-mobile/dist for the docker COPY. Skipped silently if the sibling
-# repo doesn't exist on this machine; Dockerfile expects the directory so
-# we always at least drop a placeholder so `docker build` doesn't choke.
-MOBILE_REPO="${MOBILE_REPO:-$HOME/code/openchat-mobile}"
-rm -rf client-mobile/dist
-mkdir -p client-mobile/dist
-if [ -d "$MOBILE_REPO" ]; then
-  echo "Building openchat-mobile (RN-web) from $MOBILE_REPO..."
-  (cd "$MOBILE_REPO" && npx expo export --platform web --output-dir dist-web --clear)
-  cp -r "$MOBILE_REPO/dist-web/." client-mobile/dist/
-else
-  echo "openchat-mobile repo not found at $MOBILE_REPO — /m will serve a placeholder."
-  cat > client-mobile/dist/index.html <<'PLACEHOLDER_HTML'
-<!doctype html><meta charset=utf-8><title>OpenChat /m</title>
-<body style="font-family:system-ui;padding:2rem;max-width:40rem;margin:0 auto;color:#444">
-<h1>/m placeholder</h1>
-<p>The React Native web build of openchat-mobile isn't present in this deploy. Set <code>MOBILE_REPO</code> on the deploy host (or place a sibling <code>openchat-mobile/</code> checkout next to <code>openchat/</code>) and redeploy.</p>
-</body>
-PLACEHOLDER_HTML
-fi
+# ────────────────────────────────────────────────────────────────────────────
+# RN-web builds (OpenChat-601): single openchat-mobile checkout, two exports.
+#
+# The desktop-responsive branch has been folded into main. /m/ and /d/ are now
+# the same app built twice — once with experiments.baseUrl=/m, once with /d.
+# baseUrl is gated by IS_WEB_BUILD in app.config.js so native (EAS) builds
+# never accidentally pick up a web baseUrl that would corrupt their deep
+# links + asset mapping.
+# ────────────────────────────────────────────────────────────────────────────
 
-# Build openchat-mobile-desktop (same RN codebase, responsive layout) if its
-# sibling worktree is present. Mounted at /d on the openchat server. See
-# /Users/Jacob/code/openchat-mobile-desktop/app.json (experiments.baseUrl="/d")
-# and server/src/index.ts for the static mount. The dist always exists in the
-# tarball so the Dockerfile COPY doesn't fail in non-developer environments.
-MOBILE_DESKTOP_REPO="${MOBILE_DESKTOP_REPO:-$HOME/code/openchat-mobile-desktop}"
-rm -rf client-mobile-desktop/dist
-mkdir -p client-mobile-desktop/dist
-if [ -d "$MOBILE_DESKTOP_REPO" ]; then
-  echo "Building openchat-mobile-desktop (RN-web, responsive) from $MOBILE_DESKTOP_REPO..."
-  (cd "$MOBILE_DESKTOP_REPO" && npx expo export --platform web --output-dir dist-web --clear)
-  cp -r "$MOBILE_DESKTOP_REPO/dist-web/." client-mobile-desktop/dist/
-else
-  echo "openchat-mobile-desktop repo not found at $MOBILE_DESKTOP_REPO — using openchat-mobile RN-web build for /d."
-  if [ -f client-mobile/dist/index.html ]; then
-    cp -r client-mobile/dist/. client-mobile-desktop/dist/
-    # The Expo export was built with baseUrl=/m. For the /d mount, rewrite
-    # top-level static asset references so the same checked-in RN app can serve
-    # both web entrypoints instead of letting /d drift from an untracked fork.
-    find client-mobile-desktop/dist -type f \( -name '*.html' -o -name '*.json' \) -print0 \
-      | xargs -0 perl -pi -e 's#/m/#/d/#g; s#"/m"#"/d"#g'
-  else
-    cat > client-mobile-desktop/dist/index.html <<'PLACEHOLDER_HTML'
-<!doctype html><meta charset=utf-8><title>OpenChat /d</title>
-<body style="font-family:system-ui;padding:2rem;max-width:40rem;margin:0 auto;color:#444">
-<h1>/d unavailable</h1>
-<p>The React Native web build was not present in this deploy package.</p>
-</body>
-PLACEHOLDER_HTML
+MOBILE_REPO="${MOBILE_REPO:-$HOME/code/openchat-mobile}"
+
+# Clean target dirs that go into the docker build context.
+rm -rf client-mobile/dist client-mobile-desktop/dist
+mkdir -p client-mobile/dist client-mobile-desktop/dist
+
+if [ -d "$MOBILE_REPO" ]; then
+  echo ""
+  echo "── Building openchat-mobile RN-web for /m/ ──"
+  rm -rf "$MOBILE_REPO/dist-web-m"
+  (
+    cd "$MOBILE_REPO" && \
+    IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/m npx expo export \
+      --platform web --output-dir dist-web-m --clear
+  )
+  cp -r "$MOBILE_REPO/dist-web-m/." client-mobile/dist/
+
+  echo ""
+  echo "── Building openchat-mobile RN-web for /d/ ──"
+  rm -rf "$MOBILE_REPO/dist-web-d"
+  (
+    cd "$MOBILE_REPO" && \
+    IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/d npx expo export \
+      --platform web --output-dir dist-web-d --clear
+  )
+  cp -r "$MOBILE_REPO/dist-web-d/." client-mobile-desktop/dist/
+
+  # ── CROSS-CONTAMINATION VALIDATOR (Codex catch 2026-06-01) ────────────────
+  # Two sequential expo export runs from the same Metro cache could leak the
+  # wrong baseUrl into the output if our app.config.js gate or the --clear
+  # flag fails to do its job. Verify each output references ONLY its own
+  # base path, and fail loudly otherwise — a silent baseUrl mix-up causes
+  # 404s on every JS/CSS asset request in the affected build.
+  echo ""
+  echo "── Validating bundle baseUrl integrity ──"
+
+  M_HTML="client-mobile/dist/index.html"
+  D_HTML="client-mobile-desktop/dist/index.html"
+
+  if [ ! -f "$M_HTML" ]; then
+    echo "ERROR: $M_HTML missing — /m/ export failed silently"
+    exit 1
   fi
+  if [ ! -f "$D_HTML" ]; then
+    echo "ERROR: $D_HTML missing — /d/ export failed silently"
+    exit 1
+  fi
+
+  # /m/ output must reference /m/ paths and NOT /d/ paths.
+  if ! grep -q '/m/' "$M_HTML"; then
+    echo "ERROR: /m/ export at $M_HTML has no /m/ asset references — baseUrl gate may have failed"
+    exit 1
+  fi
+  if grep -q '/d/' "$M_HTML"; then
+    echo "ERROR: /m/ export at $M_HTML contains /d/ references — cross-contamination from desktop build"
+    grep -n '/d/' "$M_HTML" | head -3
+    exit 1
+  fi
+
+  # /d/ output must reference /d/ paths and NOT /m/ paths.
+  if ! grep -q '/d/' "$D_HTML"; then
+    echo "ERROR: /d/ export at $D_HTML has no /d/ asset references — baseUrl gate may have failed"
+    exit 1
+  fi
+  if grep -q '/m/' "$D_HTML"; then
+    echo "ERROR: /d/ export at $D_HTML contains /m/ references — cross-contamination from mobile build"
+    grep -n '/m/' "$D_HTML" | head -3
+    exit 1
+  fi
+
+  echo "  ✓ /m/ references only /m/ paths"
+  echo "  ✓ /d/ references only /d/ paths"
+
+  # ── PWA assets for /d/ (OpenChat-3rw) ────────────────────────────────────
+  # Make /d/ installable from Chrome / Edge / Brave / Safari Sonoma+.
+  # Copies a manifest, service worker, and icons into the deployed /d/ dist,
+  # and injects the <link rel="manifest"> + sw registration into index.html
+  # at build time so the same RN-web bundle becomes an installable app.
+  echo ""
+  echo "── Injecting PWA manifest + sw into /d/ build ──"
+
+  PWA_SRC="$(pwd)/server/src/d-pwa"
+  if [ -d "$PWA_SRC" ]; then
+    cp "$PWA_SRC/manifest.webmanifest" client-mobile-desktop/dist/manifest.webmanifest
+    cp "$PWA_SRC/sw.js"                client-mobile-desktop/dist/sw.js
+    cp "$PWA_SRC/icon-192.png"         client-mobile-desktop/dist/icon-192.png
+    cp "$PWA_SRC/icon-512.png"         client-mobile-desktop/dist/icon-512.png
+
+    # Inject PWA tags before </head> on /d/ index.html. Uses a portable
+    # perl one-liner so it works on both macOS BSD sed and GNU sed.
+    perl -i -pe '
+      s|</head>|<link rel="manifest" href="/d/manifest.webmanifest"><meta name="theme-color" content="#5664e2"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="OpenChat"><link rel="apple-touch-icon" href="/d/icon-192.png"><script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/d/sw.js",{scope:"/d/"}).catch(function(e){console.warn("SW registration failed",e)})})}</script></head>|
+    ' client-mobile-desktop/dist/index.html
+
+    if grep -q "manifest.webmanifest" client-mobile-desktop/dist/index.html; then
+      echo "  ✓ PWA manifest + sw injected into /d/ index.html"
+    else
+      echo "ERROR: PWA injection failed — </head> not matched in dist-web-d/index.html"
+      exit 1
+    fi
+  else
+    echo "  (skip — server/src/d-pwa/ not present; PWA install will not be available)"
+  fi
+else
+  echo ""
+  echo "openchat-mobile repo not found at $MOBILE_REPO — /m and /d will serve placeholders."
+  PLACEHOLDER='<!doctype html><meta charset=utf-8><title>OpenChat</title><body style="font-family:system-ui;padding:2rem;max-width:40rem;margin:0 auto;color:#444"><h1>Build unavailable</h1><p>The RN-web build was not present in this deploy package.</p></body>'
+  echo "$PLACEHOLDER" > client-mobile/dist/index.html
+  echo "$PLACEHOLDER" > client-mobile-desktop/dist/index.html
 fi
 
 # Create deployment package
+echo ""
 echo "Creating deployment package..."
 tar -czf /tmp/${APP_NAME}-deploy.tar.gz \
   server/dist/ \
