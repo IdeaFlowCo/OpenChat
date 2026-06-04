@@ -72,23 +72,34 @@ export function leaveConversation(conversationId: string): void {
 export function sendMessage(
   conversationId: string,
   content: string,
-  replyToId?: string
+  replyToId?: string,
+  id?: string
 ): Promise<Message> {
   return new Promise((resolve, reject) => {
     if (!socket?.connected) {
       reject(new Error('Not connected'));
       return;
     }
-    const payload: { conversationId: string; content: string; replyToId?: string } = {
+    const payload: { conversationId: string; content: string; replyToId?: string; id?: string } = {
       conversationId,
       content,
     };
     if (replyToId) payload.replyToId = replyToId;
-    socket.emit(
+    // id is a client-generated idempotency key shared with the REST fallback so
+    // a lost-ack retry collapses to one row server-side (MERGE). See OpenChat-60y.
+    if (id) payload.id = id;
+    // 10s ack timeout: on mobile (esp. a China VPN) the socket often reports
+    // `connected` but the connection blips right after emit, so the server's
+    // ack never arrives. Without a timeout this Promise hangs forever — the
+    // caller's REST fallback never runs and the message sits stuck. .timeout()
+    // surfaces a lost ack as `err`, we reject, and ChatContext falls back to
+    // REST. See OpenChat-5q1.
+    socket.timeout(10000).emit(
       'message:send',
       payload,
-      (response: { success?: boolean; message?: Message; error?: string }) => {
-        if (response?.error) reject(new Error(response.error));
+      (err: Error | null, response: { success?: boolean; message?: Message; error?: string }) => {
+        if (err) reject(new Error('Send timed out'));
+        else if (response?.error) reject(new Error(response.error));
         else if (response?.message) resolve(response.message);
         else reject(new Error('No response from server'));
       }

@@ -12,6 +12,7 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
+import { randomUUID } from 'expo-crypto';
 import {
   setUnreadBadgeCount,
   loadMutedConvs,
@@ -638,6 +639,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const hasAttachments = !!attachments?.length;
     if (!id || (!hasText && !hasAttachments)) return;
 
+    // One idempotency key per logical message, shared by the socket path and
+    // the REST fallback, so a lost-ack retry can't persist two rows (the server
+    // MERGEs on this id). See OpenChat-60y.
+    const clientId = randomUUID();
+
     const optimistic: Message = {
       id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       content,
@@ -653,7 +659,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // If there are attachments, always use REST (socket path doesn't carry them).
     if (hasAttachments) {
       try {
-        const real = await api.sendMessage(id, content, attachments);
+        const real = await api.sendMessage(id, content, attachments, clientId);
         setMessages(prev => {
           const filtered = prev.filter(m => m.id !== optimistic.id);
           return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
@@ -668,16 +674,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     // Text-only path: try socket first, fall back to REST.
     try {
-      const real = await wsSend(id, content, replyToId);
+      const real = await wsSend(id, content, replyToId, clientId);
       // Replace the optimistic placeholder with the server message.
       setMessages(prev => {
         const filtered = prev.filter(m => m.id !== optimistic.id);
         return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
       });
     } catch (e) {
-      // Socket path failed — try REST fallback.
+      // Socket path failed (incl. the new 10s ack timeout) — try REST fallback.
       try {
-        const real = await api.sendMessage(id, content);
+        const real = await api.sendMessage(id, content, undefined, clientId);
         setMessages(prev => {
           const filtered = prev.filter(m => m.id !== optimistic.id);
           return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];

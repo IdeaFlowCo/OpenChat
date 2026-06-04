@@ -560,10 +560,12 @@ export const api = {
     request<{ messages: Message[]; hasMore: boolean }>(
       `/api/chat/conversations/${conversationId}/messages?before=${encodeURIComponent(before)}&limit=${limit}`
     ),
-  sendMessage: (conversationId: string, content: string, attachments?: Attachment[]) =>
+  sendMessage: (conversationId: string, content: string, attachments?: Attachment[], id?: string) =>
     request<Message>(`/api/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ content, ...(attachments?.length ? { attachments } : {}) }),
+      // id: client-generated idempotency key shared with the socket path so a
+      // WS-then-REST retry collapses to one row server-side (MERGE). OpenChat-60y.
+      body: JSON.stringify({ content, ...(attachments?.length ? { attachments } : {}), ...(id ? { id } : {}) }),
     }),
 
   /**
