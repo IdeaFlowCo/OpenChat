@@ -478,6 +478,8 @@ export interface Thought {
   status: ThoughtStatus;
   createdAt: string;
   updatedAt: string;
+  /** Tags extracted from the thought (e.g. hashtags). Rendered as chips. */
+  tags?: string[];
 }
 
 // ── Agent key types (OpenChat-7c9) ────────────────────────────────────────────
@@ -927,11 +929,16 @@ export const api = {
 
   // ── Thoughts (OpenChat-zi1) ────────────────────────────────────────────────
 
-  /** List my thoughts, newest first. */
-  getThoughts: (opts?: { limit?: number; before?: string }) => {
+  /**
+   * List my thoughts, newest first. When `q` is provided the server matches
+   * against thought text OR any tag (case-insensitive). Composable with
+   * `before` pagination.
+   */
+  getThoughts: (opts?: { limit?: number; before?: string; q?: string }) => {
     const qs = new URLSearchParams();
     if (opts?.limit) qs.set('limit', String(opts.limit));
     if (opts?.before) qs.set('before', opts.before);
+    if (opts?.q) qs.set('q', opts.q);
     const q = qs.toString();
     return request<Thought[]>(`/api/thoughts${q ? `?${q}` : ''}`);
   },

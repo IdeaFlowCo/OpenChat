@@ -17,6 +17,7 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -61,25 +62,32 @@ interface ThoughtCardProps {
   item: Thought;
   onEdit: () => void;
   onDelete: () => void;
+  onTagPress: (tag: string) => void;
   surface: string;
   border: string;
   textPrimary: string;
   textSecondary: string;
   textMuted: string;
+  chipBg: string;
+  chipText: string;
 }
 
 function ThoughtCard({
   item,
   onEdit,
   onDelete,
+  onTagPress,
   surface,
   border,
   textPrimary,
   textSecondary,
   textMuted,
+  chipBg,
+  chipText,
 }: ThoughtCardProps) {
   const kindColor = KIND_COLORS[item.kind] ?? '#3b82f6';
   const kindLabel = KIND_LABELS[item.kind] ?? item.kind;
+  const tags = item.tags ?? [];
 
   return (
     <TouchableOpacity
@@ -122,6 +130,24 @@ function ThoughtCard({
 
       {/* Body text */}
       <Text style={[styles.bodyText, { color: textPrimary }]}>{item.text}</Text>
+
+      {/* Tag chips — visually distinct from the kind badge (pill, monospace #). */}
+      {tags.length > 0 && (
+        <View style={styles.tagRow}>
+          {tags.map((tag) => (
+            <TouchableOpacity
+              key={tag}
+              onPress={() => onTagPress(tag)}
+              activeOpacity={0.7}
+              style={[styles.chip, { backgroundColor: chipBg }]}
+            >
+              <Text style={[styles.chipText, { color: chipText }]}>
+                #{tag.replace(/^#/, '')}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
     </TouchableOpacity>
   );
 }
@@ -137,20 +163,28 @@ export function ThoughtsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
   const mountedRef = useRef(true);
+  // The query currently reflected in `thoughts`. Used so socket-pushed
+  // thought:created events only prepend when we're showing the full list.
+  const activeQueryRef = useRef('');
 
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
-  const load = useCallback(async (isRefresh = false) => {
+  const load = useCallback(async (isRefresh = false, q = '') => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     setError(null);
     try {
-      const data = await fetchThoughts({ limit: 50 });
-      if (mountedRef.current) setThoughts(data);
+      const trimmed = q.trim();
+      const data = await fetchThoughts({ limit: 50, ...(trimmed ? { q: trimmed } : {}) });
+      if (mountedRef.current) {
+        activeQueryRef.current = trimmed;
+        setThoughts(data);
+      }
     } catch (e) {
       if (mountedRef.current) setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -161,8 +195,25 @@ export function ThoughtsScreen() {
     }
   }, []);
 
-  // Reload whenever the screen comes into focus (e.g., returning from add/edit).
-  useFocusEffect(useCallback(() => { load(false); }, [load]));
+  // Reload whenever the screen comes into focus (e.g., returning from add/edit),
+  // honoring whatever search query is active. We read the query from a ref so
+  // this effect doesn't re-fire on every keystroke (the debounce below owns that).
+  const queryRef = useRef('');
+  queryRef.current = query;
+  useFocusEffect(useCallback(() => { load(false, queryRef.current); }, [load]));
+
+  // Debounced search: refetch with `q` ~250ms after typing stops. Clearing
+  // the input falls back to the normal full list. Skipped on first mount —
+  // the focus effect already did the initial load.
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    const timer = setTimeout(() => { load(false, query); }, 250);
+    return () => clearTimeout(timer);
+  }, [query, load]);
 
   // Live update on tag-generated Thoughts: server emits 'thought:created'
   // when a chat message with a hashtag spawns a new Thought. Prepend so
@@ -172,6 +223,9 @@ export function ThoughtsScreen() {
     if (!sock) return;
     const handler = (payload: { thought: Thought }) => {
       if (!payload?.thought) return;
+      // While a search is active the list is filtered server-side; don't
+      // blindly prepend a new thought that may not match the query.
+      if (activeQueryRef.current) return;
       setThoughts((prev) => {
         // Idempotency: if we already have it (e.g. focus-load raced), skip.
         if (prev.some((t) => t.id === payload.thought.id)) return prev;
@@ -204,13 +258,21 @@ export function ThoughtsScreen() {
     [navigation]
   );
 
-  // Empty state
+  // Tapping a tag chip filters the list to that tag.
+  const handleTagPress = useCallback((tag: string) => {
+    setQuery(tag.replace(/^#/, ''));
+  }, []);
+
+  // Empty state — distinct copy for "no results for a search" vs "no thoughts yet".
   const renderEmpty = () => {
     if (loading) return null;
+    const searching = query.trim().length > 0;
     return (
       <View style={styles.emptyContainer}>
         <Text style={[styles.emptyText, { color: c.textMuted }]}>
-          No thoughts yet. Tap + to add one.
+          {searching
+            ? `No thoughts match "${query.trim()}".`
+            : 'No thoughts yet. Tap + to add one.'}
         </Text>
       </View>
     );
@@ -229,20 +291,42 @@ export function ThoughtsScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
+      {/* Search bar — mirrors the SearchScreen pattern for consistency. */}
+      <View style={[styles.searchWrap, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <TextInput
+          style={[
+            styles.searchInput,
+            { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border },
+          ]}
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search thoughts and tags"
+          placeholderTextColor={c.textMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+        />
+      </View>
+
       <FlatList
         data={thoughts}
         keyExtractor={(t) => t.id}
         contentContainerStyle={styles.list}
+        keyboardShouldPersistTaps="handled"
         renderItem={({ item }) => (
           <ThoughtCard
             item={item}
             onEdit={() => openEdit(item)}
             onDelete={() => handleDelete(item.id)}
+            onTagPress={handleTagPress}
             surface={c.surface}
             border={c.border}
             textPrimary={c.textPrimary}
             textSecondary={c.textSecondary}
             textMuted={c.textMuted}
+            chipBg={c.primaryMuted}
+            chipText={c.primary}
           />
         )}
         ListEmptyComponent={renderEmpty}
@@ -269,6 +353,17 @@ export function ThoughtsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  searchWrap: {
+    padding: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  searchInput: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    fontSize: 16,
+  },
   list: { padding: 12, paddingBottom: 88 },
   card: {
     borderRadius: 12,
@@ -300,6 +395,21 @@ const styles = StyleSheet.create({
   bodyText: {
     fontSize: 15,
     lineHeight: 22,
+  },
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+  },
+  chip: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 999, // fully rounded pill — distinct from the squared kind badge
+  },
+  chipText: {
+    fontSize: 12,
+    fontWeight: '500',
   },
   emptyContainer: {
     flex: 1,
