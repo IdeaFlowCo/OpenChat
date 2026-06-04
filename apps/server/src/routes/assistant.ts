@@ -82,8 +82,8 @@ router.post('/ensure', resolveActor, async (req: Request, res: Response) => {
       CREATE (bot)-[:PARTICIPATES_IN { joinedAt: datetime($now), role: 'member' }]->(c)
       WITH c
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-      RETURN c { .*, containsBot: true,
-        participants: collect({ user: participant { .id, .name, .email, .isBot }, role: rel.role }) } AS conversation
+      WITH c, collect({ user: participant { .id, .name, .email, .isBot }, role: rel.role }) AS participants
+      RETURN c { .*, containsBot: true, participants: participants } AS conversation
       `,
       { id: conversationId, userId, assistantId: ASSISTANT_USER_ID, now }
     );
