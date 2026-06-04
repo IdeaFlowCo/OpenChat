@@ -39,6 +39,12 @@ services:
       # signature per 60s). Unset = silent (existing docker logs unchanged).
       # See server/src/services/errorNotifier.ts.
       - SLACK_ERROR_WEBHOOK_URL=${SLACK_ERROR_WEBHOOK_URL:-}
+      # Feedback -> WorldIssueTracker (oc8.3). Server turns in-app feedback into
+      # WIT issues via this agent key. Unset = /api/feedback returns 503.
+      # Set: echo 'WIT_AGENT_KEY=wit_...' >> /opt/openchat/.env
+      - WIT_AGENT_KEY=${WIT_AGENT_KEY:-}
+      - WIT_API_BASE=${WIT_API_BASE:-https://sthqnyjniclvnflfkyio.supabase.co/functions/v1}
+      - WIT_SITE_URL=${WIT_SITE_URL:-https://worldissuetracker.com}
     networks:
       - app_network
 

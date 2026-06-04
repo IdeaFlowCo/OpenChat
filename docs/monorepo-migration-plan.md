@@ -75,7 +75,8 @@ openchat/
 ## 5. Effort
 A few focused sessions: shell+history (one session), types+protocol (one), api-client unify (one, the meatiest), /m,/d collapse + infra/CI (one). Sequence them; each leaves both apps building. Bottleneck is review + the EAS monorepo validation build, not agent time.
 
-## 6. Decisions needed from Jacob before execution
-1. Reuse `OpenChat` repo as the monorepo root, or create a fresh `openchat` repo?
-2. Turborepo (recommended) vs plain npm workspaces only?
-3. OK to schedule a short "no new branches" freeze window across both repos for the cutover?
+## 6. Decisions
+
+1. **Repo (DECIDED 2026-06-04):** Ultimately **reuse the `OpenChat` repo** as the monorepo home — but **stage the migration safely**: build + validate the combined layout in a **fresh scratch repo / staging branch** first (subtree-import both repos, get both apps building + an EAS validation build green), then migrate that into `OpenChat` once it's clearly safe. Don't mutate the live repo in place until the staged version is proven. (Jacob: "as long as we're careful… ultimately reuse the repo; to be safe, create a separate repo and migrate it in unless we're clear.")
+2. Turborepo vs plain workspaces — _open_ (recommend Turborepo for task caching + path-filtered CI).
+3. Cutover freeze window — _open_ (still recommended; short, mechanical).
