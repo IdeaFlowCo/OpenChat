@@ -5,6 +5,8 @@ import { validateToken, AuthUser } from '../middleware/auth.js';
 import { sendPushToUser } from '../services/push.js';
 import { processLinkPreviews } from '../services/linkPreview.js';
 import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
+import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
+import { embedAndStoreMessage } from '../services/embeddings.js';
 
 interface AuthenticatedSocket extends Socket {
   user?: AuthUser;
@@ -305,6 +307,17 @@ export function setupChatSocket(io: Server): void {
         }
 
         callback?.({ success: true, message });
+
+        // Semantic search (openchat-bfn.2): best-effort embed of the new
+        // message. Fire-and-forget; no-ops when OPENAI_API_KEY unset.
+        if (content) {
+          void embedAndStoreMessage(messageId, content)
+            .catch((err) => console.warn('[embeddings] socket embed failed:', err));
+        }
+
+        // In-app Assistant bot (openchat-bfn.3): fire an assistant turn if this
+        // conversation contains the bot. No-ops when sender is the bot itself.
+        maybeTriggerAssistant({ senderId: userId, conversationId, io });
 
         // Fan-out push notifications to all OTHER participants. Fire-and-forget;
         // never block the message:send response on push delivery.

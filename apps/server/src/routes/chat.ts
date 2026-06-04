@@ -10,6 +10,8 @@ import { resolveActor } from '../middleware/resolveActor.js';
 import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline, broadcastMessageToParticipants } from '../websocket/chatHandler.js';
 import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPreview.js';
 import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
+import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
+import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from '../services/embeddings.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
 let _s3: S3Client | null = null;
@@ -1095,6 +1097,18 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         .finally(() => { void tagSession.close(); });
     }
 
+    // Semantic search (openchat-bfn.2): best-effort embed of the new message.
+    // Fire-and-forget; never blocks the send. No-ops if OPENAI_API_KEY unset.
+    if (messageContent) {
+      void embedAndStoreMessage(message.id as string, messageContent)
+        .catch((err) => console.warn('[embeddings] REST embed failed:', err));
+    }
+
+    // In-app Assistant bot (openchat-bfn.3): if this conversation contains the
+    // bot, fire an assistant turn asynchronously. No-ops when the sender is the
+    // bot itself (loop guard inside maybeTriggerAssistant).
+    maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io });
+
     res.status(201).json(message);
   } catch (error) {
     console.error('Error sending message:', error);
@@ -1175,6 +1189,10 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
   const q = typeof rawQ === 'string' ? rawQ.trim() : '';
   const scope = (req.query.scope as string) === 'conversation' ? 'conversation' : 'global';
   const conversationId = req.query.conversationId as string | undefined;
+  // openchat-bfn.2: optional semantic/hybrid mode for the messages bucket.
+  // DEFAULT (unset / 'keyword') keeps the existing behavior unchanged.
+  const rawMode = (req.query.mode as string) || 'keyword';
+  const mode = rawMode === 'semantic' || rawMode === 'hybrid' ? rawMode : 'keyword';
   const rawLimit = parseInt(req.query.limit as string, 10);
   const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 20, 1), 100);
 
@@ -1225,6 +1243,25 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
       const messages = result.records.map(r => toJS(r.get('message')));
       res.json({ messages, conversations: [], contacts: [] });
       return;
+    }
+
+    // openchat-bfn.2: semantic/hybrid mode for the messages bucket. We still
+    // return conversations + contacts via the keyword queries below; only the
+    // messages bucket switches to vector search. If embeddings are unavailable
+    // (no OPENAI_API_KEY / embed failed), we silently fall through to keyword
+    // so behavior degrades gracefully.
+    let semanticMessages: unknown[] | null = null;
+    if ((mode === 'semantic' || mode === 'hybrid') && embeddingsEnabled()) {
+      const hits = await semanticSearchMessages(userId, q, limit);
+      if (hits) {
+        semanticMessages = hits.map((h) => ({
+          content: h.content,
+          conversationId: h.conversationId,
+          senderName: h.senderName ?? null,
+          createdAt: h.createdAt,
+          score: h.score,
+        }));
+      }
     }
 
     // Global scope: run three independent searches in parallel.
@@ -1300,9 +1337,35 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
       `, { userId, q, limit: neo4j.int(limit) }),
     ]);
 
-    const messages = messagesResult.records.map(r => toJS(r.get('message')));
+    const keywordMessages = messagesResult.records.map(r => toJS(r.get('message')));
     const conversations = conversationsResult.records.map(r => toJS(r.get('conversation')));
     const contacts = contactsResult.records.map(r => toJS(r.get('user')));
+
+    // For semantic/hybrid mode use the vector results when available; for
+    // 'hybrid' specifically, fold in any keyword matches the vector search
+    // missed (dedupe by conversationId+content), capped at `limit`.
+    let messages = keywordMessages;
+    if (semanticMessages) {
+      if (mode === 'hybrid') {
+        const seen = new Set<string>();
+        const merged: unknown[] = [];
+        for (const m of semanticMessages) {
+          const mm = m as { conversationId?: string; content?: string };
+          seen.add(`${mm.conversationId}::${mm.content}`);
+          merged.push(m);
+        }
+        for (const m of keywordMessages) {
+          const mm = m as { conversationId?: string; content?: string };
+          const key = `${mm.conversationId}::${mm.content}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          merged.push(m);
+        }
+        messages = merged.slice(0, limit);
+      } else {
+        messages = semanticMessages;
+      }
+    }
 
     res.json({ messages, conversations, contacts });
   } catch (error) {
