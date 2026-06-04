@@ -18,6 +18,16 @@ export function MessageInput() {
   const [pendingPreview, setPendingPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Voice recording state (bmp.7 / OpenChat-xxc).
+  const [recording, setRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<BlobPart[]>([]);
+  const recordStartRef = useRef<number>(0);
+  const recordTimerRef = useRef<number | null>(null);
+  const recordStreamRef = useRef<MediaStream | null>(null);
+  const cancelRecordRef = useRef(false);
+  const voiceSupported = typeof window !== 'undefined' && typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
   const { sendMessage, activeConversationId, startTyping, stopTyping, replyTo, setReplyTo, currentUser, contacts, conversations } = useChat();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // @mention autocomplete state (bmp.8). Active only in group conversations.
@@ -89,6 +99,78 @@ export function MessageInput() {
     setPendingFile(null);
     setPendingPreview(null);
   };
+
+  // ── Voice recording (bmp.7) ──────────────────────────────────────────────
+  const stopTracks = () => {
+    recordStreamRef.current?.getTracks().forEach((t) => t.stop());
+    recordStreamRef.current = null;
+    if (recordTimerRef.current) { window.clearInterval(recordTimerRef.current); recordTimerRef.current = null; }
+  };
+
+  const sendVoice = async (blob: Blob, durationMs: number) => {
+    if (!activeConversationId) return;
+    setUploading(true);
+    try {
+      const mimeType = blob.type || 'audio/webm';
+      const { putUrl, getUrl } = await chatApi.presignAttachment({
+        filename: 'voice.webm',
+        mimeType,
+        sizeBytes: blob.size,
+      });
+      const putRes = await fetch(putUrl, { method: 'PUT', headers: { 'Content-Type': mimeType }, body: blob });
+      if (!putRes.ok) throw new Error(`Upload failed: ${putRes.status}`);
+      const attachment: Attachment = { url: getUrl, mimeType, type: 'audio', durationMs };
+      await sendMessage('', [attachment]);
+    } catch (err) {
+      console.error('[MessageInput] voice send failed:', err);
+      toast.error('Voice message not sent — check your connection.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const startRecording = async () => {
+    if (!voiceSupported || recording || uploading || !activeConversationId) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordStreamRef.current = stream;
+      cancelRecordRef.current = false;
+      recordChunksRef.current = [];
+      const mr = new MediaRecorder(stream);
+      mediaRecorderRef.current = mr;
+      mr.ondataavailable = (ev) => { if (ev.data.size > 0) recordChunksRef.current.push(ev.data); };
+      mr.onstop = () => {
+        const durationMs = Date.now() - recordStartRef.current;
+        stopTracks();
+        setRecording(false);
+        setRecordSeconds(0);
+        if (cancelRecordRef.current) return;
+        if (durationMs < 500) return; // ignore accidental taps
+        const blob = new Blob(recordChunksRef.current, { type: mr.mimeType || 'audio/webm' });
+        void sendVoice(blob, durationMs);
+      };
+      recordStartRef.current = Date.now();
+      mr.start();
+      setRecording(true);
+      setRecordSeconds(0);
+      recordTimerRef.current = window.setInterval(() => {
+        setRecordSeconds(Math.floor((Date.now() - recordStartRef.current) / 1000));
+      }, 250);
+    } catch (err) {
+      console.error('[MessageInput] mic error:', err);
+      toast.error('Could not access the microphone.');
+      stopTracks();
+    }
+  };
+
+  const stopRecording = (cancel = false) => {
+    cancelRecordRef.current = cancel;
+    const mr = mediaRecorderRef.current;
+    if (mr && mr.state !== 'inactive') mr.stop();
+    else { stopTracks(); setRecording(false); setRecordSeconds(0); }
+  };
+
+  useEffect(() => () => stopTracks(), []);
 
   const handleSubmit = async (e: FormEvent | React.KeyboardEvent<HTMLTextAreaElement>) => {
     e.preventDefault();
@@ -289,6 +371,30 @@ export function MessageInput() {
           onSelect={selectMention}
         />
       )}
+      {recording ? (
+        <div className="flex items-center gap-3 rounded-3xl border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-4 py-3">
+          <span className="flex items-center gap-2 text-sm font-medium text-red-600 dark:text-red-400">
+            <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
+            Recording {Math.floor(recordSeconds / 60)}:{(recordSeconds % 60).toString().padStart(2, '0')}
+          </span>
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={() => stopRecording(true)}
+            className="rounded-full px-3 py-2 text-sm font-medium text-gray-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => stopRecording(false)}
+            aria-label="Send voice message"
+            className="rounded-full bg-blue-500 px-5 py-2 text-sm font-medium text-white hover:bg-blue-600"
+          >
+            Send
+          </button>
+        </div>
+      ) : (
       <div className="flex gap-2 items-end">
         {/* Hidden file input */}
         <input
@@ -320,15 +426,29 @@ export function MessageInput() {
           autoCorrect="on"
           className="flex-1 resize-none px-4 py-3 min-h-[44px] max-h-40 overflow-y-auto leading-6 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-3xl focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 text-base"
         />
-        <button
-          type="submit"
-          disabled={!canSend}
-          aria-label="Send message"
-          className="px-5 sm:px-6 py-3 min-h-[44px] min-w-[44px] bg-blue-500 text-white rounded-full hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
-        >
-          {uploading ? '…' : 'Send'}
-        </button>
+        {/* Mic when composer is empty (voice — bmp.7); Send otherwise. */}
+        {voiceSupported && !text.trim() && !pendingFile ? (
+          <button
+            type="button"
+            onClick={startRecording}
+            disabled={uploading}
+            aria-label="Record voice message"
+            className="px-4 py-3 min-h-[44px] min-w-[44px] bg-blue-500 text-white rounded-full hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50 font-medium transition-colors"
+          >
+            {uploading ? '…' : '🎤'}
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={!canSend}
+            aria-label="Send message"
+            className="px-5 sm:px-6 py-3 min-h-[44px] min-w-[44px] bg-blue-500 text-white rounded-full hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
+          >
+            {uploading ? '…' : 'Send'}
+          </button>
+        )}
       </div>
+      )}
     </form>
   );
 }

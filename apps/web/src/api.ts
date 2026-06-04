@@ -45,12 +45,16 @@ export interface User {
   isBot?: boolean;
 }
 
-/** Single image attachment on a message (OpenChat-6bg). */
+/** Image or audio attachment on a message (OpenChat-6bg / voice OpenChat-xxc). */
 export interface Attachment {
   url: string;
   mimeType: string;
+  /** For image attachments. */
   width?: number;
   height?: number;
+  /** For audio/voice attachments (OpenChat-xxc / bmp.7). */
+  type?: 'audio';
+  durationMs?: number;
 }
 
 /** Open Graph link preview card attached to a message (OpenChat-hq2 / bmp.8). */

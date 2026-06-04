@@ -4,6 +4,7 @@ import { useChat } from '../contexts/ChatContext';
 import { TypingBubble } from './TypingBubble';
 import { LinkPreviewCard } from './LinkPreviewCard';
 import { MessageContent } from './MessageContent';
+import { VoiceMessageBubble } from './VoiceMessageBubble';
 import { userDisplayName } from '../utils/userDisplay';
 import { api, type Message } from '../api';
 
@@ -371,23 +372,37 @@ export function MessageList() {
                     </div>
                   )}
 
-                  {/* Image attachments (OpenChat-6bg) */}
-                  {!isDeleted && message.attachments?.map((att, i) => (
-                    <a
-                      key={i}
-                      href={att.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block mb-1"
-                    >
-                      <img
-                        src={att.url}
-                        alt="Attachment"
-                        className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity"
-                        style={att.width && att.height ? { aspectRatio: `${att.width}/${att.height}` } : undefined}
-                      />
-                    </a>
-                  ))}
+                  {/* Attachments: voice (OpenChat-xxc) or image (OpenChat-6bg) */}
+                  {!isDeleted && message.attachments?.map((att, i) => {
+                    const isAudio = att.type === 'audio' || att.mimeType?.startsWith('audio/');
+                    if (isAudio) {
+                      return (
+                        <VoiceMessageBubble
+                          key={i}
+                          url={att.url}
+                          durationMs={att.durationMs ?? 0}
+                          messageId={`${message.id}-${i}`}
+                          isOwn={isOwn}
+                        />
+                      );
+                    }
+                    return (
+                      <a
+                        key={i}
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block mb-1"
+                      >
+                        <img
+                          src={att.url}
+                          alt="Attachment"
+                          className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                          style={att.width && att.height ? { aspectRatio: `${att.width}/${att.height}` } : undefined}
+                        />
+                      </a>
+                    );
+                  })}
 
                   {isEditing ? (
                     <div className="flex flex-col gap-1">
