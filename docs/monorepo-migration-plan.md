@@ -80,3 +80,14 @@ A few focused sessions: shell+history (one session), types+protocol (one), api-c
 1. **Repo (DECIDED 2026-06-04):** Ultimately **reuse the `OpenChat` repo** as the monorepo home — but **stage the migration safely**: build + validate the combined layout in a **fresh scratch repo / staging branch** first (subtree-import both repos, get both apps building + an EAS validation build green), then migrate that into `OpenChat` once it's clearly safe. Don't mutate the live repo in place until the staged version is proven. (Jacob: "as long as we're careful… ultimately reuse the repo; to be safe, create a separate repo and migrate it in unless we're clear.")
 2. Turborepo vs plain workspaces — _open_ (recommend Turborepo for task caching + path-filtered CI).
 3. Cutover freeze window — _open_ (still recommended; short, mechanical).
+
+## 7. Validated findings from the staging build (2026-06-04)
+
+Built `~/code/openchat-mono` (apps/{server,web,mobile} + npm workspaces, copies not subtree). Root `npm install` + `apps/server` build + `apps/web` build + `apps/mobile` `tsc --noEmit` all PASS. Real-migration must handle:
+
+1. **React 18 (web) vs React 19 (mobile) in one workspace — the headline risk.** npm hoists React 19 + `@types/react@19` to root; web's hoisted deps (`react-router-dom`, `react-hot-toast`) then resolve types to React 19 → `TS2786 ... JSX component` / `bigint not assignable to ReactNode`. `typeRoots` did NOT fix it. Staging band-aid: web `tsconfig.json` `baseUrl` + `paths` pinning `react`/`react-dom` (+ `/*`) to `./node_modules/@types/react(-dom)`. **Durable fix:** align both apps on React 19, or per-app React resolution isolation (nohoist / per-app `paths`). Vite runtime was unaffected — TS only.
+2. **Server build relative path:** `apps/server` build did `cp ../docs/connect-your-bot.md` (sibling `docs/` in old layout → missing under `apps/server/`). Decide: keep a monorepo-root `docs/` and point the build at it, or move the doc into the server app.
+3. **Metro/EAS not monorepo-aware:** mobile `metro.config.js` is the minimal `getDefaultConfig(__dirname)`. A real EAS/Metro build needs `watchFolders` → repo root + symlink resolution. **Validate with a throwaway EAS build before cutover.** (tsc passed, but Metro/EAS were not exercised in staging.)
+4. **Shared-code duplication confirmed** (as predicted): `web/src/api.ts` ↔ `mobile/src/api/client.ts` are independent reimplementations; message/conversation/user types hand-redeclared across server/web/mobile → Phase 2/3 `packages/{types,protocol,api-client}`.
+
+Staging repo commit: `2b3c20b` (local only, not pushed). Source repos unmodified.
