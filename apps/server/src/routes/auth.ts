@@ -495,7 +495,10 @@ router.get('/google/url', (req: Request, res: Response) => {
     ? req.query.state
     : nanoid();
 
-  const prompt = typeof req.query.prompt === 'string' ? req.query.prompt : undefined;
+  // Default to the account chooser so users can pick/switch Google accounts
+  // (without it, Google silently reuses the single signed-in session). Callers
+  // can override via ?prompt= (e.g. 'consent', 'none').
+  const prompt = typeof req.query.prompt === 'string' ? req.query.prompt : 'select_account';
 
   const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   authUrl.searchParams.set('client_id', clientId);
@@ -505,9 +508,7 @@ router.get('/google/url', (req: Request, res: Response) => {
   authUrl.searchParams.set('access_type', 'online');
   authUrl.searchParams.set('include_granted_scopes', 'true');
   authUrl.searchParams.set('state', state);
-  if (prompt) {
-    authUrl.searchParams.set('prompt', prompt);
-  }
+  authUrl.searchParams.set('prompt', prompt);
 
   res.json({ url: authUrl.toString(), state, redirectUri });
 });
