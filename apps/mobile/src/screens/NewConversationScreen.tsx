@@ -189,6 +189,16 @@ export function NewConversationScreen() {
         <FlatList
           data={results}
           keyExtractor={u => u.id}
+          // Keyboard handling (openchat-w1d): when the search keyboard is up it
+          // used to cover the list with no way to scroll to the people behind
+          // it. automaticallyAdjustKeyboardInsets insets the scroll area above
+          // the keyboard (iOS); keyboardDismissMode lets you swipe it away;
+          // keyboardShouldPersistTaps lets you tap a result without first
+          // dismissing. paddingBottom keeps the last row clear of the keyboard.
+          automaticallyAdjustKeyboardInsets
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: 24 }}
           ListEmptyComponent={
             <View style={styles.center}>
               <Text style={{ color: c.textSecondary, marginTop: 24 }}>
@@ -231,7 +241,7 @@ export function NewConversationScreen() {
                     <BotBadge isBot={item.isBot} compact />
                   </View>
                   <Text style={[styles.email, { color: c.textSecondary }]} numberOfLines={1}>
-                    {item.id === currentUser?.userId ? 'Note to self' : item.email}
+                    {item.id === currentUser?.userId ? `Note to self · ${item.email}` : item.email}
                   </Text>
                 </View>
                 {mode === 'group' && (

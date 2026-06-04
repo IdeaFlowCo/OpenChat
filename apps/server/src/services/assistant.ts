@@ -372,6 +372,47 @@ async function toolCreateConversation(
   }
 }
 
+// ─── Feedback → WorldIssueTracker (openchat-1ny) ──────────────────────────────
+// Lets the user file feedback by just telling the Assistant. Mirrors the
+// /api/feedback route (same WIT_AGENT_KEY server env).
+const WIT_BASE = process.env.WIT_API_BASE || 'https://sthqnyjniclvnflfkyio.supabase.co/functions/v1';
+const WIT_SITE = process.env.WIT_SITE_URL || 'https://worldissuetracker.com';
+
+async function toolSubmitFeedback(
+  userId: string,
+  message: string,
+  context?: string
+): Promise<unknown> {
+  const key = process.env.WIT_AGENT_KEY;
+  if (!key) return { error: 'Feedback is not configured on the server (WIT_AGENT_KEY missing).' };
+  const firstLine = message.trim().split('\n')[0]!.slice(0, 80);
+  const title = `[OpenChat] ${firstLine || 'feedback'}`;
+  const description = [
+    message.trim(),
+    '',
+    '---',
+    `Submitted via the OpenChat Assistant by user ${userId}.`,
+    context ? `Context: ${context}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  try {
+    const r = await fetch(`${WIT_BASE}/create-issue`, {
+      method: 'POST',
+      headers: { 'X-Agent-Key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, description, labels: ['openchat-feedback'] }),
+    });
+    const data = (await r.json().catch(() => null)) as
+      | { success?: boolean; issue?: { id?: string; slug?: string } }
+      | null;
+    if (!r.ok || !data?.success) return { error: 'Failed to create feedback issue' };
+    const slug = data.issue?.slug;
+    return { ok: true, url: slug ? `${WIT_SITE}/issue/${slug}` : WIT_SITE, id: data.issue?.id };
+  } catch {
+    return { error: 'Failed to reach feedback service' };
+  }
+}
+
 // ─── Tool schema (Anthropic tool-use) ─────────────────────────────────────────
 function buildTools(): AnthropicType.Tool[] {
   return [
@@ -430,6 +471,19 @@ function buildTools(): AnthropicType.Tool[] {
         required: ['participantIds'],
       },
     },
+    {
+      name: 'submit_feedback',
+      description:
+        "File the user's feedback, bug report, or feature request about OpenChat ITSELF (the app). Creates a tracked issue the OpenChat team sees. Use this when the user wants to send feedback about the app — NOT for messaging another person.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          message: { type: 'string', description: 'The feedback / bug / request text' },
+          context: { type: 'string', description: 'Optional extra context (screen, what they were doing)' },
+        },
+        required: ['message'],
+      },
+    },
   ];
 }
 
@@ -468,6 +522,12 @@ async function executeTool(
         const title = typeof input.title === 'string' ? input.title : undefined;
         if (participantIds.length === 0) return { error: 'participantIds is required' };
         return await toolCreateConversation(io, userId, participantIds, title);
+      }
+      case 'submit_feedback': {
+        const message = typeof input.message === 'string' ? input.message : '';
+        const context = typeof input.context === 'string' ? input.context : undefined;
+        if (!message.trim()) return { error: 'message is required' };
+        return await toolSubmitFeedback(userId, message, context);
       }
       default:
         return { error: `Unknown tool: ${name}` };
@@ -520,12 +580,13 @@ async function loadConversationContext(
 }
 
 const SYSTEM_PROMPT = `You are Assistant, an in-app helper inside OpenChat (a chat application).
-You are talking with a user inside a direct-message conversation. You can search the user's messages, list and read their conversations, send messages on their behalf, and create conversations — all via tools. All tools act on behalf of THIS user only.
+You are talking with a user inside a direct-message conversation. You can search the user's messages, list and read their conversations, send messages on their behalf, create conversations, and file feedback about OpenChat — all via tools. All tools act on behalf of THIS user only.
 
 Guidelines:
 - Be concise and conversational; this is a chat, not an essay.
 - Use tools to ground your answers in the user's actual messages/conversations rather than guessing.
 - Only use send_message / create_conversation when the user clearly asks you to act. When messaging OTHER people, confirm first.
+- If the user wants to report a bug, give feedback, or request a feature about OpenChat (the app), use submit_feedback — it files a tracked issue for the OpenChat team. Confirm what you'll send, then share the resulting link. This is how feedback reaches us, so offer it when the user seems stuck or frustrated with the app.
 - Your final response (plain text, no tool call) is delivered to the user as a chat message.`;
 
 /**
