@@ -927,6 +927,31 @@ export const api = {
       body: JSON.stringify({ toConversationId }),
     }),
 
+  /**
+   * Forward a message to the current user's PRIVATE Assistant DM (openchat-ug6).
+   *
+   * Unlike forwardMessage (which posts into a shared conversation the user
+   * picks), this is private — the server drops the quoted message into the
+   * caller's own Assistant conversation and, when a `question` is supplied,
+   * asks the assistant about it. Nothing is posted into the shared/source
+   * conversation.
+   *
+   * POST /api/assistant/forward
+   *   body: { sourceConversationId, sourceMessageId, question? }
+   *   -> { conversationId }   // the user's Assistant DM to navigate to
+   *
+   * Server-side endpoint is being built in parallel; we code to this contract.
+   */
+  forwardToAssistant: (params: {
+    sourceConversationId: string;
+    sourceMessageId: string;
+    question?: string;
+  }) =>
+    request<{ conversationId: string }>('/api/assistant/forward', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
   // ── Thoughts (OpenChat-zi1) ────────────────────────────────────────────────
 
   /**
