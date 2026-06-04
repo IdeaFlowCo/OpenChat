@@ -126,6 +126,8 @@ export function LoginScreen() {
     scopes: ['openid', 'email', 'profile'],
     // Native iOS: we want the ID token back. expo-auth-session handles PKCE.
     shouldAutoExchangeCode: true,
+    // Always show the account chooser so users can pick/switch Google accounts.
+    extraParams: { prompt: 'select_account' },
     // redirectUri intentionally omitted — see comment above.
   });
 
@@ -214,7 +216,7 @@ export function LoginScreen() {
           ? crypto.randomUUID()
           : Math.random().toString(36).slice(2);
         const resp = await fetch(
-          `${OPENCHAT_URL}/api/auth/google/url?redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`
+          `${OPENCHAT_URL}/api/auth/google/url?redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}&prompt=select_account`
         );
         if (!resp.ok) throw new Error(`Could not start Google sign-in (${resp.status})`);
         const data = (await resp.json()) as { url: string; state?: string; redirectUri?: string };
