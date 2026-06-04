@@ -1,15 +1,17 @@
 /**
- * McpSetupCard — copy-paste config snippets so an agent (Claude Desktop,
- * Cursor, Codex CLI, Claude Code, raw curl) can talk to OpenChat using
- * an agent API key (OpenChat-7c9).
+ * McpSetupCard — connect an AI agent to OpenChat using an agent API key
+ * (OpenChat-7c9).
+ *
+ * Layout (openchat-oc8.1): lead with ONE primary action — a big blue
+ * button that copies the tool-less "ChatGPT / Any LLM" REST onboarding
+ * blob, which can be pasted into any chatbot. The MCP/CLI config snippets
+ * (Claude Desktop, Cursor, Codex CLI, Claude Code, curl) are collapsed
+ * behind an "Advanced setup" disclosure (default collapsed).
  *
  * Used by both AddAgentKeyScreen (right after creation) and
  * AgentKeyDetailScreen (after "View full key"). When `apiKey` is null
  * we render placeholders (`oc_your_key_here`); when present we
  * inline the real key so it's truly copy-and-paste.
- *
- * Each tab has its own "Copy" button. Tab state is local — the user
- * can flip between Claude / Cursor / Codex / Code / curl freely.
  */
 import { useState } from 'react';
 import {
@@ -27,8 +29,9 @@ import { OPENCHAT_URL } from '../api/client';
 
 type Target = 'chatgpt' | 'claude' | 'cursor' | 'codex' | 'code' | 'curl';
 
+// Advanced (collapsed) clients. The default/primary "ChatGPT / Any LLM"
+// onboarding blob is surfaced as the hero CTA, not as a tab here.
 const TABS: { id: Target; label: string }[] = [
-  { id: 'chatgpt', label: 'ChatGPT / Any LLM' },
   { id: 'claude', label: 'Claude Desktop' },
   { id: 'cursor', label: 'Cursor' },
   { id: 'codex',  label: 'Codex CLI' },
@@ -113,11 +116,10 @@ function hintFor(target: Target): string {
 }
 
 /**
- * One-shot prompt the user can paste into Claude Code (or any agent CLI).
- * It includes the API key, a link to the human-readable setup guide, and
- * instructions to verify the connection. The agent reads the guide, runs the
- * `claude mcp add` command, restarts itself if needed, then calls
- * `oc_list_conversations` to prove it works.
+ * One-shot prompt for CODING agents (Claude Code, Cursor, Codex CLI): paste it
+ * and the agent installs + registers the OpenChat MCP server itself, then
+ * verifies. Lives in Advanced (the hero CTA is the tool-less REST blob for
+ * any LLM). Restored per Jacob 2026-06-04 (openchat-oc8.1).
  */
 function agentSetupPrompt(key: string, guideUrl: string): string {
   return `Please set up the OpenChat MCP server in this environment so you can read and send messages from my OpenChat account on my behalf.
@@ -144,48 +146,48 @@ interface Props {
 export function McpSetupCard({ apiKey }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  const [active, setActive] = useState<Target>('chatgpt');
+  const [active, setActive] = useState<Target>('claude');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const displayedKey = apiKey ?? 'oc_your_key_here';
   const snippet = snippetFor(active, displayedKey);
   const guideUrl = `${OPENCHAT_URL}/about/connect-your-bot`;
 
-  // Hero one-shot prompt: user pastes this into Claude Code / Cursor /
-  // any agent and the agent does the rest. Disabled (visually) when we
-  // don't have the plaintext key — otherwise the agent would get a
-  // placeholder and fail.
-  const promptForAgent = agentSetupPrompt(displayedKey, guideUrl);
+  // Primary CTA payload: the tool-less "ChatGPT / Any LLM" REST blob. Paste
+  // it into any chatbot and the model talks to OpenChat over plain HTTPS —
+  // no MCP server, no shell, no installs. Disabled (visually) until the
+  // plaintext key is revealed, otherwise the blob would carry a placeholder.
+  const primaryBlob = snippetFor('chatgpt', displayedKey);
 
   return (
     <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
       <Text style={[styles.title, { color: c.textPrimary }]}>Connect an agent</Text>
       <Text style={[styles.subtitle, { color: c.textSecondary }]}>
-        Bi-directional read + write to your conversations.
-        {apiKey ? '' : ' Reveal the key above to inline it into these snippets.'}
+        Let an AI read and send messages on your behalf — bi-directional access to your conversations.
+        {apiKey ? '' : ' Reveal the key above first so it can be inlined.'}
       </Text>
 
-      {/* HERO: Copy a one-shot prompt that lets an AI agent set itself up. */}
+      {/* PRIMARY CTA: copy the tool-less onboarding blob for any LLM. */}
       <TouchableOpacity
         style={[styles.heroBtn, { backgroundColor: c.primary, opacity: apiKey ? 1 : 0.55 }]}
         onPress={() => {
           if (!apiKey) {
-            Alert.alert('Reveal your key first', 'Tap "View full key" above so the prompt can include the real key.');
+            Alert.alert('Reveal your key first', 'Tap "View full key" above so the setup text can include the real key.');
             return;
           }
-          Clipboard.setString(promptForAgent);
+          Clipboard.setString(primaryBlob);
           Alert.alert(
-            'Prompt copied',
-            'Paste it into Claude Code, Cursor, or any agent CLI. The agent will read the guide, register the MCP server, and verify the connection.'
+            'Setup copied',
+            'Paste it into ChatGPT, Claude, Gemini, or any chatbot. The model will connect to OpenChat over plain HTTPS — no install needed.'
           );
         }}
         activeOpacity={0.85}
       >
-        <Text style={styles.heroBtnText}>📋  Copy setup prompt for AI agent</Text>
-        <Text style={styles.heroBtnSub}>One-shot — pastes into Claude Code &amp; it figures out the rest</Text>
+        <Text style={styles.heroBtnText}>📋  Copy agent setup</Text>
+        <Text style={styles.heroBtnSub}>Works in ChatGPT, Claude, Gemini — any LLM</Text>
       </TouchableOpacity>
 
-      {/* Always-visible link to the full guide so users (and agents) can */}
-      {/* read it before or after pasting the prompt. */}
+      {/* Always-visible link to the full guide. */}
       <TouchableOpacity
         onPress={() => void Linking.openURL(guideUrl)}
         activeOpacity={0.6}
@@ -197,69 +199,103 @@ export function McpSetupCard({ apiKey }: Props) {
         </Text>
       </TouchableOpacity>
 
+      {/* ADVANCED: collapsed disclosure holding the MCP/CLI config snippets. */}
       <View style={[styles.divider, { backgroundColor: c.border }]} />
 
-      <Text style={[styles.snippetsHeader, { color: c.textSecondary }]}>
-        Or paste a config snippet manually
-      </Text>
+      <TouchableOpacity
+        onPress={() => setAdvancedOpen((v) => !v)}
+        activeOpacity={0.6}
+        style={styles.advancedToggle}
+      >
+        <Text style={[styles.advancedToggleText, { color: c.textSecondary }]}>
+          {advancedOpen ? '▾' : '▸'}  Advanced setup (MCP &amp; CLI clients)
+        </Text>
+      </TouchableOpacity>
 
-      {/* Tab strip */}
-      <View style={styles.tabRow}>
-        {TABS.map((t) => {
-          const isActive = t.id === active;
-          return (
+      {advancedOpen && (
+        <View style={styles.advancedBody}>
+          {/* One-shot prompt for coding agents (Claude Code / Cursor / Codex):
+              the agent installs the MCP server itself. */}
+          <TouchableOpacity
+            style={[styles.oneShotBtn, { borderColor: c.primary, opacity: apiKey ? 1 : 0.55 }]}
+            onPress={() => {
+              if (!apiKey) {
+                Alert.alert('Reveal your key first', 'Tap "View full key" above so the prompt can include the real key.');
+                return;
+              }
+              Clipboard.setString(agentSetupPrompt(displayedKey, guideUrl));
+              Alert.alert(
+                'One-shot prompt copied',
+                'Paste into Claude Code, Cursor, or any agent CLI — it installs the OpenChat MCP server and verifies the connection.'
+              );
+            }}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.oneShotText, { color: c.primary }]}>📋  Copy one-shot setup prompt (coding agents)</Text>
+            <Text style={[styles.oneShotSub, { color: c.textMuted }]}>Paste into Claude Code / Cursor / Codex — it installs the MCP server itself</Text>
+          </TouchableOpacity>
+
+          <Text style={[styles.snippetsHeader, { color: c.textSecondary }]}>Or paste a config snippet manually</Text>
+
+          {/* Tab strip */}
+          <View style={styles.tabRow}>
+            {TABS.map((t) => {
+              const isActive = t.id === active;
+              return (
+                <TouchableOpacity
+                  key={t.id}
+                  onPress={() => setActive(t.id)}
+                  style={[
+                    styles.tab,
+                    {
+                      backgroundColor: isActive ? c.primaryMuted : 'transparent',
+                      borderColor: isActive ? c.primary : c.border,
+                    },
+                  ]}
+                  activeOpacity={0.7}
+                >
+                  <Text style={{
+                    color: isActive ? c.primary : c.textSecondary,
+                    fontWeight: '600',
+                    fontSize: 12,
+                  }}>{t.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Hint */}
+          <Text style={[styles.hint, { color: c.textMuted }]}>{hintFor(active)}</Text>
+
+          {/* Snippet */}
+          <View style={[styles.codeBox, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
+            <Text style={[styles.codeText, { color: c.textPrimary }]} selectable>
+              {snippet}
+            </Text>
+          </View>
+
+          {/* Actions */}
+          <View style={styles.actions}>
             <TouchableOpacity
-              key={t.id}
-              onPress={() => setActive(t.id)}
-              style={[
-                styles.tab,
-                {
-                  backgroundColor: isActive ? c.primaryMuted : 'transparent',
-                  borderColor: isActive ? c.primary : c.border,
-                },
-              ]}
+              style={[styles.btn, { backgroundColor: c.primary }]}
+              onPress={() => {
+                Clipboard.setString(snippet);
+                Alert.alert('Copied', `${TABS.find((t) => t.id === active)!.label} snippet copied.`);
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.btnText}>Copy</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: c.border }]}
+              onPress={() => void Linking.openURL(guideUrl)}
               activeOpacity={0.7}
             >
-              <Text style={{
-                color: isActive ? c.primary : c.textSecondary,
-                fontWeight: '600',
-                fontSize: 12,
-              }}>{t.label}</Text>
+              <Text style={[styles.btnText, { color: c.textPrimary }]}>Full guide</Text>
             </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* Hint */}
-      <Text style={[styles.hint, { color: c.textMuted }]}>{hintFor(active)}</Text>
-
-      {/* Snippet */}
-      <View style={[styles.codeBox, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
-        <Text style={[styles.codeText, { color: c.textPrimary }]} selectable>
-          {snippet}
-        </Text>
-      </View>
-
-      {/* Actions */}
-      <View style={styles.actions}>
-        <TouchableOpacity
-          style={[styles.btn, { backgroundColor: c.primary }]}
-          onPress={() => {
-            Clipboard.setString(snippet);
-            Alert.alert('Copied', `${TABS.find((t) => t.id === active)!.label} snippet copied.`);
-          }}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.btnText}>Copy</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: c.border }]}
-          onPress={() => void Linking.openURL(`${OPENCHAT_URL}/about/connect-your-bot`)}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.btnText, { color: c.textPrimary }]}>Full guide</Text>
-        </TouchableOpacity>
-      </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -295,6 +331,29 @@ const styles = StyleSheet.create({
   guideLinkUrl: { fontSize: 11, marginTop: 2 },
 
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 12 },
+
+  // Advanced disclosure
+  advancedToggle: {
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+  },
+  advancedToggleText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  advancedBody: {
+    marginTop: 10,
+  },
+  oneShotBtn: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  oneShotText: { fontSize: 13, fontWeight: '700' },
+  oneShotSub: { fontSize: 11, marginTop: 2, textAlign: 'center' },
   snippetsHeader: {
     fontSize: 11,
     fontWeight: '700',
