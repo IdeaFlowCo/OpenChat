@@ -15,6 +15,26 @@ const socketConversations = new Map<string, Set<string>>(); // socketId -> conve
 const userSockets = new Map<string, Set<string>>(); // userId -> socketIds
 const socketUsers = new Map<string, string>(); // socketId -> userId
 
+// Broadcast a message:new to every participant of a conversation via their
+// per-user room (user:<id>), which each socket joins on connect. This reaches
+// recipients who are connected but have NOT opened (joined the room of) the
+// conversation — unlike emitting to conversation:<id>, which only reaches
+// sockets that ran conversation:join. Chained .to() unions the rooms so a
+// socket in several matched rooms still receives exactly one copy.
+// See OpenChat-60y.
+export function broadcastMessageToParticipants(
+  io: Server,
+  participantIds: string[],
+  message: unknown
+): void {
+  if (!participantIds.length) return;
+  let op = io.to(`user:${participantIds[0]}`);
+  for (let i = 1; i < participantIds.length; i++) {
+    op = op.to(`user:${participantIds[i]}`);
+  }
+  op.emit('message:new', message);
+}
+
 // Force-join a user's live sockets to a conversation room. Used when a
 // member is added to a group: their existing connection should immediately
 // start receiving message:new without waiting for them to click the conv.
@@ -133,7 +153,7 @@ export function setupChatSocket(io: Server): void {
     });
 
     // Send message
-    socket.on('message:send', async (data: { conversationId: string; content: string; messageType?: string }, callback) => {
+    socket.on('message:send', async (data: { conversationId: string; content: string; messageType?: string; id?: string }, callback) => {
       const { conversationId, content, messageType = 'text' } = data;
 
       if (!content || !conversationId) {
@@ -154,26 +174,33 @@ export function setupChatSocket(io: Server): void {
           return;
         }
 
-        const messageId = nanoid();
+        // Idempotency: the client supplies a stable message id used by BOTH the
+        // WebSocket path and the REST fallback. MERGE (create-if-absent) makes a
+        // duplicate send (e.g. WS ack lost -> client retries over REST) collapse
+        // to one row instead of persisting twice with different ids. See
+        // OpenChat-60y. Fall back to a server id for older clients.
+        const messageId = (typeof data.id === 'string' && data.id) || nanoid();
         const now = new Date().toISOString();
 
         const result = await session.run(`
           MATCH (c:Conversation {id: $conversationId})
           MATCH (sender:User {id: $senderId})
-          CREATE (m:Message {
-            id: $id,
-            content: $content,
-            senderId: $senderId,
-            conversationId: $conversationId,
-            messageType: $messageType,
-            createdAt: datetime($now)
-          })
-          CREATE (m)-[:IN_CONVERSATION]->(c)
-          CREATE (sender)-[:SENT]->(m)
+          MERGE (m:Message {id: $id})
+          ON CREATE SET
+            m.content = $content,
+            m.senderId = $senderId,
+            m.conversationId = $conversationId,
+            m.messageType = $messageType,
+            m.createdAt = datetime($now)
+          MERGE (m)-[:IN_CONVERSATION]->(c)
+          MERGE (sender)-[:SENT]->(m)
           SET c.updatedAt = datetime($now),
               c.lastMessageAt = datetime($now),
-              c.lastMessagePreview = left($content, 100)
-          RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+              c.lastMessagePreview = left(m.content, 100)
+          WITH c, m, sender
+          MATCH (p:User)-[:PARTICIPATES_IN]->(c)
+          RETURN m { .*, sender: sender { .id, .name, .email } } AS message,
+                 collect(DISTINCT p.id) AS participantIds
         `, {
           id: messageId,
           content,
@@ -184,9 +211,11 @@ export function setupChatSocket(io: Server): void {
         });
 
         const message = convertToJS(result.records[0].get('message'));
+        const participantIds = result.records[0].get('participantIds') as string[];
 
-        // Broadcast to all participants in the conversation
-        io.to(`conversation:${conversationId}`).emit('message:new', message);
+        // Broadcast to every participant's per-user room (reaches recipients who
+        // haven't joined the conversation room). See OpenChat-60y.
+        broadcastMessageToParticipants(io, participantIds, message);
 
         callback?.({ success: true, message });
       } catch (error) {

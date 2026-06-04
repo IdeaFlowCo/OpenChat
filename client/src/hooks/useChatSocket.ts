@@ -167,7 +167,7 @@ export function useChatSocket(options: UseChatSocketOptions) {
     }
   }, []);
 
-  const sendMessage = useCallback((conversationId: string, content: string): Promise<Message> => {
+  const sendMessage = useCallback((conversationId: string, content: string, id?: string): Promise<Message> => {
     return new Promise((resolve, reject) => {
       const socket = socketRef.current;
       if (!socket?.connected) {
@@ -185,7 +185,7 @@ export function useChatSocket(options: UseChatSocketOptions) {
       // See OpenChat-5q1.
       socket.timeout(10000).emit(
         'message:send',
-        { conversationId, content },
+        { conversationId, content, id },
         (err: Error | null, response?: { success?: boolean; message?: Message; error?: string }) => {
           if (err) {
             reject(new Error('Send timed out'));

@@ -425,12 +425,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Send message
   const sendMessage = useCallback(async (content: string) => {
     if (!activeConversationId) return;
+    // One idempotency key per logical message, shared by the WebSocket path and
+    // the REST fallback, so a lost-ack retry can't persist two rows. See
+    // OpenChat-60y.
+    const messageId = crypto.randomUUID();
     try {
-      await socketSendMessage(activeConversationId, content);
+      await socketSendMessage(activeConversationId, content, messageId);
     } catch (e) {
-      // Fallback to REST API
-      const message = await api.sendMessage(activeConversationId, content);
-      setMessages(prev => [...prev, message]);
+      // Fallback to REST API (same id -> server MERGE de-dupes if the WS write
+      // actually landed). Dedupe locally too: the REST broadcast may have
+      // already inserted this id via handleMessage before the POST resolves.
+      const message = await api.sendMessage(activeConversationId, content, messageId);
+      setMessages(prev => (prev.some(m => m.id === message.id) ? prev : [...prev, message]));
     }
   }, [activeConversationId, socketSendMessage]);
 

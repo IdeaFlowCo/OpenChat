@@ -81,7 +81,7 @@ class ApiClient {
     return apiError;
   }
 
-  private async fetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  private async fetch<T>(path: string, options: RequestInit = {}, timeoutMs?: number): Promise<T> {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       ...(options.headers || {}),
@@ -93,11 +93,18 @@ class ApiClient {
     }
 
     const url = `${API_BASE}${path}`;
+    // Bound the request when a timeout is given so the REST fallback can't hang
+    // indefinitely on a stalled mobile/VPN connection. See OpenChat-60y.
+    const controller = timeoutMs ? new AbortController() : null;
+    const timer = controller
+      ? window.setTimeout(() => controller.abort(), timeoutMs)
+      : null;
     let response: Response;
     try {
       response = await fetch(url, {
         ...options,
         headers,
+        ...(controller ? { signal: controller.signal } : {}),
       });
     } catch (error) {
       reportFetchError({
@@ -106,6 +113,8 @@ class ApiClient {
         error,
       });
       throw error;
+    } finally {
+      if (timer !== null) window.clearTimeout(timer);
     }
 
     if (!response.ok) {
@@ -168,11 +177,13 @@ class ApiClient {
     return this.fetch(`/conversations/${conversationId}/messages${query}`);
   }
 
-  async sendMessage(conversationId: string, content: string): Promise<Message> {
+  async sendMessage(conversationId: string, content: string, id?: string): Promise<Message> {
+    // id is the client-generated idempotency key shared with the WebSocket path
+    // so a WS-then-REST retry doesn't persist twice. See OpenChat-60y.
     return this.fetch(`/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ content }),
-    });
+      body: JSON.stringify({ content, id }),
+    }, 15000);
   }
 
   // Contacts

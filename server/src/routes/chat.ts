@@ -4,7 +4,7 @@ import { nanoid } from 'nanoid';
 import neo4j from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
-import { joinUserSocketsToConversation, leaveUserSocketsFromConversation } from '../websocket/chatHandler.js';
+import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, broadcastMessageToParticipants } from '../websocket/chatHandler.js';
 
 const router = Router();
 
@@ -522,7 +522,7 @@ router.post('/conversations/:id/messages', requireAuth, async (req: Request, res
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id: conversationId } = req.params;
-  const { content, messageType = 'text' } = req.body;
+  const { content, messageType = 'text', id: clientId } = req.body;
 
   if (!content || typeof content !== 'string') {
     res.status(400).json({ error: 'content is required' });
@@ -541,26 +541,32 @@ router.post('/conversations/:id/messages', requireAuth, async (req: Request, res
       return;
     }
 
-    const messageId = nanoid();
+    // Idempotency: use the client-supplied id (shared with the WebSocket path)
+    // so a WS send whose ack was lost, then retried over this REST fallback,
+    // collapses to one row via MERGE instead of persisting a duplicate with a
+    // fresh nanoid. See OpenChat-60y.
+    const messageId = (typeof clientId === 'string' && clientId) || nanoid();
     const now = new Date().toISOString();
 
     const result = await session.run(`
       MATCH (c:Conversation {id: $conversationId})
       MATCH (sender:User {id: $senderId})
-      CREATE (m:Message {
-        id: $id,
-        content: $content,
-        senderId: $senderId,
-        conversationId: $conversationId,
-        messageType: $messageType,
-        createdAt: datetime($now)
-      })
-      CREATE (m)-[:IN_CONVERSATION]->(c)
-      CREATE (sender)-[:SENT]->(m)
+      MERGE (m:Message {id: $id})
+      ON CREATE SET
+        m.content = $content,
+        m.senderId = $senderId,
+        m.conversationId = $conversationId,
+        m.messageType = $messageType,
+        m.createdAt = datetime($now)
+      MERGE (m)-[:IN_CONVERSATION]->(c)
+      MERGE (sender)-[:SENT]->(m)
       SET c.updatedAt = datetime($now),
           c.lastMessageAt = datetime($now),
-          c.lastMessagePreview = left($content, 100)
-      RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+          c.lastMessagePreview = left(m.content, 100)
+      WITH c, m, sender
+      MATCH (p:User)-[:PARTICIPATES_IN]->(c)
+      RETURN m { .*, sender: sender { .id, .name, .email } } AS message,
+             collect(DISTINCT p.id) AS participantIds
     `, {
       id: messageId,
       content,
@@ -571,16 +577,15 @@ router.post('/conversations/:id/messages', requireAuth, async (req: Request, res
     });
 
     const message = toJS(result.records[0].get('message'));
+    const participantIds = result.records[0].get('participantIds') as string[];
 
-    // Broadcast to all participants in the conversation room, exactly like the
-    // WebSocket handler (chatHandler.ts message:send). Without this, messages
-    // sent via the REST fallback (used when a client's WebSocket is down — e.g.
-    // mobile users on a China VPN where the WS upgrade is blocked/reset) are
-    // persisted but NEVER delivered live to recipients. Clients dedupe by
-    // message.id, so the sender receiving its own broadcast is harmless.
-    // See OpenChat-5q1.
+    // Deliver live to every participant's per-user room, exactly like the
+    // WebSocket handler. Without this, messages sent via the REST fallback
+    // (mobile users on a China VPN where the WS upgrade is blocked/reset) are
+    // persisted but never delivered live. Clients dedupe by message.id, so the
+    // sender receiving its own broadcast is harmless. See OpenChat-5q1 / -60y.
     const io = req.app.get('io') as IOServer | undefined;
-    io?.to(`conversation:${conversationId}`).emit('message:new', message);
+    if (io) broadcastMessageToParticipants(io, participantIds, message);
 
     res.status(201).json(message);
   } catch (error) {
