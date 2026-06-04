@@ -45,6 +45,14 @@ services:
       - WIT_AGENT_KEY=${WIT_AGENT_KEY:-}
       - WIT_API_BASE=${WIT_API_BASE:-https://sthqnyjniclvnflfkyio.supabase.co/functions/v1}
       - WIT_SITE_URL=${WIT_SITE_URL:-https://worldissuetracker.com}
+      # AI: message transforms (/api/ai), the in-app Assistant bot (bfn.3),
+      # and semantic search embeddings (bfn.2). docker-compose only forwards
+      # vars explicitly listed here — without these the values in the host
+      # .env never reach the container (Assistant logs "ANTHROPIC_API_KEY not
+      # set", embeddings silently no-op).
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ASSISTANT_MODEL=${ASSISTANT_MODEL:-claude-haiku-4-5}
     networks:
       - app_network
 
