@@ -1106,7 +1106,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
 
 // GET /api/chat/contacts - Get all users (for starting conversations)
 // Supports ?q=search to filter by name or email (case-insensitive)
-router.get('/contacts', requireAuth, async (req: Request, res: Response) => {
+router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const searchQuery = req.query.q as string | undefined;
@@ -1169,7 +1169,7 @@ router.get('/contacts', requireAuth, async (req: Request, res: Response) => {
 // full-text index. Reasoning: CONTAINS works against the existing schema
 // without a migration, and the message corpus is small for now. We can
 // add a fulltext index in a follow-up pass once volume justifies it.
-router.get('/search', requireAuth, async (req: Request, res: Response) => {
+router.get('/search', resolveActor, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const rawQ = (req.query.q ?? '') as string;
   const q = typeof rawQ === 'string' ? rawQ.trim() : '';
