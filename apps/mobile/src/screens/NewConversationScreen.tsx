@@ -195,7 +195,7 @@ export function NewConversationScreen() {
           // the keyboard (iOS); keyboardDismissMode lets you swipe it away;
           // keyboardShouldPersistTaps lets you tap a result without first
           // dismissing. paddingBottom keeps the last row clear of the keyboard.
-          automaticallyAdjustKeyboardInsets
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios' ? true : undefined}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingBottom: 24 }}
@@ -241,7 +241,11 @@ export function NewConversationScreen() {
                     <BotBadge isBot={item.isBot} compact />
                   </View>
                   <Text style={[styles.email, { color: c.textSecondary }]} numberOfLines={1}>
-                    {item.id === currentUser?.userId ? `Note to self · ${item.email}` : item.email}
+                    {item.id === currentUser?.userId
+                      ? (item.email || currentUser?.email
+                          ? `Note to self · ${item.email || currentUser?.email}`
+                          : 'Note to self')
+                      : item.email}
                   </Text>
                 </View>
                 {mode === 'group' && (
