@@ -1,0 +1,38 @@
+{
+  "name": "openchat-mcp-server",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for OpenChat — lets Claude / Cursor / any MCP client list conversations, read and send messages, add reactions, and create DMs via the OpenChat API.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "openchat-mcp-server": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "start:http": "node dist/http.js",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "openchat",
+    "chat",
+    "claude",
+    "cursor"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "express": "^4.21.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.5",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
