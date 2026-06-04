@@ -17,6 +17,7 @@ import aiRoutes from './routes/ai.js';
 import thoughtsRoutes from './routes/thoughts.js';
 import agentKeysRoutes from './routes/agentKeys.js';
 import feedbackRoutes from './routes/feedback.js';
+import { openapiSpec } from './openapi.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -362,6 +363,18 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/thoughts', thoughtsRoutes);
 app.use('/api/agent-keys', agentKeysRoutes);
 app.use('/api/feedback', feedbackRoutes);
+
+// API reference (openchat-8md.1) — public spec + Redoc docs page.
+app.get('/api/openapi.json', (_req, res) => res.json(openapiSpec));
+app.get('/api/docs', (_req, res) => {
+  res.type('html').send(
+    '<!doctype html><html><head><title>OpenChat API</title><meta charset="utf-8"/>' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1"/></head>' +
+      '<body><redoc spec-url="/api/openapi.json"></redoc>' +
+      '<script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>' +
+      '</body></html>'
+  );
+});
 
 // Legal pages (OpenChat-wfz)
 app.use('/legal', legalRoutes);
