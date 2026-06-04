@@ -56,13 +56,22 @@ export interface ExtractedTag {
   raw: string;
   /** Lowercase tag name without the '#'. */
   name: string;
-  /** Canonical Thought kind this tag maps to. */
+  /** Canonical Thought kind (the "type"). Known type-tags map directly;
+   *  any other tag defaults to 'observation'. */
   kind: 'fact' | 'decision' | 'commitment' | 'reminder' | 'observation';
+  /** True if this tag is a reserved TYPE tag (set the kind); false if it's a
+   *  free-form LABEL (kept as a label, kind defaults to observation). Types and
+   *  labels are fundamentally different — a type is the Thought's kind, a label
+   *  is a topic tag on it. */
+  isType: boolean;
 }
 
 /**
- * Pure: parse a message body and return the list of recognized tags, in
- * source order. Unrecognized hashtags are silently ignored.
+ * Pure: parse a message body and return ALL hashtags, in source order.
+ * Reserved type-tags (#fact/#decision/#commitment/#reminder/#observation +
+ * aliases) set the Thought kind; any other tag is a free-form label that
+ * defaults to kind 'observation'. (Per Jacob 2026-06-04: any tag becomes a
+ * Thought; people don't use casual hashtags.)
  */
 export function extractTagsFromMessage(content: string): ExtractedTag[] {
   if (!content || content.length > MAX_MESSAGE_LEN) return [];
@@ -71,11 +80,12 @@ export function extractTagsFromMessage(content: string): ExtractedTag[] {
   for (const match of content.matchAll(TAG_RE)) {
     const raw = match[0];
     const name = (match[1] ?? '').toLowerCase();
-    const kind = TAG_TO_KIND[name];
-    if (!kind) continue;
+    if (!name) continue;
+    const known = TAG_TO_KIND[name];
+    const kind = known ?? 'observation';
     if (seen.has(name)) continue; // Dedup same tag in one message
     seen.add(name);
-    out.push({ raw, name, kind });
+    out.push({ raw, name, kind, isType: !!known });
     if (out.length >= MAX_TAGS_PER_MESSAGE) break;
   }
   return out;
@@ -124,6 +134,7 @@ export async function createThoughtsFromMessageTags(
           userId: $senderId,
           text: $text,
           kind: $kind,
+          tags: $tags,
           status: 'none',
           createdAt: datetime($now),
           updatedAt: datetime($now)
@@ -133,7 +144,7 @@ export async function createThoughtsFromMessageTags(
           CREATE (t)-[:FROM_MESSAGE]->(msg)
         )
         `,
-        { id, senderId: params.senderId, messageId: params.messageId, text, kind: tag.kind, now }
+        { id, senderId: params.senderId, messageId: params.messageId, text, kind: tag.kind, tags: [tag.name], now }
       );
       createdIds.push(id);
       console.log(`[thought-from-tag] created Thought ${id} (kind=${tag.kind}) for user ${params.senderId} from message ${params.messageId}`);
@@ -148,6 +159,7 @@ export async function createThoughtsFromMessageTags(
               id,
               text,
               kind: tag.kind,
+              tags: [tag.name],
               status: 'none',
               createdAt: now,
               updatedAt: now,

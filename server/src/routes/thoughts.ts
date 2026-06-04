@@ -59,7 +59,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       `
       MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought)
       ${before ? 'WHERE t.createdAt < datetime($before)' : ''}
-      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt } AS thought
+      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, tags: coalesce(t.tags, []) } AS thought
       ORDER BY t.createdAt DESC
       LIMIT $limit
       `,
@@ -123,7 +123,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         updatedAt: datetime($now)
       })
       CREATE (u)-[:HAS_THOUGHT]->(t)
-      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt } AS thought
+      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, tags: coalesce(t.tags, []) } AS thought
       `,
       { userId, id, text: text.trim(), kind, status, now }
     );
@@ -183,7 +183,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
           t.kind      = CASE WHEN $kind   IS NOT NULL THEN $kind   ELSE t.kind   END,
           t.status    = CASE WHEN $status IS NOT NULL THEN $status ELSE t.status END,
           t.updatedAt = datetime($now)
-      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt } AS thought
+      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, tags: coalesce(t.tags, []) } AS thought
       `,
       {
         userId,
