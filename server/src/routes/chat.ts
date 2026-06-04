@@ -7,7 +7,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { resolveActor } from '../middleware/resolveActor.js';
-import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline } from '../websocket/chatHandler.js';
+import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline, broadcastMessageToParticipants } from '../websocket/chatHandler.js';
 import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPreview.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
@@ -822,7 +822,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
   const session = getDriver().session();
   const userId = req.user!.userId;
   const { id: conversationId } = req.params;
-  const { content: rawContent, text, messageType = 'text', attachments } = req.body;
+  const { content: rawContent, text, messageType = 'text', attachments, id: clientId } = req.body;
   const content = rawContent ?? text;
 
   // Allow either content OR attachments (images can be sent without caption).
@@ -860,7 +860,11 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       return;
     }
 
-    const messageId = nanoid();
+    // Idempotency: use the client-supplied id (shared with the WebSocket path)
+    // so a WS send whose ack was lost, then retried over this REST fallback,
+    // collapses to one row via MERGE instead of persisting a duplicate with a
+    // fresh nanoid. See OpenChat-60y.
+    const messageId = (typeof clientId === 'string' && clientId) || nanoid();
     const now = new Date().toISOString();
     // Use caption or fallback for preview
     const messageContent = hasContent ? (content as string).trim() : '';
@@ -872,21 +876,23 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     const result = await session.run(`
       MATCH (c:Conversation {id: $conversationId})
       MATCH (sender:User {id: $senderId})
-      CREATE (m:Message {
-        id: $id,
-        content: $content,
-        senderId: $senderId,
-        conversationId: $conversationId,
-        messageType: $messageType,
-        createdAt: datetime($now),
-        attachments: $attachmentsJson
-      })
-      CREATE (m)-[:IN_CONVERSATION]->(c)
-      CREATE (sender)-[:SENT]->(m)
+      MERGE (m:Message {id: $id})
+      ON CREATE SET
+        m.content = $content,
+        m.senderId = $senderId,
+        m.conversationId = $conversationId,
+        m.messageType = $messageType,
+        m.attachments = $attachmentsJson,
+        m.createdAt = datetime($now)
+      MERGE (m)-[:IN_CONVERSATION]->(c)
+      MERGE (sender)-[:SENT]->(m)
       SET c.updatedAt = datetime($now),
           c.lastMessageAt = datetime($now),
           c.lastMessagePreview = left($preview, 100)
-      RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+      WITH c, m, sender
+      MATCH (p:User)-[:PARTICIPATES_IN]->(c)
+      RETURN m { .*, sender: sender { .id, .name, .email } } AS message,
+             collect(DISTINCT p.id) AS participantIds
     `, {
       id: messageId,
       content: messageContent,
@@ -898,19 +904,26 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       preview,
     });
 
-    const raw = toJS(result.records[0].get('message')) as Record<string, unknown>;
-    // Parse attachments JSON string back to array for the response
-    if (raw && typeof raw.attachments === 'string') {
-      try { raw.attachments = JSON.parse(raw.attachments as string); } catch { /* leave as string */ }
+    const message = toJS(result.records[0].get('message')) as Record<string, unknown>;
+    const participantIds = result.records[0].get('participantIds') as string[];
+    // Parse attachments JSON string back to array for the response + broadcast
+    if (message && typeof message.attachments === 'string') {
+      try { message.attachments = JSON.parse(message.attachments as string); } catch { /* leave as string */ }
     }
 
-    // Async link preview fetch — non-blocking (OpenChat-hq2)
     const io = req.app.get('io') as IOServer | undefined;
+    // Deliver live to every participant's per-user room, exactly like the
+    // WebSocket handler. Without this, messages sent via the REST fallback
+    // (mobile users on a China VPN where the WS upgrade is blocked/reset) are
+    // persisted but never delivered live. Clients dedupe by message.id, so the
+    // sender receiving its own broadcast is harmless. See OpenChat-5q1 / -60y.
+    if (io) broadcastMessageToParticipants(io, participantIds, message);
+    // Async link preview fetch — non-blocking (OpenChat-hq2)
     if (io) {
-      processLinkPreviews(io, raw.id as string, conversationId as string, messageContent);
+      processLinkPreviews(io, message.id as string, conversationId as string, messageContent);
     }
 
-    res.status(201).json(raw);
+    res.status(201).json(message);
   } catch (error) {
     console.error('Error sending message:', error);
     res.status(500).json({ error: 'Failed to send message' });

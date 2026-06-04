@@ -324,8 +324,15 @@ class ApiClient {
     return true;
   }
 
-  private async fetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  private async fetch<T>(path: string, options: RequestInit = {}, timeoutMs?: number): Promise<T> {
     const url = `${API_BASE}${path}`;
+    // Bound the request when a timeout is given so callers like the message
+    // REST fallback can't hang indefinitely on a stalled mobile/VPN link.
+    // See OpenChat-60y.
+    const controller = timeoutMs ? new AbortController() : null;
+    const timer = controller
+      ? window.setTimeout(() => controller.abort(), timeoutMs)
+      : null;
     const doFetch = async (token: string | null): Promise<Response> => {
       const headers: HeadersInit = {
         'Content-Type': 'application/json',
@@ -334,9 +341,10 @@ class ApiClient {
       if (token) {
         (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
       }
-      return fetch(url, { ...options, headers });
+      return fetch(url, { ...options, headers, ...(controller ? { signal: controller.signal } : {}) });
     };
 
+    try {
     let response: Response;
     try {
       response = await doFetch(this.getToken());
@@ -384,6 +392,9 @@ class ApiClient {
     // 401-after-15-min-of-use still gets the full retry budget.
     this.consecutiveRefreshes = 0;
     return response.json();
+    } finally {
+      if (timer !== null) window.clearTimeout(timer);
+    }
   }
 
   // === REST endpoints ===
@@ -435,11 +446,14 @@ class ApiClient {
     return this.fetch(`/conversations/${conversationId}/messages?${params}`);
   }
 
-  async sendMessage(conversationId: string, content: string, messageType = 'text', attachments?: Attachment[]): Promise<Message> {
+  async sendMessage(conversationId: string, content: string, messageType = 'text', attachments?: Attachment[], id?: string): Promise<Message> {
+    // id is the client-generated idempotency key shared with the WebSocket path
+    // so a WS-then-REST retry doesn't persist twice. See OpenChat-60y. The 15s
+    // timeout keeps the REST fallback from hanging on a stalled mobile/VPN link.
     return this.fetch(`/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ content, messageType, ...(attachments?.length ? { attachments } : {}) }),
-    });
+      body: JSON.stringify({ content, messageType, ...(attachments?.length ? { attachments } : {}), id }),
+    }, 15000);
   }
 
   /**

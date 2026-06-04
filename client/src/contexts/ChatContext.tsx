@@ -460,19 +460,25 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Send message (with optional image attachments — OpenChat-6bg)
   const sendMessage = useCallback(async (content: string, attachments?: Attachment[]) => {
     if (!activeConversationId) return;
+    // One idempotency key per logical message, shared by the WebSocket path and
+    // the REST fallback, so a lost-ack retry can't persist two rows. See
+    // OpenChat-60y.
+    const messageId = crypto.randomUUID();
     // If there are attachments, bypass the socket path and always use REST
-    // (socket doesn't carry attachment data).
+    // (socket doesn't carry attachment data). Still pass the idempotency id.
     if (attachments?.length) {
-      const message = await api.sendMessage(activeConversationId, content, undefined, attachments);
-      setMessages(prev => [...prev, message]);
+      const message = await api.sendMessage(activeConversationId, content, 'text', attachments, messageId);
+      setMessages(prev => (prev.some(m => m.id === message.id) ? prev : [...prev, message]));
       return;
     }
     try {
-      await socketSendMessage(activeConversationId, content);
+      await socketSendMessage(activeConversationId, content, messageId);
     } catch (e) {
-      // Fallback to REST API
-      const message = await api.sendMessage(activeConversationId, content);
-      setMessages(prev => [...prev, message]);
+      // Fallback to REST API (same id -> server MERGE de-dupes if the WS write
+      // actually landed). Dedupe locally too: the REST broadcast may have
+      // already inserted this id via handleMessage before the POST resolves.
+      const message = await api.sendMessage(activeConversationId, content, 'text', undefined, messageId);
+      setMessages(prev => (prev.some(m => m.id === message.id) ? prev : [...prev, message]));
     }
   }, [activeConversationId, socketSendMessage]);
 

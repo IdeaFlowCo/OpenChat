@@ -144,8 +144,26 @@ export function useChatSocket(options: UseChatSocketOptions) {
       }
     }, 30000);
 
+    // Mobile resume: when the OS backgrounds the tab it suspends the WebSocket
+    // and throttles the heartbeat above, so on return the socket is often dead
+    // but hasn't noticed yet. Force a reconnect when the page becomes visible
+    // again or the network comes back online. socket.connect() is a no-op if
+    // already connected. See OpenChat-5q1.
+    const reconnectIfNeeded = () => {
+      if (!socket.connected) socket.connect();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') reconnectIfNeeded();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('online', reconnectIfNeeded);
+    window.addEventListener('focus', reconnectIfNeeded);
+
     return () => {
       clearInterval(heartbeatInterval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('online', reconnectIfNeeded);
+      window.removeEventListener('focus', reconnectIfNeeded);
       socket.disconnect();
       socketRef.current = null;
     };
@@ -175,21 +193,34 @@ export function useChatSocket(options: UseChatSocketOptions) {
     }
   }, []);
 
-  const sendMessage = useCallback((conversationId: string, content: string): Promise<Message> => {
+  const sendMessage = useCallback((conversationId: string, content: string, id?: string): Promise<Message> => {
     return new Promise((resolve, reject) => {
-      if (!socketRef.current?.connected) {
+      const socket = socketRef.current;
+      if (!socket?.connected) {
         reject(new Error('Not connected'));
         return;
       }
 
-      socketRef.current.emit(
+      // Bound the send with a 10s ack timeout. On mobile / flaky networks
+      // (e.g. a China VPN) the socket frequently reports `connected` but the
+      // connection blips right after emit, so the server's ack never arrives.
+      // Without a timeout the Promise would hang forever — never resolving,
+      // never rejecting — so the caller's REST fallback never fires and the
+      // message is silently stuck. With .timeout(), a lost ack surfaces as
+      // `err`, we reject, and ChatContext falls back to the REST endpoint.
+      // See OpenChat-5q1.
+      socket.timeout(10000).emit(
         'message:send',
-        { conversationId, content },
-        (response: { success?: boolean; message?: Message; error?: string }) => {
-          if (response.error) {
+        { conversationId, content, id },
+        (err: Error | null, response?: { success?: boolean; message?: Message; error?: string }) => {
+          if (err) {
+            reject(new Error('Send timed out'));
+          } else if (response?.error) {
             reject(new Error(response.error));
-          } else if (response.message) {
+          } else if (response?.message) {
             resolve(response.message);
+          } else {
+            reject(new Error('Malformed send response'));
           }
         }
       );
