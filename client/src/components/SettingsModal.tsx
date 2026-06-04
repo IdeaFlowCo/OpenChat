@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   APP_BUILD_DATE,
   APP_GIT_BRANCH,
@@ -5,6 +6,8 @@ import {
   IS_DEV_BUILD,
   formatVersion,
 } from '../utils/appVersion';
+import { api } from '../api';
+import { buildAgentSetupBlob } from '../utils/agentSetupBlob';
 
 interface SettingsModalProps {
   open: boolean;
@@ -19,6 +22,38 @@ export function SettingsModal({
   showVersionInTopBar,
   onShowVersionInTopBarChange,
 }: SettingsModalProps) {
+  // One-click "Copy agent setup" (openchat-bbr): mints a key + copies the
+  // tool-less paste-anywhere REST blob. No navigation, no reveal step.
+  const [minting, setMinting] = useState(false);
+  const [setupStatus, setSetupStatus] = useState<
+    { kind: 'success' | 'error'; message: string } | null
+  >(null);
+
+  const handleCopyAgentSetup = async () => {
+    if (minting) return;
+    setMinting(true);
+    setSetupStatus(null);
+    try {
+      const result = await api.createAgentKey(
+        `Quick setup ${new Date().toISOString().slice(0, 10)}`,
+        ['read', 'write'],
+      );
+      const blob = buildAgentSetupBlob(result.key, window.location.origin);
+      await navigator.clipboard.writeText(blob);
+      setSetupStatus({
+        kind: 'success',
+        message: 'Copied! Paste it into ChatGPT, Claude, Gemini, or any chatbot — no install needed.',
+      });
+    } catch (err) {
+      setSetupStatus({
+        kind: 'error',
+        message: err instanceof Error ? err.message : 'Failed to create agent setup. Please try again.',
+      });
+    } finally {
+      setMinting(false);
+    }
+  };
+
   if (!open) return null;
 
   const buildDate = new Date(APP_BUILD_DATE);
@@ -54,6 +89,38 @@ export function SettingsModal({
         </div>
 
         <div className="flex-1 space-y-5 overflow-y-auto p-4">
+          {/*
+           * One-click "Copy agent setup" (openchat-bbr). TRUE one-tap: mints
+           * a key + copies a paste-anywhere setup blob for ChatGPT, Claude,
+           * any LLM. No navigation, no reveal step.
+           */}
+          <section className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-blue-600">
+              OpenChat for agents
+            </h3>
+            <button
+              type="button"
+              onClick={handleCopyAgentSetup}
+              disabled={minting}
+              className="mt-3 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {minting ? 'Minting key…' : '📋  Copy agent setup'}
+            </button>
+            <p className="mt-2 text-xs text-gray-600">
+              Mints a key + copies a paste-anywhere setup for ChatGPT, Claude, any LLM.
+            </p>
+            {setupStatus && (
+              <p
+                role="status"
+                className={`mt-2 text-sm ${
+                  setupStatus.kind === 'success' ? 'text-green-700' : 'text-red-600'
+                }`}
+              >
+                {setupStatus.message}
+              </p>
+            )}
+          </section>
+
           <section className="rounded-lg border border-gray-200 bg-gray-50 p-4">
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>

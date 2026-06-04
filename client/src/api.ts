@@ -121,6 +121,19 @@ export interface AuthResult {
   user: User;
 }
 
+/**
+ * Returned from createAgentKey — includes the full plaintext key (shown
+ * once). The server may return `key_prefix` (snake) or `keyPrefix` (camel);
+ * we normalize to `keyPrefix`. See openchat-bbr.
+ */
+export interface AgentKeyCreateResult {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  key: string;
+  scopes: string[];
+}
+
 export class ApiError extends Error {
   status: number;
   statusText: string;
@@ -794,6 +807,61 @@ class ApiClient {
       token: data.accessToken,
       refreshToken: data.refreshToken,
       user: data.user,
+    };
+  }
+
+  /**
+   * Mint a new agent key. Returns the full plaintext key once (openchat-bbr).
+   * Endpoint lives at `/api/agent-keys`, NOT under `${API_BASE}` (/api/chat),
+   * so we hit it directly and mirror the same 401-then-refresh-then-retry
+   * pattern as getMe(). Auth = the user's session JWT.
+   */
+  async createAgentKey(name: string, scopes?: string[]): Promise<AgentKeyCreateResult> {
+    const url = '/api/agent-keys';
+    const body = JSON.stringify({ name, ...(scopes ? { scopes } : {}) });
+    const buildHeaders = (): Record<string, string> => {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const token = this.getToken();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      return headers;
+    };
+
+    let response: Response;
+    try {
+      response = await fetch(url, { method: 'POST', headers: buildHeaders(), body });
+    } catch (error) {
+      reportFetchError({ url, method: 'POST', error });
+      throw error;
+    }
+
+    if (response.status === 401) {
+      const refreshed = await this.refreshAccessToken();
+      if (refreshed) {
+        try {
+          response = await fetch(url, { method: 'POST', headers: buildHeaders(), body });
+        } catch (error) {
+          reportFetchError({ url, method: 'POST', error });
+          throw error;
+        }
+      }
+    }
+
+    if (!response.ok) {
+      if (response.status !== 401) {
+        reportHttpError({ url, method: 'POST', status: response.status, statusText: response.statusText });
+      }
+      const error = await response.json().catch(() => ({ error: 'Failed to create agent key' }));
+      throw new Error(error.error || 'Failed to create agent key');
+    }
+
+    this.consecutiveRefreshes = 0;
+    const data = await response.json();
+    return {
+      id: data.id,
+      name: data.name,
+      keyPrefix: data.keyPrefix ?? data.key_prefix ?? '',
+      key: data.key,
+      scopes: data.scopes ?? [],
     };
   }
 }
