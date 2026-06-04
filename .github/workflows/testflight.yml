@@ -1,0 +1,184 @@
+# TestFlight build + submit (openchat-3jq.2)
+#
+# Builds the iOS app via EAS and submits it to App Store Connect / TestFlight.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# IMPORTANT — this is the CLOUD-build path, NOT the local-build.sh path.
+# ─────────────────────────────────────────────────────────────────────────────
+# The day-to-day release on Jacob's M3 uses apps/mobile/scripts/local-build.sh,
+# which runs `eas build --local`. That path depends on machine-specific state
+# that CANNOT exist on a GitHub-hosted runner:
+#   - the M3 login keychain + Apple Distribution private key
+#   - ~/.config/m3-login.txt (keychain unlock password)
+#   - .credentials/Distribution.p12 + .mobileprovision in the repo root
+#   - a Tahoe-specific manual IPA-repackage workaround for a broken rsync
+#   - publish-to-testers.py assigning the build to the Friends & Family group
+#
+# This workflow instead uses EAS **cloud** build (`eas build` with no --local),
+# where Expo's macOS build farm holds the credentials. That removes every
+# machine-specific dependency above and is the only path that works on a
+# stock GitHub runner. It does NOT run publish-to-testers.py (see notes at end).
+#
+# Runner: ubuntu-latest is fine. `eas build` (cloud) only needs the EAS CLI and
+# a Node toolchain to submit the job to Expo's farm — the actual iOS compile
+# happens on Expo's macOS workers, so we do NOT need a `macos-*` runner here.
+# (We'd only need macOS if we tried to reproduce `eas build --local`, which we
+# deliberately are not doing.)
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# REQUIRED REPO SECRETS (Settings → Secrets and variables → Actions)
+# ─────────────────────────────────────────────────────────────────────────────
+#   EXPO_TOKEN
+#       A personal/robot access token from https://expo.dev (Account →
+#       Settings → Access Tokens). Authenticates the EAS CLI non-interactively.
+#       Required for both `eas build` and `eas submit`.
+#
+# App Store Connect API key (for `eas submit`). Two options:
+#
+#   (A) Store the credentials in EAS and let `eas submit` pull them.
+#       Run once locally:  eas credentials  (or `eas submit` interactively)
+#       to upload the ASC API key to Expo. Then this workflow needs nothing
+#       extra beyond EXPO_TOKEN. This is the simplest path and is RECOMMENDED.
+#
+#   (B) Provide the ASC API key at submit time via these secrets:
+#         EXPO_ASC_API_KEY_BASE64  — base64 of the AuthKey_*.p8 file
+#                                     (`base64 -i AuthKey_KWJX4896S5.p8`)
+#         EXPO_ASC_KEY_ID          — e.g. KWJX4896S5
+#         EXPO_ASC_ISSUER_ID       — e.g. 69a6de95-2833-47e3-e053-5b8c7c11a4d1
+#       The job below decodes the .p8 to a temp file and points eas submit at
+#       it via apps/mobile/eas.json's submit.production.ios.ascApiKeyPath.
+#       NOTE: eas.json currently hard-codes an absolute macOS path for that
+#       key; option (B) overrides it with EXPO_ASC_API_KEY_PATH at runtime.
+#
+# The Apple Distribution signing cert + provisioning profile do NOT need to be
+# supplied here: production builds use credentialsSource:"local" in eas.json for
+# the LOCAL path, but on the CLOUD path EAS manages remote credentials. The
+# first cloud build will prompt (interactively) to generate/upload them — run
+# one cloud build manually with `eas build --platform ios --profile production`
+# BEFORE relying on this workflow, so remote credentials exist and CI is
+# fully non-interactive. (See "FIRST-RUN" note at the bottom.)
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: TestFlight (EAS cloud build + submit)
+
+on:
+  # Manual trigger from the Actions tab.
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: 'Submit the build to App Store Connect after building'
+        type: boolean
+        default: true
+      message:
+        description: 'Build message (shown in EAS dashboard)'
+        type: string
+        default: 'CI build'
+  # Tag-triggered release: push a tag like v0.1.19 to build + submit.
+  push:
+    tags:
+      - 'v*'
+
+# Avoid overlapping release builds racing for the same version/build number.
+concurrency:
+  group: testflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-submit:
+    runs-on: ubuntu-latest
+    # The mobile app is a workspace at apps/mobile; run all EAS commands there.
+    defaults:
+      run:
+        working-directory: apps/mobile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22 # Expo SDK 54 supports LTS 20/22/24; 22 matches local-build.sh's preferred keg.
+
+      - name: Set up EAS / Expo
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # Install deps from the monorepo root (npm workspaces hoists to root).
+      - name: Install dependencies
+        working-directory: .
+        run: npm ci
+
+      # ── Smoke checks before we spend an EAS build (acceptance criterion) ──
+      # typecheck runs across all workspaces via turbo; build verifies the
+      # server + web compile. If either fails we never kick off the iOS build.
+      - name: Typecheck (all workspaces)
+        working-directory: .
+        run: npm run typecheck
+
+      - name: Build (server + web smoke)
+        working-directory: .
+        run: npm run build
+
+      # ── (Option B only) materialize the ASC API key for eas submit ──
+      - name: Write ASC API key (option B)
+        if: ${{ secrets.EXPO_ASC_API_KEY_BASE64 != '' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          echo "${{ secrets.EXPO_ASC_API_KEY_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/asc/AuthKey.p8"
+          echo "EXPO_ASC_API_KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_ENV"
+          echo "EXPO_ASC_KEY_ID=${{ secrets.EXPO_ASC_KEY_ID }}" >> "$GITHUB_ENV"
+          echo "EXPO_ASC_ISSUER_ID=${{ secrets.EXPO_ASC_ISSUER_ID }}" >> "$GITHUB_ENV"
+
+      # ── EAS cloud build (production profile from apps/mobile/eas.json) ──
+      # --non-interactive: fail instead of prompting (CI must never block).
+      # --no-wait: queue the build and return; the submit step below waits on
+      #   the latest finished build instead, so a long queue doesn't burn the
+      #   GitHub-runner minute budget. If you'd rather block here, drop
+      #   --no-wait and remove the separate submit "latest" logic.
+      - name: EAS build (iOS, production)
+        run: |
+          eas build \
+            --platform ios \
+            --profile production \
+            --non-interactive \
+            --message "${{ github.event.inputs.message || github.ref_name }}"
+
+      # ── Submit the freshly built artifact to App Store Connect ──
+      # `eas submit --latest` grabs the most recent finished build for this
+      # project + platform. Because the build step above waits (no --no-wait),
+      # --latest is the one we just produced.
+      - name: EAS submit (App Store Connect / TestFlight)
+        if: ${{ github.event_name == 'push' || github.event.inputs.submit == 'true' }}
+        run: |
+          eas submit \
+            --platform ios \
+            --latest \
+            --non-interactive
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIRST-RUN / SETUP CHECKLIST (do these ONCE before trusting the workflow)
+# ─────────────────────────────────────────────────────────────────────────────
+#  1. Create an Expo access token and add it as the EXPO_TOKEN repo secret.
+#  2. Generate remote iOS credentials so cloud builds are non-interactive:
+#       cd apps/mobile && eas build --platform ios --profile production
+#     (answer the credential prompts once; EAS stores them server-side).
+#  3. Upload (or confirm) the ASC API key for submit — either via
+#       eas credentials   (recommended, option A)
+#     or add the EXPO_ASC_* secrets (option B).
+#  4. Trigger this workflow from the Actions tab (workflow_dispatch) and watch
+#     the EAS dashboard. Confirm the build appears in TestFlight.
+#
+# WHAT THIS WORKFLOW DOES NOT DO (intentional gaps vs local-build.sh):
+#  - It does NOT bump the version (local-build.sh runs `npm run bump:patch`).
+#    eas.json sets ios.autoIncrement:true so the BUILD NUMBER auto-increments
+#    server-side; bump the marketing `version` in app.config.js via a commit/tag
+#    before release if you want a new marketing version.
+#  - It does NOT run publish-to-testers.py (assign to Friends & Family +
+#    trigger Apple Beta App Review). That script uses the same ASC API key and
+#    can be run as an extra step if EXPO_ASC_* secrets are present; left out by
+#    default because it needs PyJWT and the F&F group id, and external-tester
+#    Beta App Review is a human-gated 24-48h step regardless.

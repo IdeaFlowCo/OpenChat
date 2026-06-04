@@ -30,30 +30,49 @@ npm run build --workspace=apps/server
 
 MOBILE_REPO="${MOBILE_REPO:-$(pwd)/apps/mobile}"
 
+# ── RN-web export helper (openchat-3jq.4) ────────────────────────────────────
+# Factored out so the /m and /d builds share one definition. Behavior is
+# IDENTICAL to the previous inline blocks: clear Metro cache, set the web-only
+# baseUrl gate, export, then copy into the deploy target.
+#
+#   export_rnweb <baseUrl> <out-dir-name> <dest-dist-dir>
+#
+# See docs/collapse-m-d.md for why we still export twice by default.
+export_rnweb() {
+  local base_url="$1" out_dir="$2" dest="$3"
+  echo ""
+  echo "── Building openchat-mobile RN-web for ${base_url}/ ──"
+  rm -rf "$MOBILE_REPO/$out_dir"
+  (
+    cd "$MOBILE_REPO" && \
+    IS_WEB_BUILD=1 OPENCHAT_BASE_URL="$base_url" npx expo export \
+      --platform web --output-dir "$out_dir" --clear
+  )
+  cp -r "$MOBILE_REPO/$out_dir/." "$dest/"
+}
+
 # Clean target dirs that go into the docker build context.
 rm -rf client-mobile/dist client-mobile-desktop/dist
 mkdir -p client-mobile/dist client-mobile-desktop/dist
 
 if [ -d "$MOBILE_REPO" ]; then
-  echo ""
-  echo "── Building openchat-mobile RN-web for /m/ ──"
-  rm -rf "$MOBILE_REPO/dist-web-m"
-  (
-    cd "$MOBILE_REPO" && \
-    IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/m npx expo export \
-      --platform web --output-dir dist-web-m --clear
-  )
-  cp -r "$MOBILE_REPO/dist-web-m/." client-mobile/dist/
-
-  echo ""
-  echo "── Building openchat-mobile RN-web for /d/ ──"
-  rm -rf "$MOBILE_REPO/dist-web-d"
-  (
-    cd "$MOBILE_REPO" && \
-    IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/d npx expo export \
-      --platform web --output-dir dist-web-d --clear
-  )
-  cp -r "$MOBILE_REPO/dist-web-d/." client-mobile-desktop/dist/
+  if [ "${OPENCHAT_SINGLE_RNWEB_EXPORT:-0}" = "1" ]; then
+    # ── EXPERIMENTAL single-export path (opt-in; default OFF) ────────────────
+    # Export /d ONCE, then derive /m by copying + rewriting /d/→/m/ asset
+    # references in index.html (Option 3 in docs/collapse-m-d.md). This halves
+    # Metro export time but is NOT prod-blessed yet — keep it behind the flag.
+    echo ""
+    echo "── [experimental] single RN-web export: /d → derive /m ──"
+    export_rnweb /d dist-web-d client-mobile-desktop/dist
+    cp -r client-mobile-desktop/dist/. client-mobile/dist/
+    # Rewrite absolute /d/ asset refs to /m/ in the derived /m index.html.
+    perl -i -pe 's{/d/}{/m/}g' client-mobile/dist/index.html
+    echo "  (derived /m from /d; see docs/collapse-m-d.md for risk notes)"
+  else
+    # ── DEFAULT two-export path (unchanged behavior) ─────────────────────────
+    export_rnweb /m dist-web-m client-mobile/dist
+    export_rnweb /d dist-web-d client-mobile-desktop/dist
+  fi
 
   # ── CROSS-CONTAMINATION VALIDATOR (Codex catch 2026-06-01) ────────────────
   # Two sequential expo export runs from the same Metro cache could leak the
