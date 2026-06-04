@@ -97,12 +97,17 @@ async function persistMessage(
   io: IOServer | undefined,
   senderId: string,
   conversationId: string,
-  content: string
+  content: string,
+  opts?: { viaAssistant?: boolean }
 ): Promise<{ message: Record<string, unknown>; participantIds: string[] } | null> {
   const messageId = nanoid();
   const now = new Date().toISOString();
   const messageContent = content.trim();
   if (!messageContent) return null;
+  // viaAssistant: marks messages the Assistant sent on the user's behalf so
+  // clients can badge them (openchat-bfn.4). Stored on the Message node and
+  // surfaced in the projection below.
+  const viaAssistant = opts?.viaAssistant === true;
 
   const s = getDriver().session();
   try {
@@ -116,6 +121,7 @@ async function persistMessage(
         m.senderId = $senderId,
         m.conversationId = $conversationId,
         m.messageType = 'text',
+        m.viaAssistant = $viaAssistant,
         m.createdAt = datetime($now)
       MERGE (m)-[:IN_CONVERSATION]->(c)
       MERGE (sender)-[:SENT]->(m)
@@ -127,7 +133,7 @@ async function persistMessage(
       RETURN m { .*, sender: sender { .id, .name, .email } } AS message,
              collect(DISTINCT p.id) AS participantIds
       `,
-      { id: messageId, content: messageContent, senderId, conversationId, now }
+      { id: messageId, content: messageContent, senderId, conversationId, now, viaAssistant }
     );
 
     if (result.records.length === 0) return null;
@@ -146,6 +152,76 @@ async function persistMessage(
   } finally {
     await s.close();
   }
+}
+
+/**
+ * Idempotently ensure the caller's private direct Assistant DM exists and
+ * return its conversation id. Shared by POST /api/assistant/ensure (which also
+ * returns the full hydrated conversation) and POST /api/assistant/forward.
+ *
+ * Mirrors the MERGE logic in routes/assistant.ts: find an existing direct
+ * conversation that has BOTH the user and the assistant bot, else create one
+ * flagged containsBot=true. Pass `io` to join the user's sockets to the room.
+ */
+export async function ensureAssistantConversation(
+  userId: string,
+  io?: IOServer
+): Promise<string> {
+  await ensureAssistantUser();
+  const s = getDriver().session();
+  try {
+    const existing = await s.run(
+      `
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {type: 'direct'})
+      MATCH (bot:User {id: $assistantId})-[:PARTICIPATES_IN]->(c)
+      RETURN c.id AS id
+      LIMIT 1
+      `,
+      { userId, assistantId: ASSISTANT_USER_ID }
+    );
+    let conversationId: string;
+    if (existing.records.length > 0) {
+      conversationId = existing.records[0].get('id') as string;
+    } else {
+      conversationId = nanoid();
+      const now = new Date().toISOString();
+      await s.run(
+        `
+        MATCH (u:User {id: $userId})
+        MATCH (bot:User {id: $assistantId})
+        CREATE (c:Conversation {
+          id: $id, title: null, type: 'direct', containsBot: true,
+          createdAt: datetime($now), updatedAt: datetime($now), lastMessageAt: datetime($now)
+        })
+        CREATE (u)-[:PARTICIPATES_IN { joinedAt: datetime($now), role: 'owner' }]->(c)
+        CREATE (bot)-[:PARTICIPATES_IN { joinedAt: datetime($now), role: 'member' }]->(c)
+        `,
+        { id: conversationId, userId, assistantId: ASSISTANT_USER_ID, now }
+      );
+    }
+    if (io) {
+      const { joinUserSocketsToConversation } = await import('../websocket/chatHandler.js');
+      joinUserSocketsToConversation(io, userId, conversationId);
+    }
+    return conversationId;
+  } finally {
+    await s.close();
+  }
+}
+
+/**
+ * Post a message into a conversation as the given sender, reusing the shared
+ * persist + broadcast path. Exposed so HTTP routes (e.g. forward) can author a
+ * user message that lands live and triggers the normal assistant turn. The
+ * caller is responsible for any participation check.
+ */
+export async function postMessageAs(
+  io: IOServer | undefined,
+  senderId: string,
+  conversationId: string,
+  content: string
+): Promise<{ message: Record<string, unknown>; participantIds: string[] } | null> {
+  return persistMessage(io, senderId, conversationId, content);
 }
 
 // ─── Tool implementations (all scoped to the owning HUMAN userId) ─────────────
@@ -299,36 +375,96 @@ async function toolReadMessages(
   }
 }
 
+// ─── Outbound-send rate limit (openchat-bfn.4) ───────────────────────────────
+// Per-user in-memory sliding window over assistant-initiated sends. Mirrors the
+// feedbackRateLimited pattern. Prevents a prompt-injected / abusive turn from
+// blasting many messages on the user's behalf.
+const SEND_RATE_LIMIT = 20; // max sends per user per window
+const SEND_WINDOW_MS = 60_000; // 1 minute
+const sendRate = new Map<string, number[]>();
+
+function sendRateLimited(userId: string): boolean {
+  const now = Date.now();
+  const cutoff = now - SEND_WINDOW_MS;
+  const arr = (sendRate.get(userId) ?? []).filter((t) => t > cutoff);
+  if (arr.length >= SEND_RATE_LIMIT) {
+    sendRate.set(userId, arr);
+    return true;
+  }
+  arr.push(now);
+  sendRate.set(userId, arr);
+  return false;
+}
+
 async function toolSendMessage(
   io: IOServer | undefined,
   userId: string,
   conversationId: string,
-  content: string
+  content: string,
+  confirm: boolean
 ): Promise<unknown> {
   if (!content || !content.trim()) {
     return { error: 'content is required' };
   }
+
+  // Inspect the target conversation: confirm the user participates, gather the
+  // OTHER human participants (anyone who isn't this user and isn't a bot), and
+  // a display name for the confirmation surface.
+  let conversationName = 'Conversation';
+  let otherHumans: string[] = [];
   const s = getDriver().session();
   try {
-    // The user must participate in the target conversation.
     const check = await s.run(
-      `MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId}) RETURN c LIMIT 1`,
+      `
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+      OPTIONAL MATCH (other:User)-[:PARTICIPATES_IN]->(c)
+      WHERE other.id <> $userId AND coalesce(other.isBot, false) = false
+      WITH c, collect(DISTINCT other.name) AS otherNames
+      RETURN c.title AS title, c.type AS type, otherNames
+      LIMIT 1
+      `,
       { userId, conversationId }
     );
     if (check.records.length === 0) {
       return { error: 'You do not have access to that conversation.' };
     }
+    const title = check.records[0].get('title') as string | null;
+    otherHumans = ((toJS(check.records[0].get('otherNames')) as (string | null)[]) || [])
+      .filter((n): n is string => typeof n === 'string' && n.trim().length > 0);
+    conversationName = (title && title.trim()) || (otherHumans.join(', ')) || 'Conversation';
   } finally {
     await s.close();
   }
 
-  // TODO(openchat-bfn.4): guardrails for messaging OTHER people. send_message
-  // currently sends AS the user into ANY conversation they participate in,
-  // which can include DMs/groups with non-self contacts. bfn.4 must add
-  // confirmation / allowlist / "only self-DM unless approved" gating here
-  // before the assistant can autonomously message real contacts.
-  const persisted = await persistMessage(io, userId, conversationId, content);
+  const hadOtherHumans = otherHumans.length > 0;
+
+  // CONFIRMATION gate (openchat-bfn.4): if the target conversation has any human
+  // OTHER than the user (i.e. it's not just the user's self/Assistant DM), the
+  // model must surface the send to the user and re-call with confirm:true. A
+  // self/Assistant-only DM sends freely.
+  if (hadOtherHumans && !confirm) {
+    return {
+      needsConfirmation: true,
+      conversationName,
+      recipients: otherHumans,
+      preview: content.trim().slice(0, 300),
+    };
+  }
+
+  // RATE LIMIT (openchat-bfn.4): only count outbound sends that actually go out.
+  if (sendRateLimited(userId)) {
+    return { error: 'Send rate limit reached — please try again shortly.' };
+  }
+
+  const persisted = await persistMessage(io, userId, conversationId, content, { viaAssistant: true });
   if (!persisted) return { error: 'Failed to send message' };
+
+  // AUDIT (openchat-bfn.4): log every assistant-initiated send.
+  console.log(
+    '[assistant] send_message',
+    JSON.stringify({ userId, conversationId, hadOtherHumans, confirmed: confirm === true })
+  );
+
   return { ok: true, messageId: persisted.message.id, conversationId };
 }
 
@@ -483,12 +619,17 @@ function buildTools(): AnthropicType.Tool[] {
     {
       name: 'send_message',
       description:
-        "Send a message AS THE USER into one of their conversations. Use this to act on the user's behalf (e.g. reply to someone, post an update). Confirm intent before messaging other people.",
+        "Send a message AS THE USER into one of their conversations. Use this to act on the user's behalf (e.g. reply to someone, post an update). If the conversation has any human OTHER than the user, the first call returns { needsConfirmation: true, conversationName, recipients, preview } and does NOT send — surface that to the user, get their explicit OK, then call again with confirm:true. Messages to the user's own self/Assistant DM send immediately.",
       input_schema: {
         type: 'object',
         properties: {
           conversationId: { type: 'string' },
           content: { type: 'string' },
+          confirm: {
+            type: 'boolean',
+            description:
+              'Set true ONLY after the user has explicitly approved sending this exact message to other people. Leave false/omitted on the first attempt.',
+          },
         },
         required: ['conversationId', 'content'],
       },
@@ -546,8 +687,9 @@ async function executeTool(
       case 'send_message': {
         const conversationId = typeof input.conversationId === 'string' ? input.conversationId : '';
         const content = typeof input.content === 'string' ? input.content : '';
+        const confirm = input.confirm === true;
         if (!conversationId) return { error: 'conversationId is required' };
-        return await toolSendMessage(io, userId, conversationId, content);
+        return await toolSendMessage(io, userId, conversationId, content, confirm);
       }
       case 'create_conversation': {
         const participantIds = Array.isArray(input.participantIds)
@@ -619,7 +761,8 @@ You are talking with a user inside a direct-message conversation. You can search
 Guidelines:
 - Be concise and conversational; this is a chat, not an essay.
 - Use tools to ground your answers in the user's actual messages/conversations rather than guessing.
-- Only use send_message / create_conversation when the user clearly asks you to act. When messaging OTHER people, confirm first.
+- Only use send_message / create_conversation when the user clearly asks you to act.
+- send_message to OTHER people requires confirmation: the first send_message call to a conversation that includes anyone besides the user returns { needsConfirmation: true, conversationName, recipients, preview } instead of sending. When you get that, DO NOT retry blindly — tell the user exactly what you'll send and to whom, wait for their explicit yes, then call send_message again with the SAME content and confirm:true. If they decline or change the wording, do not send. Messages to the user's own Assistant DM go through immediately with no confirmation.
 - If the user wants to report a bug, give feedback, or request a feature about OpenChat (the app), use submit_feedback — it files a tracked issue for the OpenChat team. Confirm what you'll send, then share the resulting link. This is how feedback reaches us, so offer it when the user seems stuck or frustrated with the app.
 - Your final response (plain text, no tool call) is delivered to the user as a chat message.`;
 
