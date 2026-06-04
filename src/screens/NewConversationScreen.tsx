@@ -59,7 +59,9 @@ export function NewConversationScreen() {
     setLoading(true);
     api.getContacts(debounced || undefined)
       .then(rows => {
-        if (!cancelled) setResults(rows.filter(u => u.id !== currentUser?.userId));
+        // Keep self in the list so you can DM yourself ("note to self").
+        // The server pins you first; we just don't strip you out anymore.
+        if (!cancelled) setResults(rows);
       })
       .catch(err => {
         console.warn('[NewConversation] search failed:', err);
@@ -224,12 +226,12 @@ export function NewConversationScreen() {
                 <View style={{ flex: 1 }}>
                   <View style={styles.rowTop}>
                     <Text style={[styles.name, { color: c.textPrimary }]} numberOfLines={1}>
-                      {item.name || item.email}
+                      {item.id === currentUser?.userId ? `${item.name || item.email} (You)` : (item.name || item.email)}
                     </Text>
                     <BotBadge isBot={item.isBot} compact />
                   </View>
                   <Text style={[styles.email, { color: c.textSecondary }]} numberOfLines={1}>
-                    {item.email}
+                    {item.id === currentUser?.userId ? 'Note to self' : item.email}
                   </Text>
                 </View>
                 {mode === 'group' && (
