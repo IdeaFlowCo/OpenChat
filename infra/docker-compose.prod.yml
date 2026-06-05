@@ -53,6 +53,15 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ASSISTANT_MODEL=${ASSISTANT_MODEL:-claude-haiku-4-5}
+      # File/attachment storage (S3/GCS) for image + VOICE uploads. Same
+      # compose-forwarding caveat: without these the presign endpoint 503s
+      # ("File uploads are not configured") and voice/image attachments fail.
+      - S3_BUCKET=${S3_BUCKET:-}
+      - S3_ENDPOINT=${S3_ENDPOINT:-}
+      - S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-auto}
     networks:
       - app_network
 
