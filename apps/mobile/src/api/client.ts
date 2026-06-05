@@ -153,6 +153,10 @@ export interface Message {
   forwardedFromSenderId?: string;
   /** Display-name snapshot of the original sender at forward time. */
   forwardedFromSenderName?: string;
+  /** Auto-generated transcript of a voice message (OpenChat-4jn).
+   *  Present on history load, and updated live via the `message:transcript`
+   *  socket event. */
+  transcript?: string;
 }
 
 /** Single attachment — image or audio (OpenChat-6bg, OpenChat-xxc). */
