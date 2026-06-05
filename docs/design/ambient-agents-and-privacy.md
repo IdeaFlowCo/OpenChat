@@ -132,7 +132,7 @@ My "none have a real group object" was wrong. The rest of the portfolio:
 |---|---|---|
 | **CollabLists** (`collablists-convodocs`) | **Built**: `teams` + `team_members` + `team_invitations` (`drizzle/0023_teams.sql`) | **In-flight** (ticket `collablists12-25-2bd`) + multi-list-membership via `list_item_memberships` |
 | **WIT** (`world-issue-tracker`) | `trackers` container (owned via `created_by_user_id`) + **planned** `tracker_members` (noted in `20260430020000_trackers_created_by.sql`) | per-issue, scoped to a tracker |
-| **Notestream** | `SharedHashtag` — a shared collaborative tag anyone invited can add to (`accessEmails[]`, `UNLISTED|LISTED`, `ENT-5280`); a shared *space*, not a member table | per-note (`isPublished`+`accessMode`+`accessEmails`) |
+| **Notestream** (latest `origin/main` — RICHEST template) | **Built**: `Group` (container) + `GroupMember` (role, **email-keyed**) + `GroupHashtag` (channels = display-only, NOT access-bearing) + `GroupRole` OWNER/EDITOR/CONTRIBUTOR/VIEWER | `NoteSharing` + `HashtagSharing` per-item grants (`PrincipalType` email/userId/anonymous + `NoteSharingRole`) |
 
 **Revised takeaway:** the portfolio is converging on **container + members + per-item visibility**
 (CollabLists `teams`/`team_members`, WIT `trackers`/planned `tracker_members`). OpenChat's
@@ -143,10 +143,17 @@ My "none have a real group object" was wrong. The rest of the portfolio:
 - **(B) A first-class `Group`/`Team` object** (matches CollabLists `team_members` + WIT `tracker_members`)
   that BOTH conversations and thoughts can be scoped to — more durable + reusable, portfolio-aligned,
   but more to build.
-- **Recommendation:** ship (A) for the Thoughts demo, but make the `visibilityFilter`'s group principal
-  *pluggable* so (B) slots in later without a rewrite. If cross-resource teams (a team that owns
-  thoughts AND conversations AND eventually CollabLists/WIT items) is the real goal, go (B) — possibly a
-  shared team model across apps.
+- **Recommendation (revised after seeing Notestream's model):** ship (A) for the Thoughts demo, but
+  adopt **Notestream's group schema as the target** for (B) — it's the most complete and battle-tested:
+  - `Group {id, name, ownerId, …}` + `GroupMember {groupId, principal(email), role}` +
+    `GroupRole = OWNER|EDITOR|CONTRIBUTOR|VIEWER`.
+  - **Membership keyed by email/principal** (pre-registration invites resolve on signup) — copy this.
+  - **Roles ON membership, enforced in the filter** (fixes Noos's stored-but-unenforced tiers).
+  - **Channels are display-only; the Group is the access boundary** — in OpenChat, conversations/threads
+    can be a group's "channels," but access = `GroupMember`, not the channel.
+  - `Thought.groupId` + `visibility` for the demo; per-item `SHARED_WITH` ≈ Notestream `NoteSharing`.
+  - Long game: a **shared `Group`/`Team` model across apps** (Notestream, CollabLists, WIT, OpenChat all
+    converging on the same Group+members+roles shape) — worth considering before each reinvents it.
 
 ## Phasing
 1. **Thoughts visibility demo** + the `visibilityFilter` helper *(small — proves the model)*
