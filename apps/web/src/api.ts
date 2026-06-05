@@ -142,6 +142,13 @@ export interface Message {
   forwardedFromMessageId?: string;
   forwardedFromSenderId?: string;
   forwardedFromSenderName?: string;
+  /**
+   * Auto-generated transcript for voice/audio attachments (openchat-4jn).
+   * Present on history load when transcription has finished; otherwise
+   * arrives live via the `message:transcript` socket event. Empty/undefined
+   * while pending — render nothing in that case.
+   */
+  transcript?: string;
 }
 
 export interface Conversation {

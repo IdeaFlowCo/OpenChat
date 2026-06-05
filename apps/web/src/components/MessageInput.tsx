@@ -21,12 +21,29 @@ export function MessageInput() {
   // Voice recording state (bmp.7 / OpenChat-xxc).
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
+  // Hands-free (tap-to-toggle) vs hold-to-record (openchat-9de). When the
+  // recording bar is shown in hands-free mode, the user explicitly taps
+  // Stop/Cancel; in hold mode, releasing the mic finalizes the recording.
+  const [handsFree, setHandsFree] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordChunksRef = useRef<BlobPart[]>([]);
   const recordStartRef = useRef<number>(0);
   const recordTimerRef = useRef<number | null>(null);
   const recordStreamRef = useRef<MediaStream | null>(null);
   const cancelRecordRef = useRef(false);
+  // Tap-vs-hold discrimination (openchat-9de). A press shorter than this
+  // (ms) counts as a tap → flip into hands-free mode and keep recording on
+  // release. A longer press is a hold → release finalizes + sends.
+  const TAP_THRESHOLD_MS = 250;
+  const pressStartRef = useRef<number>(0);
+  const handsFreeRef = useRef(false);
+  // Guard so a touch device that fires BOTH pointer and mouse events for one
+  // physical press doesn't start recording twice / toggle modes spuriously.
+  const pressActiveRef = useRef(false);
+  // If the user releases a HOLD before async getUserMedia resolves, record
+  // the intent here so startRecording can stop immediately once the recorder
+  // exists (instead of leaving a recorder running that nothing will stop).
+  const pendingStopRef = useRef<null | 'send' | 'cancel'>(null);
   const voiceSupported = typeof window !== 'undefined' && typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
   const { sendMessage, activeConversationId, startTyping, stopTyping, replyTo, setReplyTo, currentUser, contacts, conversations } = useChat();
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -144,6 +161,8 @@ export function MessageInput() {
         stopTracks();
         setRecording(false);
         setRecordSeconds(0);
+        setHandsFree(false);
+        handsFreeRef.current = false;
         if (cancelRecordRef.current) return;
         if (durationMs < 500) return; // ignore accidental taps
         const blob = new Blob(recordChunksRef.current, { type: mr.mimeType || 'audio/webm' });
@@ -156,10 +175,26 @@ export function MessageInput() {
       recordTimerRef.current = window.setInterval(() => {
         setRecordSeconds(Math.floor((Date.now() - recordStartRef.current) / 1000));
       }, 250);
+      // The user may have already released a HOLD while getUserMedia was still
+      // resolving — honor that now rather than leaving the recorder running.
+      if (pendingStopRef.current) {
+        const intent = pendingStopRef.current;
+        pendingStopRef.current = null;
+        stopRecording(intent === 'cancel');
+      }
     } catch (err) {
+      // Most commonly a permission denial (NotAllowedError) — give a friendly
+      // nudge rather than a generic failure. (openchat-9de)
       console.error('[MessageInput] mic error:', err);
-      toast.error('Could not access the microphone.');
+      const denied = err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+      toast.error(denied
+        ? 'Microphone access was blocked. Enable it in your browser settings to record voice messages.'
+        : 'Could not access the microphone.');
       stopTracks();
+      setRecording(false);
+      setHandsFree(false);
+      handsFreeRef.current = false;
+      pressActiveRef.current = false;
     }
   };
 
@@ -167,7 +202,50 @@ export function MessageInput() {
     cancelRecordRef.current = cancel;
     const mr = mediaRecorderRef.current;
     if (mr && mr.state !== 'inactive') mr.stop();
-    else { stopTracks(); setRecording(false); setRecordSeconds(0); }
+    else {
+      stopTracks();
+      setRecording(false);
+      setRecordSeconds(0);
+      setHandsFree(false);
+      handsFreeRef.current = false;
+    }
+  };
+
+  // ── Tap-to-toggle vs hold-to-record (openchat-9de) ──────────────────────
+  // Press-and-hold: start recording on press, finalize + send on release.
+  // Quick tap (< TAP_THRESHOLD_MS): flip into hands-free mode and keep
+  // recording; the user then taps Stop (send) or Cancel in the recording bar.
+  const handleMicPressStart = () => {
+    if (pressActiveRef.current) return; // de-dupe pointer + mouse double-fire
+    if (recording || uploading || !activeConversationId) return;
+    pressActiveRef.current = true;
+    pressStartRef.current = Date.now();
+    handsFreeRef.current = false;
+    pendingStopRef.current = null;
+    void startRecording();
+  };
+
+  const handleMicPressEnd = () => {
+    if (!pressActiveRef.current) return;
+    pressActiveRef.current = false;
+    // Already in hands-free mode (e.g. release after a prior tap): ignore —
+    // the recording bar's own Stop/Cancel buttons drive it from here.
+    if (handsFreeRef.current) return;
+    const heldMs = Date.now() - pressStartRef.current;
+    if (heldMs < TAP_THRESHOLD_MS) {
+      // Treat as a tap → stay recording hands-free.
+      handsFreeRef.current = true;
+      setHandsFree(true);
+    } else {
+      // Treat as a hold → release finalizes and sends. If getUserMedia is
+      // still resolving (no recorder yet), defer the stop so startRecording
+      // can honor it the moment the recorder exists.
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        stopRecording(false);
+      } else {
+        pendingStopRef.current = 'send';
+      }
+    }
   };
 
   useEffect(() => () => stopTracks(), []);
@@ -378,21 +456,31 @@ export function MessageInput() {
             Recording {Math.floor(recordSeconds / 60)}:{(recordSeconds % 60).toString().padStart(2, '0')}
           </span>
           <div className="flex-1" />
-          <button
-            type="button"
-            onClick={() => stopRecording(true)}
-            className="rounded-full px-3 py-2 text-sm font-medium text-gray-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => stopRecording(false)}
-            aria-label="Send voice message"
-            className="rounded-full bg-blue-500 px-5 py-2 text-sm font-medium text-white hover:bg-blue-600"
-          >
-            Send
-          </button>
+          {handsFree ? (
+            // Hands-free (tap-to-toggle): explicit Stop/Cancel controls.
+            <>
+              <button
+                type="button"
+                onClick={() => stopRecording(true)}
+                className="rounded-full px-3 py-2 text-sm font-medium text-gray-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => stopRecording(false)}
+                aria-label="Stop and send voice message"
+                className="rounded-full bg-blue-500 px-5 py-2 text-sm font-medium text-white hover:bg-blue-600"
+              >
+                Stop
+              </button>
+            </>
+          ) : (
+            // Hold-to-record: the user is holding the mic; release sends.
+            <span className="text-xs text-gray-500 dark:text-slate-400">
+              Release to send · tap for hands-free
+            </span>
+          )}
         </div>
       ) : (
       <div className="flex gap-2 items-end">
@@ -426,14 +514,20 @@ export function MessageInput() {
           autoCorrect="on"
           className="flex-1 resize-none px-4 py-3 min-h-[44px] max-h-40 overflow-y-auto leading-6 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-3xl focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 text-base"
         />
-        {/* Mic when composer is empty (voice — bmp.7); Send otherwise. */}
+        {/* Mic when composer is empty (voice — bmp.7). Press-and-hold to
+            record-then-send; quick tap for hands-free recording (openchat-9de).
+            Pointer events cover mouse + touch + pen; the press guard de-dupes
+            the legacy mouse events some touch browsers also fire. */}
         {voiceSupported && !text.trim() && !pendingFile ? (
           <button
             type="button"
-            onClick={startRecording}
+            onPointerDown={(e) => { e.preventDefault(); handleMicPressStart(); }}
+            onPointerUp={(e) => { e.preventDefault(); handleMicPressEnd(); }}
+            onPointerLeave={handleMicPressEnd}
+            onPointerCancel={handleMicPressEnd}
             disabled={uploading}
-            aria-label="Record voice message"
-            className="px-4 py-3 min-h-[44px] min-w-[44px] bg-blue-500 text-white rounded-full hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50 font-medium transition-colors"
+            aria-label="Record voice message — hold to record, tap for hands-free"
+            className="px-4 py-3 min-h-[44px] min-w-[44px] bg-blue-500 text-white rounded-full hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50 font-medium transition-colors touch-none select-none"
           >
             {uploading ? '…' : '🎤'}
           </button>
