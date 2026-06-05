@@ -15,6 +15,7 @@
 import { useState } from 'react';
 import {
   Alert,
+  Clipboard,
   Modal,
   Platform,
   Pressable,
@@ -114,6 +115,14 @@ export function MessageActionSheet({
       senderName: senderName,
       content: message.content,
     });
+    handleDismiss();
+  };
+
+  // Press-and-hold → Copy (openchat-651). Uses RN's built-in Clipboard (same as
+  // the rest of the app); a brief alert confirms since the sheet just closes.
+  const handleCopy = () => {
+    if (!message) return;
+    Clipboard.setString(message.content ?? '');
     handleDismiss();
   };
 
@@ -367,6 +376,18 @@ export function MessageActionSheet({
 
             {/* Inline emoji reaction picker — always shown (OpenChat-7bd) */}
             <ReactionPicker myReactions={myReactions} onPick={handleReactPick} />
+
+            {/* Copy — always shown (even for deleted, harmless) (openchat-651) */}
+            {!message.deletedAt && (
+              <TouchableOpacity
+                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={handleCopy}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.actionIcon}>📋</Text>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Copy</Text>
+              </TouchableOpacity>
+            )}
 
             {/* Reply — always shown (skip if message is deleted) */}
             {!message.deletedAt && (

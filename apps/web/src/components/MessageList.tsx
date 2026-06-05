@@ -486,6 +486,16 @@ export function MessageList() {
                       <button
                         type="button"
                         onClick={() => {
+                          void navigator.clipboard?.writeText(message.content ?? '');
+                          setOpenMenuId(null);
+                        }}
+                        className="block w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800"
+                      >
+                        📋 Copy
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
                           setReplyTo(message);
                           setOpenMenuId(null);
                         }}

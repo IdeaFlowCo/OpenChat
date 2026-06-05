@@ -772,6 +772,32 @@ Guidelines:
  * scoped to `userId`, and writes the final text as a Message FROM the
  * assistant bot. Best-effort: logs and returns on any failure.
  */
+// Typing/"thinking" indicator for the Assistant (openchat-ft1). Reuses the
+// human typing:start/stop socket events — clients already render those — so the
+// bot shows "Assistant is typing…" while it works, just like a person.
+function emitAssistantTyping(io: IOServer | undefined, conversationId: string, on: boolean): void {
+  if (!io) return;
+  io.to(`conversation:${conversationId}`).emit(on ? 'typing:start' : 'typing:stop', {
+    conversationId,
+    userId: ASSISTANT_USER_ID,
+  });
+}
+
+// Intelligent error reporting (openchat-i0r): map a failure to a short, human
+// message the user actually sees in the chat, instead of silent nothing.
+function friendlyAssistantError(err: unknown): string {
+  const e = err as { status?: number; message?: string };
+  const status = typeof e?.status === 'number' ? e.status : undefined;
+  const msg = (e?.message || '').toLowerCase();
+  if (status === 429 || msg.includes('overloaded') || msg.includes('rate limit')) {
+    return "⚠️ I'm getting a lot of requests right now — give me a moment and ask again.";
+  }
+  if (status === 401 || status === 403) {
+    return '⚠️ I’m not fully configured to respond right now.';
+  }
+  return '⚠️ Sorry, I ran into a problem and couldn’t finish that. Mind trying again?';
+}
+
 export async function runAssistantTurn(opts: {
   userId: string;
   conversationId: string;
@@ -782,9 +808,18 @@ export async function runAssistantTurn(opts: {
   const client = await getAnthropicClient();
   if (!client) {
     console.warn('[assistant] ANTHROPIC_API_KEY not set — assistant turn skipped.');
+    await persistMessage(
+      io, ASSISTANT_USER_ID, conversationId,
+      "⚠️ I can’t respond right now — the AI isn’t configured on the server."
+    ).catch(() => {});
     return;
   }
 
+  // Heartbeat the typing indicator: the web client auto-clears a typer after 3s
+  // without a fresh typing:start, and an assistant turn often runs much longer
+  // (openchat-ft1). Re-emit every 2s until the turn finishes.
+  emitAssistantTyping(io, conversationId, true);
+  const typingHeartbeat = setInterval(() => emitAssistantTyping(io, conversationId, true), 2000);
   try {
     const tools = buildTools();
     const messages = await loadConversationContext(conversationId);
@@ -838,10 +873,19 @@ export async function runAssistantTurn(opts: {
       }
     }
 
-    if (finalText) {
-      await persistMessage(io, ASSISTANT_USER_ID, conversationId, finalText);
+    if (!finalText) {
+      finalText = "I couldn’t put together a response — mind rephrasing or trying again?";
     }
+    await persistMessage(io, ASSISTANT_USER_ID, conversationId, finalText);
   } catch (err) {
     console.error('[assistant] runAssistantTurn failed:', err);
+    // Report errors intelligently: surface a friendly message in the chat
+    // instead of leaving the user staring at a typing indicator (openchat-i0r).
+    await persistMessage(
+      io, ASSISTANT_USER_ID, conversationId, friendlyAssistantError(err)
+    ).catch(() => {});
+  } finally {
+    clearInterval(typingHeartbeat);
+    emitAssistantTyping(io, conversationId, false);
   }
 }
