@@ -58,6 +58,9 @@ const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
 // ── Voice message constants (OpenChat-xxc) ─────────────────────────────────
 const MAX_RECORDING_MS = 5 * 60 * 1000; // 5 minutes cap
 const CANCEL_DRAG_PX = 80; // horizontal drag distance to cancel recording
+// Press shorter than this is treated as a TAP → hands-free (locked) recording
+// (OpenChat-9de). A longer press is a HOLD → record-while-held, send on release.
+const TAP_THRESHOLD_MS = 350;
 
 // Distance from the bottom (in px) within which we consider the user to be
 // "at bottom" — i.e. they want to see new messages as they arrive. Beyond
@@ -293,6 +296,11 @@ export function ChatScreen({
 
   // ── Voice recording state (OpenChat-xxc) ───────────────────────────────────
   const [isRecording, setIsRecording] = useState(false);
+  // Hands-free / locked mode (OpenChat-9de): set when the mic was TAPPED rather
+  // than held. Recording continues after the finger lifts; the user ends it with
+  // the Stop button (send) or Cancel button (discard) in the recording bar.
+  const [recordingLocked, setRecordingLocked] = useState(false);
+  const recordingLockedRef = useRef(false);
   const [recordingCancelled, setRecordingCancelled] = useState(false);
   const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
   const recordingRef = useRef<Recording | null>(null);
@@ -300,9 +308,11 @@ export function ChatScreen({
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const recordingMaxTimerRef = useRef<NodeJS.Timeout | null>(null);
   const micPressStartXRef = useRef<number>(0);
-  // Stable ref so the max-duration timer can call handleMicPressOut without
-  // a stale closure from handleMicPressIn's useCallback dependencies.
-  const handleMicPressOutRef = useRef<(wasCancelled: boolean) => Promise<void>>(async () => {});
+  // Wall-clock time the mic press began — used to tell a TAP from a HOLD.
+  const micPressStartTimeRef = useRef<number>(0);
+  // Stable ref to the current finishRecording closure, so out-of-render callers
+  // (the 5-minute hard-cap timer) avoid a stale closure.
+  const finishRecordingRef = useRef<(wasCancelled: boolean) => Promise<void>>(async () => {});
 
   // ── Toast state ────────────────────────────────────────────────────────────
   const [toastVisible, setToastVisible] = useState(false);
@@ -756,8 +766,11 @@ export function ChatScreen({
 
   /** Called when the mic button is pressed in. Starts recording. */
   const handleMicPressIn = useCallback(async (pageX: number) => {
+    // If already recording in locked (hands-free) mode, ignore further presses
+    // on the mic — the Stop/Cancel buttons drive the end of a locked recording.
     if (sending || uploadingAttachment || isRecording || Platform.OS === 'web') return;
     micPressStartXRef.current = pageX;
+    micPressStartTimeRef.current = Date.now();
     setRecordingCancelled(false);
     setRecordingElapsedMs(0);
 
@@ -774,17 +787,55 @@ export function ChatScreen({
 
       // Hard cap at 5 minutes. Use ref to avoid stale closure.
       recordingMaxTimerRef.current = setTimeout(() => {
-        void handleMicPressOutRef.current(false);
+        void finishRecordingRef.current(false);
       }, MAX_RECORDING_MS);
     } catch (err) {
+      // Most common: microphone permission denied. Surface a clear message
+      // rather than silently failing (OpenChat-9de).
       console.warn('[voice] startRecording error:', err);
       setIsRecording(false);
+      const denied = err instanceof Error && /permission/i.test(err.message);
+      Alert.alert(
+        denied ? 'Microphone access needed' : 'Recording failed',
+        denied
+          ? 'Enable microphone access in Settings to send voice messages.'
+          : 'Could not start recording. Please try again.'
+      );
     }
   }, [sending, uploadingAttachment, isRecording]);
 
-  /** Called when the mic button is released. Stops and sends (or cancels). */
+  /**
+   * Called when the finger lifts off the mic button. Distinguishes a TAP (short
+   * press → hands-free locked recording) from a HOLD (record-while-held → send
+   * on release). A drag-cancel passes wasCancelled=true. (OpenChat-9de)
+   */
   const handleMicPressOut = useCallback(async (wasCancelled: boolean) => {
     if (!isRecording && !recordingRef.current) return;
+
+    // In locked (hands-free) mode the finger lift is a no-op — recording keeps
+    // going until the user taps Stop or Cancel.
+    if (recordingLockedRef.current) return;
+
+    const pressMs = Date.now() - micPressStartTimeRef.current;
+
+    // Short press that was NOT a drag-cancel → enter hands-free locked mode.
+    if (!wasCancelled && pressMs < TAP_THRESHOLD_MS) {
+      recordingLockedRef.current = true;
+      setRecordingLocked(true);
+      return;
+    }
+
+    // Otherwise it's a HOLD release (or a cancel) → finish the recording.
+    await finishRecording(wasCancelled);
+  }, [isRecording, sending, sendMessage, replyTo, uploadAudio]);
+
+  /**
+   * Ends the current recording: sends it (wasCancelled=false) or discards it
+   * (wasCancelled=true). Shared by the hold-release path, the locked-mode
+   * Stop/Cancel buttons, and the 5-minute hard cap. (OpenChat-xxc / 9de)
+   */
+  const finishRecording = useCallback(async (wasCancelled: boolean) => {
+    if (!recordingRef.current) return;
 
     // Clear timers.
     if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
@@ -793,6 +844,8 @@ export function ChatScreen({
     const rec = recordingRef.current;
     recordingRef.current = null;
     setIsRecording(false);
+    recordingLockedRef.current = false;
+    setRecordingLocked(false);
 
     if (!rec) return;
 
@@ -831,13 +884,13 @@ export function ChatScreen({
       setSending(false);
       setRecordingElapsedMs(0);
     }
-  }, [isRecording, sendMessage, replyTo]);
+  }, [sendMessage, replyTo, uploadAudio]);
 
-  // Keep the ref up to date so the max-duration timer always calls the
-  // current version of handleMicPressOut.
+  // Keep the ref up to date so the max-duration timer (and any other
+  // out-of-render caller) always invokes the current finishRecording closure.
   useEffect(() => {
-    handleMicPressOutRef.current = handleMicPressOut;
-  }, [handleMicPressOut]);
+    finishRecordingRef.current = finishRecording;
+  }, [finishRecording]);
 
   const handleSend = async () => {
     const trimmed = text.trim();
@@ -1238,6 +1291,21 @@ export function ChatScreen({
                       </TouchableOpacity>
                     );
                   })}
+                  {/* Voice transcript caption (OpenChat-4jn) — muted line under
+                      the voice bubble. Present on history load and updated live
+                      via the message:transcript socket event. */}
+                  {!m.deletedAt && !!m.transcript && m.attachments?.some(a => a.type === 'audio') && (
+                    <Text
+                      style={{
+                        color: isOwn ? 'rgba(255,255,255,0.75)' : c.textMuted,
+                        fontSize: 13,
+                        fontStyle: 'italic',
+                        marginTop: 4,
+                      }}
+                    >
+                      {m.transcript}
+                    </Text>
+                  )}
                   {/* Deleted: muted italic tombstone (OpenChat-q9h) */}
                   {m.deletedAt
                     ? <Text style={{ color: isOwn ? 'rgba(255,255,255,0.55)' : c.textMuted, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
@@ -1404,7 +1472,10 @@ export function ChatScreen({
         </View>
       )}
 
-      {/* Recording overlay — shown while mic is held (OpenChat-xxc) */}
+      {/* Recording overlay (OpenChat-xxc / 9de).
+          - HOLD mode: shows elapsed time + "slide to cancel" hint.
+          - LOCKED (hands-free) mode: shows elapsed time + Cancel and Stop
+            buttons so the user can finish without holding. */}
       {isRecording && (
         <View style={[styles.recordingBar, { backgroundColor: c.surface, borderColor: c.border }]}>
           <View style={[styles.recordingDot, { backgroundColor: '#ef4444' }]} />
@@ -1416,9 +1487,31 @@ export function ChatScreen({
               return `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
             })()}
           </Text>
-          <Text style={{ color: c.textMuted, fontSize: 12, marginLeft: 12 }}>
-            {'← Slide to cancel'}
-          </Text>
+          {recordingLocked ? (
+            <>
+              <View style={{ flex: 1 }} />
+              <TouchableOpacity
+                onPress={() => void finishRecording(true)}
+                style={{ paddingHorizontal: 12, paddingVertical: 6 }}
+                hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                accessibilityLabel="Cancel voice message"
+              >
+                <Text style={{ color: c.textMuted, fontSize: 14, fontWeight: '500' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => void finishRecording(false)}
+                style={[styles.recordingStopBtn, { backgroundColor: c.primary }]}
+                hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                accessibilityLabel="Stop and send voice message"
+              >
+                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>Stop</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <Text style={{ color: c.textMuted, fontSize: 12, marginLeft: 12 }}>
+              {'← Slide to cancel · tap mic for hands-free'}
+            </Text>
+          )}
         </View>
       )}
 
@@ -1723,6 +1816,13 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
+  },
+  // Stop-and-send button shown in hands-free (locked) recording (OpenChat-9de)
+  recordingStopBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 16,
+    marginLeft: 4,
   },
   attachmentImage: {
     width: '100%',

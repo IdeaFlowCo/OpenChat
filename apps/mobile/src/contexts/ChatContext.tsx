@@ -526,12 +526,24 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }));
     };
 
+    // message:transcript — server-side voice transcription ready (OpenChat-4jn).
+    // Sets the matching message's transcript so the caption appears live under
+    // the voice bubble. `messages` only holds the active conversation, so the
+    // conversation guard keeps stale-conversation events from no-op churning.
+    const onTranscript = (payload: { messageId: string; conversationId: string; transcript: string }) => {
+      if (payload.conversationId !== activeConvIdRef.current) return;
+      setMessages(prev => prev.map(m =>
+        m.id === payload.messageId ? { ...m, transcript: payload.transcript } : m
+      ));
+    };
+
     sock.on('connect', onConnect);
     sock.on('disconnect', onDisconnect);
     sock.on('message:new', onMessage);
     sock.on('message:updated', onMessageUpdated);
     sock.on('message:reactions-updated', onReactionsUpdated);
     sock.on('message:preview-ready', onPreviewReady);
+    sock.on('message:transcript', onTranscript);
     sock.on('conversation:created', onConversationCreated);
     sock.on('conversation:updated', onConversationUpdated);
     sock.on('participant:added', onParticipantAdded);
@@ -551,6 +563,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sock.off('message:updated', onMessageUpdated);
       sock.off('message:reactions-updated', onReactionsUpdated);
       sock.off('message:preview-ready', onPreviewReady);
+      sock.off('message:transcript', onTranscript);
       sock.off('conversation:created', onConversationCreated);
       sock.off('conversation:updated', onConversationUpdated);
       sock.off('participant:added', onParticipantAdded);
