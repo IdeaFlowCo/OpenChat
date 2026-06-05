@@ -125,8 +125,28 @@ existing Thoughts feature (confirmed trivial by research):
 | **Notestream** | derived (isPublished + accessMode + accessEmails[]) | none; email allow-list; per-#hashtag container share | per-item + per-container | Copy: per-container (conversation) default + per-item override; UNLISTED vs LISTED. |
 | **Cortex** | n/a (infra isolation) | WorkspaceMember (1 group→1 workspace) | per-tenant container/VM | Wrong shape for chat. Lesson: default-deny + explicit shares only. |
 
-**Cross-cutting:** none have a real team object — OpenChat's `Conversation` membership is
-the differentiator and the right group principal.
+### Correction (2026-06-04 follow-up — Jacob flagged that group objects DO exist)
+My "none have a real group object" was wrong. The rest of the portfolio:
+
+| Project | Group/team object | Per-item visibility |
+|---|---|---|
+| **CollabLists** (`collablists-convodocs`) | **Built**: `teams` + `team_members` + `team_invitations` (`drizzle/0023_teams.sql`) | **In-flight** (ticket `collablists12-25-2bd`) + multi-list-membership via `list_item_memberships` |
+| **WIT** (`world-issue-tracker`) | `trackers` container (owned via `created_by_user_id`) + **planned** `tracker_members` (noted in `20260430020000_trackers_created_by.sql`) | per-issue, scoped to a tracker |
+| **Notestream** | `SharedHashtag` — a shared collaborative tag anyone invited can add to (`accessEmails[]`, `UNLISTED|LISTED`, `ENT-5280`); a shared *space*, not a member table | per-note (`isPublished`+`accessMode`+`accessEmails`) |
+
+**Revised takeaway:** the portfolio is converging on **container + members + per-item visibility**
+(CollabLists `teams`/`team_members`, WIT `trackers`/planned `tracker_members`). OpenChat's
+`Conversation` + `PARTICIPATES_IN` is the *same shape, already built* — we're aligned, not unique.
+
+**Decision — group principal:**
+- **(A) Conversation-membership** as the group tier (cheapest; reuse `PARTICIPATES_IN`; v1).
+- **(B) A first-class `Group`/`Team` object** (matches CollabLists `team_members` + WIT `tracker_members`)
+  that BOTH conversations and thoughts can be scoped to — more durable + reusable, portfolio-aligned,
+  but more to build.
+- **Recommendation:** ship (A) for the Thoughts demo, but make the `visibilityFilter`'s group principal
+  *pluggable* so (B) slots in later without a rewrite. If cross-resource teams (a team that owns
+  thoughts AND conversations AND eventually CollabLists/WIT items) is the real goal, go (B) — possibly a
+  shared team model across apps.
 
 ## Phasing
 1. **Thoughts visibility demo** + the `visibilityFilter` helper *(small — proves the model)*
@@ -136,8 +156,9 @@ the differentiator and the right group principal.
 5. **Public bot endpoint + agent-to-agent** *(network effect)*
 
 ## Open questions for Jacob
-- **"Collura"** — no repo/file/memory matches it. Best guesses: a typo for **Cortex**, or
-  **Collab/Collablists** (your noos `#collablists`/`#agent-collab` nodes). Which did you mean?
+- ~~"Collura"~~ → **CollabLists** (confirmed). It has a built `teams`/`team_members`/`team_invitations`
+  model + in-flight per-item visibility — the closest prior art; mirror it (see Correction above).
+- **Group principal: (A) conversation-membership vs (B) first-class `Group`/`Team`** — see Decision above.
 - **Distinct bot identities** after all, or is the single-runtime + per-context model right?
 - Should the group agent be **opt-in per conversation** (added like a participant) or
   **ambient** (always available via `@assistant`)? (Recommend opt-in via `containsBot`.)
