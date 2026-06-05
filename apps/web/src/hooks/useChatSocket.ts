@@ -18,6 +18,8 @@ interface UseChatSocketOptions {
   onReactionsUpdated?: (data: { messageId: string; conversationId: string; reactions: Array<{ emoji: string; count: number; byMe: boolean }> }) => void;
   /** A participant marked the conversation read (openchat-bmp.4). */
   onReadUpdated?: (data: { conversationId: string; userId: string; lastReadAt: string; readMap?: Record<string, string | null>; onlineMap?: Record<string, boolean> }) => void;
+  /** A voice message was auto-transcribed (openchat-4jn). */
+  onTranscript?: (data: { messageId: string; conversationId: string; transcript: string }) => void;
 }
 
 export function useChatSocket(options: UseChatSocketOptions) {
@@ -34,6 +36,7 @@ export function useChatSocket(options: UseChatSocketOptions) {
     onMessageUpdated,
     onReactionsUpdated,
     onReadUpdated,
+    onTranscript,
   } = options;
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -154,6 +157,13 @@ export function useChatSocket(options: UseChatSocketOptions) {
       onReadUpdated?.(data);
     });
 
+    // Voice-message transcript ready (openchat-4jn). The server emits this
+    // once async transcription finishes; we patch it onto the message so the
+    // caption appears live without a reload.
+    socket.on('message:transcript', (data) => {
+      onTranscript?.(data);
+    });
+
     socket.on('error', (error) => {
       console.error('Socket error:', error);
     });
@@ -201,6 +211,7 @@ export function useChatSocket(options: UseChatSocketOptions) {
     onMessageUpdated,
     onReactionsUpdated,
     onReadUpdated,
+    onTranscript,
   ]);
 
   const joinConversation = useCallback((conversationId: string) => {

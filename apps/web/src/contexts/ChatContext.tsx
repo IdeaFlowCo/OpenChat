@@ -218,6 +218,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // A voice message was auto-transcribed (openchat-4jn). Patch the transcript
+  // onto the message if it's loaded so the caption appears live without a
+  // reload.
+  const handleTranscript = useCallback((data: { messageId: string; conversationId: string; transcript: string }) => {
+    setMessages(prev => prev.map(m => (m.id === data.messageId ? { ...m, transcript: data.transcript } : m)));
+  }, []);
+
   const handleTypingStart = useCallback((data: { conversationId: string; userId: string }) => {
     setTypingUsers(prev => {
       const newMap = new Map(prev);
@@ -338,6 +345,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     onMessageUpdated: handleMessageUpdated,
     onReactionsUpdated: handleReactionsUpdated,
     onReadUpdated: handleReadUpdated,
+    onTranscript: handleTranscript,
   });
 
   // Set API token when auth changes

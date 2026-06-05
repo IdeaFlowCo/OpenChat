@@ -376,14 +376,28 @@ export function MessageList() {
                   {!isDeleted && message.attachments?.map((att, i) => {
                     const isAudio = att.type === 'audio' || att.mimeType?.startsWith('audio/');
                     if (isAudio) {
+                      // Transcript caption (openchat-4jn): muted/italic text
+                      // under the bubble once the server transcribes it. Show
+                      // nothing while absent/pending.
+                      const transcript = message.transcript?.trim();
                       return (
-                        <VoiceMessageBubble
-                          key={i}
-                          url={att.url}
-                          durationMs={att.durationMs ?? 0}
-                          messageId={`${message.id}-${i}`}
-                          isOwn={isOwn}
-                        />
+                        <div key={i}>
+                          <VoiceMessageBubble
+                            url={att.url}
+                            durationMs={att.durationMs ?? 0}
+                            messageId={`${message.id}-${i}`}
+                            isOwn={isOwn}
+                          />
+                          {transcript && (
+                            <div
+                              className={`mt-0.5 text-xs italic ${
+                                isOwn ? 'text-blue-100/80' : 'text-gray-500 dark:text-slate-400'
+                              }`}
+                            >
+                              {transcript}
+                            </div>
+                          )}
+                        </div>
                       );
                     }
                     return (
