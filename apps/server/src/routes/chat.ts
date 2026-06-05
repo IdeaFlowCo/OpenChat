@@ -12,6 +12,7 @@ import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPr
 import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from '../services/embeddings.js';
+import { maybeTranscribeMessage } from '../services/transcribeVoice.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
 let _s3: S3Client | null = null;
@@ -1077,6 +1078,13 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // Async link preview fetch — non-blocking (OpenChat-hq2)
     if (io) {
       processLinkPreviews(io, message.id as string, conversationId as string, messageContent);
+    }
+    // Voice transcription — non-blocking, best-effort (openchat-4jn). Whisper
+    // transcribes any audio attachment and emits message:transcript.
+    if (hasAttachments) {
+      void maybeTranscribeMessage(io, message.id as string, conversationId as string, attachments).catch(
+        () => { /* best-effort */ }
+      );
     }
 
     // Hashtag → Thought extraction (OpenChat-thoughts-from-tags). Best-
