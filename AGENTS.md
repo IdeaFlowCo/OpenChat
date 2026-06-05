@@ -4,18 +4,37 @@ This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get sta
 
 ## 🔁 Web ↔ Mobile parity (MANDATORY)
 
-OpenChat ships across **two repos that must stay in sync**:
+**MONOREPO (since 2026-06-04):** everything lives in this one repo, `IdeaFlowCo/OpenChat`:
 
-| Repo | What it is | Surfaces |
+| Path | What it is | Surfaces |
 |------|-----------|----------|
-| `IdeaFlowCo/OpenChat` (this repo) | Node/Express + Neo4j **server**, legacy Vite **web** client, and the **deploy host** that `expo export`s openchat-mobile into `/m` and `/d` | `chat.globalbr.ai`, `/legacy` |
-| `tmad4000/openchat-mobile` (`~/code/openchat-mobile`) | React Native / Expo app | native iOS (TestFlight) + RN-web at **`/m`** (mobile web) and **`/d`** (desktop web) |
+| `apps/server` | Node/Express + Socket.io + Neo4j **server** (shared backend) | `chat.globalbr.ai/api/*` |
+| `apps/web` | Vite/React **web** client (legacy) | `chat.globalbr.ai/`, `/legacy` |
+| `apps/mobile` | React Native / Expo app | native iOS (TestFlight) + RN-web at **`/m`** (mobile web) and **`/d`** (desktop web) |
+| `apps/mcp-server` | MCP REST→tools bridge (Claude-side connector) | run locally / connect to Claude |
+| `infra/` | `deploy.sh`, `docker-compose.prod.yml`, `Dockerfile` | prod deploy |
 
-**Rule: any user-facing chat change you make in one repo, you must also make in the other**, in the SAME work session, so native and web never drift. This includes composer behavior, send/receive, auth flows, message rendering, presence, etc. The backend is shared (one server), so server changes cover both — but **client changes do NOT cross repos automatically**.
+(The old separate `tmad4000/openchat-mobile` repo is **frozen/archived** — its history is in `apps/mobile`.)
 
-- After changing a feature here, ask: "does `openchat-mobile` have the same surface?" If yes, port it (and vice versa). `deploy.sh` rebuilds `/m`,`/d` from `~/code/openchat-mobile`, so a web deploy ships whatever is committed there.
+**Rule: any user-facing chat change in one client (`apps/web` / `apps/mobile`) must be mirrored in the other in the SAME session** so native and web never drift (composer, send/receive, auth, rendering, presence…). The backend (`apps/server`) is shared, so server changes cover both. `infra/deploy.sh` rebuilds `/m`,`/d` from `apps/mobile`.
 - **Platform-appropriate exceptions are fine** (just document them): e.g. Enter-to-send is **web-only** — on a native touch keyboard the return key stays a newline and sending is the send button. No hardware-keyboard Enter handling is needed.
 - Standing tracker: epic **openchat-3jq** ("keep web/mobile in sync").
+
+## 🚀 Deploy when done (STANDING RULE — Jacob, 2026-06-04)
+
+When you finish a chunk of work, **deploy both** without asking each time:
+
+1. **Web / server / `/m` / `/d`:**
+   ```bash
+   cd ~/code/OpenChat && bash infra/deploy.sh
+   ```
+2. **Native iOS → TestFlight** (bumps version, `eas build --local`, `eas submit`, publishes to testers → Apple Beta review):
+   ```bash
+   cd ~/code/OpenChat/apps/mobile && TMPDIR="$HOME/.ocbuild-tmp" bash scripts/local-build.sh
+   ```
+   - **Never run `local-build.sh` under tmux.** Use a canonical `TMPDIR` under `$HOME` (the `/tmp` symlink breaks Metro: "Unable to resolve module index.ts"). Node must be v22.
+   - The fastlane `exportArchive` step "fails" on macOS Tahoe (openrsync `-E`); the script works around it with a manual IPA zip — that's expected, the build still ships.
+   - Signing creds live (gitignored) in `apps/mobile/.credentials/` + `apps/mobile/credentials.json`; ASC API key in `~/.appstoreconnect/`.
 
 ## Quick Reference
 
