@@ -20,6 +20,9 @@ const WIT_BASE =
   process.env.WIT_API_BASE ||
   'https://sthqnyjniclvnflfkyio.supabase.co/functions/v1';
 const WIT_SITE = process.env.WIT_SITE_URL || 'https://worldissuetracker.com';
+// File feedback onto the OpenChat board/tracker by default. Previously omitted,
+// so every feedback issue was created ORPHAN (tracker_id null). Override via env.
+const WIT_TRACKER_SLUG = process.env.WIT_FEEDBACK_TRACKER_SLUG || 'openchat';
 const MAX_MESSAGE = 5000;
 
 // POST /api/feedback — create a WIT issue from a user's feedback message.
@@ -68,6 +71,7 @@ router.post('/', resolveActor, async (req: Request, res: Response) => {
         title,
         description,
         labels: ['openchat-feedback'],
+        tracker_slug: WIT_TRACKER_SLUG, // file on the OpenChat board, not orphan
       }),
     });
     const data = (await r.json().catch(() => null)) as

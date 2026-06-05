@@ -513,6 +513,7 @@ async function toolCreateConversation(
 // /api/feedback route (same WIT_AGENT_KEY server env).
 const WIT_BASE = process.env.WIT_API_BASE || 'https://sthqnyjniclvnflfkyio.supabase.co/functions/v1';
 const WIT_SITE = process.env.WIT_SITE_URL || 'https://worldissuetracker.com';
+const WIT_TRACKER_SLUG = process.env.WIT_FEEDBACK_TRACKER_SLUG || 'openchat'; // file on the OpenChat board, not orphan
 const FEEDBACK_MAX_MESSAGE = 5000; // match POST /api/feedback
 const FEEDBACK_MAX_CONTEXT = 1000;
 const FEEDBACK_RATE_LIMIT = 5; // max submissions per user per window
@@ -569,7 +570,7 @@ async function toolSubmitFeedback(
     const r = await fetch(`${WIT_BASE}/create-issue`, {
       method: 'POST',
       headers: { 'X-Agent-Key': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, description, labels: ['openchat-feedback'] }),
+      body: JSON.stringify({ title, description, labels: ['openchat-feedback'], tracker_slug: WIT_TRACKER_SLUG }),
       signal: AbortSignal.timeout(10_000), // don't let a hung WIT stall the turn
     });
     const data = (await r.json().catch(() => null)) as
