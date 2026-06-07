@@ -9,7 +9,8 @@
  */
 
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Clipboard, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Clipboard, Linking, Modal, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
 import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
@@ -502,6 +503,65 @@ export function SettingsScreen() {
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>
                 Manage who you've blocked
               </Text>
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Invite people (openchat-37z). Shareable QR/link points to the landing
+          page (chat.globalbr.ai) which branches to iOS TestFlight, web, and
+          Android — so one QR works for whoever scans it. */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>INVITE PEOPLE</Text>
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <View style={{ alignItems: 'center', paddingVertical: 18 }}>
+            <View style={{ backgroundColor: '#fff', padding: 12, borderRadius: 12 }}>
+              <QRCode value="https://chat.globalbr.ai" size={168} />
+            </View>
+            <Text style={[styles.optionHint, { color: c.textSecondary, marginTop: 10, textAlign: 'center', paddingHorizontal: 16 }]}>
+              Scan to open the OpenChat download page — iOS TestFlight, web, or Android
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+            onPress={async () => {
+              const url = 'https://chat.globalbr.ai';
+              const message = `Try OpenChat — chat with a built-in AI assistant: ${url}`;
+              if (Platform.OS === 'web') {
+                const nav = (globalThis as unknown as { navigator?: { share?: (d: unknown) => Promise<void> } }).navigator;
+                if (nav?.share) { try { await nav.share({ title: 'OpenChat', text: message, url }); } catch { /* cancelled */ } return; }
+                Clipboard.setString(url); Alert.alert('Copied', 'Invite link copied to clipboard.'); return;
+              }
+              try { await Share.share({ message, url }); } catch { /* cancelled */ }
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>📤  Share invite link</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>chat.globalbr.ai · works on any device</Text>
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+            onPress={() => Linking.openURL('https://testflight.apple.com/join/QvUPzDMY')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Get the iOS app · TestFlight</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Install the native beta on iPhone</Text>
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => Linking.openURL('https://chat.globalbr.ai/about')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>View the download page</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>The landing page with every platform</Text>
             </View>
             <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
           </TouchableOpacity>
