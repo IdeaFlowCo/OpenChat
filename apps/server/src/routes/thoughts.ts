@@ -69,7 +69,16 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       `
       MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought)
       ${where}
-      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, tags: coalesce(t.tags, []) } AS thought
+      // Provenance: which chat a tag-extracted thought came from, so the
+      // Thoughts UI can label "from <chat>" + filter per-conversation.
+      OPTIONAL MATCH (t)-[:FROM_MESSAGE]->(m:Message)
+      OPTIONAL MATCH (conv:Conversation { id: m.conversationId })
+      RETURN t {
+        .id, .text, .kind, .status, .createdAt, .updatedAt,
+        tags: coalesce(t.tags, []),
+        sourceConversationId: m.conversationId,
+        sourceConversationName: conv.name
+      } AS thought
       ORDER BY t.createdAt DESC
       LIMIT $limit
       `,
