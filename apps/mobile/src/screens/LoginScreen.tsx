@@ -19,7 +19,7 @@ import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useTheme } from '../contexts/ThemeContext';
-import { loginWithPassword, googleIdTokenExchange, googleExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL } from '../api/client';
+import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
 
@@ -49,6 +49,9 @@ export function LoginScreen() {
   const { bootstrapIfAuthed } = useChat();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // 'signin' = existing account; 'register' = create a new account (name+email+password).
+  const [mode, setMode] = useState<'signin' | 'register'>('signin');
+  const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
@@ -258,9 +261,27 @@ export function LoginScreen() {
     }
   };
 
+  const doRegister = async (n: string, e: string, p: string): Promise<void> => {
+    setLoading(true);
+    try {
+      await registerWithPassword(e.trim(), p, n.trim());
+      // Flip auth state in the context — the navigator swaps stacks.
+      await bootstrapIfAuthed();
+    } catch (err) {
+      Alert.alert('Sign-up failed', err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async () => {
-    if (!email || !password) return;
-    await doLogin(email, password);
+    if (mode === 'register') {
+      if (!name.trim() || !email || !password) return;
+      await doRegister(name, email, password);
+    } else {
+      if (!email || !password) return;
+      await doLogin(email, password);
+    }
   };
 
   const handleQuickLogin = async (acct: TestAccount) => {
@@ -324,6 +345,18 @@ export function LoginScreen() {
           <View style={[styles.orLine, { backgroundColor: c.border }]} />
         </View>
 
+        {mode === 'register' && (
+          <TextInput
+            style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
+            value={name}
+            onChangeText={setName}
+            placeholder="Your name"
+            placeholderTextColor={c.textMuted}
+            autoCapitalize="words"
+            autoComplete="name"
+            editable={!loading}
+          />
+        )}
         <TextInput
           style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
           value={email}
@@ -356,8 +389,18 @@ export function LoginScreen() {
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.buttonText}>Sign In</Text>
+            <Text style={styles.buttonText}>{mode === 'register' ? 'Create account' : 'Sign In'}</Text>
           )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => setMode(mode === 'register' ? 'signin' : 'register')}
+          disabled={loading}
+          style={{ marginTop: 14, alignSelf: 'center' }}
+        >
+          <Text style={{ color: c.primary, fontSize: 14, fontWeight: '600' }}>
+            {mode === 'register' ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
+          </Text>
         </TouchableOpacity>
 
         {SHOW_TEST_LOGINS && (

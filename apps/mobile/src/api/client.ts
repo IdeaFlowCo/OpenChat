@@ -453,6 +453,42 @@ export async function loginWithPassword(
 }
 
 /**
+ * Create a new account with email + password + name (Noos /api/auth/register),
+ * then sign in. Gives users a path that doesn't depend on Google/Apple — needed
+ * especially on Android where native Google sign-in requires extra setup.
+ */
+export async function registerWithPassword(
+  email: string,
+  password: string,
+  name: string
+): Promise<{ user: CurrentUser; token: string }> {
+  const res = await fetch(`${NOOS_URL}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password, name }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try {
+      const j = JSON.parse(text);
+      msg = j.error || j.message || text;
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(`Sign-up failed (${res.status}): ${msg}`);
+  }
+  const body = await res.json();
+  const user: CurrentUser = {
+    userId: body.user.id,
+    email: body.user.email,
+    name: body.user.name,
+  };
+  await setSession(body.accessToken, user);
+  return { user, token: body.accessToken };
+}
+
+/**
  * Search response shape — mirrors server/src/routes/chat.ts → GET /search.
  * Three buckets returned together so the UI can render one combined search
  * panel without three separate round-trips.
