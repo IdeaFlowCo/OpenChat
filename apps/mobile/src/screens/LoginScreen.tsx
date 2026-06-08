@@ -19,7 +19,7 @@ import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useTheme } from '../contexts/ThemeContext';
-import { loginWithPassword, googleIdTokenExchange, googleExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, OPENCHAT_URL } from '../api/client';
+import { loginWithPassword, googleIdTokenExchange, googleExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
 
@@ -120,7 +120,7 @@ export function LoginScreen() {
   // still used at chat.globalbr.ai and the RN-web build at /m on web.
   const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest({
     iosClientId: GOOGLE_IOS_CLIENT_ID,
-    androidClientId: GOOGLE_IOS_CLIENT_ID, // TODO: separate Android client when Android ships
+    androidClientId: GOOGLE_ANDROID_CLIENT_ID, // Android-type client (pkg + SHA-1); falls back to iOS until EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID is set
     webClientId: GOOGLE_CLIENT_ID,
     clientId: GOOGLE_IOS_CLIENT_ID,
     scopes: ['openid', 'email', 'profile'],

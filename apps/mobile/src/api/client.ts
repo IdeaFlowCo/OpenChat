@@ -296,6 +296,19 @@ export const GOOGLE_IOS_CLIENT_ID =
   '874749606899-ajd7segoct156poo3gbeoefg3s349626.apps.googleusercontent.com';
 
 /**
+ * GOOGLE_ANDROID_CLIENT_ID — the Android-type OAuth client (package
+ * com.jacobcole.openchat + the signing-cert SHA-1). REQUIRED for native
+ * Android Google sign-in: Android rejects iOS/Web client IDs, so the OAuth
+ * flow can't return to the app and strands the user on Google's homepage
+ * (→ news). Create the client in the GCP console (Credentials → OAuth client →
+ * Android) and set EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID. Until then it falls
+ * back to the iOS client so builds don't break — but Android sign-in stays
+ * broken until the real Android client is configured. (openchat — android-oauth)
+ */
+export const GOOGLE_ANDROID_CLIENT_ID =
+  process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || GOOGLE_IOS_CLIENT_ID;
+
+/**
  * Exchange a Google authorization code for an OpenChat JWT + user. Hits the
  * SAME server endpoint the web client uses (`POST /api/auth/google/exchange`).
  * The server holds GOOGLE_CLIENT_SECRET and performs the actual token swap
