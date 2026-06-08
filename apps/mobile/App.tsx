@@ -356,12 +356,11 @@ function AuthedTabs({
         tabBarActiveTintColor: c.primary,
         tabBarInactiveTintColor: c.textSecondary,
         tabBarLabelStyle: { fontSize: 12, fontWeight: '500' },
-        // desktop-ux-audit: tint the WHOLE active tab cell (not just the icon
-        // pill). On desktop web each cell is ~half the screen, so a full-cell
-        // primaryMuted fill is the dominant "this tab is selected" signal;
-        // mobile cells are narrow enough that this reads as a subtle highlight.
-        // Safe in both light + dark (primaryMuted is a low-alpha cobalt wash).
-        tabBarActiveBackgroundColor: c.primaryMuted,
+        // NO full-cell tabBarActiveBackgroundColor: the contained icon pill
+        // (TabIcon → primaryMuted, borderRadius 14) is the selected affordance.
+        // Stacking a full-cell fill ON the pill made the active tab read as a
+        // broken doubled blue block on mobile. The pill alone is clean on both
+        // mobile + desktop web.
       }}
     >
       <Tab.Screen
