@@ -574,6 +574,17 @@ export function SettingsScreen() {
         <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
           <TouchableOpacity
             style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+            onPress={() => Linking.openURL('https://github.com/IdeaFlowCo/OpenChat')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Source code · GitHub</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>github.com/IdeaFlowCo/OpenChat — open source</Text>
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
             onPress={() => Linking.openURL('https://chat.globalbr.ai/')}
             activeOpacity={0.7}
           >

@@ -397,6 +397,10 @@ function RootView({
             <div className="flex justify-between gap-4"><dt className="text-gray-500 dark:text-slate-400">Commit</dt><dd className="text-right font-mono text-sm text-gray-900 dark:text-slate-100">{APP_GIT_SHA || 'unknown'}</dd></div>
             <div className="flex justify-between gap-4"><dt className="text-gray-500 dark:text-slate-400">Branch</dt><dd className="text-right font-mono text-sm text-gray-900 dark:text-slate-100">{APP_GIT_BRANCH || 'unknown'}</dd></div>
           </dl>
+          <a href="https://github.com/IdeaFlowCo/OpenChat" target="_blank" rel="noopener" className="mt-3 flex items-center justify-between gap-4 border-t border-gray-100 dark:border-slate-800 pt-3 text-sm font-medium text-gray-900 dark:text-slate-100 hover:underline">
+            <span>Source code · GitHub<span className="block text-xs font-normal text-gray-500 dark:text-slate-400">github.com/IdeaFlowCo/OpenChat — open source</span></span>
+            <span className="text-gray-400">↗</span>
+          </a>
           <label className="mt-3 flex items-center justify-between gap-4 border-t border-gray-100 dark:border-slate-800 pt-3">
             <span>
               <span className="block text-sm font-medium text-gray-900 dark:text-slate-100">Show version in top bar</span>
