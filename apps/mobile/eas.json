@@ -25,6 +25,9 @@
       "ios": {
         "buildConfiguration": "Release"
       },
+      "android": {
+        "credentialsSource": "remote"
+      },
       "credentialsSource": "local"
     }
   },
@@ -36,6 +39,11 @@
         "ascApiKeyId": "KWJX4896S5",
         "ascApiKeyIssuerId": "69a6de95-2833-47e3-e053-5b8c7c11a4d1",
         "ascAppId": "6774991932"
+      },
+      "android": {
+        "serviceAccountKeyPath": "/Users/jacobcole/.config/google-play/openchat-play-service-account.json",
+        "track": "internal",
+        "releaseStatus": "completed"
       }
     }
   }
