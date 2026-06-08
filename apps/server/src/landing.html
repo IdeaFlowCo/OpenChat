@@ -355,6 +355,13 @@
       <a class="btn-primary" id="hero-open" href="/m/">Open OpenChat →</a>
       <a class="btn-secondary" href="#agents">Connect your agent</a>
     </div>
+    <!-- Device-aware native-app pointer. Hidden by default; the script below
+         fills + reveals it for iOS / Android / desktop visitors so the path to
+         the real app is obvious above the fold (not just buried in #install). -->
+    <p id="hero-native-hint" style="display:none;margin:14px 0 0;font-size:15px;color:var(--text-dim);">
+      <span id="hero-native-text"></span>
+      <a id="hero-native-link" href="#install" style="color:var(--accent);font-weight:600;text-decoration:none;white-space:nowrap;"></a>
+    </p>
   </section>
 
   <section id="install">
@@ -363,28 +370,28 @@
     <p class="section-sub">Same conversations across iOS, Android, and the web. Same account, same agent keys.</p>
     <div class="platforms">
 
-      <a class="platform" href="https://testflight.apple.com/join/QvUPzDMY" target="_blank" rel="noopener">
+      <a class="platform" data-platform="ios" href="https://testflight.apple.com/join/QvUPzDMY" target="_blank" rel="noopener">
         <div class="platform-icon"></div>
         <div class="platform-name">iOS · TestFlight</div>
         <div class="platform-sub">Native app via Apple's beta program</div>
         <span class="platform-cta">Join TestFlight</span>
       </a>
 
-      <a class="platform" href="https://expo.dev/artifacts/eas/94tzwhaMkezUC89qCpXoXx.apk" target="_blank" rel="noopener">
+      <a class="platform" data-platform="android" href="https://expo.dev/artifacts/eas/94tzwhaMkezUC89qCpXoXx.apk" target="_blank" rel="noopener">
         <div class="platform-icon" style="background:linear-gradient(135deg,#3ddc84 0%,#26854f 100%);box-shadow:0 6px 16px rgba(61,220,132,0.4);">A</div>
         <div class="platform-name">Android · APK</div>
         <div class="platform-sub">Direct install — preview build</div>
         <span class="platform-cta">Download APK</span>
       </a>
 
-      <a class="platform" href="/m/">
+      <a class="platform" data-platform="web" href="/m/">
         <div class="platform-icon" style="background:linear-gradient(135deg,#5fadf2 0%,#3a7ec1 100%);box-shadow:0 6px 16px rgba(95,173,242,0.4);">M</div>
         <div class="platform-name">Mobile web</div>
         <div class="platform-sub">No install — works in any browser</div>
         <span class="platform-cta">Open</span>
       </a>
 
-      <a class="platform" href="/d/">
+      <a class="platform" data-platform="desktop" href="/d/">
         <div class="platform-icon" style="background:linear-gradient(135deg,#b46cff 0%,#7c41cc 100%);box-shadow:0 6px 16px rgba(180,108,255,0.4);">⬇</div>
         <div class="platform-name">Desktop · install as app</div>
         <div class="platform-sub">Standalone window · OS notifications · works offline</div>
@@ -545,16 +552,57 @@
 </div>
 
 <script>
-  // Smart deep-link: desktop visitors get /d/, mobile/tablet get /m/.
-  // Updates the hero, nav-signin, and CTA-banner buttons in place.
+  // Smart deep-link + device-aware app guidance.
+  // - "Open OpenChat" buttons → the instant no-install web app (/m mobile, /d desktop).
+  // - Reveals an above-the-fold pointer to the NATIVE app for the visitor's OS.
+  // - In #install, floats the visitor's platform card to the top + badges it,
+  //   so "scroll down and get the correct one" actually lands on the right one.
   (function() {
-    var isDesktop = window.matchMedia && window.matchMedia('(min-width: 900px)').matches;
-    var target = isDesktop ? '/d/' : '/m/';
-    var els = ['hero-open', 'nav-signin', 'cta-open'];
-    els.forEach(function(id) {
+    var ua = navigator.userAgent || '';
+    var isIOS = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && 'ontouchend' in document);
+    var isAndroid = /Android/i.test(ua);
+    var isMobile = isIOS || isAndroid || (window.matchMedia && window.matchMedia('(max-width: 899px)').matches);
+    var platform = isIOS ? 'ios' : isAndroid ? 'android' : 'desktop';
+
+    // 1) Instant-use web app target.
+    var webTarget = isMobile ? '/m/' : '/d/';
+    ['hero-open', 'nav-signin', 'cta-open'].forEach(function(id) {
       var el = document.getElementById(id);
-      if (el) el.setAttribute('href', target);
+      if (el) el.setAttribute('href', webTarget);
     });
+
+    // 2) Above-the-fold native-app pointer.
+    var hints = {
+      ios:     { text: 'On iPhone? ',            label: 'Get the native iOS app →', href: 'https://testflight.apple.com/join/QvUPzDMY' },
+      android: { text: 'On Android? ',           label: 'Download the app →',        href: '#install' },
+      desktop: { text: 'Prefer a desktop app? ', label: 'Install for desktop →',     href: '/d/' }
+    };
+    var hint = hints[platform];
+    if (hint) {
+      var p = document.getElementById('hero-native-hint');
+      var t = document.getElementById('hero-native-text');
+      var a = document.getElementById('hero-native-link');
+      if (p && t && a) {
+        t.textContent = hint.text;
+        a.textContent = hint.label;
+        a.setAttribute('href', hint.href);
+        if (hint.href.charAt(0) === 'h') a.setAttribute('target', '_blank');
+        p.style.display = 'block';
+      }
+    }
+
+    // 3) Surface the visitor's platform card first + highlight it.
+    var container = document.querySelector('.platforms');
+    var match = container && container.querySelector('.platform[data-platform="' + platform + '"]');
+    if (container && match) {
+      container.insertBefore(match, container.firstChild);
+      match.style.borderColor = 'var(--accent)';
+      match.style.boxShadow = '0 0 0 1px var(--accent), 0 10px 30px rgba(124,128,255,0.18)';
+      var badge = document.createElement('div');
+      badge.textContent = '★ Best for your device';
+      badge.style.cssText = 'font-size:12px;font-weight:700;color:var(--accent);margin-bottom:10px;letter-spacing:.02em;';
+      match.insertBefore(badge, match.firstChild);
+    }
   })();
 
   // MCP setup snippet tabs.
