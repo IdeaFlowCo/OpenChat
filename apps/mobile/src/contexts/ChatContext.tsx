@@ -203,6 +203,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // reconnectNewConvIds: conversations that received messages during the last
   // catch-up. Cleared automatically after 3 seconds (enough for a pulse animation).
   const [reconnectNewConvIds, setReconnectNewConvIds] = useState<Set<string>>(new Set());
+  const missingConversationFetchesRef = useRef<Set<string>>(new Set());
   // ────────────────────────────────────────────────────────────────────────────
 
   const refreshConversations = useCallback(async () => {
@@ -213,6 +214,34 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.warn('[ChatContext] refreshConversations failed:', err);
     }
+  }, []);
+
+  const fetchMissingConversationForMessage = useCallback((msg: Message) => {
+    const conversationId = msg.conversationId;
+    if (missingConversationFetchesRef.current.has(conversationId)) return;
+    missingConversationFetchesRef.current.add(conversationId);
+
+    api.getConversation(conversationId)
+      .then(conv => {
+        setConversations(prev => {
+          const nextConv = {
+            ...conv,
+            lastMessagePreview: msg.content.slice(0, 100),
+            lastMessageAt: msg.createdAt,
+          };
+          const idx = prev.findIndex(c => c.id === conversationId);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], ...nextConv };
+            return sortByRecent(next);
+          }
+          return sortByRecent([nextConv, ...prev]);
+        });
+      })
+      .catch(err => console.warn('[ChatContext] fetch missing conversation failed:', err))
+      .finally(() => {
+        missingConversationFetchesRef.current.delete(conversationId);
+      });
   }, []);
 
   const bootstrapIfAuthed = useCallback(async (): Promise<boolean> => {
@@ -302,6 +331,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 };
                 next[idx] = updated;
                 newConvIds.add(msg.conversationId);
+              } else {
+                fetchMissingConversationForMessage(msg);
+                newConvIds.add(msg.conversationId);
               }
             }
             return sortByRecent(next);
@@ -351,11 +383,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
       }
       // Update conversation row preview + re-sort.
-      setConversations(prev => sortByRecent(prev.map(conv =>
-        conv.id === msg.conversationId
-          ? { ...conv, lastMessagePreview: msg.content.slice(0, 100), lastMessageAt: msg.createdAt }
-          : conv
-      )));
+      setConversations(prev => {
+        let found = false;
+        const next = prev.map(conv => {
+          if (conv.id === msg.conversationId) {
+            found = true;
+            return { ...conv, lastMessagePreview: msg.content.slice(0, 100), lastMessageAt: msg.createdAt };
+          }
+          return conv;
+        });
+        if (!found) {
+          fetchMissingConversationForMessage(msg);
+        }
+        return sortByRecent(next);
+      });
       // Unread bump + in-app banner: only if msg is for a non-active conv and
       // not from us. The banner component itself further filters muted convs.
       if (msg.conversationId !== activeConvIdRef.current && msg.senderId !== currentUser?.userId) {
@@ -574,7 +615,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sock.off('read:updated', onReadUpdated);
       sock.off('user:profile-updated', onProfileUpdated);
     };
-  }, [isAuthed, currentUser?.userId, refreshConversations]);
+  }, [isAuthed, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage]);
 
   // setActiveConversation: clears unread, joins/leaves rooms, loads messages.
   const setActiveConversation = useCallback((id: string | null) => {

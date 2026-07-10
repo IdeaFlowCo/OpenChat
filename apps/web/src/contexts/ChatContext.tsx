@@ -78,6 +78,14 @@ interface ChatContextValue {
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
+function sortByRecent(list: Conversation[]): Conversation[] {
+  return [...list].sort((a, b) => {
+    const aTime = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+    const bTime = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+    return bTime - aTime;
+  });
+}
+
 export function ChatProvider({ children }: { children: ReactNode }) {
   // Auth state
   const [token, setToken] = useState<string | null>(() => getStoredToken());
@@ -108,6 +116,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // imperative socket-handler logic (unread bump, mark-read).
   const activeConvRef = useRef<string | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
+  const missingConversationFetchesRef = useRef<Set<string>>(new Set());
   // markConversationRead is defined later; this ref lets the stable socket
   // handler call the latest version without depending on it. (openchat-bmp.4)
   const markConversationReadRef = useRef<((id: string) => void) | null>(null);
@@ -133,6 +142,36 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     currentUserIdRef.current = currentUser?.userId ?? null;
   }, [currentUser?.userId]);
 
+  const fetchMissingConversationForMessage = useCallback((message: Message) => {
+    const conversationId = message.conversationId;
+    if (missingConversationFetchesRef.current.has(conversationId)) return;
+    missingConversationFetchesRef.current.add(conversationId);
+
+    api.getConversation(conversationId)
+      .then(conv => {
+        setConversations(prev => {
+          const nextConv = {
+            ...conv,
+            lastMessagePreview: message.content.slice(0, 100),
+            lastMessageAt: message.createdAt,
+          };
+          const idx = prev.findIndex(c => c.id === conversationId);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], ...nextConv };
+            return sortByRecent(next);
+          }
+          return sortByRecent([nextConv, ...prev]);
+        });
+      })
+      .catch(e => {
+        if (!isAuthError(e)) console.error('Failed to fetch conversation for incoming message:', e);
+      })
+      .finally(() => {
+        missingConversationFetchesRef.current.delete(conversationId);
+      });
+  }, []);
+
   // Socket handlers
   const handleMessage = useCallback((message: Message) => {
     // Track newest message timestamp for reconnect catch-up (bmp.9).
@@ -140,7 +179,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       lastMessageAtRef.current = message.createdAt;
     }
     setMessages(prev => {
-      if (message.conversationId === activeConversationId) {
+      if (message.conversationId === activeConvRef.current) {
         // Add to current conversation
         if (prev.some(m => m.id === message.id)) return prev;
         return [...prev, message];
@@ -149,16 +188,24 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     });
 
     // Update conversation preview
-    setConversations(prev => prev.map(conv => {
-      if (conv.id === message.conversationId) {
-        return {
-          ...conv,
-          lastMessagePreview: message.content.slice(0, 100),
-          lastMessageAt: message.createdAt,
-        };
+    setConversations(prev => {
+      let found = false;
+      const next = prev.map(conv => {
+        if (conv.id === message.conversationId) {
+          found = true;
+          return {
+            ...conv,
+            lastMessagePreview: message.content.slice(0, 100),
+            lastMessageAt: message.createdAt,
+          };
+        }
+        return conv;
+      });
+      if (!found) {
+        fetchMissingConversationForMessage(message);
       }
-      return conv;
-    }));
+      return sortByRecent(next);
+    });
 
     // Unread bookkeeping (openchat-bmp.4). Bump the per-conversation unread
     // count when the message lands in a conversation that ISN'T currently
@@ -179,7 +226,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       // immediately so their tick advances to "read" (parity with mobile).
       markConversationReadRef.current?.(message.conversationId);
     }
-  }, []);
+  }, [fetchMissingConversationForMessage]);
 
   // Edit / soft-delete echo (openchat-bmp.3). Replace the message in place in
   // the active conversation's list. We match on id; deletes arrive as a
@@ -277,16 +324,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (idx >= 0) {
         const next = [...prev];
         next[idx] = { ...next[idx], ...conv };
-        return next;
+        return sortByRecent(next);
       }
-      return [conv, ...prev];
+      return sortByRecent([conv, ...prev]);
     });
   }, []);
 
   const handleConversationUpdated = useCallback((data: { conversationId: string; conversation: unknown }) => {
     const conv = data.conversation as Conversation;
     if (!conv?.id) return;
-    setConversations(prev => prev.map(c => (c.id === conv.id ? { ...c, ...conv } : c)));
+    setConversations(prev => sortByRecent(prev.map(c => (c.id === conv.id ? { ...c, ...conv } : c))));
   }, []);
 
   const handleParticipantAdded = useCallback((data: { conversationId: string; conversation: unknown }) => {
@@ -297,10 +344,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (idx >= 0) {
         const next = [...prev];
         next[idx] = { ...next[idx], ...conv };
-        return next;
+        return sortByRecent(next);
       }
       // We were just added — insert.
-      return [conv, ...prev];
+      return sortByRecent([conv, ...prev]);
     });
   }, []);
 
@@ -473,7 +520,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     try {
       const data = await api.getConversations();
-      setConversations(data);
+      setConversations(sortByRecent(data));
       const seededPresence = new Map<string, { status: string; statusMessage?: string }>();
       for (const conv of data) {
         for (const participant of conv.participants || []) {
@@ -638,9 +685,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (idx >= 0) {
         const next = [...prev];
         next[idx] = conv;
-        return next;
+        return sortByRecent(next);
       }
-      return [conv, ...prev];
+      return sortByRecent([conv, ...prev]);
     });
     return conv;
   }, []);
