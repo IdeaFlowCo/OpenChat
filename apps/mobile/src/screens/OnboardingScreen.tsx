@@ -28,6 +28,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -456,38 +457,44 @@ interface AgentReadyStepProps {
 
 function AgentReadyStep({ c, onDone }: AgentReadyStepProps) {
   return (
-    <View style={styles.stepContent}>
-      <Text style={styles.notifEmoji}>🤖</Text>
-      <Text style={[styles.stepHeading, { color: c.textPrimary }]}>Built for you and your AI</Text>
-      <Text style={[styles.stepSubhead, { color: c.textSecondary }]}>
-        OpenChat is agent-ready from day one.
-      </Text>
+    <ScrollView
+      style={styles.stepScroll}
+      contentContainerStyle={styles.stepScrollContent}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={styles.agentReadyContent}>
+        <Text style={styles.notifEmoji}>🤖</Text>
+        <Text style={[styles.stepHeading, { color: c.textPrimary }]}>Built for you and your AI</Text>
+        <Text style={[styles.stepSubhead, { color: c.textSecondary }]}>
+          OpenChat is agent-ready from day one.
+        </Text>
 
-      <View style={styles.agentBullets}>
-        <View style={[styles.agentBullet, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
-          <Text style={styles.agentBulletEmoji}>🔑</Text>
-          <Text style={[styles.agentBulletText, { color: c.textSecondary }]}>
-            <Text style={{ fontWeight: '600', color: c.textPrimary }}>Connect an agent.</Text>
-            {' '}Mint a key in Settings so Claude, Cursor, or any MCP client can read and send messages as you.
-          </Text>
+        <View style={styles.agentBullets}>
+          <View style={[styles.agentBullet, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
+            <Text style={styles.agentBulletEmoji}>🔑</Text>
+            <Text style={[styles.agentBulletText, { color: c.textSecondary }]}>
+              <Text style={{ fontWeight: '600', color: c.textPrimary }}>Connect an agent.</Text>
+              {' '}Mint a key in Settings so Claude, Cursor, or any MCP client can read and send messages as you.
+            </Text>
+          </View>
+          <View style={[styles.agentBullet, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
+            <Text style={styles.agentBulletEmoji}>💭</Text>
+            <Text style={[styles.agentBulletText, { color: c.textSecondary }]}>
+              <Text style={{ fontWeight: '600', color: c.textPrimary }}>Keep Thoughts.</Text>
+              {' '}A private stream for facts, decisions, and reminders — memory your agents can build on.
+            </Text>
+          </View>
         </View>
-        <View style={[styles.agentBullet, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
-          <Text style={styles.agentBulletEmoji}>💭</Text>
-          <Text style={[styles.agentBulletText, { color: c.textSecondary }]}>
-            <Text style={{ fontWeight: '600', color: c.textPrimary }}>Keep Thoughts.</Text>
-            {' '}A private stream for facts, decisions, and reminders — memory your agents can build on.
-          </Text>
-        </View>
+
+        <TouchableOpacity
+          style={[styles.ctaButton, { backgroundColor: c.primary, marginTop: 24 }]}
+          onPress={onDone}
+          accessibilityLabel="Start chatting"
+        >
+          <Text style={styles.ctaButtonText}>{'Start chatting →'}</Text>
+        </TouchableOpacity>
       </View>
-
-      <TouchableOpacity
-        style={[styles.ctaButton, { backgroundColor: c.primary, marginTop: 24 }]}
-        onPress={onDone}
-        accessibilityLabel="Start chatting"
-      >
-        <Text style={styles.ctaButtonText}>{'Start chatting →'}</Text>
-      </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -518,6 +525,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingBottom: 40,
+  },
+  stepScroll: {
+    flex: 1,
+  },
+  stepScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingBottom: 40,
+  },
+  agentReadyContent: {
+    alignItems: 'center',
   },
 
   // Welcome step
