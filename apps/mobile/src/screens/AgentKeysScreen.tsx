@@ -1,6 +1,6 @@
 /**
  * Agent API Keys list screen (OpenChat-7c9).
- * Settings → DEVELOPER → Agent keys
+ * Settings → Agent keys
  *
  * Shows all keys for the current user. Each row is tappable → navigates to
  * AgentKeyDetailScreen. Floating "+ New key" button → AddAgentKeyScreen.

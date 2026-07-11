@@ -220,7 +220,8 @@ u.thoughtSources = { note: bool, memory: bool, issue: bool, snippet: bool, extra
 
 ```
 POST   /api/thoughts                    manual capture
-GET    /api/thoughts?include=note,memory,extraction
+GET    /api/thoughts?limit=50&before=<ISO>&q=<query>
+GET    /api/thoughts?include=note,memory,extraction       target source filter
 GET    /api/thoughts?kind=commitment&status=open    filtered views
 PATCH  /api/thoughts/:id                edit (manual only; synced read-only)
 DELETE /api/thoughts/:id                soft-delete (hidden=true)
@@ -231,9 +232,9 @@ PATCH  /api/thoughts/sources            flip a source on/off
 POST   /api/thoughts/sync               bulk upsert from sync agent
 ```
 
-Socket events (v2):
+Socket events:
 ```
-thought:added       { thought }
+thought:created     { thought }    shipped for tag-extracted Thoughts
 thought:updated     { thought }
 thought:removed     { id }
 ```
@@ -243,7 +244,9 @@ thought:removed     { id }
 ## Build order
 
 1. **Server**: `:Thought` schema + CRUD + sources endpoint + sync endpoint
-2. **Mobile**: ThoughtsScreen wired to live API (replace in-memory demo on `next` branch)
+   (CRUD + tag extraction shipped; source preferences/sync still target)
+2. **Mobile**: ThoughtsScreen wired to live API with search and live
+   `thought:created` updates
 3. **Web**: `/thoughts` route on `next` branch
 4. **LLM extraction**: opt-in per-conv toggle, batch-extract on new messages, surface "💭 add?" suggestion
 5. **Time-shifted surfacing**: chat header shows recent-context Thoughts
@@ -261,7 +264,8 @@ Estimated effort: build order 1-3 ≈ one focused session; 4-6 ≈ one session e
 - **Rich-text / markdown formatting.** Plain text only at v1. Less than a Notion clone is the goal.
 - **Attachments / images.** Goes into the Files feature (separate ticket, not filed yet).
 - **Multi-user collaborative editing.** Thoughts are author-owned. Annotations / comments on a shared thought are a v2 conversation.
-- **Search inside Thoughts.** Wire the Neo4j full-text index at v1 but no UI until row ~50.
+- **Advanced search inside Thoughts.** v1 ships simple text/tag search; full-text
+  indexing, filters, and source facets remain later work.
 
 ---
 
@@ -269,7 +273,7 @@ Estimated effort: build order 1-3 ≈ one focused session; 4-6 ≈ one session e
 
 Live in beads under epic `OpenChat-3kr` ("OpenChat next: thought-stream tab + agentic + NVC"). Sub-tickets:
 
-- `OpenChat-3kr.1` — Thoughts tab UI (mobile scaffold landed on `next`; web TBD; server CRUD TBD)
+- `OpenChat-3kr.1` — Thoughts tab UI (mobile + RN-web shipped; legacy web TBD; server CRUD shipped)
 - `OpenChat-3kr.2` — NVC composer mode (separate feature in same epic)
 - `OpenChat-3kr.3` — Agentic features (summon agent, watchers, automation rules)
 - `OpenChat-3kr.4` — bd + memories surface in Thoughts tab (sync agent + server route)

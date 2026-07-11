@@ -1,12 +1,15 @@
 /**
- * OnboardingScreen — 3-step first-run experience (OpenChat-x2s).
+ * OnboardingScreen — 4-step first-run experience (OpenChat-x2s + OpenChat-jmu).
  *
  * Steps:
  *   0  Welcome     — app icon + headline + subhead + "Let's go →"
  *   1  Set name    — editable name pre-filled from Google profile,
  *                    optional avatar photo pick + upload,
  *                    "Skip" + "Save & continue"
- *   2  Notifications — "Want notifications?" "Maybe later" / "Turn on" + "Done →"
+ *   2  Notifications — "Want notifications?" "Maybe later" / "Turn on" + "Next →"
+ *   3  Agent-ready — OpenChat-jmu: what makes OpenChat different (agents via
+ *                    MCP keys + the private Thoughts stream), pointing at
+ *                    Settings → Copy agent setup / Agent keys and the Thoughts tab.
  *
  * On completion (any path):
  *   - Calls markOnboardingComplete() (AsyncStorage)
@@ -25,6 +28,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -50,7 +54,7 @@ const PUSH_SOFTASKED_KEY = 'openchat_push_softasked';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SCREEN_W } = Dimensions.get('window');
-const TOTAL_STEPS = 3;
+const TOTAL_STEPS = 4;
 const SLIDE_MS = 250;
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Onboarding'>;
@@ -235,9 +239,11 @@ export function OnboardingScreen({ navigation }: Props) {
             done={notifDone}
             onMaybeLater={handleMaybeLater}
             onTurnOn={handleTurnOnNotifications}
-            onDone={finish}
+            onDone={() => goToStep(3)}
           />
         );
+      case 3:
+        return <AgentReadyStep c={c} onDone={finish} />;
       default:
         return null;
     }
@@ -434,11 +440,61 @@ function NotificationsStep({ c, done, onMaybeLater, onTurnOn, onDone }: Notifica
       <TouchableOpacity
         style={[styles.ctaButton, { backgroundColor: c.primary, marginTop: 24 }]}
         onPress={onDone}
-        accessibilityLabel="Done"
+        accessibilityLabel="Next"
       >
-        <Text style={styles.ctaButtonText}>{"Done →"}</Text>
+        <Text style={styles.ctaButtonText}>{"Next →"}</Text>
       </TouchableOpacity>
     </View>
+  );
+}
+
+// ── Step 3: Agent-ready (OpenChat-jmu) ─────────────────────────────────────────
+
+interface AgentReadyStepProps {
+  c: ReturnType<typeof getColors>;
+  onDone: () => void;
+}
+
+function AgentReadyStep({ c, onDone }: AgentReadyStepProps) {
+  return (
+    <ScrollView
+      style={styles.stepScroll}
+      contentContainerStyle={styles.stepScrollContent}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={styles.agentReadyContent}>
+        <Text style={styles.notifEmoji}>🤖</Text>
+        <Text style={[styles.stepHeading, { color: c.textPrimary }]}>Built for you and your AI</Text>
+        <Text style={[styles.stepSubhead, { color: c.textSecondary }]}>
+          OpenChat is agent-ready from day one.
+        </Text>
+
+        <View style={styles.agentBullets}>
+          <View style={[styles.agentBullet, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
+            <Text style={styles.agentBulletEmoji}>🔑</Text>
+            <Text style={[styles.agentBulletText, { color: c.textSecondary }]}>
+              <Text style={{ fontWeight: '600', color: c.textPrimary }}>Connect an agent.</Text>
+              {' '}Mint a key in Settings so Claude, Cursor, or any MCP client can read and send messages as you.
+            </Text>
+          </View>
+          <View style={[styles.agentBullet, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
+            <Text style={styles.agentBulletEmoji}>💭</Text>
+            <Text style={[styles.agentBulletText, { color: c.textSecondary }]}>
+              <Text style={{ fontWeight: '600', color: c.textPrimary }}>Keep Thoughts.</Text>
+              {' '}A private stream for facts, decisions, and reminders — memory your agents can build on.
+            </Text>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.ctaButton, { backgroundColor: c.primary, marginTop: 24 }]}
+          onPress={onDone}
+          accessibilityLabel="Start chatting"
+        >
+          <Text style={styles.ctaButtonText}>{'Start chatting →'}</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
   );
 }
 
@@ -469,6 +525,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingBottom: 40,
+  },
+  stepScroll: {
+    flex: 1,
+  },
+  stepScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingBottom: 40,
+  },
+  agentReadyContent: {
+    alignItems: 'center',
   },
 
   // Welcome step
@@ -565,6 +632,30 @@ const styles = StyleSheet.create({
   notifConfirm: {
     fontSize: 15,
     marginTop: 16,
+  },
+
+  // Agent-ready step (step 3)
+  agentBullets: {
+    gap: 10,
+    width: '100%',
+    maxWidth: 340,
+  },
+  agentBullet: {
+    flexDirection: 'row',
+    gap: 10,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'flex-start',
+  },
+  agentBulletEmoji: {
+    fontSize: 20,
+    lineHeight: 24,
+  },
+  agentBulletText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
   },
 
   // Action row (Skip / Save, Maybe later / Turn on)

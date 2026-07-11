@@ -31,6 +31,7 @@ TestFlight.
 
 | Path | Audience | Notes |
 |------|----------|-------|
+| `https://chat.globalbr.ai/` | Public launch page | Marketing/install surface with TestFlight, APK, mobile web, desktop PWA, QR, and agent setup links. |
 | `https://chat.globalbr.ai/m` | Mobile web | Same React-Native-web app, mobile-width layout. |
 | `https://chat.globalbr.ai/d` | Desktop web | Same app, master-detail layout at widths ≥ 900px. **Installable as a PWA** (manifest + service worker injected at deploy). |
 | `https://chat.globalbr.ai/legacy` | Legacy Vite client | Kept for backward compat. |
