@@ -1,5 +1,5 @@
 /**
- * OnboardingScreen — 3-step first-run experience (OpenChat-x2s).
+ * OnboardingScreen — 4-step first-run experience (OpenChat-x2s + OpenChat-jmu).
  *
  * Steps:
  *   0  Welcome     — app icon + headline + subhead + "Let's go →"
@@ -9,7 +9,7 @@
  *   2  Notifications — "Want notifications?" "Maybe later" / "Turn on" + "Next →"
  *   3  Agent-ready — OpenChat-jmu: what makes OpenChat different (agents via
  *                    MCP keys + the private Thoughts stream), pointing at
- *                    Settings → Connect an agent and the Thoughts tab.
+ *                    Settings → Copy agent setup / Agent keys and the Thoughts tab.
  *
  * On completion (any path):
  *   - Calls markOnboardingComplete() (AsyncStorage)

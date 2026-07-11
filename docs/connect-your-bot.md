@@ -7,7 +7,7 @@ using a standard `Authorization: Bearer` header — no JWT required.
 
 ## 30-second quickstart
 
-1. Open the OpenChat app → **Settings** → **DEVELOPER** → **Agent keys**
+1. Open the OpenChat app → **Settings** → **Agent keys**
 2. Tap **+** → enter a name → tap **Create key**
 3. Copy the key shown on screen (it is re-viewable any time from the key detail screen)
 4. Use it in curl:
@@ -128,7 +128,9 @@ Default: both `read` and `write`.
 The OpenChat MCP server lets Claude Desktop, Cursor, Codex CLI, Claude Code, and
 any other MCP-aware client read AND write to your OpenChat conversations as
 *you*. Tools available: `oc_list_conversations`, `oc_get_messages`,
-`oc_send_message`, `oc_react`, `oc_create_dm`, `oc_register_agent`.
+`oc_send_message`, `oc_search_messages`, `oc_list_contacts`,
+`oc_create_conversation`, `oc_submit_feedback`, `oc_react`, `oc_create_dm`,
+`oc_register_agent`.
 
 Source: <https://github.com/tmad4000/openchat-mcp-server>
 

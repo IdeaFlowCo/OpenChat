@@ -11,7 +11,7 @@ Grounded in shipped code, the vision pillars stand here:
 | Pillar | Status | Where |
 |---|---|---|
 | **AI-integrated messaging** | ✅ shipped | Pre-send transforms (NVC, concise, translate) in composer; voice-note transcription |
-| **Agent-friendly API** | ✅ shipped | `oc_` agent keys (Settings → Connect an agent, `apps/server/src/routes/agentKeys.ts`), MCP server (`apps/mcp-server`, 6 tools), curl-able REST |
+| **Agent-friendly API** | ✅ shipped | `oc_` agent keys (Settings → Copy agent setup / Agent keys, `apps/server/src/routes/agentKeys.ts`), MCP server (`apps/mcp-server`, 10 tools), curl-able REST |
 | **Thoughts / memory** | ✅ v1 shipped | Private stream of facts / decisions / commitments / reminders with tags, search, live socket sync (`routes/thoughts.ts`, `ThoughtsScreen.tsx`). AI extraction from chats is designed (`docs/thoughts-design.md`) but not built |
 | **Noos identity** | ✅ shipped | Shared JWT SSO with Noos; same Neo4j graph |
 | **Shareable human conversations** | ◻ partial | Per-user invite pages (`/u/:id`), QR invites, private conversation export — no public transcript links yet |
@@ -28,7 +28,8 @@ Grounded in shipped code, the vision pillars stand here:
    your AI") introduces agent keys and the Thoughts stream to every new user on
    native, `/m`, and `/d` (`OnboardingScreen.tsx`, one shared RN codebase, so
    web/mobile parity holds by construction; the legacy `/legacy` client has no
-   onboarding flow — documented platform exception).
+   onboarding flow — documented platform exception). The follow-up action is
+   Settings → Copy agent setup / Agent keys.
 
 ## What should come next
 
