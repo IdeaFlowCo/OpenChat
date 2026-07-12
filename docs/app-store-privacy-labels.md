@@ -2,7 +2,7 @@
 
 > **Audience:** the person filling in App Store Connect → App Privacy.
 > **Source of truth:** OpenChat-d8w. Update whenever data collection changes.
-> **Last audit:** 2026-06-01 against build 39 (v0.1.7).
+> **Last audit:** 2026-07-12 against `apps/mobile/app.config.js` v0.1.23.
 
 Apple's "App Privacy" section ("nutrition labels") is a structured answer to:
 *what does your app collect, and is it linked to the user?* These answers must
@@ -19,10 +19,11 @@ when filling out the ASC form.
 
 - **Privacy Policy URL:** https://chat.globalbr.ai/legal/privacy
 - **Terms of Service URL:** https://chat.globalbr.ai/legal/terms
-- **Support URL:** mailto:support@chat.globalbr.ai
+- **Support URL:** https://chat.globalbr.ai (contact: support@chat.globalbr.ai)
 - **App category:** Social Networking (primary), Productivity (secondary)
 - **Sign-in providers:** Google OAuth, Sign in with Apple, email/password (via Noos SSO)
-- **Server location:** AWS Lightsail (US East), Neo4j Aura
+- **Server location:** AWS Lightsail (US East), Neo4j Aura, S3-compatible object storage
+- **Current App Store blocker:** reviewer account credentials, production seed/demo data, screenshots, and final App Store Connect metadata approval remain human/App Store Connect actions.
 
 ---
 
@@ -67,13 +68,13 @@ when filling out the ASC form.
 |---|---|---|---|---|
 | Photos or Videos | YES (image attachments) | YES | NO | App Functionality |
 | Audio Data (voice messages) | YES | YES | NO | App Functionality |
-| Other User Content (chat messages, reactions) | YES | YES | NO | App Functionality |
+| Other User Content (chat messages, reactions, reports, feedback, thoughts, status/profile text) | YES | YES | NO | App Functionality, Other Purposes (safety review for reports) |
 
 **Notes:**
-- Messages, voice notes, reactions, and image attachments are stored in Neo4j (server-side) so they sync across devices.
+- Messages, voice notes, reactions, reports, feedback, thoughts, and image attachments are stored server-side so they sync across devices and can be reviewed when users report safety issues.
 - Images live in S3-compatible storage with presigned-URL access.
 - We do NOT use this content for advertising, analytics, or model training.
-- Bot-routed messages (when a user invites an AI agent into a conversation) are sent to Anthropic for response generation only — see Section 9.
+- Bot-routed messages and message transform requests are sent to Anthropic for response generation or rewriting only; voice messages may be sent to OpenAI Whisper for transcription; message text/search queries may be sent to OpenAI for semantic-search embeddings.
 
 ---
 
@@ -123,13 +124,13 @@ when filling out the ASC form.
 
 | Data Type | Collected? | Linked to user? | Used for tracking? | Purposes |
 |---|---|---|---|---|
-| Crash Data | NO (Sentry not yet shipped — pending OpenChat-7um) | — | — | — |
+| Crash Data | YES (mobile/web client logger forwards uncaught errors and crash/error context to `/api/client-logs`) | YES when signed in | NO | App Functionality |
 | Performance Data | NO | — | — | — |
-| Other Diagnostic Data | YES (`/api/client-logs` browser errors) | YES (when signed in) | NO | App Functionality |
+| Other Diagnostic Data | YES (`/api/client-logs`, server request/error logs) | YES when signed in or present in request context | NO | App Functionality |
 
 **Notes:**
-- `/api/client-logs` accepts forwarded browser error events for debugging. Contains stack traces + browser metadata. Tied to user only when sender is signed-in.
-- Sentry crash reporting will land in OpenChat-7um. When it does, flip Crash Data to YES (Linked / App Functionality). Anthropic, the upstream Sentry vendor, has its own data processing terms.
+- `/api/client-logs` accepts forwarded web and mobile error events for debugging. Contains error messages, stack traces, request metadata, device/app context, and user agents. Tied to a user only when the event includes signed-in context.
+- Sentry is still not shipped; the current crash/error path is OpenChat's own client logger plus server logs.
 
 ---
 
@@ -142,11 +143,14 @@ when filling out the ASC form.
 | Vendor | Data Shared | Purpose |
 |---|---|---|
 | **Anthropic** (claude-haiku-4-5) | Message content of conversations where an AI agent participates; pre-send transform requests | AI assistant replies, message rewriting |
+| **OpenAI** (`text-embedding-3-small`, `whisper-1`) | Message text/search text for embeddings; voice-message audio for transcription | Semantic search, voice-message transcripts |
 | **Expo** (push delivery) | Push notification token, conversation ID, message preview | App Functionality (delivering notifications to iOS/Android) |
 | **Apple** (Sign in with Apple) | Email (or Apple email-relay), name on first sign-in | Account creation |
-| **Google** (OAuth + maybe `gpt-image-1`) | Email, name, profile picture; OAuth code exchange | Account creation |
+| **Google** (OAuth) | Email, name, profile picture; OAuth code exchange | Account creation |
 | **AWS** (Lightsail server, S3-compatible storage) | All app data (messages, images, voice notes, profile info) | App Functionality (server infrastructure) |
+| **Neo4j Aura** | Account, conversation, message, report, block, and app metadata | App Functionality (database infrastructure) |
 | **Noos SSO** (`globalbr.ai`) | Email + password verification | Authentication |
+| **World Issue Tracker / Slack webhook tooling** | Feedback, report text, reporter/target metadata, operational error context when configured | Support, safety review, operations |
 
 ---
 
@@ -155,19 +159,18 @@ when filling out the ASC form.
 App Store Connect → App Information → Notes for Reviewer.
 
 ```
-Sign in: tap "Continue with Google" on the login screen
+Sign in: use the email/password form on the login screen
 Reviewer account:
   Email: openchat-reviewer@globalbr.ai
   Password: <TBD — set in 1Password, paste here at submission time>
 
-ALTERNATIVELY, you can use the email/password form:
-  Email: openchat-reviewer@globalbr.ai
-  Password: <same as above>
+If Apple asks to verify third-party login parity, Sign in with Apple is available
+on iOS from the same login screen. Google sign-in is also available.
 
 The account has all in-app features enabled, including:
   - Voice messages
   - Image attachments
-  - AI agent integration via MCP (agent keys in Settings → DEVELOPER)
+  - AI agent integration via MCP / agent keys in Settings
   - Group chat with 2 seed conversations
   - 3 fixture messages in each thread
 
@@ -181,9 +184,9 @@ WhatsApp Business, or Slack.
 ```
 
 **ACTION FOR JACOB:**
-- [ ] Create `openchat-reviewer@globalbr.ai` via Noos SSO sign-up
+- [ ] Create `openchat-reviewer@globalbr.ai` via the production email/password sign-up path
 - [ ] Generate a strong reviewer password; store in 1Password under "OpenChat App Store Reviewer"
-- [ ] Seed the reviewer account with 2 demo conversations + 3 messages each (script: `cd ~/code/openchat/server && npm run seed -- --user=reviewer`)
+- [ ] Seed the reviewer account with 2 demo conversations + 3 messages each. The current `apps/server/src/seed-test-data.ts` only seeds Alice/Bob test accounts, so either extend it for `openchat-reviewer@globalbr.ai` or create the reviewer demo data manually before submission.
 - [ ] Paste the password into App Store Connect → Notes for Reviewer at submission time
 - [ ] Confirm the support email `support@chat.globalbr.ai` is monitored (forward to Jacob's primary?)
 
@@ -193,15 +196,15 @@ WhatsApp Business, or Slack.
 
 The privacy policy at https://chat.globalbr.ai/legal/privacy MUST contain:
 
-- [ ] "Data Collected" section listing all of Section 1, 4, 6, 9 above
-- [ ] "Third-Party Processors" subsection listing all of Section 10 above
-- [ ] "User Rights" — account deletion path (already shipped: Settings → Delete account)
-- [ ] "Data Retention" — how long messages are retained, deletion policy
-- [ ] "International Transfers" — note that data may flow through AWS US-East
-- [ ] "Contact" — support@chat.globalbr.ai
-- [ ] Last-updated date
+- [x] "Data Collected" section listing all of Section 1, 4, 6, 9 above
+- [x] "Third-Party Processors" subsection listing all of Section 10 above
+- [x] "User Rights" — account deletion path (already shipped: Settings → Delete account)
+- [x] "Data Retention" — how long messages are retained, deletion policy
+- [x] "International Transfers" — note that data may flow through AWS US-East / Neo4j Aura
+- [x] "Contact" — support@chat.globalbr.ai
+- [x] Last-updated date
 
-Audit `/Users/Jacob/code/openchat/server/src/legal/privacy.md` and update to match these requirements before submission.
+Audited and updated `apps/server/src/legal/privacy.md` on 2026-07-12 for the v0.1.23 launch-readiness pass.
 
 ---
 
@@ -212,7 +215,7 @@ Re-audit this doc when ANY of these change:
 - New data type collected (e.g. contacts, location, health data)
 - New third-party processor added (e.g. Mixpanel, Stripe, Twilio)
 - New user-content surface added (e.g. video calls would add "Video data")
-- Sentry / crash reporting lands (OpenChat-7um) → flip Section 9 Crash Data to YES
+- Sentry or another third-party crash SDK ships → add that processor and update Section 9 notes
 - Phone-number sign-in lands (OpenChat-xf4) → flip Section 1 Phone Number to YES
 - Contacts integration lands (OpenChat-ap3) → flip Section 3 Contacts to YES
 - Any new third-party SDK added to mobile or web client
