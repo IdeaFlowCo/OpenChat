@@ -7,6 +7,10 @@ EAS Updates, and the web builds at `/m` and `/d`.
 Tracking epic: **openchat-3jq** (release/update pipeline + web↔mobile parity).
 Ticket: **openchat-3jq.6**.
 
+For the first public App Store submission checklist, reviewer notes, metadata
+blockers, and explicit approval gates, see
+[`app-store-launch-readiness.md`](./app-store-launch-readiness.md).
+
 ---
 
 ## 1. How testers get builds
