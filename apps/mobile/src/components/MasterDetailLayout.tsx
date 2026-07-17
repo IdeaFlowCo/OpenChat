@@ -43,12 +43,7 @@ import { OPENCHAT_URL } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
-// Explicit .web imports — these files are web-only and never reached from
-// native code paths. TypeScript needs the explicit extension because we
-// don't enable `moduleSuffixes` globally (it breaks node_modules typings).
-// Metro on web resolves identically; on native the dep graph never reaches
-// these files because nothing in native code imports MasterDetailLayout.
-import { ConversationList } from './ConversationList.web';
+import { ConversationList } from './ConversationList';
 // /d/ right pane renders the same ChatScreen that /m/ uses — with full
 // feature parity (voice / preview / transform / forwarding / reactions /
 // edit / delete / mentions / attachments / read receipts / pagination).
@@ -102,8 +97,16 @@ export function MasterDetailLayout() {
   const navigation = useNavigation<NavProp<'Conversations'>>();
   const {
     currentUser, isConnected, activeConversationId, setActiveConversation,
-    conversationsLoaded, refreshConversations,
+    conversationsLoaded, refreshConversations, conversations,
   } = useChat();
+
+  // Keep the latest list + active id in refs so the keydown handler (bound
+  // once) can read current values for arrow-key navigation without
+  // re-registering the DOM listener on every conversation update.
+  const conversationsRef = useRef(conversations);
+  const activeIdRef = useRef(activeConversationId);
+  conversationsRef.current = conversations;
+  activeIdRef.current = activeConversationId;
 
   const [collapsed, setCollapsed] = useState(false);
   // Animated width — initialized to expanded; we'll snap (no animation) to
@@ -201,6 +204,36 @@ export function MasterDetailLayout() {
       if (meta && key === '/') {
         ev.preventDefault();
         openShortcuts();
+        return;
+      }
+      // Arrow-key conversation navigation (Up/Down move the selection through
+      // the sidebar list; wraps at the ends). Skip when focus is inside a
+      // text input / textarea / contentEditable so arrows keep their normal
+      // caret-movement behavior in the composer and search box.
+      if (!meta && (key === 'ArrowDown' || key === 'ArrowUp')) {
+        const state = navigation.getState?.();
+        const routes = state?.routes ?? [];
+        const top = routes[routes.length - 1]?.name;
+        if (top && top !== 'Conversations') return;
+
+        const target = ev.target as HTMLElement | null;
+        const tag = target?.tagName;
+        const isTyping =
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          (target?.isContentEditable ?? false);
+        if (isTyping) return;
+        const list = conversationsRef.current;
+        if (!list || list.length === 0) return;
+        ev.preventDefault();
+        const currentIdx = list.findIndex(cv => cv.id === activeIdRef.current);
+        const delta = key === 'ArrowDown' ? 1 : -1;
+        // From no selection: Down → first, Up → last. Otherwise step + wrap.
+        const nextIdx =
+          currentIdx === -1
+            ? (delta === 1 ? 0 : list.length - 1)
+            : (currentIdx + delta + list.length) % list.length;
+        setActiveConversation(list[nextIdx].id);
         return;
       }
       if (key === 'Escape') {

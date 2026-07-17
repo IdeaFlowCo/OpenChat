@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenChat",
+  "version": "0.1.23",
+  "identifier": "com.jacobcole.openchat.desktop",
+  "build": {
+    "comment": "frontendDist points at the react-native-web export built WITHOUT a baseUrl (root-relative assets) so it loads from the tauri:// origin. beforeBuildCommand runs the export; run it manually with `npm run build:web` during development.",
+    "beforeDevCommand": "npm --prefix ../../mobile run web",
+    "beforeBuildCommand": "npm --prefix .. run build:web",
+    "frontendDist": "../../mobile/dist-web-app",
+    "devUrl": "http://localhost:8081"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OpenChat",
+        "width": 1100,
+        "height": 760,
+        "minWidth": 380,
+        "minHeight": 480,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "comment": "csp null keeps the packaged web app's inline styles / connections working. The RNW build talks to the same chat.globalbr.ai API + socket as the browser build; tighten this to an allowlist before a public release.",
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
