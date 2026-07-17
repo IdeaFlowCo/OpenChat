@@ -49,12 +49,12 @@ standard Tauri v2 setup — no custom Rust beyond the boilerplate entry point.
 cd apps/desktop
 npm install
 npm run build:web   # exports apps/mobile -> ../mobile/dist-web-app
-npm run build       # tauri build -> native installer in src-tauri/target/release/bundle
+npm run build:tauri # tauri build -> native installer in src-tauri/target/release/bundle
 # or: npm run dev    # live dev window against the Expo web dev server (port 8081)
 ```
 
 `tauri.conf.json`'s `frontendDist` points at `../../mobile/dist-web-app`, and
-`beforeBuildCommand` re-runs the web export so `npm run build` is one step.
+`beforeBuildCommand` re-runs the web export so `npm run build:tauri` is one step.
 
 ## Electron alternative (follow-up)
 

@@ -11,7 +11,7 @@
     "dev": "node scripts/dev.mjs",
     "dev:server": "npm run dev --workspace=apps/server",
     "dev:web": "npm run dev --workspace=apps/web",
-    "build": "turbo run build",
+    "build": "turbo run build --filter=!openchat-desktop",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"

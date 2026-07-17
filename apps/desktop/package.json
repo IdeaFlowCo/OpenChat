@@ -6,9 +6,9 @@
   "scripts": {
     "build:web": "npm --prefix ../mobile run export:web:app",
     "dev": "tauri dev",
-    "build": "tauri build"
+    "build:tauri": "tauri build"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.1.0"
+    "@tauri-apps/cli": "2.11.2"
   }
 }
