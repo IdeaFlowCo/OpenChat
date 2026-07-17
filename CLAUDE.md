@@ -53,12 +53,14 @@ bd close <id>         # Complete work
 
 ## Build & Test
 
-_Add your build and test commands here_
+Run project-wide checks from the monorepo root. The root `packageManager` pins
+npm so Turborepo can resolve workspace tasks consistently.
 
 ```bash
-# Example:
-# npm install
-# npm test
+npm ci
+npm run lint
+npm run typecheck
+npm run build
 ```
 
 ## Architecture Overview
