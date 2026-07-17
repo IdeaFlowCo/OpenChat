@@ -2027,10 +2027,10 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
 
   const isKindReaction = kind !== undefined && kind !== null;
   const emojiAllowed = isKindReaction
-    ? [...ALLOWED_EMOJI, ...ALLOWED_KIND_EMOJI].includes(emoji ?? '')
+    ? ALLOWED_KIND_EMOJI.includes(emoji ?? '')
     : ALLOWED_EMOJI.includes(emoji ?? '');
   if (!emoji || !emojiAllowed) {
-    const list = isKindReaction ? [...ALLOWED_EMOJI, ...ALLOWED_KIND_EMOJI] : ALLOWED_EMOJI;
+    const list = isKindReaction ? ALLOWED_KIND_EMOJI : ALLOWED_EMOJI;
     res.status(400).json({ error: `emoji must be one of: ${list.join(' ')}` });
     return;
   }
@@ -2051,13 +2051,6 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
     const conversationId = check.records[0].get('conversationId') as string;
     const now = new Date().toISOString();
 
-    // MERGE so re-adding the same (emoji, kind) is idempotent. A user can hold
-    // both a plain 👍 and a filed receipt without collision. Neo4j forbids
-    // MERGE on a null property value, so plain (kind-less) and kind reactions
-    // take separate MERGE paths. The plain emoji allowlist and the kind-emoji
-    // allowlist are disjoint, so merging plain reactions on {emoji} alone can
-    // never collide with a kind edge. The href is (re)set on the kind edge so a
-    // bot re-filing updates the link.
     if (isKindReaction) {
       await session.run(`
         MATCH (u:User {id: $userId}), (m:Message {id: $messageId})
@@ -2068,8 +2061,12 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
     } else {
       await session.run(`
         MATCH (u:User {id: $userId}), (m:Message {id: $messageId})
-        MERGE (u)-[r:REACTED {emoji: $emoji}]->(m)
-        ON CREATE SET r.createdAt = datetime($now)
+        OPTIONAL MATCH (u)-[existing:REACTED {emoji: $emoji}]->(m)
+        WHERE existing.kind IS NULL
+        WITH u, m, existing
+        FOREACH (_ IN CASE WHEN existing IS NULL THEN [1] ELSE [] END |
+          CREATE (u)-[:REACTED {emoji: $emoji, createdAt: datetime($now)}]->(m)
+        )
       `, { userId, messageId, emoji, now });
     }
 

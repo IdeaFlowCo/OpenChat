@@ -34,7 +34,7 @@ export function ReactionsBar({ reactions, isOwn, onToggle }: Props) {
           const href = r.href;
           return (
             <TouchableOpacity
-              key={`${r.kind}:${r.emoji}`}
+              key={`${r.kind}:${r.emoji}:${r.href}`}
               style={[styles.pill, { backgroundColor: c.primaryMuted, borderColor: c.primary }]}
               onPress={() => void Linking.openURL(href)}
               activeOpacity={0.7}

@@ -558,7 +558,7 @@ export function MessageList() {
                     if (r.kind && r.href) {
                       return (
                         <a
-                          key={`${r.kind}:${r.emoji}`}
+                          key={`${r.kind}:${r.emoji}:${r.href}`}
                           href={r.href}
                           target="_blank"
                           rel="noopener noreferrer"
