@@ -98,10 +98,13 @@ export function MessageList() {
   }, [typingUsers, activeConversationId, currentUser?.userId]);
 
   useEffect(() => {
+    const timers = timerRef.current;
+    const lastSeen = lastSeenRef.current;
+
     return () => {
-      for (const handle of timerRef.current.values()) clearTimeout(handle);
-      timerRef.current.clear();
-      lastSeenRef.current.clear();
+      for (const handle of timers.values()) clearTimeout(handle);
+      timers.clear();
+      lastSeen.clear();
     };
   }, [activeConversationId]);
 
