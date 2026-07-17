@@ -6,6 +6,7 @@ import { sendPushToUser } from '../services/push.js';
 import { processLinkPreviews } from '../services/linkPreview.js';
 import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
+import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage } from '../services/embeddings.js';
 
 interface AuthenticatedSocket extends Socket {
@@ -284,6 +285,10 @@ export function setupChatSocket(io: Server): void {
         // Broadcast to every participant's per-user room (reaches recipients who
         // haven't joined the conversation room). See OpenChat-60y.
         broadcastMessageToParticipants(io, participantIds, message);
+
+        // Outbound webhooks (openchat bot-channel): push to external subscribers
+        // (e.g. groupbrain). Fire-and-forget, no-ops when no subscription.
+        dispatchMessageEvent(message as Record<string, unknown>, participantIds);
 
         // Async link preview fetch — non-blocking (OpenChat-hq2)
         processLinkPreviews(io, messageId, conversationId, content);

@@ -47,6 +47,18 @@ Authorization: Bearer oc_<key>
 | `PATCH` | `/api/chat/messages/:id` | Edit your message |
 | `DELETE` | `/api/chat/messages/:id` | Delete your message |
 
+### Reactions
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST`   | `/api/chat/messages/:id/reactions` | Add a reaction `{ "emoji": "🗂️" }` |
+| `DELETE` | `/api/chat/messages/:id/reactions/:emoji` | Remove your reaction |
+
+Both accept an agent key. The allowed emoji set is
+`👍 ❤️ 😂 😮 😢 🙏 🗂️`. The `🗂️` glyph is the distinctive **"filed to KB"**
+receipt a bot can drop on a message it has ingested — more expressive than a
+plain WhatsApp reaction.
+
 ### Agent key management
 
 | Method | Path | Description |
@@ -56,6 +68,53 @@ Authorization: Bearer oc_<key>
 | `GET`    | `/api/agent-keys/:id/reveal` | Get plaintext key |
 | `PATCH`  | `/api/agent-keys/:id` | Rename / change scopes |
 | `DELETE` | `/api/agent-keys/:id` | Revoke a key |
+
+---
+
+## Outbound webhooks (push instead of poll)
+
+Rather than polling `GET /api/chat/messages/since`, register a webhook and
+OpenChat will `POST` to your URL whenever a message lands in a conversation you
+participate in.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST`   | `/api/webhooks` | Create a subscription (returns `secret` **once**) |
+| `GET`    | `/api/webhooks` | List your subscriptions (no secret) |
+| `DELETE` | `/api/webhooks/:id` | Delete a subscription |
+
+Create body:
+
+```json
+{
+  "url": "https://your-service.example/openchat/webhook",
+  "events": ["message.created"],
+  "conversationId": "optional — filter to one room; omit for all your rooms",
+  "secret": "optional — supply your own shared secret; else one is minted"
+}
+```
+
+Each delivery is a normalized message payload:
+
+```json
+{
+  "event": "message.created",
+  "message": {
+    "id": "…", "conversationId": "…", "senderId": "…", "senderName": "…",
+    "content": "…", "messageType": "text", "attachments": null,
+    "replyToId": null, "createdAt": "2026-07-16T…Z"
+  }
+}
+```
+
+and carries two verification headers:
+
+- `X-OpenChat-Secret: <your secret>` — raw shared secret (simple equality check).
+- `X-OpenChat-Signature: sha256=<hex>` — HMAC-SHA256 of the exact request body,
+  keyed by the secret (tamper-evident; recompute and compare).
+
+Delivery is fire-and-forget with a 5 s timeout and a single retry; it never
+blocks or delays the sender.
 
 ---
 
@@ -197,3 +256,28 @@ claude mcp add openchat \
 
 There is no "bot mode" — your agent IS you, with the scopes you assigned to its
 key. Limit blast radius with `read`-only keys for reader bots.
+
+---
+
+## Dedicated bot users (e.g. GroupBrain)
+
+Most agents act *as their owning human* (the key authenticates as you). For a
+first-class external bot that should appear as its own identity — its own name,
+its own avatar, `isBot: true` — OpenChat provisions a dedicated bot **User**
+distinct from the in-app `assistant` singleton.
+
+The **GroupBrain** bot user (`id: "groupbrain"`) is created idempotently on
+server boot by `ensureGroupbrainBotUser()`
+(`apps/server/src/services/groupbrainBot.ts`), mirroring `ensureAssistantUser()`.
+To wire groupbrain up:
+
+1. The bot user exists automatically after a server start.
+2. Mint an agent key (as the human operator) and hand it to groupbrain — or,
+   to have messages appear *as GroupBrain*, mint the key while signed in as the
+   `groupbrain` user so the key's owner is the bot.
+3. Register an outbound webhook (above) so groupbrain receives `message.created`
+   pushes, and reply / react via the REST endpoints.
+
+Because `isBot: true`, any conversation containing the bot also participates in
+the existing bot-trigger machinery (`maybeTriggerAssistant` gates on
+`isBot = true`).

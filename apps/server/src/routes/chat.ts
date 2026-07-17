@@ -11,6 +11,7 @@ import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUser
 import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPreview.js';
 import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
+import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from '../services/embeddings.js';
 import { maybeTranscribeMessage } from '../services/transcribeVoice.js';
 
@@ -1075,6 +1076,9 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // persisted but never delivered live. Clients dedupe by message.id, so the
     // sender receiving its own broadcast is harmless. See OpenChat-5q1 / -60y.
     if (io) broadcastMessageToParticipants(io, participantIds, message);
+    // Outbound webhooks (openchat bot-channel): push the message to any external
+    // subscriber (e.g. groupbrain). Fire-and-forget, no-ops when no subscription.
+    dispatchMessageEvent(message, participantIds);
     // Async link preview fetch — non-blocking (OpenChat-hq2)
     if (io) {
       processLinkPreviews(io, message.id as string, conversationId as string, messageContent);
@@ -1965,13 +1969,13 @@ async function getReactionSummary(
 }
 
 // POST /api/chat/messages/:id/reactions — add reaction (idempotent)
-router.post('/messages/:id/reactions', requireAuth, async (req: Request, res: Response) => {
+router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const messageId = req.params.id as string;
   const { emoji } = req.body as { emoji?: string };
 
-  const ALLOWED_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+  const ALLOWED_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🗂️'];
   if (!emoji || !ALLOWED_EMOJI.includes(emoji)) {
     res.status(400).json({ error: `emoji must be one of: ${ALLOWED_EMOJI.join(' ')}` });
     return;
@@ -2017,7 +2021,7 @@ router.post('/messages/:id/reactions', requireAuth, async (req: Request, res: Re
 });
 
 // DELETE /api/chat/messages/:id/reactions/:emoji — remove own reaction
-router.delete('/messages/:id/reactions/:emoji', requireAuth, async (req: Request, res: Response) => {
+router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const messageId = req.params.id as string;
