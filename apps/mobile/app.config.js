@@ -29,7 +29,14 @@ module.exports = {
     name: 'OpenChat',
     slug: 'openchat-mobile',
     version: '0.1.23',
-    orientation: 'portrait',
+    // orientation: 'default' unlocks landscape so iPad gets a proper
+    // rotatable split-view / multitasking experience (OpenChat-d7f). Phones
+    // still lay out the single-column mobile stack in any orientation; the
+    // master-detail split only engages at width >= 900px (see
+    // src/theme/breakpoints.ts), which on iPad means landscape + full-screen
+    // portrait but not narrow Split View / Slide Over panes — exactly the
+    // "when it gets narrow, behave like mobile" behavior the layout targets.
+    orientation: 'default',
     icon: './assets/icon.png',
     scheme: 'openchat',
     userInterfaceStyle: 'automatic',

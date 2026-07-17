@@ -40,6 +40,7 @@ export function KeyboardShortcutsScreen() {
     { keys: `${meta} N`, label: 'New conversation' },
     { keys: `${meta} ,`, label: 'Open settings' },
     { keys: `${meta} /`, label: 'Show this cheat sheet' },
+    { keys: '↑ / ↓', label: 'Move between conversations' },
     { keys: 'Esc', label: 'Close modal / deselect conversation' },
     { keys: 'Enter', label: 'Send message (in composer)' },
     { keys: 'Shift + Enter', label: 'New line (in composer)' },

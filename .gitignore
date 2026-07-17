@@ -23,6 +23,7 @@ apps/web/tsconfig.node.tsbuildinfo
 # Mobile RN-web export staging dirs (consumed by deploy.sh)
 apps/mobile/dist-web-m/
 apps/mobile/dist-web-d/
+apps/mobile/dist-web-app/
 
 # Turborepo cache
 .turbo/
