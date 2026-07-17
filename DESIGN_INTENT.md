@@ -9,7 +9,7 @@ OpenChat is a GChat-inspired messaging application that integrates with the Noos
 ### Backend (port 41851)
 - **Express + Socket.io** for REST API and real-time messaging
 - **Neo4j** graph database (same as Noos - production: `bolt://44.211.180.200:7687`)
-- **JWT authentication** (shared secret with Noos for SSO)
+- **JWT authentication** (shared secret with Noos for SSO) plus `oc_` agent API keys for bot/script access
 
 ### Frontend (port 29231 dev)
 - **React + TypeScript + Vite**
@@ -56,12 +56,18 @@ Flow:
 - Send/receive text messages
 - Message list with sender info and timestamps
 - Optimistic updates (send via socket, fallback to REST)
+- Emoji reactions, including the `🗂️` bot receipt reaction
 
 ### Presence System
 - Status options: available, away, busy, invisible, offline
 - Custom status message
 - Presence indicators on contacts and conversation list
 - Real-time presence updates via WebSocket
+
+### Agent and Bot Integrations
+- Agent keys authenticate REST requests with `Authorization: Bearer oc_<key>`
+- Outbound webhooks deliver `message.created` events to external services
+- GroupBrain has a dedicated `groupbrain` bot user, distinct from the in-app `assistant`
 
 ## Data Model
 
@@ -82,9 +88,22 @@ Flow:
   messageType, createdAt
 })
 
+(:AgentKey {
+  id, ownerUserId, name, keyPrefix, keyCiphertext,
+  keyIv, scopes, createdAt, expiresAt, revokedAt
+})
+
+(:Webhook {
+  id, ownerUserId, url, secret, events,
+  conversationId, createdByKeyId, createdAt, deactivatedAt
+})
+
 (User)-[:PARTICIPATES_IN]->(Conversation)
 (Message)-[:IN_CONVERSATION]->(Conversation)
 (User)-[:SENT]->(Message)
+(User)-[:REACTED {emoji, createdAt}]->(Message)
+(User)-[:OWNS_KEY]->(AgentKey)
+(User)-[:OWNS_WEBHOOK]->(Webhook)
 ```
 
 ## Pending Work
@@ -138,9 +157,23 @@ App.tsx
 - `GET /api/chat/conversations/:id` - Get with participants
 - `GET /api/chat/conversations/:id/messages` - Paginated messages
 - `POST /api/chat/conversations/:id/messages` - Send message
+- `POST /api/chat/messages/:id/reactions` - Add a reaction (JWT or agent key)
+- `DELETE /api/chat/messages/:id/reactions/:emoji` - Remove own reaction (JWT or agent key)
 - `GET /api/chat/contacts` - List all users (supports ?q= search)
 - `GET /api/chat/users/by-email/:email` - Direct email lookup
 - `PUT /api/chat/presence` - Update own presence
+
+### Agent Keys
+- `GET /api/agent-keys` - List caller's keys (no plaintext)
+- `POST /api/agent-keys` - Mint a new key
+- `GET /api/agent-keys/:id/reveal` - Reveal plaintext key
+- `PATCH /api/agent-keys/:id` - Rename / change scopes
+- `DELETE /api/agent-keys/:id` - Revoke key and deactivate webhooks created by it
+
+### Webhooks
+- `POST /api/webhooks` - Create outbound webhook subscription (returns secret once)
+- `GET /api/webhooks` - List caller's subscriptions (no secret)
+- `DELETE /api/webhooks/:id` - Delete subscription
 
 ### WebSocket Events
 - `message:new` - Receive new message

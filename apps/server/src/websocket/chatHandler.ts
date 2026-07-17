@@ -6,6 +6,7 @@ import { sendPushToUser } from '../services/push.js';
 import { processLinkPreviews } from '../services/linkPreview.js';
 import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
+import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage } from '../services/embeddings.js';
 
 interface AuthenticatedSocket extends Socket {
@@ -258,16 +259,20 @@ export function setupChatSocket(io: Server): void {
             m.conversationId = $conversationId,
             m.messageType = $messageType,
             m.mentions = $mentions,
-            m.createdAt = datetime($now)
+            m.createdAt = datetime($now),
+            m._created = true
           MERGE (m)-[:IN_CONVERSATION]->(c)
           MERGE (sender)-[:SENT]->(m)
           SET c.updatedAt = datetime($now),
               c.lastMessageAt = datetime($now),
               c.lastMessagePreview = left(m.content, 100)
-          WITH c, m, sender
+          WITH c, m, sender, coalesce(m._created, false) AS wasCreated
+          REMOVE m._created
+          WITH c, m, sender, wasCreated
           MATCH (p:User)-[:PARTICIPATES_IN]->(c)
           RETURN m { .*, sender: sender { .id, .name, .email } } AS message,
-                 collect(DISTINCT p.id) AS participantIds
+                 collect(DISTINCT p.id) AS participantIds,
+                 wasCreated
         `, {
           id: messageId,
           content,
@@ -280,10 +285,15 @@ export function setupChatSocket(io: Server): void {
 
         const message = convertToJS(result.records[0].get('message'));
         const participantIds = result.records[0].get('participantIds') as string[];
+        const wasCreated = result.records[0].get('wasCreated') === true;
 
         // Broadcast to every participant's per-user room (reaches recipients who
         // haven't joined the conversation room). See OpenChat-60y.
         broadcastMessageToParticipants(io, participantIds, message);
+
+        // Outbound webhooks (openchat bot-channel): push to external subscribers
+        // (e.g. groupbrain). Fire-and-forget, no-ops when no subscription.
+        if (wasCreated) dispatchMessageEvent(message as Record<string, unknown>, participantIds);
 
         // Async link preview fetch — non-blocking (OpenChat-hq2)
         processLinkPreviews(io, messageId, conversationId, content);

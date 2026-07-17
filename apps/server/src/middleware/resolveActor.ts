@@ -18,8 +18,14 @@ import { validateToken } from './auth.js';
 
 interface CacheEntry {
   userId: string;
+  keyId: string;
   expiresAt: number | null; // unix ms — null means no expiry
   cachedAt: number;         // unix ms
+}
+
+interface ResolvedAgentKey {
+  userId: string;
+  keyId: string;
 }
 
 // In-memory LRU-ish cache keyed by keyPrefix (first 12 chars of the full key).
@@ -55,7 +61,7 @@ export function decryptKey(keyCiphertext: string, keyIv: string): string | null 
   }
 }
 
-async function resolveAgentKey(fullKey: string): Promise<string | null> {
+async function resolveAgentKey(fullKey: string): Promise<ResolvedAgentKey | null> {
   // keyPrefix = "oc_" + first 8 chars after "oc_" = first 11 chars total
   // e.g. key = "oc_AbCdEfGh..." → prefix = "oc_AbCdEfGh" (11 chars)
   const keyPrefix = fullKey.slice(0, 11);
@@ -67,7 +73,7 @@ async function resolveAgentKey(fullKey: string): Promise<string | null> {
     if (age < CACHE_TTL_MS) {
       // Still valid — check expiry
       if (cached.expiresAt !== null && Date.now() > cached.expiresAt) return null;
-      return cached.userId;
+      return { userId: cached.userId, keyId: cached.keyId };
     }
     KEY_CACHE.delete(keyPrefix);
   }
@@ -80,6 +86,7 @@ async function resolveAgentKey(fullKey: string): Promise<string | null> {
          AND (k.expiresAt IS NULL OR k.expiresAt > $now)
        RETURN k.keyCiphertext AS keyCiphertext,
               k.keyIv AS keyIv,
+              k.id AS keyId,
               k.ownerUserId AS ownerUserId,
               k.expiresAt AS expiresAt`,
       { keyPrefix, now: new Date().toISOString() }
@@ -90,6 +97,7 @@ async function resolveAgentKey(fullKey: string): Promise<string | null> {
     const record = result.records[0];
     const keyCiphertext = record.get('keyCiphertext') as string;
     const keyIv = record.get('keyIv') as string;
+    const keyId = record.get('keyId') as string;
     const ownerUserId = record.get('ownerUserId') as string;
     const expiresAt = record.get('expiresAt') as string | null;
 
@@ -99,6 +107,7 @@ async function resolveAgentKey(fullKey: string): Promise<string | null> {
     // Cache the result.
     KEY_CACHE.set(keyPrefix, {
       userId: ownerUserId,
+      keyId,
       expiresAt: expiresAt ? new Date(expiresAt).getTime() : null,
       cachedAt: Date.now(),
     });
@@ -116,7 +125,7 @@ async function resolveAgentKey(fullKey: string): Promise<string | null> {
       .catch(() => { /* best-effort */ })
       .finally(() => bgSession.close());
 
-    return ownerUserId;
+    return { userId: ownerUserId, keyId };
   } finally {
     await session.close();
   }
@@ -155,13 +164,14 @@ export async function resolveActor(
   }
 
   try {
-    const userId = await resolveAgentKey(token);
-    if (!userId) {
+    const resolved = await resolveAgentKey(token);
+    if (!resolved) {
       res.status(401).json({ error: 'Invalid, expired, or revoked agent key' });
       return;
     }
     // Synthesise an AuthUser from the key's owner so route handlers work unchanged.
-    req.user = { userId, email: '' };
+    req.user = { userId: resolved.userId, email: '' };
+    req.agentKeyId = resolved.keyId;
     next();
   } catch (err) {
     console.error('resolveActor error:', err);

@@ -11,6 +11,7 @@ import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUser
 import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPreview.js';
 import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
+import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from '../services/embeddings.js';
 import { maybeTranscribeMessage } from '../services/transcribeVoice.js';
 
@@ -1021,7 +1022,8 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         m.messageType = $messageType,
         m.attachments = $attachmentsJson,
         m.replyToId = $replyToId,
-        m.createdAt = datetime($now)
+        m.createdAt = datetime($now),
+        m._created = true
       MERGE (m)-[:IN_CONVERSATION]->(c)
       MERGE (sender)-[:SENT]->(m)
       SET c.updatedAt = datetime($now),
@@ -1030,7 +1032,9 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       // OpenChat-uxj: hydrate the reply target so clients can render the
       // quote bubble without an extra fetch. OpenChat-60y: also return the
       // participant ids so we can fan out to per-user rooms.
-      WITH c, m, sender
+      WITH c, m, sender, coalesce(m._created, false) AS wasCreated
+      REMOVE m._created
+      WITH c, m, sender, wasCreated
       OPTIONAL MATCH (reply:Message {id: m.replyToId})
       OPTIONAL MATCH (replySender:User)-[:SENT]->(reply)
       MATCH (p:User)-[:PARTICIPATES_IN]->(c)
@@ -1048,7 +1052,8 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
           }
         END
       } AS message,
-      collect(DISTINCT p.id) AS participantIds
+      collect(DISTINCT p.id) AS participantIds,
+      wasCreated
     `, {
       id: messageId,
       content: messageContent,
@@ -1063,6 +1068,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
 
     const message = toJS(result.records[0].get('message')) as Record<string, unknown>;
     const participantIds = result.records[0].get('participantIds') as string[];
+    const wasCreated = result.records[0].get('wasCreated') === true;
     // Parse attachments JSON string back to array for the response + broadcast
     if (message && typeof message.attachments === 'string') {
       try { message.attachments = JSON.parse(message.attachments as string); } catch { /* leave as string */ }
@@ -1075,6 +1081,9 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // persisted but never delivered live. Clients dedupe by message.id, so the
     // sender receiving its own broadcast is harmless. See OpenChat-5q1 / -60y.
     if (io) broadcastMessageToParticipants(io, participantIds, message);
+    // Outbound webhooks (openchat bot-channel): push the message to any external
+    // subscriber (e.g. groupbrain). Fire-and-forget, no-ops when no subscription.
+    if (wasCreated) dispatchMessageEvent(message, participantIds);
     // Async link preview fetch — non-blocking (OpenChat-hq2)
     if (io) {
       processLinkPreviews(io, message.id as string, conversationId as string, messageContent);
@@ -1615,7 +1624,10 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
       SET c.updatedAt = datetime($now),
           c.lastMessageAt = datetime($now),
           c.lastMessagePreview = left($preview, 100)
-      RETURN m { .*, sender: forwarder { .id, .name, .email } } AS message
+      WITH c, m, forwarder
+      MATCH (p:User)-[:PARTICIPATES_IN]->(c)
+      RETURN m { .*, sender: forwarder { .id, .name, .email } } AS message,
+             collect(DISTINCT p.id) AS participantIds
     `, {
       id: messageId,
       content,
@@ -1630,6 +1642,7 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
     });
 
     const raw = toJS(result.records[0].get('message')) as Record<string, unknown>;
+    const participantIds = result.records[0].get('participantIds') as string[];
     // Parse attachments JSON string back to array for the response.
     if (raw && typeof raw.attachments === 'string') {
       try { raw.attachments = JSON.parse(raw.attachments as string); } catch { /* leave */ }
@@ -1640,6 +1653,7 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
     if (io) {
       io.to(`conversation:${toConversationId}`).emit('message:new', raw);
     }
+    dispatchMessageEvent(raw, participantIds);
 
     res.status(201).json(raw);
   } catch (error) {
@@ -1965,13 +1979,13 @@ async function getReactionSummary(
 }
 
 // POST /api/chat/messages/:id/reactions — add reaction (idempotent)
-router.post('/messages/:id/reactions', requireAuth, async (req: Request, res: Response) => {
+router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const messageId = req.params.id as string;
   const { emoji } = req.body as { emoji?: string };
 
-  const ALLOWED_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+  const ALLOWED_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🗂️'];
   if (!emoji || !ALLOWED_EMOJI.includes(emoji)) {
     res.status(400).json({ error: `emoji must be one of: ${ALLOWED_EMOJI.join(' ')}` });
     return;
@@ -2017,7 +2031,7 @@ router.post('/messages/:id/reactions', requireAuth, async (req: Request, res: Re
 });
 
 // DELETE /api/chat/messages/:id/reactions/:emoji — remove own reaction
-router.delete('/messages/:id/reactions/:emoji', requireAuth, async (req: Request, res: Response) => {
+router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const messageId = req.params.id as string;

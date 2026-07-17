@@ -16,9 +16,12 @@ import legalRoutes from './routes/legal.js';
 import aiRoutes from './routes/ai.js';
 import thoughtsRoutes from './routes/thoughts.js';
 import agentKeysRoutes from './routes/agentKeys.js';
+import webhooksRoutes from './routes/webhooks.js';
 import feedbackRoutes from './routes/feedback.js';
 import assistantRoutes from './routes/assistant.js';
 import { ensureAssistantUser } from './services/assistant.js';
+import { ensureGroupbrainBotUser } from './services/groupbrainBot.js';
+import { ensureWebhookIndex } from './services/webhookDispatch.js';
 import { ensureVectorIndex } from './services/embeddings.js';
 import { openapiSpec } from './openapi.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
@@ -368,6 +371,7 @@ app.use('/api/push', pushRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/thoughts', thoughtsRoutes);
 app.use('/api/agent-keys', agentKeysRoutes);
+app.use('/api/webhooks', webhooksRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/assistant', assistantRoutes);
 
@@ -431,6 +435,23 @@ async function start() {
       console.log('Assistant bot user ensured');
     } catch (e) {
       console.error('Failed to ensure assistant user:', e);
+    }
+
+    // GroupBrain external bot (openchat bot-channel): ensure a dedicated bot
+    // User (distinct id from the in-app assistant) exists so groupbrain's DMs
+    // and rooms are its own identity.
+    try {
+      await ensureGroupbrainBotUser();
+      console.log('GroupBrain bot user ensured');
+    } catch (e) {
+      console.error('Failed to ensure groupbrain bot user:', e);
+    }
+
+    try {
+      await ensureWebhookIndex();
+      console.log('Webhook owner index ensured');
+    } catch (e) {
+      console.error('Failed to ensure webhook index:', e);
     }
 
     // Semantic search (openchat-bfn.2): idempotently create the Message

@@ -3,7 +3,8 @@
 OpenChat supports agent API keys so any bot or script can read and send messages
 using a standard `Authorization: Bearer` header. The key authenticates as the
 owning user: messages sent with an agent key appear as that user, not as a
-separate bot identity.
+separate bot identity. Dedicated service bots can instead own their own key and
+receive push delivery through outbound webhooks.
 
 ## Quickstart
 
@@ -50,8 +51,61 @@ Passing your own user id creates or returns a self-DM.
 | `POST` | `/api/chat/conversations` | Create a conversation |
 | `GET` | `/api/chat/conversations/:id/messages` | Get messages |
 | `POST` | `/api/chat/conversations/:id/messages` | Send a message |
+| `POST` | `/api/chat/messages/:id/reactions` | Add a reaction, including `🗂️` for "filed to KB" |
+| `DELETE` | `/api/chat/messages/:id/reactions/:emoji` | Remove your reaction |
 | `GET` | `/api/agent-keys` | List agent keys |
 | `POST` | `/api/agent-keys` | Mint an agent key |
+| `POST` | `/api/webhooks` | Create an outbound webhook subscription |
+| `GET` | `/api/webhooks` | List webhook subscriptions |
+| `DELETE` | `/api/webhooks/:id` | Delete a webhook subscription |
 
 Agent keys have default-on capability flags. They can do everything a user
 session can unless a key is explicitly narrowed later.
+
+## Outbound Webhooks
+
+Use webhooks when an external service should receive new messages without
+polling:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://your-service.example/openchat/webhook","events":["message.created"]}' \
+  "$BASE_URL/api/webhooks"
+```
+
+The create response returns a shared `secret` once. Each delivery posts:
+
+```json
+{
+  "event": "message.created",
+  "message": {
+    "id": "...",
+    "conversationId": "...",
+    "senderId": "...",
+    "senderName": "...",
+    "content": "...",
+    "messageType": "text",
+    "attachments": null,
+    "replyToId": null,
+    "createdAt": "2026-07-16T00:00:00.000Z"
+  }
+}
+```
+
+Deliveries include both verification headers:
+
+- `X-OpenChat-Secret: <secret>` for a direct shared-secret check.
+- `X-OpenChat-Signature: sha256=<hex>` for an HMAC-SHA256 of the exact body.
+
+Delivery is fire-and-forget with a 5 s timeout and one retry. Webhooks created
+with an agent key are deactivated when that key is revoked.
+
+## Dedicated Bot Users
+
+Most agent keys act as their owning human. First-class external services can
+use a dedicated bot user instead. The GroupBrain user (`id: "groupbrain"`,
+`isBot: true`) is created idempotently on server boot and is distinct from the
+in-app `assistant` user. A key owned by that user lets GroupBrain send messages,
+react, and receive `message.created` webhooks as its own OpenChat identity.
