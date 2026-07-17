@@ -106,6 +106,14 @@ export interface ReactionSummary {
   emoji: string;
   count: number;
   byMe: boolean;
+  /**
+   * Semantic kind tag (openchat-reaction-kind). Plain reactions omit this.
+   * 'filed' = a bot's filed-receipt whose `href` links to the KB page it
+   * created; clients render kind reactions as a tappable link.
+   */
+  kind?: string | null;
+  /** Target URL for a kind reaction (e.g. the filed KB page). */
+  href?: string | null;
 }
 
 /** Open Graph / Twitter card preview data (OpenChat-hq2). */

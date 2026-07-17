@@ -15,7 +15,7 @@ interface UseChatSocketOptions {
   /** A message was edited or soft-deleted (openchat-bmp.3). Payload is the full message. */
   onMessageUpdated?: (message: Message) => void;
   /** Reaction counts changed on a message (openchat-bmp.1). */
-  onReactionsUpdated?: (data: { messageId: string; conversationId: string; reactions: Array<{ emoji: string; count: number; byMe: boolean }> }) => void;
+  onReactionsUpdated?: (data: { messageId: string; conversationId: string; reactions: Array<{ emoji: string; count: number; byMe: boolean; kind?: string | null; href?: string | null }> }) => void;
   /** A participant marked the conversation read (openchat-bmp.4). */
   onReadUpdated?: (data: { conversationId: string; userId: string; lastReadAt: string; readMap?: Record<string, string | null>; onlineMap?: Record<string, boolean> }) => void;
   /** A voice message was auto-transcribed (openchat-4jn). */

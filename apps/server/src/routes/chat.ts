@@ -709,6 +709,8 @@ router.get('/conversations/:id/export', requireAuth, async (req: Request, res: R
         OPTIONAL MATCH (reactor:User)-[reaction:REACTED]->(m)
         WITH m, sender, collect({
           emoji: reaction.emoji,
+          kind: reaction.kind,
+          href: reaction.href,
           userId: reactor.id,
           name: reactor.name,
           email: reactor.email
@@ -815,9 +817,9 @@ router.get('/conversations/:id/messages', resolveActor, async (req: Request, res
         CALL {
           WITH m
           OPTIONAL MATCH (reactor:User)-[r:REACTED]->(m)
-          WITH r.emoji AS emoji, count(*) AS cnt, collect(reactor.id) AS reactors
+          WITH r.emoji AS emoji, r.kind AS kind, r.href AS href, count(*) AS cnt, collect(reactor.id) AS reactors
           WHERE emoji IS NOT NULL
-          RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors }) AS reactions
+          RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors, kind: kind, href: href }) AS reactions
         }
         ${replyHydrate}
         RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions, replyTo: replyTo } AS message
@@ -830,9 +832,9 @@ router.get('/conversations/:id/messages', resolveActor, async (req: Request, res
         CALL {
           WITH m
           OPTIONAL MATCH (reactor:User)-[r:REACTED]->(m)
-          WITH r.emoji AS emoji, count(*) AS cnt, collect(reactor.id) AS reactors
+          WITH r.emoji AS emoji, r.kind AS kind, r.href AS href, count(*) AS cnt, collect(reactor.id) AS reactors
           WHERE emoji IS NOT NULL
-          RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors }) AS reactions
+          RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors, kind: kind, href: href }) AS reactions
         }
         ${replyHydrate}
         RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions, replyTo: replyTo } AS message
@@ -1959,35 +1961,77 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
 
 // ─── Reactions (OpenChat-7bd) ─────────────────────────────────────────────────
 
+// Reaction kinds (openchat-reaction-kind). A "kind" tags a reaction with
+// semantic meaning beyond the raw emoji. 'filed' is the first kind: a bot's
+// filed-receipt whose `href` links to the knowledge-base page it created.
+// Plain reactions have no kind (kind = null) and stay fully backward compatible.
+const ALLOWED_KINDS = ['filed'];
+
 // Helper: aggregate reactions on a message for the requesting user.
+// Kind reactions (kind != null) carry an optional `href` and are grouped
+// separately from plain reactions with the same emoji so clients can render
+// them distinctly (e.g. a tappable filed badge).
 async function getReactionSummary(
   session: ReturnType<ReturnType<typeof getDriver>['session']>,
   messageId: string,
   userId: string
-): Promise<Array<{ emoji: string; count: number; byMe: boolean }>> {
+): Promise<Array<{ emoji: string; count: number; byMe: boolean; kind?: string; href?: string }>> {
   const result = await session.run(`
     MATCH (u:User)-[r:REACTED]->(m:Message {id: $messageId})
-    WITH r.emoji AS emoji, count(*) AS cnt, collect(u.id) AS reactors
-    RETURN emoji, cnt, $userId IN reactors AS byMe
-    ORDER BY emoji
+    WITH r.emoji AS emoji, r.kind AS kind, r.href AS href, count(*) AS cnt, collect(u.id) AS reactors
+    RETURN emoji, kind, href, cnt, $userId IN reactors AS byMe
+    ORDER BY kind, emoji
   `, { messageId, userId });
-  return result.records.map(rec => ({
-    emoji: rec.get('emoji') as string,
-    count: (rec.get('cnt') as { toNumber: () => number }).toNumber?.() ?? Number(rec.get('cnt')),
-    byMe: rec.get('byMe') as boolean,
-  }));
+  return result.records.map(rec => {
+    const kind = rec.get('kind') as string | null;
+    const href = rec.get('href') as string | null;
+    return {
+      emoji: rec.get('emoji') as string,
+      count: (rec.get('cnt') as { toNumber: () => number }).toNumber?.() ?? Number(rec.get('cnt')),
+      byMe: rec.get('byMe') as boolean,
+      ...(kind ? { kind } : {}),
+      ...(href ? { href } : {}),
+    };
+  });
 }
 
 // POST /api/chat/messages/:id/reactions — add reaction (idempotent)
+// Uses resolveActor (not requireAuth) so agent-key (oc_) callers — e.g. a bot
+// filing a KB receipt — may react, not just JWT-authenticated humans
+// (openchat-reaction-kind).
 router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const messageId = req.params.id as string;
-  const { emoji } = req.body as { emoji?: string };
+  const { emoji, kind, href } = req.body as { emoji?: string; kind?: string; href?: string };
 
-  const ALLOWED_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🗂️'];
-  if (!emoji || !ALLOWED_EMOJI.includes(emoji)) {
-    res.status(400).json({ error: `emoji must be one of: ${ALLOWED_EMOJI.join(' ')}` });
+  // Emoji allowlist for plain human reactions. Kind reactions (e.g. a filed
+  // receipt) may use a filing glyph outside this set.
+  const ALLOWED_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+  const ALLOWED_KIND_EMOJI = ['🗂️', '📁', '📎', '✅'];
+
+  // Validate kind first: only allowlisted kinds are accepted.
+  if (kind !== undefined && kind !== null) {
+    if (!ALLOWED_KINDS.includes(kind)) {
+      res.status(400).json({ error: `kind must be one of: ${ALLOWED_KINDS.join(', ')}` });
+      return;
+    }
+    // 'filed' receipts must link to the page they created.
+    if (kind === 'filed') {
+      if (!href || !/^https?:\/\/.+/i.test(href)) {
+        res.status(400).json({ error: "kind 'filed' requires an http(s) href" });
+        return;
+      }
+    }
+  }
+
+  const isKindReaction = kind !== undefined && kind !== null;
+  const emojiAllowed = isKindReaction
+    ? [...ALLOWED_EMOJI, ...ALLOWED_KIND_EMOJI].includes(emoji ?? '')
+    : ALLOWED_EMOJI.includes(emoji ?? '');
+  if (!emoji || !emojiAllowed) {
+    const list = isKindReaction ? [...ALLOWED_EMOJI, ...ALLOWED_KIND_EMOJI] : ALLOWED_EMOJI;
+    res.status(400).json({ error: `emoji must be one of: ${list.join(' ')}` });
     return;
   }
 
@@ -2007,12 +2051,27 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
     const conversationId = check.records[0].get('conversationId') as string;
     const now = new Date().toISOString();
 
-    // MERGE so re-adding same emoji is idempotent
-    await session.run(`
-      MATCH (u:User {id: $userId}), (m:Message {id: $messageId})
-      MERGE (u)-[r:REACTED {emoji: $emoji}]->(m)
-      ON CREATE SET r.createdAt = datetime($now)
-    `, { userId, messageId, emoji, now });
+    // MERGE so re-adding the same (emoji, kind) is idempotent. A user can hold
+    // both a plain 👍 and a filed receipt without collision. Neo4j forbids
+    // MERGE on a null property value, so plain (kind-less) and kind reactions
+    // take separate MERGE paths. The plain emoji allowlist and the kind-emoji
+    // allowlist are disjoint, so merging plain reactions on {emoji} alone can
+    // never collide with a kind edge. The href is (re)set on the kind edge so a
+    // bot re-filing updates the link.
+    if (isKindReaction) {
+      await session.run(`
+        MATCH (u:User {id: $userId}), (m:Message {id: $messageId})
+        MERGE (u)-[r:REACTED {emoji: $emoji, kind: $kind}]->(m)
+        ON CREATE SET r.createdAt = datetime($now)
+        SET r.href = $href
+      `, { userId, messageId, emoji, now, kind, href: href ?? null });
+    } else {
+      await session.run(`
+        MATCH (u:User {id: $userId}), (m:Message {id: $messageId})
+        MERGE (u)-[r:REACTED {emoji: $emoji}]->(m)
+        ON CREATE SET r.createdAt = datetime($now)
+      `, { userId, messageId, emoji, now });
+    }
 
     const reactions = await getReactionSummary(session, messageId, userId);
 
@@ -2030,12 +2089,17 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
   }
 });
 
-// DELETE /api/chat/messages/:id/reactions/:emoji — remove own reaction
+// DELETE /api/chat/messages/:id/reactions/:emoji — remove own reaction.
+// Optional ?kind= query param removes a kind edge (e.g. a filed receipt);
+// omitting it removes the plain (kind-less) reaction. Uses resolveActor so
+// agent-key callers can remove their own reactions too (openchat-reaction-kind).
 router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const messageId = req.params.id as string;
   const emoji = decodeURIComponent(req.params.emoji as string);
+  const kindParam = req.query.kind;
+  const kind = typeof kindParam === 'string' && kindParam.length > 0 ? kindParam : null;
 
   try {
     // Verify access
@@ -2052,10 +2116,13 @@ router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Reques
 
     const conversationId = check.records[0].get('conversationId') as string;
 
+    // Match on kind too: null kind removes only the plain reaction; a supplied
+    // kind removes that specific kind edge, leaving any plain reaction intact.
     await session.run(`
       MATCH (u:User {id: $userId})-[r:REACTED {emoji: $emoji}]->(m:Message {id: $messageId})
+      WHERE r.kind = $kind OR (r.kind IS NULL AND $kind IS NULL)
       DELETE r
-    `, { userId, messageId, emoji });
+    `, { userId, messageId, emoji, kind });
 
     const reactions = await getReactionSummary(session, messageId, userId);
 
@@ -2215,9 +2282,9 @@ router.get('/messages/since', resolveActor, async (req: Request, res: Response) 
       CALL {
         WITH m
         OPTIONAL MATCH (reactor:User)-[r:REACTED]->(m)
-        WITH r.emoji AS emoji, count(*) AS cnt, collect(reactor.id) AS reactors
+        WITH r.emoji AS emoji, r.kind AS kind, r.href AS href, count(*) AS cnt, collect(reactor.id) AS reactors
         WHERE emoji IS NOT NULL
-        RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors }) AS reactions
+        RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors, kind: kind, href: href }) AS reactions
       }
       RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions } AS message
       ORDER BY m.createdAt ASC

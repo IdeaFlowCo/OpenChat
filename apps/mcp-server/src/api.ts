@@ -49,7 +49,7 @@ export interface Message {
   conversationId?: string;
   createdAt?: string;
   sender?: { id?: string; name?: string; email?: string };
-  reactions?: Array<{ emoji: string; count: number; byMe: boolean }>;
+  reactions?: Array<{ emoji: string; count: number; byMe: boolean; kind?: string | null; href?: string | null }>;
   attachments?: unknown[];
   [k: string]: unknown;
 }
@@ -222,9 +222,11 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<{ url?: string; id?: string }>('POST', '/api/feedback', { body }),
 
     // ---- reactions ----
-    addReaction: (messageId: string, emoji: string) =>
+    // `kind` + `href` tag a semantic reaction, e.g. a 'filed' receipt linking
+    // to the KB page a bot created (openchat-reaction-kind).
+    addReaction: (messageId: string, emoji: string, kind?: string, href?: string) =>
       request<unknown>('POST', `/api/chat/messages/${encodeURIComponent(messageId)}/reactions`, {
-        body: { emoji },
+        body: { emoji, ...(kind ? { kind } : {}), ...(href ? { href } : {}) },
       }),
 
     // ---- users ----

@@ -387,17 +387,29 @@ export function buildServer(
     {
       title: 'Add emoji reaction',
       description:
-        'Add an emoji reaction to a message. Reactions are idempotent — re-adding the same emoji is a no-op.',
+        'Add an emoji reaction to a message. Reactions are idempotent — re-adding the same emoji is a no-op. ' +
+        "Pass kind='filed' with an href to leave a filed-receipt that links to the knowledge-base page you created; " +
+        'clients render it as a tappable badge.',
       inputSchema: {
         messageId: z.string().min(1).describe('The message id to react to'),
-        emoji: z.string().min(1).describe('The emoji character(s), e.g. "👍" or "❤️"'),
+        emoji: z.string().min(1).describe('The emoji character(s), e.g. "👍" or "🗂️"'),
+        kind: z
+          .enum(['filed'])
+          .optional()
+          .describe("Optional semantic kind. 'filed' = a receipt linking to a KB page (requires href)."),
+        href: z
+          .string()
+          .url()
+          .optional()
+          .describe("Target URL for a kind reaction, e.g. the filed KB page. Required when kind='filed'."),
       },
     },
-    async ({ messageId, emoji }) => {
+    async ({ messageId, emoji, kind, href }) => {
       try {
         requireApiKey(api, 'Adding reactions');
-        await api.addReaction(messageId, emoji);
-        return textResult(`Reaction ${emoji} added to message ${messageId}.`);
+        await api.addReaction(messageId, emoji, kind, href);
+        const suffix = kind ? ` (${kind}${href ? ` → ${href}` : ''})` : '';
+        return textResult(`Reaction ${emoji}${suffix} added to message ${messageId}.`);
       } catch (e) {
         return errorResult(e);
       }
