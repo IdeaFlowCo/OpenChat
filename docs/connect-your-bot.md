@@ -278,6 +278,6 @@ To wire groupbrain up:
 3. Register an outbound webhook (above) so groupbrain receives `message.created`
    pushes, and reply / react via the REST endpoints.
 
-Because `isBot: true`, any conversation containing the bot also participates in
-the existing bot-trigger machinery (`maybeTriggerAssistant` gates on
-`isBot = true`).
+GroupBrain's `isBot: true` marker is only its identity/UI marker. It is a
+separate bot user and does not trigger the in-app assistant loop; that loop only
+fires for the dedicated `assistant` singleton user.

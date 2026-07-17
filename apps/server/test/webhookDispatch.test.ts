@@ -304,6 +304,20 @@ describe('isSafeWebhookUrl', () => {
     await expect(isSafeWebhookUrl('https://private.example/hook')).resolves.toBe(false);
   });
 
+  it('rejects non-global DNS results', async () => {
+    for (const address of ['0.0.0.0', '100.64.0.1', '192.88.99.1', '198.18.0.1', '203.0.113.7', '224.0.0.1']) {
+      mocks.lookupMock.mockResolvedValue([{ address, family: 4 }]);
+      await expect(isSafeWebhookUrl('https://non-global.example/hook')).resolves.toBe(false);
+    }
+  });
+
+  it('rejects IPv6 unspecified, multicast, documentation, and mapped private targets', async () => {
+    await expect(isSafeWebhookUrl('http://[::]/hook')).resolves.toBe(false);
+    await expect(isSafeWebhookUrl('http://[ff02::1]/hook')).resolves.toBe(false);
+    await expect(isSafeWebhookUrl('http://[2001:db8::1]/hook')).resolves.toBe(false);
+    await expect(isSafeWebhookUrl('http://[::ffff:10.0.0.1]/hook')).resolves.toBe(false);
+  });
+
   it('allows public DNS results', async () => {
     mocks.lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
     await expect(isSafeWebhookUrl('https://public.example/hook')).resolves.toBe(true);

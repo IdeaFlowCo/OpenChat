@@ -1022,7 +1022,8 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         m.messageType = $messageType,
         m.attachments = $attachmentsJson,
         m.replyToId = $replyToId,
-        m.createdAt = datetime($now)
+        m.createdAt = datetime($now),
+        m._created = true
       MERGE (m)-[:IN_CONVERSATION]->(c)
       MERGE (sender)-[:SENT]->(m)
       SET c.updatedAt = datetime($now),
@@ -1031,7 +1032,9 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       // OpenChat-uxj: hydrate the reply target so clients can render the
       // quote bubble without an extra fetch. OpenChat-60y: also return the
       // participant ids so we can fan out to per-user rooms.
-      WITH c, m, sender
+      WITH c, m, sender, coalesce(m._created, false) AS wasCreated
+      REMOVE m._created
+      WITH c, m, sender, wasCreated
       OPTIONAL MATCH (reply:Message {id: m.replyToId})
       OPTIONAL MATCH (replySender:User)-[:SENT]->(reply)
       MATCH (p:User)-[:PARTICIPATES_IN]->(c)
@@ -1049,7 +1052,8 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
           }
         END
       } AS message,
-      collect(DISTINCT p.id) AS participantIds
+      collect(DISTINCT p.id) AS participantIds,
+      wasCreated
     `, {
       id: messageId,
       content: messageContent,
@@ -1064,6 +1068,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
 
     const message = toJS(result.records[0].get('message')) as Record<string, unknown>;
     const participantIds = result.records[0].get('participantIds') as string[];
+    const wasCreated = result.records[0].get('wasCreated') === true;
     // Parse attachments JSON string back to array for the response + broadcast
     if (message && typeof message.attachments === 'string') {
       try { message.attachments = JSON.parse(message.attachments as string); } catch { /* leave as string */ }
@@ -1078,7 +1083,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     if (io) broadcastMessageToParticipants(io, participantIds, message);
     // Outbound webhooks (openchat bot-channel): push the message to any external
     // subscriber (e.g. groupbrain). Fire-and-forget, no-ops when no subscription.
-    dispatchMessageEvent(message, participantIds);
+    if (wasCreated) dispatchMessageEvent(message, participantIds);
     // Async link preview fetch — non-blocking (OpenChat-hq2)
     if (io) {
       processLinkPreviews(io, message.id as string, conversationId as string, messageContent);

@@ -118,53 +118,125 @@ export function selectWebhooksForEvent(
   });
 }
 
-function isPrivateIPv4(address: string): boolean {
+function parseIPv4(address: string): number[] | null {
   const parts = address.split('.').map((p) => Number.parseInt(p, 10));
   if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) {
-    return true;
+    return null;
   }
+  return parts;
+}
+
+function isPublicIPv4(address: string): boolean {
+  const parts = parseIPv4(address);
+  if (!parts) return false;
 
   const [a, b] = parts;
-  return (
+  const blocked =
+    a === 0 ||
     a === 10 ||
     a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
     (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 0) ||
     (a === 192 && b === 168) ||
-    (a === 169 && b === 254)
-  );
+    (a === 192 && b === 88 && parts[2] === 99) ||
+    (a === 169 && b === 254) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    (a === 192 && b === 0 && parts[2] === 2) ||
+    (a === 198 && b === 51 && parts[2] === 100) ||
+    (a === 203 && b === 0 && parts[2] === 113) ||
+    a >= 224;
+  return !blocked;
 }
 
 function isLoopbackIPv4(address: string): boolean {
-  const parts = address.split('.').map((p) => Number.parseInt(p, 10));
+  const parts = parseIPv4(address) ?? [];
   return parts.length === 4 && parts[0] === 127;
 }
 
-function isPrivateIPv6(address: string): boolean {
-  const normalized = address.toLowerCase();
-  if (normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') return true;
+function parseIPv6Bytes(address: string): number[] | null {
+  if (net.isIP(address) !== 6) return null;
 
-  const ipv4Mapped = normalized.match(/^(?:::ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
-  if (ipv4Mapped) return isPrivateIPv4(ipv4Mapped[1]);
+  let normalized = address.toLowerCase();
+  const zoneIndex = normalized.indexOf('%');
+  if (zoneIndex !== -1) normalized = normalized.slice(0, zoneIndex);
 
-  const firstGroup = normalized.split(':')[0];
-  const first = Number.parseInt(firstGroup || '0', 16);
-  if (!Number.isInteger(first)) return true;
+  if (normalized.includes('.')) {
+    const lastColon = normalized.lastIndexOf(':');
+    const v4 = parseIPv4(normalized.slice(lastColon + 1));
+    if (!v4) return null;
+    normalized = `${normalized.slice(0, lastColon)}:${((v4[0] << 8) | v4[1]).toString(16)}:${(
+      (v4[2] << 8) |
+      v4[3]
+    ).toString(16)}`;
+  }
 
-  return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+  const pieces = normalized.split('::');
+  if (pieces.length > 2) return null;
+
+  const left = pieces[0] ? pieces[0].split(':') : [];
+  const right = pieces.length === 2 && pieces[1] ? pieces[1].split(':') : [];
+  const missing = 8 - left.length - right.length;
+  if (missing < 0 || (pieces.length === 1 && missing !== 0)) return null;
+
+  const groups = [...left, ...Array(missing).fill('0'), ...right];
+  if (groups.length !== 8) return null;
+
+  const bytes: number[] = [];
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+    const value = Number.parseInt(group, 16);
+    bytes.push((value >> 8) & 0xff, value & 0xff);
+  }
+  return bytes;
+}
+
+function mappedIPv4FromIPv6(address: string): string | null {
+  const bytes = parseIPv6Bytes(address);
+  if (!bytes) return null;
+
+  const isMapped =
+    bytes.slice(0, 10).every((b) => b === 0) &&
+    bytes[10] === 0xff &&
+    bytes[11] === 0xff;
+  if (!isMapped) return null;
+  return bytes.slice(12).join('.');
+}
+
+function isPublicIPv6(address: string): boolean {
+  const mapped = mappedIPv4FromIPv6(address);
+  if (mapped) return isPublicIPv4(mapped);
+
+  const bytes = parseIPv6Bytes(address);
+  if (!bytes) return false;
+
+  const allZero = bytes.every((b) => b === 0);
+  if (allZero) return false;
+
+  const first16 = (bytes[0] << 8) | bytes[1];
+  const first32 = first16 * 0x10000 + ((bytes[2] << 8) | bytes[3]);
+  const first48 = first32 * 0x10000 + ((bytes[4] << 8) | bytes[5]);
+
+  if (first16 === 0x2001 && ((bytes[2] << 8) | bytes[3]) === 0x0db8) return false;
+  if (first48 === 0x200100000002) return false;
+  if (first16 === 0x2001 && bytes[2] === 0 && (bytes[3] & 0xf0) === 0x10) return false;
+  if (first16 === 0x2002) return false;
+
+  return (first16 & 0xe000) === 0x2000;
 }
 
 function isLoopbackIPv6(address: string): boolean {
   const normalized = address.toLowerCase();
   if (normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') return true;
 
-  const ipv4Mapped = normalized.match(/^(?:::ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
-  return ipv4Mapped ? isLoopbackIPv4(ipv4Mapped[1]) : false;
+  const mapped = mappedIPv4FromIPv6(address);
+  return mapped ? isLoopbackIPv4(mapped) : false;
 }
 
 function isBlockedAddress(address: string): boolean {
   const family = net.isIP(address);
-  if (family === 4) return isPrivateIPv4(address);
-  if (family === 6) return isPrivateIPv6(address);
+  if (family === 4) return !isPublicIPv4(address);
+  if (family === 6) return !isPublicIPv6(address);
   return true;
 }
 
