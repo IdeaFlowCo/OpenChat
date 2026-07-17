@@ -116,6 +116,12 @@ and carries two verification headers:
 Delivery is fire-and-forget with a 5 s timeout and a single retry; it never
 blocks or delays the sender.
 
+Webhook ownership depends on the credential used to create it. Webhooks created
+with an agent key are bound to that key and are automatically deactivated when
+the key is revoked, giving the operator a single kill switch. Webhooks created
+with a user JWT are plain user-owned subscriptions and are managed with
+`DELETE /api/webhooks/:id`.
+
 ---
 
 ## Credentials file convention

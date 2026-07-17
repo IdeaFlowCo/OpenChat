@@ -25,6 +25,8 @@ import { MESSAGE_CREATED_EVENT } from '../services/webhookDispatch.js';
 const router = Router();
 
 const SUPPORTED_EVENTS = new Set([MESSAGE_CREATED_EVENT]);
+const MAX_SECRET_LENGTH = 256;
+const SAFE_SECRET_RE = /^[A-Za-z0-9._~+=/@:-]+$/;
 
 function isValidHttpUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false;
@@ -34,6 +36,15 @@ function isValidHttpUrl(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+
+function normalizeSuppliedSecret(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') return '';
+
+  const normalized = value.trim();
+  if (!normalized || normalized.length > MAX_SECRET_LENGTH || !SAFE_SECRET_RE.test(normalized)) return '';
+  return normalized;
 }
 
 // ── POST /api/webhooks ────────────────────────────────────────────────────────
@@ -73,11 +84,17 @@ router.post('/', resolveActor, async (req: Request, res: Response) => {
   }
 
   // Caller may supply their own shared secret; otherwise we mint one.
-  const resolvedSecret =
-    typeof secret === 'string' && secret.trim() ? secret.trim() : `whsec_${crypto.randomBytes(24).toString('base64url')}`;
+  const suppliedSecret = normalizeSuppliedSecret(secret);
+  if (suppliedSecret === '') {
+    res.status(400).json({ error: 'secret must use 1-256 URL/header-safe ASCII characters' });
+    return;
+  }
+
+  const resolvedSecret = suppliedSecret ?? `whsec_${crypto.randomBytes(24).toString('base64url')}`;
 
   const id = nanoid();
   const createdAt = new Date().toISOString();
+  const createdByKeyId = req.agentKeyId ?? null;
 
   const session = getDriver().session();
   try {
@@ -90,6 +107,7 @@ router.post('/', resolveActor, async (req: Request, res: Response) => {
          secret: $secret,
          events: $events,
          conversationId: $conversationId,
+         createdByKeyId: $createdByKeyId,
          createdAt: $createdAt
        })
        CREATE (u)-[:OWNS_WEBHOOK]->(w)`,
@@ -100,6 +118,7 @@ router.post('/', resolveActor, async (req: Request, res: Response) => {
         secret: resolvedSecret,
         events: resolvedEvents,
         conversationId: conversationId ?? null,
+        createdByKeyId,
         createdAt,
       }
     );

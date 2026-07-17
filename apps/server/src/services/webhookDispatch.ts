@@ -29,9 +29,10 @@ import { getDriver } from '../db.js';
 export const MESSAGE_CREATED_EVENT = 'message.created';
 
 const DELIVERY_TIMEOUT_MS = 5_000;
-const ALLOW_LOCAL_WEBHOOKS = ['1', 'true', 'yes'].includes(
-  (process.env.WEBHOOK_ALLOW_LOCAL ?? '').toLowerCase()
-);
+
+function allowLocalWebhooks(): boolean {
+  return ['1', 'true', 'yes'].includes((process.env.WEBHOOK_ALLOW_LOCAL ?? '').toLowerCase());
+}
 
 export interface WebhookSubscription {
   id: string;
@@ -39,6 +40,7 @@ export interface WebhookSubscription {
   secret: string;
   events: string[];
   conversationId: string | null;
+  deactivatedAt?: string | null;
 }
 
 export interface NormalizedMessagePayload {
@@ -112,6 +114,7 @@ export function selectWebhooksForEvent(
   conversationId: string
 ): WebhookSubscription[] {
   return webhooks.filter((w) => {
+    if (w.deactivatedAt) return false;
     const subscribed = Array.isArray(w.events) && w.events.includes(event);
     if (!subscribed) return false;
     return w.conversationId == null || w.conversationId === conversationId;
@@ -264,7 +267,7 @@ async function resolveWebhookTarget(url: string): Promise<ResolvedWebhookTarget 
   const hostname = normalizeHostname(parsed.hostname.toLowerCase());
 
   if (net.isIP(hostname)) {
-    if (ALLOW_LOCAL_WEBHOOKS && isLoopbackAddress(hostname)) {
+    if (allowLocalWebhooks() && isLoopbackAddress(hostname)) {
       return { url: parsed, address: hostname, family: net.isIP(hostname) as 4 | 6 };
     }
     if (isBlockedAddress(hostname)) return null;
@@ -277,7 +280,7 @@ async function resolveWebhookTarget(url: string): Promise<ResolvedWebhookTarget 
     if (!validAddresses.length) return null;
 
     const allLoopback = validAddresses.every((entry) => isLoopbackAddress(entry.address));
-    if (ALLOW_LOCAL_WEBHOOKS && allLoopback) {
+    if (allowLocalWebhooks() && allLoopback) {
       const first = validAddresses[0];
       return { url: parsed, address: first.address, family: first.family as 4 | 6 };
     }
@@ -311,11 +314,12 @@ function postPinnedWebhook(
         headers,
         signal: controller.signal,
         lookup: (_hostname, _options, callback) => {
-          if (!ALLOW_LOCAL_WEBHOOKS && isBlockedAddress(target.address)) {
+          const localAllowed = allowLocalWebhooks();
+          if (!localAllowed && isBlockedAddress(target.address)) {
             callback(new Error('Blocked webhook target address'), target.address, target.family);
             return;
           }
-          if (ALLOW_LOCAL_WEBHOOKS && !isLoopbackAddress(target.address) && isBlockedAddress(target.address)) {
+          if (localAllowed && !isLoopbackAddress(target.address) && isBlockedAddress(target.address)) {
             callback(new Error('Blocked webhook target address'), target.address, target.family);
             return;
           }
@@ -365,6 +369,14 @@ async function deliver(webhook: WebhookSubscription, body: string): Promise<void
   }
 }
 
+async function deliverSafely(webhook: WebhookSubscription, body: string): Promise<void> {
+  try {
+    await deliver(webhook, body);
+  } catch (err) {
+    console.warn(`[webhook] delivery crashed: ${webhook.id} -> ${webhook.url}`, err);
+  }
+}
+
 export async function ensureWebhookIndex(): Promise<void> {
   const session = getDriver().session();
   try {
@@ -393,9 +405,10 @@ async function loadMatchingWebhooks(
     const result = await session.run(
       `MATCH (w:Webhook)
        WHERE w.ownerUserId IN $participantIds
+         AND w.deactivatedAt IS NULL
          AND $event IN w.events
          AND (w.conversationId IS NULL OR w.conversationId = $conversationId)
-       RETURN w { .id, .url, .secret, .events, .conversationId } AS webhook`,
+       RETURN w { .id, .url, .secret, .events, .conversationId, .deactivatedAt } AS webhook`,
       { participantIds, event, conversationId }
     );
     return result.records.map((r) => r.get('webhook') as WebhookSubscription);
@@ -431,6 +444,6 @@ export function dispatchMessageEvent(
     if (!matches.length) return;
 
     const body = JSON.stringify(buildMessagePayload(MESSAGE_CREATED_EVENT, message));
-    await Promise.all(matches.map((w) => deliver(w, body)));
+    await Promise.all(matches.map((w) => deliverSafely(w, body)));
   })();
 }

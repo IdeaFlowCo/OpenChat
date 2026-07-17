@@ -171,6 +171,11 @@ describe('selectWebhooksForEvent', () => {
     const w = { ...base, events: ['something.else'] };
     expect(selectWebhooksForEvent([w], MESSAGE_CREATED_EVENT, 'c1')).toHaveLength(0);
   });
+
+  it('drops a deactivated webhook', () => {
+    const w = { ...base, deactivatedAt: '2026-07-16T01:00:00.000Z' };
+    expect(selectWebhooksForEvent([w], MESSAGE_CREATED_EVENT, 'c1')).toHaveLength(0);
+  });
 });
 
 describe('dispatchMessageEvent', () => {
@@ -188,6 +193,7 @@ describe('dispatchMessageEvent', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    delete process.env.WEBHOOK_ALLOW_LOCAL;
   });
 
   it('POSTs a signed payload when a matching subscription exists', async () => {
@@ -247,6 +253,23 @@ describe('dispatchMessageEvent', () => {
     mocks.state.records = [];
     dispatchMessageEvent(SAMPLE_MESSAGE, ['u1']);
     // Give the async IIFE a chance to run, then assert nothing was sent.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mocks.requestMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT dispatch to a deactivated subscription', async () => {
+    mocks.state.records = [
+      webhookRecord({
+        id: 'w1',
+        url: 'https://x.example/hook',
+        secret: 's',
+        events: [MESSAGE_CREATED_EVENT],
+        conversationId: 'c1',
+        deactivatedAt: '2026-07-16T01:00:00.000Z',
+      }),
+    ];
+
+    dispatchMessageEvent(SAMPLE_MESSAGE, ['u1']);
     await new Promise((r) => setTimeout(r, 20));
     expect(mocks.requestMock).not.toHaveBeenCalled();
   });
@@ -321,6 +344,12 @@ describe('isSafeWebhookUrl', () => {
   it('allows public DNS results', async () => {
     mocks.lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
     await expect(isSafeWebhookUrl('https://public.example/hook')).resolves.toBe(true);
+  });
+
+  it('reads WEBHOOK_ALLOW_LOCAL lazily for loopback dev webhooks', async () => {
+    process.env.WEBHOOK_ALLOW_LOCAL = 'true';
+    await expect(isSafeWebhookUrl('http://127.0.0.1:7777/hook')).resolves.toBe(true);
+    delete process.env.WEBHOOK_ALLOW_LOCAL;
   });
 });
 

@@ -313,6 +313,11 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       `MATCH (u:User {id: $userId})-[:OWNS_KEY]->(k:AgentKey {id: $id})
        WHERE k.revokedAt IS NULL
        SET k.revokedAt = $now
+       WITH k
+       OPTIONAL MATCH (w:Webhook {createdByKeyId: k.id})
+       WHERE w.deactivatedAt IS NULL
+       WITH k, collect(w) AS webhooks
+       FOREACH (webhook IN webhooks | SET webhook.deactivatedAt = $now)
        RETURN k.keyPrefix AS keyPrefix`,
       { userId, id, now: new Date().toISOString() }
     );
