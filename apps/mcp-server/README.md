@@ -143,7 +143,7 @@ Set the API key one of three ways (checked in this order):
 ## How bi-directional access works
 
 - **Outbound (agent → OpenChat):** any tool call (`oc_send_message`, `oc_react`, …) hits the OpenChat REST API as you. Messages appear in your conversations as if you sent them.
-- **Inbound (OpenChat → agent):** call `oc_list_conversations` or `oc_get_messages` from inside your agent loop. New messages show up immediately because the underlying REST API reflects realtime state. (Push/subscribe over WebSocket is on the roadmap — for now poll every few seconds, or only fetch when the user explicitly asks.)
+- **Inbound (OpenChat → agent):** call `oc_list_conversations` or `oc_get_messages` from inside your agent loop. New messages show up immediately because the underlying REST API reflects realtime state. The MCP server still polls; webhook-capable service bots should register `/api/webhooks` for push delivery.
 
 This is **the same auth model as the OpenChat mobile/web app**, just exposed as MCP tools. There is no separate "bot mode" — your agent IS you.
 

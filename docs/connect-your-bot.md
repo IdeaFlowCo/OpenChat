@@ -257,8 +257,8 @@ claude mcp add openchat \
 - **Outbound:** every tool call hits the OpenChat REST API as you. Messages
   show up in conversations as if you sent them.
 - **Inbound:** the agent calls `oc_list_conversations` / `oc_get_messages` to
-  read incoming messages. Polling for now; WebSocket subscribe is on the
-  roadmap.
+  read incoming messages. Polling remains the MCP-server path; service bots
+  that need push should use `/api/webhooks`.
 
 There is no "bot mode" — your agent IS you, with the scopes you assigned to its
 key. Limit blast radius with `read`-only keys for reader bots.
