@@ -84,7 +84,8 @@ Per-user agent API keys (`oc_…` prefix, AES-256-GCM at rest, re-viewable)
 shipped as `OpenChat-7c9`. The OpenChat MCP server shipped alongside as
 a thin REST→MCP adapter. Six tools: `oc_list_conversations`,
 `oc_get_messages`, `oc_send_message`, `oc_react`, `oc_create_dm`,
-`oc_register_agent`.
+`oc_register_agent`. `oc_react` can also leave a linked `filed` receipt by
+passing `kind: "filed"` and an `http(s)` `href`.
 
 This is a fundamentally different identity model from paths 1 and 2.
 Instead of a shared bot user that anyone can @mention, each user mints

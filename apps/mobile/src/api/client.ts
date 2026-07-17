@@ -101,7 +101,7 @@ export interface Conversation {
   createdAt?: string;
 }
 
-/** Aggregated reaction summary for a single emoji on a message. */
+/** Aggregated reaction summary for one plain or semantic reaction bucket. */
 export interface ReactionSummary {
   emoji: string;
   count: number;
@@ -148,7 +148,7 @@ export interface Message {
     senderId: string;
     sender?: { id: string; name?: string; email: string };
   };
-  /** Aggregated reaction summary (OpenChat-7bd). */
+  /** Aggregated reactions, including optional semantic kind receipts. */
   reactions?: ReactionSummary[];
   /** Image attachments (OpenChat-6bg). */
   attachments?: Attachment[];
