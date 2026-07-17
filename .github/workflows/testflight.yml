@@ -113,8 +113,12 @@ jobs:
         run: npm ci
 
       # ── Smoke checks before we spend an EAS build (acceptance criterion) ──
-      # typecheck runs across all workspaces via turbo; build verifies the
-      # server + web compile. If either fails we never kick off the iOS build.
+      # lint + typecheck run across all workspaces via turbo; build verifies the
+      # server + web compile. If any fails we never kick off the iOS build.
+      - name: Lint (all workspaces)
+        working-directory: .
+        run: npm run lint
+
       - name: Typecheck (all workspaces)
         working-directory: .
         run: npm run typecheck
