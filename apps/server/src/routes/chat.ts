@@ -1619,7 +1619,10 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
       SET c.updatedAt = datetime($now),
           c.lastMessageAt = datetime($now),
           c.lastMessagePreview = left($preview, 100)
-      RETURN m { .*, sender: forwarder { .id, .name, .email } } AS message
+      WITH c, m, forwarder
+      MATCH (p:User)-[:PARTICIPATES_IN]->(c)
+      RETURN m { .*, sender: forwarder { .id, .name, .email } } AS message,
+             collect(DISTINCT p.id) AS participantIds
     `, {
       id: messageId,
       content,
@@ -1634,6 +1637,7 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
     });
 
     const raw = toJS(result.records[0].get('message')) as Record<string, unknown>;
+    const participantIds = result.records[0].get('participantIds') as string[];
     // Parse attachments JSON string back to array for the response.
     if (raw && typeof raw.attachments === 'string') {
       try { raw.attachments = JSON.parse(raw.attachments as string); } catch { /* leave */ }
@@ -1644,6 +1648,7 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
     if (io) {
       io.to(`conversation:${toConversationId}`).emit('message:new', raw);
     }
+    dispatchMessageEvent(raw, participantIds);
 
     res.status(201).json(raw);
   } catch (error) {

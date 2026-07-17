@@ -25,6 +25,7 @@ import { getDriver } from '../db.js';
 import { broadcastMessageToParticipants } from '../websocket/chatHandler.js';
 import { processLinkPreviews } from '../services/linkPreview.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from './embeddings.js';
+import { dispatchMessageEvent } from './webhookDispatch.js';
 
 export const ASSISTANT_USER_ID = 'assistant';
 export const ASSISTANT_NAME = 'Assistant';
@@ -144,6 +145,7 @@ async function persistMessage(
       broadcastMessageToParticipants(io, participantIds, message);
       processLinkPreviews(io, message.id as string, conversationId, messageContent);
     }
+    dispatchMessageEvent(message, participantIds);
 
     // Best-effort: embed the new message for semantic search (openchat-bfn.2).
     void embedAndStoreMessage(message.id as string, messageContent).catch(() => { /* best-effort */ });

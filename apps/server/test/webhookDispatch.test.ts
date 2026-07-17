@@ -2,12 +2,50 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import crypto from 'node:crypto';
 
 const mocks = vi.hoisted(() => {
-  const state: { records: Array<{ get: (k: string) => unknown }> } = { records: [] };
+  const state: {
+    records: Array<{ get: (k: string) => unknown }>;
+    requestBodies: string[];
+    statusCodes: number[];
+    lookupAddresses: string[];
+  } = { records: [], requestBodies: [], statusCodes: [], lookupAddresses: [] };
+  const requestMock = vi.fn((url, options, callback) => {
+    const handlers: Record<string, (err?: Error) => void> = {};
+    const req = {
+      on: vi.fn((event: string, handler: (err?: Error) => void) => {
+        handlers[event] = handler;
+        return req;
+      }),
+      write: vi.fn((body: string) => {
+        state.requestBodies.push(body);
+      }),
+      end: vi.fn(() => {
+        options.lookup(String(url.hostname ?? ''), {}, (err: Error | null, address: string) => {
+          if (err) {
+            handlers.error?.(err);
+            return;
+          }
+          state.lookupAddresses.push(address);
+          const statusCode = state.statusCodes.shift() ?? 200;
+          const res = {
+            statusCode,
+            resume: vi.fn(),
+            on: vi.fn((event: string, handler: () => void) => {
+              if (event === 'end') queueMicrotask(handler);
+              return res;
+            }),
+          };
+          callback(res);
+        });
+      }),
+    };
+    return req;
+  });
   return {
     state,
     sessionRun: vi.fn(async () => ({ records: state.records })),
     sessionClose: vi.fn(async () => {}),
     lookupMock: vi.fn(async () => [{ address: '93.184.216.34', family: 4 }]),
+    requestMock,
   };
 });
 vi.mock('../src/db.js', () => ({
@@ -17,6 +55,14 @@ vi.mock('../src/db.js', () => ({
 }));
 vi.mock('node:dns/promises', () => ({
   lookup: mocks.lookupMock,
+}));
+vi.mock('node:http', () => ({
+  default: { request: mocks.requestMock },
+  request: mocks.requestMock,
+}));
+vi.mock('node:https', () => ({
+  default: { request: mocks.requestMock },
+  request: mocks.requestMock,
 }));
 
 import {
@@ -128,17 +174,16 @@ describe('selectWebhooksForEvent', () => {
 });
 
 describe('dispatchMessageEvent', () => {
-  const fetchMock = vi.fn();
-
   beforeEach(() => {
     mocks.state.records = [];
+    mocks.state.requestBodies = [];
+    mocks.state.statusCodes = [];
+    mocks.state.lookupAddresses = [];
     mocks.sessionRun.mockClear();
     mocks.sessionClose.mockClear();
     mocks.lookupMock.mockClear();
     mocks.lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
-    fetchMock.mockReset();
-    fetchMock.mockResolvedValue({ ok: true });
-    vi.stubGlobal('fetch', fetchMock);
+    mocks.requestMock.mockClear();
   });
 
   afterEach(() => {
@@ -158,20 +203,44 @@ describe('dispatchMessageEvent', () => {
 
     dispatchMessageEvent(SAMPLE_MESSAGE, ['u1']);
     // dispatch is fire-and-forget; let the async IIFE settle.
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(mocks.requestMock).toHaveBeenCalledTimes(1));
 
-    const [url, opts] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://x.example/hook');
+    const [url, opts] = mocks.requestMock.mock.calls[0];
+    expect(url.toString()).toBe('https://x.example/hook');
     expect(opts.method).toBe('POST');
+    expect(mocks.state.lookupAddresses).toEqual(['93.184.216.34']);
 
     // Secret + HMAC verification of the exact delivered body.
-    const expectedSig = crypto.createHmac('sha256', 'whsec_abc').update(opts.body).digest('hex');
+    const body = mocks.state.requestBodies[0];
+    const expectedSig = crypto.createHmac('sha256', 'whsec_abc').update(body).digest('hex');
     expect(opts.headers['X-OpenChat-Secret']).toBe('whsec_abc');
     expect(opts.headers['X-OpenChat-Signature']).toBe(`sha256=${expectedSig}`);
 
-    const parsed = JSON.parse(opts.body);
+    const parsed = JSON.parse(body);
     expect(parsed.event).toBe('message.created');
     expect(parsed.message.id).toBe('m1');
+  });
+
+  it('POSTs a signed payload for a forwarded message', async () => {
+    mocks.state.records = [
+      webhookRecord({
+        id: 'w1',
+        url: 'https://x.example/hook',
+        secret: 'whsec_forward',
+        events: [MESSAGE_CREATED_EVENT],
+        conversationId: 'c1',
+      }),
+    ];
+
+    dispatchMessageEvent({ ...SAMPLE_MESSAGE, id: 'm-forward', forwardedFromMessageId: 'm-original' }, ['u1']);
+    await vi.waitFor(() => expect(mocks.requestMock).toHaveBeenCalledTimes(1));
+
+    const body = mocks.state.requestBodies[0];
+    const parsed = JSON.parse(body);
+    const expectedSig = crypto.createHmac('sha256', 'whsec_forward').update(body).digest('hex');
+    const [, opts] = mocks.requestMock.mock.calls[0];
+    expect(opts.headers['X-OpenChat-Signature']).toBe(`sha256=${expectedSig}`);
+    expect(parsed.message.id).toBe('m-forward');
   });
 
   it('does NOT dispatch when there is no subscription', async () => {
@@ -179,7 +248,7 @@ describe('dispatchMessageEvent', () => {
     dispatchMessageEvent(SAMPLE_MESSAGE, ['u1']);
     // Give the async IIFE a chance to run, then assert nothing was sent.
     await new Promise((r) => setTimeout(r, 20));
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.requestMock).not.toHaveBeenCalled();
   });
 
   it('retries exactly once when the first delivery fails', async () => {
@@ -192,10 +261,10 @@ describe('dispatchMessageEvent', () => {
         conversationId: 'c1',
       }),
     ];
-    fetchMock.mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true });
+    mocks.state.statusCodes = [500, 200];
 
     dispatchMessageEvent(SAMPLE_MESSAGE, ['u1']);
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(mocks.requestMock).toHaveBeenCalledTimes(2));
   });
 
   it('does NOT dispatch to a private resolved address', async () => {
@@ -213,7 +282,7 @@ describe('dispatchMessageEvent', () => {
     dispatchMessageEvent(SAMPLE_MESSAGE, ['u1']);
     await vi.waitFor(() => expect(mocks.lookupMock).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 20));
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.requestMock).not.toHaveBeenCalled();
   });
 });
 

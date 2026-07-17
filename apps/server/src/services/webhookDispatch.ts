@@ -21,6 +21,8 @@
 
 import crypto from 'node:crypto';
 import { lookup } from 'node:dns/promises';
+import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 import { getDriver } from '../db.js';
 
@@ -52,6 +54,12 @@ export interface NormalizedMessagePayload {
     replyToId: string | null;
     createdAt: string | null;
   };
+}
+
+interface ResolvedWebhookTarget {
+  url: URL;
+  address: string;
+  family: 4 | 6;
 }
 
 /**
@@ -167,34 +175,97 @@ function isLoopbackAddress(address: string): boolean {
   return false;
 }
 
-export async function isSafeWebhookUrl(url: string): Promise<boolean> {
+function normalizeHostname(hostname: string): string {
+  return hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
+}
+
+async function resolveWebhookTarget(url: string): Promise<ResolvedWebhookTarget | null> {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    return false;
+    return null;
   }
 
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
 
-  const hostname = parsed.hostname.toLowerCase();
-  if (hostname === 'localhost') return ALLOW_LOCAL_WEBHOOKS;
+  const hostname = normalizeHostname(parsed.hostname.toLowerCase());
 
   if (net.isIP(hostname)) {
-    if (ALLOW_LOCAL_WEBHOOKS && isLoopbackAddress(hostname)) return true;
-    return !isBlockedAddress(hostname);
+    if (ALLOW_LOCAL_WEBHOOKS && isLoopbackAddress(hostname)) {
+      return { url: parsed, address: hostname, family: net.isIP(hostname) as 4 | 6 };
+    }
+    if (isBlockedAddress(hostname)) return null;
+    return { url: parsed, address: hostname, family: net.isIP(hostname) as 4 | 6 };
   }
 
   try {
     const addresses = await lookup(hostname, { all: true, verbatim: true });
-    if (!addresses.length) return false;
-    if (ALLOW_LOCAL_WEBHOOKS && addresses.every((entry) => isLoopbackAddress(entry.address))) {
-      return true;
+    const validAddresses = addresses.filter((entry) => entry.family === 4 || entry.family === 6);
+    if (!validAddresses.length) return null;
+
+    const allLoopback = validAddresses.every((entry) => isLoopbackAddress(entry.address));
+    if (ALLOW_LOCAL_WEBHOOKS && allLoopback) {
+      const first = validAddresses[0];
+      return { url: parsed, address: first.address, family: first.family as 4 | 6 };
     }
-    return addresses.every((entry) => !isBlockedAddress(entry.address));
+
+    if (validAddresses.some((entry) => isBlockedAddress(entry.address))) return null;
+
+    const first = validAddresses[0];
+    return { url: parsed, address: first.address, family: first.family as 4 | 6 };
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function isSafeWebhookUrl(url: string): Promise<boolean> {
+  return (await resolveWebhookTarget(url)) !== null;
+}
+
+function postPinnedWebhook(
+  target: ResolvedWebhookTarget,
+  headers: Record<string, string>,
+  body: string
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const client = target.url.protocol === 'https:' ? https : http;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
+    const req = client.request(
+      target.url,
+      {
+        method: 'POST',
+        headers,
+        signal: controller.signal,
+        lookup: (_hostname, _options, callback) => {
+          if (!ALLOW_LOCAL_WEBHOOKS && isBlockedAddress(target.address)) {
+            callback(new Error('Blocked webhook target address'), target.address, target.family);
+            return;
+          }
+          if (ALLOW_LOCAL_WEBHOOKS && !isLoopbackAddress(target.address) && isBlockedAddress(target.address)) {
+            callback(new Error('Blocked webhook target address'), target.address, target.family);
+            return;
+          }
+          callback(null, target.address, target.family);
+        },
+      },
+      (res) => {
+        res.resume();
+        res.on('end', () => {
+          clearTimeout(timer);
+          resolve((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300);
+        });
+      }
+    );
+
+    req.on('error', () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+    req.write(body);
+    req.end();
+  });
 }
 
 /** POST a signed payload to one webhook, with a timeout and a single retry. */
@@ -202,27 +273,13 @@ async function deliver(webhook: WebhookSubscription, body: string): Promise<void
   const headers = buildWebhookHeaders(body, webhook.secret);
 
   const attempt = async (): Promise<boolean | 'blocked'> => {
-    if (!(await isSafeWebhookUrl(webhook.url))) {
+    const target = await resolveWebhookTarget(webhook.url);
+    if (!target) {
       console.warn(`[webhook] blocked unsafe delivery target: ${webhook.id} -> ${webhook.url}`);
       return 'blocked';
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
-    try {
-      const res = await fetch(webhook.url, {
-        method: 'POST',
-        headers,
-        body,
-        signal: controller.signal,
-        redirect: 'manual',
-      });
-      return res.ok;
-    } catch {
-      return false;
-    } finally {
-      clearTimeout(timer);
-    }
+    return postPinnedWebhook(target, headers, body);
   };
 
   const ok = await attempt();
