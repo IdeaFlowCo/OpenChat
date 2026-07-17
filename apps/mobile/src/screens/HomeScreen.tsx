@@ -1,13 +1,17 @@
-/**
- * HomeScreen — NATIVE / narrow-web shim (OpenChat-601).
- *
- * Registered at the "Conversations" route key in the ChatsNavigator stack.
- * On native and on web viewports <900px this is the actual home — a
- * straight re-export of ConversationsScreen. The .web.tsx sibling handles
- * the responsive swap to MasterDetailLayout for desktop-width browsers.
- *
- * Per Codex review 2026-06-01: every .web.tsx imported by shared code
- * needs a native sibling, otherwise Metro fails on iOS / Android build.
- * This shim satisfies that constraint.
- */
-export { ConversationsScreen as HomeScreen } from './ConversationsScreen';
+import { useLayoutEffect } from 'react';
+import { useNavigation } from '@react-navigation/native';
+import { useIsDesktop } from '../theme/breakpoints';
+import { ConversationsScreen } from './ConversationsScreen';
+import { MasterDetailLayout } from '../components/MasterDetailLayout';
+import type { NavProp } from '../navigation/types';
+
+export function HomeScreen() {
+  const isDesktop = useIsDesktop();
+  const navigation = useNavigation<NavProp<'Conversations'>>();
+
+  useLayoutEffect(() => {
+    navigation.setOptions({ headerShown: !isDesktop });
+  }, [isDesktop, navigation]);
+
+  return isDesktop ? <MasterDetailLayout /> : <ConversationsScreen />;
+}

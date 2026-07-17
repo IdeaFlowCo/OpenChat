@@ -43,12 +43,7 @@ import { OPENCHAT_URL } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
-// Explicit .web imports — these files are web-only and never reached from
-// native code paths. TypeScript needs the explicit extension because we
-// don't enable `moduleSuffixes` globally (it breaks node_modules typings).
-// Metro on web resolves identically; on native the dep graph never reaches
-// these files because nothing in native code imports MasterDetailLayout.
-import { ConversationList } from './ConversationList.web';
+import { ConversationList } from './ConversationList';
 // /d/ right pane renders the same ChatScreen that /m/ uses — with full
 // feature parity (voice / preview / transform / forwarding / reactions /
 // edit / delete / mentions / attachments / read receipts / pagination).
@@ -216,6 +211,11 @@ export function MasterDetailLayout() {
       // text input / textarea / contentEditable so arrows keep their normal
       // caret-movement behavior in the composer and search box.
       if (!meta && (key === 'ArrowDown' || key === 'ArrowUp')) {
+        const state = navigation.getState?.();
+        const routes = state?.routes ?? [];
+        const top = routes[routes.length - 1]?.name;
+        if (top && top !== 'Conversations') return;
+
         const target = ev.target as HTMLElement | null;
         const tag = target?.tagName;
         const isTyping =
