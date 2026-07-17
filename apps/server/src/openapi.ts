@@ -12,6 +12,9 @@
  */
 
 const bearer = [{ bearerAuth: [] as string[] }];
+const PLAIN_REACTION_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🙏'] as const;
+const KIND_REACTION_EMOJI = ['🗂️', '📁', '📎', '✅'] as const;
+const REACTION_KINDS = ['filed'] as const;
 
 const Message = {
   type: 'object',
@@ -55,10 +58,34 @@ const AgentKey = {
 const ReactionSummary = {
   type: 'object',
   properties: {
-    emoji: { type: 'string', enum: ['👍', '❤️', '😂', '😮', '😢', '🙏', '🗂️'] },
+    emoji: { type: 'string', enum: [...PLAIN_REACTION_EMOJI, ...KIND_REACTION_EMOJI] },
     count: { type: 'integer' },
     byMe: { type: 'boolean' },
+    kind: { type: 'string', enum: REACTION_KINDS },
+    href: { type: 'string', format: 'uri' },
   },
+} as const;
+
+const AddReactionRequest = {
+  type: 'object',
+  properties: {
+    emoji: {
+      type: 'string',
+      enum: [...PLAIN_REACTION_EMOJI, ...KIND_REACTION_EMOJI],
+      description: `Plain reactions use ${PLAIN_REACTION_EMOJI.join(' ')}. Kind reactions use ${KIND_REACTION_EMOJI.join(' ')}.`,
+    },
+    kind: {
+      type: 'string',
+      enum: REACTION_KINDS,
+      description: "Optional semantic reaction kind. `filed` requires an http(s) `href`.",
+    },
+    href: {
+      type: 'string',
+      format: 'uri',
+      description: "Required for `kind: 'filed'`; must be an http(s) URL.",
+    },
+  },
+  required: ['emoji'],
 } as const;
 
 const Webhook = {
@@ -196,9 +223,9 @@ export const openapiSpec = {
         operationId: 'addReaction',
         tags: ['Chat'],
         summary: 'Add a reaction to a message',
-        description: 'Accepts user JWTs and `oc_` agent keys. `🗂️` is the bot-friendly "filed to KB" receipt.',
+        description: 'Accepts user JWTs and `oc_` agent keys. Plain reactions use the base emoji allowlist. Kind reactions use filing glyphs (`🗂️`, `📁`, `📎`, `✅`); `kind: "filed"` requires an http(s) `href` linking to the filed resource.',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        requestBody: { required: true, content: json({ type: 'object', properties: { emoji: { type: 'string', enum: ['👍', '❤️', '😂', '😮', '😢', '🙏', '🗂️'] } }, required: ['emoji'] }) },
+        requestBody: { required: true, content: json(AddReactionRequest) },
         responses: { '201': ok({ type: 'object', properties: { reactions: { type: 'array', items: { $ref: '#/components/schemas/ReactionSummary' } } } }, 'Created'), '400': errResp('Unsupported emoji'), '401': errResp('Unauthorized'), '404': errResp('Message not found') },
       },
     },
@@ -207,10 +234,11 @@ export const openapiSpec = {
         operationId: 'removeReaction',
         tags: ['Chat'],
         summary: 'Remove your reaction from a message',
-        description: 'Accepts user JWTs and `oc_` agent keys.',
+        description: 'Accepts user JWTs and `oc_` agent keys. Omit `kind` to remove the plain reaction, or pass `kind=filed` to remove a filed receipt reaction.',
         parameters: [
           { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
           { name: 'emoji', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'kind', in: 'query', schema: { type: 'string', enum: REACTION_KINDS } },
         ],
         responses: { '200': ok({ type: 'object', properties: { reactions: { type: 'array', items: { $ref: '#/components/schemas/ReactionSummary' } } } }), '401': errResp('Unauthorized'), '404': errResp('Message not found') },
       },

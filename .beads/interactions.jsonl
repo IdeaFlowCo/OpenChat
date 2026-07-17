@@ -86,3 +86,5 @@
 {"id":"int-cbfc0746","kind":"field_change","created_at":"2026-07-17T01:30:19.995891Z","actor":"tmad4000","issue_id":"OpenChat-c6f","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-abf1ca0d","kind":"field_change","created_at":"2026-07-17T11:26:42.662932Z","actor":"tmad4000","issue_id":"OpenChat-2x3","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-df0b9cf9","kind":"field_change","created_at":"2026-07-17T11:33:00.74185Z","actor":"tmad4000","issue_id":"OpenChat-2x3","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-6ac4c81f","kind":"field_change","created_at":"2026-07-17T11:40:34.116655Z","actor":"tmad4000","issue_id":"OpenChat-03g","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-80403faa","kind":"field_change","created_at":"2026-07-17T11:41:17.02318Z","actor":"tmad4000","issue_id":"OpenChat-03g","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"fixed"}}
