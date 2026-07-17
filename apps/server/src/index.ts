@@ -337,10 +337,8 @@ app.get(/^\/legacy(\/|$)/, (_req, res) => {
   res.type('html').send(getLegacyShell());
 });
 
-// Optional RN-web build of openchat-mobile, mounted at /m/*. Lets us experiment
-// with the React Native app on the web without disturbing the existing /
-// client. Built by deploy.sh from sibling openchat-mobile repo via
-// `npx expo export --platform web` (with app.json experiments.baseUrl=/m).
+// RN-web build of apps/mobile, mounted at /m/*. Built by deploy.sh via
+// `expo export --platform web` with app.config.js experiments.baseUrl=/m.
 // If the dist directory is missing this just no-ops (404 under /m).
 const mobileDistPath = path.join(__dirname, '..', '..', '..', 'client-mobile', 'dist');
 app.use('/m', express.static(mobileDistPath));
@@ -352,9 +350,9 @@ app.get(/^\/m(\/|$)/, (_req, res, next) => {
   });
 });
 
-// Desktop-responsive RN-web build, mounted at /d/*. Same codebase as /m but
-// with a multi-pane master-detail layout above the 768px breakpoint. Built
-// from sibling openchat-mobile-desktop repo (experiments.baseUrl=/d).
+// Desktop-responsive RN-web build, mounted at /d/*. Same apps/mobile codebase
+// as /m, with a multi-pane master-detail layout at widths >=900px. Built by
+// deploy.sh with app.config.js experiments.baseUrl=/d.
 const mobileDesktopDistPath = path.join(__dirname, '..', '..', '..', 'client-mobile-desktop', 'dist');
 app.use('/d', express.static(mobileDesktopDistPath));
 app.get(/^\/d(\/|$)/, (_req, res, next) => {

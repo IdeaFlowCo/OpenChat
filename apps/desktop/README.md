@@ -40,7 +40,7 @@ standard Tauri v2 setup — no custom Rust beyond the boilerplate entry point.
 - Platform WebView deps — macOS: nothing extra; Linux: `webkit2gtk`; Windows:
   WebView2 (preinstalled on Win 11).
 - App icons in `src-tauri/icons/` — generate from `apps/mobile/assets/icon.png`
-  with `npx @tauri-apps/cli icon apps/mobile/assets/icon.png`. (Not committed;
+  with `npx @tauri-apps/cli icon ../mobile/assets/icon.png`. (Not committed;
   Tauri requires them at build time.)
 
 **Build:**
@@ -52,6 +52,10 @@ npm run build:web   # exports apps/mobile -> ../mobile/dist-web-app
 npm run build:tauri # tauri build -> native installer in src-tauri/target/release/bundle
 # or: npm run dev    # starts Expo web on port 8081, then opens the Tauri dev window
 ```
+
+The root `npm run build` intentionally filters out `openchat-desktop`; this
+wrapper needs the Rust/Tauri toolchain and should be built explicitly from
+`apps/desktop`.
 
 `tauri.conf.json`'s `frontendDist` points at `../../mobile/dist-web-app`, and
 `beforeBuildCommand` re-runs the web export so `npm run build:tauri` is one step.

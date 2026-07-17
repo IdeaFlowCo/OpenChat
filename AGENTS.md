@@ -11,6 +11,7 @@ This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get sta
 | `apps/server` | Node/Express + Socket.io + Neo4j **server** (shared backend) | `chat.globalbr.ai/api/*` |
 | `apps/web` | Vite/React **web** client (legacy) | `chat.globalbr.ai/`, `/legacy` |
 | `apps/mobile` | React Native / Expo app | native iOS (TestFlight) + RN-web at **`/m`** (mobile web) and **`/d`** (desktop web) |
+| `apps/desktop` | Tauri desktop wrapper around the `apps/mobile` RN-web export | native desktop shell |
 | `apps/mcp-server` | MCP REST→tools bridge (Claude-side connector) | run locally / connect to Claude |
 | `infra/` | `deploy.sh`, `docker-compose.prod.yml`, `Dockerfile` | prod deploy |
 

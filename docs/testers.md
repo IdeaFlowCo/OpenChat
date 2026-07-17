@@ -31,7 +31,7 @@ TestFlight.
 
 | Path | Audience | Notes |
 |------|----------|-------|
-| `https://chat.globalbr.ai/m` | Mobile web | Same React-Native-web app, mobile-width layout. |
+| `https://chat.globalbr.ai/m` | Mobile web | Same React-Native-web app, usually opened on mobile; layout still adapts by viewport width. |
 | `https://chat.globalbr.ai/d` | Desktop web | Same app, master-detail layout at widths ≥ 900px. **Installable as a PWA** (manifest + service worker injected at deploy). |
 | `https://chat.globalbr.ai/legacy` | Legacy Vite client | Kept for backward compat. |
 

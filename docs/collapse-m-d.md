@@ -22,20 +22,24 @@ proposes it but implements only the minimal, reversible first step.
 
 ### Code (already responsive — no fork)
 
-- `src/theme/breakpoints.ts` — `useIsDesktop()` returns `true` only on web at
-  `width >= 900`. Uses RN's `useWindowDimensions()`, so it re-evaluates on
-  resize. On native it's always `false`.
-- `src/screens/HomeScreen.web.tsx` / `ChatScreenRouter.web.tsx` — on web ≥900px
-  render `MasterDetailLayout`; otherwise the single-column conversations stack.
-- `src/components/MasterDetailLayout.web.tsx` — the side-by-side desktop view
-  (sidebar + chat pane, keyboard shortcuts, collapsible sidebar).
+- `src/theme/breakpoints.ts` — `useIsDesktop()` returns `true` on web at
+  `width >= 900`. On native it also requires a tablet-sized short side, so
+  landscape phones stay single-column while iPad landscape / large screens use
+  master-detail. Uses RN's `useWindowDimensions()`, so it re-evaluates on
+  resize and rotation.
+- `src/screens/HomeScreen.tsx` / `ChatScreenRouter.tsx` — at desktop/tablet
+  widths they render or route into `MasterDetailLayout`; otherwise the
+  single-column conversations stack.
+- `src/components/MasterDetailLayout.tsx` — the side-by-side desktop/tablet
+  view (sidebar + chat pane, keyboard shortcuts, arrow-key conversation
+  navigation, collapsible sidebar).
 - There is **no** `openchat-mobile-desktop` repo anymore. The comments in
   `app.config.js` and `breakpoints.ts` confirm `/m` and `/d` both build from
   the same `apps/mobile` source (OpenChat-601).
 
 ### Build (the only divergence)
 
-`infra/deploy.sh` runs `expo export --platform web` twice:
+`infra/deploy.sh` runs `expo export --platform web` twice for production web:
 
 ```
 IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/m  → dist-web-m → client-mobile/dist           (served at /m)
@@ -45,9 +49,18 @@ IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/d  → dist-web-d → client-mobile-desktop/di
 `app.config.js` applies `experiments.baseUrl = OPENCHAT_BASE_URL` **only** when
 `IS_WEB_BUILD=1`. `baseUrl` rewrites every asset/script URL in `index.html` to
 be prefixed with `/m/` or `/d/`. That prefix must match the server mount path
-or every JS/CSS request 404s — which is exactly why deploy.sh has the
+or every JS/CSS request 404s. This base path must be correct — which is exactly why deploy.sh has the
 cross-contamination validator (lines ~58-102) that fails the build if a `/m`
 bundle references `/d` paths or vice-versa.
+
+The desktop shell uses a third, non-production-web export:
+
+```
+IS_WEB_BUILD=1  → dist-web-app (root-relative assets for the Tauri shell)
+```
+
+`dist-web-app` intentionally omits `OPENCHAT_BASE_URL` so assets load from the
+Tauri shell origin.
 
 ### Serving
 

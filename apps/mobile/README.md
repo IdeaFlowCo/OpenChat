@@ -1,6 +1,8 @@
 # openchat-mobile
 
-React Native (Expo) prototype of OpenChat. Connects to the same production backend at `https://chat.globalbr.ai`. Tracks beads ticket `OpenChat-dv0`.
+React Native (Expo) OpenChat app. Connects to the same production backend at
+`https://chat.globalbr.ai` and also exports the RN-web builds served at `/m`
+and `/d`.
 
 ## What works today (v0 scaffold)
 
@@ -9,7 +11,11 @@ React Native (Expo) prototype of OpenChat. Connects to the same production backe
 - Open a conversation → message thread renders
 - Send messages via Socket.io (REST fallback)
 - Receive messages live via WebSocket
-- System dark mode (follows iOS appearance setting)
+- System dark mode (follows system appearance)
+- Responsive master-detail layout at desktop/tablet widths
+- iPad landscape support (`orientation: 'default'`)
+- Web keyboard shortcuts, including Up/Down conversation navigation in the
+  wide master-detail layout
 
 ## What's stubbed / TODO
 
@@ -25,7 +31,7 @@ React Native (Expo) prototype of OpenChat. Connects to the same production backe
 ## Running
 
 ```bash
-cd ~/code/openchat-mobile
+cd apps/mobile
 npm install          # one-time
 npx expo start       # starts Metro bundler + QR code
 ```
@@ -47,6 +53,25 @@ EXPO_PUBLIC_NOOS_URL=https://globalbr.ai \
 
 Defaults are the production URLs above.
 
+### Web and desktop exports
+
+The RN-web app is the source for both production web mounts:
+
+```bash
+cd apps/mobile
+npm run export:web:mobile   # dist-web-m, assets under /m/
+npm run export:web:desktop  # dist-web-d, assets under /d/
+npm run export:web:app      # dist-web-app, root-relative assets for desktop shells
+```
+
+The layout switches at runtime by width (`src/theme/breakpoints.ts`): at
+900px and wider it renders the persistent sidebar + conversation pane; below
+that it uses the phone stack. On native, the split view also requires a
+tablet-sized short side so landscape phones stay in the mobile layout. The
+Tauri desktop wrapper in `../desktop` consumes `dist-web-app`. Reference
+screenshots for the wide split view and narrow phone layout live in
+`docs/screenshots/`.
+
 ## Architecture
 
 ```
@@ -54,10 +79,15 @@ App.tsx                      # screen router (loading → login → conversation
 src/api/
   client.ts                  # REST: getConversations, getMessages, sendMessage, login
   socket.ts                  # Socket.io: connect, join, send, message:new listener
+src/components/
+  MasterDetailLayout.tsx     # wide iPad / desktop sidebar + chat pane
 src/screens/
   LoginScreen.tsx
+  HomeScreen.tsx             # responsive home: master-detail or conversations list
   ConversationsScreen.tsx
+  ChatScreenRouter.tsx       # redirects desktop-width chat routes into the right pane
   ChatScreen.tsx
+src/theme/breakpoints.ts     # 900px desktop switch + native tablet guard
 src/theme/colors.ts          # palette tokens (light + dark, parity with web)
 ```
 

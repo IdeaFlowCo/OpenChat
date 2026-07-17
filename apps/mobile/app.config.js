@@ -2,16 +2,19 @@
  * app.config.js (OpenChat-601) — env-driven Expo config.
  *
  * Replaces the previous static app.json so the web-target baseUrl can be
- * switched between /m (mobile-web build at /m/*) and /d (desktop-responsive
- * build at /d/*) from a single openchat-mobile checkout. Both /m/ and /d/
- * deploys come from the same `main` branch — no more desktop-responsive
- * branch to sync.
+ * switched between /m (mobile-web build at /m/*), /d (desktop-responsive
+ * build at /d/*), and the root-relative dist-web-app export consumed by the
+ * desktop shell. All exports come from this monorepo's `apps/mobile` source —
+ * no more desktop-responsive branch to sync.
  *
  *   IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/m npx expo export --platform web \
  *     --output-dir dist-web-m --clear
  *
  *   IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/d npx expo export --platform web \
  *     --output-dir dist-web-d --clear
+ *
+ *   IS_WEB_BUILD=1 npx expo export --platform web \
+ *     --output-dir dist-web-app --clear
  *
  * CRITICAL — DO NOT set OPENCHAT_BASE_URL during native (EAS) builds.
  * Setting `experiments.baseUrl` on iOS / Android corrupts deep links and
@@ -33,8 +36,8 @@ module.exports = {
     // rotatable split-view / multitasking experience (OpenChat-d7f). Phones
     // still lay out the single-column mobile stack in any orientation; the
     // master-detail split only engages at width >= 900px (see
-    // src/theme/breakpoints.ts), which on iPad means landscape + full-screen
-    // portrait but not narrow Split View / Slide Over panes — exactly the
+    // src/theme/breakpoints.ts), which on iPad means wide landscape / large
+    // full-screen panes but not narrow Split View / Slide Over panes — exactly the
     // "when it gets narrow, behave like mobile" behavior the layout targets.
     orientation: 'default',
     icon: './assets/icon.png',
