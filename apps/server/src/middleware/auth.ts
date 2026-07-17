@@ -7,6 +7,7 @@ export interface AuthUser {
 }
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- Express type augmentation requires a namespace.
   namespace Express {
     interface Request {
       user?: AuthUser;

@@ -153,7 +153,7 @@ because tmux's stale audit session breaks codesign keychain resolution.
 `.github/workflows/testflight.yml` runs an **EAS cloud build + submit**
 (`workflow_dispatch` or push a `v*` tag). It does *not* reproduce the local
 keychain/credentials dance — Expo's build farm holds the credentials. It runs
-typecheck + build smoke checks first, then `eas build` then `eas submit`.
+lint + typecheck + build smoke checks first, then `eas build` then `eas submit`.
 
 Required secrets and first-run setup are documented at the top of that workflow
 file. It intentionally does **not** run `publish-to-testers.py` (external-tester

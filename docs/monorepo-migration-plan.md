@@ -37,7 +37,7 @@ openchat/
 │   └── eas.json, scripts/local-build.sh, publish-to-testers.py
 ├── package.json       # workspaces: ["apps/*","packages/*"]
 ├── turbo.json
-└── .github/workflows/ # CI: typecheck/build/test; EAS build+submit (3jq.2)
+└── .github/workflows/ # CI: lint/typecheck/build/test; EAS build+submit (3jq.2)
 ```
 
 ## 3. Migration order (incremental, each step independently shippable)
@@ -63,7 +63,7 @@ openchat/
 
 **Phase 5 — Infra + CI.**
 - `deploy.sh`/Docker build `apps/server` + `apps/web`. `eas.json`/`local-build.sh` run from `apps/mobile` (keep the TMPDIR + Node self-heal from openchat-u0k).
-- GitHub Actions: turbo `typecheck`/`build`/`test` on PR; EAS build+submit workflow (openchat-3jq.2).
+- GitHub Actions: turbo `lint`/`typecheck`/`build`/`test` on PR; EAS build+submit workflow (openchat-3jq.2).
 
 ## 4. Risks & mitigations
 - **History join messiness** → use `git subtree` (preserves history, single tree); tag both repos pre-migration for rollback.

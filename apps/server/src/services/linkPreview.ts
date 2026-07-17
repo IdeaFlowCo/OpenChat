@@ -60,7 +60,7 @@ export function extractUrls(content: string): string[] {
   let m: RegExpExecArray | null;
   while ((m = URL_RE.exec(content)) !== null) {
     // Strip trailing punctuation that's likely not part of the URL
-    let url = m[0].replace(/[.,!?:;]+$/, '');
+    const url = m[0].replace(/[.,!?:;]+$/, '');
     if (found.includes(url)) continue;
     found.push(url);
     if (found.length >= 2) break;

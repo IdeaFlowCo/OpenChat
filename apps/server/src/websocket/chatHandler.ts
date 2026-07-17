@@ -216,7 +216,7 @@ export function setupChatSocket(io: Server): void {
         const convType = convCheckResult.records[0]?.get('convType') as string | null;
         const isGroupConv = convType === 'group';
 
-        let mentionedUserIds: string[] = [];
+        const mentionedUserIds: string[] = [];
         if (isGroupConv) {
           const mentionTokens = [...content.matchAll(/@([\w-]+(?:\s+[\w-]+)?)/g)].map(m => m[1]);
           if (mentionTokens.length > 0) {
