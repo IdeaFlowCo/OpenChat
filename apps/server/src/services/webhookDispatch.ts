@@ -20,11 +20,16 @@
  */
 
 import crypto from 'node:crypto';
+import { lookup } from 'node:dns/promises';
+import net from 'node:net';
 import { getDriver } from '../db.js';
 
 export const MESSAGE_CREATED_EVENT = 'message.created';
 
 const DELIVERY_TIMEOUT_MS = 5_000;
+const ALLOW_LOCAL_WEBHOOKS = ['1', 'true', 'yes'].includes(
+  (process.env.WEBHOOK_ALLOW_LOCAL ?? '').toLowerCase()
+);
 
 export interface WebhookSubscription {
   id: string;
@@ -105,11 +110,103 @@ export function selectWebhooksForEvent(
   });
 }
 
+function isPrivateIPv4(address: string): boolean {
+  const parts = address.split('.').map((p) => Number.parseInt(p, 10));
+  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) {
+    return true;
+  }
+
+  const [a, b] = parts;
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254)
+  );
+}
+
+function isLoopbackIPv4(address: string): boolean {
+  const parts = address.split('.').map((p) => Number.parseInt(p, 10));
+  return parts.length === 4 && parts[0] === 127;
+}
+
+function isPrivateIPv6(address: string): boolean {
+  const normalized = address.toLowerCase();
+  if (normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') return true;
+
+  const ipv4Mapped = normalized.match(/^(?:::ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
+  if (ipv4Mapped) return isPrivateIPv4(ipv4Mapped[1]);
+
+  const firstGroup = normalized.split(':')[0];
+  const first = Number.parseInt(firstGroup || '0', 16);
+  if (!Number.isInteger(first)) return true;
+
+  return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+}
+
+function isLoopbackIPv6(address: string): boolean {
+  const normalized = address.toLowerCase();
+  if (normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') return true;
+
+  const ipv4Mapped = normalized.match(/^(?:::ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
+  return ipv4Mapped ? isLoopbackIPv4(ipv4Mapped[1]) : false;
+}
+
+function isBlockedAddress(address: string): boolean {
+  const family = net.isIP(address);
+  if (family === 4) return isPrivateIPv4(address);
+  if (family === 6) return isPrivateIPv6(address);
+  return true;
+}
+
+function isLoopbackAddress(address: string): boolean {
+  const family = net.isIP(address);
+  if (family === 4) return isLoopbackIPv4(address);
+  if (family === 6) return isLoopbackIPv6(address);
+  return false;
+}
+
+export async function isSafeWebhookUrl(url: string): Promise<boolean> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === 'localhost') return ALLOW_LOCAL_WEBHOOKS;
+
+  if (net.isIP(hostname)) {
+    if (ALLOW_LOCAL_WEBHOOKS && isLoopbackAddress(hostname)) return true;
+    return !isBlockedAddress(hostname);
+  }
+
+  try {
+    const addresses = await lookup(hostname, { all: true, verbatim: true });
+    if (!addresses.length) return false;
+    if (ALLOW_LOCAL_WEBHOOKS && addresses.every((entry) => isLoopbackAddress(entry.address))) {
+      return true;
+    }
+    return addresses.every((entry) => !isBlockedAddress(entry.address));
+  } catch {
+    return false;
+  }
+}
+
 /** POST a signed payload to one webhook, with a timeout and a single retry. */
 async function deliver(webhook: WebhookSubscription, body: string): Promise<void> {
   const headers = buildWebhookHeaders(body, webhook.secret);
 
-  const attempt = async (): Promise<boolean> => {
+  const attempt = async (): Promise<boolean | 'blocked'> => {
+    if (!(await isSafeWebhookUrl(webhook.url))) {
+      console.warn(`[webhook] blocked unsafe delivery target: ${webhook.id} -> ${webhook.url}`);
+      return 'blocked';
+    }
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
     try {
@@ -118,6 +215,7 @@ async function deliver(webhook: WebhookSubscription, body: string): Promise<void
         headers,
         body,
         signal: controller.signal,
+        redirect: 'manual',
       });
       return res.ok;
     } catch {
@@ -128,12 +226,25 @@ async function deliver(webhook: WebhookSubscription, body: string): Promise<void
   };
 
   const ok = await attempt();
-  if (!ok) {
+  if (ok === 'blocked') return;
+  if (ok === false) {
     // Retry exactly once.
     const retried = await attempt();
-    if (!retried) {
+    if (retried === false) {
       console.warn(`[webhook] delivery failed after retry: ${webhook.id} -> ${webhook.url}`);
     }
+  }
+}
+
+export async function ensureWebhookIndex(): Promise<void> {
+  const session = getDriver().session();
+  try {
+    await session.run(
+      `CREATE INDEX webhook_owner_user_id IF NOT EXISTS
+       FOR (w:Webhook) ON (w.ownerUserId)`
+    );
+  } finally {
+    await session.close();
   }
 }
 

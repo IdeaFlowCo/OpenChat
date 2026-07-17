@@ -21,6 +21,7 @@ import feedbackRoutes from './routes/feedback.js';
 import assistantRoutes from './routes/assistant.js';
 import { ensureAssistantUser } from './services/assistant.js';
 import { ensureGroupbrainBotUser } from './services/groupbrainBot.js';
+import { ensureWebhookIndex } from './services/webhookDispatch.js';
 import { ensureVectorIndex } from './services/embeddings.js';
 import { openapiSpec } from './openapi.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
@@ -444,6 +445,13 @@ async function start() {
       console.log('GroupBrain bot user ensured');
     } catch (e) {
       console.error('Failed to ensure groupbrain bot user:', e);
+    }
+
+    try {
+      await ensureWebhookIndex();
+      console.log('Webhook owner index ensured');
+    } catch (e) {
+      console.error('Failed to ensure webhook index:', e);
     }
 
     // Semantic search (openchat-bfn.2): idempotently create the Message

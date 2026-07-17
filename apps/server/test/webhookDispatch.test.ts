@@ -1,13 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import crypto from 'node:crypto';
 
-// Mock the Neo4j driver so dispatch can be exercised without a live database.
-// `records` is swapped per-test to simulate matching / no-matching subscriptions.
-let mockRecords: Array<{ get: (k: string) => unknown }> = [];
-const sessionRun = vi.fn(async () => ({ records: mockRecords }));
-const sessionClose = vi.fn(async () => {});
+const mocks = vi.hoisted(() => {
+  const state: { records: Array<{ get: (k: string) => unknown }> } = { records: [] };
+  return {
+    state,
+    sessionRun: vi.fn(async () => ({ records: state.records })),
+    sessionClose: vi.fn(async () => {}),
+    lookupMock: vi.fn(async () => [{ address: '93.184.216.34', family: 4 }]),
+  };
+});
 vi.mock('../src/db.js', () => ({
-  getDriver: () => ({ session: () => ({ run: sessionRun, close: sessionClose }) }),
+  getDriver: () => ({
+    session: () => ({ run: mocks.sessionRun, close: mocks.sessionClose }),
+  }),
+}));
+vi.mock('node:dns/promises', () => ({
+  lookup: mocks.lookupMock,
 }));
 
 import {
@@ -15,6 +24,8 @@ import {
   buildWebhookHeaders,
   selectWebhooksForEvent,
   dispatchMessageEvent,
+  ensureWebhookIndex,
+  isSafeWebhookUrl,
   MESSAGE_CREATED_EVENT,
   type WebhookSubscription,
 } from '../src/services/webhookDispatch.js';
@@ -120,8 +131,11 @@ describe('dispatchMessageEvent', () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
-    mockRecords = [];
-    sessionRun.mockClear();
+    mocks.state.records = [];
+    mocks.sessionRun.mockClear();
+    mocks.sessionClose.mockClear();
+    mocks.lookupMock.mockClear();
+    mocks.lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
     fetchMock.mockReset();
     fetchMock.mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', fetchMock);
@@ -132,7 +146,7 @@ describe('dispatchMessageEvent', () => {
   });
 
   it('POSTs a signed payload when a matching subscription exists', async () => {
-    mockRecords = [
+    mocks.state.records = [
       webhookRecord({
         id: 'w1',
         url: 'https://x.example/hook',
@@ -161,7 +175,7 @@ describe('dispatchMessageEvent', () => {
   });
 
   it('does NOT dispatch when there is no subscription', async () => {
-    mockRecords = [];
+    mocks.state.records = [];
     dispatchMessageEvent(SAMPLE_MESSAGE, ['u1']);
     // Give the async IIFE a chance to run, then assert nothing was sent.
     await new Promise((r) => setTimeout(r, 20));
@@ -169,7 +183,7 @@ describe('dispatchMessageEvent', () => {
   });
 
   it('retries exactly once when the first delivery fails', async () => {
-    mockRecords = [
+    mocks.state.records = [
       webhookRecord({
         id: 'w1',
         url: 'https://x.example/hook',
@@ -182,5 +196,58 @@ describe('dispatchMessageEvent', () => {
 
     dispatchMessageEvent(SAMPLE_MESSAGE, ['u1']);
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+
+  it('does NOT dispatch to a private resolved address', async () => {
+    mocks.lookupMock.mockResolvedValue([{ address: '10.0.0.5', family: 4 }]);
+    mocks.state.records = [
+      webhookRecord({
+        id: 'w1',
+        url: 'https://internal.example/hook',
+        secret: 's',
+        events: [MESSAGE_CREATED_EVENT],
+        conversationId: 'c1',
+      }),
+    ];
+
+    dispatchMessageEvent(SAMPLE_MESSAGE, ['u1']);
+    await vi.waitFor(() => expect(mocks.lookupMock).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('isSafeWebhookUrl', () => {
+  it('rejects non-http schemes', async () => {
+    await expect(isSafeWebhookUrl('file:///etc/passwd')).resolves.toBe(false);
+  });
+
+  it('rejects loopback and link-local hosts', async () => {
+    await expect(isSafeWebhookUrl('http://localhost:3000/hook')).resolves.toBe(false);
+    await expect(isSafeWebhookUrl('http://127.0.0.1/hook')).resolves.toBe(false);
+    await expect(isSafeWebhookUrl('http://169.254.169.254/latest')).resolves.toBe(false);
+    await expect(isSafeWebhookUrl('http://[::1]/hook')).resolves.toBe(false);
+    await expect(isSafeWebhookUrl('http://[fe80::1]/hook')).resolves.toBe(false);
+  });
+
+  it('rejects private DNS results', async () => {
+    mocks.lookupMock.mockResolvedValue([{ address: '192.168.1.10', family: 4 }]);
+    await expect(isSafeWebhookUrl('https://private.example/hook')).resolves.toBe(false);
+  });
+
+  it('allows public DNS results', async () => {
+    mocks.lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+    await expect(isSafeWebhookUrl('https://public.example/hook')).resolves.toBe(true);
+  });
+});
+
+describe('ensureWebhookIndex', () => {
+  it('creates the owner lookup index idempotently', async () => {
+    await ensureWebhookIndex();
+
+    expect(mocks.sessionRun).toHaveBeenCalledWith(
+      expect.stringContaining('CREATE INDEX webhook_owner_user_id IF NOT EXISTS')
+    );
+    expect(mocks.sessionClose).toHaveBeenCalled();
   });
 });

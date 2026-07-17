@@ -32,9 +32,9 @@ export function maybeTriggerAssistant(opts: {
       const result = await s.run(
         `MATCH (c:Conversation {id: $conversationId})
          RETURN EXISTS {
-           MATCH (bot:User)-[:PARTICIPATES_IN]->(c) WHERE bot.isBot = true
+           MATCH (bot:User)-[:PARTICIPATES_IN]->(c) WHERE bot.id = $assistantId
          } AS containsBot`,
-        { conversationId }
+        { conversationId, assistantId: ASSISTANT_USER_ID }
       );
       containsBot = result.records[0]?.get('containsBot') === true;
     } catch (err) {
