@@ -101,11 +101,19 @@ export interface Conversation {
   createdAt?: string;
 }
 
-/** Aggregated reaction summary for a single emoji on a message. */
+/** Aggregated reaction summary for one plain or semantic reaction bucket. */
 export interface ReactionSummary {
   emoji: string;
   count: number;
   byMe: boolean;
+  /**
+   * Semantic kind tag (openchat-reaction-kind). Plain reactions omit this.
+   * 'filed' = a bot's filed-receipt whose `href` links to the KB page it
+   * created; clients render kind reactions as a tappable link.
+   */
+  kind?: string | null;
+  /** Target URL for a kind reaction (e.g. the filed KB page). */
+  href?: string | null;
 }
 
 /** Open Graph / Twitter card preview data (OpenChat-hq2). */
@@ -140,7 +148,7 @@ export interface Message {
     senderId: string;
     sender?: { id: string; name?: string; email: string };
   };
-  /** Aggregated reaction summary (OpenChat-7bd). */
+  /** Aggregated reactions, including optional semantic kind receipts. */
   reactions?: ReactionSummary[];
   /** Image attachments (OpenChat-6bg). */
   attachments?: Attachment[];

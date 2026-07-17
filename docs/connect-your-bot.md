@@ -51,13 +51,27 @@ Authorization: Bearer oc_<key>
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST`   | `/api/chat/messages/:id/reactions` | Add a reaction `{ "emoji": "🗂️" }` |
-| `DELETE` | `/api/chat/messages/:id/reactions/:emoji` | Remove your reaction |
+| `POST`   | `/api/chat/messages/:id/reactions` | Add a plain reaction or a semantic receipt reaction |
+| `DELETE` | `/api/chat/messages/:id/reactions/:emoji` | Remove your plain reaction; add `?kind=filed` to remove a filed receipt |
 
-Both accept an agent key. The allowed emoji set is
-`👍 ❤️ 😂 😮 😢 🙏 🗂️`. The `🗂️` glyph is the distinctive **"filed to KB"**
-receipt a bot can drop on a message it has ingested — more expressive than a
-plain WhatsApp reaction.
+Both accept an agent key. Plain reactions use `👍 ❤️ 😂 😮 😢 🙏` and stay
+backward compatible:
+
+```json
+{ "emoji": "👍" }
+```
+
+Semantic receipt reactions use filing glyphs `🗂️ 📁 📎 ✅`. The first supported
+kind is `filed`, which requires an `http(s)` `href`; clients render it as a
+tappable link to the filed resource:
+
+```json
+{
+  "emoji": "🗂️",
+  "kind": "filed",
+  "href": "https://your-kb.example/item/123"
+}
+```
 
 ### Agent key management
 

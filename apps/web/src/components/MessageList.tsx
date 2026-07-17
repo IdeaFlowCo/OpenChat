@@ -98,10 +98,13 @@ export function MessageList() {
   }, [typingUsers, activeConversationId, currentUser?.userId]);
 
   useEffect(() => {
+    const timers = timerRef.current;
+    const lastSeen = lastSeenRef.current;
+
     return () => {
-      for (const handle of timerRef.current.values()) clearTimeout(handle);
-      timerRef.current.clear();
-      lastSeenRef.current.clear();
+      for (const handle of timers.values()) clearTimeout(handle);
+      timers.clear();
+      lastSeen.clear();
     };
   }, [activeConversationId]);
 
@@ -551,22 +554,44 @@ export function MessageList() {
               {/* Reaction pills (openchat-bmp.1) */}
               {!isDeleted && message.reactions && message.reactions.length > 0 && (
                 <div className={`flex flex-wrap gap-1 mt-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                  {message.reactions.map(r => (
-                    <button
-                      key={r.emoji}
-                      type="button"
-                      onClick={() => void toggleReaction(message.id, r.emoji)}
-                      className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-xs transition-colors ${
-                        r.byMe
-                          ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-200'
-                          : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700'
-                      }`}
-                      aria-label={`${r.emoji} ${r.count}${r.byMe ? ' including you' : ''}`}
-                    >
-                      <span>{r.emoji}</span>
-                      <span>{r.count}</span>
-                    </button>
-                  ))}
+                  {message.reactions.map(r => {
+                    // Kind reactions with an href (e.g. a bot's filed receipt)
+                    // render as a tappable link that opens the target page,
+                    // instead of a toggle button (openchat-reaction-kind).
+                    if (r.kind && r.href) {
+                      return (
+                        <a
+                          key={`${r.kind}:${r.emoji}:${r.href}`}
+                          href={r.href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-0.5 rounded-full border border-emerald-400 bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 px-1.5 py-0.5 text-xs transition-colors hover:bg-emerald-100 dark:hover:bg-emerald-900/60"
+                          aria-label={`${r.kind}: opens ${r.href}`}
+                          title={r.href}
+                        >
+                          <span>{r.emoji}</span>
+                          <span className="capitalize">{r.kind}</span>
+                          {r.count > 1 && <span>{r.count}</span>}
+                        </a>
+                      );
+                    }
+                    return (
+                      <button
+                        key={r.emoji}
+                        type="button"
+                        onClick={() => void toggleReaction(message.id, r.emoji)}
+                        className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-xs transition-colors ${
+                          r.byMe
+                            ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-200'
+                            : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700'
+                        }`}
+                        aria-label={`${r.emoji} ${r.count}${r.byMe ? ' including you' : ''}`}
+                      >
+                        <span>{r.emoji}</span>
+                        <span>{r.count}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>

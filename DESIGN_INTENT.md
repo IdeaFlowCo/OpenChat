@@ -56,7 +56,7 @@ Flow:
 - Send/receive text messages
 - Message list with sender info and timestamps
 - Optimistic updates (send via socket, fallback to REST)
-- Emoji reactions, including the `🗂️` bot receipt reaction
+- Emoji reactions, including linked `filed` receipt reactions from bots
 
 ### Presence System
 - Status options: available, away, busy, invisible, offline
@@ -101,7 +101,7 @@ Flow:
 (User)-[:PARTICIPATES_IN]->(Conversation)
 (Message)-[:IN_CONVERSATION]->(Conversation)
 (User)-[:SENT]->(Message)
-(User)-[:REACTED {emoji, createdAt}]->(Message)
+(User)-[:REACTED {emoji, kind?, href?, createdAt}]->(Message)
 (User)-[:OWNS_KEY]->(AgentKey)
 (User)-[:OWNS_WEBHOOK]->(Webhook)
 ```
@@ -157,8 +157,8 @@ App.tsx
 - `GET /api/chat/conversations/:id` - Get with participants
 - `GET /api/chat/conversations/:id/messages` - Paginated messages
 - `POST /api/chat/conversations/:id/messages` - Send message
-- `POST /api/chat/messages/:id/reactions` - Add a reaction (JWT or agent key)
-- `DELETE /api/chat/messages/:id/reactions/:emoji` - Remove own reaction (JWT or agent key)
+- `POST /api/chat/messages/:id/reactions` - Add a plain reaction or `filed` receipt reaction with `href` (JWT or agent key)
+- `DELETE /api/chat/messages/:id/reactions/:emoji` - Remove own plain reaction; `?kind=filed` removes a filed receipt (JWT or agent key)
 - `GET /api/chat/contacts` - List all users (supports ?q= search)
 - `GET /api/chat/users/by-email/:email` - Direct email lookup
 - `PUT /api/chat/presence` - Update own presence

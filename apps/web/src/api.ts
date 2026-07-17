@@ -95,11 +95,19 @@ export const EXPORT_RANGE_OPTIONS: Array<{ key: ExportRangeKey; label: string; d
   { key: 'all_time', label: 'All time', detail: 'Your full available history' },
 ];
 
-/** Aggregated reaction for a message (openchat-bmp.1). */
+/** Aggregated reaction summary for one plain or semantic reaction bucket. */
 export interface Reaction {
   emoji: string;
   count: number;
   byMe: boolean;
+  /**
+   * Semantic kind tag (openchat-reaction-kind). Plain reactions omit this.
+   * 'filed' = a bot's filed-receipt whose `href` links to the KB page it
+   * created; clients render kind reactions as a tappable link.
+   */
+  kind?: string | null;
+  /** Target URL for a kind reaction (e.g. the filed KB page). */
+  href?: string | null;
 }
 
 /**
@@ -128,7 +136,7 @@ export interface Message {
   sender?: User;
   /** Image attachments (OpenChat-6bg). */
   attachments?: Attachment[];
-  /** Aggregated emoji reactions (openchat-bmp.1). */
+  /** Aggregated reactions, including optional semantic kind receipts. */
   reactions?: Reaction[];
   /** Quoted reply target (openchat-bmp.2). */
   replyTo?: ReplyTo | null;

@@ -51,13 +51,31 @@ Passing your own user id creates or returns a self-DM.
 | `POST` | `/api/chat/conversations` | Create a conversation |
 | `GET` | `/api/chat/conversations/:id/messages` | Get messages |
 | `POST` | `/api/chat/conversations/:id/messages` | Send a message |
-| `POST` | `/api/chat/messages/:id/reactions` | Add a reaction, including `🗂️` for "filed to KB" |
-| `DELETE` | `/api/chat/messages/:id/reactions/:emoji` | Remove your reaction |
+| `POST` | `/api/chat/messages/:id/reactions` | Add a plain reaction or a semantic receipt reaction |
+| `DELETE` | `/api/chat/messages/:id/reactions/:emoji` | Remove your plain reaction; add `?kind=filed` to remove a filed receipt |
 | `GET` | `/api/agent-keys` | List agent keys |
 | `POST` | `/api/agent-keys` | Mint an agent key |
 | `POST` | `/api/webhooks` | Create an outbound webhook subscription |
 | `GET` | `/api/webhooks` | List webhook subscriptions |
 | `DELETE` | `/api/webhooks/:id` | Delete a webhook subscription |
+
+Plain reactions use `👍 ❤️ 😂 😮 😢 🙏`:
+
+```json
+{ "emoji": "👍" }
+```
+
+Semantic receipt reactions use filing glyphs `🗂️ 📁 📎 ✅`. The first supported
+kind is `filed`, which requires an `http(s)` `href`; clients render it as a
+tappable link to the filed resource:
+
+```json
+{
+  "emoji": "🗂️",
+  "kind": "filed",
+  "href": "https://your-kb.example/item/123"
+}
+```
 
 Agent keys have default-on capability flags. They can do everything a user
 session can unless a key is explicitly narrowed later.

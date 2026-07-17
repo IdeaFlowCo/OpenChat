@@ -136,13 +136,14 @@ Set the API key one of three ways (checked in this order):
 | `oc_list_contacts(query?)` | List/filter contacts by name or email; `me`/`self` matches the caller (`GET /api/chat/contacts`) |
 | `oc_create_conversation(participantIds, title?, type?)` | Create a direct or group conversation (`POST /api/chat/conversations`) |
 | `oc_submit_feedback(message, context?)` | File feedback about OpenChat (`POST /api/feedback`) |
-| `oc_react(messageId, emoji)` | Add an emoji reaction to a message |
+| `oc_react(messageId, emoji, kind?, href?)` | Add an emoji reaction; pass `kind="filed"` with an `http(s)` `href` to leave a tappable filed-receipt badge |
 | `oc_create_dm(userEmail)` | Look up a user by email and start/return a 1:1 DM conversation |
 | `oc_register_agent(name, scopes?, expiresAt?)` | Mint a new agent API key under your account |
 
 ## How bi-directional access works
 
 - **Outbound (agent → OpenChat):** any tool call (`oc_send_message`, `oc_react`, …) hits the OpenChat REST API as you. Messages appear in your conversations as if you sent them.
+- **Filed receipts:** `oc_react(messageId, "🗂️", "filed", "https://...")` records a bot filing receipt; web and mobile render it as a link to the filed resource.
 - **Inbound (OpenChat → agent):** call `oc_list_conversations` or `oc_get_messages` from inside your agent loop. New messages show up immediately because the underlying REST API reflects realtime state. The MCP server still polls; webhook-capable service bots should register `/api/webhooks` for push delivery.
 
 This is **the same auth model as the OpenChat mobile/web app**, just exposed as MCP tools. There is no separate "bot mode" — your agent IS you.
