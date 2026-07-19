@@ -37,6 +37,21 @@ Then on your iPhone:
 
 Sign in with `alice@noos.app` / `password123` (test account) or your real Noos credentials.
 
+### Thought Stream web prototype
+
+The destination-aware Thought Stream concept is available as an isolated,
+mock-data-only Expo web entry. It bypasses auth and backend startup without
+changing the normal native or web app path.
+
+```bash
+cd apps/mobile
+npm run web -- --port 8417
+```
+
+Open `http://localhost:8417/?prototype=thought-stream`. The prototype includes
+the root stream, DM and group lenses, destination-specific drafts, audience
+consequences, and explicit chat-to-thought saving.
+
 ### Pointing at a different backend
 
 ```bash
