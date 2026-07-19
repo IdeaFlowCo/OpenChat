@@ -28,6 +28,7 @@ import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import type { NavProp } from '../navigation/types';
+import { FeedbackComposerModal } from '../components/FeedbackComposerModal';
 
 function formatTime(iso: string | undefined): string {
   if (!iso) return '';
@@ -178,6 +179,7 @@ export function ConversationsScreen() {
     reconnectNewConvIds,
   } = useChat();
   const [refreshing, setRefreshing] = useState(false);
+  const [feedbackVisible, setFeedbackVisible] = useState(false);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -197,6 +199,13 @@ export function ConversationsScreen() {
             style={{ paddingHorizontal: 8, paddingVertical: 4 }}
           >
             <Text style={{ color: c.primary, fontSize: 20 }}>🔍</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setFeedbackVisible(true)}
+            accessibilityLabel="Send feedback"
+            style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+          >
+            <Text style={{ color: c.primary, fontSize: 20, fontWeight: '700' }}>?</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => navigation.navigate('NewConversation')}
@@ -249,6 +258,10 @@ export function ConversationsScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
+      <FeedbackComposerModal
+        visible={feedbackVisible}
+        onClose={() => setFeedbackVisible(false)}
+      />
       <FlatList
         data={conversations}
         keyExtractor={item => item.id}

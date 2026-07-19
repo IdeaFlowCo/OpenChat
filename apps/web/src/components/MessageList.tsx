@@ -337,6 +337,9 @@ export function MessageList() {
                 )}
 
                 <div
+                  onDoubleClick={() => {
+                    if (!isDeleted) void toggleReaction(message.id, '❤️');
+                  }}
                   className={`px-4 py-2 rounded-2xl ${
                     isOwn
                       ? 'bg-blue-500 text-white rounded-br-md'
@@ -406,6 +409,7 @@ export function MessageList() {
                         href={att.url}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onDoubleClick={(event) => event.stopPropagation()}
                         className="block mb-1"
                       >
                         <img

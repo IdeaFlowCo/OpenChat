@@ -92,12 +92,7 @@ export function MessageInput() {
     if (replyTo) inputRef.current?.focus();
   }, [replyTo]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    // Reset input so same file can be picked again
-    e.target.value = '';
-
+  const stageImage = (file: File) => {
     if (!ALLOWED_MIME_TYPES.includes(file.type)) {
       alert('Only images (JPEG, PNG, GIF, WEBP) are supported.');
       return;
@@ -106,9 +101,27 @@ export function MessageInput() {
       alert('Image must be smaller than 20 MB.');
       return;
     }
+    if (pendingPreview) URL.revokeObjectURL(pendingPreview);
     setPendingFile(file);
     const url = URL.createObjectURL(file);
     setPendingPreview(url);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset input so same file can be picked again
+    e.target.value = '';
+    stageImage(file);
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const file = Array.from(e.clipboardData.items)
+      .find((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      ?.getAsFile();
+    if (!file) return; // Preserve the browser's normal text-paste behavior.
+    e.preventDefault();
+    stageImage(file);
   };
 
   const clearPendingFile = () => {
@@ -508,6 +521,7 @@ export function MessageInput() {
           value={text}
           onChange={(e) => handleChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder="Type a message..."
           enterKeyHint="enter"
           autoComplete="off"

@@ -38,6 +38,54 @@ export interface PickedAsset {
   fileSize: number;
 }
 
+const ALLOWED_IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+]);
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+
+/** Convert an image pasted in a web composer into the normal picker shape. */
+export async function pickedAssetFromWebFile(file: File): Promise<PickedAsset> {
+  if (Platform.OS !== 'web') throw new Error('Clipboard images are only available on web');
+  if (!ALLOWED_IMAGE_MIME_TYPES.has(file.type)) {
+    throw new Error('Paste a JPEG, PNG, GIF, or WEBP image');
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    throw new Error('Image must be smaller than 20 MB');
+  }
+
+  const uri = URL.createObjectURL(file);
+  let width = 0;
+  let height = 0;
+  try {
+    const bitmap = await createImageBitmap(file);
+    width = bitmap.width;
+    height = bitmap.height;
+    bitmap.close();
+  } catch {
+    // Dimensions are optional metadata; the upload itself can still proceed.
+  }
+
+  return {
+    uri,
+    mimeType: file.type === 'image/jpg' ? 'image/jpeg' : file.type,
+    width,
+    height,
+    fileName: file.name || `pasted-image-${Date.now()}.png`,
+    fileSize: file.size,
+  };
+}
+
+/** Release temporary browser object URLs without affecting native file URIs. */
+export function releasePickedAsset(asset: PickedAsset | null): void {
+  if (Platform.OS === 'web' && asset?.uri.startsWith('blob:')) {
+    URL.revokeObjectURL(asset.uri);
+  }
+}
+
 /**
  * Open the system image picker. Returns null if the user cancels or permission
  * is denied. Requests permission automatically on first call.

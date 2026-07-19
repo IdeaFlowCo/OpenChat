@@ -107,8 +107,8 @@ export async function createThoughtsFromMessageTags(
     messageId: string;
     conversationId: string;
     content: string;
-    /** Optional Socket.IO server — emits 'thought:created' to the sender's
-     *  user room so the Thoughts tab auto-refreshes without polling. */
+    /** Optional Socket.IO server — emits 'thought:created' to every user who
+     *  can read it so the Thoughts tab auto-refreshes without polling. */
     io?: IOServer;
   }
 ): Promise<string[]> {
@@ -125,10 +125,11 @@ export async function createThoughtsFromMessageTags(
       const text = params.content.trim();
       const id = nanoid();
       const now = new Date().toISOString();
-      await session.run(
+      const result = await session.run(
         `
         MATCH (u:User {id: $senderId})
         OPTIONAL MATCH (m:Message {id: $messageId})
+        OPTIONAL MATCH (conv:Conversation {id: $conversationId})
         CREATE (t:Thought {
           id: $id,
           userId: $senderId,
@@ -143,18 +144,39 @@ export async function createThoughtsFromMessageTags(
         FOREACH (msg IN CASE WHEN m IS NULL THEN [] ELSE [m] END |
           CREATE (t)-[:FROM_MESSAGE]->(msg)
         )
+        WITH u, conv
+        OPTIONAL MATCH (participant:User)-[:PARTICIPATES_IN]->(conv)
+        RETURN
+          coalesce(u.name, 'Group member') AS authorName,
+          conv.type AS conversationType,
+          coalesce(conv.title, conv.name) AS conversationName,
+          collect(participant.id) AS participantIds
         `,
-        { id, senderId: params.senderId, messageId: params.messageId, text, kind: tag.kind, tags: [tag.name], now }
+        {
+          id,
+          senderId: params.senderId,
+          messageId: params.messageId,
+          conversationId: params.conversationId,
+          text,
+          kind: tag.kind,
+          tags: [tag.name],
+          now,
+        }
       );
       createdIds.push(id);
       console.log(`[thought-from-tag] created Thought ${id} (kind=${tag.kind}) for user ${params.senderId} from message ${params.messageId}`);
 
-      // Emit to the sender's user room so the Thoughts tab can refresh
-      // without polling. Same room-naming pattern other emits use
-      // (chatHandler joins each user to `user:${userId}` on connect).
+      // Group-tagged Thoughts are visible to every current group member; DMs
+      // and standalone Thoughts remain private to their author.
       if (params.io) {
         try {
-          params.io.to(`user:${params.senderId}`).emit('thought:created', {
+          const record = result.records[0];
+          const conversationType = record?.get('conversationType') as string | null;
+          const participantIds = (record?.get('participantIds') as string[] | undefined) ?? [];
+          const recipients = conversationType === 'group'
+            ? participantIds
+            : [params.senderId];
+          const payload = {
             thought: {
               id,
               text,
@@ -163,10 +185,17 @@ export async function createThoughtsFromMessageTags(
               status: 'none',
               createdAt: now,
               updatedAt: now,
-              fromMessageId: params.messageId,
-              fromConversationId: params.conversationId,
+              ownerId: params.senderId,
+              authorName: (record?.get('authorName') as string | undefined) ?? 'Group member',
+              sourceMessageId: params.messageId,
+              sourceConversationId: params.conversationId,
+              sourceConversationName: record?.get('conversationName') as string | null,
+              sourceConversationType: conversationType,
             },
-          });
+          };
+          for (const recipientId of new Set(recipients)) {
+            params.io.to(`user:${recipientId}`).emit('thought:created', payload);
+          }
         } catch (e) {
           console.warn('[thought-from-tag] socket emit failed:', e);
         }

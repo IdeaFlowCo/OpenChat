@@ -5,7 +5,8 @@
  * kind:   'fact' | 'decision' | 'commitment' | 'reminder' | 'observation'
  * status: 'none' | 'open' | 'closed'
  *
- * All routes require auth. Users only see/modify their own Thoughts.
+ * All routes require auth. Users can also read tag-extracted Thoughts from
+ * groups they currently belong to, but only owners can modify Thoughts.
  */
 
 import { Router, Request, Response } from 'express';
@@ -45,39 +46,53 @@ function toJS(value: unknown): unknown {
 }
 
 /**
- * GET /api/thoughts?limit=50&before=<ISO createdAt>
- * List the current user's thoughts, newest first.
+ * GET /api/thoughts?limit=50&before=<ISO createdAt>&conversationId=<id>
+ * List the current user's thoughts plus visible group-tagged thoughts.
  */
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const limit = Math.min(parseInt(String(req.query.limit || '50'), 10) || 50, 200);
   const before = typeof req.query.before === 'string' ? req.query.before : null;
+  const conversationId = typeof req.query.conversationId === 'string'
+    ? req.query.conversationId.trim()
+    : null;
   // Search (?q=) — matches Thought text OR any of its tags (case-insensitive).
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : null;
 
   const conds: string[] = [];
   if (before) conds.push('t.createdAt < datetime($before)');
+  if (conversationId) conds.push('m.conversationId = $conversationId');
   if (q)
     conds.push(
       '(toLower(t.text) CONTAINS toLower($q) OR any(tag IN coalesce(t.tags, []) WHERE toLower(tag) CONTAINS toLower($q)))'
     );
-  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
-
   const session = getDriver().session();
   try {
     const result = await session.run(
       `
-      MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought)
-      ${where}
-      // Provenance: which chat a tag-extracted thought came from, so the
-      // Thoughts UI can label "from <chat>" + filter per-conversation.
+      MATCH (owner:User)-[:HAS_THOUGHT]->(t:Thought)
       OPTIONAL MATCH (t)-[:FROM_MESSAGE]->(m:Message)
       OPTIONAL MATCH (conv:Conversation { id: m.conversationId })
+      WHERE (
+        owner.id = $userId
+        OR (
+          conv.type = 'group'
+          AND EXISTS {
+            MATCH (:User {id: $userId})-[:PARTICIPATES_IN]->(conv)
+          }
+        )
+      )
+      ${conds.length ? `AND ${conds.join(' AND ')}` : ''}
       RETURN t {
         .id, .text, .kind, .status, .createdAt, .updatedAt,
         tags: coalesce(t.tags, []),
+        ownerId: owner.id,
+        authorName: coalesce(owner.name, 'Group member'),
+        isOwn: owner.id = $userId,
+        sourceMessageId: m.id,
         sourceConversationId: m.conversationId,
-        sourceConversationName: conv.name
+        sourceConversationName: coalesce(conv.title, conv.name),
+        sourceConversationType: conv.type
       } AS thought
       ORDER BY t.createdAt DESC
       LIMIT $limit
@@ -85,7 +100,13 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       // Neo4j's LIMIT clause requires a true integer; JS Number(50) gets
       // serialized as 50.0 and Neo4j rejects it. Wrap via neo4j.int().
       // Same pattern as server/src/routes/chat.ts:796.
-      { userId, before: before ?? undefined, q: q ?? undefined, limit: neo4j.int(limit) }
+      {
+        userId,
+        before: before ?? undefined,
+        q: q ?? undefined,
+        conversationId: conversationId ?? undefined,
+        limit: neo4j.int(limit),
+      }
     );
 
     const thoughts = result.records.map((r) => toJS(r.get('thought')));

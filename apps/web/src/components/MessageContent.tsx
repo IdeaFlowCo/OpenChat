@@ -7,8 +7,8 @@ interface Props {
   mentionNames: string[];
 }
 
-// URL matcher (http/https). Kept conservative to avoid eating trailing punctuation.
-const URL_RE = /(https?:\/\/[^\s<]+[^\s<.,!?:;)\]])/g;
+// URL matcher (http/https/www). Kept conservative to avoid trailing punctuation.
+const URL_RE = /((?:https?:\/\/|www\.)[^\s<]+[^\s<.,!?:;)\]])/g;
 
 /**
  * Render message text with two enhancements (bmp.8):
@@ -58,8 +58,16 @@ export function MessageContent({ content, isOwn, mentionNames }: Props) {
   let idx = 0;
   while ((m = URL_RE.exec(content)) !== null) {
     if (m.index > last) parts.push(<Fragment key={`u-t${idx}`}>{renderWithMentions(content.slice(last, m.index), `t${idx}`)}</Fragment>);
+    const href = m[0].startsWith('www.') ? `https://${m[0]}` : m[0];
     parts.push(
-      <a key={`u-l${idx}`} href={m[0]} target="_blank" rel="noopener noreferrer" className={linkClass}>
+      <a
+        key={`u-l${idx}`}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={linkClass}
+        onDoubleClick={(event) => event.stopPropagation()}
+      >
         {m[0]}
       </a>
     );

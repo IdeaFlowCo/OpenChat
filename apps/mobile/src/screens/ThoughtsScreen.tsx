@@ -27,6 +27,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { fetchThoughts, deleteThought, Thought } from '../services/thoughts';
+import { api, Conversation, Message, ThoughtKind } from '../api/client';
 import { getSocket } from '../api/socket';
 import type { ThoughtsNavProp } from '../navigation/types';
 import {
@@ -53,6 +54,91 @@ const KIND_LABELS: Record<string, string> = {
   observation: 'Observation',
 };
 
+const TAG_TO_KIND: Record<string, ThoughtKind> = {
+  fact: 'fact',
+  decision: 'decision',
+  commitment: 'commitment',
+  commit: 'commitment',
+  reminder: 'reminder',
+  todo: 'reminder',
+  observation: 'observation',
+  thought: 'observation',
+  note: 'observation',
+};
+
+const TAG_RE = /#([a-zA-Z]+)/g;
+
+function extractTags(content: string): Array<{ name: string; kind: ThoughtKind }> {
+  const seen = new Set<string>();
+  const tags: Array<{ name: string; kind: ThoughtKind }> = [];
+  for (const match of content.matchAll(TAG_RE)) {
+    const name = (match[1] ?? '').toLowerCase();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    tags.push({ name, kind: TAG_TO_KIND[name] ?? 'observation' });
+    if (tags.length >= 5) break;
+  }
+  return tags;
+}
+
+function thoughtDedupKey(thought: Thought): string {
+  const tag = (thought.tags?.[0] ?? '').replace(/^#/, '').toLowerCase();
+  return thought.sourceMessageId && tag ? `${thought.sourceMessageId}:${tag}` : thought.id;
+}
+
+function projectConversationTagThoughts(
+  messages: Message[],
+  conversation: Conversation | undefined,
+  currentUserId: string | undefined,
+  query: string
+): Thought[] {
+  const trimmedQuery = query.trim().replace(/^#/, '').toLowerCase();
+  const sourceConversationName = conversation?.title
+    || (conversation?.type === 'group' ? 'Group chat' : 'Chat');
+
+  return messages.flatMap((message) => {
+    if (message.deletedAt || !message.content?.trim()) return [];
+    return extractTags(message.content).map((tag) => {
+      const authorName = message.sender?.name
+        || message.sender?.email?.split('@')[0]
+        || (message.senderId === currentUserId ? 'You' : 'Group member');
+      const thought: Thought = {
+        id: `conversation-tag:${message.id}:${tag.name}`,
+        text: message.content.trim(),
+        kind: tag.kind,
+        status: 'none',
+        createdAt: message.createdAt,
+        updatedAt: message.createdAt,
+        tags: [tag.name],
+        ownerId: message.senderId,
+        authorName,
+        isOwn: message.senderId === currentUserId,
+        sourceMessageId: message.id,
+        sourceConversationId: message.conversationId,
+        sourceConversationName,
+        sourceConversationType: conversation?.type,
+      };
+      return thought;
+    });
+  }).filter((thought) => {
+    if (!trimmedQuery) return true;
+    return thought.text.toLowerCase().includes(trimmedQuery)
+      || (thought.tags ?? []).some((tag) => tag.toLowerCase().includes(trimmedQuery));
+  });
+}
+
+function mergeThoughtLists(primary: Thought[], projected: Thought[]): Thought[] {
+  const seen = new Set(primary.map(thoughtDedupKey));
+  const merged = [...primary];
+  for (const thought of projected) {
+    const key = thoughtDedupKey(thought);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(thought);
+  }
+  return merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   if (diff < 60_000) return 'just now';
@@ -66,8 +152,9 @@ function formatRelativeTime(iso: string): string {
 
 interface ThoughtCardProps {
   item: Thought;
-  onEdit: () => void;
-  onDelete: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  onOpenSource?: () => void;
   onTagPress: (tag: string) => void;
   surface: string;
   border: string;
@@ -82,6 +169,7 @@ function ThoughtCard({
   item,
   onEdit,
   onDelete,
+  onOpenSource,
   onTagPress,
   surface,
   border,
@@ -94,16 +182,19 @@ function ThoughtCard({
   const kindColor = KIND_COLORS[item.kind] ?? '#3b82f6';
   const kindLabel = KIND_LABELS[item.kind] ?? item.kind;
   const tags = item.tags ?? [];
+  const isShared = item.isOwn === false;
+  const primaryAction = onEdit ?? onOpenSource;
 
   return (
     <TouchableOpacity
-      onPress={onEdit}
-      onLongPress={() =>
+      onPress={primaryAction}
+      disabled={!primaryAction}
+      onLongPress={onDelete ? () =>
         Alert.alert('Delete thought?', item.text.slice(0, 80), [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Delete', style: 'destructive', onPress: onDelete },
         ])
-      }
+        : undefined}
       activeOpacity={0.7}
       style={[styles.card, { backgroundColor: surface, borderColor: border }]}
     >
@@ -114,6 +205,11 @@ function ThoughtCard({
         <Text style={[styles.time, { color: textMuted }]}>
           {formatRelativeTime(item.createdAt)}
         </Text>
+        {isShared && (
+          <Text style={[styles.author, { color: textSecondary }]} numberOfLines={1}>
+            {item.authorName || 'Group member'}
+          </Text>
+        )}
         {item.status !== 'none' && (
           <View
             style={[
@@ -142,13 +238,35 @@ function ThoughtCard({
       {/* Body text */}
       <Text style={[styles.bodyText, { color: textPrimary }]}>{item.text}</Text>
 
+      {item.sourceConversationId && (
+        <TouchableOpacity
+          onPress={(event) => {
+            event.stopPropagation();
+            onOpenSource?.();
+          }}
+          disabled={!onOpenSource}
+          style={[styles.provenanceRow, { borderColor: border }]}
+          accessibilityRole="button"
+          accessibilityLabel={`Open source chat ${item.sourceConversationName || ''}`.trim()}
+        >
+          <Text style={[styles.provenanceText, { color: textSecondary }]} numberOfLines={1}>
+            {isShared ? 'Shared in ' : 'From '}
+            {item.sourceConversationName || (item.sourceConversationType === 'group' ? 'Group chat' : 'Chat')}
+          </Text>
+          <Text style={[styles.provenanceArrow, { color: textMuted }]}>›</Text>
+        </TouchableOpacity>
+      )}
+
       {/* Tag chips — visually distinct from the kind badge (pill, monospace #). */}
       {tags.length > 0 && (
         <View style={styles.tagRow}>
           {tags.map((tag) => (
             <TouchableOpacity
               key={tag}
-              onPress={() => onTagPress(tag)}
+              onPress={(event) => {
+                event.stopPropagation();
+                onTagPress(tag);
+              }}
               activeOpacity={0.7}
               style={[styles.chip, { backgroundColor: chipBg }]}
             >
@@ -169,33 +287,57 @@ export function ThoughtsScreen() {
   const navigation = useNavigation<ThoughtsNavProp<'ThoughtsList'>>();
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  const { setActiveConversation } = useChat();
+  const { setActiveConversation, currentUser, conversations } = useChat();
 
   const [thoughts, setThoughts] = useState<Thought[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const mountedRef = useRef(true);
   // The query currently reflected in `thoughts`. Used so socket-pushed
   // thought:created events only prepend when we're showing the full list.
   const activeQueryRef = useRef('');
+  const selectedConversationRef = useRef<string | null>(null);
+  const conversationsRef = useRef<Conversation[]>([]);
+  selectedConversationRef.current = selectedConversationId;
+  conversationsRef.current = conversations;
 
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
-  const load = useCallback(async (isRefresh = false, q = '') => {
+  const load = useCallback(async (
+    isRefresh = false,
+    q = '',
+    conversationId = selectedConversationRef.current
+  ) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     setError(null);
     try {
       const trimmed = q.trim();
-      const data = await fetchThoughts({ limit: 50, ...(trimmed ? { q: trimmed } : {}) });
+      const data = await fetchThoughts({
+        limit: 50,
+        ...(trimmed ? { q: trimmed } : {}),
+        ...(conversationId ? { conversationId } : {}),
+      });
+      let visibleThoughts = conversationId
+        ? data.filter((thought) => thought.sourceConversationId === conversationId)
+        : data;
+      if (conversationId) {
+        const conversation = conversationsRef.current.find((item) => item.id === conversationId);
+        const { messages } = await api.getMessages(conversationId);
+        visibleThoughts = mergeThoughtLists(
+          data,
+          projectConversationTagThoughts(messages, conversation, currentUser?.userId, trimmed)
+        );
+      }
       if (mountedRef.current) {
         activeQueryRef.current = trimmed;
-        setThoughts(data);
+        setThoughts(visibleThoughts);
       }
     } catch (e) {
       if (mountedRef.current) setError(e instanceof Error ? e.message : 'Failed to load');
@@ -223,9 +365,9 @@ export function ThoughtsScreen() {
       didMountRef.current = true;
       return;
     }
-    const timer = setTimeout(() => { load(false, query); }, 250);
+    const timer = setTimeout(() => { load(false, query, selectedConversationId); }, 250);
     return () => clearTimeout(timer);
-  }, [query, load]);
+  }, [query, selectedConversationId, load]);
 
   // Live update on tag-generated Thoughts: server emits 'thought:created'
   // when a chat message with a hashtag spawns a new Thought. Prepend so
@@ -238,15 +380,25 @@ export function ThoughtsScreen() {
       // While a search is active the list is filtered server-side; don't
       // blindly prepend a new thought that may not match the query.
       if (activeQueryRef.current) return;
+      if (
+        selectedConversationRef.current
+        && payload.thought.sourceConversationId !== selectedConversationRef.current
+      ) return;
+      const thought = {
+        ...payload.thought,
+        isOwn: payload.thought.ownerId
+          ? payload.thought.ownerId === currentUser?.userId
+          : payload.thought.isOwn,
+      };
       setThoughts((prev) => {
         // Idempotency: if we already have it (e.g. focus-load raced), skip.
-        if (prev.some((t) => t.id === payload.thought.id)) return prev;
-        return [payload.thought, ...prev];
+        if (prev.some((t) => t.id === thought.id)) return prev;
+        return [thought, ...prev];
       });
     };
     sock.on('thought:created', handler);
     return () => { sock.off('thought:created', handler); };
-  }, []);
+  }, [currentUser?.userId]);
 
   const handleDelete = useCallback(async (id: string) => {
     try {
@@ -276,8 +428,8 @@ export function ThoughtsScreen() {
   }, []);
 
   const handleThoughtCreated = useCallback((thought: Thought) => {
-    if (activeQueryRef.current) {
-      void load(false, queryRef.current);
+    if (activeQueryRef.current || selectedConversationRef.current) {
+      void load(false, queryRef.current, selectedConversationRef.current);
       return;
     }
     setThoughts((current) => (
@@ -285,7 +437,7 @@ export function ThoughtsScreen() {
     ));
   }, [load]);
 
-  const openConversationLens = useCallback((conversationId: string) => {
+  const openConversation = useCallback((conversationId: string) => {
     setActiveConversation(conversationId);
     const tabNavigation = navigation.getParent() as unknown as {
       navigate: (name: string, params?: object) => void;
@@ -305,7 +457,9 @@ export function ThoughtsScreen() {
         <Text style={[styles.emptyText, { color: c.textMuted }]}>
           {searching
             ? `No thoughts match "${query.trim()}".`
-            : 'No thoughts yet. Tap + to add one.'}
+            : selectedConversationId
+              ? 'No tagged thoughts in this chat yet.'
+              : 'No thoughts yet. Tap + to add one.'}
         </Text>
       </View>
     );
@@ -324,9 +478,10 @@ export function ThoughtsScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
-      {isThoughtStreamPrototype ? (
-        <ThoughtStreamLensBar onOpenConversation={openConversationLens} />
-      ) : null}
+      <ThoughtStreamLensBar
+        selectedConversationId={selectedConversationId}
+        onSelectConversation={setSelectedConversationId}
+      />
 
       {/* Search bar — mirrors the SearchScreen pattern for consistency. */}
       <View style={[styles.searchWrap, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -351,21 +506,27 @@ export function ThoughtsScreen() {
         keyExtractor={(t) => t.id}
         contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"
-        renderItem={({ item }) => (
-          <ThoughtCard
-            item={item}
-            onEdit={() => openEdit(item)}
-            onDelete={() => handleDelete(item.id)}
-            onTagPress={handleTagPress}
-            surface={c.surface}
-            border={c.border}
-            textPrimary={c.textPrimary}
-            textSecondary={c.textSecondary}
-            textMuted={c.textMuted}
-            chipBg={c.primaryMuted}
-            chipText={c.primary}
-          />
-        )}
+        renderItem={({ item }) => {
+          const isOwn = item.isOwn ?? (!item.ownerId || item.ownerId === currentUser?.userId);
+          return (
+            <ThoughtCard
+              item={item}
+              onEdit={isOwn ? () => openEdit(item) : undefined}
+              onDelete={isOwn ? () => handleDelete(item.id) : undefined}
+              onOpenSource={item.sourceConversationId
+                ? () => openConversation(item.sourceConversationId!)
+                : undefined}
+              onTagPress={handleTagPress}
+              surface={c.surface}
+              border={c.border}
+              textPrimary={c.textPrimary}
+              textSecondary={c.textSecondary}
+              textMuted={c.textMuted}
+              chipBg={c.primaryMuted}
+              chipText={c.primary}
+            />
+          );
+        }}
         ListEmptyComponent={renderEmpty}
         refreshControl={
           <RefreshControl
@@ -431,6 +592,11 @@ const styles = StyleSheet.create({
   time: {
     fontSize: 11,
   },
+  author: {
+    flexShrink: 1,
+    fontSize: 11,
+    fontWeight: '600',
+  },
   // Pushes the first trailing element (status or kind pill) to the right edge.
   headerRight: {
     marginLeft: 'auto',
@@ -438,6 +604,24 @@ const styles = StyleSheet.create({
   bodyText: {
     fontSize: 15,
     lineHeight: 22,
+  },
+  provenanceRow: {
+    minHeight: 34,
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  provenanceText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  provenanceArrow: {
+    fontSize: 18,
+    lineHeight: 20,
   },
   tagRow: {
     flexDirection: 'row',

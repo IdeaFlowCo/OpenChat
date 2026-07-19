@@ -47,9 +47,11 @@ function audienceLabel(conversation: Conversation, currentUser: CurrentUser | nu
 }
 
 export function ThoughtStreamLensBar({
-  onOpenConversation,
+  selectedConversationId,
+  onSelectConversation,
 }: {
-  onOpenConversation: (conversationId: string) => void;
+  selectedConversationId: string | null;
+  onSelectConversation: (conversationId: string | null) => void;
 }) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -68,12 +70,12 @@ export function ThoughtStreamLensBar({
     <View style={[styles.streamHeader, { backgroundColor: c.surface, borderColor: c.border }]}>
       <View style={styles.streamTitleRow}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.eyebrow, { color: c.primary }]}>ROOT CONTEXT</Text>
+          <Text style={[styles.eyebrow, { color: c.primary }]}>VISIBLE TO YOU</Text>
           <Text style={[styles.streamTitle, { color: c.textPrimary }]}>Thought Stream</Text>
         </View>
         <View style={[styles.privateLabel, { backgroundColor: c.surfaceElevated }]}>
           <View style={[styles.audienceDot, { backgroundColor: c.presenceAvailable }]} />
-          <Text style={[styles.privateLabelText, { color: c.textSecondary }]}>Only you</Text>
+          <Text style={[styles.privateLabelText, { color: c.textSecondary }]}>Private + groups</Text>
         </View>
       </View>
 
@@ -82,19 +84,35 @@ export function ThoughtStreamLensBar({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.lensRow}
       >
-        <View style={[styles.activeLens, { backgroundColor: c.primaryMuted, borderColor: c.primary }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: selectedConversationId === null }}
+          accessibilityLabel="Show all visible thoughts"
+          onPress={() => onSelectConversation(null)}
+          style={[
+            selectedConversationId === null ? styles.activeLens : styles.lensButton,
+            {
+              backgroundColor: selectedConversationId === null ? c.primaryMuted : c.background,
+              borderColor: selectedConversationId === null ? c.primary : c.border,
+            },
+          ]}
+        >
           <Text style={[styles.lensKind, { color: c.primary }]}>STREAM</Text>
-          <Text style={[styles.lensName, { color: c.textPrimary }]}>My thoughts</Text>
-        </View>
+          <Text style={[styles.lensName, { color: c.textPrimary }]}>All visible</Text>
+        </Pressable>
         {conversations.map((conversation) => (
           <Pressable
             key={conversation.id}
             accessibilityRole="button"
-            accessibilityLabel={`Open ${conversationTitle(conversation, currentUser)} chat lens`}
-            onPress={() => onOpenConversation(conversation.id)}
+            accessibilityLabel={`Filter thoughts to ${conversationTitle(conversation, currentUser)}`}
+            accessibilityState={{ selected: selectedConversationId === conversation.id }}
+            onPress={() => onSelectConversation(conversation.id)}
             style={({ pressed }) => [
-              styles.lensButton,
-              { borderColor: c.border, backgroundColor: c.background },
+              selectedConversationId === conversation.id ? styles.activeLens : styles.lensButton,
+              {
+                borderColor: selectedConversationId === conversation.id ? c.primary : c.border,
+                backgroundColor: selectedConversationId === conversation.id ? c.primaryMuted : c.background,
+              },
               pressed && { opacity: 0.68 },
             ]}
           >

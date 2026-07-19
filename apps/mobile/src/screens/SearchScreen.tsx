@@ -36,6 +36,7 @@ import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import type { NavProp } from '../navigation/types';
+import { FeedbackComposerModal } from '../components/FeedbackComposerModal';
 
 const DEBOUNCE_MS = 300;
 const MIN_QUERY_LEN = 2;
@@ -53,8 +54,9 @@ function relativeTime(iso?: string): string {
 interface RowMessage { kind: 'msg'; hit: SearchMessageHit; }
 interface RowConv    { kind: 'conv'; hit: SearchConversationHit; }
 interface RowContact { kind: 'contact'; hit: User; }
+interface RowFeedback { kind: 'feedback'; key: string; }
 interface RowHeader  { kind: 'header'; label: string; count: number; key: string; }
-type Row = RowMessage | RowConv | RowContact | RowHeader;
+type Row = RowMessage | RowConv | RowContact | RowFeedback | RowHeader;
 
 export function SearchScreen() {
   const navigation = useNavigation<NavProp<'Search'>>();
@@ -67,6 +69,7 @@ export function SearchScreen() {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<SearchResults | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  const [feedbackVisible, setFeedbackVisible] = useState(false);
 
   // Focus the input on mount.
   useLayoutEffect(() => {
@@ -101,8 +104,12 @@ export function SearchScreen() {
   // OpenChat-search-self: any contact hit whose id matches the current user
   // becomes a top-level "You" section, separate from "People" — tap = self-DM.
   const rows: Row[] = useMemo(() => {
-    if (!results) return [];
     const out: Row[] = [];
+    if (query.trim().toLowerCase().startsWith('feedback')) {
+      out.push({ kind: 'header', label: 'OpenChat', count: 1, key: 'h-feedback' });
+      out.push({ kind: 'feedback', key: 'feedback' });
+    }
+    if (!results) return out;
 
     // Pull self-hit out of the contacts bucket so it gets a dedicated header.
     const me = currentUser?.userId;
@@ -126,7 +133,7 @@ export function SearchScreen() {
       for (const u of otherContacts) out.push({ kind: 'contact', hit: u });
     }
     return out;
-  }, [results, currentUser?.userId]);
+  }, [results, currentUser?.userId, query]);
 
   const openConversation = (conversationId: string) => {
     navigation.replace('Chat', { conversationId });
@@ -153,6 +160,27 @@ export function SearchScreen() {
             {item.label.toUpperCase()} · {item.count}
           </Text>
         </View>
+      );
+    }
+    if (item.kind === 'feedback') {
+      return (
+        <TouchableOpacity
+          style={[styles.row, { borderColor: c.divider }]}
+          onPress={() => setFeedbackVisible(true)}
+          activeOpacity={0.7}
+          accessibilityLabel="Send feedback about OpenChat"
+        >
+          <View style={[styles.feedbackIcon, { backgroundColor: c.primaryMuted }]}>
+            <Text style={{ color: c.primary, fontSize: 20, fontWeight: '700' }}>?</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.rowTitle, { color: c.textPrimary }]}>Send feedback</Text>
+            <Text style={[styles.rowPreview, { color: c.textSecondary }]}>
+              Report a bug or request a feature
+            </Text>
+          </View>
+          <Text style={{ color: c.textMuted, fontSize: 20 }}>›</Text>
+        </TouchableOpacity>
       );
     }
     if (item.kind === 'conv') {
@@ -243,6 +271,10 @@ export function SearchScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
+      <FeedbackComposerModal
+        visible={feedbackVisible}
+        onClose={() => setFeedbackVisible(false)}
+      />
       <View style={[styles.searchWrap, { backgroundColor: c.surface, borderColor: c.border }]}>
         <TextInput
           ref={inputRef}
@@ -273,7 +305,10 @@ export function SearchScreen() {
       ) : (
         <FlatList
           data={rows}
-          keyExtractor={r => r.kind === 'header' ? r.key : r.hit.id}
+          keyExtractor={r => {
+            if (r.kind === 'header' || r.kind === 'feedback') return r.key;
+            return r.hit.id;
+          }}
           renderItem={renderRow}
           keyboardShouldPersistTaps="handled"
           ListHeaderComponent={loading ? (
@@ -316,5 +351,12 @@ const styles = StyleSheet.create({
   rowTitle: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
   rowTime: { fontSize: 11, marginLeft: 'auto' },
   rowPreview: { fontSize: 13, marginTop: 2 },
+  feedbackIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   msgIn: { fontSize: 11, marginTop: 4, fontStyle: 'italic' },
 });

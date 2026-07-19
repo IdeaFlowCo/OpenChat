@@ -552,6 +552,14 @@ export interface Thought {
   updatedAt: string;
   /** Tags extracted from the thought (e.g. hashtags). Rendered as chips. */
   tags?: string[];
+  /** Ownership/provenance fields are present on list responses. */
+  ownerId?: string;
+  authorName?: string;
+  isOwn?: boolean;
+  sourceMessageId?: string;
+  sourceConversationId?: string;
+  sourceConversationName?: string | null;
+  sourceConversationType?: 'direct' | 'group';
 }
 
 // ── Agent key types (OpenChat-7c9) ────────────────────────────────────────────
@@ -1031,11 +1039,12 @@ export const api = {
    * against thought text OR any tag (case-insensitive). Composable with
    * `before` pagination.
    */
-  getThoughts: (opts?: { limit?: number; before?: string; q?: string }) => {
+  getThoughts: (opts?: { limit?: number; before?: string; q?: string; conversationId?: string }) => {
     const qs = new URLSearchParams();
     if (opts?.limit) qs.set('limit', String(opts.limit));
     if (opts?.before) qs.set('before', opts.before);
     if (opts?.q) qs.set('q', opts.q);
+    if (opts?.conversationId) qs.set('conversationId', opts.conversationId);
     const q = qs.toString();
     return request<Thought[]>(`/api/thoughts${q ? `?${q}` : ''}`);
   },

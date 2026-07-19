@@ -28,6 +28,7 @@ export default defineConfig({
   server: {
     port: clientPort,
     strictPort: true,
+    allowedHosts: ['m3-laptop-server.tailb2a35c.ts.net'],
     proxy: {
       '/api': {
         target: serverTarget,

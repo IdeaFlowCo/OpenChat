@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from 'react';
 import { Platform, StatusBar, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -278,8 +278,9 @@ function TabIcon({ label, focused, color, c }: {
         alignItems: 'center',
         justifyContent: 'center',
         minWidth: 44,
+        height: 32,
         paddingHorizontal: 12,
-        paddingVertical: 4,
+        paddingVertical: 0,
         borderRadius: 14,
         backgroundColor: focused ? c.primaryMuted : 'transparent',
       }}
@@ -303,9 +304,9 @@ function TabIcon({ label, focused, color, c }: {
       )}
       <Text
         style={{
-          fontSize: focused ? 24 : 20,
+          fontSize: focused ? 23 : 20,
           color,
-          lineHeight: 28,
+          lineHeight: 30,
           fontWeight: focused ? '700' : '400',
         }}
       >
@@ -343,11 +344,19 @@ function AuthedTabs({
   currentUser: { email?: string } | null;
   c: ReturnType<typeof getColors>;
 }) {
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { backgroundColor: c.surface, borderTopColor: c.border },
+        tabBarStyle: {
+          height: 58 + insets.bottom,
+          paddingTop: 4,
+          paddingBottom: Math.max(insets.bottom, 6),
+          backgroundColor: c.surface,
+          borderTopColor: c.border,
+        },
+        tabBarItemStyle: { minHeight: 52 },
         // OpenChat-65r: use the brand cobalt (c.primary = #3b82f6) for the
         // active tint — both icon + label inherit it. Inactive uses
         // textSecondary (one step bolder than the old textMuted) so the

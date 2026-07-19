@@ -13,6 +13,7 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -41,7 +42,14 @@ import type { NavProp, RouteProps } from '../navigation/types';
 import { setActiveConversationForNotifications } from '../services/notifications';
 import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
-import { pickImage, uploadImage, PickedAsset, uploadAudio } from '../services/attachments';
+import {
+  pickImage,
+  pickedAssetFromWebFile,
+  releasePickedAsset,
+  uploadImage,
+  PickedAsset,
+  uploadAudio,
+} from '../services/attachments';
 import { startRecording, stopRecording, cancelRecording } from '../services/audioRecorder';
 import type { Recording } from '../services/audioRecorder';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
@@ -96,7 +104,9 @@ function formatTime(iso: string): string {
  * Returns an array of React Native <Text> elements that can be nested inside
  * a parent <Text> node.
  */
-function renderContentWithMentions(
+const URL_RE = /((?:https?:\/\/|www\.)[^\s<]+[^\s<.,!?:;)\]])/gi;
+
+function renderMessageContent(
   content: string,
   participants: Participant[],
   baseColor: string,
@@ -112,16 +122,18 @@ function renderContentWithMentions(
     if (!nameMap.has(localPart)) nameMap.set(localPart, p.user.id);
   }
 
-  const parts: React.ReactElement[] = [];
-  const regex = /@([\w-]+(?:\s+[\w-]+)?)/g;
+  const parts: React.ReactNode[] = [];
+  const tokenRegex = new RegExp(`${URL_RE.source}|@([\\w-]+(?:\\s+[\\w-]+)?)`, 'gi');
   let last = 0;
   let match: RegExpExecArray | null;
   let idx = 0;
 
-  while ((match = regex.exec(content)) !== null) {
-    const token = match[1];
-    const userId = nameMap.get(token.toLowerCase());
-    if (!userId) continue; // not a known participant — treat as plain text
+  while ((match = tokenRegex.exec(content)) !== null) {
+    const matchedText = match[0];
+    const isUrl = /^(?:https?:\/\/|www\.)/i.test(matchedText);
+    const token = match[2];
+    const userId = token ? nameMap.get(token.toLowerCase()) : undefined;
+    if (!isUrl && !userId) continue; // Unknown @token: leave it in plain text.
 
     // Text before this token
     if (match.index > last) {
@@ -132,12 +144,31 @@ function renderContentWithMentions(
       );
     }
 
-    const mentionColor = colorForUserId(userId, scheme);
-    parts.push(
-      <Text key={`mention-${idx++}`} style={{ color: mentionColor, fontWeight: '700' }}>
-        @{token}
-      </Text>
-    );
+    if (isUrl) {
+      const href = matchedText.startsWith('www.') ? `https://${matchedText}` : matchedText;
+      parts.push(
+        <Text
+          key={`link-${idx++}`}
+          accessibilityRole="link"
+          style={{ color: baseColor, fontWeight: '600', textDecorationLine: 'underline' }}
+          onPress={(event) => {
+            event.stopPropagation();
+            void Linking.openURL(href).catch(() => {
+              Alert.alert('Could not open link', href);
+            });
+          }}
+        >
+          {matchedText}
+        </Text>
+      );
+    } else {
+      const mentionColor = colorForUserId(userId, scheme);
+      parts.push(
+        <Text key={`mention-${idx++}`} style={{ color: mentionColor, fontWeight: '700' }}>
+          @{token}
+        </Text>
+      );
+    }
     last = match.index + match[0].length;
   }
 
@@ -150,11 +181,7 @@ function renderContentWithMentions(
     );
   }
 
-  if (parts.length === 0) {
-    return <Text style={{ color: baseColor }}>{content}</Text>;
-  }
-
-  return <Text>{parts}</Text>;
+  return <Text style={{ color: baseColor }}>{parts.length ? parts : content}</Text>;
 }
 
 interface RenderRow {
@@ -275,6 +302,8 @@ export function ChatScreen({
   const textInputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList<RenderRow>>(null);
   const typingTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastMessageTapRef = useRef<{ messageId: string; at: number } | null>(null);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   // ── ActionSheet state (OpenChat-uxj, OpenChat-46p, OpenChat-wgl, OpenChat-q9h, OpenChat-7bd)
   const [actionSheetVisible, setActionSheetVisible] = useState(false);
@@ -292,6 +321,7 @@ export function ChatScreen({
   // ── Attachment state (OpenChat-6bg) ────────────────────────────────────────
   // pendingAsset: picked but not yet uploaded (shown as preview above composer)
   const [pendingAsset, setPendingAsset] = useState<PickedAsset | null>(null);
+  const pendingAssetRef = useRef<PickedAsset | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   // fullscreen viewer
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
@@ -327,6 +357,21 @@ export function ChatScreen({
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastVisible(false), 3200);
   }, []);
+
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    pendingAssetRef.current = pendingAsset;
+  }, [pendingAsset]);
+
+  useEffect(() => () => releasePickedAsset(pendingAssetRef.current), []);
 
   // ── Transform banner state (OpenChat-8a0) ──────────────────────────────────
   // originalText: the text before the transform (for Undo).
@@ -761,8 +806,40 @@ export function ChatScreen({
   const handlePickAttachment = useCallback(async () => {
     if (sending || uploadingAttachment) return;
     const asset = await pickImage();
-    if (asset) setPendingAsset(asset);
+    if (asset) {
+      releasePickedAsset(pendingAssetRef.current);
+      setPendingAsset(asset);
+    }
   }, [sending, uploadingAttachment]);
+
+  // React Native Web preserves normal text paste. This listener only
+  // intercepts clipboard images and routes them through the attachment flow.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const input = textInputRef.current as unknown as HTMLElement | null;
+    if (!input?.addEventListener) return;
+
+    const handlePaste = (event: ClipboardEvent) => {
+      const file = Array.from(event.clipboardData?.items ?? [])
+        .find((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        ?.getAsFile();
+      if (!file) return;
+
+      event.preventDefault();
+      void pickedAssetFromWebFile(file)
+        .then((asset) => {
+          releasePickedAsset(pendingAssetRef.current);
+          setPendingAsset(asset);
+          showToast('Image pasted');
+        })
+        .catch((err) => {
+          Alert.alert('Could not paste image', err instanceof Error ? err.message : 'Please try another image.');
+        });
+    };
+
+    input.addEventListener('paste', handlePaste);
+    return () => input.removeEventListener('paste', handlePaste);
+  }, [showToast]);
 
   // ── Voice recording handlers (OpenChat-xxc) ──────────────────────────────
 
@@ -950,6 +1027,7 @@ export function ChatScreen({
       console.warn('[ChatScreen] send failed:', err);
       Alert.alert('Upload failed', 'Could not send the image. Please try again.');
     } finally {
+      releasePickedAsset(assetToUpload);
       setSending(false);
     }
   };
@@ -998,6 +1076,18 @@ export function ChatScreen({
       console.warn('[ChatScreen] reaction failed:', err);
     }
   }, [toggleReaction]);
+
+  const handleMessagePress = useCallback((message: Message) => {
+    if (message.deletedAt) return;
+    const now = Date.now();
+    const previous = lastMessageTapRef.current;
+    if (previous?.messageId === message.id && now - previous.at <= 320) {
+      lastMessageTapRef.current = null;
+      void handleReact(message.id, '❤️');
+      return;
+    }
+    lastMessageTapRef.current = { messageId: message.id, at: now };
+  }, [handleReact]);
 
 
   const handleBlock = useCallback(async (userId: string, displayName: string) => {
@@ -1153,6 +1243,8 @@ export function ChatScreen({
           data={rows}
           keyExtractor={r => r.key}
           contentContainerStyle={{ padding: 12, gap: 6 }}
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          keyboardShouldPersistTaps="handled"
           onScroll={handleScroll}
           // Throttle scroll events to ~60fps; high enough to catch the
           // user reaching bottom quickly, low enough not to thrash JS.
@@ -1211,6 +1303,7 @@ export function ChatScreen({
                 <View style={{ flexDirection: 'column', maxWidth: '78%', alignItems: isOwn ? 'flex-end' : 'flex-start' }}>
                 <TouchableOpacity
                   activeOpacity={0.85}
+                  onPress={() => handleMessagePress(m)}
                   onLongPress={() => handleLongPress(m, isOwn, m.sender?.name || m.sender?.email || '')}
                   delayLongPress={350}
                   style={[
@@ -1235,7 +1328,10 @@ export function ChatScreen({
                   {/* Reply quote header — shown if this message is a reply (OpenChat-uxj) */}
                   {m.replyToId && (
                     <TouchableOpacity
-                      onPress={() => m.replyToId && scrollToMessage(m.replyToId)}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        if (m.replyToId) scrollToMessage(m.replyToId);
+                      }}
                       activeOpacity={0.7}
                       style={[
                         styles.replyHeader,
@@ -1292,7 +1388,10 @@ export function ChatScreen({
                     return (
                       <TouchableOpacity
                         key={i}
-                        onPress={() => setFullscreenImage(att.url)}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          setFullscreenImage(att.url);
+                        }}
                         activeOpacity={0.85}
                         style={{ marginBottom: m.content ? 6 : 0 }}
                       >
@@ -1326,16 +1425,14 @@ export function ChatScreen({
                   {m.deletedAt
                     ? <Text style={{ color: isOwn ? 'rgba(255,255,255,0.55)' : c.textMuted, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
                     : (!!m.content && (
-                        isGroup
-                          ? <Text style={{ fontSize: 16 }}>
-                              {renderContentWithMentions(
-                                m.content,
-                                mentionableParticipants,
-                                isOwn ? c.bubbleOwnText : c.bubbleOtherText,
-                                scheme
-                              )}
-                            </Text>
-                          : <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 16 }}>{m.content}</Text>
+                        <Text style={{ fontSize: 16 }}>
+                          {renderMessageContent(
+                            m.content,
+                            isGroup ? mentionableParticipants : [],
+                            isOwn ? c.bubbleOwnText : c.bubbleOtherText,
+                            scheme
+                          )}
+                        </Text>
                       ))
                   }
                   <View style={styles.bubbleFooter}>
@@ -1450,7 +1547,10 @@ export function ChatScreen({
             </Text>
           </View>
           <TouchableOpacity
-            onPress={() => setPendingAsset(null)}
+            onPress={() => {
+              releasePickedAsset(pendingAsset);
+              setPendingAsset(null);
+            }}
             style={styles.replyBarClose}
             hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
           >
@@ -1572,6 +1672,16 @@ export function ChatScreen({
             }
           }}
         />
+        {keyboardVisible && Platform.OS !== 'web' && (
+          <TouchableOpacity
+            onPress={Keyboard.dismiss}
+            style={styles.keyboardDismissButton}
+            accessibilityRole="button"
+            accessibilityLabel="Close keyboard"
+          >
+            <Text style={{ color: c.textSecondary, fontSize: 24, lineHeight: 24 }}>⌄</Text>
+          </TouchableOpacity>
+        )}
         {/* Transform sparkle button (OpenChat-8a0) — hidden in edit mode or while recording */}
         {!editingMessage && !isRecording && (
           <TransformButton
@@ -1763,6 +1873,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     minHeight: 40,
     maxHeight: 120,
+  },
+  keyboardDismissButton: {
+    width: 36,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   send: {
     paddingHorizontal: 18,

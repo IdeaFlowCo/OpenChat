@@ -8,7 +8,12 @@ import { api, Thought, ThoughtKind, ThoughtStatus } from '../api/client';
 
 export type { Thought, ThoughtKind, ThoughtStatus };
 
-export async function fetchThoughts(opts?: { limit?: number; before?: string; q?: string }): Promise<Thought[]> {
+export async function fetchThoughts(opts?: {
+  limit?: number;
+  before?: string;
+  q?: string;
+  conversationId?: string;
+}): Promise<Thought[]> {
   return api.getThoughts(opts);
 }
 
