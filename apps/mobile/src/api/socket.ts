@@ -1,7 +1,7 @@
 /**
- * Socket.io connection to OpenChat. WebSocket transport only (matches the
- * web client's choice — Cloudflare's proxy breaks the polling fallback,
- * causing the reconnect-loop bug fixed in commit 6f229af on the web side).
+ * Socket.io connection to OpenChat. Production uses WebSocket-only transport
+ * (Cloudflare's proxy breaks the polling fallback). The local Thought Stream
+ * prototype uses polling because Metro reserves websocket upgrades for HMR.
  *
  * This module exports a singleton connection plus tiny send-helpers. The
  * higher-level event handling (message:new, conversation:created, presence,
@@ -10,7 +10,17 @@
  */
 
 import { io, Socket } from 'socket.io-client';
-import { OPENCHAT_URL, getToken, Message, Conversation } from './client';
+import {
+  OPENCHAT_URL,
+  USING_THOUGHT_STREAM_PROXY,
+  getToken,
+  Message,
+  Conversation,
+} from './client';
+import {
+  THOUGHT_STREAM_PROXY_PREFIX,
+  thoughtStreamPrototypeProxyOrigin,
+} from '../prototypes/flags';
 
 export interface ParticipantEvent {
   conversationId: string;
@@ -43,14 +53,24 @@ export async function connect(): Promise<Socket> {
   if (socket) {
     socket.disconnect();
   }
-  socket = io(OPENCHAT_URL, {
-    auth: { token },
-    transports: ['websocket'],
-    autoConnect: true,
-    reconnection: true,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 10000,
-  });
+  socket = io(
+    USING_THOUGHT_STREAM_PROXY && thoughtStreamPrototypeProxyOrigin
+      ? thoughtStreamPrototypeProxyOrigin
+      : OPENCHAT_URL,
+    {
+      path: USING_THOUGHT_STREAM_PROXY
+        ? `${THOUGHT_STREAM_PROXY_PREFIX}/openchat/socket.io`
+        : '/socket.io',
+      // Metro reserves websocket upgrades for HMR; HTTP polling still gives
+      // the private prototype a live production socket through the proxy.
+      transports: USING_THOUGHT_STREAM_PROXY ? ['polling'] : ['websocket'],
+      auth: { token },
+      autoConnect: true,
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 10000,
+    }
+  );
   return socket;
 }
 

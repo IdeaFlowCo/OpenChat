@@ -8,6 +8,10 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import {
+  THOUGHT_STREAM_PROXY_PREFIX,
+  thoughtStreamPrototypeProxyOrigin,
+} from '../prototypes/flags';
 
 /**
  * Token storage strategy (OpenChat-ghr):
@@ -64,11 +68,26 @@ async function clearTokenEverywhere(): Promise<void> {
   try { await AsyncStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
 }
 
-// Production by default; can override via .env (EXPO_PUBLIC_OPENCHAT_URL).
+const thoughtStreamOpenChatUrl = thoughtStreamPrototypeProxyOrigin
+  ? `${thoughtStreamPrototypeProxyOrigin}${THOUGHT_STREAM_PROXY_PREFIX}/openchat`
+  : null;
+const thoughtStreamNoosUrl = thoughtStreamPrototypeProxyOrigin
+  ? `${thoughtStreamPrototypeProxyOrigin}${THOUGHT_STREAM_PROXY_PREFIX}/noos`
+  : null;
+
+// Production by default; explicit env overrides still take precedence. The
+// local Thought Stream route uses Metro's same-origin proxy because the real
+// APIs intentionally reject the private Tailscale browser origin via CORS.
 export const OPENCHAT_URL =
-  process.env.EXPO_PUBLIC_OPENCHAT_URL || 'https://chat.globalbr.ai';
+  process.env.EXPO_PUBLIC_OPENCHAT_URL || thoughtStreamOpenChatUrl || 'https://chat.globalbr.ai';
 export const NOOS_URL =
   process.env.EXPO_PUBLIC_NOOS_URL || 'https://globalbr.ai';
+const NOOS_LOGIN_URL =
+  process.env.EXPO_PUBLIC_NOOS_URL || thoughtStreamNoosUrl || NOOS_URL;
+
+export const USING_THOUGHT_STREAM_PROXY = Boolean(
+  thoughtStreamOpenChatUrl && OPENCHAT_URL === thoughtStreamOpenChatUrl
+);
 
 const TOKEN_KEY = 'openchat_token';
 const USER_KEY = 'openchat_user';
@@ -426,7 +445,7 @@ export async function loginWithPassword(
   email: string,
   password: string
 ): Promise<{ user: CurrentUser; token: string }> {
-  const res = await fetch(`${NOOS_URL}/api/auth/login`, {
+  const res = await fetch(`${NOOS_LOGIN_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ email, password }),

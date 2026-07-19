@@ -22,6 +22,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
+import { thoughtStreamPrototypeProxyOrigin } from '../prototypes/flags';
 
 // Required for the in-app browser to dismiss properly after the OAuth round-trip.
 WebBrowser.maybeCompleteAuthSession();
@@ -55,6 +56,7 @@ export function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
+  const showTestLogins = SHOW_TEST_LOGINS || Boolean(thoughtStreamPrototypeProxyOrigin);
 
   // Web Google sign-in uses a full-page REDIRECT, not the expo-auth-session
   // popup: Google's pages set Cross-Origin-Opener-Policy, which severs the
@@ -403,7 +405,7 @@ export function LoginScreen() {
           </Text>
         </TouchableOpacity>
 
-        {SHOW_TEST_LOGINS && (
+        {showTestLogins && (
           <View style={styles.quickLogin}>
             <View style={[styles.divider, { backgroundColor: c.border }]} />
             <Text style={[styles.quickLabel, { color: c.textMuted }]}>Quick login (testing)</Text>
@@ -421,6 +423,8 @@ export function LoginScreen() {
                   ]}
                   onPress={() => handleQuickLogin(acct)}
                   disabled={loading}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Sign in as ${acct.label} test account`}
                 >
                   <Text style={[styles.quickButtonText, { color: c.textPrimary }]}>{acct.label}</Text>
                   <Text style={[styles.quickButtonSub, { color: c.textMuted }]}>{acct.email}</Text>
