@@ -330,9 +330,12 @@ export function ThoughtsScreen() {
       if (conversationId) {
         const conversation = conversationsRef.current.find((item) => item.id === conversationId);
         const { messages } = await api.getMessages(conversationId);
+        const visibleMessages = conversation?.type === 'group'
+          ? messages
+          : messages.filter((message) => message.senderId === currentUser?.userId);
         visibleThoughts = mergeThoughtLists(
-          data,
-          projectConversationTagThoughts(messages, conversation, currentUser?.userId, trimmed)
+          visibleThoughts,
+          projectConversationTagThoughts(visibleMessages, conversation, currentUser?.userId, trimmed)
         );
       }
       if (mountedRef.current) {
