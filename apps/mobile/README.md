@@ -39,18 +39,22 @@ Sign in with `alice@noos.app` / `password123` (test account) or your real Noos c
 
 ### Thought Stream web prototype
 
-The destination-aware Thought Stream concept is available as an isolated,
-mock-data-only Expo web entry. It bypasses auth and backend startup without
-changing the normal native or web app path.
+The destination-aware Thought Stream concept is embedded in the normal Expo
+web app behind a query flag. It uses the real auth flow, tabs, Thought Stream,
+conversation list, chat screen, and API data while leaving the unflagged app
+unchanged.
 
 ```bash
 cd apps/mobile
 npm run web -- --port 8417
 ```
 
-Open `http://localhost:8417/?prototype=thought-stream`. The prototype includes
-the root stream, DM and group lenses, destination-specific drafts, audience
-consequences, and explicit chat-to-thought saving.
+Open `http://localhost:8417/?prototype=thought-stream`, sign in, and select the
+Thoughts tab. The flagged UI adds real DM/group lenses, multiple destinations,
+audience labels, and chat-to-thought saving. Publishing calls the configured
+backend: thoughts and messages created here are real account data. Multi-target
+publishing is a client-side fan-out of independent API calls, not an atomic
+backend operation.
 
 ### Pointing at a different backend
 

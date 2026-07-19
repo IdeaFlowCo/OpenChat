@@ -37,17 +37,12 @@ import { installDeepLinkHandling, resumePendingIntent } from './src/services/dee
 import { LoginScreen } from './src/screens/LoginScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 
-const IS_THOUGHT_STREAM_PROTOTYPE =
-  Platform.OS === 'web' &&
-  typeof globalThis.location !== 'undefined' &&
-  new URLSearchParams(globalThis.location.search).get('prototype') === 'thought-stream';
-
 // Init crash reporting FIRST so even early-boot errors reach Sentry (OpenChat-7um).
 // No-op if EXPO_PUBLIC_SENTRY_DSN is unset.
-if (!IS_THOUGHT_STREAM_PROTOTYPE) initCrashReporting();
+initCrashReporting();
 // Install the client logger before anything else mounts so even early-boot
 // errors are captured (OpenChat-e5v).
-if (!IS_THOUGHT_STREAM_PROTOTYPE) installClientLogger();
+installClientLogger();
 // HomeScreen replaces a direct ConversationsScreen import at the
 // "Conversations" stack key (OpenChat-601). On native + narrow web it
 // re-exports ConversationsScreen; on web ≥900px it renders the
@@ -75,7 +70,6 @@ import { AddAgentKeyScreen } from './src/screens/AddAgentKeyScreen';
 import { AgentKeyDetailScreen } from './src/screens/AgentKeyDetailScreen';
 import { ThoughtsScreen } from './src/screens/ThoughtsScreen';
 import { AddEditThoughtScreen } from './src/screens/AddEditThoughtScreen';
-import { ThoughtStreamPrototype } from './src/prototypes/ThoughtStreamPrototype';
 import { getColors } from './src/theme/colors';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { InAppMessageBanner } from './src/components/InAppMessageBanner';
@@ -527,14 +521,6 @@ function ShellWithBackground() {
 }
 
 export default function App() {
-  if (IS_THOUGHT_STREAM_PROTOTYPE) {
-    return (
-      <SafeAreaProvider>
-        <ThoughtStreamPrototype />
-      </SafeAreaProvider>
-    );
-  }
-
   return (
     <SafeAreaProvider>
       <ThemeProvider>

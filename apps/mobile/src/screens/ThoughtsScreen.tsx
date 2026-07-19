@@ -24,10 +24,16 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
+import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { fetchThoughts, deleteThought, Thought } from '../services/thoughts';
 import { getSocket } from '../api/socket';
 import type { ThoughtsNavProp } from '../navigation/types';
+import {
+  DestinationComposerPrototype,
+  ThoughtStreamLensBar,
+} from '../prototypes/DestinationComposerPrototype';
+import { isThoughtStreamPrototype } from '../prototypes/flags';
 
 // ── Badge colors ──────────────────────────────────────────────────────────────
 
@@ -163,6 +169,7 @@ export function ThoughtsScreen() {
   const navigation = useNavigation<ThoughtsNavProp<'ThoughtsList'>>();
   const { scheme } = useTheme();
   const c = getColors(scheme);
+  const { setActiveConversation } = useChat();
 
   const [thoughts, setThoughts] = useState<Thought[]>([]);
   const [loading, setLoading] = useState(true);
@@ -268,6 +275,27 @@ export function ThoughtsScreen() {
     setQuery(tag.replace(/^#/, ''));
   }, []);
 
+  const handleThoughtCreated = useCallback((thought: Thought) => {
+    if (activeQueryRef.current) {
+      void load(false, queryRef.current);
+      return;
+    }
+    setThoughts((current) => (
+      current.some((item) => item.id === thought.id) ? current : [thought, ...current]
+    ));
+  }, [load]);
+
+  const openConversationLens = useCallback((conversationId: string) => {
+    setActiveConversation(conversationId);
+    const tabNavigation = navigation.getParent() as unknown as {
+      navigate: (name: string, params?: object) => void;
+    } | undefined;
+    tabNavigation?.navigate('ChatsTab', {
+      screen: 'Chat',
+      params: { conversationId },
+    });
+  }, [navigation, setActiveConversation]);
+
   // Empty state — distinct copy for "no results for a search" vs "no thoughts yet".
   const renderEmpty = () => {
     if (loading) return null;
@@ -296,6 +324,10 @@ export function ThoughtsScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
+      {isThoughtStreamPrototype ? (
+        <ThoughtStreamLensBar onOpenConversation={openConversationLens} />
+      ) : null}
+
       {/* Search bar — mirrors the SearchScreen pattern for consistency. */}
       <View style={[styles.searchWrap, { backgroundColor: c.surface, borderColor: c.border }]}>
         <TextInput
@@ -344,14 +376,17 @@ export function ThoughtsScreen() {
         }
       />
 
-      {/* FAB */}
-      <TouchableOpacity
-        style={[styles.fab, { backgroundColor: c.primary }]}
-        onPress={openAdd}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.fabIcon}>+</Text>
-      </TouchableOpacity>
+      {isThoughtStreamPrototype ? (
+        <DestinationComposerPrototype onThoughtCreated={handleThoughtCreated} />
+      ) : (
+        <TouchableOpacity
+          style={[styles.fab, { backgroundColor: c.primary }]}
+          onPress={openAdd}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.fabIcon}>+</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }

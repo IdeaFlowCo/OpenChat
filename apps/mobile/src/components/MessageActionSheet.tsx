@@ -47,6 +47,8 @@ interface Props {
   onReply: (data: ReplyToData) => void;
   /** Forward action — opens ForwardPickerScreen (OpenChat-hhc) */
   onForward: (messageId: string) => void;
+  /** Prototype-only action that persists the message as a private thought. */
+  onSaveAsThought?: (message: Message) => void;
   /**
    * Forward to the user's PRIVATE Assistant DM (openchat-ug6). Drops the
    * quoted message into the Assistant conversation. Private — never posts
@@ -81,6 +83,7 @@ export function MessageActionSheet({
   onDismiss,
   onReply,
   onForward,
+  onSaveAsThought,
   onForwardToAssistant,
   onAskAssistant,
   onEdit,
@@ -130,6 +133,13 @@ export function MessageActionSheet({
     if (!message) return;
     handleDismiss();
     onForward(message.id);
+  };
+
+  const handleSaveAsThought = () => {
+    if (!message || !onSaveAsThought) return;
+    const currentMessage = message;
+    handleDismiss();
+    onSaveAsThought(currentMessage);
   };
 
   // "Forward to Assistant" — private, no prompt (openchat-ug6 v1 path).
@@ -386,6 +396,20 @@ export function MessageActionSheet({
               >
                 <Text style={styles.actionIcon}>📋</Text>
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Copy</Text>
+              </TouchableOpacity>
+            )}
+
+            {onSaveAsThought && !message.deletedAt && (
+              <TouchableOpacity
+                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={handleSaveAsThought}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.actionIcon}>◇</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Save as private thought</Text>
+                  <Text style={{ color: c.textSecondary, fontSize: 12, marginTop: 2 }}>Only you can see it</Text>
+                </View>
               </TouchableOpacity>
             )}
 

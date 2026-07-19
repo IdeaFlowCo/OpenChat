@@ -52,6 +52,8 @@ import { LinkPreviewCard } from '../components/LinkPreviewCard';
 import type { Participant } from '../api/client';
 import { ExportSheet } from '../components/ExportSheet';
 import { saveJsonDownload } from '../services/exportDownload';
+import { createThought } from '../services/thoughts';
+import { isThoughtStreamPrototype } from '../prototypes/flags';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
 
@@ -1022,6 +1024,20 @@ export function ChatScreen({
     navigation.navigate('ForwardPicker', { messageId });
   }, [navigation]);
 
+  const handleSaveAsThought = useCallback(async (message: Message) => {
+    try {
+      await createThought({
+        text: message.content,
+        kind: 'observation',
+        status: 'none',
+      });
+      showToast('Saved to your Thought Stream');
+    } catch (err) {
+      console.warn('[ChatScreen] save-as-thought failed:', err);
+      Alert.alert('Could not save thought', 'Please try again.');
+    }
+  }, [showToast]);
+
   // ── Forward to private Assistant DM (openchat-ug6) ─────────────────────────
   // Shared helper: posts to /api/assistant/forward and, on success, navigates
   // the user into their Assistant conversation. PRIVATE — nothing is posted
@@ -1667,6 +1683,7 @@ export function ChatScreen({
         onDismiss={() => setActionSheetVisible(false)}
         onReply={handleReply}
         onForward={handleForward}
+        onSaveAsThought={isThoughtStreamPrototype ? handleSaveAsThought : undefined}
         onForwardToAssistant={handleForwardToAssistant}
         onAskAssistant={handleAskAssistant}
         onEdit={handleEdit}
