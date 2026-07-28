@@ -14,6 +14,7 @@ import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
 import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from '../services/embeddings.js';
 import { maybeTranscribeMessage } from '../services/transcribeVoice.js';
+import { CONVERSATIONS_QUERY, UNREAD_TOTAL_QUERY } from '../queries/chatUnread.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
 let _s3: S3Client | null = null;
@@ -121,51 +122,31 @@ router.get('/conversations', resolveActor, async (req: Request, res: Response) =
   const userId = req.user!.userId;
 
   try {
-    const result = await session.run(`
-      MATCH (u:User {id: $userId})-[myRel:PARTICIPATES_IN]->(c:Conversation)
-      // Omit DM conversations where the other participant has blocked me
-      WHERE NOT (
-        c.type = 'direct'
-        AND EXISTS {
-          MATCH (other:User)-[:PARTICIPATES_IN]->(c)
-          WHERE other.id <> $userId
-            AND (other)-[:BLOCKED]->(u)
-        }
-      )
-      CALL {
-        WITH c
-        OPTIONAL MATCH (c)<-[:IN_CONVERSATION]-(m:Message)
-        WITH m ORDER BY m.createdAt DESC
-        RETURN collect(m)[0] AS lastMessage
-      }
-      CALL {
-        WITH c
-        MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-        RETURN collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
-      }
-      CALL {
-        WITH c
-        OPTIONAL MATCH (bot:User)-[:PARTICIPATES_IN]->(c)
-        WHERE bot.isBot = true
-        RETURN count(bot) > 0 AS containsBot
-      }
-      RETURN c {
-        .*,
-        lastMessage: lastMessage { .content, .senderId, .createdAt },
-        participants: participants,
-        containsBot: containsBot,
-        // OpenChat-aes: per-user mute state on the PARTICIPATES_IN edge.
-        // Returns ISO timestamp, the literal 'always', or null.
-        mutedUntil: myRel.mutedUntil
-      } AS conversation
-      ORDER BY c.lastMessageAt DESC
-    `, { userId });
+    const result = await session.run(CONVERSATIONS_QUERY, { userId });
 
     const conversations = result.records.map(r => toJS(r.get('conversation')));
     res.json(conversations);
   } catch (error) {
     console.error('Error fetching conversations:', error);
     res.status(500).json({ error: 'Failed to fetch conversations' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/unread-total - Total unread messages for the navbar badge.
+// JWT-only: embedded clients mint a short-lived user JWT before polling.
+router.get('/unread-total', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+
+  try {
+    const result = await session.run(UNREAD_TOTAL_QUERY, { userId });
+    const unreadTotal = result.records[0]?.get('unreadTotal');
+    res.json({ unreadTotal: unreadTotal ? toJS(unreadTotal) : 0 });
+  } catch (error) {
+    console.error('Error fetching unread total:', error);
+    res.status(500).json({ error: 'Failed to fetch unread total' });
   } finally {
     await session.close();
   }
