@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
+import { timingSafeEqual } from 'node:crypto';
 import { OAuth2Client, TokenPayload } from 'google-auth-library';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { getDriver } from '../db.js';
@@ -13,6 +14,10 @@ function getJwtSecret(): string {
 }
 const NOOS_URL = process.env.NOOS_URL || 'http://localhost:52743';
 const LOCALHOST_AUTH_BASE = 'http://localhost:5173';
+const DEFAULT_BRIDGE_TTL_SECONDS = 24 * 60 * 60;
+const MAX_BRIDGE_TTL_SECONDS = 7 * 24 * 60 * 60;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const BRIDGE_TTL_PATTERN = /^(\d+)(s|m|h|d)$/;
 
 /**
  * Fallback for /api/auth/login when the caller does not provide redirect_uri.
@@ -50,6 +55,37 @@ function sendJsonDownload(res: Response, filename: string, payload: unknown): vo
   res.json(payload);
 }
 
+function bridgeSecretsMatch(provided: string, expected: string): boolean {
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+  return providedBuffer.length === expectedBuffer.length
+    && timingSafeEqual(providedBuffer, expectedBuffer);
+}
+
+function parseBridgeTtlSeconds(value: unknown): number | null {
+  if (value === undefined) return DEFAULT_BRIDGE_TTL_SECONDS;
+  if (typeof value !== 'string') return null;
+
+  const match = BRIDGE_TTL_PATTERN.exec(value);
+  if (!match) return null;
+
+  const amount = Number(match[1]);
+  const unitSeconds = {
+    s: 1,
+    m: 60,
+    h: 60 * 60,
+    d: 24 * 60 * 60,
+  }[match[2]];
+  if (unitSeconds === undefined) return null;
+  const requestedSeconds = amount * unitSeconds;
+
+  if (!Number.isSafeInteger(requestedSeconds) || requestedSeconds <= 0) {
+    return null;
+  }
+
+  return Math.min(requestedSeconds, MAX_BRIDGE_TTL_SECONDS);
+}
+
 // Google OAuth — see OpenChat-hwi epic. Client created in GCP project
 // boreal-conquest-464203-v2; secret lives in server/.env (and on M5 at
 // ~/.config/openchat-accounts.json for the human reference copy).
@@ -75,6 +111,132 @@ interface GoogleUserInfo {
   picture?: string;
   locale?: string;
 }
+
+/**
+ * POST /api/auth/bridge-exchange
+ *
+ * Trusted first-party identity bridge for social.globalbr.ai. The peer
+ * attests that the supplied email is verified; OpenChat authenticates that
+ * assertion with a dedicated secret, provisions the User, and optionally
+ * mints an ordinary OpenChat JWT.
+ */
+export function createBridgeExchangeHandler(
+  getDriverForRequest: typeof getDriver = getDriver
+) {
+  return async (req: Request, res: Response): Promise<void> => {
+    const bridgeSecret = process.env.OC_BRIDGE_SECRET;
+    if (!bridgeSecret) {
+      res.status(503).json({ error: 'Identity bridge is not configured' });
+      return;
+    }
+
+    const authHeader = req.headers.authorization;
+    if (
+      !authHeader?.startsWith('Bearer ')
+      || !bridgeSecretsMatch(authHeader.slice(7), bridgeSecret)
+    ) {
+      res.status(401).json({ error: 'Invalid bridge credentials' });
+      return;
+    }
+
+    const {
+      email,
+      name,
+      avatarUrl,
+      app,
+      ttl,
+      provisionOnly,
+    } = req.body ?? {};
+
+    if (
+      typeof email !== 'string'
+      || email !== email.trim()
+      || !EMAIL_PATTERN.test(email)
+    ) {
+      res.status(400).json({ error: 'A valid email is required' });
+      return;
+    }
+    if (app !== 'social') {
+      res.status(400).json({ error: 'app must be "social"' });
+      return;
+    }
+    if (name !== undefined && typeof name !== 'string') {
+      res.status(400).json({ error: 'name must be a string' });
+      return;
+    }
+    if (avatarUrl !== undefined && typeof avatarUrl !== 'string') {
+      res.status(400).json({ error: 'avatarUrl must be a string' });
+      return;
+    }
+    if (provisionOnly !== undefined && typeof provisionOnly !== 'boolean') {
+      res.status(400).json({ error: 'provisionOnly must be a boolean' });
+      return;
+    }
+
+    const ttlSeconds = parseBridgeTtlSeconds(ttl);
+    if (ttlSeconds === null) {
+      res.status(400).json({ error: 'ttl must be a positive duration such as "24h"' });
+      return;
+    }
+
+    const session = getDriverForRequest().session();
+    try {
+      const now = new Date().toISOString();
+      const result = await session.run(`
+        MERGE (u:User {email: $email})
+        ON CREATE SET
+          u.id = $id,
+          u.name = coalesce($name, $email),
+          u.avatarUrl = $avatarUrl,
+          u.signupProvider = 'social-bridge',
+          u.createdAt = datetime($now),
+          u.presenceStatus = 'available',
+          u.lastSeenAt = datetime($now)
+        ON MATCH SET
+          u.lastSeenAt = datetime($now),
+          u.presenceStatus = 'available'
+        RETURN u { .id, .email, .name } AS user
+      `, {
+        email,
+        name: name?.trim() || null,
+        avatarUrl: avatarUrl || null,
+        id: nanoid(),
+        now,
+      });
+
+      const user = toJS(result.records[0].get('user')) as {
+        id: string;
+        email: string;
+        name: string;
+      };
+
+      if (provisionOnly) {
+        res.status(201).json({ user });
+        return;
+      }
+
+      const token = jwt.sign(
+        {
+          userId: user.id,
+          email: user.email,
+          iss: 'openchat-bridge',
+          app,
+        },
+        getJwtSecret(),
+        { expiresIn: ttlSeconds }
+      );
+
+      res.status(201).json({ token, user });
+    } catch (error) {
+      console.error('Error in bridge exchange:', error);
+      res.status(500).json({ error: 'Bridge exchange failed' });
+    } finally {
+      await session.close();
+    }
+  };
+}
+
+router.post('/bridge-exchange', createBridgeExchangeHandler());
 
 // Helper to convert Neo4j types to JS
 function toJS(value: unknown): unknown {

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc && mkdir -p dist/legal dist/docs dist/well-known && cp src/legal/*.md dist/legal/ && cp src/landing.html src/landing-icon.png src/qr-chat-globalbrai.svg dist/ && cp src/well-known/apple-app-site-association.json dist/well-known/ && cp ../../docs/connect-your-bot.md dist/docs/",
+    "test": "npm run build && node --test test-bridge-exchange.mjs",
     "start": "node dist/index.js",
     "lint": "eslint src",
     "test": "vitest run",
