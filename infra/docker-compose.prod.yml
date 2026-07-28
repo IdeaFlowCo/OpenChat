@@ -16,6 +16,7 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - NOOS_API_URL=${NOOS_API_URL:-http://noos_api:4000/api}
       - NOOS_URL=${NOOS_URL:-https://globalbr.ai}
+      # Canonical browser base for generated auth callback URLs.
       - OPENCHAT_URL=${OPENCHAT_URL:-https://chat.globalbr.ai}
       # Comma-separated browser origins allowed by Express and Socket.IO.
       - CORS_ORIGIN=${CORS_ORIGIN:-https://chat.globalbr.ai,https://social.globalbr.ai}

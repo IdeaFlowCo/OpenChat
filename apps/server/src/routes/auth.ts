@@ -14,6 +14,10 @@ function getJwtSecret(): string {
 const NOOS_URL = process.env.NOOS_URL || 'http://localhost:52743';
 const LOCALHOST_AUTH_BASE = 'http://localhost:5173';
 
+/**
+ * Fallback for /api/auth/login when the caller does not provide redirect_uri.
+ * OPENCHAT_URL stays canonical; otherwise use the first configured CORS origin.
+ */
 export function getAuthFallbackRedirect(openChatUrl: string | undefined, corsOrigin: string | undefined): string {
   const defaultBase = openChatUrl || parseCorsOrigins(corsOrigin)[0] || LOCALHOST_AUTH_BASE;
   return `${defaultBase.replace(/\/$/, '')}/auth/callback`;
