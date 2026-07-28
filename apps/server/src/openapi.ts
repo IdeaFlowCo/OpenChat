@@ -55,6 +55,33 @@ const AgentKey = {
   },
 } as const;
 
+const AccountExport = {
+  type: 'object',
+  properties: {
+    schema: { type: 'string', const: 'openchat.account_export.v1' },
+    exportedAt: { type: 'string', format: 'date-time' },
+    range: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', enum: ['last_hour', 'last_day', 'last_week', 'last_month', 'all_time'] },
+        label: { type: 'string' },
+        since: { type: 'string', format: 'date-time', nullable: true },
+      },
+    },
+    user: { type: 'object' },
+    conversations: { type: 'array', items: { $ref: '#/components/schemas/Conversation' } },
+    messageCount: { type: 'integer' },
+    messages: { type: 'array', items: { $ref: '#/components/schemas/Message' } },
+    thoughts: { type: 'array', items: { type: 'object' } },
+    blockedUsers: { type: 'array', items: { type: 'object' } },
+    agentKeys: {
+      type: 'array',
+      description: 'Non-secret agent key metadata owned by the exported account; plaintext keys are never included.',
+      items: { $ref: '#/components/schemas/AgentKey' },
+    },
+  },
+} as const;
+
 const ReactionSummary = {
   type: 'object',
   properties: {
@@ -147,7 +174,7 @@ export const openapiSpec = {
         description: 'User JWT or `oc_` agent API key.',
       },
     },
-    schemas: { Message, Conversation, AgentKey, ReactionSummary, Webhook, WebhookDelivery, Error },
+    schemas: { Message, Conversation, AgentKey, AccountExport, ReactionSummary, Webhook, WebhookDelivery, Error },
   },
   tags: [
     { name: 'Chat', description: 'Conversations and messages' },
@@ -163,6 +190,18 @@ export const openapiSpec = {
     },
     '/api/auth/me': {
       get: { operationId: 'getMe', tags: ['Account'], summary: 'Get the authenticated user (or agent-key owner)', responses: { '200': ok({ type: 'object' }), '401': errResp('Unauthorized') } },
+    },
+    '/api/auth/export': {
+      get: {
+        operationId: 'exportAccount',
+        tags: ['Account'],
+        summary: 'Download an account data export',
+        description: 'Requires a user JWT. The JSON bundle includes profile, conversations, range-filtered messages and thoughts, blocked users, and non-secret agent key metadata.',
+        parameters: [
+          { name: 'range', in: 'query', required: true, schema: { type: 'string', enum: ['last_hour', 'last_day', 'last_week', 'last_month', 'all_time'] } },
+        ],
+        responses: { '200': ok({ $ref: '#/components/schemas/AccountExport' }), '400': errResp('Invalid range'), '401': errResp('Unauthorized') },
+      },
     },
     '/api/chat/conversations': {
       get: {
