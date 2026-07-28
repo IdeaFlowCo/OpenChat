@@ -47,7 +47,7 @@ Passing your own user id creates or returns a self-DM.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/chat/conversations` | List conversations |
+| `GET` | `/api/chat/conversations` | List conversations, including caller-specific `lastReadAt` and `unreadCount` |
 | `POST` | `/api/chat/conversations` | Create a conversation |
 | `GET` | `/api/chat/conversations/:id/messages` | Get messages |
 | `POST` | `/api/chat/conversations/:id/messages` | Send a message |

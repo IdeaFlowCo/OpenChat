@@ -38,8 +38,18 @@ const Conversation = {
     lastMessageAt: { type: 'string', format: 'date-time' },
     lastMessagePreview: { type: 'string' },
     containsBot: { type: 'boolean' },
+    lastReadAt: { type: 'string', format: 'date-time', nullable: true },
+    unreadCount: { type: 'integer', description: 'Caller-specific count of non-deleted messages from other senders after lastReadAt.' },
     participants: { type: 'array', items: { type: 'object' } },
   },
+} as const;
+
+const UnreadTotal = {
+  type: 'object',
+  properties: {
+    unreadTotal: { type: 'integer', description: 'Caller-specific total unread count across visible conversations.' },
+  },
+  required: ['unreadTotal'],
 } as const;
 
 const AgentKey = {
@@ -133,7 +143,7 @@ export const openapiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'OpenChat API',
-    version: '0.2.2',
+    version: '0.2.3',
     description:
       'REST API for OpenChat. Authenticate with `Authorization: Bearer <token>` where the token is either a user JWT or an `oc_` agent API key (mint one in Settings → Agent keys, or via /api/agent-keys). An agent key acts AS the owning user. Field note: message create accepts `content` (preferred) or `text` (alias). Webhook deliveries include `X-OpenChat-Secret` and `X-OpenChat-Signature` headers. Live guide: /about/connect-your-bot',
   },
@@ -182,6 +192,15 @@ export const openapiSpec = {
     },
     '/api/chat/conversations/{id}': {
       get: { operationId: 'getConversation', tags: ['Chat'], summary: 'Get a conversation with participants', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ $ref: '#/components/schemas/Conversation' }), '404': errResp('Not found') } },
+    },
+    '/api/chat/unread-total': {
+      get: {
+        operationId: 'getUnreadTotal',
+        tags: ['Chat'],
+        summary: "Get the caller's aggregate unread count",
+        description: 'JWT-authenticated navbar badge endpoint. Counts non-deleted messages from other senders after each visible conversation PARTICIPATES_IN.lastReadAt, defaulting missing lastReadAt to the epoch.',
+        responses: { '200': ok(UnreadTotal), '401': errResp('Unauthorized') },
+      },
     },
     '/api/chat/conversations/{id}/messages': {
       get: {
