@@ -153,4 +153,4 @@ This is **the same auth model as the OpenChat mobile/web app**, just exposed as 
 - Keys are AES-256-GCM encrypted at rest on the server.
 - Keys are re-viewable in-app (Settings → Agent keys → View full key) — you don't need to re-mint a new one if you lose it.
 - Revoke any key from the same screen; revocations take effect within ~60 s (cache TTL).
-- Restrict scope at creation time: `read` only, `write` only, or both.
+- Scope labels (`read`, `write`, or both) are stored and returned for operator intent. Current server authorization does not enforce those labels; a valid key acts as the owning user.

@@ -55,6 +55,7 @@ Passing your own user id creates or returns a self-DM.
 | `DELETE` | `/api/chat/messages/:id/reactions/:emoji` | Remove your plain reaction; add `?kind=filed` to remove a filed receipt |
 | `GET` | `/api/agent-keys` | List agent keys |
 | `POST` | `/api/agent-keys` | Mint an agent key |
+| `GET` | `/api/auth/export?range=<range>` | Download an account JSON export with a user JWT |
 | `POST` | `/api/webhooks` | Create an outbound webhook subscription |
 | `GET` | `/api/webhooks` | List webhook subscriptions |
 | `DELETE` | `/api/webhooks/:id` | Delete a webhook subscription |
@@ -77,8 +78,22 @@ tappable link to the filed resource:
 }
 ```
 
-Agent keys have default-on capability flags. They can do everything a user
-session can unless a key is explicitly narrowed later.
+Agent keys store `read` / `write` scope labels for operator intent. The current
+REST authorization path does not enforce those labels; a valid agent key acts as
+the owning user.
+
+Account export requires a user JWT, not an agent key:
+
+```bash
+curl -H "Authorization: Bearer <user-jwt>" \
+  "$BASE_URL/api/auth/export"
+```
+
+The optional `range` query defaults to `last_day`; supported values are
+`last_hour`, `last_day`, `last_week`, `last_month`, and `all_time`. The JSON
+bundle includes profile, conversations, range-filtered messages and thoughts,
+blocked users, and non-secret agent key metadata. Plaintext keys are never
+included.
 
 ## Outbound Webhooks
 
