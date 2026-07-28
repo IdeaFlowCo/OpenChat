@@ -236,7 +236,7 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
       }
       CALL {
         WITH u
-        OPTIONAL MATCH (u)-[:OWNS_AGENT_KEY]->(ak)
+        OPTIONAL MATCH (u)-[:OWNS_KEY]->(ak)
         RETURN collect(ak {
           .id,
           .name,
