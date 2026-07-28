@@ -11,7 +11,9 @@ integration('server-side unread tracking', () => {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const aliceId = `unread-alice-${suffix}`;
   const bobId = `unread-bob-${suffix}`;
+  const carolId = `unread-carol-${suffix}`;
   const conversationId = `unread-conversation-${suffix}`;
+  const blockedConversationId = `unread-blocked-conversation-${suffix}`;
   let driver: Driver;
 
   beforeAll(async () => {
@@ -21,16 +23,28 @@ integration('server-side unread tracking', () => {
       await session.run(`
         CREATE (alice:User {id: $aliceId, name: 'Unread Alice', email: $aliceEmail})
         CREATE (bob:User {id: $bobId, name: 'Unread Bob', email: $bobEmail})
+        CREATE (carol:User {id: $carolId, name: 'Unread Carol', email: $carolEmail})
         CREATE (conversation:Conversation {
           id: $conversationId,
           type: 'direct',
           lastMessageAt: datetime('2026-01-02T04:00:00Z')
+        })
+        CREATE (blockedConversation:Conversation {
+          id: $blockedConversationId,
+          type: 'direct',
+          lastMessageAt: datetime('2026-01-02T04:30:00Z')
         })
         CREATE (alice)-[:PARTICIPATES_IN {
           role: 'member',
           lastReadAt: datetime('2026-01-01T00:00:00Z')
         }]->(conversation)
         CREATE (bob)-[:PARTICIPATES_IN {role: 'member'}]->(conversation)
+        CREATE (alice)-[:PARTICIPATES_IN {
+          role: 'member',
+          lastReadAt: datetime('2026-01-01T00:00:00Z')
+        }]->(blockedConversation)
+        CREATE (carol)-[:PARTICIPATES_IN {role: 'member'}]->(blockedConversation)
+        CREATE (carol)-[:BLOCKED]->(alice)
         CREATE (unread:Message {
           id: $unreadId,
           conversationId: $conversationId,
@@ -60,16 +74,27 @@ integration('server-side unread tracking', () => {
           content: 'already read',
           createdAt: datetime('2025-12-31T23:00:00Z')
         })-[:IN_CONVERSATION]->(conversation)
+        CREATE (hidden:Message {
+          id: $hiddenId,
+          conversationId: $blockedConversationId,
+          senderId: $carolId,
+          content: 'hidden by block',
+          createdAt: datetime('2026-01-02T04:30:00Z')
+        })-[:IN_CONVERSATION]->(blockedConversation)
       `, {
         aliceId,
         aliceEmail: `${aliceId}@example.test`,
         bobId,
         bobEmail: `${bobId}@example.test`,
+        carolId,
+        carolEmail: `${carolId}@example.test`,
         conversationId,
+        blockedConversationId,
         unreadId: `unread-message-${suffix}`,
         ownId: `own-message-${suffix}`,
         deletedId: `deleted-message-${suffix}`,
         oldId: `old-message-${suffix}`,
+        hiddenId: `hidden-message-${suffix}`,
       });
     } finally {
       await session.close();
@@ -81,13 +106,15 @@ integration('server-side unread tracking', () => {
     const session = driver.session();
     try {
       await session.run(`
-        MATCH (conversation:Conversation {id: $conversationId})
-        OPTIONAL MATCH (message:Message {conversationId: $conversationId})
+        MATCH (conversation:Conversation)
+        WHERE conversation.id IN [$conversationId, $blockedConversationId]
+        OPTIONAL MATCH (message:Message)
+        WHERE message.conversationId IN [$conversationId, $blockedConversationId]
         DETACH DELETE message, conversation
-      `, { conversationId });
+      `, { conversationId, blockedConversationId });
       await session.run(
-        'MATCH (user:User) WHERE user.id IN [$aliceId, $bobId] DETACH DELETE user',
-        { aliceId, bobId },
+        'MATCH (user:User) WHERE user.id IN [$aliceId, $bobId, $carolId] DETACH DELETE user',
+        { aliceId, bobId, carolId },
       );
     } finally {
       await session.close();
@@ -113,6 +140,21 @@ integration('server-side unread tracking', () => {
     try {
       const result = await session.run(UNREAD_TOTAL_QUERY, { userId: aliceId });
       expect(result.records[0].get('unreadTotal').toNumber()).toBe(1);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('excludes direct conversations hidden by a block from list and total unread counts', async () => {
+    const session = driver.session();
+    try {
+      const listResult = await session.run(CONVERSATIONS_QUERY, { userId: aliceId });
+      const conversationIds = listResult.records.map(record => record.get('conversation').id);
+      const totalResult = await session.run(UNREAD_TOTAL_QUERY, { userId: aliceId });
+
+      expect(conversationIds).toContain(conversationId);
+      expect(conversationIds).not.toContain(blockedConversationId);
+      expect(totalResult.records[0].get('unreadTotal').toNumber()).toBe(1);
     } finally {
       await session.close();
     }

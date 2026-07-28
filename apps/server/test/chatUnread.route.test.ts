@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import neo4j from 'neo4j-driver';
 import type { Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { UNREAD_TOTAL_QUERY } from '../src/queries/chatUnread.js';
+import { CONVERSATIONS_QUERY, UNREAD_TOTAL_QUERY } from '../src/queries/chatUnread.js';
 
 const mocks = vi.hoisted(() => ({
   run: vi.fn(),
@@ -20,6 +20,22 @@ vi.mock('../src/db.js', () => ({
 }));
 
 import chatRouter from '../src/routes/chat.js';
+
+describe('chat unread queries', () => {
+  it('keeps list and total queries aligned on visibility and index selection', () => {
+    const hiddenDirectDmPredicate = `c.type = 'direct'
+    AND EXISTS {
+      MATCH (other:User)-[:PARTICIPATES_IN]->(c)
+      WHERE other.id <> $userId
+        AND (other)-[:BLOCKED]->(u)
+    }`;
+
+    expect(CONVERSATIONS_QUERY).toContain(hiddenDirectDmPredicate);
+    expect(UNREAD_TOTAL_QUERY).toContain(hiddenDirectDmPredicate);
+    expect(CONVERSATIONS_QUERY).toContain('USING INDEX m:Message(conversationId)');
+    expect(CONVERSATIONS_QUERY).not.toContain('USING INDEX m:Message(createdAt)');
+  });
+});
 
 describe('GET /api/chat/unread-total', () => {
   let server: Server;

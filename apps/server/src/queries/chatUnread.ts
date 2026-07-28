@@ -1,6 +1,4 @@
-export const CONVERSATIONS_QUERY = `
-  MATCH (u:User {id: $userId})-[myRel:PARTICIPATES_IN]->(c:Conversation)
-  // Omit DM conversations where the other participant has blocked me
+const visibleConversationPredicate = `
   WHERE NOT (
     c.type = 'direct'
     AND EXISTS {
@@ -8,7 +6,11 @@ export const CONVERSATIONS_QUERY = `
       WHERE other.id <> $userId
         AND (other)-[:BLOCKED]->(u)
     }
-  )
+  )`;
+
+export const CONVERSATIONS_QUERY = `
+  MATCH (u:User {id: $userId})-[myRel:PARTICIPATES_IN]->(c:Conversation)
+  ${visibleConversationPredicate}
   CALL {
     WITH c
     OPTIONAL MATCH (c)<-[:IN_CONVERSATION]-(m:Message)
@@ -29,9 +31,9 @@ export const CONVERSATIONS_QUERY = `
   CALL {
     WITH c, myRel
     MATCH (m:Message)
-    USING INDEX m:Message(createdAt)
-    WHERE m.createdAt > coalesce(myRel.lastReadAt, datetime({epochMillis: 0}))
-      AND m.conversationId = c.id
+    USING INDEX m:Message(conversationId)
+    WHERE m.conversationId = c.id
+      AND m.createdAt > coalesce(myRel.lastReadAt, datetime({epochMillis: 0}))
       AND m.senderId <> $userId
       AND m.deletedAt IS NULL
     RETURN count(m) AS unreadCount
@@ -51,7 +53,8 @@ export const CONVERSATIONS_QUERY = `
 `;
 
 export const UNREAD_TOTAL_QUERY = `
-  MATCH (:User {id: $userId})-[myRel:PARTICIPATES_IN]->(c:Conversation)
+  MATCH (u:User {id: $userId})-[myRel:PARTICIPATES_IN]->(c:Conversation)
+  ${visibleConversationPredicate}
   MATCH (m:Message {conversationId: c.id})
   WHERE m.createdAt > coalesce(myRel.lastReadAt, datetime({epochMillis: 0}))
     AND m.senderId <> $userId
