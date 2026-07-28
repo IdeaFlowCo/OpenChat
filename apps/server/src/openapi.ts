@@ -198,7 +198,7 @@ export const openapiSpec = {
         summary: 'Download an account data export',
         description: 'Requires a user JWT. The JSON bundle includes profile, conversations, range-filtered messages and thoughts, blocked users, and non-secret agent key metadata.',
         parameters: [
-          { name: 'range', in: 'query', required: true, schema: { type: 'string', enum: ['last_hour', 'last_day', 'last_week', 'last_month', 'all_time'] } },
+          { name: 'range', in: 'query', schema: { type: 'string', default: 'last_day', enum: ['last_hour', 'last_day', 'last_week', 'last_month', 'all_time'] } },
         ],
         responses: { '200': ok({ $ref: '#/components/schemas/AccountExport' }), '400': errResp('Invalid range'), '401': errResp('Unauthorized') },
       },
