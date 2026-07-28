@@ -9,7 +9,7 @@ OpenChat is a GChat-inspired messaging application that integrates with the Noos
 ### Backend (port 41851)
 - **Express + Socket.io** for REST API and real-time messaging
 - **Neo4j** graph database (same as Noos - production: `bolt://44.211.180.200:7687`)
-- **JWT authentication** (shared secret with Noos for SSO) plus `oc_` agent API keys for bot/script access
+- **JWT authentication** (shared secret with Noos for SSO), `oc_` agent API keys for bot/script access, and a separate `OC_BRIDGE_SECRET` for the trusted SocialSphere → OpenChat identity bridge
 
 ### Frontend (port 29231 dev)
 - **React + TypeScript + Vite**
@@ -22,6 +22,7 @@ OpenChat is a GChat-inspired messaging application that integrates with the Noos
 - Dev login (`POST /api/auth/dev-login`) - email-based, creates user if needed
 - Token login - paste existing Noos JWT
 - SSO callback (`/auth/callback?code=...` or `#token=...`) - exchange with Noos
+- Social identity bridge (`POST /api/auth/bridge-exchange`) - server-to-server verified-email assertion from `social.globalbr.ai`; creates/merges by email and can return an ordinary OpenChat JWT
 - Protected routes - redirect to login if not authenticated
 
 ### Contact Selection UI
@@ -147,6 +148,7 @@ App.tsx
 
 ### Auth
 - `POST /api/auth/dev-login` - { email, name? } → { token, user }
+- `POST /api/auth/bridge-exchange` - trusted SocialSphere bridge; `Authorization: Bearer <OC_BRIDGE_SECRET>`, `{ app: "social", email, name?, avatarUrl?, ttl?, provisionOnly? }` → `{ token?, user }`
 - `GET /api/auth/me` - Get current user
 - `POST /api/auth/logout` - Mark offline
 - `GET /api/auth/login` - Redirect to Noos SSO authorize (code flow)
@@ -188,5 +190,6 @@ App.tsx
 1. **Separate from Noos codebase** - OpenChat is its own repo, imports Noos as dependency for auth
 2. **Shared Neo4j database** - Chat nodes coexist with knowledge graph nodes
 3. **Chat nodes don't inherit :Node** - Keeps chat immutable, knowledge editable
-4. **JWT sharing** - Same secret allows seamless SSO between apps
-5. **Client-side contact filtering** - Simple, fast for small user counts; API search for larger scale
+4. **JWT sharing** - Same secret allows seamless SSO between OpenChat and Noos
+5. **Identity bridge separation** - SocialSphere uses `OC_BRIDGE_SECRET`, distinct from `JWT_SECRET`, to assert verified emails and receive normal OpenChat user JWTs; email verification stays upstream in SocialSphere
+6. **Client-side contact filtering** - Simple, fast for small user counts; API search for larger scale

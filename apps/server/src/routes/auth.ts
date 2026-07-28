@@ -117,8 +117,13 @@ interface GoogleUserInfo {
  *
  * Trusted first-party identity bridge for social.globalbr.ai. The peer
  * attests that the supplied email is verified; OpenChat authenticates that
- * assertion with a dedicated secret, provisions the User, and optionally
- * mints an ordinary OpenChat JWT.
+ * assertion with OC_BRIDGE_SECRET, provisions/merges the User by email, and
+ * optionally mints an ordinary OpenChat JWT. The caller must send
+ * Authorization: Bearer <OC_BRIDGE_SECRET> and body { app: "social", email,
+ * name?, avatarUrl?, ttl?, provisionOnly? }. ttl accepts strings such as
+ * "24h", defaults to 24h, and is capped at 7d; provisionOnly returns only
+ * the user record. Email verification is enforced by social before calling
+ * this endpoint, not by OpenChat.
  */
 export function createBridgeExchangeHandler(
   getDriverForRequest: typeof getDriver = getDriver

@@ -160,6 +160,56 @@ const WebhookDelivery = {
   },
 } as const;
 
+const BridgeExchangeRequest = {
+  type: 'object',
+  properties: {
+    app: {
+      type: 'string',
+      enum: ['social'],
+      description: 'Forensic caller marker. Only `social` is accepted.',
+    },
+    email: {
+      type: 'string',
+      format: 'email',
+      description: 'Verified email asserted by social.globalbr.ai.',
+    },
+    name: { type: 'string' },
+    avatarUrl: { type: 'string', format: 'uri' },
+    ttl: {
+      type: 'string',
+      pattern: '^\\d+[smhd]$',
+      default: '24h',
+      description: 'JWT lifetime such as `30m`, `24h`, or `7d`; capped at seven days.',
+    },
+    provisionOnly: {
+      type: 'boolean',
+      default: false,
+      description: 'When true, provisions/merges the user without returning a token.',
+    },
+  },
+  required: ['app', 'email'],
+} as const;
+
+const BridgeExchangeResponse = {
+  type: 'object',
+  properties: {
+    token: {
+      type: 'string',
+      description: 'OpenChat HS256 user JWT, omitted when provisionOnly is true.',
+    },
+    user: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        email: { type: 'string', format: 'email' },
+        name: { type: 'string' },
+      },
+      required: ['id', 'email', 'name'],
+    },
+  },
+  required: ['user'],
+} as const;
+
 const Error = {
   type: 'object',
   properties: { error: { type: 'string' } },
@@ -187,7 +237,18 @@ export const openapiSpec = {
         description: 'User JWT or `oc_` agent API key.',
       },
     },
-    schemas: { Message, Conversation, AgentKey, AccountExport, ReactionSummary, Webhook, WebhookDelivery, Error },
+    schemas: {
+      Message,
+      Conversation,
+      AgentKey,
+      AccountExport,
+      ReactionSummary,
+      Webhook,
+      WebhookDelivery,
+      BridgeExchangeRequest,
+      BridgeExchangeResponse,
+      Error,
+    },
   },
   tags: [
     { name: 'Chat', description: 'Conversations and messages' },
@@ -195,6 +256,7 @@ export const openapiSpec = {
     { name: 'Webhooks', description: 'Outbound `message.created` subscriptions for bot channels' },
     { name: 'Feedback', description: 'In-app feedback → WorldIssueTracker' },
     { name: 'Account', description: 'Current user' },
+    { name: 'Identity bridge', description: 'Trusted first-party server-to-server user provisioning' },
     { name: 'Meta', description: 'Health, spec' },
   ],
   paths: {
@@ -214,6 +276,22 @@ export const openapiSpec = {
           { name: 'range', in: 'query', required: false, schema: { type: 'string', default: 'last_day', enum: ['last_hour', 'last_day', 'last_week', 'last_month', 'all_time'] }, description: 'Optional export window; defaults to last_day.' },
         ],
         responses: { '200': ok({ $ref: '#/components/schemas/AccountExport' }), '400': errResp('Invalid range'), '401': errResp('Unauthorized') },
+      },
+    },
+    '/api/auth/bridge-exchange': {
+      post: {
+        operationId: 'bridgeExchange',
+        tags: ['Identity bridge'],
+        summary: 'Provision a social user and optionally mint an OpenChat JWT',
+        security: bearer,
+        description: 'Server-to-server endpoint for the trusted social.globalbr.ai peer. Authenticate with `Authorization: Bearer <OC_BRIDGE_SECRET>`, not a user JWT or `oc_` key. The peer must verify the email before calling OpenChat; OpenChat merges users by email, sets `signupProvider: "social-bridge"` only on creation, and does not send messages or trigger webhook/assistant/push side effects.',
+        requestBody: { required: true, content: json({ $ref: '#/components/schemas/BridgeExchangeRequest' }) },
+        responses: {
+          '201': ok({ $ref: '#/components/schemas/BridgeExchangeResponse' }, 'Created'),
+          '400': errResp('Bad request'),
+          '401': errResp('Invalid bridge credentials'),
+          '503': errResp('Identity bridge is not configured'),
+        },
       },
     },
     '/api/chat/conversations': {
