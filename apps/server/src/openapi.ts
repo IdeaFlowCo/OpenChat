@@ -49,8 +49,11 @@ const AgentKey = {
     name: { type: 'string' },
     keyPrefix: { type: 'string', example: 'oc_uzt9' },
     scopes: { type: 'array', items: { type: 'string', enum: ['read', 'write'] } },
+    agentName: { type: 'string', nullable: true },
+    agentVersion: { type: 'string', nullable: true },
     createdAt: { type: 'string', format: 'date-time' },
     lastUsedAt: { type: 'string', format: 'date-time', nullable: true },
+    expiresAt: { type: 'string', format: 'date-time', nullable: true },
     revokedAt: { type: 'string', format: 'date-time', nullable: true },
   },
 } as const;
