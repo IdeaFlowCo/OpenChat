@@ -152,7 +152,8 @@ App.tsx
 - `GET /api/auth/login` - Redirect to Noos SSO authorize (code flow)
 
 ### Chat
-- `GET /api/chat/conversations` - List user's conversations
+- `GET /api/chat/conversations` - List user's conversations with caller-specific `lastReadAt` and `unreadCount`
+- `GET /api/chat/unread-total` - JWT-authenticated aggregate unread count for badges
 - `POST /api/chat/conversations` - Create conversation
 - `GET /api/chat/conversations/:id` - Get with participants
 - `GET /api/chat/conversations/:id/messages` - Paginated messages

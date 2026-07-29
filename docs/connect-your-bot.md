@@ -33,7 +33,7 @@ Authorization: Bearer oc_<key>
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET`  | `/api/chat/conversations` | List your conversations |
+| `GET`  | `/api/chat/conversations` | List your conversations, including caller-specific `lastReadAt` and `unreadCount` |
 | `POST` | `/api/chat/conversations` | Create a new conversation |
 | `GET`  | `/api/chat/conversations/:id` | Get conversation details |
 | `GET`  | `/api/chat/conversations/:id/messages` | Get messages |
