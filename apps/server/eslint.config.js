@@ -30,6 +30,13 @@ export default tseslint.config(
     },
   },
   {
+    // Node-based integration tests live alongside the server package.
+    files: ['**/*.mjs'],
+    languageOptions: {
+      globals: { ...globals.node, fetch: 'readonly' },
+    },
+  },
+  {
     // The PWA service worker ships as plain JS and runs in the ServiceWorker
     // global scope (self, caches, fetch, ...), not Node.
     files: ['**/*.js'],

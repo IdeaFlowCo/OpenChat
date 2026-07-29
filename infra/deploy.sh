@@ -203,6 +203,7 @@ NEO4J_URI=bolt://noos_neo4j:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=CHANGE_ME
 JWT_SECRET=CHANGE_ME
+OC_BRIDGE_SECRET=CHANGE_ME
 NOOS_API_URL=http://noos_api:4000/api
 NOOS_URL=https://globalbr.ai
 OPENCHAT_URL=https://chat.globalbr.ai

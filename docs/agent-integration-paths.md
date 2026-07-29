@@ -1,13 +1,14 @@
 # Agent integration paths
 
-> **Status:** revised 2026-07-16 after the webhook-out change. OpenChat now has
-> a first-class REST + outbound-webhook bot channel. This does not remove the
-> MCP path; it changes the recommended surface for service-owned bots that need
-> push delivery.
+> **Status:** revised 2026-07-28 after the SocialSphere identity-bridge change.
+> OpenChat now has a server-to-server provisioning bridge for trusted first-party
+> SocialSphere sign-in, alongside the REST + outbound-webhook bot channel. This
+> does not remove the MCP path; it changes how first-party services obtain a
+> normal OpenChat user JWT after verifying email upstream.
 
 ## TL;DR
 
-Four paths exist; **three are kept for different use cases**, one is retired:
+Five paths exist; **four are kept for different use cases**, one is retired:
 
 | # | Path | Identity model | Use case | Status | Verdict |
 |---|---|---|---|---|---|
@@ -15,6 +16,7 @@ Four paths exist; **three are kept for different use cases**, one is retired:
 | 2 | **openchat-agent** (`~/code/openchat-agent`) | Same shared bot user as picortex | **Same use case as picortex** — shared room-level participant | Built 2026-05-31 morning, never deployed. ~450 SLOC, OpenChat-native, no Linq baggage. | **Deploy** on a fresh isolated VM. Replaces picortex's OpenChat slice. |
 | 3 | **openchat-mcp-server** + agent API keys | Per-user `oc_…` key. Agent acts AS the user. | "MY agent uses MY chats when I ask it to" — single-user, on-demand | Shipped 2026-06-01. GitHub: <https://github.com/tmad4000/openchat-mcp-server>. In-app UI in `AgentKeysScreen`. | **Canonical for per-user integration.** Complementary to path 2, not a replacement. |
 | 4 | **REST + outbound webhooks** (`/api/webhooks`) | User-owned or service-owned `oc_…` key; GroupBrain has dedicated bot user `groupbrain` | "External service should receive messages in real time and reply/react over REST" | Shipped 2026-07-16. First consumer: GroupBrain. | **Canonical for webhook-capable service bots.** Prefer before WebSocket auth unless the bot needs socket-only behavior. |
+| 5 | **SocialSphere identity bridge** (`POST /api/auth/bridge-exchange`) | Normal OpenChat user merged by verified email; caller authenticated by `OC_BRIDGE_SECRET` | "Trusted first-party service already verified this user and needs an OpenChat account/JWT" | Shipped 2026-07-28 for `social.globalbr.ai`. | **Canonical for first-party user provisioning.** Not a bot/message integration path. |
 
 ## Why both 2 and 3 (corrected — earlier draft was wrong)
 
@@ -129,6 +131,24 @@ The API key is the bedrock. MCP and outbound webhooks are two surfaces on top:
 MCP is pull/request-response for LLM clients, while webhooks are push delivery
 for external services.
 
+## SocialSphere identity bridge
+
+`POST /api/auth/bridge-exchange` is intentionally separate from agent keys and
+bot channels. It is a trusted first-party server-to-server auth exchange for
+`social.globalbr.ai`: SocialSphere verifies the user's email, calls OpenChat
+with `Authorization: Bearer <OC_BRIDGE_SECRET>`, and supplies
+`{ "app": "social", "email": "...", "name": "...", "avatarUrl": "..." }`.
+OpenChat then MERGEs the `User` by email, sets `signupProvider:
+"social-bridge"` only when creating the user, and returns an ordinary HS256
+OpenChat user JWT.
+
+The endpoint returns `503` when `OC_BRIDGE_SECRET` is unset, `401` for missing
+or incorrect bearer auth, and `400` for malformed email/app/body fields. `ttl`
+defaults to `24h` and is capped at `7d`; `provisionOnly: true` provisions the
+user without returning a token. It does not send messages, register webhooks,
+invoke embeddings, call the assistant, or trigger push side effects. OIDC is a
+deferred option; the locked near-term choice is this JWT bridge.
+
 ## Is MCP overkill / underkill / just right?
 
 **Just right for "LLM client wants to read or send messages on your behalf
@@ -154,6 +174,7 @@ longer the default recommendation for ordinary service bots.
 | "Claude in my menu bar can summarize / reply to my chats" | **MCP via API key** |
 | "Headless script that posts a daily summary to a group" | **REST directly via API key** |
 | "Webhook-capable service that reacts to new messages" | **Outbound webhooks + REST via API key** |
+| "First-party SocialSphere sign-in needs an OpenChat user session" | **SocialSphere identity bridge** |
 | "Bot that needs socket-only behavior such as typing or live room joins" | **WebSocket + bot JWT** (picortex/openchat-agent model) |
 | "Agent runs my desktop and uses OpenChat as one of many tools" | **MCP via API key** |
 
