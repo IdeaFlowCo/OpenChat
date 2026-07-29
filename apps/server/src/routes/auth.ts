@@ -5,12 +5,23 @@ import { OAuth2Client, TokenPayload } from 'google-auth-library';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { getDriver } from '../db.js';
 import { requireAuth, AuthUser } from '../middleware/auth.js';
+import { parseCorsOrigins } from '../config/cors.js';
 
 const router = Router();
 function getJwtSecret(): string {
   return process.env.JWT_SECRET || 'dev-secret-change-me';
 }
 const NOOS_URL = process.env.NOOS_URL || 'http://localhost:52743';
+const LOCALHOST_AUTH_BASE = 'http://localhost:5173';
+
+/**
+ * Fallback for /api/auth/login when the caller does not provide redirect_uri.
+ * OPENCHAT_URL stays canonical; otherwise use the first configured CORS origin.
+ */
+export function getAuthFallbackRedirect(openChatUrl: string | undefined, corsOrigin: string | undefined): string {
+  const defaultBase = openChatUrl || parseCorsOrigins(corsOrigin)[0] || LOCALHOST_AUTH_BASE;
+  return `${defaultBase.replace(/\/$/, '')}/auth/callback`;
+}
 
 const EXPORT_RANGES = {
   last_hour: { label: 'Last hour', ms: 60 * 60 * 1000 },
@@ -420,8 +431,7 @@ router.post('/logout', requireAuth, async (req: Request, res: Response) => {
  * Would redirect to: ${NOOS_URL}/auth/authorize?redirect_uri=...&client_id=openchat
  */
 router.get('/login', (req: Request, res: Response) => {
-  const defaultBase = process.env.OPENCHAT_URL || process.env.CORS_ORIGIN || 'http://localhost:5173';
-  const fallbackRedirect = `${defaultBase.replace(/\/$/, '')}/auth/callback`;
+  const fallbackRedirect = getAuthFallbackRedirect(process.env.OPENCHAT_URL, process.env.CORS_ORIGIN);
   const redirectUri = typeof req.query.redirect_uri === 'string' ? req.query.redirect_uri : fallbackRedirect;
   const state = typeof req.query.state === 'string' ? req.query.state : undefined;
 

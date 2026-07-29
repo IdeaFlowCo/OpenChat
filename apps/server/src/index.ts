@@ -25,6 +25,7 @@ import { ensureWebhookIndex } from './services/webhookDispatch.js';
 import { ensureVectorIndex } from './services/embeddings.js';
 import { openapiSpec } from './openapi.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
+import { parseCorsOrigins } from './config/cors.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,8 +46,8 @@ const httpServer = createServer(app);
 const allowedOrigins = [
   'http://localhost:29231',
   'https://chat.globalbr.ai',
-  process.env.CORS_ORIGIN
-].filter(Boolean) as string[];
+  ...parseCorsOrigins(process.env.CORS_ORIGIN)
+];
 
 // Socket.io setup
 const io = new Server(httpServer, {
