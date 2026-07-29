@@ -198,7 +198,8 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
  *
  * Download an account-scoped JSON bundle: profile, conversations the caller is
  * still a participant in, matching messages for the selected range, thoughts,
- * blocked users, and non-secret agent key metadata if present.
+ * blocked users, and non-secret agent key metadata if present. The optional
+ * range query defaults to `last_day`.
  */
 router.get('/export', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
@@ -247,7 +248,7 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
       }
       CALL {
         WITH u
-        OPTIONAL MATCH (u)-[:OWNS_AGENT_KEY]->(ak)
+        OPTIONAL MATCH (u)-[:OWNS_KEY]->(ak)
         RETURN collect(ak {
           .id,
           .name,

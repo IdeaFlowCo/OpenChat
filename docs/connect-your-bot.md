@@ -83,6 +83,18 @@ tappable link to the filed resource:
 | `PATCH`  | `/api/agent-keys/:id` | Rename / change scopes |
 | `DELETE` | `/api/agent-keys/:id` | Revoke a key |
 
+### Account export
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/auth/export?range=<range>` | Download an account JSON export |
+
+Account export requires a user JWT, not an agent key. The optional `range`
+query defaults to `last_day`; supported values are `last_hour`, `last_day`,
+`last_week`, `last_month`, and `all_time`. The export includes profile,
+conversations, range-filtered messages and thoughts, blocked users, and
+non-secret agent key metadata. Plaintext keys are never included.
+
 ---
 
 ## Outbound webhooks (push instead of poll)
@@ -182,14 +194,16 @@ def get_conversations():
 
 ## Scopes
 
-When creating a key you can restrict what it can do:
+When creating a key you can store scope labels for operator intent:
 
 | Scope | Capability |
 |-------|-----------|
-| `read` | Read conversations and messages |
-| `write` | Send, edit, and delete messages |
+| `read` | Intended for readers of conversations and messages |
+| `write` | Intended for message/reaction writers |
 
-Default: both `read` and `write`.
+Default: both `read` and `write`. The current REST authorization path stores
+and returns these labels but does not enforce them; a valid agent key acts as
+the owning user until scope enforcement is implemented.
 
 ---
 
@@ -274,8 +288,8 @@ claude mcp add openchat \
   read incoming messages. Polling remains the MCP-server path; service bots
   that need push should use `/api/webhooks`.
 
-There is no "bot mode" — your agent IS you, with the scopes you assigned to its
-key. Limit blast radius with `read`-only keys for reader bots.
+There is no "bot mode" — your agent IS you. Scope labels are visible metadata
+today; they are not yet enforced as read/write authorization boundaries.
 
 ---
 
