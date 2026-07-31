@@ -21,14 +21,16 @@ let _s3: S3Client | null = null;
 function getS3(): S3Client {
   if (_s3) return _s3;
   const endpoint = process.env.S3_ENDPOINT;
-  const region = process.env.AWS_REGION || 'auto';
+  const region = process.env.OBJECT_STORAGE_REGION || process.env.AWS_REGION || 'auto';
+  const accessKeyId = process.env.OBJECT_STORAGE_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || '';
   _s3 = new S3Client({
     region,
     ...(endpoint ? { endpoint, forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true' } : {}),
-    credentials: process.env.AWS_ACCESS_KEY_ID
+    credentials: accessKeyId
       ? {
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+          accessKeyId,
+          secretAccessKey,
         }
       : undefined,
   });

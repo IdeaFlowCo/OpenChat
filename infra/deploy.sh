@@ -1,16 +1,16 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # Run from repo root.
 cd "$(dirname "$0")/.."
 
-SERVER_IP="3.216.129.34"
-SSH_KEY="~/.ssh/lightsail-noos.pem"
-REMOTE_USER="ubuntu"
+GCP_PROJECT="${GCP_PROJECT:-lightsail-migration}"
+GCP_ZONE="${GCP_ZONE:-us-central1-a}"
+GCP_INSTANCE="${GCP_INSTANCE:-noos}"
 APP_NAME="openchat"
 APP_PORT="4001"
 
-echo "=== Deploying $APP_NAME to $SERVER_IP ==="
+echo "=== Preparing $APP_NAME for GCP instance $GCP_INSTANCE ($GCP_PROJECT/$GCP_ZONE) ==="
 
 # Build the legacy Vite web client (served at /legacy/, kept for backward compat).
 echo "Building legacy Vite web client..."
@@ -176,13 +176,18 @@ tar -czf /tmp/${APP_NAME}-deploy.tar.gz \
   -C /tmp oc-docker-compose.prod.yml oc-Dockerfile
 
 # Copy to server
-echo "Copying to server..."
-scp -i $SSH_KEY -o StrictHostKeyChecking=no /tmp/${APP_NAME}-deploy.tar.gz $REMOTE_USER@$SERVER_IP:/tmp/
+echo "Copying to GCP instance..."
+gcloud compute scp "/tmp/${APP_NAME}-deploy.tar.gz" "$GCP_INSTANCE:/tmp/${APP_NAME}-deploy.tar.gz" \
+  --project="$GCP_PROJECT" \
+  --zone="$GCP_ZONE"
 
 # Deploy on server
 echo "Deploying on server..."
-ssh -i $SSH_KEY -o StrictHostKeyChecking=no $REMOTE_USER@$SERVER_IP << ENDSSH
-set -e
+gcloud compute ssh "$GCP_INSTANCE" \
+  --project="$GCP_PROJECT" \
+  --zone="$GCP_ZONE" \
+  --command="sudo env APP_NAME=$APP_NAME bash -s" << 'ENDSSH'
+set -euo pipefail
 
 # Setup app directory
 sudo mkdir -p /opt/$APP_NAME
@@ -212,8 +217,7 @@ fi
 
 # Start services
 echo "Starting $APP_NAME..."
-sudo docker compose down 2>/dev/null || true
-sudo docker compose up -d --build
+sudo docker compose up -d --build --remove-orphans
 
 # Show logs
 echo "Recent logs:"
@@ -225,4 +229,4 @@ ENDSSH
 
 echo ""
 echo "=== Deployment finished ==="
-echo "App should be available at port $APP_PORT on $SERVER_IP"
+echo "App should be available at port $APP_PORT on GCP instance $GCP_INSTANCE"
