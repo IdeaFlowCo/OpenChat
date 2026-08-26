@@ -91,6 +91,14 @@ jobs:
     defaults:
       run:
         working-directory: apps/mobile
+    # The `secrets` context is NOT available in a step-level `if:` — referencing
+    # it there makes the whole file unparseable, so GitHub can't even evaluate
+    # the `on:` triggers and reports a startup_failure for EVERY push. Hoist the
+    # optional (option B) secrets into job-level env, which IS available in `if:`.
+    env:
+      ASC_API_KEY_BASE64: ${{ secrets.EXPO_ASC_API_KEY_BASE64 }}
+      ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
 
     steps:
       - name: Checkout
@@ -129,13 +137,15 @@ jobs:
 
       # ── (Option B only) materialize the ASC API key for eas submit ──
       - name: Write ASC API key (option B)
-        if: ${{ secrets.EXPO_ASC_API_KEY_BASE64 != '' }}
+        if: ${{ env.ASC_API_KEY_BASE64 != '' }}
         run: |
           mkdir -p "$RUNNER_TEMP/asc"
-          echo "${{ secrets.EXPO_ASC_API_KEY_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/asc/AuthKey.p8"
-          echo "EXPO_ASC_API_KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_ENV"
-          echo "EXPO_ASC_KEY_ID=${{ secrets.EXPO_ASC_KEY_ID }}" >> "$GITHUB_ENV"
-          echo "EXPO_ASC_ISSUER_ID=${{ secrets.EXPO_ASC_ISSUER_ID }}" >> "$GITHUB_ENV"
+          printf '%s' "$ASC_API_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/asc/AuthKey.p8"
+          {
+            echo "EXPO_ASC_API_KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8"
+            echo "EXPO_ASC_KEY_ID=$ASC_KEY_ID"
+            echo "EXPO_ASC_ISSUER_ID=$ASC_ISSUER_ID"
+          } >> "$GITHUB_ENV"
 
       # ── EAS cloud build (production profile from apps/mobile/eas.json) ──
       # --non-interactive: fail instead of prompting (CI must never block).
