@@ -35,6 +35,7 @@ import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { AiDisclosureBanner } from '../components/AiDisclosureBanner';
 import { BotBadge } from '../components/BotBadge';
+import { AppIcon } from '../components/AppIcon';
 import { NewMessagesPill } from '../components/NewMessagesPill';
 import { ChatEmptyState } from '../components/ChatEmptyState';
 import type { NavProp, RouteProps } from '../navigation/types';
@@ -560,19 +561,19 @@ export function ChatScreen({
           <TouchableOpacity
             onPress={() => setExportSheetVisible(true)}
             accessibilityLabel="Export conversation"
-            style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+            style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
           >
-            <Text style={{ color: c.primary, fontSize: 18 }}>↓</Text>
+            <AppIcon name="download" color={c.primary} size={20} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={showMuteMenu}
             accessibilityLabel={isMuted ? 'Unmute conversation' : 'Mute conversation'}
-            style={{ paddingHorizontal: 8, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+            style={{ minWidth: 44, minHeight: 44, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 }}
           >
             {isMuted && (
-              <Text style={{ fontSize: 14, color: c.textMuted }}>🔕</Text>
+              <AppIcon name="mute" color={c.textMuted} size={15} strokeWidth={1.8} />
             )}
-            <Text style={{ color: c.textSecondary, fontSize: 20, lineHeight: 22 }}>⋯</Text>
+            <AppIcon name="more" color={c.textSecondary} size={20} />
           </TouchableOpacity>
         </View>
       ),
@@ -1136,7 +1137,7 @@ export function ChatScreen({
           ref={listRef}
           data={rows}
           keyExtractor={r => r.key}
-          contentContainerStyle={{ padding: 12, gap: 6 }}
+          contentContainerStyle={{ padding: 12, gap: 8 }}
           onScroll={handleScroll}
           // Throttle scroll events to ~60fps; high enough to catch the
           // user reaching bottom quickly, low enough not to thrash JS.
@@ -1725,7 +1726,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingVertical: 12,
+    paddingVertical: 14,
   },
   dayLine: { flex: 1, height: StyleSheet.hairlineWidth },
   dayLabel: { fontSize: 11, fontWeight: '600', letterSpacing: 0.4 },

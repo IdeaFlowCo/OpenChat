@@ -13,11 +13,11 @@ function normalize(scheme: ColorSchemeName | ColorScheme | undefined | null): Co
 
 const palette = {
   light: {
-    background: '#f9fafb',         // gray-50
+    background: '#f3f4f6',         // gray-100; separates white content surfaces
     surface: '#ffffff',            // white
     surfaceElevated: '#f3f4f6',    // gray-100
     border: '#e5e7eb',             // gray-200
-    divider: '#f3f4f6',            // gray-100
+    divider: '#e5e7eb',            // gray-200
     textPrimary: '#111827',        // gray-900
     textSecondary: '#6b7280',      // gray-500
     textMuted: '#9ca3af',          // gray-400

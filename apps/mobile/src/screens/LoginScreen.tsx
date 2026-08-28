@@ -471,10 +471,13 @@ export function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, padding: 24, justifyContent: 'center' },
+  root: { flex: 1, padding: 24, justifyContent: 'center', alignItems: 'stretch' },
   card: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
     padding: 24,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
     gap: 12,
   },
@@ -483,19 +486,20 @@ const styles = StyleSheet.create({
   input: {
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     fontSize: 16,
   },
   button: {
-    paddingVertical: 14,
-    borderRadius: 10,
+    height: 50,
+    borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 4,
   },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   footer: { fontSize: 12, textAlign: 'center', marginTop: 8 },
-  shareSection: { marginTop: 24, alignItems: 'stretch' },
+  shareSection: { width: '100%', maxWidth: 520, alignSelf: 'center', marginTop: 32, alignItems: 'stretch', opacity: 0.88 },
   shareLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8, textAlign: 'center' },
   shareCard: {
     flexDirection: 'row',
@@ -531,7 +535,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     paddingHorizontal: 8,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
   },
@@ -547,7 +551,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
     gap: 10,
-    minHeight: 48,
+    height: 50,
   },
   googleGlyph: {
     width: 22,
@@ -574,14 +578,14 @@ const styles = StyleSheet.create({
   // Apple Sign-In button. AppleAuthenticationButton requires an explicit height.
   appleButton: {
     width: '100%',
-    height: 48,
-    borderRadius: 10,
+    height: 50,
+    borderRadius: 12,
   },
   // Loading placeholder so the layout doesn't jump while the native sheet opens.
   appleButtonPlaceholder: {
     width: '100%',
-    height: 48,
-    borderRadius: 10,
+    height: 50,
+    borderRadius: 12,
     backgroundColor: '#000',
     alignItems: 'center',
     justifyContent: 'center',

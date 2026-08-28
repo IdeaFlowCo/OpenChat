@@ -44,6 +44,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { ConversationList } from './ConversationList';
+import { AppIcon } from './AppIcon';
+import { ConnectionStatusLine } from './ConnectionStatusLine';
 // /d/ right pane renders the same ChatScreen that /m/ uses — with full
 // feature parity (voice / preview / transform / forwarding / reactions /
 // edit / delete / mentions / attachments / read receipts / pagination).
@@ -296,7 +298,7 @@ export function MasterDetailLayout() {
               accessibilityLabel="Expand sidebar"
               hoverBg={c.surfaceElevated}
             >
-              <Text style={{ color: c.primary, fontSize: 18 }}>›</Text>
+              <AppIcon name="chevron-right" color={c.primary} size={19} />
             </IconButton>
             <IconButton
               onPress={openNew}
@@ -304,7 +306,7 @@ export function MasterDetailLayout() {
               accessibilityLabel="New conversation"
               hoverBg={c.surfaceElevated}
             >
-              <Text style={{ color: c.primary, fontSize: 22, lineHeight: 22, fontWeight: '300' }}>＋</Text>
+              <AppIcon name="plus" color={c.primary} size={20} />
             </IconButton>
           </View>
         ) : (
@@ -315,7 +317,7 @@ export function MasterDetailLayout() {
               accessibilityLabel="Collapse sidebar"
               hoverBg={c.surfaceElevated}
             >
-              <Text style={{ color: c.primary, fontSize: 18 }}>‹</Text>
+              <AppIcon name="chevron-left" color={c.primary} size={19} />
             </IconButton>
             <IconButton
               onPress={openSettings}
@@ -323,13 +325,18 @@ export function MasterDetailLayout() {
               accessibilityLabel="Settings"
               hoverBg={c.surfaceElevated}
             >
-              <Text style={{ color: c.primary, fontSize: 20 }}>⚙︎</Text>
+              <AppIcon name="settings" color={c.primary} size={19} strokeWidth={1.8} />
             </IconButton>
             <View style={{ flex: 1, alignItems: 'center' }}>
               <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary }}>Chats</Text>
-              <Text style={{ fontSize: 11, color: c.textSecondary }} numberOfLines={1}>
-                {currentUser?.email}  ·  {isConnected ? '🟢 connected' : '⚪ connecting…'}
-              </Text>
+              <ConnectionStatusLine
+                account={currentUser?.email}
+                connected={isConnected}
+                connectedColor={c.presenceAvailable}
+                disconnectedColor={c.presenceOffline}
+                textColor={c.textSecondary}
+                disconnectedLabel="connecting…"
+              />
             </View>
             <IconButton
               onPress={openSearch}
@@ -337,7 +344,7 @@ export function MasterDetailLayout() {
               accessibilityLabel="Search"
               hoverBg={c.surfaceElevated}
             >
-              <Text style={{ color: c.primary, fontSize: 18 }}>🔍</Text>
+              <AppIcon name="search" color={c.primary} size={19} />
             </IconButton>
             <IconButton
               onPress={openNew}
@@ -345,7 +352,7 @@ export function MasterDetailLayout() {
               accessibilityLabel="New conversation"
               hoverBg={c.surfaceElevated}
             >
-              <Text style={{ color: c.primary, fontSize: 26, lineHeight: 26, fontWeight: '300' }}>＋</Text>
+              <AppIcon name="plus" color={c.primary} size={20} />
             </IconButton>
           </View>
         )}
@@ -394,7 +401,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 4,
+    gap: 8,
   },
   sidebarHeaderCompact: {
     flexDirection: 'column',
@@ -404,11 +411,11 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   iconBtn: {
-    minWidth: 32,
-    minHeight: 32,
+    minWidth: 36,
+    minHeight: 36,
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    paddingVertical: 6,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
     // @ts-ignore — web-only: show a pointer so these read as clickable.
