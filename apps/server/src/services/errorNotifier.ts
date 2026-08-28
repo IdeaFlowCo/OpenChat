@@ -3,7 +3,8 @@
  * Jacob sees them within seconds without grep-tailing docker logs.
  *
  * Gate: SLACK_ERROR_WEBHOOK_URL env var. If unset, the entire module is a
- * no-op. Set it on the deploy host (Lightsail /opt/openchat/.env) to a
+ * no-op. Set it on the GCP production host (`lightsail-migration/noos`,
+ * `/opt/openchat/.env`) to a
  * Slack Incoming Webhook URL — POSTs a simple Block-Kit message.
  *
  * Rate limiting: an in-memory hash table debounces identical errors. The

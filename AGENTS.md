@@ -13,7 +13,7 @@ This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get sta
 | `apps/mobile` | React Native / Expo app | native iOS (TestFlight) + RN-web at **`/m`** (mobile web) and **`/d`** (desktop web) |
 | `apps/desktop` | Tauri desktop wrapper around the `apps/mobile` RN-web export | native desktop shell |
 | `apps/mcp-server` | MCP REST→tools bridge (Claude-side connector) | run locally / connect to Claude |
-| `infra/` | `deploy.sh`, `docker-compose.prod.yml`, `Dockerfile` | prod deploy |
+| `infra/` | `deploy.sh`, `docker-compose.prod.yml`, `Dockerfile` | GCP prod deploy |
 
 (The old separate `tmad4000/openchat-mobile` repo is **frozen/archived** — its history is in `apps/mobile`.)
 
@@ -29,6 +29,9 @@ When you finish a chunk of work, **deploy both** without asking each time:
    ```bash
    cd ~/code/OpenChat && bash infra/deploy.sh
    ```
+   This targets GCE instance `noos` in project `lightsail-migration`, zone
+   `us-central1-a`. See `docs/gcp-production.md`. Never use the retired
+   Lightsail IP or the unrelated `boreal-conquest-464203-v2/noos-gcp-1` VM.
 2. **Native iOS → TestFlight** (bumps version, `eas build --local`, `eas submit`, publishes to testers → Apple Beta review):
    ```bash
    cd ~/code/OpenChat/apps/mobile && TMPDIR="$HOME/.ocbuild-tmp" bash scripts/local-build.sh
