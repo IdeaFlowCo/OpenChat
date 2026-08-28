@@ -70,6 +70,13 @@ container's `JWT_SECRET`; it lets fresh Noos sessions authenticate without
 invalidating existing OpenChat sessions. Never replace OpenChat's `JWT_SECRET`
 with the Noos value as a migration shortcut.
 
+Before deploying this compatibility change to an existing installation, add
+`NOOS_JWT_SECRET` to `/opt/openchat/.env`. The deploy script preserves an
+existing environment file; its generated template only applies to a new
+installation. Confirm both variables are present without printing their values,
+then run the normal deploy and verify both an existing OpenChat session and a
+fresh Noos session.
+
 ## Verified migration status
 
 The public `/api/openapi.json` response exactly matched the response fetched

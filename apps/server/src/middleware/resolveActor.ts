@@ -3,7 +3,7 @@
  * Bearer oc_<...> agent API keys (OpenChat-7c9).
  *
  * Auth precedence:
- *   1. Bearer <jwt>  — validated against JWT_SECRET (existing picortex path)
+ *   1. Bearer <jwt>  — validated against JWT_SECRET or NOOS_JWT_SECRET
  *   2. Bearer oc_<…> — looked up by keyPrefix, AES-256-GCM decrypted + compared
  *
  * Caches successful key lookups for ~60 s to avoid a Neo4j round-trip on every
