@@ -25,7 +25,7 @@ const palette = {
     primaryActive: '#1d4ed8',      // blue-700
     bubbleOwn: '#3b82f6',
     bubbleOwnText: '#ffffff',
-    bubbleOther: '#f3f4f6',        // gray-100
+    bubbleOther: '#ffffff',        // white
     bubbleOtherText: '#111827',    // gray-900
     presenceAvailable: '#22c55e',
     presenceAway: '#eab308',

@@ -1,6 +1,7 @@
 import { useChat } from '../contexts/ChatContext';
 import { PresenceIndicator } from './PresenceIndicator';
 import { BotBadge } from './BotBadge';
+import { AppIcon } from './AppIcon';
 import { userDisplayName } from '../utils/userDisplay';
 
 export function ConversationList() {
@@ -89,7 +90,11 @@ export function ConversationList() {
                     {conv.type === 'direct' && other && <BotBadge user={other} compact />}
                   </span>
                   <span className="text-xs text-gray-400 dark:text-slate-500 shrink-0 ml-2 flex items-center gap-2">
-                    {conv.mutedUntil && <span title="Muted" aria-label="Muted">🔕</span>}
+                    {conv.mutedUntil && (
+                      <span title="Muted" aria-label="Muted">
+                        <AppIcon name="mute" size={13} strokeWidth={1.8} />
+                      </span>
+                    )}
                     {formatTime(conv.lastMessageAt)}
                     {hasUnread && (
                       <span
