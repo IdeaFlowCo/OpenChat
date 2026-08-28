@@ -64,6 +64,12 @@ into the repository. The live deployment still accepts the legacy `AWS_*`
 credential names because the AWS SDK is used as an S3-compatible client for
 GCS; provider-neutral `OBJECT_STORAGE_*` names are preferred for new configs.
 
+`JWT_SECRET` remains OpenChat's signing and primary verification key.
+`NOOS_JWT_SECRET` is a verify-only compatibility key and must match the Noos API
+container's `JWT_SECRET`; it lets fresh Noos sessions authenticate without
+invalidating existing OpenChat sessions. Never replace OpenChat's `JWT_SECRET`
+with the Noos value as a migration shortcut.
+
 ## Verified migration status
 
 The public `/api/openapi.json` response exactly matched the response fetched

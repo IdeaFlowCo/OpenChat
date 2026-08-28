@@ -20,13 +20,36 @@ function getJwtSecret(): string {
   return process.env.JWT_SECRET || 'dev-secret-change-me';
 }
 
+function getJwtVerificationSecrets(): string[] {
+  const primarySecret = getJwtSecret();
+  const noosSecret = process.env.NOOS_JWT_SECRET;
+
+  return noosSecret && noosSecret !== primarySecret
+    ? [primarySecret, noosSecret]
+    : [primarySecret];
+}
+
+function isAuthUser(value: unknown): value is AuthUser {
+  if (!value || typeof value !== 'object') return false;
+
+  const payload = value as Record<string, unknown>;
+  return typeof payload.userId === 'string'
+    && payload.userId.length > 0
+    && typeof payload.email === 'string'
+    && payload.email.length > 0;
+}
+
 export function validateToken(token: string): AuthUser | null {
-  try {
-    const decoded = jwt.verify(token, getJwtSecret()) as AuthUser;
-    return decoded;
-  } catch {
-    return null;
+  for (const secret of getJwtVerificationSecrets()) {
+    try {
+      const decoded = jwt.verify(token, secret);
+      if (isAuthUser(decoded)) return decoded;
+    } catch {
+      // Try the next configured verification key.
+    }
   }
+
+  return null;
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
