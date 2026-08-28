@@ -21,7 +21,15 @@ SOURCE="${2:-all}"
 
 echo "═══ openchat errors — last $SINCE — source: $SOURCE ═══"
 
-LOGS=$(ssh noos-prod "sudo docker logs openchat_app --since $SINCE 2>&1" 2>/dev/null)
+GCP_PROJECT="${GCP_PROJECT:-lightsail-migration}"
+GCP_ZONE="${GCP_ZONE:-us-central1-a}"
+GCP_INSTANCE="${GCP_INSTANCE:-noos}"
+
+LOGS=$(gcloud compute ssh "$GCP_INSTANCE" \
+  --project="$GCP_PROJECT" \
+  --zone="$GCP_ZONE" \
+  --quiet \
+  --command="sudo docker logs openchat_app --since $SINCE 2>&1" 2>/dev/null)
 
 case "$SOURCE" in
   api)

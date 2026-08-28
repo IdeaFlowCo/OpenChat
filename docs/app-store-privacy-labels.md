@@ -2,7 +2,7 @@
 
 > **Audience:** the person filling in App Store Connect → App Privacy.
 > **Source of truth:** OpenChat-d8w. Update whenever data collection changes.
-> **Last audit:** 2026-06-01 against build 39 (v0.1.7).
+> **Last infrastructure audit:** 2026-08-28 against the live GCP deployment.
 
 Apple's "App Privacy" section ("nutrition labels") is a structured answer to:
 *what does your app collect, and is it linked to the user?* These answers must
@@ -22,7 +22,7 @@ when filling out the ASC form.
 - **Support URL:** mailto:support@chat.globalbr.ai
 - **App category:** Social Networking (primary), Productivity (secondary)
 - **Sign-in providers:** Google OAuth, Sign in with Apple, email/password (via Noos SSO)
-- **Server location:** AWS Lightsail (US East), Neo4j Aura
+- **Server location:** Google Cloud Compute Engine (`us-central1`), self-hosted Neo4j
 
 ---
 
@@ -145,7 +145,7 @@ when filling out the ASC form.
 | **Expo** (push delivery) | Push notification token, conversation ID, message preview | App Functionality (delivering notifications to iOS/Android) |
 | **Apple** (Sign in with Apple) | Email (or Apple email-relay), name on first sign-in | Account creation |
 | **Google** (OAuth + maybe `gpt-image-1`) | Email, name, profile picture; OAuth code exchange | Account creation |
-| **AWS** (Lightsail server, S3-compatible storage) | All app data (messages, images, voice notes, profile info) | App Functionality (server infrastructure) |
+| **Google Cloud** (Compute Engine and Cloud Storage) | All app data (messages, images, voice notes, profile info) | App Functionality (server infrastructure) |
 | **Noos SSO** (`globalbr.ai`) | Email + password verification | Authentication |
 
 ---
@@ -197,7 +197,7 @@ The privacy policy at https://chat.globalbr.ai/legal/privacy MUST contain:
 - [ ] "Third-Party Processors" subsection listing all of Section 10 above
 - [ ] "User Rights" — account deletion path (already shipped: Settings → Delete account)
 - [ ] "Data Retention" — how long messages are retained, deletion policy
-- [ ] "International Transfers" — note that data may flow through AWS US-East
+- [ ] "International Transfers" — note that data may flow through Google Cloud US regions
 - [ ] "Contact" — support@chat.globalbr.ai
 - [ ] Last-updated date
 

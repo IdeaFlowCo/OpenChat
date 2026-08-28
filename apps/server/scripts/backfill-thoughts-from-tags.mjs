@@ -13,8 +13,8 @@
  * compiled dist service) so backfilled Thoughts match send-time ones exactly.
  *
  * HOW TO RUN (Neo4j is internal to the prod docker network, so run in-container):
- *   scp apps/server/scripts/backfill-thoughts-from-tags.mjs noos-prod:/tmp/
- *   ssh noos-prod 'sudo docker cp /tmp/backfill-thoughts-from-tags.mjs openchat_app:/app/apps/server/ \
+ *   gcloud compute scp apps/server/scripts/backfill-thoughts-from-tags.mjs noos:/tmp/ --project=lightsail-migration --zone=us-central1-a
+ *   gcloud compute ssh noos --project=lightsail-migration --zone=us-central1-a --command='sudo docker cp /tmp/backfill-thoughts-from-tags.mjs openchat_app:/app/apps/server/ \
  *     && sudo docker exec -w /app/apps/server openchat_app node backfill-thoughts-from-tags.mjs \
  *     && sudo docker exec openchat_app rm -f /app/apps/server/backfill-thoughts-from-tags.mjs'
  *

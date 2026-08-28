@@ -62,6 +62,11 @@ services:
       - S3_BUCKET=${S3_BUCKET:-}
       - S3_ENDPOINT=${S3_ENDPOINT:-}
       - S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-}
+      # Provider-neutral names are canonical. AWS_* remains supported for the
+      # existing GCS interoperability credentials during a gradual rollover.
+      - OBJECT_STORAGE_ACCESS_KEY_ID=${OBJECT_STORAGE_ACCESS_KEY_ID:-}
+      - OBJECT_STORAGE_SECRET_ACCESS_KEY=${OBJECT_STORAGE_SECRET_ACCESS_KEY:-}
+      - OBJECT_STORAGE_REGION=${OBJECT_STORAGE_REGION:-auto}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       - AWS_REGION=${AWS_REGION:-auto}
