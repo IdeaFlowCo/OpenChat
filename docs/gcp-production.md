@@ -83,6 +83,10 @@ Remaining gaps found in that audit:
 - `boreal-conquest-464203-v2/noos-gcp-1` is an empty duplicate migration VM. It
   is not the production origin and should be removed after an owner confirms
   it has no separate purpose.
+- The old Lightsail host is no longer serving production and was unreachable
+  during this audit, but AWS account access was not available to confirm that
+  its instance, static IP, snapshots, disks, buckets, and billing were removed.
+  Treat the traffic cutover as verified and the AWS teardown as unverified.
 - The former GCP migration work remained in draft PR #12 and never reached
   `main`; this document and the corrected scripts supersede it.
 
