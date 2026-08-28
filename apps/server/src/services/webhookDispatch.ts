@@ -54,6 +54,7 @@ export interface NormalizedMessagePayload {
     messageType: string;
     attachments: unknown;
     replyToId: string | null;
+    viaSecretary: boolean;
     createdAt: string | null;
   };
 }
@@ -84,6 +85,7 @@ export function buildMessagePayload(
       messageType: typeof message.messageType === 'string' ? message.messageType : 'text',
       attachments: message.attachments ?? null,
       replyToId: (message.replyToId as string | undefined) ?? null,
+      viaSecretary: message.viaSecretary === true,
       createdAt: (message.createdAt as string | undefined) ?? null,
     },
   };

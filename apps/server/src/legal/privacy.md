@@ -8,6 +8,8 @@ This Privacy Policy describes how OpenChat (operated by chat.globalbr.ai) collec
 
 **Account information.** When you sign up, we collect your email address and display name. If you sign in with Google or Apple, we receive your profile information from that provider.
 
+**Secretary quick answers.** If you enable Secretary mode, we store the questions and exact answers you approve so OpenChat can automatically reply to matching questions in your direct chats. Secretary mode is optional and disabled by default.
+
 **Messages.** We store the messages you send and receive so conversations persist across sessions. Message content is stored on our servers.
 
 **Usage data.** We collect basic presence information (online/offline status) and the timestamp of your last activity.

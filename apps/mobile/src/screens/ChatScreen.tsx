@@ -1244,6 +1244,11 @@ export function ChatScreen({
                     </TouchableOpacity>
                   )}
                   {/* Forwarded-from label (OpenChat-hhc) */}
+                  {!!m.viaSecretary && !m.deletedAt && (
+                    <Text style={[styles.forwardedLabel, { color: isOwn ? 'rgba(255,255,255,0.78)' : c.textMuted }]}>
+                      ◇ Secretary auto-reply
+                    </Text>
+                  )}
                   {!!m.forwardedFromMessageId && (
                     <Text style={[styles.forwardedLabel, { color: isOwn ? 'rgba(255,255,255,0.7)' : c.textMuted }]} numberOfLines={1}>
                       {'↪ Forwarded from '}{m.forwardedFromSenderName || 'Unknown'}

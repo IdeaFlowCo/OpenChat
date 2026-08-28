@@ -6,7 +6,7 @@ import {
   IS_DEV_BUILD,
   formatVersion,
 } from '../utils/appVersion';
-import { AgentKey, api, EXPORT_RANGE_OPTIONS, ExportRangeKey, User } from '../api';
+import { AgentKey, api, EXPORT_RANGE_OPTIONS, ExportRangeKey, User, type SecretaryAnswer } from '../api';
 import { buildAgentSetupBlob } from '../utils/agentSetupBlob';
 import { saveTextDownload } from '../utils/download';
 import { useTheme, ThemePreference } from '../contexts/ThemeContext';
@@ -19,7 +19,7 @@ interface SettingsModalProps {
   onShowVersionInTopBarChange: (value: boolean) => void;
 }
 
-type View = 'root' | 'profile' | 'agentKeys' | 'blocked' | 'export';
+type View = 'root' | 'profile' | 'secretary' | 'agentKeys' | 'blocked' | 'export';
 
 function timeAgo(iso: string | null | undefined): string {
   if (!iso) return 'Never';
@@ -65,6 +65,7 @@ export function SettingsModal({
 
   const title =
     view === 'profile' ? 'Edit profile'
+    : view === 'secretary' ? 'Secretary'
     : view === 'agentKeys' ? 'Agent keys'
     : view === 'blocked' ? 'Blocked users'
     : view === 'export' ? 'Export my data'
@@ -125,6 +126,7 @@ export function SettingsModal({
             />
           )}
           {view === 'profile' && <ProfileEditView onDone={() => setView('root')} />}
+          {view === 'secretary' && <SecretaryView />}
           {view === 'agentKeys' && <AgentKeysView />}
           {view === 'blocked' && <BlockedUsersView />}
           {view === 'export' && <ExportView />}
@@ -267,6 +269,13 @@ function RootView({
           </div>
         </section>
       )}
+
+      <section>
+        <h3 className={labelCls}>Automation</h3>
+        <div className={`mt-2 ${sectionCls}`}>
+          <NavRow label="Secretary" hint="Auto-answer repetitive questions using replies you approve" onClick={() => onNavigate('secretary')} />
+        </div>
+      </section>
 
       {/* Feedback */}
       <section>
@@ -435,6 +444,160 @@ function RootView({
 // ─────────────────────────────────────────────────────────────────────────
 // Profile edit (OpenChat-tml)
 // ─────────────────────────────────────────────────────────────────────────
+
+function SecretaryView() {
+  const [enabled, setEnabled] = useState(false);
+  const [answers, setAnswers] = useState<SecretaryAnswer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [question, setQuestion] = useState('');
+  const [answer, setAnswer] = useState('');
+  const [status, setStatus] = useState<{ kind: 'error' | 'success'; text: string } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api.getSecretary()
+      .then((config) => {
+        if (!active) return;
+        setEnabled(config.enabled);
+        setAnswers(config.answers);
+      })
+      .catch((error) => active && setStatus({ kind: 'error', text: error instanceof Error ? error.message : 'Could not load Secretary.' }))
+      .finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, []);
+
+  const toggle = async () => {
+    const next = !enabled;
+    setEnabled(next);
+    setStatus(null);
+    try {
+      await api.setSecretaryEnabled(next);
+    } catch (error) {
+      setEnabled(!next);
+      setStatus({ kind: 'error', text: error instanceof Error ? error.message : 'Could not update Secretary.' });
+    }
+  };
+
+  const reset = () => {
+    setEditingId(null);
+    setQuestion('');
+    setAnswer('');
+  };
+
+  const edit = (entry: SecretaryAnswer) => {
+    setEditingId(entry.id);
+    setQuestion(entry.question);
+    setAnswer(entry.answer);
+    setStatus(null);
+  };
+
+  const save = async () => {
+    if (!question.trim() || !answer.trim() || saving) return;
+    setSaving(true);
+    setStatus(null);
+    try {
+      const saved = editingId
+        ? await api.updateSecretaryAnswer(editingId, { question: question.trim(), answer: answer.trim() })
+        : await api.createSecretaryAnswer({ question: question.trim(), answer: answer.trim() });
+      setAnswers((current) => editingId
+        ? current.map((item) => item.id === editingId ? saved : item)
+        : [...current, saved]);
+      reset();
+      setStatus({ kind: 'success', text: 'Quick answer saved.' });
+    } catch (error) {
+      setStatus({ kind: 'error', text: error instanceof Error ? error.message : 'Could not save quick answer.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (entry: SecretaryAnswer) => {
+    if (!window.confirm(`Delete the quick answer “${entry.question}”?`)) return;
+    setStatus(null);
+    try {
+      await api.deleteSecretaryAnswer(entry.id);
+      setAnswers((current) => current.filter((item) => item.id !== entry.id));
+      if (editingId === entry.id) reset();
+    } catch (error) {
+      setStatus({ kind: 'error', text: error instanceof Error ? error.message : 'Could not delete quick answer.' });
+    }
+  };
+
+  if (loading) return <p className="py-8 text-center text-sm text-gray-500 dark:text-slate-400">Loading Secretary…</p>;
+
+  return (
+    <div className="space-y-5">
+      <section className="rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/50 p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="font-semibold text-gray-900 dark:text-slate-100">Routine questions, handled</h3>
+            <p className="mt-1 text-sm leading-5 text-gray-600 dark:text-slate-400">Replies in direct chats use only the exact answers you approve here.</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={enabled}
+            aria-label="Enable Secretary auto-replies"
+            onClick={toggle}
+            className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${enabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-slate-600'}`}
+          >
+            <span className={`absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+          </button>
+        </div>
+        <p className="mt-3 rounded-lg bg-white dark:bg-slate-900 px-3 py-2 text-xs leading-5 text-gray-500 dark:text-slate-400">Replies are visibly labeled “Secretary auto-reply.” Unmatched questions wait for you; group chats are never answered.</p>
+      </section>
+
+      <section>
+        <h3 className={labelCls}>Approved quick answers</h3>
+        <div className="mt-2 space-y-2">
+          {answers.map((entry) => (
+            <div key={entry.id} className={`rounded-lg border p-3 ${editingId === entry.id ? 'border-blue-500' : 'border-gray-200 dark:border-slate-700'}`}>
+              <button type="button" onClick={() => edit(entry)} className="block w-full text-left">
+                <span className="block text-sm font-semibold text-gray-900 dark:text-slate-100">{entry.question}</span>
+                <span className="mt-1 block whitespace-pre-wrap text-sm text-gray-600 dark:text-slate-400">{entry.answer}</span>
+              </button>
+              <button type="button" onClick={() => void remove(entry)} className="mt-2 text-xs font-medium text-red-600 dark:text-red-400">Delete</button>
+            </div>
+          ))}
+          {answers.length === 0 && <p className="py-3 text-center text-sm text-gray-500 dark:text-slate-400">Add one repetitive question to try the mode.</p>}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-gray-200 dark:border-slate-700 p-4">
+        <h3 className="font-semibold text-gray-900 dark:text-slate-100">{editingId ? 'Edit quick answer' : 'Add a quick answer'}</h3>
+        <label className="mt-3 block text-xs font-semibold text-gray-600 dark:text-slate-400">
+          When someone asks…
+          <input
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            maxLength={200}
+            placeholder="What is your address?"
+            className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 text-sm font-normal text-gray-900 dark:text-slate-100 placeholder:text-gray-400"
+          />
+        </label>
+        <label className="mt-3 block text-xs font-semibold text-gray-600 dark:text-slate-400">
+          Reply with…
+          <textarea
+            value={answer}
+            onChange={(event) => setAnswer(event.target.value)}
+            maxLength={2000}
+            rows={4}
+            placeholder="The exact answer people should receive"
+            className="mt-1 w-full resize-none rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-normal text-gray-900 dark:text-slate-100 placeholder:text-gray-400"
+          />
+        </label>
+        <div className="mt-3 flex justify-end gap-2">
+          {editingId && <button type="button" onClick={reset} className="min-h-[40px] rounded-lg border border-gray-300 dark:border-slate-700 px-4 text-sm font-medium text-gray-700 dark:text-slate-300">Cancel</button>}
+          <button type="button" onClick={() => void save()} disabled={!question.trim() || !answer.trim() || saving} className="min-h-[40px] rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{saving ? 'Saving…' : editingId ? 'Save' : 'Add answer'}</button>
+        </div>
+      </section>
+
+      {status && <p role="status" className={`text-sm ${status.kind === 'error' ? 'text-red-600 dark:text-red-400' : 'text-green-700 dark:text-green-400'}`}>{status.text}</p>}
+    </div>
+  );
+}
 
 function ProfileEditView({ onDone }: { onDone: () => void }) {
   const { currentUser } = useChat();

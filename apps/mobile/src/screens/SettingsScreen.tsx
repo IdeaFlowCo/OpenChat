@@ -320,6 +320,23 @@ export function SettingsScreen() {
       )}
 
       <View style={styles.section}>
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>AUTOMATION</Text>
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => navigation.navigate('Secretary')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Secretary</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Auto-answer repetitive questions using replies you approve</Text>
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>FEEDBACK</Text>
         <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
           <TouchableOpacity

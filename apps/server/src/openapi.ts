@@ -24,6 +24,7 @@ const Message = {
     senderId: { type: 'string' },
     content: { type: 'string' },
     messageType: { type: 'string', example: 'text' },
+    viaSecretary: { type: 'boolean', description: 'True when this is an owner-approved Secretary auto-reply.' },
     createdAt: { type: 'string', format: 'date-time' },
     sender: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, email: { type: 'string' } } },
   },
@@ -68,6 +69,27 @@ const AgentKey = {
   },
 } as const;
 
+const SecretaryAnswer = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    question: { type: 'string', maxLength: 200 },
+    answer: { type: 'string', maxLength: 2000 },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+  required: ['id', 'question', 'answer'],
+} as const;
+
+const SecretaryConfig = {
+  type: 'object',
+  properties: {
+    enabled: { type: 'boolean' },
+    answers: { type: 'array', items: { $ref: '#/components/schemas/SecretaryAnswer' } },
+  },
+  required: ['enabled', 'answers'],
+} as const;
+
 const AccountExport = {
   type: 'object',
   properties: {
@@ -92,6 +114,7 @@ const AccountExport = {
       description: 'Non-secret agent key metadata owned by the exported account; plaintext keys are never included.',
       items: { $ref: '#/components/schemas/AgentKey' },
     },
+    secretary: { $ref: '#/components/schemas/SecretaryConfig' },
   },
 } as const;
 
@@ -154,6 +177,7 @@ const WebhookDelivery = {
         messageType: { type: 'string', example: 'text' },
         attachments: { nullable: true },
         replyToId: { type: 'string', nullable: true },
+        viaSecretary: { type: 'boolean' },
         createdAt: { type: 'string', format: 'date-time', nullable: true },
       },
     },
@@ -241,6 +265,8 @@ export const openapiSpec = {
       Message,
       Conversation,
       AgentKey,
+      SecretaryAnswer,
+      SecretaryConfig,
       AccountExport,
       ReactionSummary,
       Webhook,
@@ -255,6 +281,7 @@ export const openapiSpec = {
     { name: 'Agent keys', description: 'Mint / manage `oc_` API keys' },
     { name: 'Webhooks', description: 'Outbound `message.created` subscriptions for bot channels' },
     { name: 'Feedback', description: 'In-app feedback → WorldIssueTracker' },
+    { name: 'Secretary', description: 'Owner-approved direct-message auto-replies' },
     { name: 'Account', description: 'Current user' },
     { name: 'Identity bridge', description: 'Trusted first-party server-to-server user provisioning' },
     { name: 'Meta', description: 'Health, spec' },
@@ -390,6 +417,17 @@ export const openapiSpec = {
     },
     '/api/chat/presence': {
       put: { operationId: 'updatePresence', tags: ['Chat'], summary: 'Update your presence', requestBody: { required: true, content: json({ type: 'object', properties: { presenceStatus: { type: 'string' }, statusMessage: { type: 'string' } } }) }, responses: { '200': ok({ type: 'object' }) } },
+    },
+    '/api/secretary': {
+      get: { operationId: 'getSecretary', tags: ['Secretary'], summary: 'Get Secretary mode and approved quick answers', responses: { '200': ok({ $ref: '#/components/schemas/SecretaryConfig' }), '401': errResp('Unauthorized') } },
+      patch: { operationId: 'setSecretaryEnabled', tags: ['Secretary'], summary: 'Enable or disable Secretary mode', requestBody: { required: true, content: json({ type: 'object', properties: { enabled: { type: 'boolean' } }, required: ['enabled'] }) }, responses: { '200': ok({ type: 'object', properties: { enabled: { type: 'boolean' } } }), '400': errResp('Bad request') } },
+    },
+    '/api/secretary/answers': {
+      post: { operationId: 'createSecretaryAnswer', tags: ['Secretary'], summary: 'Add an approved quick answer', requestBody: { required: true, content: json({ type: 'object', properties: { question: { type: 'string', maxLength: 200 }, answer: { type: 'string', maxLength: 2000 } }, required: ['question', 'answer'] }) }, responses: { '201': ok({ $ref: '#/components/schemas/SecretaryAnswer' }, 'Created'), '400': errResp('Bad request') } },
+    },
+    '/api/secretary/answers/{id}': {
+      patch: { operationId: 'updateSecretaryAnswer', tags: ['Secretary'], summary: 'Update an approved quick answer', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: json({ type: 'object', properties: { question: { type: 'string', maxLength: 200 }, answer: { type: 'string', maxLength: 2000 } }, required: ['question', 'answer'] }) }, responses: { '200': ok({ $ref: '#/components/schemas/SecretaryAnswer' }), '404': errResp('Not found') } },
+      delete: { operationId: 'deleteSecretaryAnswer', tags: ['Secretary'], summary: 'Delete an approved quick answer', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }), '404': errResp('Not found') } },
     },
     '/api/agent-keys': {
       get: { operationId: 'listAgentKeys', tags: ['Agent keys'], summary: 'List your agent keys (no plaintext)', responses: { '200': ok({ type: 'array', items: { $ref: '#/components/schemas/AgentKey' } }) } },

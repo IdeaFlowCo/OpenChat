@@ -106,6 +106,7 @@ describe('buildMessagePayload', () => {
         messageType: 'text',
         attachments: null,
         replyToId: null,
+        viaSecretary: false,
         createdAt: '2026-07-16T00:00:00.000Z',
       },
     });
