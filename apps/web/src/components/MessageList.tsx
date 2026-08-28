@@ -353,6 +353,11 @@ export function MessageList() {
                   )}
 
                   {/* Forwarded provenance (OpenChat-hhc) */}
+                  {!isDeleted && message.viaSecretary && (
+                    <div className={`mb-1 text-xs font-medium ${isOwn ? 'text-blue-100' : 'text-gray-400 dark:text-slate-500'}`}>
+                      ◇ Secretary auto-reply
+                    </div>
+                  )}
                   {!isDeleted && message.forwardedFromMessageId && (
                     <div className={`mb-1 text-xs italic ${isOwn ? 'text-blue-100' : 'text-gray-400 dark:text-slate-500'}`}>
                       ↪ Forwarded{message.forwardedFromSenderName ? ` from ${message.forwardedFromSenderName}` : ''}

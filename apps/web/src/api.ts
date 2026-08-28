@@ -157,6 +157,21 @@ export interface Message {
    * while pending — render nothing in that case.
    */
   transcript?: string;
+  /** Owner-approved automatic reply sent by personal Secretary mode. */
+  viaSecretary?: boolean;
+}
+
+export interface SecretaryAnswer {
+  id: string;
+  question: string;
+  answer: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SecretaryConfig {
+  enabled: boolean;
+  answers: SecretaryAnswer[];
 }
 
 export interface Conversation {
@@ -1101,6 +1116,29 @@ class ApiClient {
   // ── Account deletion (OpenChat-nhy) — DELETE /api/auth/me ────────────────
   async deleteAccount(): Promise<{ ok: boolean }> {
     return this.authedFetch(`${AUTH_BASE}/me`, { method: 'DELETE' });
+  }
+
+  // ── Personal Secretary (OpenChat-3kr.3.1) ───────────────────────────────
+  async getSecretary(): Promise<SecretaryConfig> {
+    return this.authedFetch('/api/secretary');
+  }
+
+  async setSecretaryEnabled(enabled: boolean): Promise<{ enabled: boolean }> {
+    return this.authedFetch('/api/secretary', { method: 'PATCH', body: JSON.stringify({ enabled }) });
+  }
+
+  async createSecretaryAnswer(fields: { question: string; answer: string }): Promise<SecretaryAnswer> {
+    return this.authedFetch('/api/secretary/answers', { method: 'POST', body: JSON.stringify(fields) });
+  }
+
+  async updateSecretaryAnswer(id: string, fields: { question: string; answer: string }): Promise<SecretaryAnswer> {
+    return this.authedFetch(`/api/secretary/answers/${encodeURIComponent(id)}`, {
+      method: 'PATCH', body: JSON.stringify(fields),
+    });
+  }
+
+  async deleteSecretaryAnswer(id: string): Promise<void> {
+    return this.authedFetch(`/api/secretary/answers/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   // ── Data export (account-level). GET /api/auth/export?range=… ────────────

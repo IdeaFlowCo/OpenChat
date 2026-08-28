@@ -429,6 +429,12 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
           .revokedAt
         }) AS agentKeys
       }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:OWNS_SECRETARY_ANSWER]->(sa:SecretaryAnswer)
+        WITH sa ORDER BY sa.createdAt ASC
+        RETURN collect(sa { .id, .question, .answer, .createdAt, .updatedAt }) AS secretaryAnswers
+      }
       RETURN u {
         .id,
         .email,
@@ -438,13 +444,15 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
         .avatarUrl,
         .createdAt,
         .updatedAt,
-        .onboardedAt
+        .onboardedAt,
+        .secretaryEnabled
       } AS user,
       conversations,
       messages,
       thoughts,
       blockedUsers,
-      agentKeys
+      agentKeys,
+      secretaryAnswers
     `, { userId, since });
 
     if (result.records.length === 0) {
@@ -474,6 +482,10 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
       thoughts: (toJS(record.get('thoughts')) as unknown[]).filter(Boolean),
       blockedUsers: (toJS(record.get('blockedUsers')) as unknown[]).filter(Boolean),
       agentKeys: (toJS(record.get('agentKeys')) as unknown[]).filter(Boolean),
+      secretary: {
+        enabled: (toJS(record.get('user')) as Record<string, unknown>)?.secretaryEnabled === true,
+        answers: ((toJS(record.get('secretaryAnswers')) as unknown[] | undefined) ?? []).filter(Boolean),
+      },
     });
   } catch (error) {
     console.error('Error exporting account:', error);
@@ -994,6 +1006,12 @@ router.delete('/me', requireAuth, async (req: Request, res: Response) => {
       await tx.run(`
         MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(th:Thought)
         DETACH DELETE th
+      `, { userId });
+
+      // 2c. Delete personal Secretary quick-answer nodes.
+      await tx.run(`
+        MATCH (u:User {id: $userId})-[:OWNS_SECRETARY_ANSWER]->(entry:SecretaryAnswer)
+        DETACH DELETE entry
       `, { userId });
 
       // 3. Delete the User node (and all its relationships).

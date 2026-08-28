@@ -51,6 +51,8 @@ export type RootStackParamList = {
   /** Unified OS permissions panel (notifications, mic, camera, photos) with
    *  per-row re-request and open-settings affordances. */
   Permissions: undefined;
+  /** Owner-approved automatic replies for routine direct-message questions. */
+  Secretary: undefined;
 };
 
 // ── Thoughts stack (OpenChat-zi1) ─────────────────────────────────────────────

@@ -53,6 +53,7 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { ChatScreenRouter } from './src/screens/ChatScreenRouter';
 import { KeyboardShortcutsScreen } from './src/screens/KeyboardShortcutsScreen';
 import { PermissionsScreen } from './src/screens/PermissionsScreen';
+import { SecretaryScreen } from './src/screens/SecretaryScreen';
 import { NewConversationScreen } from './src/screens/NewConversationScreen';
 import { GroupSettingsScreen } from './src/screens/GroupSettingsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
@@ -207,6 +208,11 @@ function ChatsNavigator({ currentUser, c }: {
         name="Permissions"
         component={PermissionsScreen}
         options={{ title: 'Permissions' }}
+      />
+      <ChatsStack.Screen
+        name="Secretary"
+        component={SecretaryScreen}
+        options={{ title: 'Secretary' }}
       />
     </ChatsStack.Navigator>
   );

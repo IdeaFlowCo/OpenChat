@@ -19,6 +19,7 @@ import agentKeysRoutes from './routes/agentKeys.js';
 import webhooksRoutes from './routes/webhooks.js';
 import feedbackRoutes from './routes/feedback.js';
 import assistantRoutes from './routes/assistant.js';
+import secretaryRoutes from './routes/secretary.js';
 import { ensureAssistantUser } from './services/assistant.js';
 import { ensureGroupbrainBotUser } from './services/groupbrainBot.js';
 import { ensureWebhookIndex } from './services/webhookDispatch.js';
@@ -373,6 +374,7 @@ app.use('/api/agent-keys', agentKeysRoutes);
 app.use('/api/webhooks', webhooksRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/assistant', assistantRoutes);
+app.use('/api/secretary', secretaryRoutes);
 
 // API reference (openchat-8md.1) — public spec + Redoc docs page.
 app.get('/api/openapi.json', (_req, res) => res.json(openapiSpec));

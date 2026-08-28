@@ -11,6 +11,7 @@ import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUser
 import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPreview.js';
 import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
+import { maybeTriggerSecretary } from '../services/secretary.js';
 import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from '../services/embeddings.js';
 import { maybeTranscribeMessage } from '../services/transcribeVoice.js';
@@ -1108,6 +1109,13 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // bot, fire an assistant turn asynchronously. No-ops when the sender is the
     // bot itself (loop guard inside maybeTriggerAssistant).
     maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io });
+    maybeTriggerSecretary({
+      senderId: userId,
+      conversationId: conversationId as string,
+      sourceMessageId: message.id as string,
+      content: messageContent,
+      io,
+    });
 
     res.status(201).json(message);
   } catch (error) {

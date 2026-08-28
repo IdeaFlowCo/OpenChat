@@ -6,6 +6,7 @@ import { sendPushToUser } from '../services/push.js';
 import { processLinkPreviews } from '../services/linkPreview.js';
 import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
+import { maybeTriggerSecretary } from '../services/secretary.js';
 import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage } from '../services/embeddings.js';
 
@@ -328,6 +329,13 @@ export function setupChatSocket(io: Server): void {
         // In-app Assistant bot (openchat-bfn.3): fire an assistant turn if this
         // conversation contains the bot. No-ops when sender is the bot itself.
         maybeTriggerAssistant({ senderId: userId, conversationId, io });
+        maybeTriggerSecretary({
+          senderId: userId,
+          conversationId,
+          sourceMessageId: messageId,
+          content,
+          io,
+        });
 
         // Fan-out push notifications to all OTHER participants. Fire-and-forget;
         // never block the message:send response on push delivery.

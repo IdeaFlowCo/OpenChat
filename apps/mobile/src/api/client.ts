@@ -165,6 +165,21 @@ export interface Message {
    *  Present on history load, and updated live via the `message:transcript`
    *  socket event. */
   transcript?: string;
+  /** Owner-approved automatic reply sent by personal Secretary mode. */
+  viaSecretary?: boolean;
+}
+
+export interface SecretaryAnswer {
+  id: string;
+  question: string;
+  answer: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SecretaryConfig {
+  enabled: boolean;
+  answers: SecretaryAnswer[];
 }
 
 /** Single attachment — image or audio (OpenChat-6bg, OpenChat-xxc). */
@@ -874,6 +889,26 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(fields),
     }),
+
+  // ── Personal Secretary (OpenChat-3kr.3.1) ───────────────────────────────
+  getSecretary: () => request<SecretaryConfig>('/api/secretary'),
+  setSecretaryEnabled: (enabled: boolean) =>
+    request<{ enabled: boolean }>('/api/secretary', {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
+  createSecretaryAnswer: (fields: { question: string; answer: string }) =>
+    request<SecretaryAnswer>('/api/secretary/answers', {
+      method: 'POST',
+      body: JSON.stringify(fields),
+    }),
+  updateSecretaryAnswer: (id: string, fields: { question: string; answer: string }) =>
+    request<SecretaryAnswer>(`/api/secretary/answers/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(fields),
+    }),
+  deleteSecretaryAnswer: (id: string) =>
+    request<{ ok: boolean }>(`/api/secretary/answers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   /**
    * Request a presigned PUT URL for an avatar image upload (OpenChat-x2s).
