@@ -87,6 +87,10 @@ concurrency:
 jobs:
   build-and-submit:
     runs-on: ubuntu-latest
+    env:
+      EXPO_ASC_API_KEY_BASE64: ${{ secrets.EXPO_ASC_API_KEY_BASE64 }}
+      EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
     # The mobile app is a workspace at apps/mobile; run all EAS commands there.
     defaults:
       run:
@@ -129,13 +133,11 @@ jobs:
 
       # ── (Option B only) materialize the ASC API key for eas submit ──
       - name: Write ASC API key (option B)
-        if: ${{ secrets.EXPO_ASC_API_KEY_BASE64 != '' }}
+        if: ${{ env.EXPO_ASC_API_KEY_BASE64 != '' }}
         run: |
           mkdir -p "$RUNNER_TEMP/asc"
-          echo "${{ secrets.EXPO_ASC_API_KEY_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/asc/AuthKey.p8"
+          echo "$EXPO_ASC_API_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/asc/AuthKey.p8"
           echo "EXPO_ASC_API_KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_ENV"
-          echo "EXPO_ASC_KEY_ID=${{ secrets.EXPO_ASC_KEY_ID }}" >> "$GITHUB_ENV"
-          echo "EXPO_ASC_ISSUER_ID=${{ secrets.EXPO_ASC_ISSUER_ID }}" >> "$GITHUB_ENV"
 
       # ── EAS cloud build (production profile from apps/mobile/eas.json) ──
       # --non-interactive: fail instead of prompting (CI must never block).
