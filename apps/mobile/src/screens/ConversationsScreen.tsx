@@ -27,6 +27,8 @@ import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
+import { AppIcon } from '../components/AppIcon';
+import { ConnectionStatusLine } from '../components/ConnectionStatusLine';
 import type { NavProp } from '../navigation/types';
 
 function formatTime(iso: string | undefined): string {
@@ -137,9 +139,9 @@ function ConvRow({
               </Text>
               {item.type === 'direct' && <BotBadge isBot={isBot} compact />}
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               {isMuted && (
-                <Text style={{ fontSize: 11, color: textMuted }}>🔕</Text>
+                <AppIcon name="mute" color={textMuted} size={13} strokeWidth={1.8} />
               )}
               <Text style={[styles.rowTime, { color: textMuted }]}>
                 {formatTime(item.lastMessageAt)}
@@ -184,9 +186,14 @@ export function ConversationsScreen() {
       headerTitle: () => (
         <View style={{ alignItems: 'center' }}>
           <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary }}>Chats</Text>
-          <Text style={{ fontSize: 11, color: c.textSecondary }}>
-            {currentUser?.email}  ·  {isConnected ? '🟢 connected' : '⚪ offline — reconnecting'}
-          </Text>
+          <ConnectionStatusLine
+            account={currentUser?.email}
+            connected={isConnected}
+            connectedColor={c.presenceAvailable}
+            disconnectedColor={c.presenceOffline}
+            textColor={c.textSecondary}
+            disconnectedLabel="reconnecting"
+          />
         </View>
       ),
       headerRight: () => (
@@ -194,16 +201,16 @@ export function ConversationsScreen() {
           <TouchableOpacity
             onPress={() => navigation.navigate('Search')}
             accessibilityLabel="Search"
-            style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+            style={styles.headerAction}
           >
-            <Text style={{ color: c.primary, fontSize: 20 }}>🔍</Text>
+            <AppIcon name="search" color={c.primary} size={20} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => navigation.navigate('NewConversation')}
             accessibilityLabel="New conversation"
-            style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+            style={styles.headerAction}
           >
-            <Text style={{ color: c.primary, fontSize: 28, lineHeight: 28, fontWeight: '300' }}>＋</Text>
+            <AppIcon name="plus" color={c.primary} size={21} />
           </TouchableOpacity>
         </View>
       ),
@@ -229,7 +236,7 @@ export function ConversationsScreen() {
             flexDirection: 'row',
           }}
         >
-          <Text style={{ color: c.primary, fontSize: 18, lineHeight: 20, fontWeight: '600' }}>⚙</Text>
+          <AppIcon name="settings" color={c.primary} size={19} strokeWidth={1.8} />
         </TouchableOpacity>
       ),
     });
@@ -316,6 +323,13 @@ export function ConversationsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  headerAction: {
+    minWidth: 44,
+    minHeight: 44,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

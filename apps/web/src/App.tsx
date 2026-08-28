@@ -162,7 +162,7 @@ function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
+      <div className="bg-white p-8 rounded-[20px] shadow-md w-full max-w-[520px]">
         <h1 className="text-2xl font-bold mb-2 text-center">OpenChat</h1>
         <p className="text-gray-500 text-sm mb-6 text-center">
           Real-time messaging powered by the Global Brain
@@ -179,7 +179,7 @@ function LoginPage() {
             setAuthNotice(null);
             handleNoosLogin();
           }}
-          className="w-full py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 font-medium"
+          className="w-full h-[50px] bg-blue-500 text-white rounded-xl hover:bg-blue-600 disabled:opacity-50 font-medium"
           disabled={loading}
         >
           {loading ? 'Redirecting...' : 'Continue with Noos'}

@@ -7,6 +7,7 @@ import { SettingsModal } from './SettingsModal';
 import { api, User, SearchResults } from '../api';
 import { toastError } from '../utils/toastError';
 import { BotBadge } from './BotBadge';
+import { AppIcon } from './AppIcon';
 import type { CurrentUserLike } from '../utils/userDisplay';
 import {
   currentUserAsContact,
@@ -658,8 +659,8 @@ export function ChatSidebar() {
                 className="w-full pl-8 pr-8 py-2 min-h-[36px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
                 aria-label="Search"
               />
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-slate-500 pointer-events-none text-sm">
-                🔍
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-slate-500 pointer-events-none">
+                <AppIcon name="search" size={15} />
               </span>
               {globalSearchTerm && (
                 <button

@@ -8,6 +8,7 @@ import { ContactProfilePanel } from '../components/ContactProfilePanel';
 import { BotBadge } from '../components/BotBadge';
 import { ConversationHeaderMenu } from '../components/ConversationHeaderMenu';
 import { userDisplayName } from '../utils/userDisplay';
+import { AppIcon } from '../components/AppIcon';
 
 export function ChatPage() {
   const { loadConversations, activeConversationId, setActiveConversation, conversations, isConnected, currentUser } = useChat();
@@ -55,7 +56,7 @@ export function ChatPage() {
   const hasActive = !!activeConversationId;
 
   return (
-    <div className="flex h-full bg-gray-50 dark:bg-slate-950 pl-safe pr-safe">
+    <div className="flex h-full bg-gray-100 dark:bg-slate-950 pl-safe pr-safe">
       {/* Sidebar — full-width on mobile when no conv active; fixed w-80 on md+ */}
       <aside
         className={`${hasActive ? 'hidden md:flex' : 'flex'} flex-1 md:flex-none md:w-80 border-r border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex-col`}
@@ -122,7 +123,9 @@ export function ChatPage() {
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {activeConversation.mutedUntil && (
-                  <span className="text-gray-400 dark:text-slate-500" title="Muted" aria-label="Muted">🔕</span>
+                  <span className="text-gray-400 dark:text-slate-500" title="Muted" aria-label="Muted">
+                    <AppIcon name="mute" size={15} strokeWidth={1.8} />
+                  </span>
                 )}
                 {isConnected ? (
                   <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1" aria-label="Connected">
