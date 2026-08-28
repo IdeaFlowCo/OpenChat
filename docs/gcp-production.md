@@ -74,8 +74,6 @@ snapshots exist.
 
 Remaining gaps found in that audit:
 
-- Production `openchat_app` was built on 2026-07-17. Current `main`, including
-  Secretary auto-replies, has not yet been deployed.
 - The only logical Neo4j export in
   `gs://lightsail-migration-noos-neo4j-backups` is from 2026-07-31. Daily disk
   snapshots are current, but recurring logical database backups are not.
@@ -87,6 +85,11 @@ Remaining gaps found in that audit:
   it has no separate purpose.
 - The former GCP migration work remained in draft PR #12 and never reached
   `main`; this document and the corrected scripts supersede it.
+
+Current `main` was deployed through the corrected GCP path on 2026-08-28. The
+new container passed the public health check, reconnected to Neo4j and the
+picortex bot, and `/api/secretary` returned its expected authenticated API
+response rather than the previous SPA fallback.
 
 The retired AWS Lightsail address `3.216.129.34` is historical only. Do not use
 it for deploys, logs, database access, or health checks.
