@@ -17,6 +17,7 @@ import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from 
 import { maybeTranscribeMessage } from '../services/transcribeVoice.js';
 import { CONVERSATIONS_QUERY, UNREAD_TOTAL_QUERY } from '../queries/chatUnread.js';
 import { ensureDirectConversation } from '../services/directConversation.js';
+import { classifyContactDiscoveryQuery } from '../privacy/contactDiscovery.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
 let _s3: S3Client | null = null;
@@ -1087,39 +1088,33 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
   }
 });
 
-// GET /api/chat/contacts - Get all users (for starting conversations)
-// Supports ?q=search to filter by name or email (case-insensitive)
+// GET /api/chat/contacts - Find a user for starting a conversation.
+// Empty/self queries return only the caller. Other users require a complete,
+// case-insensitive email match; there is intentionally no browsable directory.
 router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
-  const searchQuery = req.query.q as string | undefined;
-  const normalizedSearch = (searchQuery || '').trim().toLowerCase();
-  const isSelfSearch = normalizedSearch === 'self' || normalizedSearch === 'me';
+  const discovery = classifyContactDiscoveryQuery(req.query.q);
 
   try {
-    // Self is ALWAYS discoverable so you can DM yourself ("note to self"):
-    //  - empty query  -> everyone incl. you, you pinned first
-    //  - searching     -> others matching name/email, PLUS you if you match
-    //    name/email or typed the magic words "self"/"me". You always rank first.
+    if (discovery.kind === 'invalid') {
+      res.json([]);
+      return;
+    }
+
     const query = `
         MATCH (u:User)
-        WHERE
-          $search = ''
-          OR (
-            u.id <> $userId
-            AND (toLower(u.name) CONTAINS toLower($search) OR toLower(u.email) CONTAINS toLower($search))
-          )
-          OR (
-            u.id = $userId
-            AND ($isSelfSearch = true
-                 OR toLower(u.name) CONTAINS toLower($search)
-                 OR toLower(u.email) CONTAINS toLower($search))
-          )
+        WHERE ($selfOnly = true AND u.id = $userId)
+           OR ($email <> '' AND toLower(u.email) = $email)
         RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
-        ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
+        LIMIT 1
       `;
 
-    const result = await session.run(query, { userId, search: (searchQuery || '').trim(), isSelfSearch });
+    const result = await session.run(query, {
+      userId,
+      selfOnly: discovery.kind === 'self',
+      email: discovery.kind === 'email' ? discovery.normalized : '',
+    });
     const contacts = result.records.map(r => toJS(r.get('user')));
     res.json(contacts);
   } catch (error) {
@@ -1145,8 +1140,8 @@ router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
 //     message in the graph.
 //   - Conversations: same — only conversations the user is a member of are
 //     considered, and we match by title.
-//   - Contacts: all users by name/email (already public-by-design via
-//     /contacts).
+//   - Contacts: the caller for self keywords, or another user only when q is
+//     a complete email address matching exactly (case-insensitive).
 //
 // Backed by CONTAINS (case-insensitive via toLower) rather than a Neo4j
 // full-text index. Reasoning: CONTAINS works against the existing schema
@@ -1156,6 +1151,7 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const rawQ = (req.query.q ?? '') as string;
   const q = typeof rawQ === 'string' ? rawQ.trim() : '';
+  const contactDiscovery = classifyContactDiscoveryQuery(q);
   const scope = (req.query.scope as string) === 'conversation' ? 'conversation' : 'global';
   const conversationId = req.query.conversationId as string | undefined;
   // openchat-bfn.2: optional semantic/hybrid mode for the messages bucket.
@@ -1238,10 +1234,11 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
     // Notes:
     // - Messages query filters on PARTICIPATES_IN, so a user can never get
     //   back a message from a conversation they're not in.
-    // - Conversations matches on the conversation TITLE only (participant
-    //   names already surface via the contacts bucket; layering them in
-    //   here causes confusing double-counted results).
-    // - Contacts excludes self, matching the existing /contacts behavior.
+    // - Conversations matches on the conversation TITLE only. Participant
+    //   details remain available inside conversations the caller already
+    //   belongs to; they are never used as a global people directory.
+    // - Contacts are not a directory: self keywords or a complete exact email
+    //   are the only discovery paths.
     //
     // Each query runs on its OWN session: a single Neo4j session cannot run
     // multiple queries concurrently (Promise.all on one session throws
@@ -1290,20 +1287,20 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
         LIMIT $limit
       `, { userId, q, limit: neo4j.int(limit) }),
 
-      // Contacts: case-insensitive CONTAINS on name OR email.
-      // OpenChat-search-self: includes SELF when the literal query matches the
-      // user's own name/email OR when the query is a reserved self-keyword
-      // ('me', 'self', 'myself'). Codex review 2026-06-01: dropping the
-      // u.id <> $userId exclusion does not leak — the response shape only
-      // contains data the user already has on their own profile.
+      // Contacts: self, or one case-insensitive exact email match. Passing an
+      // empty contactEmail for partial/name queries makes this bucket empty
+      // while message and conversation search continue to work normally.
       runQ(`
         MATCH (u:User)
-        WHERE (toLower(u.name) CONTAINS toLower($q) OR toLower(u.email) CONTAINS toLower($q))
-           OR (u.id = $userId AND toLower($q) IN ['me', 'self', 'myself'])
+        WHERE ($selfOnly = true AND u.id = $userId)
+           OR ($contactEmail <> '' AND toLower(u.email) = $contactEmail)
         RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
-        ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
-        LIMIT $limit
-      `, { userId, q, limit: neo4j.int(limit) }),
+        LIMIT 1
+      `, {
+        userId,
+        selfOnly: contactDiscovery.kind === 'self',
+        contactEmail: contactDiscovery.kind === 'email' ? contactDiscovery.normalized : '',
+      }),
     ]);
 
     const keywordMessages = messagesResult.records.map(r => toJS(r.get('message')));
@@ -1348,13 +1345,20 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
 // GET /api/chat/users/by-email/:email - Look up user by exact email
 router.get('/users/by-email/:email', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
-  const { email } = req.params;
+  const discovery = classifyContactDiscoveryQuery(req.params.email);
 
   try {
+    if (discovery.kind !== 'email') {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
     const result = await session.run(`
-      MATCH (u:User {email: $email})
+      MATCH (u:User)
+      WHERE toLower(u.email) = $email
       RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
-    `, { email });
+      LIMIT 1
+    `, { email: discovery.normalized });
 
     if (result.records.length === 0) {
       res.status(404).json({ error: 'User not found' });

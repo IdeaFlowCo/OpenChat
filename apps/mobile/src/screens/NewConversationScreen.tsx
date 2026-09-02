@@ -108,8 +108,8 @@ export function NewConversationScreen() {
   };
 
   const headerInstructions = useMemo(() => {
-    if (mode === 'direct') return 'Pick someone to start chatting';
-    if (selected.length === 0) return 'Pick people to start a group';
+    if (mode === 'direct') return 'Enter their full email or scan their QR code';
+    if (selected.length === 0) return 'Find people by full email to start a group';
     if (selected.length === 1) return 'Pick one more — groups need at least 2 others';
     return `${selected.length} selected — tap Create when ready`;
   }, [mode, selected.length]);
@@ -146,11 +146,12 @@ export function NewConversationScreen() {
         style={[styles.search, { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border }]}
         value={query}
         onChangeText={setQuery}
-        placeholder="Search by name or email"
+        placeholder="Enter a complete email address"
         placeholderTextColor={c.textMuted}
         autoCapitalize="none"
         autoCorrect={false}
       />
+      <Text style={[styles.discoveryHint, { color: c.textMuted }]}>People are shown only for an exact email match.</Text>
 
       {mode === 'group' && (
         <View style={styles.groupTitleWrap}>
@@ -202,7 +203,7 @@ export function NewConversationScreen() {
           ListEmptyComponent={
             <View style={styles.center}>
               <Text style={{ color: c.textSecondary, marginTop: 24 }}>
-                {query ? `No contacts found for "${query}"` : 'No contacts yet'}
+                {query ? `No exact email match for "${query}"` : 'Enter a complete email address to find someone.'}
               </Text>
               {!query && Platform.OS !== 'web' && (
                 <TouchableOpacity
@@ -303,6 +304,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   subtitle: { fontSize: 13, marginTop: 12 },
+  discoveryHint: { fontSize: 12, marginTop: 6, marginBottom: 2 },
   search: {
     marginTop: 8,
     paddingHorizontal: 14,

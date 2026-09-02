@@ -502,10 +502,10 @@ export const openapiSpec = {
       },
     },
     '/api/chat/contacts': {
-      get: { operationId: 'listContacts', tags: ['Chat'], summary: 'List users (for starting conversations)', parameters: [{ name: 'q', in: 'query', schema: { type: 'string' }, description: "Filter by name/email; 'self'/'me' matches the caller" }], responses: { '200': ok({ type: 'array', items: { type: 'object' } }) } },
+      get: { operationId: 'listContacts', tags: ['Chat'], summary: 'Find a user for starting a conversation', description: 'There is no public user directory. An empty query or self keyword returns the caller; another user requires a complete, case-insensitive exact email match.', parameters: [{ name: 'q', in: 'query', schema: { type: 'string' }, description: "Complete email address; 'self'/'me'/'myself' matches the caller" }], responses: { '200': ok({ type: 'array', maxItems: 1, items: { type: 'object' } }) } },
     },
     '/api/chat/search': {
-      get: { operationId: 'searchMessages', tags: ['Chat'], summary: 'Search messages', parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }) } },
+      get: { operationId: 'searchMessages', tags: ['Chat'], summary: 'Search messages and conversations', description: 'People appear only for self keywords or a complete, case-insensitive exact email match.', parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }) } },
     },
     '/api/chat/presence': {
       put: { operationId: 'updatePresence', tags: ['Chat'], summary: 'Update your presence', requestBody: { required: true, content: json({ type: 'object', properties: { presenceStatus: { type: 'string' }, statusMessage: { type: 'string' } } }) }, responses: { '200': ok({ type: 'object' }) } },

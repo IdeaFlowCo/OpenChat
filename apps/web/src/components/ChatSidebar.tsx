@@ -92,10 +92,10 @@ type PickerMode = 'closed' | 'direct' | 'group';
 
 export function ChatSidebar() {
   const { searchContacts, createConversation, setActiveConversation, presence, currentUser, isConnected, updatePresence, logout, pendingMatchCount } = useChat();
-  // Full directory loaded when the picker opens, so users can browse people
-  // to DM without having to type first (openchat-2rn). Search narrows it.
-  const [allContacts, setAllContacts] = useState<User[]>([]);
-  const [loadingAllContacts, setLoadingAllContacts] = useState(false);
+  // Empty discovery returns only the current user, keeping note-to-self handy
+  // without exposing a browsable account directory.
+  const [initialContacts, setInitialContacts] = useState<User[]>([]);
+  const [loadingInitialContacts, setLoadingInitialContacts] = useState(false);
   const { preference: themePref, setPreference: setThemePref } = useTheme();
   const [pickerMode, setPickerMode] = useState<PickerMode>('closed');
   const [searchTerm, setSearchTerm] = useState('');
@@ -220,13 +220,11 @@ export function ChatSidebar() {
     setSelectedContacts([]);
     setGroupTitle('');
     setTimeout(() => searchInputRef.current?.focus(), 100);
-    // Browse the full directory (openchat-2rn): fetch all contacts so the
-    // empty-search state shows a list instead of "type to search".
-    setLoadingAllContacts(true);
+    setLoadingInitialContacts(true);
     searchContacts('')
-      .then(results => setAllContacts(rankSelfFirst(results, currentUser)))
-      .catch(() => setAllContacts([]))
-      .finally(() => setLoadingAllContacts(false));
+      .then(results => setInitialContacts(rankSelfFirst(results, currentUser)))
+      .catch(() => setInitialContacts([]))
+      .finally(() => setLoadingInitialContacts(false));
   };
 
   const handleStatusChange = (nextStatus: 'available' | 'away' | 'busy' | 'invisible') => {
@@ -539,12 +537,15 @@ export function ChatSidebar() {
             <input
               ref={searchInputRef}
               type="text"
-              placeholder="Search by name or email..."
+              placeholder="Enter a complete email address"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full px-3 py-2 min-h-[40px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-lg focus:outline-none focus:border-blue-500 text-base"
               autoFocus
             />
+            <p className="mt-1.5 text-xs text-gray-500 dark:text-slate-400">
+              People appear only after an exact email match. Accounts are not listed publicly.
+            </p>
 
             {/* Selected pills + Create button (group mode) */}
             {pickerMode === 'group' && (
@@ -586,22 +587,22 @@ export function ChatSidebar() {
 
           <div className="flex-1 overflow-y-auto bg-white dark:bg-slate-900">
             {(() => {
-              // When the search box is empty, browse the full directory
-              // (openchat-2rn); otherwise show search results.
+              // The empty state contains only the caller (note to self);
+              // other people require a complete email match.
               const browsing = searchTerm.length === 0;
-              const list = browsing ? allContacts : searchResults;
-              const loading = browsing ? loadingAllContacts : isSearching;
+              const list = browsing ? initialContacts : searchResults;
+              const loading = browsing ? loadingInitialContacts : isSearching;
               if (loading) {
                 return (
                   <div className="p-4 text-center text-gray-500 dark:text-slate-400">
-                    <div className="animate-pulse">{browsing ? 'Loading contacts…' : 'Searching...'}</div>
+                    <div className="animate-pulse">{browsing ? 'Loading…' : 'Searching...'}</div>
                   </div>
                 );
               }
               if (list.length === 0) {
                 return (
                   <div className="p-4 text-center text-gray-500 dark:text-slate-400">
-                    {browsing ? 'No contacts yet' : `No contacts found for "${searchTerm}"`}
+                    {browsing ? 'Enter their complete email address to find them.' : `No exact email match for "${searchTerm}"`}
                   </div>
                 );
               }
@@ -669,7 +670,7 @@ export function ChatSidebar() {
                 type="search"
                 value={globalSearchTerm}
                 onChange={(e) => setGlobalSearchTerm(e.target.value)}
-                placeholder="Search messages, people, groups…"
+                placeholder="Search chats; use full email for people…"
                 className="w-full pl-8 pr-8 py-2 min-h-[36px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
                 aria-label="Search"
               />
