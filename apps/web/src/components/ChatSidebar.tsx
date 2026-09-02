@@ -22,6 +22,10 @@ import {
   readShowVersionInTopBar,
   writeShowVersionInTopBar,
 } from '../utils/appVersion';
+import {
+  getDirectConversationTitle,
+  isSelfDirectConversation,
+} from '../utils/conversationDisplay';
 
 // Environment detection for context-aware UI
 type AppEnvironment = 'tailscale' | 'localhost' | 'production';
@@ -91,7 +95,7 @@ function useDebounce<T>(value: T, delay: number): T {
 type PickerMode = 'closed' | 'direct' | 'group';
 
 export function ChatSidebar() {
-  const { searchContacts, createConversation, setActiveConversation, presence, currentUser, isConnected, updatePresence, logout, pendingMatchCount } = useChat();
+  const { conversations, searchContacts, createConversation, setActiveConversation, presence, currentUser, isConnected, updatePresence, logout, pendingMatchCount } = useChat();
   // Empty discovery returns only the current user, keeping note-to-self handy
   // without exposing a browsable account directory.
   const [initialContacts, setInitialContacts] = useState<User[]>([]);
@@ -701,6 +705,7 @@ export function ChatSidebar() {
                 results={globalSearchResults}
                 isLoading={isGlobalSearching}
                 currentUser={currentUser}
+                loadedConversations={conversations}
                 onOpenConversation={handleSearchOpenConversation}
                 onOpenContact={handleSearchOpenContact}
                 messagePreview={messagePreview}
@@ -731,12 +736,13 @@ interface SearchResultsPanelProps {
   results: SearchResults | null;
   isLoading: boolean;
   currentUser: CurrentUserLike | null | undefined;
+  loadedConversations: ReturnType<typeof useChat>['conversations'];
   onOpenConversation: (conversationId: string) => void;
   onOpenContact: (contact: User) => void;
   messagePreview: (content: string, q: string) => string;
 }
 
-function SearchResultsPanel({ query, results, isLoading, currentUser, onOpenConversation, onOpenContact, messagePreview }: SearchResultsPanelProps) {
+function SearchResultsPanel({ query, results, isLoading, currentUser, loadedConversations, onOpenConversation, onOpenContact, messagePreview }: SearchResultsPanelProps) {
   // While loading the *first* result for a given query, results === null —
   // show a skeleton. On subsequent re-queries (typing keeps changing the
   // term), we keep the previous results visible so the panel doesn't flash.
@@ -773,7 +779,9 @@ function SearchResultsPanel({ query, results, isLoading, currentUser, onOpenConv
         <div>
           {sectionHeader('Conversations')}
           {conversations.map(conv => {
-            const title = conv.title?.trim() || (conv.participants || []).map(p => p.name || p.email).join(', ') || 'Untitled';
+            const title = conv.type === 'direct'
+              ? getDirectConversationTitle(conv, currentUser, 'Untitled')
+              : conv.title?.trim() || (conv.participants || []).map(p => p.name || p.email).join(', ') || 'Untitled';
             const subtitle = (conv.participants || []).map(p => p.name || p.email).join(', ');
             return (
               <div
@@ -800,7 +808,10 @@ function SearchResultsPanel({ query, results, isLoading, currentUser, onOpenConv
         <div>
           {sectionHeader('Messages')}
           {messages.map(msg => {
-            const convTitle = msg.conversationTitle?.trim() || (msg.conversationType === 'group' ? 'Untitled group' : 'Direct message');
+            const conversation = loadedConversations.find(candidate => candidate.id === msg.conversationId);
+            const convTitle = conversation && isSelfDirectConversation(conversation, currentUser)
+              ? getDirectConversationTitle(conversation, currentUser, 'Direct message')
+              : msg.conversationTitle?.trim() || (msg.conversationType === 'group' ? 'Untitled group' : 'Direct message');
             const senderName = msg.sender?.name || msg.sender?.email || 'Unknown';
             return (
               <div

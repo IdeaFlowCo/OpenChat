@@ -37,6 +37,11 @@ import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import type { NavProp } from '../navigation/types';
+import {
+  getDirectConversationParticipant,
+  getDirectConversationTitle,
+  isSelfDirectConversation,
+} from '../utils/conversationDisplay';
 
 const DEBOUNCE_MS = 300;
 const MIN_QUERY_LEN = 2;
@@ -61,7 +66,7 @@ export function SearchScreen() {
   const navigation = useNavigation<NavProp<'Search'>>();
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  const { currentUser, createConversation } = useChat();
+  const { conversations, currentUser, createConversation } = useChat();
   const inputRef = useRef<TextInput>(null);
 
   const [query, setQuery] = useState('');
@@ -159,9 +164,10 @@ export function SearchScreen() {
     if (item.kind === 'conv') {
       const h = item.hit;
       const isGroup = h.type === 'group';
-      const other = !isGroup ? h.participants?.find(p => p.id !== currentUser?.userId) : null;
-      const title = h.title
-        || (other ? (other.name || other.email) : 'Group');
+      const other = !isGroup ? getDirectConversationParticipant(h, currentUser) : null;
+      const title = isGroup
+        ? h.title || 'Group'
+        : getDirectConversationTitle(h, currentUser, 'Group');
       return (
         <TouchableOpacity
           style={[styles.row, { borderColor: c.divider }]}
@@ -187,8 +193,10 @@ export function SearchScreen() {
     if (item.kind === 'msg') {
       const h = item.hit;
       const senderName = h.sender?.name || h.sender?.email?.split('@')[0] || 'someone';
-      const inLabel = h.conversationTitle
-        || (h.conversationType === 'direct' ? `DM with ${senderName}` : 'Group chat');
+      const conversation = conversations.find(candidate => candidate.id === h.conversationId);
+      const inLabel = conversation && isSelfDirectConversation(conversation, currentUser)
+        ? getDirectConversationTitle(conversation, currentUser, 'Group chat')
+        : h.conversationTitle || (h.conversationType === 'direct' ? `DM with ${senderName}` : 'Group chat');
       return (
         <TouchableOpacity
           style={[styles.row, { borderColor: c.divider }]}
