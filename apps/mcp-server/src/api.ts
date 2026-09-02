@@ -90,6 +90,38 @@ export interface SearchResult {
   [k: string]: unknown;
 }
 
+export type IntentKind = 'ask' | 'offer';
+export type IntentStatus = 'active' | 'withdrawn' | 'connected';
+
+/** An intent owned by the authenticated user. */
+export interface AgentIntent {
+  id: string;
+  ownerUserId: string;
+  kind: IntentKind;
+  terms: string;
+  details?: string | null;
+  status: IntentStatus;
+  createdAt: string;
+  updatedAt: string;
+  [k: string]: unknown;
+}
+
+export type MatchViewerStatus = 'pending' | 'awaiting_other' | 'closed' | 'connected';
+
+/** Privacy-safe, per-viewer projection returned by the matches API. */
+export interface AgentMatchView {
+  id: string;
+  status: MatchViewerStatus;
+  ownIntent: Pick<AgentIntent, 'id' | 'kind' | 'terms'>;
+  otherKind: IntentKind;
+  otherTerms: string;
+  createdAt: string;
+  updatedAt: string;
+  conversationId?: string;
+  alreadyResolved?: boolean;
+  [k: string]: unknown;
+}
+
 export class OpenChatApiError extends Error {
   constructor(
     public status: number,
@@ -243,6 +275,26 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
         '/api/agent-keys',
         { body }
       ),
+
+    // ---- asks, offers, and quiet matches ----
+    publishIntent: (body: { kind: IntentKind; terms: string; details?: string }) =>
+      request<{ intent: AgentIntent }>('POST', '/api/intents', { body }),
+
+    listIntents: () =>
+      request<{ intents: AgentIntent[] }>('GET', '/api/intents'),
+
+    withdrawIntent: (id: string) =>
+      request<{ intent: AgentIntent }>('PATCH', `/api/intents/${encodeURIComponent(id)}`, {
+        body: { status: 'withdrawn' },
+      }),
+
+    listMatches: () =>
+      request<{ matches: AgentMatchView[] }>('GET', '/api/matches'),
+
+    respondMatch: (id: string, decision: 'approve' | 'decline') =>
+      request<{ match: AgentMatchView }>('POST', `/api/matches/${encodeURIComponent(id)}/respond`, {
+        body: { decision },
+      }),
   };
 }
 

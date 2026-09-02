@@ -104,6 +104,8 @@ describe('buildMessagePayload', () => {
         senderName: 'Alice',
         content: 'hello world',
         messageType: 'text',
+        cardKind: null,
+        cardPayload: null,
         attachments: null,
         replyToId: null,
         viaSecretary: false,

@@ -16,6 +16,7 @@ import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from '../services/embeddings.js';
 import { maybeTranscribeMessage } from '../services/transcribeVoice.js';
 import { CONVERSATIONS_QUERY, UNREAD_TOTAL_QUERY } from '../queries/chatUnread.js';
+import { ensureDirectConversation } from '../services/directConversation.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
 let _s3: S3Client | null = null;
@@ -157,7 +158,6 @@ router.get('/unread-total', requireAuth, async (req: Request, res: Response) => 
 
 // POST /api/chat/conversations - Create a conversation (1:1 or group)
 router.post('/conversations', resolveActor, async (req: Request, res: Response) => {
-  const session = getDriver().session();
   const userId = req.user!.userId;
   const { participantIds, title, type = 'direct' } = req.body;
 
@@ -166,83 +166,25 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
     return;
   }
 
-  // For direct messages, check if conversation already exists.
+  // Direct messages use the shared exact-participant dedup path. Quiet-match
+  // connections call this same helper, so human DMs cannot drift into a
+  // second implementation.
   if (type === 'direct' && participantIds.length === 1) {
-    const otherId = participantIds[0];
-
-    // Self-DM dedupe (OpenChat-self-1, codex 2026-06-01): the two-user
-    // pattern below requires u1 != u2 in the graph. For a self-DM (one
-    // participant edge) it would never match → repeated POSTs would
-    // create duplicate self-DMs. Special-case before the normal path.
-    if (otherId === userId) {
-      const selfExisting = await session.run(`
-        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {type: 'direct'})
-        WHERE NOT EXISTS {
-          MATCH (other:User)-[:PARTICIPATES_IN]->(c) WHERE other.id <> $userId
-        }
-        MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-        WITH c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
-        RETURN c { .*, participants: participants } AS conversation
-        LIMIT 1
-      `, { userId });
-
-      if (selfExisting.records.length > 0) {
-        const conv = toJS(selfExisting.records[0].get('conversation')) as Record<string, unknown> | null;
-        await session.close();
-        const io = req.app.get('io') as IOServer | undefined;
-        const existingId = typeof conv?.id === 'string' ? conv.id : null;
-        if (io && existingId) joinUserSocketsToConversation(io, userId, existingId);
-        res.json(conv);
-        return;
-      }
-      // No existing self-DM found → fall through to creation with the
-      // single-edge model (allParticipants below filters self → empty,
-      // then we add the one edge explicitly).
+    try {
+      const result = await ensureDirectConversation(
+        userId,
+        participantIds[0] as string,
+        req.app.get('io') as IOServer | undefined,
+      );
+      res.status(result.created ? 201 : 200).json(result.conversation);
+    } catch (error) {
+      console.error('Error ensuring direct conversation:', error);
+      res.status(500).json({ error: 'Failed to create conversation' });
     }
-
-    const existing = await session.run(`
-      MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-      WHERE c.type = 'direct'
-      WITH c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
-      WITH c, participants, [p IN participants | p.user.id] AS participantIds
-      WHERE (
-        $otherId = $userId
-        AND size(participantIds) = 1
-        AND $userId IN participantIds
-      ) OR (
-        $otherId <> $userId
-        AND size(participantIds) = 2
-        AND $userId IN participantIds
-        AND $otherId IN participantIds
-      )
-      RETURN c {
-        .*,
-        participants: participants
-      } AS conversation
-    `, { userId, otherId });
-
-    if (existing.records.length > 0) {
-      const conv = toJS(existing.records[0].get('conversation')) as Record<string, unknown> | null;
-      await session.close();
-      // Auto-join the live sockets of BOTH participants to the existing DM's
-      // conversation room. Without this, a client that re-requests a DM via
-      // POST /conversations (e.g. on first open from a fresh socket) and
-      // then immediately sends a message has the message broadcast to a
-      // conversation room nobody is in — recipient never sees it until they
-      // explicitly conversation:join. Same race as the group-creation
-      // auto-join below but for the dedupe path. Caught by multi-account
-      // e2e test (server/test-multi-account-e2e.mjs).
-      const io = req.app.get('io') as IOServer | undefined;
-      const existingId = typeof conv?.id === 'string' ? conv.id : null;
-      if (io && existingId) {
-        joinUserSocketsToConversation(io, userId, existingId);
-        joinUserSocketsToConversation(io, otherId, existingId);
-      }
-      res.json(conv);
-      return;
-    }
+    return;
   }
 
+  const session = getDriver().session();
   const conversationId = nanoid();
   const now = new Date().toISOString();
   const allParticipants = [userId, ...participantIds.filter((id: string) => id !== userId)];
@@ -920,11 +862,24 @@ router.patch('/conversations/:id/read', requireAuth, async (req: Request, res: R
 
 // POST /api/chat/conversations/:id/messages - Send a message
 router.post('/conversations/:id/messages', resolveActor, async (req: Request, res: Response) => {
-  const session = getDriver().session();
   const userId = req.user!.userId;
   const { id: conversationId } = req.params;
-  const { content: rawContent, text, messageType = 'text', attachments, id: clientId, replyToId } = req.body;
+  const {
+    content: rawContent,
+    text,
+    messageType = 'text',
+    attachments,
+    id: clientId,
+    replyToId,
+  } = req.body;
   const content = rawContent ?? text;
+
+  // Card messages are server-internal. Accepting them here would let a human
+  // participant or oc_ agent key forge unattributed match cards.
+  if (messageType !== 'text') {
+    res.status(400).json({ error: "messageType must be 'text'" });
+    return;
+  }
 
   // Allow either content OR attachments (images can be sent without caption).
   const hasContent = content && typeof content === 'string' && content.trim();
@@ -957,6 +912,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     }
   }
 
+  const session = getDriver().session();
   try {
     // Verify user is participant
     const check = await session.run(`

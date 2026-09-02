@@ -166,11 +166,22 @@ export function setupChatSocket(io: Server): void {
     });
 
     // Send message
-    socket.on('message:send', async (data: { conversationId: string; content: string; messageType?: string; id?: string }, callback) => {
+    socket.on('message:send', async (data: {
+      conversationId: string;
+      content: string;
+      messageType?: string;
+      id?: string;
+    }, callback) => {
       const { conversationId, content, messageType = 'text' } = data;
 
       if (!content || !conversationId) {
         callback?.({ error: 'conversationId and content required' });
+        return;
+      }
+      // Card messages are server-internal because clients render them without
+      // sender attribution. Never accept cardKind/cardPayload over the socket.
+      if (messageType !== 'text') {
+        callback?.({ error: "messageType must be 'text'" });
         return;
       }
 

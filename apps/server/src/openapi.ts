@@ -23,7 +23,9 @@ const Message = {
     conversationId: { type: 'string' },
     senderId: { type: 'string' },
     content: { type: 'string' },
-    messageType: { type: 'string', example: 'text' },
+    messageType: { type: 'string', enum: ['text', 'card'], default: 'text' },
+    cardKind: { type: 'string', nullable: true, description: 'Card discriminator when messageType is card.' },
+    cardPayload: { type: 'string', nullable: true, description: 'JSON-encoded card data when messageType is card.' },
     viaSecretary: { type: 'boolean', description: 'True when this is an owner-approved Secretary auto-reply.' },
     createdAt: { type: 'string', format: 'date-time' },
     sender: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, email: { type: 'string' } } },
@@ -67,6 +69,46 @@ const AgentKey = {
     expiresAt: { type: 'string', format: 'date-time', nullable: true },
     revokedAt: { type: 'string', format: 'date-time', nullable: true },
   },
+} as const;
+
+const AgentIntent = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    ownerUserId: { type: 'string', description: 'Returned only for the caller\'s own intents.' },
+    kind: { type: 'string', enum: ['ask', 'offer'] },
+    terms: { type: 'string', minLength: 1, maxLength: 500, description: 'Anonymous public matching terms.' },
+    details: { type: 'string', nullable: true, maxLength: 2000, description: 'Private owner-only context; never shown to a match.' },
+    status: { type: 'string', enum: ['active', 'withdrawn', 'connected'] },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+  required: ['id', 'ownerUserId', 'kind', 'terms', 'status', 'createdAt', 'updatedAt'],
+} as const;
+
+const AgentMatch = {
+  type: 'object',
+  description: 'Per-viewer anonymous match projection. The other user identity, private details, and response state are never returned.',
+  properties: {
+    id: { type: 'string' },
+    status: { type: 'string', enum: ['pending', 'awaiting_other', 'closed', 'connected'] },
+    ownIntent: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        kind: { type: 'string', enum: ['ask', 'offer'] },
+        terms: { type: 'string' },
+      },
+      required: ['id', 'kind', 'terms'],
+    },
+    otherKind: { type: 'string', enum: ['ask', 'offer'] },
+    otherTerms: { type: 'string' },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+    conversationId: { type: 'string', description: 'Present only after mutual approval.' },
+    alreadyResolved: { type: 'boolean', description: 'True when responding to a match that was already closed or connected.' },
+  },
+  required: ['id', 'status', 'ownIntent', 'otherKind', 'otherTerms', 'createdAt', 'updatedAt'],
 } as const;
 
 const SecretaryAnswer = {
@@ -175,6 +217,8 @@ const WebhookDelivery = {
         senderName: { type: 'string', nullable: true },
         content: { type: 'string' },
         messageType: { type: 'string', example: 'text' },
+        cardKind: { type: 'string', nullable: true },
+        cardPayload: { type: 'string', nullable: true, description: 'JSON-encoded card data.' },
         attachments: { nullable: true },
         replyToId: { type: 'string', nullable: true },
         viaSecretary: { type: 'boolean' },
@@ -265,6 +309,8 @@ export const openapiSpec = {
       Message,
       Conversation,
       AgentKey,
+      AgentIntent,
+      AgentMatch,
       SecretaryAnswer,
       SecretaryConfig,
       AccountExport,
@@ -279,6 +325,7 @@ export const openapiSpec = {
   tags: [
     { name: 'Chat', description: 'Conversations and messages' },
     { name: 'Agent keys', description: 'Mint / manage `oc_` API keys' },
+    { name: 'Agent network', description: 'Anonymous asks/offers and double-opt-in quiet matches' },
     { name: 'Webhooks', description: 'Outbound `message.created` subscriptions for bot channels' },
     { name: 'Feedback', description: 'In-app feedback → WorldIssueTracker' },
     { name: 'Secretary', description: 'Owner-approved direct-message auto-replies' },
@@ -319,6 +366,51 @@ export const openapiSpec = {
           '401': errResp('Invalid bridge credentials'),
           '503': errResp('Identity bridge is not configured'),
         },
+      },
+    },
+    '/api/intents': {
+      get: {
+        operationId: 'listIntents',
+        tags: ['Agent network'],
+        summary: "List the caller's asks and offers",
+        responses: { '200': ok({ type: 'object', properties: { intents: { type: 'array', items: { $ref: '#/components/schemas/AgentIntent' } } } }), '401': errResp('Unauthorized') },
+      },
+      post: {
+        operationId: 'publishIntent',
+        tags: ['Agent network'],
+        summary: 'Publish an anonymous ask or offer',
+        description: 'Publishing is explicit discovery opt-in. Only terms and kind are visible to a potential match; details remain private.',
+        requestBody: { required: true, content: json({ type: 'object', properties: { kind: { type: 'string', enum: ['ask', 'offer'] }, terms: { type: 'string', minLength: 1, maxLength: 500 }, details: { type: 'string', maxLength: 2000 } }, required: ['kind', 'terms'] }) },
+        responses: { '201': ok({ type: 'object', properties: { intent: { $ref: '#/components/schemas/AgentIntent' } } }, 'Created'), '400': errResp('Bad request'), '401': errResp('Unauthorized') },
+      },
+    },
+    '/api/intents/{id}': {
+      patch: {
+        operationId: 'withdrawIntent',
+        tags: ['Agent network'],
+        summary: 'Withdraw an intent from discovery',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: true, content: json({ type: 'object', properties: { status: { type: 'string', const: 'withdrawn' } }, required: ['status'] }) },
+        responses: { '200': ok({ type: 'object', properties: { intent: { $ref: '#/components/schemas/AgentIntent' } } }), '400': errResp('Bad request'), '404': errResp('Not found') },
+      },
+    },
+    '/api/matches': {
+      get: {
+        operationId: 'listMatches',
+        tags: ['Agent network'],
+        summary: "List the caller's anonymous quiet matches",
+        responses: { '200': ok({ type: 'object', properties: { matches: { type: 'array', items: { $ref: '#/components/schemas/AgentMatch' } } } }), '401': errResp('Unauthorized') },
+      },
+    },
+    '/api/matches/{id}/respond': {
+      post: {
+        operationId: 'respondMatch',
+        tags: ['Agent network'],
+        summary: 'Approve or decline a quiet match',
+        description: 'Responses are idempotent. Mutual approval creates or reuses a human DM with one neutral context card and sends no opener.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: true, content: json({ type: 'object', properties: { decision: { type: 'string', enum: ['approve', 'decline'] } }, required: ['decision'] }) },
+        responses: { '200': ok({ type: 'object', properties: { match: { $ref: '#/components/schemas/AgentMatch' } } }), '400': errResp('Bad request'), '404': errResp('Not found') },
       },
     },
     '/api/chat/conversations': {
@@ -367,7 +459,7 @@ export const openapiSpec = {
         summary: 'Send a message',
         description: 'Body accepts `content` (preferred) or `text` (alias). At least one of content/attachments required.',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        requestBody: { required: true, content: json({ type: 'object', properties: { content: { type: 'string' }, text: { type: 'string', description: 'alias for content' }, messageType: { type: 'string', default: 'text' } } }) },
+        requestBody: { required: true, content: json({ type: 'object', properties: { content: { type: 'string' }, text: { type: 'string', description: 'alias for content' }, messageType: { type: 'string', enum: ['text'], default: 'text', description: 'Client-authored messages are text only; cards are server-internal.' } } }) },
         responses: { '201': ok({ $ref: '#/components/schemas/Message' }, 'Created'), '400': errResp('content or attachments required'), '401': errResp('Unauthorized') },
       },
     },

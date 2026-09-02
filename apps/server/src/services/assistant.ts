@@ -26,6 +26,13 @@ import { broadcastMessageToParticipants } from '../websocket/chatHandler.js';
 import { processLinkPreviews } from '../services/linkPreview.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from './embeddings.js';
 import { dispatchMessageEvent } from './webhookDispatch.js';
+import {
+  createIntent,
+  listIntents,
+  listMatches,
+  respondToMatch,
+  withdrawIntent,
+} from './agentNetwork.js';
 
 export const ASSISTANT_USER_ID = 'assistant';
 export const ASSISTANT_NAME = 'Assistant';
@@ -94,12 +101,17 @@ export async function ensureAssistantUser(): Promise<void> {
  * Caller is responsible for any participation check; this function trusts
  * `senderId` (assistant turns scope tools to the owning human elsewhere).
  */
-async function persistMessage(
+export async function persistMessage(
   io: IOServer | undefined,
   senderId: string,
   conversationId: string,
   content: string,
-  opts?: { viaAssistant?: boolean }
+  opts?: {
+    viaAssistant?: boolean;
+    messageType?: 'text' | 'card';
+    cardKind?: string;
+    cardPayload?: string;
+  }
 ): Promise<{ message: Record<string, unknown>; participantIds: string[] } | null> {
   const messageId = nanoid();
   const now = new Date().toISOString();
@@ -109,6 +121,9 @@ async function persistMessage(
   // clients can badge them (openchat-bfn.4). Stored on the Message node and
   // surfaced in the projection below.
   const viaAssistant = opts?.viaAssistant === true;
+  const messageType = opts?.messageType ?? 'text';
+  const cardKind = messageType === 'card' ? opts?.cardKind ?? null : null;
+  const cardPayload = messageType === 'card' ? opts?.cardPayload ?? null : null;
 
   const s = getDriver().session();
   try {
@@ -121,7 +136,9 @@ async function persistMessage(
         m.content = $content,
         m.senderId = $senderId,
         m.conversationId = $conversationId,
-        m.messageType = 'text',
+        m.messageType = $messageType,
+        m.cardKind = $cardKind,
+        m.cardPayload = $cardPayload,
         m.viaAssistant = $viaAssistant,
         m.createdAt = datetime($now)
       MERGE (m)-[:IN_CONVERSATION]->(c)
@@ -134,7 +151,17 @@ async function persistMessage(
       RETURN m { .*, sender: sender { .id, .name, .email } } AS message,
              collect(DISTINCT p.id) AS participantIds
       `,
-      { id: messageId, content: messageContent, senderId, conversationId, now, viaAssistant }
+      {
+        id: messageId,
+        content: messageContent,
+        senderId,
+        conversationId,
+        now,
+        viaAssistant,
+        messageType,
+        cardKind,
+        cardPayload,
+      }
     );
 
     if (result.records.length === 0) return null;
@@ -662,6 +689,50 @@ function buildTools(): AnthropicType.Tool[] {
         required: ['message'],
       },
     },
+    {
+      name: 'publish_intent',
+      description: 'Publish an anonymous ask or offer after the user explicitly confirms the exact terms that will be discoverable.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', enum: ['ask', 'offer'] },
+          terms: { type: 'string', description: 'Exact anonymous public terms, 1-500 characters' },
+          details: { type: 'string', description: 'Optional private owner-only context, at most 2000 characters' },
+        },
+        required: ['kind', 'terms'],
+      },
+    },
+    {
+      name: 'list_intents',
+      description: "List the user's asks and offers, including private details and current state.",
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'withdraw_intent',
+      description: "Withdraw one of the user's intents from discovery.",
+      input_schema: {
+        type: 'object',
+        properties: { intentId: { type: 'string' } },
+        required: ['intentId'],
+      },
+    },
+    {
+      name: 'list_matches',
+      description: "List the user's anonymous quiet matches and their viewer-safe status.",
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'respond_match',
+      description: 'Approve or decline a quiet match. Approval never sends an opener; mutual approval only creates or reuses a human DM with a context card.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          matchId: { type: 'string' },
+          decision: { type: 'string', enum: ['approve', 'decline'] },
+        },
+        required: ['matchId', 'decision'],
+      },
+    },
   ];
 }
 
@@ -707,6 +778,35 @@ async function executeTool(
         const context = typeof input.context === 'string' ? input.context : undefined;
         if (!message.trim()) return { error: 'message is required' };
         return await toolSubmitFeedback(userId, message, context);
+      }
+      case 'publish_intent': {
+        const kind = input.kind === 'ask' || input.kind === 'offer' ? input.kind : null;
+        const terms = typeof input.terms === 'string' ? input.terms.trim() : '';
+        const details = typeof input.details === 'string' ? input.details : undefined;
+        if (!kind) return { error: "kind must be 'ask' or 'offer'" };
+        if (!terms || terms.length > 500) return { error: 'terms must be between 1 and 500 characters' };
+        if (details && details.length > 2000) return { error: 'details must be at most 2000 characters' };
+        return { intent: await createIntent(userId, { kind, terms, details }, { io }) };
+      }
+      case 'list_intents':
+        return { intents: await listIntents(userId) };
+      case 'withdraw_intent': {
+        const intentId = typeof input.intentId === 'string' ? input.intentId : '';
+        if (!intentId) return { error: 'intentId is required' };
+        const intent = await withdrawIntent(userId, intentId);
+        return intent ? { intent } : { error: 'Intent not found' };
+      }
+      case 'list_matches':
+        return { matches: await listMatches(userId) };
+      case 'respond_match': {
+        const matchId = typeof input.matchId === 'string' ? input.matchId : '';
+        const decision = input.decision === 'approve' || input.decision === 'decline'
+          ? input.decision
+          : null;
+        if (!matchId) return { error: 'matchId is required' };
+        if (!decision) return { error: "decision must be 'approve' or 'decline'" };
+        const match = await respondToMatch(userId, matchId, decision, io);
+        return match ? { match } : { error: 'Match not found' };
       }
       default:
         return { error: `Unknown tool: ${name}` };
@@ -759,12 +859,15 @@ async function loadConversationContext(
 }
 
 const SYSTEM_PROMPT = `You are Assistant, an in-app helper inside OpenChat (a chat application).
-You are talking with a user inside a direct-message conversation. You can search the user's messages, list and read their conversations, send messages on their behalf, create conversations, and file feedback about OpenChat — all via tools. All tools act on behalf of THIS user only.
+You are talking with a user inside a direct-message conversation. You can search the user's messages, list and read their conversations, send messages on their behalf, create conversations, manage quiet-match asks/offers, and file feedback about OpenChat — all via tools. All tools act on behalf of THIS user only.
 
 Guidelines:
 - Be concise and conversational; this is a chat, not an essay.
 - Use tools to ground your answers in the user's actual messages/conversations rather than guessing.
 - Only use send_message / create_conversation when the user clearly asks you to act.
+- Quiet matching uses anonymous asks and offers. Publishing an intent is explicit discovery opt-in. Before calling publish_intent, echo the exact anonymous terms back to the user and wait for explicit confirmation. Explain that only kind and terms are shown before mutual approval; private details are never shown to the other person. Never publish silently.
+- Matches are double opt-in. A user's plain-language “yes, connect us” can authorize respond_match approval. Before declining, confirm that choice too. Never reveal or speculate about the other side's response. A closed match does not reveal who declined.
+- Mutual approval creates or reuses a normal DM between the two humans with a neutral context card. It never sends an opener on either person's behalf; tell the user they choose whether and what to write.
 - send_message to OTHER people requires confirmation: the first send_message call to a conversation that includes anyone besides the user returns { needsConfirmation: true, conversationName, recipients, preview } instead of sending. When you get that, DO NOT retry blindly — tell the user exactly what you'll send and to whom, wait for their explicit yes, then call send_message again with the SAME content and confirm:true. If they decline or change the wording, do not send. Messages to the user's own Assistant DM go through immediately with no confirmation.
 - If the user wants to report a bug, give feedback, or request a feature about OpenChat (the app), use submit_feedback — it files a tracked issue for the OpenChat team. Confirm what you'll send, then share the resulting link. This is how feedback reaches us, so offer it when the user seems stuck or frustrated with the app.
 - Your final response (plain text, no tool call) is delivered to the user as a chat message.`;

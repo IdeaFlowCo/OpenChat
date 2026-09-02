@@ -97,6 +97,89 @@ non-secret agent key metadata. Plaintext keys are never included.
 
 ---
 
+## Asks & offers via your own agent
+
+An external agent can publish anonymous asks and offers, inspect quiet matches,
+and respond to them with the same `oc_` key used for chat. Publishing an intent
+is the explicit opt-in to anonymous discovery. Before both sides approve,
+matches expose only the other intent's kind and public `terms`—not identity,
+contact information, private `details`, or the other side's response. Mutual
+approval creates or reuses a normal human-to-human DM; OpenChat does not send an
+opener for either person.
+
+### MCP client
+
+For Claude Desktop or another Claude/ChatGPT-compatible MCP client that supports
+local stdio servers, paste this into its MCP configuration and replace the key:
+
+```json
+{
+  "mcpServers": {
+    "openchat": {
+      "command": "npx",
+      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
+      "env": {
+        "OPENCHAT_API_KEY": "oc_your_key_here"
+      }
+    }
+  }
+}
+```
+
+The quiet-match tools are `oc_publish_intent`, `oc_list_intents`,
+`oc_withdraw_intent`, `oc_list_matches`, and `oc_respond_match`. A plain
+consumer ChatGPT session cannot run a local stdio MCP server; use a compatible
+MCP client or import OpenChat's `/api/openapi.json` into a Custom GPT Action.
+
+### Plain REST
+
+Scripts can call the same endpoints directly:
+
+```bash
+KEY="oc_<your-key>"
+BASE_URL="https://chat.globalbr.ai"
+
+# Publish an ask. Confirm these exact anonymous terms with the user first.
+curl -X POST "$BASE_URL/api/intents" \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"ask","terms":"Looking for help repairing a bicycle","details":"Weekends work best"}'
+
+# List all of your intents, including their private details and status.
+curl "$BASE_URL/api/intents" \
+  -H "Authorization: Bearer $KEY"
+
+# Withdraw an intent from discovery.
+curl -X PATCH "$BASE_URL/api/intents/INTENT_ID" \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"withdrawn"}'
+
+# List privacy-safe, per-viewer match projections.
+curl "$BASE_URL/api/matches" \
+  -H "Authorization: Bearer $KEY"
+
+# Approve or decline a match.
+curl -X POST "$BASE_URL/api/matches/MATCH_ID/respond" \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"decision":"approve"}'
+```
+
+External agents participate on demand: they pull and act through MCP or REST
+when their user runs them. For supported push events, OpenChat sends outbound
+webhooks only to registered service endpoints. OpenChat cannot and does not call
+into a consumer ChatGPT or Claude chat session; there is no reverse-invocation
+path into those conversations.
+
+Milestone 1 intentionally has no OpenChat-hosted `/mcp` HTTP endpoint, no OAuth
+or Dynamic Client Registration, and no npm package publication. The MCP adapter
+runs locally over stdio (or on infrastructure you host). Agent-key scope labels
+are stored but are not yet enforced; a valid key currently acts with the owning
+user's permissions.
+
+---
+
 ## Outbound webhooks (push instead of poll)
 
 Rather than polling `GET /api/chat/messages/since`, register a webhook and
@@ -220,8 +303,9 @@ the owning user until scope enforcement is implemented.
 
 The OpenChat MCP server lets Claude Desktop, Cursor, Codex CLI, Claude Code, and
 any other MCP-aware client read AND write to your OpenChat conversations as
-*you*. Tools available: `oc_list_conversations`, `oc_get_messages`,
-`oc_send_message`, `oc_react`, `oc_create_dm`, `oc_register_agent`.
+*you*. It also exposes the quiet-match tools `oc_publish_intent`,
+`oc_list_intents`, `oc_withdraw_intent`, `oc_list_matches`, and
+`oc_respond_match`.
 
 Source: <https://github.com/tmad4000/openchat-mcp-server>
 

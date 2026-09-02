@@ -52,6 +52,8 @@ export interface NormalizedMessagePayload {
     senderName: string | null;
     content: string;
     messageType: string;
+    cardKind: string | null;
+    cardPayload: string | null;
     attachments: unknown;
     replyToId: string | null;
     viaSecretary: boolean;
@@ -83,6 +85,8 @@ export function buildMessagePayload(
       senderName: (sender?.name as string | undefined) ?? null,
       content: typeof message.content === 'string' ? message.content : '',
       messageType: typeof message.messageType === 'string' ? message.messageType : 'text',
+      cardKind: typeof message.cardKind === 'string' ? message.cardKind : null,
+      cardPayload: typeof message.cardPayload === 'string' ? message.cardPayload : null,
       attachments: message.attachments ?? null,
       replyToId: (message.replyToId as string | undefined) ?? null,
       viaSecretary: message.viaSecretary === true,

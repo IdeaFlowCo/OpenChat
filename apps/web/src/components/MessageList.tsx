@@ -5,6 +5,7 @@ import { TypingBubble } from './TypingBubble';
 import { LinkPreviewCard } from './LinkPreviewCard';
 import { MessageContent } from './MessageContent';
 import { VoiceMessageBubble } from './VoiceMessageBubble';
+import { AgentNetworkCard } from './AgentNetworkCard';
 import { userDisplayName } from '../utils/userDisplay';
 import { api, type Message } from '../api';
 
@@ -294,6 +295,25 @@ export function MessageList() {
         // Date separator before the first message of each day (bmp.8).
         const prev = mi > 0 ? messages[mi - 1] : null;
         const showDateSeparator = !prev || dayKey(prev.createdAt) !== dayKey(message.createdAt);
+        if (message.messageType === 'card') {
+          return (
+            <Fragment key={message.id}>
+              {showDateSeparator && (
+                <div className="flex justify-center py-1">
+                  <span className="rounded-full bg-gray-200/70 dark:bg-slate-800 px-3 py-0.5 text-[11px] font-medium text-gray-500 dark:text-slate-400">
+                    {dateSeparatorLabel(message.createdAt)}
+                  </span>
+                </div>
+              )}
+              <AgentNetworkCard
+                message={message}
+                onOpenConversation={(conversationId) => {
+                  void loadConversations().then(() => setActiveConversation(conversationId));
+                }}
+              />
+            </Fragment>
+          );
+        }
         const sender = message.sender || (isOwn && currentUser
           ? { id: currentUser.userId, email: currentUser.email, name: currentUser.name || currentUser.email }
           : undefined);

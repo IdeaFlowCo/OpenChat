@@ -139,6 +139,11 @@ Set the API key one of three ways (checked in this order):
 | `oc_react(messageId, emoji, kind?, href?)` | Add an emoji reaction; pass `kind="filed"` with an `http(s)` `href` to leave a tappable filed-receipt badge |
 | `oc_create_dm(userEmail)` | Look up a user by email and start/return a 1:1 DM conversation |
 | `oc_register_agent(name, scopes?, expiresAt?)` | Mint a new agent API key under your account |
+| `oc_publish_intent(kind, terms, details?)` | Publish an anonymous ask or offer for quiet matching (`POST /api/intents`) |
+| `oc_list_intents` | List all asks and offers you own (`GET /api/intents`) |
+| `oc_withdraw_intent(intentId)` | Withdraw one of your intents from discovery (`PATCH /api/intents/:id`) |
+| `oc_list_matches` | List privacy-safe matches involving your intents (`GET /api/matches`) |
+| `oc_respond_match(matchId, decision)` | Approve or decline a match (`POST /api/matches/:id/respond`) |
 
 ## How bi-directional access works
 
