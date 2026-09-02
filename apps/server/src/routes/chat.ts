@@ -995,7 +995,10 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // attachmentsJson stored as a JSON string in Neo4j
     const attachmentsJson = hasAttachments ? JSON.stringify(attachments) : null;
     // lastMessagePreview for image-only messages
-    const preview = messageContent || (hasAttachments ? '📷 Photo' : '');
+    const hasAudio = hasAttachments && (attachments as { mimeType?: string }[]).some(
+      (a) => typeof a?.mimeType === 'string' && a.mimeType.startsWith('audio/')
+    );
+    const preview = messageContent || (hasAudio ? 'Voice note' : hasAttachments ? 'Photo' : '');
 
     const result = await session.run(`
       MATCH (c:Conversation {id: $conversationId})
@@ -1594,7 +1597,7 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
     const messageId = nanoid();
     const now = new Date().toISOString();
     const content = (sourceMsg.content as string) || '';
-    const preview = content || (attachmentsJson ? '📷 Photo' : '');
+    const preview = content || (attachmentsJson ? 'Photo' : '');
 
     // 5. Create the new message in the target conversation.
     const result = await session.run(`
