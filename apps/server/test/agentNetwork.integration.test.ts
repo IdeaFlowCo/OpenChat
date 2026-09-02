@@ -396,4 +396,74 @@ integration('agent-network quiet-match loop', () => {
       await check.close();
     }
   });
+
+  it('excludes expired, withdrawn, blocked, and otherwise ineligible intents', async () => {
+    const unique = suffix.replace(/[^a-z0-9]/gi, '');
+
+    const expiredAsk = await service.createIntent(happyA, {
+      kind: 'ask', terms: `expired${unique}`,
+    }, { queueScan: false });
+    const expiredOffer = await service.createIntent(happyB, {
+      kind: 'offer', terms: `expired${unique}`,
+    }, { queueScan: false });
+
+    const withdrawnAsk = await service.createIntent(declineA, {
+      kind: 'ask', terms: `withdrawn${unique}`,
+    }, { queueScan: false });
+    const withdrawnOffer = await service.createIntent(declineB, {
+      kind: 'offer', terms: `withdrawn${unique}`,
+    }, { queueScan: false });
+    await service.withdrawIntent(declineA, withdrawnAsk.id);
+
+    const blockedAsk = await service.createIntent(reuseA, {
+      kind: 'ask', terms: `blocked${unique}`,
+    }, { queueScan: false });
+    const blockedOffer = await service.createIntent(reuseB, {
+      kind: 'offer', terms: `blocked${unique}`,
+    }, { queueScan: false });
+
+    const sameOwnerAsk = await service.createIntent(scanA, {
+      kind: 'ask', terms: `sameowner${unique}`,
+    }, { queueScan: false });
+    const sameOwnerOffer = await service.createIntent(scanA, {
+      kind: 'offer', terms: `sameowner${unique}`,
+    }, { queueScan: false });
+
+    const sameKindAskA = await service.createIntent(raceA, {
+      kind: 'ask', terms: `samekind${unique}`,
+    }, { queueScan: false });
+    const sameKindAskB = await service.createIntent(raceB, {
+      kind: 'ask', terms: `samekind${unique}`,
+    }, { queueScan: false });
+
+    const session = driver.session();
+    try {
+      await session.run(
+        `MATCH (intent:AgentIntent {id: $intentId})
+         SET intent.expiresAt = datetime('2020-01-01T00:00:00Z')`,
+        { intentId: expiredAsk.id },
+      );
+      await session.run(
+        `MATCH (blocker:User {id: $blocker}), (blocked:User {id: $blocked})
+         MERGE (blocker)-[:BLOCKED]->(blocked)`,
+        { blocker: reuseA, blocked: reuseB },
+      );
+    } finally {
+      await session.close();
+    }
+
+    for (const intentId of [
+      expiredAsk.id,
+      expiredOffer.id,
+      withdrawnOffer.id,
+      blockedAsk.id,
+      blockedOffer.id,
+      sameOwnerAsk.id,
+      sameOwnerOffer.id,
+      sameKindAskA.id,
+      sameKindAskB.id,
+    ]) {
+      expect(await service.scanIntentForMatches(intentId, { scoring })).toEqual([]);
+    }
+  });
 });

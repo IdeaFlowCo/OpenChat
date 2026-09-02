@@ -25,6 +25,7 @@ Follow the repo pattern: inline Cypher, idempotent `ensureAgentIntentIndexes()` 
   terms,            // ANONYMOUS public text — the ONLY content ever shown to the other side pre-approval
   details,          // optional private context; visible ONLY to owner + owner's own agent; never to the other side, even post-approval
   status,           // 'active' | 'withdrawn' | 'connected'
+  expiresAt,        // optional discovery expiry; null means no automatic expiry
   createdAt, updatedAt
 })
 (:User)-[:OWNS_INTENT]->(:AgentIntent)
@@ -46,7 +47,7 @@ Constraints/indexes: unique on `AgentIntent.id`, `AgentMatch.id`; index on `Agen
 ## Matching service ("quiet match")
 
 - Trigger: synchronously-queued scan when an intent is created (fire-and-forget async, like `maybeTriggerAssistant` — never blocks the request).
-- Candidates: `status:'active'` intents of the **complementary kind** (ask↔offer only), different owner, excluding pairs where either user has blocked the other (reuse existing blocking checks), excluding already-matched pairs.
+- Candidates: unexpired `status:'active'` intents of the **complementary kind** (ask↔offer only), different owner, excluding pairs where either user has blocked the other (reuse existing blocking checks), excluding already-matched pairs.
 - Scoring pipeline (injectable for tests, mirroring `secretaryMatcher.ts` style):
   1. Token-overlap score (deterministic baseline, always available).
   2. If `OPENAI_API_KEY` set: embedding cosine similarity via the existing `embeddings.ts` helper (embed `terms` only — never `details`).
@@ -86,7 +87,7 @@ Client rendering (mobile `ChatScreen.tsx` ~line 1380-1443 branch; web `MessageLi
 
 ## REST API (all under `resolveActor` — JWT *and* `oc_` agent keys; this IS the provider-neutral seam)
 
-- `POST /api/intents` `{kind, terms, details?}` → `201 {intent}`. Validation: kind ∈ {ask, offer}; terms 1–500 chars; details ≤ 2000.
+- `POST /api/intents` `{kind, terms, details?, expiresAt?}` → `201 {intent}`. Validation: kind ∈ {ask, offer}; terms 1–500 chars; details ≤ 2000; optional expiry is a future date-time.
 - `GET /api/intents` → own intents (all fields).
 - `PATCH /api/intents/:id` `{status:'withdrawn'}` (owner only) → withdraw from discovery. (Editing terms = withdraw + republish; keeps matching semantics trivial.)
 - `GET /api/matches` → matches involving the caller's intents, per-viewer projection ONLY: `{id, status, ownIntent{id,kind,terms}, otherKind, otherTerms, createdAt, updatedAt}`.

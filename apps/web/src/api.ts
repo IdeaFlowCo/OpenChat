@@ -175,6 +175,7 @@ export interface AgentIntent {
   terms: string;
   details: string | null;
   status: AgentIntentStatus;
+  expiresAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1250,7 +1251,7 @@ class ApiClient {
   }
 
   // ── Agent-network asks, offers, and quiet matches ───────────────────────
-  async publishIntent(params: { kind: AgentIntentKind; terms: string; details?: string }): Promise<{ intent: AgentIntent }> {
+  async publishIntent(params: { kind: AgentIntentKind; terms: string; details?: string; expiresAt?: string }): Promise<{ intent: AgentIntent }> {
     return this.authedFetch('/api/intents', { method: 'POST', body: JSON.stringify(params) });
   }
 

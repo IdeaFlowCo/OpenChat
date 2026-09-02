@@ -23,6 +23,7 @@ export interface AgentIntent {
   terms: string;
   details: string | null;
   status: IntentStatus;
+  expiresAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -33,6 +34,8 @@ interface MatchIntent {
   terms: string;
   ownerUserId?: string;
   details?: string | null;
+  status?: IntentStatus;
+  expiresAt?: string | null;
 }
 
 export interface AgentMatchProjection {
@@ -298,7 +301,7 @@ async function deliverProposal(
 
 export async function createIntent(
   userId: string,
-  input: { kind: IntentKind; terms: string; details?: string | null },
+  input: { kind: IntentKind; terms: string; details?: string | null; expiresAt?: string | null },
   options: { io?: IOServer; queueScan?: boolean; scoring?: ScoringPipeline } = {},
 ): Promise<AgentIntent> {
   const id = nanoid();
@@ -311,12 +314,21 @@ export async function createIntent(
       CREATE (intent:AgentIntent {
         id: $id, ownerUserId: $userId, kind: $kind, terms: $terms,
         details: $details, status: 'active',
+        expiresAt: CASE WHEN $expiresAt IS NULL THEN null ELSE datetime($expiresAt) END,
         createdAt: datetime($now), updatedAt: datetime($now)
       })
       CREATE (owner)-[:OWNS_INTENT]->(intent)
       RETURN intent { .* } AS intent
       `,
-      { id, userId, kind: input.kind, terms: input.terms, details: input.details ?? null, now },
+      {
+        id,
+        userId,
+        kind: input.kind,
+        terms: input.terms,
+        details: input.details ?? null,
+        expiresAt: input.expiresAt ?? null,
+        now,
+      },
     );
     if (result.records.length === 0) throw new Error('Intent owner not found');
     const intent = toJS(result.records[0].get('intent')) as AgentIntent;
@@ -413,6 +425,11 @@ export async function listMatches(userId: string, io?: IOServer): Promise<AgentM
   }
 }
 
+function isDiscoverableIntent(intent: MatchIntent, now: number): boolean {
+  return intent.status === 'active'
+    && (intent.expiresAt == null || Date.parse(intent.expiresAt) > now);
+}
+
 export async function scanIntentForMatches(
   intentId: string,
   options: { io?: IOServer; scoring?: ScoringPipeline } = {},
@@ -423,7 +440,9 @@ export async function scanIntentForMatches(
       `
       MATCH (sourceOwner:User)-[:OWNS_INTENT]->(source:AgentIntent {id: $intentId, status: 'active'})
       MATCH (candidateOwner:User)-[:OWNS_INTENT]->(candidate:AgentIntent {status: 'active'})
-      WHERE candidate.kind <> source.kind
+      WHERE (source.expiresAt IS NULL OR source.expiresAt > datetime($now))
+        AND (candidate.expiresAt IS NULL OR candidate.expiresAt > datetime($now))
+        AND candidate.kind <> source.kind
         AND candidateOwner.id <> sourceOwner.id
         AND NOT (sourceOwner)-[:BLOCKED]->(candidateOwner)
         AND NOT (candidateOwner)-[:BLOCKED]->(sourceOwner)
@@ -432,16 +451,20 @@ export async function scanIntentForMatches(
           MATCH (existing)-[:MATCHES]->(candidate)
           WHERE existing.status <> 'proposed'
         }
-      RETURN source { .id, .kind, .terms, .ownerUserId } AS source,
-             candidate { .id, .kind, .terms, .ownerUserId } AS candidate
+      RETURN source { .id, .kind, .terms, .ownerUserId, .status, .expiresAt } AS source,
+             candidate { .id, .kind, .terms, .ownerUserId, .status, .expiresAt } AS candidate
       `,
-      { intentId },
+      { intentId, now: new Date().toISOString() },
     );
 
     const scored: Array<{ source: MatchIntent; candidate: MatchIntent; score: number }> = [];
     for (const record of candidates.records) {
       const source = toJS(record.get('source')) as MatchIntent;
       const candidate = toJS(record.get('candidate')) as MatchIntent;
+      const scanTime = Date.now();
+      if (!isDiscoverableIntent(source, scanTime) || !isDiscoverableIntent(candidate, scanTime)) {
+        continue;
+      }
       const score = await scoreIntentPair(source, candidate, options.scoring);
       if (score !== null) scored.push({ source, candidate, score });
     }
@@ -457,7 +480,9 @@ export async function scanIntentForMatches(
         `
         MATCH (sourceOwner:User)-[:OWNS_INTENT]->(source:AgentIntent {id: $sourceId, status: 'active'})
         MATCH (candidateOwner:User)-[:OWNS_INTENT]->(candidate:AgentIntent {id: $candidateId, status: 'active'})
-        WHERE sourceOwner.id <> candidateOwner.id
+        WHERE (source.expiresAt IS NULL OR source.expiresAt > datetime($now))
+          AND (candidate.expiresAt IS NULL OR candidate.expiresAt > datetime($now))
+          AND sourceOwner.id <> candidateOwner.id
           AND NOT (sourceOwner)-[:BLOCKED]->(candidateOwner)
           AND NOT (candidateOwner)-[:BLOCKED]->(sourceOwner)
         OPTIONAL MATCH (existing:AgentMatch)-[:MATCHES]->(source)
