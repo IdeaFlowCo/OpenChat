@@ -590,6 +590,9 @@ export async function respondToMatch(
         messageType: 'card',
         cardKind: 'match_context',
         cardPayload: JSON.stringify({ matchId, askTerms: ask.terms, offerTerms: offer.terms }),
+        // Reusing the match id makes the context card exactly-once even if a
+        // connection completion is retried after an interrupted response.
+        messageId: matchId,
       },
     );
     const finishSession = getDriver().session();

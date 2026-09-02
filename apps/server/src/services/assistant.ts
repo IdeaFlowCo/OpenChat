@@ -111,9 +111,11 @@ export async function persistMessage(
     messageType?: 'text' | 'card';
     cardKind?: string;
     cardPayload?: string;
+    /** Caller-chosen id; the MERGE above makes reuse exactly-once. */
+    messageId?: string;
   }
 ): Promise<{ message: Record<string, unknown>; participantIds: string[] } | null> {
-  const messageId = nanoid();
+  const messageId = opts?.messageId ?? nanoid();
   const now = new Date().toISOString();
   const messageContent = content.trim();
   if (!messageContent) return null;
