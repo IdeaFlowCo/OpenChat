@@ -217,13 +217,17 @@ Each delivery is a normalized message payload:
   "event": "message.created",
   "message": {
     "id": "…", "conversationId": "…", "senderId": "…", "senderName": "…",
-    "content": "…", "messageType": "text", "attachments": null,
+    "content": "…", "messageType": "text", "cardKind": null,
+    "cardPayload": null, "attachments": null,
     "replyToId": null, "createdAt": "2026-07-16T…Z"
   }
 }
 ```
 
-and carries two verification headers:
+For server-authored card messages, `messageType` is `card`, `cardKind`
+identifies the card, and `cardPayload` contains JSON-encoded card data.
+
+Each delivery also carries two verification headers:
 
 - `X-OpenChat-Secret: <your secret>` — raw shared secret (simple equality check).
 - `X-OpenChat-Signature: sha256=<hex>` — HMAC-SHA256 of the exact request body,

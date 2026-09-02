@@ -728,7 +728,7 @@ export async function respondToMatch(
     await session.close();
   }
 
-  let updated = await loadMatchForResponse(userId, matchId);
+  const updated = await loadMatchForResponse(userId, matchId);
   if (!updated) return null;
   if (!transitionStatus) {
     return updated.matchStatus === 'proposed'
