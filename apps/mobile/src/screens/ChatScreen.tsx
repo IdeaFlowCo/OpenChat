@@ -54,6 +54,7 @@ import type { Participant } from '../api/client';
 import { ExportSheet } from '../components/ExportSheet';
 import { saveJsonDownload } from '../services/exportDownload';
 import { logError, logWarn } from '../services/clientLogger';
+import { serif } from '../theme/typography';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
 
@@ -540,13 +541,13 @@ export function ChatScreen({
           />
           <View style={{ flexShrink: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={{ color: c.textPrimary, fontWeight: '600', fontSize: 16 }} numberOfLines={1}>
+              <Text style={{ color: c.textPrimary, fontWeight: '600', fontSize: 17, fontFamily: serif }} numberOfLines={1}>
                 {headerTitle}
               </Text>
               {!isGroup && <BotBadge isBot={other?.isBot} compact />}
               {isGroup && containsBot && <BotBadge isBot compact />}
               {(isGroup || isSelfDM || other?.id) && (
-                <Text style={{ color: c.textMuted, marginLeft: 4 }}>ⓘ</Text>
+                <View style={{ marginLeft: 5 }}><AppIcon name="info" color={c.textMuted} size={13} strokeWidth={1.8} /></View>
               )}
             </View>
             {!isGroup && other && (
@@ -597,6 +598,17 @@ export function ChatScreen({
       ),
     });
   }, [embedded, navigation, isGroup, isSelfDM, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.primary, c.textPrimary, c.textSecondary, c.textMuted, containsBot, isMuted, showMuteMenu]);
+
+  // Ink & Paper: own bubbles are ink-on-paper (light) / paper-on-ink (dark),
+  // so translucent overlays inside them derive from the bubble text color
+  // instead of the old white-on-blue assumption.
+  const ownTint = useCallback((opacity: number) => {
+    const hex = c.bubbleOwnText.replace('#', '');
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${opacity})`;
+  }, [c.bubbleOwnText]);
 
   const rows = useMemo(() => {
     const built = buildRows(messages, currentUser?.userId);
@@ -1279,10 +1291,10 @@ export function ChatScreen({
                     styles.bubble,
                     {
                       backgroundColor: failed ? c.dangerMuted : (isOwn ? c.bubbleOwn : c.bubbleOther),
-                      borderBottomRightRadius: isOwn ? 4 : 18,
-                      borderBottomLeftRadius: isOwn ? 18 : 4,
-                      borderColor: failed ? c.danger : 'transparent',
-                      borderWidth: failed ? 1 : 0,
+                      borderTopRightRadius: isOwn ? 4 : 16,
+                      borderTopLeftRadius: isOwn ? 16 : 4,
+                      borderColor: failed ? c.danger : (isOwn ? 'transparent' : c.border),
+                      borderWidth: failed ? 1 : (isOwn ? 0 : StyleSheet.hairlineWidth),
                     },
                     // Reply-message accent stripe (OpenChat-imt): a 3px colored
                     // bar on the bubble's leading edge gives at-a-glance
@@ -1290,7 +1302,7 @@ export function ChatScreen({
                     // the LEFT for other-people's messages and the RIGHT for
                     // own messages, matching the bubble's tail orientation.
                     m.replyToId && !failed && (isOwn
-                      ? { borderRightWidth: 3, borderRightColor: 'rgba(255,255,255,0.55)' }
+                      ? { borderRightWidth: 3, borderRightColor: ownTint(0.55) }
                       : { borderLeftWidth: 3, borderLeftColor: c.primary }),
                   ]}
                 >
@@ -1302,19 +1314,19 @@ export function ChatScreen({
                       style={[
                         styles.replyHeader,
                         {
-                          borderLeftColor: isOwn ? 'rgba(255,255,255,0.6)' : c.primary,
-                          backgroundColor: isOwn ? 'rgba(255,255,255,0.15)' : c.surfaceElevated,
+                          borderLeftColor: isOwn ? ownTint(0.6) : c.primary,
+                          backgroundColor: isOwn ? ownTint(0.15) : c.surfaceElevated,
                         },
                       ]}
                     >
                       <Text
-                        style={[styles.replyHeaderAuthor, { color: isOwn ? 'rgba(255,255,255,0.85)' : colorForUserId(m.replyTo?.senderId, scheme) }]}
+                        style={[styles.replyHeaderAuthor, { color: isOwn ? ownTint(0.85) : colorForUserId(m.replyTo?.senderId, scheme) }]}
                         numberOfLines={1}
                       >
                         {m.replyTo?.sender?.name || m.replyTo?.sender?.email || 'Reply'}
                       </Text>
                       <Text
-                        style={[styles.replyHeaderContent, { color: isOwn ? 'rgba(255,255,255,0.7)' : c.textSecondary }]}
+                        style={[styles.replyHeaderContent, { color: isOwn ? ownTint(0.7) : c.textSecondary }]}
                         numberOfLines={2}
                       >
                         {m.replyTo?.content || '…'}
@@ -1323,12 +1335,12 @@ export function ChatScreen({
                   )}
                   {/* Forwarded-from label (OpenChat-hhc) */}
                   {!!m.viaSecretary && !m.deletedAt && (
-                    <Text style={[styles.forwardedLabel, { color: isOwn ? 'rgba(255,255,255,0.78)' : c.textMuted }]}>
+                    <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.78) : c.textMuted }]}>
                       ◇ Secretary auto-reply
                     </Text>
                   )}
                   {!!m.forwardedFromMessageId && (
-                    <Text style={[styles.forwardedLabel, { color: isOwn ? 'rgba(255,255,255,0.7)' : c.textMuted }]} numberOfLines={1}>
+                    <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.7) : c.textMuted }]} numberOfLines={1}>
                       {'↪ Forwarded from '}{m.forwardedFromSenderName || 'Unknown'}
                     </Text>
                   )}
@@ -1380,7 +1392,7 @@ export function ChatScreen({
                   {!m.deletedAt && !!m.transcript && m.attachments?.some(a => a.type === 'audio') && (
                     <Text
                       style={{
-                        color: isOwn ? 'rgba(255,255,255,0.75)' : c.textMuted,
+                        color: isOwn ? ownTint(0.75) : c.textMuted,
                         fontSize: 13,
                         fontStyle: 'italic',
                         marginTop: 4,
@@ -1391,7 +1403,7 @@ export function ChatScreen({
                   )}
                   {/* Deleted: muted italic tombstone (OpenChat-q9h) */}
                   {m.deletedAt
-                    ? <Text style={{ color: isOwn ? 'rgba(255,255,255,0.55)' : c.textMuted, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
+                    ? <Text style={{ color: isOwn ? ownTint(0.55) : c.textMuted, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
                     : (!!m.content && (
                         isGroup
                           ? <Text style={{ fontSize: 16 }}>
@@ -1406,24 +1418,24 @@ export function ChatScreen({
                       ))
                   }
                   <View style={styles.bubbleFooter}>
-                    <Text style={{ color: isOwn ? 'rgba(255,255,255,0.7)' : c.textMuted, fontSize: 10 }}>
+                    <Text style={{ color: isOwn ? ownTint(0.7) : c.textMuted, fontSize: 10 }}>
                       {failed ? 'Failed to send' : formatTime(m.createdAt)}
                     </Text>
                     {/* Edited tag (OpenChat-q9h) */}
                     {!!(m.editedAt && !m.deletedAt) && (
-                      <Text style={{ color: isOwn ? 'rgba(255,255,255,0.6)' : c.textMuted, fontSize: 10, marginLeft: 4, fontStyle: 'italic' }}>edited</Text>
+                      <Text style={{ color: isOwn ? ownTint(0.6) : c.textMuted, fontSize: 10, marginLeft: 4, fontStyle: 'italic' }}>edited</Text>
                     )}
                     {/* Tick marks for own DM messages (OpenChat-0nj). Only shown
                         after the local-optimistic id is replaced by a real server id. */}
                     {isOwn && !isGroup && !failed && !m.id.startsWith('local-') && (() => {
                       const tick = getTickState(m);
                       if (tick === 'read') {
-                        return <Text style={{ color: '#4FC3F7', fontSize: 10, marginLeft: 3 }}>✓✓</Text>;
+                        return <Text style={{ color: scheme === 'dark' ? '#b3541e' : '#e08b5c', fontSize: 10, marginLeft: 3 }}>✓✓</Text>;
                       }
                       if (tick === 'delivered') {
-                        return <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, marginLeft: 3 }}>✓✓</Text>;
+                        return <Text style={{ color: ownTint(0.6), fontSize: 10, marginLeft: 3 }}>✓✓</Text>;
                       }
-                      return <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 10, marginLeft: 3 }}>✓</Text>;
+                      return <Text style={{ color: ownTint(0.5), fontSize: 10, marginLeft: 3 }}>✓</Text>;
                     })()}
                   </View>
                 </TouchableOpacity>
@@ -1601,7 +1613,8 @@ export function ChatScreen({
       {/* Cancel feedback — shown briefly after drag-cancel (OpenChat-xxc) */}
       {recordingCancelled && (
         <View style={[styles.recordingBar, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <Text style={{ color: c.textMuted, fontSize: 14 }}>🗑 Recording cancelled</Text>
+          <AppIcon name="trash" color={c.textMuted} size={15} />
+          <Text style={{ color: c.textMuted, fontSize: 14, marginLeft: 8 }}>Recording cancelled</Text>
         </View>
       )}
 
@@ -1619,10 +1632,10 @@ export function ChatScreen({
         )}
         <TextInput
           ref={textInputRef}
-          style={[styles.input, { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border }]}
+          style={[styles.input, { backgroundColor: 'transparent', color: c.textPrimary, borderBottomColor: c.border }]}
           value={text}
           onChangeText={handleTextChange}
-          placeholder="Type a message…"
+          placeholder="Write…"
           placeholderTextColor={c.textMuted}
           multiline
           // Web (/m, /d): Enter sends, Shift+Enter inserts a newline. Guarded to
@@ -1793,7 +1806,7 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 18,
+    borderRadius: 16,
   },
   sender: { fontSize: 12, marginBottom: 2, fontWeight: '500' },
   forwardedLabel: { fontSize: 11, fontStyle: 'italic', marginBottom: 3 },
@@ -1821,18 +1834,19 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 4,
+    paddingVertical: 9,
+    borderRadius: 0,
+    borderWidth: 0,
+    borderBottomWidth: 1.5,
     fontSize: 16,
     minHeight: 40,
     maxHeight: 120,
   },
   send: {
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     paddingVertical: 10,
-    borderRadius: 20,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },

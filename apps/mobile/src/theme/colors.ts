@@ -1,7 +1,14 @@
 /**
- * Theme tokens shared with the web app's dark-mode palette (per OpenChat-ri4).
- * Keep these in sync with client/src/index.css + tailwind defaults so cross-
- * platform users see the same colors.
+ * Theme tokens — "Ink & Paper" design direction (design-audit 2026-09-02,
+ * chosen by Jacob from the three from-scratch directions).
+ *
+ * Identity: warm paper ground, near-monochrome ink, ONE burnt-sienna accent,
+ * serif display type (see typography.ts). Own bubbles are ink-on-paper in
+ * light mode and paper-on-ink in dark mode — the palette's signature move.
+ *
+ * The old palette was stock Tailwind blue-500/gray, shared with the legacy
+ * web client. The legacy client intentionally keeps its own look for now
+ * (Jacob scoped it out); the RN app is the flagship surface.
  */
 import { Appearance, ColorSchemeName } from 'react-native';
 
@@ -13,50 +20,50 @@ function normalize(scheme: ColorSchemeName | ColorScheme | undefined | null): Co
 
 const palette = {
   light: {
-    background: '#f3f4f6',         // gray-100; separates white content surfaces
-    surface: '#ffffff',            // white
-    surfaceElevated: '#f3f4f6',    // gray-100
-    border: '#e5e7eb',             // gray-200
-    divider: '#e5e7eb',            // gray-200
-    textPrimary: '#111827',        // gray-900
-    textSecondary: '#6b7280',      // gray-500
-    textMuted: '#9ca3af',          // gray-400
-    primary: '#3b82f6',            // blue-500
-    primaryActive: '#1d4ed8',      // blue-700
-    bubbleOwn: '#3b82f6',
-    bubbleOwnText: '#ffffff',
-    bubbleOther: '#ffffff',        // white
-    bubbleOtherText: '#111827',    // gray-900
-    presenceAvailable: '#22c55e',
-    presenceAway: '#eab308',
-    presenceBusy: '#ef4444',
-    presenceOffline: '#9ca3af',
-    danger: '#dc2626',
-    dangerMuted: 'rgba(220, 38, 38, 0.12)',
-    primaryMuted: 'rgba(59, 130, 246, 0.14)',
+    background: '#faf6ef',         // paper
+    surface: '#fffdf8',            // bright paper (cards, headers, composer)
+    surfaceElevated: '#f3ecdf',    // pressed paper
+    border: '#e7ddcc',             // paper edge
+    divider: '#e7ddcc',
+    textPrimary: '#1c1917',        // ink
+    textSecondary: '#78716c',      // faded ink
+    textMuted: '#a8a29e',          // pencil
+    primary: '#b3541e',            // burnt sienna — THE accent
+    primaryActive: '#8f4318',
+    bubbleOwn: '#1c1917',          // ink block
+    bubbleOwnText: '#faf6ef',
+    bubbleOther: '#fffdf8',
+    bubbleOtherText: '#1c1917',
+    presenceAvailable: '#4a7c59',  // moss
+    presenceAway: '#c07b28',       // ochre
+    presenceBusy: '#b3402e',       // brick
+    presenceOffline: '#a8a29e',
+    danger: '#b3402e',
+    dangerMuted: 'rgba(179, 64, 46, 0.12)',
+    primaryMuted: 'rgba(179, 84, 30, 0.13)',
   },
   dark: {
-    background: '#020617',         // slate-950
-    surface: '#0f172a',            // slate-900
-    surfaceElevated: '#1e293b',    // slate-800
-    border: '#1e293b',             // slate-800
-    divider: '#1e293b',
-    textPrimary: '#f1f5f9',        // slate-100
-    textSecondary: '#94a3b8',      // slate-400
-    textMuted: '#64748b',          // slate-500
-    primary: '#3b82f6',
-    primaryActive: '#1d4ed8',
-    bubbleOwn: '#3b82f6',
-    bubbleOwnText: '#ffffff',
-    bubbleOther: '#1e293b',        // slate-800
-    bubbleOtherText: '#f1f5f9',    // slate-100
-    presenceAvailable: '#22c55e',
-    presenceAway: '#eab308',
-    presenceBusy: '#ef4444',
-    presenceOffline: '#475569',
-    danger: '#f87171',
-    dangerMuted: 'rgba(248, 113, 113, 0.16)',
-    primaryMuted: 'rgba(59, 130, 246, 0.16)',
+    background: '#16130f',         // midnight ink
+    surface: '#201c16',
+    surfaceElevated: '#2a251d',
+    border: '#3a332a',
+    divider: '#3a332a',
+    textPrimary: '#ede5d8',        // paper-white
+    textSecondary: '#a89f8f',
+    textMuted: '#7d7466',
+    primary: '#d97742',            // sienna, lifted for dark ground
+    primaryActive: '#e08b5c',
+    bubbleOwn: '#ede5d8',          // paper block on ink ground (mirror of light)
+    bubbleOwnText: '#1c1917',
+    bubbleOther: '#201c16',
+    bubbleOtherText: '#ede5d8',
+    presenceAvailable: '#6da57c',
+    presenceAway: '#d99a4e',
+    presenceBusy: '#d05f4b',
+    presenceOffline: '#7d7466',
+    danger: '#d05f4b',
+    dangerMuted: 'rgba(208, 95, 75, 0.16)',
+    primaryMuted: 'rgba(217, 119, 66, 0.16)',
   },
 };
 

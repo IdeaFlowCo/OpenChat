@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="luxury">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenChat — Design Audit &amp; Alternative Directions</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :where(.grid, .flex) > * { min-width: 0; }
+  :where(p, h1, h2, h3, h4, h5, h6, li, dd, blockquote, figcaption, td, th, .badge, .label) { overflow-wrap: anywhere; }
+  :where(img, svg, video, canvas, iframe) { max-width: 100%; height: auto; }
+
+  /* ── Phone frame ─────────────────────────────────────────── */
+  .phone {
+    width: 340px; max-width: 100%; border-radius: 28px; overflow: hidden;
+    border: 6px solid #0b0b0e; box-shadow: 0 12px 40px rgba(0,0,0,.45);
+    flex-shrink: 0; font-family: -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  }
+  .phone * { line-height: 1.35; }
+
+  /* ── CURRENT design tokens (verbatim from apps/mobile/src/theme/colors.ts) ── */
+  .cur { background:#f3f4f6; color:#111827; }
+  .cur .hdr { background:#fff; border-bottom:1px solid #e5e7eb; padding:10px 12px; display:flex; align-items:center; gap:8px; }
+  .cur .bubble { border-radius:14px; padding:8px 12px; max-width:78%; font-size:14.5px; }
+  .cur .own { background:#3b82f6; color:#fff; margin-left:auto; border-bottom-right-radius:4px; }
+  .cur .other { background:#fff; color:#111827; border:1px solid #e5e7eb; border-bottom-left-radius:4px; }
+  .cur .composer { background:#fff; border-top:1px solid #e5e7eb; display:flex; align-items:center; gap:6px; padding:8px; }
+  .cur .input { flex:1; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:18px; padding:8px 12px; color:#9ca3af; font-size:14px; }
+  .cur .micbtn { width:36px; height:36px; border-radius:18px; background:#3b82f6; display:flex; align-items:center; justify-content:center; font-size:16px; }
+  .cur .tabbar { background:#fff; border-top:1px solid #e5e7eb; display:flex; justify-content:space-around; padding:8px 0 14px; }
+
+  /* ── Direction A: Ink & Paper ────────────────────────────── */
+  .dirA { background:#faf6ef; color:#1c1917; }
+  .dirA .hdr { background:#faf6ef; border-bottom:1px solid #e7ddcc; padding:12px 14px; display:flex; align-items:baseline; gap:8px; }
+  .dirA .hdr .title { font-family: Georgia, "Iowan Old Style", serif; font-size:17px; font-weight:600; letter-spacing:.01em; }
+  .dirA .bubble { border-radius:4px 16px 16px 16px; padding:9px 13px; max-width:80%; font-size:14.5px; }
+  .dirA .own { background:#1c1917; color:#faf6ef; margin-left:auto; border-radius:16px 4px 16px 16px; }
+  .dirA .other { background:#fffdf8; color:#1c1917; border:1px solid #e7ddcc; }
+  .dirA .accent { color:#b3541e; }
+  .dirA .composer { background:#fffdf8; border-top:1px solid #e7ddcc; display:flex; align-items:center; gap:8px; padding:9px 10px; }
+  .dirA .input { flex:1; background:transparent; border:none; border-bottom:1.5px solid #e7ddcc; border-radius:0; padding:7px 2px; color:#a8a29e; font-size:14px; font-family:Georgia, serif; font-style:italic; }
+  .dirA .micbtn { width:34px; height:34px; border-radius:8px; background:#b3541e; display:flex; align-items:center; justify-content:center; }
+  .dirA .tabbar { background:#faf6ef; border-top:1px solid #e7ddcc; display:flex; justify-content:space-around; padding:9px 0 14px; }
+  .dirA .thought-card { background:#fffdf8; border:1px solid #e7ddcc; border-left:3px solid #b3541e; border-radius:2px 10px 10px 2px; padding:10px 12px; font-size:13px; box-shadow:0 1px 2px rgba(28,25,23,.06); }
+
+  /* ── Direction B: Deep Graph ─────────────────────────────── */
+  .dirB { background:#0a0e1a; color:#e6eaf5; }
+  .dirB .hdr { background:rgba(20,26,46,.85); border-bottom:1px solid #232c4d; padding:11px 14px; display:flex; align-items:center; gap:8px; backdrop-filter: blur(8px); }
+  .dirB .bubble { border-radius:16px; padding:9px 13px; max-width:80%; font-size:14.5px; }
+  .dirB .own { background:linear-gradient(135deg,#4f46e5 0%,#0891b2 100%); color:#fff; margin-left:auto; border-bottom-right-radius:5px; }
+  .dirB .other { background:#141a2e; color:#e6eaf5; border:1px solid #232c4d; border-bottom-left-radius:5px; }
+  .dirB .composer { background:#0f1424; border-top:1px solid #232c4d; display:flex; align-items:center; gap:7px; padding:9px 10px; }
+  .dirB .input { flex:1; background:#141a2e; border:1px solid #232c4d; border-radius:12px; padding:8px 12px; color:#5c6a94; font-size:14px; }
+  .dirB .micbtn { width:36px; height:36px; border-radius:12px; background:linear-gradient(135deg,#4f46e5,#0891b2); display:flex; align-items:center; justify-content:center; box-shadow:0 0 14px rgba(8,145,178,.5); }
+  .dirB .tabbar { background:#0f1424; border-top:1px solid #232c4d; display:flex; justify-content:space-around; padding:9px 0 14px; }
+  .dirB .thought-card { background:rgba(20,26,46,.9); border:1px solid #232c4d; border-radius:12px; padding:10px 12px; font-size:13px; position:relative; }
+  .dirB .thought-card::before { content:""; position:absolute; left:0; top:10px; bottom:10px; width:2px; border-radius:2px; background:linear-gradient(#4f46e5,#0891b2); }
+
+  /* ── Direction C: Signal ─────────────────────────────────── */
+  .dirC { background:#ffffff; color:#0a0a0a; }
+  .dirC .hdr { background:#fff; border-bottom:2px solid #0a0a0a; padding:12px 14px; display:flex; align-items:center; gap:8px; }
+  .dirC .hdr .title { font-weight:800; font-size:17px; letter-spacing:-.02em; }
+  .dirC .bubble { border-radius:10px; padding:9px 13px; max-width:80%; font-size:14.5px; font-weight:450; }
+  .dirC .own { background:#0a0a0a; color:#fff; margin-left:auto; }
+  .dirC .other { background:#f4f4f4; color:#0a0a0a; }
+  .dirC .accent { color:#ff5d3b; }
+  .dirC .composer { background:#fff; border-top:2px solid #0a0a0a; display:flex; align-items:center; gap:8px; padding:9px 10px; }
+  .dirC .input { flex:1; background:#f4f4f4; border:none; border-radius:10px; padding:9px 12px; color:#8a8a8a; font-size:14px; }
+  .dirC .micbtn { width:36px; height:36px; border-radius:10px; background:#ff5d3b; display:flex; align-items:center; justify-content:center; }
+  .dirC .tabbar { background:#fff; border-top:1px solid #e4e4e4; display:flex; justify-content:space-around; padding:9px 0 14px; }
+  .dirC .thought-card { background:#fff; border:1.5px solid #0a0a0a; border-radius:10px; padding:10px 12px; font-size:13px; box-shadow:3px 3px 0 #ff5d3b22; }
+
+  .callout { position:relative; }
+  .flag { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:9px; background:#ef4444; color:#fff; font-size:11px; font-weight:700; vertical-align:2px; margin-left:4px; }
+  .swatch { width:26px; height:26px; border-radius:7px; display:inline-block; border:1px solid rgba(0,0,0,.25); }
+  .ic { display:inline-flex; vertical-align:middle; }
+</style>
+</head>
+<body class="bg-base-100 text-base-content">
+<div class="max-w-6xl mx-auto px-4 py-8 space-y-10">
+
+  <!-- ═══════════ Header / the decision ═══════════ -->
+  <header class="space-y-3">
+    <h1 class="text-3xl font-bold">OpenChat — design audit &amp; three alternative directions</h1>
+    <p class="text-base-content/75 max-w-3xl">
+      You said the emojis don't look great and the basic design system is part of the problem. Below:
+      (1) an audit of the current UI (rendered from the app's actual color tokens and layout code),
+      (2) what I already fixed in <span class="badge badge-outline badge-sm">PR&nbsp;#22</span>, and
+      (3) <strong>three from-scratch design directions</strong> as phone mockups.
+      <strong>The decision to make: pick a direction (or a blend) at the bottom.</strong>
+    </p>
+  </header>
+
+  <!-- ═══════════ Section 1: audit ═══════════ -->
+  <section class="space-y-4">
+    <h2 class="text-2xl font-semibold">1 · What the app looks like today, and why it feels generic</h2>
+    <div class="flex flex-wrap gap-8 items-start">
+      <div class="phone cur">
+        <div class="hdr">
+          <div style="width:30px;height:30px;border-radius:15px;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600">S</div>
+          <div style="flex:1">
+            <div style="font-weight:600;font-size:15px">Sandeep <span style="color:#9ca3af">ⓘ</span><span class="flag">4</span></div>
+            <div style="color:#6b7280;font-size:11px">available</div>
+          </div>
+          <span style="color:#3b82f6;font-size:16px">↓</span>
+          <span style="color:#6b7280;font-size:16px">⋯</span>
+        </div>
+        <div style="padding:12px;display:flex;flex-direction:column;gap:8px;min-height:250px">
+          <div style="text-align:center;color:#9ca3af;font-size:11px;font-weight:600">TODAY</div>
+          <div class="bubble other">Did you see the new thoughts feature?</div>
+          <div class="bubble own">Yes! Saving this — #idea unified pin + save to stream <span class="flag">2</span></div>
+          <div class="bubble other">🎤 Voice message… (0:12)</div>
+        </div>
+        <div class="composer">
+          <span style="font-size:19px">📎</span><span class="flag">1</span>
+          <div class="input">Type a message…</div>
+          <span style="font-size:16px">✨</span>
+          <span style="font-size:16px">💙</span><span class="flag">1</span>
+          <div class="micbtn">🎤</div>
+        </div>
+        <div class="tabbar">
+          <div style="text-align:center"><div style="font-size:20px">💬</div><div style="font-size:10px;color:#3b82f6;font-weight:600">Chats</div></div>
+          <div style="text-align:center;opacity:.55"><div style="font-size:20px">💭</div><div style="font-size:10px">Thoughts</div></div>
+        </div>
+      </div>
+
+      <div class="flex-1 min-w-[280px] space-y-3">
+        <div class="card bg-base-200"><div class="card-body p-4">
+          <h3 class="font-semibold"><span class="flag">1</span> Emoji as UI icons</h3>
+          <p class="text-sm text-base-content/75">📎 💙 🎤 💬 💭 📋 🤖 🗑 render from each OS's emoji font: different shapes per platform, full-color glyphs that ignore your theme, mixed metaphors, no shared stroke weight. This is the single biggest "unfinished" signal. <strong>Fixed in PR #22</strong> for composer, tab bar and the new sheet actions with a single SVG line-icon set (below); the rest of the app (action sheet legacy rows, FAB, "ⓘ", arrows) should follow.</p>
+        </div></div>
+        <div class="card bg-base-200"><div class="card-body p-4">
+          <h3 class="font-semibold"><span class="flag">2</span> Stock-Tailwind palette = no identity</h3>
+          <p class="text-sm text-base-content/75">Primary <span class="swatch" style="background:#3b82f6"></span> blue-500 + gray-100/200/400/500/900 is the default of every scaffolded app. The same blue is used for your bubbles, buttons, links, tab highlight and pins — so nothing reads as special, and the app has no recognizable color voice.</p>
+        </div></div>
+        <div class="card bg-base-200"><div class="card-body p-4">
+          <h3 class="font-semibold"><span class="flag">3</span> Flat hierarchy</h3>
+          <p class="text-sm text-base-content/75">Every surface is a 12-radius card with the same hairline border; type is system-font at 3 nearly-identical sizes. Nothing is loud, nothing is quiet — headers, cards, bubbles and chips all carry equal visual weight.</p>
+        </div></div>
+        <div class="card bg-base-200"><div class="card-body p-4">
+          <h3 class="font-semibold"><span class="flag">4</span> Header clutter &amp; mixed glyph systems</h3>
+          <p class="text-sm text-base-content/75">"ⓘ", text arrows (↓ ↩ ↪ ✎) and emoji live side-by-side in the chat header and action sheet. One icon system should own all of it.</p>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="card bg-base-200"><div class="card-body p-4">
+      <h3 class="font-semibold">Shipped already in PR #22 — the new line-icon set (react-native-svg, themable, identical on iOS/Android/web)</h3>
+      <div class="flex flex-wrap gap-5 items-center pt-2" style="color:currentColor">
+        <!-- inline copies of the actual AppIcon paths -->
+        <span class="ic" title="chat"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></span>
+        <span class="ic" title="thought"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 13.5a4 4 0 0 0-1-7.9 5 5 0 0 0-9.4.9A3.6 3.6 0 0 0 8 13.7c.4 0 9.5 0 10.5-.2z"/><circle cx="8" cy="17.5" r="1.3"/><circle cx="5" cy="20.5" r="0.8"/></svg></span>
+        <span class="ic" title="pin"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6M10 4l-.5 6L6.8 12a1 1 0 0 0 .7 1.7h9a1 1 0 0 0 .7-1.7L14.5 10 14 4"/><line x1="12" y1="13.7" x2="12" y2="20"/></svg></span>
+        <span class="ic" title="mic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg></span>
+        <span class="ic" title="attach"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 0 1-7.78-7.78l8.49-8.49a3.67 3.67 0 0 1 5.19 5.19l-8.49 8.48a1.83 1.83 0 0 1-2.59-2.59l7.78-7.78"/></svg></span>
+        <span class="ic" title="heart"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></span>
+        <span class="ic" title="download"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="3" x2="12" y2="15"/><polyline points="7 10 12 15 17 10"/><path d="M5 20h14"/></svg></span>
+        <span class="ic" title="search"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.2" y1="16.2" x2="21" y2="21"/></svg></span>
+        <span class="ic" title="settings"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.25"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M19.07 4.93l-2.12 2.12M7.05 16.95l-2.12 2.12"/></svg></span>
+      </div>
+      <p class="text-sm text-base-content/60 pt-1">These work under any of the directions below — the palette and shapes change, the icon language stays.</p>
+    </div></div>
+  </section>
+
+  <!-- ═══════════ Section 2: three directions ═══════════ -->
+  <section class="space-y-4">
+    <h2 class="text-2xl font-semibold">2 · Three from-scratch directions</h2>
+    <p class="text-base-content/75 max-w-3xl">Each mockup shows the same chat plus the new chat-scoped Thoughts card, so differences are directly comparable. All three keep the shipped icon set and the pin/save-to-stream flow.</p>
+
+    <div class="grid lg:grid-cols-3 gap-6">
+
+      <!-- Direction A -->
+      <div class="space-y-3">
+        <div class="card bg-base-200"><div class="card-body p-4">
+          <h3 class="font-bold text-lg">A · Ink &amp; Paper</h3>
+          <p class="text-sm text-base-content/75">Warm paper ground, near-monochrome ink, one burnt-sienna accent, serif display type. Thoughts read as index cards. Calm, literary — fits "a thinking layer over your conversations."</p>
+          <div class="flex gap-2 pt-1">
+            <span class="swatch" style="background:#faf6ef"></span><span class="swatch" style="background:#1c1917"></span><span class="swatch" style="background:#b3541e"></span><span class="swatch" style="background:#e7ddcc"></span>
+          </div>
+          <p class="text-xs text-base-content/60">Cost: serif + warm palette needs careful dark mode; most rework of type styles.</p>
+        </div></div>
+        <div class="phone dirA">
+          <div class="hdr">
+            <div class="title" style="flex:1">Sandeep</div>
+            <span class="ic accent"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 13.5a4 4 0 0 0-1-7.9 5 5 0 0 0-9.4.9A3.6 3.6 0 0 0 8 13.7c.4 0 9.5 0 10.5-.2z"/><circle cx="8" cy="17.5" r="1.3"/><circle cx="5" cy="20.5" r="0.8"/></svg></span>
+            <span class="ic" style="color:#a8a29e"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></svg></span>
+          </div>
+          <div style="padding:12px;display:flex;flex-direction:column;gap:9px;min-height:230px">
+            <div style="text-align:center;color:#a8a29e;font-size:10.5px;letter-spacing:.14em;font-family:Georgia,serif;font-style:italic">today</div>
+            <div class="bubble other">Did you see the new thoughts feature?</div>
+            <div class="bubble own">Yes — pinning this idea to our chat.</div>
+            <div class="thought-card">
+              <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+                <span class="ic accent"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 4h6M10 4l-.5 6L6.8 12a1 1 0 0 0 .7 1.7h9a1 1 0 0 0 .7-1.7L14.5 10 14 4"/><line x1="12" y1="13.7" x2="12" y2="20"/></svg></span>
+                <span style="font-size:10.5px;letter-spacing:.1em;color:#b3541e;font-weight:600">PINNED · IDEA</span>
+              </div>
+              Unified pin + save-to-stream on every message
+            </div>
+          </div>
+          <div class="composer">
+            <span class="ic" style="color:#78716c"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 0 1-7.78-7.78l8.49-8.49a3.67 3.67 0 0 1 5.19 5.19l-8.49 8.48a1.83 1.83 0 0 1-2.59-2.59l7.78-7.78"/></svg></span>
+            <div class="input">Write…</div>
+            <div class="micbtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#faf6ef" stroke-width="2" stroke-linecap="round"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg></div>
+          </div>
+          <div class="tabbar">
+            <div style="text-align:center;color:#1c1917"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg><div style="font-size:9.5px;font-weight:700">Chats</div></div>
+            <div style="text-align:center;color:#a8a29e"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 13.5a4 4 0 0 0-1-7.9 5 5 0 0 0-9.4.9A3.6 3.6 0 0 0 8 13.7c.4 0 9.5 0 10.5-.2z"/><circle cx="8" cy="17.5" r="1.3"/><circle cx="5" cy="20.5" r="0.8"/></svg><div style="font-size:9.5px">Thoughts</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Direction B -->
+      <div class="space-y-3">
+        <div class="card bg-base-200"><div class="card-body p-4">
+          <h3 class="font-bold text-lg">B · Deep Graph</h3>
+          <p class="text-sm text-base-content/75">Dark-first, indigo→cyan gradient as the one signature move (your bubbles, mic, pins), glassy slate surfaces. Leans into the Noos / knowledge-graph identity — "Global Brain" made visible.</p>
+          <div class="flex gap-2 pt-1">
+            <span class="swatch" style="background:#0a0e1a"></span><span class="swatch" style="background:#141a2e"></span><span class="swatch" style="background:linear-gradient(135deg,#4f46e5,#0891b2)"></span><span class="swatch" style="background:#e6eaf5"></span>
+          </div>
+          <p class="text-xs text-base-content/60">Cost: light mode becomes the secondary theme; gradients need restraint to avoid 2021-crypto vibes.</p>
+        </div></div>
+        <div class="phone dirB">
+          <div class="hdr">
+            <div style="width:28px;height:28px;border-radius:10px;background:linear-gradient(135deg,#4f46e5,#0891b2);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff">S</div>
+            <div style="flex:1">
+              <div style="font-weight:650;font-size:15px">Sandeep</div>
+              <div style="color:#22c55e;font-size:10.5px">● online</div>
+            </div>
+            <span class="ic" style="color:#7dd3fc"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 13.5a4 4 0 0 0-1-7.9 5 5 0 0 0-9.4.9A3.6 3.6 0 0 0 8 13.7c.4 0 9.5 0 10.5-.2z"/><circle cx="8" cy="17.5" r="1.3"/><circle cx="5" cy="20.5" r="0.8"/></svg></span>
+            <span class="ic" style="color:#5c6a94"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></svg></span>
+          </div>
+          <div style="padding:12px;display:flex;flex-direction:column;gap:9px;min-height:230px">
+            <div style="text-align:center;color:#5c6a94;font-size:10.5px;font-weight:600;letter-spacing:.1em">TODAY</div>
+            <div class="bubble other">Did you see the new thoughts feature?</div>
+            <div class="bubble own">Yes — pinning this idea to our chat.</div>
+            <div class="thought-card">
+              <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;padding-left:8px">
+                <span class="ic" style="color:#7dd3fc"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 4h6M10 4l-.5 6L6.8 12a1 1 0 0 0 .7 1.7h9a1 1 0 0 0 .7-1.7L14.5 10 14 4"/><line x1="12" y1="13.7" x2="12" y2="20"/></svg></span>
+                <span style="font-size:10.5px;letter-spacing:.1em;color:#7dd3fc;font-weight:700">PINNED · IDEA</span>
+              </div>
+              <div style="padding-left:8px">Unified pin + save-to-stream on every message</div>
+            </div>
+          </div>
+          <div class="composer">
+            <span class="ic" style="color:#5c6a94"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 0 1-7.78-7.78l8.49-8.49a3.67 3.67 0 0 1 5.19 5.19l-8.49 8.48a1.83 1.83 0 0 1-2.59-2.59l7.78-7.78"/></svg></span>
+            <div class="input">Message…</div>
+            <div class="micbtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg></div>
+          </div>
+          <div class="tabbar">
+            <div style="text-align:center;color:#7dd3fc"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg><div style="font-size:9.5px;font-weight:700">Chats</div></div>
+            <div style="text-align:center;color:#5c6a94"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 13.5a4 4 0 0 0-1-7.9 5 5 0 0 0-9.4.9A3.6 3.6 0 0 0 8 13.7c.4 0 9.5 0 10.5-.2z"/><circle cx="8" cy="17.5" r="1.3"/><circle cx="5" cy="20.5" r="0.8"/></svg><div style="font-size:9.5px">Thoughts</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Direction C -->
+      <div class="space-y-3">
+        <div class="card bg-base-200"><div class="card-body p-4">
+          <h3 class="font-bold text-lg">C · Signal</h3>
+          <p class="text-sm text-base-content/75">High-contrast neutral: black on white, heavy weights, tight letter-spacing, one vivid coral accent reserved for actions (mic, pins, unread). Feels like iMessage × Linear. Cheapest to execute — mostly token swaps on today's layout.</p>
+          <div class="flex gap-2 pt-1">
+            <span class="swatch" style="background:#ffffff"></span><span class="swatch" style="background:#0a0a0a"></span><span class="swatch" style="background:#ff5d3b"></span><span class="swatch" style="background:#f4f4f4"></span>
+          </div>
+          <p class="text-xs text-base-content/60">Cost: least distinctive of the three; identity carried almost entirely by the accent + typography discipline.</p>
+        </div></div>
+        <div class="phone dirC">
+          <div class="hdr">
+            <div class="title" style="flex:1">Sandeep</div>
+            <span class="ic accent"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 13.5a4 4 0 0 0-1-7.9 5 5 0 0 0-9.4.9A3.6 3.6 0 0 0 8 13.7c.4 0 9.5 0 10.5-.2z"/><circle cx="8" cy="17.5" r="1.3"/><circle cx="5" cy="20.5" r="0.8"/></svg></span>
+            <span class="ic" style="color:#8a8a8a"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></svg></span>
+          </div>
+          <div style="padding:12px;display:flex;flex-direction:column;gap:9px;min-height:230px">
+            <div style="text-align:center;color:#8a8a8a;font-size:10.5px;font-weight:800;letter-spacing:.12em">TODAY</div>
+            <div class="bubble other">Did you see the new thoughts feature?</div>
+            <div class="bubble own">Yes — pinning this idea to our chat.</div>
+            <div class="thought-card">
+              <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+                <span class="ic accent"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 4h6M10 4l-.5 6L6.8 12a1 1 0 0 0 .7 1.7h9a1 1 0 0 0 .7-1.7L14.5 10 14 4"/><line x1="12" y1="13.7" x2="12" y2="20"/></svg></span>
+                <span style="font-size:10.5px;letter-spacing:.1em;color:#ff5d3b;font-weight:800">PINNED · IDEA</span>
+              </div>
+              Unified pin + save-to-stream on every message
+            </div>
+          </div>
+          <div class="composer">
+            <span class="ic" style="color:#0a0a0a"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 0 1-7.78-7.78l8.49-8.49a3.67 3.67 0 0 1 5.19 5.19l-8.49 8.48a1.83 1.83 0 0 1-2.59-2.59l7.78-7.78"/></svg></span>
+            <div class="input">Message</div>
+            <div class="micbtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg></div>
+          </div>
+          <div class="tabbar">
+            <div style="text-align:center;color:#0a0a0a"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg><div style="font-size:9.5px;font-weight:800">Chats</div></div>
+            <div style="text-align:center;color:#8a8a8a"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 13.5a4 4 0 0 0-1-7.9 5 5 0 0 0-9.4.9A3.6 3.6 0 0 0 8 13.7c.4 0 9.5 0 10.5-.2z"/><circle cx="8" cy="17.5" r="1.3"/><circle cx="5" cy="20.5" r="0.8"/></svg><div style="font-size:9.5px">Thoughts</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="alert alert-info">
+      <span><strong>My read:</strong> B (Deep Graph) is the most <em>ownable</em> — it turns the Noos/Global-Brain story into the visual identity, and dark-first suits a phone chat app. A is the most beautiful for the Thoughts surface specifically. C is the safest and cheapest. A pragmatic blend: <strong>C's typography discipline + B's gradient reserved for own-bubbles/mic/pins</strong>.</span>
+    </div>
+  </section>
+
+  <!-- ═══════════ Section 3: decision form ═══════════ -->
+  <section class="space-y-4">
+    <h2 class="text-2xl font-semibold">3 · Pick the direction</h2>
+    <form data-lavish-question="design-direction" class="card bg-base-200" onsubmit="event.preventDefault();
+      const f = new FormData(event.currentTarget);
+      const dir = f.get('direction');
+      const scope = [...f.getAll('scope')].join(', ') || 'no extras selected';
+      const notes = (f.get('notes')||'').toString().trim();
+      if (!dir) return;
+      window.lavish.queuePrompt(
+        'Design direction decision: ' + dir + '. Also apply: ' + scope + (notes ? '. Notes: ' + notes : ''),
+        { tag: 'choice', text: 'Direction: ' + dir, element: event.currentTarget,
+          data: { question: 'design-direction', answer: dir, scope, notes } });">
+      <div class="card-body p-5 space-y-4">
+        <div class="space-y-2">
+          <div class="font-semibold">Direction</div>
+          <label class="flex gap-3 items-start"><input type="radio" name="direction" value="A — Ink & Paper" class="radio radio-sm mt-1"><span><strong>A — Ink &amp; Paper</strong> <span class="text-sm text-base-content/60">warm, literary, thoughts-first</span></span></label>
+          <label class="flex gap-3 items-start"><input type="radio" name="direction" value="B — Deep Graph" class="radio radio-sm mt-1"><span><strong>B — Deep Graph</strong> <span class="text-sm text-base-content/60">dark-first, gradient identity, Global-Brain story</span></span></label>
+          <label class="flex gap-3 items-start"><input type="radio" name="direction" value="C — Signal" class="radio radio-sm mt-1"><span><strong>C — Signal</strong> <span class="text-sm text-base-content/60">high-contrast neutral + coral accent, cheapest</span></span></label>
+          <label class="flex gap-3 items-start"><input type="radio" name="direction" value="Blend: C typography + B gradient accents" class="radio radio-sm mt-1"><span><strong>Blend</strong> <span class="text-sm text-base-content/60">C's type discipline + B's gradient on own-bubbles/mic/pins (my recommendation)</span></span></label>
+          <label class="flex gap-3 items-start"><input type="radio" name="direction" value="Keep current palette, just finish the icon/hierarchy cleanup" class="radio radio-sm mt-1"><span><strong>Keep current</strong> <span class="text-sm text-base-content/60">just finish icon + hierarchy cleanup</span></span></label>
+        </div>
+        <div class="space-y-2">
+          <div class="font-semibold">Also apply</div>
+          <label class="flex gap-3 items-center"><input type="checkbox" name="scope" value="sweep ALL remaining emoji/text glyphs to the SVG icon set" class="checkbox checkbox-sm" checked><span class="text-sm">Sweep all remaining emoji/text glyphs (action sheet, ⓘ, arrows, FAB) to the icon set</span></label>
+          <label class="flex gap-3 items-center"><input type="checkbox" name="scope" value="redesign Thoughts cards per chosen direction" class="checkbox checkbox-sm" checked><span class="text-sm">Redesign Thoughts cards per the chosen direction</span></label>
+          <label class="flex gap-3 items-center"><input type="checkbox" name="scope" value="apply direction to web (/m and /d exports follow automatically) and legacy web client" class="checkbox checkbox-sm"><span class="text-sm">Extend to the legacy web client too</span></label>
+          <label class="flex gap-3 items-center"><input type="checkbox" name="scope" value="new app icon + splash to match" class="checkbox checkbox-sm"><span class="text-sm">New app icon + splash screen to match</span></label>
+        </div>
+        <div>
+          <div class="font-semibold pb-1">Notes</div>
+          <textarea name="notes" class="textarea w-full" rows="2" placeholder="Anything to change about the chosen direction…"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary w-fit">Queue this decision</button>
+      </div>
+    </form>
+    <p class="text-sm text-base-content/60">Annotate anything directly (select text / click elements) — mockup details, spacing, colors — and send it back with the queued decision.</p>
+  </section>
+
+</div>
+</body>
+</html>

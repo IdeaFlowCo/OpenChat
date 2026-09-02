@@ -98,7 +98,7 @@ module.exports = {
     android: {
       package: 'com.jacobcole.openchat',
       adaptiveIcon: {
-        backgroundColor: '#3b82f6',
+        backgroundColor: '#faf6ef',
         foregroundImage: './assets/android-icon-foreground.png',
         backgroundImage: './assets/android-icon-background.png',
         monochromeImage: './assets/android-icon-monochrome.png',
@@ -127,12 +127,12 @@ module.exports = {
       'expo-camera',
       'expo-image-picker',
       'expo-apple-authentication',
-      ['expo-notifications', { color: '#3b82f6' }],
+      ['expo-notifications', { color: '#b3541e' }],
       [
         'expo-splash-screen',
         {
           image: './assets/splash-icon.png',
-          backgroundColor: '#5664e2',
+          backgroundColor: '#faf6ef',
           imageWidth: 200,
           resizeMode: 'contain',
         },
