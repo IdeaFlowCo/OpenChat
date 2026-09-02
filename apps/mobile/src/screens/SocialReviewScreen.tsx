@@ -112,6 +112,7 @@ export function SocialReviewScreen() {
                 <Text style={[styles.label, { color: item.priority === 'action' ? c.primary : c.textMuted }]}>{itemLabel(item)}</Text>
                 <Text style={[styles.cardTitle, { color: c.textPrimary }]}>{itemTitle(item)}</Text>
                 {item.kind === 'match' && <Text style={[styles.detail, { color: c.textSecondary }]}>Matched with your {item.match.ownIntent.kind}: {item.match.ownIntent.terms}</Text>}
+                {item.kind === 'draft' && item.draft.seeks.length > 0 && <Text style={[styles.detail, { color: c.textSecondary }]}>Looking for · {item.draft.seeks.join(', ')}</Text>}
                 {item.kind === 'draft' && item.draft.brings.length > 0 && <Text style={[styles.detail, { color: c.textSecondary }]}>You can bring · {item.draft.brings.join(', ')}</Text>}
                 {item.kind === 'draft' && (
                   <View style={[styles.consentPreview, { borderColor: c.border, backgroundColor: c.background }]}>
