@@ -57,8 +57,21 @@ export async function startRecording(): Promise<Recording> {
     playsInSilentModeIOS: true,
   });
 
-  const { recording } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
-  return recording;
+  try {
+    const { recording } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
+    return recording;
+  } catch (err) {
+    // "Only one Recording object can be prepared at a given time" — a prior
+    // recording was left prepared (app backgrounded mid-recording, edit flow,
+    // etc). expo-av cleans its singleton up as part of throwing, so one
+    // immediate retry succeeds — without this the FIRST mic press after a
+    // wedge always failed and the second worked (OpenChat 2026-09-02 iPad).
+    if (err instanceof Error && /only one recording/i.test(err.message)) {
+      const { recording } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
+      return recording;
+    }
+    throw err;
+  }
 }
 
 /**
