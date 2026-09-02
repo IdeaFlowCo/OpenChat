@@ -55,61 +55,61 @@ export async function ensureDirectConversation(
 ): Promise<DirectConversationResult> {
   const session = getDriver().session();
   try {
-    const existing = await session.run(
-      `
-      MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-      WHERE c.type = 'direct'
-      WITH c,
-           collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
-      WITH c, participants, [p IN participants | p.user.id] AS participantIds
-      WHERE (
-        $otherId = $userId
-        AND size(participantIds) = 1
-        AND $userId IN participantIds
-      ) OR (
-        $otherId <> $userId
-        AND size(participantIds) = 2
-        AND $userId IN participantIds
-        AND $otherId IN participantIds
-      )
-      RETURN c { .*, participants: participants } AS conversation
-      LIMIT 1
-      `,
-      { userId, otherId },
-    );
-
-    if (existing.records.length > 0) {
-      const conversation = toJS(existing.records[0].get('conversation')) as Record<string, unknown>;
-      notifyParticipants(io, conversation, [...new Set([userId, otherId])], false);
-      return { conversation, created: false };
-    }
-
     const id = nanoid();
     const now = new Date().toISOString();
-    const participantIds = [...new Set([userId, otherId])];
-    const created = await session.run(
+    const participantIds = [...new Set([userId, otherId])].sort();
+    const directPairKey = JSON.stringify(participantIds);
+    const creationToken = nanoid();
+    const result = await session.run(
       `
-      CREATE (c:Conversation {
-        id: $id, title: null, type: 'direct', containsBot: false,
-        createdAt: datetime($now), updatedAt: datetime($now), lastMessageAt: datetime($now)
-      })
-      WITH c
+      MATCH (first:User {id: $firstId}), (second:User {id: $secondId})
+      OPTIONAL MATCH (first)-[:PARTICIPATES_IN]->(existing:Conversation {type: 'direct'})
+      WHERE ($firstId = $secondId AND NOT EXISTS {
+        MATCH (other:User)-[:PARTICIPATES_IN]->(existing)
+        WHERE other.id <> $firstId
+      }) OR ($firstId <> $secondId
+        AND EXISTS { MATCH (second)-[:PARTICIPATES_IN]->(existing) }
+        AND NOT EXISTS {
+          MATCH (other:User)-[:PARTICIPATES_IN]->(existing)
+          WHERE NOT other.id IN [$firstId, $secondId]
+        })
+      WITH first, second, head(collect(existing)) AS existing
+      FOREACH (_ IN CASE WHEN existing IS NULL THEN [] ELSE [1] END |
+        SET existing.directPairKey = $directPairKey
+      )
+      MERGE (c:Conversation {directPairKey: $directPairKey})
+      ON CREATE SET c.id = $id, c.title = null, c.type = 'direct',
+                    c.containsBot = false, c.createdAt = datetime($now),
+                    c.updatedAt = datetime($now), c.lastMessageAt = datetime($now),
+                    c.creationToken = $creationToken
+      WITH c, c.creationToken = $creationToken AS created
+      REMOVE c.creationToken
       UNWIND $participantIds AS participantId
       MATCH (user:User {id: participantId})
-      CREATE (user)-[rel:PARTICIPATES_IN {
-        joinedAt: datetime($now),
-        role: CASE WHEN participantId = $userId THEN 'owner' ELSE 'member' END
-      }]->(c)
-      WITH c, collect({user: user {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
-      RETURN c { .*, participants: participants } AS conversation
+      MERGE (user)-[rel:PARTICIPATES_IN]->(c)
+      ON CREATE SET rel.joinedAt = datetime($now),
+                    rel.role = CASE WHEN participantId = $userId THEN 'owner' ELSE 'member' END
+      WITH c, created,
+           collect({user: user {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
+      RETURN c { .*, participants: participants } AS conversation, created
       `,
-      { id, now, participantIds, userId },
+      {
+        id,
+        now,
+        participantIds,
+        userId,
+        firstId: participantIds[0],
+        secondId: participantIds.at(-1),
+        directPairKey,
+        creationToken,
+      },
     );
-    if (created.records.length === 0) throw new Error('Direct conversation participants not found');
+    if (result.records.length === 0) throw new Error('Direct conversation participants not found');
 
-    const conversation = toJS(created.records[0].get('conversation')) as Record<string, unknown>;
-    notifyParticipants(io, conversation, participantIds, true);
-    return { conversation, created: true };
+    const conversation = toJS(result.records[0].get('conversation')) as Record<string, unknown>;
+    const created = result.records[0].get('created') as boolean;
+    notifyParticipants(io, conversation, participantIds, created);
+    return { conversation, created };
   } finally {
     await session.close();
   }

@@ -8,13 +8,21 @@ const integration = uri && user && password ? describe.sequential : describe.ski
 
 integration('agent-network quiet-match loop', () => {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const userIds = ['happy-a', 'happy-b', 'decline-a', 'decline-b', 'reuse-a', 'reuse-b']
+  const userIds = [
+    'happy-a', 'happy-b', 'decline-a', 'decline-b', 'reuse-a', 'reuse-b',
+    'scan-a', 'scan-b', 'race-a', 'race-b', 'collision-a', 'collision-b',
+    'recovery-a', 'recovery-b',
+  ]
     .map((prefix) => `${prefix}-${suffix}`);
-  const [happyA, happyB, declineA, declineB, reuseA, reuseB] = userIds as [string, string, string, string, string, string];
+  const [
+    happyA, happyB, declineA, declineB, reuseA, reuseB, scanA, scanB,
+    raceA, raceB, collisionA, collisionB, recoveryA, recoveryB,
+  ] = userIds as [string, string, string, string, string, string, string, string, string, string, string, string, string, string];
   let driver: Driver;
   let service: typeof import('../src/services/agentNetwork.js');
   let directService: typeof import('../src/services/directConversation.js');
-  let closeDatabase: typeof import('../src/db.js').closeDatabase;
+  let database: typeof import('../src/db.js');
+  let assistantService: typeof import('../src/services/assistant.js');
 
   const scoring = {
     embeddingScore: async () => null,
@@ -26,9 +34,12 @@ integration('agent-network quiet-match loop', () => {
     process.env.NEO4J_URI = uri!;
     process.env.NEO4J_USER = user!;
     process.env.NEO4J_PASSWORD = password!;
-    ({ closeDatabase } = await import('../src/db.js'));
+    database = await import('../src/db.js');
     service = await import('../src/services/agentNetwork.js');
     directService = await import('../src/services/directConversation.js');
+    assistantService = await import('../src/services/assistant.js');
+    await database.initDatabase();
+    await service.ensureAgentIntentIndexes();
     driver = neo4j.driver(uri!, neo4j.auth.basic(user!, password!));
     const session = driver.session();
     try {
@@ -74,7 +85,7 @@ integration('agent-network quiet-match loop', () => {
     } finally {
       await session.close();
       await driver.close();
-      await closeDatabase();
+      await database.closeDatabase();
     }
   });
 
@@ -188,6 +199,122 @@ integration('agent-network quiet-match loop', () => {
       expect(result.records[0].get('count').toNumber()).toBe(1);
     } finally {
       await session.close();
+    }
+  });
+
+  it('claims a concurrent intent pair exactly once', async () => {
+    const token = `scantoken${suffix.replace(/[^a-z0-9]/gi, '')}`;
+    const ask = await service.createIntent(scanA, { kind: 'ask', terms: token }, { queueScan: false });
+    const offer = await service.createIntent(scanB, { kind: 'offer', terms: token }, { queueScan: false });
+    const results = await Promise.all([
+      service.scanIntentForMatches(ask.id, { scoring }),
+      service.scanIntentForMatches(offer.id, { scoring }),
+    ]);
+    expect(results.flat()).toHaveLength(1);
+
+    const session = driver.session();
+    try {
+      const result = await session.run(
+        `MATCH (match:AgentMatch)-[:MATCHES]->(intent:AgentIntent)
+         WHERE intent.id IN [$askId, $offerId]
+         RETURN count(DISTINCT match) AS count`,
+        { askId: ask.id, offerId: offer.id },
+      );
+      expect(result.records[0].get('count').toNumber()).toBe(1);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('deduplicates a normal DM racing match completion', async () => {
+    const token = `racetoken${suffix.replace(/[^a-z0-9]/gi, '')}`;
+    const matchId = await propose(raceA, raceB, token, 'race ask private', 'race offer private');
+    await service.respondToMatch(raceA, matchId, 'approve');
+    const [normal, connected] = await Promise.all([
+      directService.ensureDirectConversation(raceA, raceB),
+      service.respondToMatch(raceB, matchId, 'approve'),
+    ]);
+    expect(connected?.conversationId).toBe(normal.conversation.id);
+
+    const session = driver.session();
+    try {
+      const result = await session.run(
+        `MATCH (:User {id: $a})-[:PARTICIPATES_IN]->(conversation:Conversation {type: 'direct'})
+         MATCH (:User {id: $b})-[:PARTICIPATES_IN]->(conversation)
+         RETURN count(DISTINCT conversation) AS count`,
+        { a: raceA, b: raceB },
+      );
+      expect(result.records[0].get('count').toNumber()).toBe(1);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('keeps context-card identity separate from client message ids', async () => {
+    const token = `collisiontoken${suffix.replace(/[^a-z0-9]/gi, '')}`;
+    const matchId = await propose(collisionA, collisionB, token, 'collision ask private', 'collision offer private');
+    const selfDm = await directService.ensureDirectConversation(collisionA, collisionA);
+    await assistantService.persistMessage(
+      undefined,
+      collisionA,
+      selfDm.conversation.id as string,
+      'client-selected id',
+      { messageId: matchId },
+    );
+    await service.respondToMatch(collisionA, matchId, 'approve');
+    const connected = await service.respondToMatch(collisionB, matchId, 'approve');
+
+    const session = driver.session();
+    try {
+      const result = await session.run(
+        `MATCH (card:Message {matchContextKey: $matchId})
+         MATCH (client:Message {id: $matchId})
+         RETURN card.id AS cardId, card.cardKind AS cardKind,
+                card.conversationId AS cardConversationId,
+                client.conversationId AS clientConversationId`,
+        { matchId },
+      );
+      expect(result.records).toHaveLength(1);
+      expect(result.records[0].get('cardId')).not.toBe(matchId);
+      expect(result.records[0].get('cardKind')).toBe('match_context');
+      expect(result.records[0].get('cardConversationId')).toBe(connected?.conversationId);
+      expect(result.records[0].get('clientConversationId')).toBe(selfDm.conversation.id);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('resumes connected matches whose durable completion was interrupted', async () => {
+    const token = `recoverytoken${suffix.replace(/[^a-z0-9]/gi, '')}`;
+    const matchId = await propose(recoveryA, recoveryB, token, 'recovery ask private', 'recovery offer private');
+    const session = driver.session();
+    try {
+      await session.run(
+        `MATCH (match:AgentMatch {id: $matchId})
+         SET match.status = 'connected', match.aResponse = 'approved', match.bResponse = 'approved'
+         REMOVE match.conversationId`,
+        { matchId },
+      );
+    } finally {
+      await session.close();
+    }
+
+    const recovered = await service.respondToMatch(recoveryA, matchId, 'approve');
+    expect(recovered?.status).toBe('connected');
+    expect(recovered?.conversationId).toBeTruthy();
+
+    const retry = await service.respondToMatch(recoveryB, matchId, 'approve');
+    expect(retry?.alreadyResolved).toBe(true);
+    const check = driver.session();
+    try {
+      const result = await check.run(
+        `MATCH (message:Message {matchContextKey: $matchId})
+         RETURN count(message) AS count`,
+        { matchId },
+      );
+      expect(result.records[0].get('count').toNumber()).toBe(1);
+    } finally {
+      await check.close();
     }
   });
 });

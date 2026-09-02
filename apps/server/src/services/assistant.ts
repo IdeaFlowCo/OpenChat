@@ -113,6 +113,7 @@ export async function persistMessage(
     cardPayload?: string;
     /** Caller-chosen id; the MERGE above makes reuse exactly-once. */
     messageId?: string;
+    matchContextKey?: string;
   }
 ): Promise<{ message: Record<string, unknown>; participantIds: string[] } | null> {
   const messageId = opts?.messageId ?? nanoid();
@@ -126,6 +127,10 @@ export async function persistMessage(
   const messageType = opts?.messageType ?? 'text';
   const cardKind = messageType === 'card' ? opts?.cardKind ?? null : null;
   const cardPayload = messageType === 'card' ? opts?.cardPayload ?? null : null;
+  const matchContextKey = opts?.matchContextKey;
+  const messageIdentity = matchContextKey
+    ? 'MERGE (m:Message {matchContextKey: $matchContextKey})'
+    : 'MERGE (m:Message {id: $id})';
 
   const s = getDriver().session();
   try {
@@ -133,8 +138,9 @@ export async function persistMessage(
       `
       MATCH (c:Conversation {id: $conversationId})
       MATCH (sender:User {id: $senderId})
-      MERGE (m:Message {id: $id})
+      ${messageIdentity}
       ON CREATE SET
+        m.id = $id,
         m.content = $content,
         m.senderId = $senderId,
         m.conversationId = $conversationId,
@@ -163,6 +169,7 @@ export async function persistMessage(
         messageType,
         cardKind,
         cardPayload,
+        matchContextKey: matchContextKey ?? null,
       }
     );
 

@@ -243,6 +243,7 @@ export async function ensureAgentIntentIndexes(): Promise<void> {
   try {
     await session.run(`CREATE CONSTRAINT agent_intent_id IF NOT EXISTS FOR (intent:AgentIntent) REQUIRE intent.id IS UNIQUE`);
     await session.run(`CREATE CONSTRAINT agent_match_id IF NOT EXISTS FOR (match:AgentMatch) REQUIRE match.id IS UNIQUE`);
+    await session.run(`CREATE CONSTRAINT agent_match_pair IF NOT EXISTS FOR (match:AgentMatch) REQUIRE match.pairKey IS UNIQUE`);
     await session.run(`CREATE INDEX agent_intent_owner IF NOT EXISTS FOR (intent:AgentIntent) ON (intent.ownerUserId)`);
     await session.run(`CREATE INDEX agent_intent_status IF NOT EXISTS FOR (intent:AgentIntent) ON (intent.status)`);
   } finally {
@@ -444,6 +445,8 @@ export async function scanIntentForMatches(
     const createdIds: string[] = [];
     for (const pair of scored) {
       const matchId = nanoid();
+      const pairKey = JSON.stringify([pair.source.id, pair.candidate.id].sort());
+      const creationToken = nanoid();
       const now = new Date().toISOString();
       const created = await session.run(
         `
@@ -452,30 +455,38 @@ export async function scanIntentForMatches(
         WHERE sourceOwner.id <> candidateOwner.id
           AND NOT (sourceOwner)-[:BLOCKED]->(candidateOwner)
           AND NOT (candidateOwner)-[:BLOCKED]->(sourceOwner)
-          AND NOT EXISTS {
-            MATCH (existing:AgentMatch)-[:MATCHES]->(source)
-            MATCH (existing)-[:MATCHES]->(candidate)
-          }
-        CREATE (match:AgentMatch {
-          id: $matchId, status: 'proposed', score: $score,
-          createdAt: datetime($now), updatedAt: datetime($now)
-        })
-        CREATE (match)-[:MATCHES]->(source)
-        CREATE (match)-[:MATCHES]->(candidate)
+        OPTIONAL MATCH (existing:AgentMatch)-[:MATCHES]->(source)
+        WHERE (existing)-[:MATCHES]->(candidate)
+        WITH sourceOwner, candidateOwner, source, candidate, head(collect(existing)) AS existing
+        FOREACH (_ IN CASE WHEN existing IS NULL THEN [] ELSE [1] END |
+          SET existing.pairKey = $pairKey
+        )
+        MERGE (match:AgentMatch {pairKey: $pairKey})
+        ON CREATE SET match.id = $matchId, match.status = 'proposed', match.score = $score,
+                      match.createdAt = datetime($now), match.updatedAt = datetime($now),
+                      match.creationToken = $creationToken
+        WITH match, sourceOwner, candidateOwner, source, candidate,
+             match.creationToken = $creationToken AS created
+        REMOVE match.creationToken
+        MERGE (match)-[:MATCHES]->(source)
+        MERGE (match)-[:MATCHES]->(candidate)
         RETURN source { .id, .kind, .terms } AS source,
                candidate { .id, .kind, .terms } AS candidate,
                sourceOwner.id AS sourceOwnerId,
-               candidateOwner.id AS candidateOwnerId
+               candidateOwner.id AS candidateOwnerId,
+               created
         `,
         {
           sourceId: pair.source.id,
           candidateId: pair.candidate.id,
           matchId,
+          pairKey,
+          creationToken,
           score: pair.score,
           now,
         },
       );
-      if (created.records.length === 0) continue;
+      if (created.records.length === 0 || !created.records[0].get('created')) continue;
       createdIds.push(matchId);
       const record = created.records[0];
       const source = toJS(record.get('source')) as MatchIntent;
@@ -524,6 +535,58 @@ async function loadMatchForResponse(userId: string, matchId: string): Promise<Re
   }
 }
 
+async function completeConnectedMatch(
+  userId: string,
+  matchId: string,
+  current: RespondRecord,
+  io?: IOServer,
+): Promise<AgentMatchProjection | null> {
+  const dm = await ensureDirectConversation(userId, current.otherOwnerId, io);
+  const conversationId = dm.conversation.id as string;
+  const ask = current.ownIntent.kind === 'ask' ? current.ownIntent : current.otherIntent;
+  const offer = current.ownIntent.kind === 'offer' ? current.ownIntent : current.otherIntent;
+  await ensureAssistantUser();
+  await persistMessage(
+    io,
+    ASSISTANT_USER_ID,
+    conversationId,
+    `Your agents matched an ask and an offer. Ask: ${ask.terms} / Offer: ${offer.terms}`,
+    {
+      messageType: 'card',
+      cardKind: 'match_context',
+      cardPayload: JSON.stringify({ matchId, askTerms: ask.terms, offerTerms: offer.terms }),
+      matchContextKey: matchId,
+    },
+  );
+
+  const finishSession = getDriver().session();
+  try {
+    await finishSession.run(
+      `
+      MATCH (match:AgentMatch {id: $matchId})-[:MATCHES]->(intent:AgentIntent)
+      SET match.conversationId = $conversationId,
+          match.updatedAt = datetime($now),
+          intent.status = 'connected',
+          intent.updatedAt = datetime($now)
+      `,
+      { matchId, conversationId, now: new Date().toISOString() },
+    );
+  } finally {
+    await finishSession.close();
+  }
+
+  const updated = await loadMatchForResponse(userId, matchId);
+  if (!updated) return null;
+  const otherView = await loadMatchForResponse(updated.otherOwnerId, matchId);
+  await Promise.all([
+    postAgentCard(io, userId, 'match_status', { matchId, status: 'connected' }, 'Your match is connected.'),
+    postAgentCard(io, updated.otherOwnerId, 'match_status', { matchId, status: 'connected' }, 'Your match is connected.'),
+  ]);
+  emitMatchUpdated(io, userId, updated.projection);
+  if (otherView) emitMatchUpdated(io, updated.otherOwnerId, otherView.projection);
+  return updated.projection;
+}
+
 export async function respondToMatch(
   userId: string,
   matchId: string,
@@ -533,6 +596,9 @@ export async function respondToMatch(
   const current = await loadMatchForResponse(userId, matchId);
   if (!current) return null;
   if (current.matchStatus !== 'proposed') {
+    if (current.matchStatus === 'connected' && !current.projection.conversationId) {
+      return completeConnectedMatch(userId, matchId, current, io);
+    }
     return { ...current.projection, alreadyResolved: true };
   }
   if (current.ownResponse) return current.projection;
@@ -545,6 +611,7 @@ export async function respondToMatch(
       `
       MATCH (:User {id: $userId})-[:OWNS_INTENT]->(own:AgentIntent)<-[:MATCHES]-(match:AgentMatch {id: $matchId})-[:MATCHES]->(other:AgentIntent)
       WHERE own <> other AND match.status = 'proposed'
+        AND CASE WHEN own.id < other.id THEN match.aResponse ELSE match.bResponse END IS NULL
       SET match.aResponse = CASE WHEN own.id < other.id THEN $response ELSE match.aResponse END,
           match.bResponse = CASE WHEN own.id > other.id THEN $response ELSE match.bResponse END,
           match.updatedAt = datetime($now)
@@ -572,54 +639,8 @@ export async function respondToMatch(
       : { ...updated.projection, alreadyResolved: true };
   }
 
-  // Only the request whose write actually performs the second approval may
-  // create the DM/context card. A racing first approval can observe the final
-  // connected state on reload, but must not duplicate these side effects.
   if (transitionStatus === 'connected') {
-    const dm = await ensureDirectConversation(userId, updated.otherOwnerId, io);
-    const conversationId = dm.conversation.id as string;
-    const ask = updated.ownIntent.kind === 'ask' ? updated.ownIntent : updated.otherIntent;
-    const offer = updated.ownIntent.kind === 'offer' ? updated.ownIntent : updated.otherIntent;
-    await ensureAssistantUser();
-    await persistMessage(
-      io,
-      ASSISTANT_USER_ID,
-      conversationId,
-      `Your agents matched an ask and an offer. Ask: ${ask.terms} / Offer: ${offer.terms}`,
-      {
-        messageType: 'card',
-        cardKind: 'match_context',
-        cardPayload: JSON.stringify({ matchId, askTerms: ask.terms, offerTerms: offer.terms }),
-        // Reusing the match id makes the context card exactly-once even if a
-        // connection completion is retried after an interrupted response.
-        messageId: matchId,
-      },
-    );
-    const finishSession = getDriver().session();
-    try {
-      await finishSession.run(
-        `
-        MATCH (match:AgentMatch {id: $matchId})-[:MATCHES]->(intent:AgentIntent)
-        SET match.conversationId = $conversationId,
-            match.updatedAt = datetime($now),
-            intent.status = 'connected',
-            intent.updatedAt = datetime($now)
-        `,
-        { matchId, conversationId, now: new Date().toISOString() },
-      );
-    } finally {
-      await finishSession.close();
-    }
-    updated = await loadMatchForResponse(userId, matchId);
-    if (!updated) return null;
-    const otherView = await loadMatchForResponse(updated.otherOwnerId, matchId);
-    await Promise.all([
-      postAgentCard(io, userId, 'match_status', { matchId, status: 'connected' }, 'Your match is connected.'),
-      postAgentCard(io, updated.otherOwnerId, 'match_status', { matchId, status: 'connected' }, 'Your match is connected.'),
-    ]);
-    emitMatchUpdated(io, userId, updated.projection);
-    if (otherView) emitMatchUpdated(io, updated.otherOwnerId, otherView.projection);
-    return updated.projection;
+    return completeConnectedMatch(userId, matchId, updated, io);
   }
 
   if (transitionStatus === 'closed') {
