@@ -52,6 +52,7 @@ export async function ensureDirectConversation(
   userId: string,
   otherId: string,
   io?: IOServer,
+  title?: string,
 ): Promise<DirectConversationResult> {
   const session = getDriver().session();
   try {
@@ -78,7 +79,7 @@ export async function ensureDirectConversation(
         SET existing.directPairKey = $directPairKey
       )
       MERGE (c:Conversation {directPairKey: $directPairKey})
-      ON CREATE SET c.id = $id, c.title = null, c.type = 'direct',
+      ON CREATE SET c.id = $id, c.title = $title, c.type = 'direct',
                     c.containsBot = coalesce(first.isBot, false) OR coalesce(second.isBot, false),
                     c.createdAt = datetime($now),
                     c.updatedAt = datetime($now), c.lastMessageAt = datetime($now),
@@ -103,6 +104,7 @@ export async function ensureDirectConversation(
         secondId: participantIds.at(-1),
         directPairKey,
         creationToken,
+        title: title || null,
       },
     );
     if (result.records.length === 0) throw new Error('Direct conversation participants not found');

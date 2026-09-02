@@ -11,13 +11,13 @@ integration('agent-network quiet-match loop', () => {
   const userIds = [
     'happy-a', 'happy-b', 'decline-a', 'decline-b', 'reuse-a', 'reuse-b',
     'scan-a', 'scan-b', 'race-a', 'race-b', 'collision-a', 'collision-b',
-    'recovery-a', 'recovery-b',
+    'recovery-a', 'recovery-b', 'creator-a', 'creator-b',
   ]
     .map((prefix) => `${prefix}-${suffix}`);
   const [
     happyA, happyB, declineA, declineB, reuseA, reuseB, scanA, scanB,
-    raceA, raceB, collisionA, collisionB, recoveryA, recoveryB,
-  ] = userIds as [string, string, string, string, string, string, string, string, string, string, string, string, string, string];
+    raceA, raceB, collisionA, collisionB, recoveryA, recoveryB, creatorA, creatorB,
+  ] = userIds as [string, string, string, string, string, string, string, string, string, string, string, string, string, string, string, string];
   let driver: Driver;
   let service: typeof import('../src/services/agentNetwork.js');
   let directService: typeof import('../src/services/directConversation.js');
@@ -262,6 +262,39 @@ integration('agent-network quiet-match loop', () => {
         { a: raceA, b: raceB },
       );
       expect(result.records[0].get('count').toNumber()).toBe(1);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('shares one atomic claim across direct-conversation creation paths', async () => {
+    const [normal, tool] = await Promise.all([
+      directService.ensureDirectConversation(creatorA, creatorB),
+      assistantService.createConversationForAssistant(undefined, creatorA, [creatorB], 'Pair'),
+    ]);
+    expect((tool as { id: string }).id).toBe(normal.conversation.id);
+
+    const [assistantDelivery, assistantRoute] = await Promise.all([
+      assistantService.ensureAssistantConversation(creatorB),
+      directService.ensureDirectConversation(creatorB, 'assistant'),
+    ]);
+    expect(assistantDelivery).toBe(assistantRoute.conversation.id);
+
+    const session = driver.session();
+    try {
+      const result = await session.run(
+        `MATCH (:User {id: $a})-[:PARTICIPATES_IN]->(humanDm:Conversation {type: 'direct'})
+         MATCH (:User {id: $b})-[:PARTICIPATES_IN]->(humanDm)
+         WITH count(DISTINCT humanDm) AS humanDmCount
+         MATCH (:User {id: $b})-[:PARTICIPATES_IN]->(assistantDm:Conversation {type: 'direct'})
+         MATCH (:User {id: $assistantId})-[:PARTICIPATES_IN]->(assistantDm)
+         RETURN humanDmCount, count(DISTINCT assistantDm) AS assistantDmCount,
+                collect(DISTINCT assistantDm.containsBot) AS containsBot`,
+        { a: creatorA, b: creatorB, assistantId: 'assistant' },
+      );
+      expect(result.records[0].get('humanDmCount').toNumber()).toBe(1);
+      expect(result.records[0].get('assistantDmCount').toNumber()).toBe(1);
+      expect(result.records[0].get('containsBot')).toEqual([true]);
     } finally {
       await session.close();
     }

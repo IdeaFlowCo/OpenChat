@@ -482,16 +482,27 @@ async function toolSendMessage(
   return { ok: true, messageId: persisted.message.id, conversationId };
 }
 
-async function toolCreateConversation(
+export async function createConversationForAssistant(
   io: IOServer | undefined,
   userId: string,
   participantIds: string[],
   title?: string
 ): Promise<unknown> {
+  const allParticipants = [userId, ...new Set(participantIds.filter((id) => id !== userId))];
+  const type = allParticipants.length <= 2 ? 'direct' : 'group';
+
+  if (type === 'direct') {
+    const result = await ensureDirectConversation(userId, allParticipants[1] ?? userId, io, title);
+    return {
+      id: result.conversation.id,
+      type,
+      title: result.conversation.title ?? null,
+      participantIds: allParticipants,
+    };
+  }
+
   const conversationId = nanoid();
   const now = new Date().toISOString();
-  const type = participantIds.filter((id) => id !== userId).length <= 1 ? 'direct' : 'group';
-  const allParticipants = [userId, ...participantIds.filter((id) => id !== userId)];
 
   const s = getDriver().session();
   try {
@@ -756,7 +767,7 @@ async function executeTool(
           : [];
         const title = typeof input.title === 'string' ? input.title : undefined;
         if (participantIds.length === 0) return { error: 'participantIds is required' };
-        return await toolCreateConversation(io, userId, participantIds, title);
+        return await createConversationForAssistant(io, userId, participantIds, title);
       }
       case 'submit_feedback': {
         const message = typeof input.message === 'string' ? input.message : '';
