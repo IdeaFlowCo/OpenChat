@@ -10,10 +10,17 @@ import {
   rememberAuthNotice,
 } from '../utils/authSession';
 
+interface CurrentUserState {
+  userId: string;
+  email: string;
+  name?: string;
+  canBrowseUserDirectory?: boolean;
+}
+
 interface ChatContextValue {
   // Auth
   token: string | null;
-  currentUser: { userId: string; email: string; name?: string } | null;
+  currentUser: CurrentUserState | null;
   login: (token: string) => boolean;
   noosLogin: (email: string, password: string) => Promise<void>;
   noosRegister: (email: string, password: string, name: string) => Promise<void>;
@@ -95,7 +102,7 @@ function sortByRecent(list: Conversation[]): Conversation[] {
 export function ChatProvider({ children }: { children: ReactNode }) {
   // Auth state
   const [token, setToken] = useState<string | null>(() => getStoredToken());
-  const [currentUser, setCurrentUser] = useState<{ userId: string; email: string; name?: string } | null>(() => {
+  const [currentUser, setCurrentUser] = useState<CurrentUserState | null>(() => {
     return token ? getStoredUser() : null;
   });
 
@@ -443,6 +450,25 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       .catch(error => {
         if (!cancelled && !isAuthError(error)) console.error('Failed to load agent matches:', error);
       });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    api.getMe()
+      .then(me => {
+        if (cancelled) return;
+        const user: CurrentUserState = {
+          userId: me.id,
+          email: me.email,
+          name: me.name,
+          canBrowseUserDirectory: me.canBrowseUserDirectory === true,
+        };
+        setCurrentUser(user);
+        localStorage.setItem('openchat_user', JSON.stringify(user));
+      })
+      .catch(error => console.warn('[ChatContext] current-user refresh failed:', error));
     return () => { cancelled = true; };
   }, [token]);
 

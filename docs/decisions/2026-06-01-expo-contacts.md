@@ -33,8 +33,8 @@ Even if we hash phone numbers client-side, asking for Contacts conditions every 
 
 - **QR add-user** (OpenChat-wtb) — peer-to-peer, no permission needed
 - **Per-group invite QR + universal link** (OpenChat-240, OpenChat-84u.1 — shipped this session) — share a link in any messaging app
-- **User search + conversation creation** in /m/, /d/, native (`GET /api/chat/search`, then `POST /api/chat/conversations` with `participantIds`) — works for any user who can find the other account
-- **Search screen** with autocomplete over `/api/chat/contacts` — works for already-connected users
+- **User search + conversation creation** in /m/, /d/, native (`GET /api/chat/search`, then `POST /api/chat/conversations` with `participantIds`) — ordinary members can find another account by complete email; trusted directory callers can also search partial names/emails
+- **Contact picker** over `/api/chat/contacts` — supports the same exact-email or trusted-directory discovery rules
 
 These cover ~80% of the IRL onboarding moments (meet someone, scan their QR, or get their email).
 

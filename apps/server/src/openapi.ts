@@ -502,10 +502,10 @@ export const openapiSpec = {
       },
     },
     '/api/chat/contacts': {
-      get: { operationId: 'listContacts', tags: ['Chat'], summary: 'List users (for starting conversations)', parameters: [{ name: 'q', in: 'query', schema: { type: 'string' }, description: "Filter by name/email; 'self'/'me' matches the caller" }], responses: { '200': ok({ type: 'array', items: { type: 'object' } }) } },
+      get: { operationId: 'listContacts', tags: ['Chat'], summary: 'Find a user for starting a conversation', description: 'Ordinary members get only themselves for an empty/self query and need a complete, case-insensitive exact email for another person. Callers with server-granted trusted directory access may browse and use partial name/email queries.', parameters: [{ name: 'q', in: 'query', schema: { type: 'string' }, description: "Complete email address or 'self'/'me'/'myself'; trusted directory callers may also use a partial name/email or omit the query to browse" }], responses: { '200': ok({ type: 'array', items: { type: 'object' } }) } },
     },
     '/api/chat/search': {
-      get: { operationId: 'searchMessages', tags: ['Chat'], summary: 'Search messages', parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }) } },
+      get: { operationId: 'searchMessages', tags: ['Chat'], summary: 'Search messages and conversations', description: 'Contact results require self keywords or a complete exact email for ordinary members; callers with server-granted trusted directory access may use partial name/email queries.', parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }) } },
     },
     '/api/chat/presence': {
       put: { operationId: 'updatePresence', tags: ['Chat'], summary: 'Update your presence', requestBody: { required: true, content: json({ type: 'object', properties: { presenceStatus: { type: 'string' }, statusMessage: { type: 'string' } } }) }, responses: { '200': ok({ type: 'object' }) } },

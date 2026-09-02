@@ -8,7 +8,7 @@ OpenChat is a GChat-inspired messaging application that integrates with the Noos
 
 ### Backend (port 41851)
 - **Express + Socket.io** for REST API and real-time messaging
-- **Neo4j** graph database (same as Noos - production: `bolt://44.211.180.200:7687`)
+- **Neo4j** graph database (same as Noos; production is self-hosted on GCP Compute Engine and configured through `NEO4J_URI`)
 - **JWT authentication** (shared secret with Noos for SSO), `oc_` agent API keys for bot/script access, and a separate `OC_BRIDGE_SECRET` for the trusted SocialSphere → OpenChat identity bridge
 
 ### Frontend (port 29231 dev)
@@ -26,15 +26,15 @@ OpenChat is a GChat-inspired messaging application that integrates with the Noos
 - Protected routes - redirect to login if not authenticated
 
 ### Contact Selection UI
-**Location:** `client/src/components/ChatSidebar.tsx`
+**Location:** `apps/web/src/components/ChatSidebar.tsx`
 
 Flow:
 1. User clicks "New" button in sidebar header
-2. Contacts are searched via API (`GET /api/chat/contacts?q=...`)
+2. A person is found via exact email, or by partial name/email when the caller has server-granted trusted directory access (`GET /api/chat/contacts?q=...`)
 3. Contact picker UI slides in with:
    - Back button to return to conversation list
-   - Search input for filtering by name/email (client-side)
-   - Scrollable list of contacts with:
+   - Search input reflecting the caller's exact-email or trusted-directory access
+   - Matching person rows with:
      - Avatar (first letter of name)
      - Presence indicator (green/yellow/red dot)
      - Name and status message
@@ -44,8 +44,9 @@ Flow:
    - Returns to conversation view
 
 ### Contact Search (API)
-- `GET /api/chat/contacts?q=search` - server-side filter by name/email substring (case-insensitive)
-- `GET /api/chat/users/by-email/:email` - exact email lookup
+- `GET /api/chat/contacts?q=email` - ordinary members use exact, case-insensitive email discovery and empty/self returns only the caller; server-granted trusted directory callers may browse and use partial name/email
+- `GET /api/chat/users/by-email/:email` - exact, case-insensitive email lookup
+- No browsable public account directory; a narrowly granted trusted-directory capability supports club operators while existing conversations and private invite/QR flows provide relationship-scoped discovery
 
 ### Conversations
 - List conversations in sidebar with last message preview
@@ -162,7 +163,7 @@ App.tsx
 - `POST /api/chat/conversations/:id/messages` - Send message
 - `POST /api/chat/messages/:id/reactions` - Add a plain reaction or `filed` receipt reaction with `href` (JWT or agent key)
 - `DELETE /api/chat/messages/:id/reactions/:emoji` - Remove own plain reaction; `?kind=filed` removes a filed receipt (JWT or agent key)
-- `GET /api/chat/contacts` - List all users (supports ?q= search)
+- `GET /api/chat/contacts` - Return self or an exact-email match for ordinary members; trusted directory callers may browse and search partial names/emails
 - `GET /api/chat/users/by-email/:email` - Direct email lookup
 - `PUT /api/chat/presence` - Update own presence
 
@@ -192,4 +193,4 @@ App.tsx
 3. **Chat nodes don't inherit :Node** - Keeps chat immutable, knowledge editable
 4. **JWT sharing** - Same secret allows seamless SSO between OpenChat and Noos
 5. **Identity bridge separation** - SocialSphere uses `OC_BRIDGE_SECRET`, distinct from `JWT_SECRET`, to assert verified emails and receive normal OpenChat user JWTs; email verification stays upstream in SocialSphere
-6. **Client-side contact filtering** - Simple, fast for small user counts; API search for larger scale
+6. **Private contact discovery** - No public account directory; ordinary members require an exact complete email, QR code, or private group invite, while trusted directory access is granted only by operators

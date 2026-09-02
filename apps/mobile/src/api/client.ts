@@ -83,6 +83,7 @@ export interface User {
   avatarUrl?: string;
   /** True for AI / agent users (picortex, future agents). Surface as a badge. */
   isBot?: boolean;
+  canBrowseUserDirectory?: boolean;
 }
 
 export interface Participant {
@@ -229,6 +230,7 @@ export interface CurrentUser {
   userId: string;
   email: string;
   name?: string;
+  canBrowseUserDirectory?: boolean;
 }
 
 let memToken: string | null = null;
@@ -678,6 +680,7 @@ async function requestJsonDownload(path: string, fallbackFilename: string): Prom
 }
 
 export const api = {
+  getMe: () => request<User>('/api/auth/me'),
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
   getConversation: (conversationId: string) =>
     request<Conversation>(`/api/chat/conversations/${conversationId}`),

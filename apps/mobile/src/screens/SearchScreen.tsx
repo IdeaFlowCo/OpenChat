@@ -1,5 +1,6 @@
 /**
- * Search — combined search across messages, conversations, and contacts.
+ * Search — combined search across messages and conversations, plus exact-email
+ * people discovery.
  *
  * Mirrors the web client's SearchResultsPanel in ChatSidebar.tsx but
  * presents as a full-screen modal on mobile. Three result sections,
@@ -249,7 +250,9 @@ export function SearchScreen() {
           style={[styles.input, { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border }]}
           value={query}
           onChangeText={setQuery}
-          placeholder="Search messages, conversations, people"
+          placeholder={currentUser?.canBrowseUserDirectory
+            ? 'Search chats or people'
+            : 'Search chats; full email finds people'}
           placeholderTextColor={c.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
@@ -261,7 +264,9 @@ export function SearchScreen() {
       {trimmed.length < MIN_QUERY_LEN ? (
         <View style={styles.empty}>
           <Text style={{ color: c.textSecondary, textAlign: 'center', paddingHorizontal: 32 }}>
-            Type at least {MIN_QUERY_LEN} characters to search across messages, conversations, and contacts.
+            {currentUser?.canBrowseUserDirectory
+              ? 'Search messages, conversations, and people by name or email.'
+              : 'Search messages and conversations. To find a person, enter their complete email address.'}
           </Text>
         </View>
       ) : showEmpty && !loading ? (

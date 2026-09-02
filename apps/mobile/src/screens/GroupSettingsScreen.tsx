@@ -294,11 +294,16 @@ export function GroupSettingsScreen() {
                       }]}
                       value={addQuery}
                       onChangeText={setAddQuery}
-                      placeholder="Search by name or email"
+                      placeholder={currentUser?.canBrowseUserDirectory ? 'Search by name or email' : 'Enter a complete email address'}
                       placeholderTextColor={c.textMuted}
                       autoCapitalize="none"
                       autoCorrect={false}
                     />
+                    <Text style={{ color: c.textMuted, fontSize: 12, marginTop: 6 }}>
+                      {currentUser?.canBrowseUserDirectory
+                        ? 'Trusted directory access is enabled, or use the private QR / invite link above.'
+                        : 'Exact email only, or use the private QR / invite link above.'}
+                    </Text>
                     {addResults.slice(0, 10).map(u => (
                       <TouchableOpacity
                         key={u.id}

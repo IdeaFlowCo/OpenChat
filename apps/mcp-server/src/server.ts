@@ -269,11 +269,11 @@ export function buildServer(
     {
       title: 'Search messages',
       description:
-        'Full-text search across the messages, conversations, and contacts the authenticated user can see. ' +
+        'Full-text search across the authenticated user\'s messages and conversations. Contact results require a complete exact email or self keyword for ordinary members; callers with server-granted trusted directory access may use partial names or emails. ' +
         'Maps to GET /api/chat/search. Returns matching message hits (with sender, conversation, and timestamp), ' +
         'plus any matching conversations and contacts.',
       inputSchema: {
-        query: z.string().min(1).describe('Search query string'),
+        query: z.string().min(1).describe('Message/conversation query; for people, use a complete email or self keyword unless trusted directory access permits partial name/email search'),
         limit: z
           .number()
           .int()
@@ -326,14 +326,14 @@ export function buildServer(
     {
       title: 'List contacts',
       description:
-        'List the contacts (users) available to the authenticated user. Maps to GET /api/chat/contacts. ' +
-        'Pass an optional query to filter by name or email; the special value "me" or "self" matches the caller. ' +
+        'Find contacts available to the authenticated user. Maps to GET /api/chat/contacts. ' +
+        'Ordinary members get only themselves for an empty or self query and need a complete exact email for another person. Callers with server-granted trusted directory access may browse and filter by partial name/email. ' +
         'Each entry includes id, name, email, and presence — use the id with oc_create_conversation.',
       inputSchema: {
         query: z
           .string()
           .optional()
-          .describe('Optional filter by name/email. "me" or "self" matches the caller.'),
+          .describe('Complete email or "me"/"self"; trusted directory callers may use a partial name/email or omit this to browse.'),
       },
     },
     async ({ query }) => {

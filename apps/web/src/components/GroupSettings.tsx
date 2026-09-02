@@ -61,7 +61,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
   // Search when adding members
   useEffect(() => {
     if (!showAdd) return;
-    if (debouncedSearch.length === 0) {
+    if (debouncedSearch.length === 0 && !currentUser?.canBrowseUserDirectory) {
       setResults([]);
       return;
     }
@@ -78,7 +78,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
     return () => {
       cancelled = true;
     };
-  }, [debouncedSearch, showAdd, searchContacts, conversation.participants]);
+  }, [debouncedSearch, showAdd, searchContacts, conversation.participants, currentUser?.canBrowseUserDirectory]);
 
   if (!open) return null;
 
@@ -232,7 +232,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
                     type="text"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search to add member…"
+                    placeholder={currentUser?.canBrowseUserDirectory ? 'Search by name or email…' : 'Enter a complete email address…'}
                     className="flex-1 px-3 py-2 min-h-[40px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-lg focus:outline-none focus:border-blue-500 text-base"
                     autoFocus
                   />
@@ -243,7 +243,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
                     Cancel
                   </button>
                 </div>
-                {search.length > 0 && (
+                {(search.length > 0 || currentUser?.canBrowseUserDirectory) && (
                   <div className="max-h-48 overflow-y-auto bg-white dark:bg-slate-900 rounded border border-gray-200 dark:border-slate-700">
                     {isSearching ? (
                       <div className="p-3 text-sm text-gray-500 dark:text-slate-400 text-center">Searching…</div>
