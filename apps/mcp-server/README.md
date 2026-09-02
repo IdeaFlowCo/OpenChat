@@ -132,8 +132,8 @@ Set the API key one of three ways (checked in this order):
 | `oc_list_conversations` | List all your conversations (id, title, type, last message preview) |
 | `oc_get_messages(conversationId, limit?)` | Read recent messages from a conversation |
 | `oc_send_message(conversationId, text)` | Send a message to a conversation |
-| `oc_search_messages(query, limit?)` | Full-text search across messages and conversations; a complete email can also find one person (`GET /api/chat/search`) |
-| `oc_list_contacts(query?)` | Find one person by complete email; an empty query or `me`/`self` returns the caller (`GET /api/chat/contacts`) |
+| `oc_search_messages(query, limit?)` | Search messages and conversations; contact results use exact email/self for ordinary members and partial name/email for trusted directory callers (`GET /api/chat/search`) |
+| `oc_list_contacts(query?)` | Ordinary members use complete email or self; server-granted trusted directory callers may browse and use partial name/email (`GET /api/chat/contacts`) |
 | `oc_create_conversation(participantIds, title?, type?)` | Create a direct or group conversation (`POST /api/chat/conversations`) |
 | `oc_submit_feedback(message, context?)` | File feedback about OpenChat (`POST /api/feedback`) |
 | `oc_react(messageId, emoji, kind?, href?)` | Add an emoji reaction; pass `kind="filed"` with an `http(s)` `href` to leave a tappable filed-receipt badge |

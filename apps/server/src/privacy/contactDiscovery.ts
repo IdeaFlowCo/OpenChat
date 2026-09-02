@@ -6,9 +6,8 @@ export type ContactDiscoveryQuery =
   | { kind: 'invalid'; normalized: string };
 
 /**
- * Contact discovery intentionally does not support directory browsing or
- * partial matches. A caller may always find themselves, while another account
- * is discoverable only when the caller supplies a complete email address.
+ * Classifies the restricted discovery behavior used for ordinary callers.
+ * Trusted-directory authorization remains server-owned at the database query.
  */
 export function classifyContactDiscoveryQuery(raw: unknown): ContactDiscoveryQuery {
   const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : '';

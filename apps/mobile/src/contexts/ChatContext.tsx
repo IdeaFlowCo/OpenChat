@@ -30,6 +30,7 @@ import {
   User,
   getUser,
   getToken,
+  setSession,
   clearSession,
   onAuthExpired,
 } from '../api/client';
@@ -315,7 +316,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setIsAuthed(false);
       return false;
     }
-    const u = await getUser();
+    let u = await getUser();
+    try {
+      const me = await api.getMe();
+      u = {
+        userId: me.id,
+        email: me.email,
+        name: me.name,
+        canBrowseUserDirectory: me.canBrowseUserDirectory === true,
+      };
+      await setSession(token, u);
+    } catch (error) {
+      console.warn('[ChatContext] current-user refresh failed:', error);
+    }
     setCurrentUser(u);
     setIsAuthed(true);
     try {

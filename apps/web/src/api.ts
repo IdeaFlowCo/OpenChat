@@ -43,6 +43,7 @@ export interface User {
    * can tell who they're talking to. OpenChat-aoy / agent-chat vision.
    */
   isBot?: boolean;
+  canBrowseUserDirectory?: boolean;
 }
 
 /** Image or audio attachment on a message (OpenChat-6bg / voice OpenChat-xxc). */

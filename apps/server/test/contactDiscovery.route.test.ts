@@ -60,6 +60,7 @@ describe('private contact discovery routes', () => {
   beforeEach(() => {
     mocks.run.mockReset();
     mocks.close.mockReset();
+    mocks.run.mockResolvedValue({ records: [] });
   });
 
   afterAll(async () => {
@@ -69,7 +70,7 @@ describe('private contact discovery routes', () => {
   });
 
   it('returns only the caller for an empty contact query', async () => {
-    mocks.run.mockResolvedValueOnce(resultWith(caller));
+    mocks.run.mockResolvedValue(resultWith(caller));
 
     const response = await fetch(`${baseUrl}/api/chat/contacts`, {
       headers: { Authorization: authorization },
@@ -79,13 +80,14 @@ describe('private contact discovery routes', () => {
     expect(await response.json()).toEqual([caller]);
     expect(mocks.run).toHaveBeenCalledWith(expect.stringContaining('u.id = $userId'), {
       userId: caller.id,
+      search: '',
       selfOnly: true,
       email: '',
     });
   });
 
   it.each(['me', 'self', 'myself'])('returns only the caller for the %s keyword', async keyword => {
-    mocks.run.mockResolvedValueOnce(resultWith(caller));
+    mocks.run.mockResolvedValue(resultWith(caller));
 
     const response = await fetch(`${baseUrl}/api/chat/contacts?q=${keyword}`, {
       headers: { Authorization: authorization },
@@ -95,23 +97,25 @@ describe('private contact discovery routes', () => {
     expect(await response.json()).toEqual([caller]);
     expect(mocks.run).toHaveBeenCalledWith(expect.any(String), {
       userId: caller.id,
+      search: keyword,
       selfOnly: true,
       email: '',
     });
   });
 
-  it.each(['Alice', 'alice@', 'example.test', 'alice.other@example'])('does not query the database for partial discovery input %s', async partial => {
+  it.each(['Alice', 'alice@', 'example.test', 'alice.other@example'])('keeps the ordinary contact result empty for partial discovery input %s', async partial => {
     const response = await fetch(`${baseUrl}/api/chat/contacts?q=${encodeURIComponent(partial)}`, {
       headers: { Authorization: authorization },
     });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual([]);
-    expect(mocks.run).not.toHaveBeenCalled();
+    expect(mocks.run).toHaveBeenCalledTimes(1);
+    expect(String(mocks.run.mock.calls[0][0])).toContain('canBrowseUserDirectory');
   });
 
   it('normalizes a complete email and performs one exact lookup', async () => {
-    mocks.run.mockResolvedValueOnce(resultWith(other));
+    mocks.run.mockResolvedValue(resultWith(other));
 
     const response = await fetch(`${baseUrl}/api/chat/contacts?q=${encodeURIComponent('  ALICE.OTHER@EXAMPLE.TEST  ')}`, {
       headers: { Authorization: authorization },
@@ -121,9 +125,27 @@ describe('private contact discovery routes', () => {
     expect(await response.json()).toEqual([other]);
     expect(mocks.run).toHaveBeenCalledWith(expect.stringContaining('toLower(u.email) = $email'), {
       userId: caller.id,
+      search: 'alice.other@example.test',
       selfOnly: false,
       email: 'alice.other@example.test',
     });
+  });
+
+  it('lets a trusted directory caller browse and use partial name search', async () => {
+    mocks.run.mockResolvedValue(resultWith(other));
+
+    const browseResponse = await fetch(`${baseUrl}/api/chat/contacts`, {
+      headers: { Authorization: authorization },
+    });
+    const partialResponse = await fetch(`${baseUrl}/api/chat/contacts?q=Alice`, {
+      headers: { Authorization: authorization },
+    });
+
+    expect(await browseResponse.json()).toEqual([other]);
+    expect(await partialResponse.json()).toEqual([other]);
+    expect(String(mocks.run.mock.calls[0][0])).toContain('coalesce(actor.canBrowseUserDirectory, false)');
+    expect(mocks.run.mock.calls[0][1]).toMatchObject({ search: '' });
+    expect(mocks.run.mock.calls[1][1]).toMatchObject({ search: 'alice' });
   });
 
   it('uses the same exact-email rule in global search while preserving other search buckets', async () => {
@@ -148,6 +170,21 @@ describe('private contact discovery routes', () => {
     const contactCalls = mocks.run.mock.calls.filter(([cypher]) => String(cypher).includes('contactEmail'));
     expect(contactCalls[0][1]).toMatchObject({ selfOnly: false, contactEmail: '' });
     expect(contactCalls[1][1]).toMatchObject({ selfOnly: false, contactEmail: 'alice.other@example.test' });
+  });
+
+  it('uses trusted partial discovery in the contacts bucket of global search', async () => {
+    mocks.run.mockImplementation(async (cypher: string) => {
+      return cypher.includes('contactEmail') ? resultWith(other) : { records: [] };
+    });
+
+    const response = await fetch(`${baseUrl}/api/chat/search?q=Alice`, {
+      headers: { Authorization: authorization },
+    });
+
+    expect((await response.json()).contacts).toEqual([other]);
+    const contactCall = mocks.run.mock.calls.find(([cypher]) => String(cypher).includes('contactEmail'));
+    expect(String(contactCall?.[0])).toContain('coalesce(actor.canBrowseUserDirectory, false)');
+    expect(contactCall?.[1]).toMatchObject({ contactSearch: 'alice' });
   });
 
   it('normalizes case in the dedicated by-email lookup', async () => {

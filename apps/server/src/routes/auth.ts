@@ -342,7 +342,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
   try {
     const result = await session.run(`
       MATCH (u:User {id: $userId})
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .lastSeenAt, .isBot, .canBrowseUserDirectory } AS user
     `, { userId });
 
     if (result.records.length === 0) {

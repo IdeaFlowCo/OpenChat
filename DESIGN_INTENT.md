@@ -30,10 +30,10 @@ OpenChat is a GChat-inspired messaging application that integrates with the Noos
 
 Flow:
 1. User clicks "New" button in sidebar header
-2. A person is found via exact email through the API (`GET /api/chat/contacts?q=...`)
+2. A person is found via exact email, or by partial name/email when the caller has server-granted trusted directory access (`GET /api/chat/contacts?q=...`)
 3. Contact picker UI slides in with:
    - Back button to return to conversation list
-   - Search input requiring a complete email address
+   - Search input reflecting the caller's exact-email or trusted-directory access
    - A matching person row with:
      - Avatar (first letter of name)
      - Presence indicator (green/yellow/red dot)
@@ -44,9 +44,9 @@ Flow:
    - Returns to conversation view
 
 ### Contact Search (API)
-- `GET /api/chat/contacts?q=email` - exact, case-insensitive email discovery; empty/self queries return only the caller
+- `GET /api/chat/contacts?q=email` - ordinary members use exact, case-insensitive email discovery and empty/self returns only the caller; server-granted trusted directory callers may browse and use partial name/email
 - `GET /api/chat/users/by-email/:email` - exact, case-insensitive email lookup
-- No browsable public account directory; existing conversations and private invite/QR flows provide relationship-scoped discovery
+- No browsable public account directory; a narrowly granted trusted-directory capability supports club operators while existing conversations and private invite/QR flows provide relationship-scoped discovery
 
 ### Conversations
 - List conversations in sidebar with last message preview
@@ -163,7 +163,7 @@ App.tsx
 - `POST /api/chat/conversations/:id/messages` - Send message
 - `POST /api/chat/messages/:id/reactions` - Add a plain reaction or `filed` receipt reaction with `href` (JWT or agent key)
 - `DELETE /api/chat/messages/:id/reactions/:emoji` - Remove own plain reaction; `?kind=filed` removes a filed receipt (JWT or agent key)
-- `GET /api/chat/contacts` - Return self, or find one user by complete email
+- `GET /api/chat/contacts` - Return self or an exact-email match for ordinary members; trusted directory callers may browse and search partial names/emails
 - `GET /api/chat/users/by-email/:email` - Direct email lookup
 - `PUT /api/chat/presence` - Update own presence
 
@@ -193,4 +193,4 @@ App.tsx
 3. **Chat nodes don't inherit :Node** - Keeps chat immutable, knowledge editable
 4. **JWT sharing** - Same secret allows seamless SSO between OpenChat and Noos
 5. **Identity bridge separation** - SocialSphere uses `OC_BRIDGE_SECRET`, distinct from `JWT_SECRET`, to assert verified emails and receive normal OpenChat user JWTs; email verification stays upstream in SocialSphere
-6. **Private contact discovery** - No public account directory; other people require an exact complete email, QR code, or private group invite
+6. **Private contact discovery** - No public account directory; ordinary members require an exact complete email, QR code, or private group invite, while trusted directory access is granted only by operators

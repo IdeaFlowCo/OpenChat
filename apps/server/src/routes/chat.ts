@@ -1090,28 +1090,35 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
 
 // GET /api/chat/contacts - Find a user for starting a conversation.
 // Empty/self queries return only the caller. Other users require a complete,
-// case-insensitive email match; there is intentionally no browsable directory.
+// case-insensitive email match unless the caller has trusted directory access.
 router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
-  const discovery = classifyContactDiscoveryQuery(req.query.q);
 
   try {
-    if (discovery.kind === 'invalid') {
-      res.json([]);
-      return;
-    }
+    const discovery = classifyContactDiscoveryQuery(req.query.q);
 
     const query = `
+        MATCH (actor:User {id: $userId})
+        WITH coalesce(actor.canBrowseUserDirectory, false) AS directoryAccess
         MATCH (u:User)
-        WHERE ($selfOnly = true AND u.id = $userId)
-           OR ($email <> '' AND toLower(u.email) = $email)
+        WHERE (directoryAccess = true AND (
+                 $search = ''
+                 OR toLower(coalesce(u.name, '')) CONTAINS $search
+                 OR toLower(coalesce(u.email, '')) CONTAINS $search
+                 OR ($selfOnly = true AND u.id = $userId)
+               ))
+           OR (directoryAccess = false AND (
+                 ($selfOnly = true AND u.id = $userId)
+                 OR ($email <> '' AND toLower(u.email) = $email)
+               ))
         RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
-        LIMIT 1
+        ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
       `;
 
     const result = await session.run(query, {
       userId,
+      search: discovery.normalized,
       selfOnly: discovery.kind === 'self',
       email: discovery.kind === 'email' ? discovery.normalized : '',
     });
@@ -1140,8 +1147,8 @@ router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
 //     message in the graph.
 //   - Conversations: same — only conversations the user is a member of are
 //     considered, and we match by title.
-//   - Contacts: the caller for self keywords, or another user only when q is
-//     a complete email address matching exactly (case-insensitive).
+//   - Contacts: trusted directory users may browse by partial name/email;
+//     other callers get self keywords or complete exact-email matches.
 //
 // Backed by CONTAINS (case-insensitive via toLower) rather than a Neo4j
 // full-text index. Reasoning: CONTAINS works against the existing schema
@@ -1151,7 +1158,6 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const rawQ = (req.query.q ?? '') as string;
   const q = typeof rawQ === 'string' ? rawQ.trim() : '';
-  const contactDiscovery = classifyContactDiscoveryQuery(q);
   const scope = (req.query.scope as string) === 'conversation' ? 'conversation' : 'global';
   const conversationId = req.query.conversationId as string | undefined;
   // openchat-bfn.2: optional semantic/hybrid mode for the messages bucket.
@@ -1229,6 +1235,8 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
       }
     }
 
+    const contactDiscovery = classifyContactDiscoveryQuery(q);
+
     // Global scope: run three independent searches in parallel.
     //
     // Notes:
@@ -1237,8 +1245,7 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
     // - Conversations matches on the conversation TITLE only. Participant
     //   details remain available inside conversations the caller already
     //   belongs to; they are never used as a global people directory.
-    // - Contacts are not a directory: self keywords or a complete exact email
-    //   are the only discovery paths.
+    // - Contacts follow the caller's server-owned discovery capability.
     //
     // Each query runs on its OWN session: a single Neo4j session cannot run
     // multiple queries concurrently (Promise.all on one session throws
@@ -1287,19 +1294,28 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
         LIMIT $limit
       `, { userId, q, limit: neo4j.int(limit) }),
 
-      // Contacts: self, or one case-insensitive exact email match. Passing an
-      // empty contactEmail for partial/name queries makes this bucket empty
-      // while message and conversation search continue to work normally.
       runQ(`
+        MATCH (actor:User {id: $userId})
+        WITH coalesce(actor.canBrowseUserDirectory, false) AS directoryAccess
         MATCH (u:User)
-        WHERE ($selfOnly = true AND u.id = $userId)
-           OR ($contactEmail <> '' AND toLower(u.email) = $contactEmail)
+        WHERE (directoryAccess = true AND (
+                 toLower(coalesce(u.name, '')) CONTAINS $contactSearch
+                 OR toLower(coalesce(u.email, '')) CONTAINS $contactSearch
+                 OR ($selfOnly = true AND u.id = $userId)
+               ))
+           OR (directoryAccess = false AND (
+                 ($selfOnly = true AND u.id = $userId)
+                 OR ($contactEmail <> '' AND toLower(u.email) = $contactEmail)
+               ))
         RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
-        LIMIT 1
+        ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
+        LIMIT $limit
       `, {
         userId,
+        contactSearch: contactDiscovery.normalized,
         selfOnly: contactDiscovery.kind === 'self',
         contactEmail: contactDiscovery.kind === 'email' ? contactDiscovery.normalized : '',
+        limit: neo4j.int(limit),
       }),
     ]);
 

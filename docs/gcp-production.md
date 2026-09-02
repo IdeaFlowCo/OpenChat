@@ -59,6 +59,53 @@ gcloud compute ssh noos \
   --command='sudo docker logs openchat_app --since 30m'
 ```
 
+### Trusted user-directory access
+
+`User.canBrowseUserDirectory` is a sparse, server-owned capability. Ordinary
+signup, login, identity-bridge, and profile-update requests cannot set it. Grant
+it only to people who need to operate a trusted club or mutual-aid directory.
+
+Connect to the production Neo4j shell without putting its password in shell
+history or process arguments; `cypher-shell` prompts for it:
+
+```bash
+gcloud compute ssh noos \
+  --project=lightsail-migration \
+  --zone=us-central1-a \
+  --command='sudo docker exec -it noos_neo4j cypher-shell -u neo4j'
+```
+
+In `cypher-shell`, set the normalized account email, inspect the target, and
+grant only when exactly one user matches:
+
+```cypher
+:param email => 'trusted-operator@example.com';
+MATCH (u:User) WHERE toLower(u.email) = toLower($email)
+RETURN u.id AS id, u.email AS email, coalesce(u.canBrowseUserDirectory, false) AS enabled;
+
+MATCH (u:User) WHERE toLower(u.email) = toLower($email)
+WITH collect(u) AS users
+WHERE size(users) = 1
+UNWIND users AS u
+SET u.canBrowseUserDirectory = true
+RETURN u.id AS id, u.email AS email, u.canBrowseUserDirectory AS enabled;
+```
+
+Revoke by removing the property, again only when exactly one user matches:
+
+```cypher
+MATCH (u:User) WHERE toLower(u.email) = toLower($email)
+WITH collect(u) AS users
+WHERE size(users) = 1
+UNWIND users AS u
+REMOVE u.canBrowseUserDirectory
+RETURN u.id AS id, u.email AS email, coalesce(u.canBrowseUserDirectory, false) AS enabled;
+```
+
+The change is effective for API authorization immediately. Web and mobile copy
+refreshes from `/api/auth/me` on the next authenticated app bootstrap; restart
+the client after a grant or revoke to refresh that copy.
+
 Secrets live in `/opt/openchat/.env` on the GCE instance and must not be copied
 into the repository. The live deployment still accepts the legacy `AWS_*`
 credential names because the AWS SDK is used as an S3-compatible client for

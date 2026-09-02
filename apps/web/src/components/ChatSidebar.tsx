@@ -537,14 +537,16 @@ export function ChatSidebar() {
             <input
               ref={searchInputRef}
               type="text"
-              placeholder="Enter a complete email address"
+              placeholder={currentUser?.canBrowseUserDirectory ? 'Search by name or email' : 'Enter a complete email address'}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full px-3 py-2 min-h-[40px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-lg focus:outline-none focus:border-blue-500 text-base"
               autoFocus
             />
             <p className="mt-1.5 text-xs text-gray-500 dark:text-slate-400">
-              People appear only after an exact email match. Accounts are not listed publicly.
+              {currentUser?.canBrowseUserDirectory
+                ? 'Trusted directory access is enabled for this account.'
+                : 'People appear only after an exact email match. Accounts are not listed publicly.'}
             </p>
 
             {/* Selected pills + Create button (group mode) */}
@@ -587,8 +589,6 @@ export function ChatSidebar() {
 
           <div className="flex-1 overflow-y-auto bg-white dark:bg-slate-900">
             {(() => {
-              // The empty state contains only the caller (note to self);
-              // other people require a complete email match.
               const browsing = searchTerm.length === 0;
               const list = browsing ? initialContacts : searchResults;
               const loading = browsing ? loadingInitialContacts : isSearching;
@@ -602,7 +602,9 @@ export function ChatSidebar() {
               if (list.length === 0) {
                 return (
                   <div className="p-4 text-center text-gray-500 dark:text-slate-400">
-                    {browsing ? 'Enter their complete email address to find them.' : `No exact email match for "${searchTerm}"`}
+                    {currentUser?.canBrowseUserDirectory
+                      ? (browsing ? 'No contacts yet' : `No contacts found for "${searchTerm}"`)
+                      : (browsing ? 'Enter their complete email address to find them.' : `No exact email match for "${searchTerm}"`)}
                   </div>
                 );
               }
@@ -670,7 +672,9 @@ export function ChatSidebar() {
                 type="search"
                 value={globalSearchTerm}
                 onChange={(e) => setGlobalSearchTerm(e.target.value)}
-                placeholder="Search chats; use full email for people…"
+                placeholder={currentUser?.canBrowseUserDirectory
+                  ? 'Search chats or people…'
+                  : 'Search chats; use full email for people…'}
                 className="w-full pl-8 pr-8 py-2 min-h-[36px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
                 aria-label="Search"
               />
