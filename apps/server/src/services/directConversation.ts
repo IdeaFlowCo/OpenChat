@@ -86,6 +86,7 @@ export async function ensureDirectConversation(
                     c.creationToken = $creationToken
       WITH c, c.creationToken = $creationToken AS created
       REMOVE c.creationToken
+      WITH c, created
       UNWIND $participantIds AS participantId
       MATCH (user:User {id: participantId})
       MERGE (user)-[rel:PARTICIPATES_IN]->(c)
