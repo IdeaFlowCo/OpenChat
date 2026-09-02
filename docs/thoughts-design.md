@@ -117,7 +117,19 @@ Status-having kinds use `previousId` for superseded chains (decisions) and a sep
 
 ---
 
-## Open questions (NOT resolved)
+### From 2026-09-02 (Jacob, via Claude session — resolves all five open questions below)
+
+| # | Decision | Resolution |
+|---|---|---|
+| D12 (Q1) | Open-threads-with-others visibility | **Opt-in shareable, default private.** Same per-thought "Send to…" affordance; implements naturally via the visibility set. |
+| D13 (Q2) | Relationship to Thoughtstreams / NoteStream | **NoteStream is the canonical note store; Thoughtstreams becomes the social-network view of NoteStream.** "Thoughtstream" is the general phenomenon with different filters over it; its data structure will closely mirror NoteStream notes. NoteStream is NOT mirrored onto Neo4j yet, so **OpenChat Thoughts keeps writing its own `:Thought` nodes in Neo4j for now**; when the NoteStream→Neo4j mirror lands, converge the schemas (they're already shaped alike). |
+| D14 (Q3) | Agents reading user thoughts | **Yes — agents should read your thoughts.** Keep the consent/permission-scope framing from Plan B when building it (explicit scope on first invocation). |
+| D15 (Q4) | Bot citation posture | Adopted as proposed: bots **reference** prior thoughts ("I recall you mentioned…") rather than quoting verbatim. Hard rule in the agent reply contract. |
+| D16 (Q5) | Leave-a-group semantics | **Shared thoughts stay visible to remaining members after the author leaves** — same as chat messages. |
+
+Note: pinning (shipped 2026-09-02, PR #22) implements the Plan B "visible to a conversation" case — `PINNED_IN` relationship + chat-scoped view.
+
+## Open questions (RESOLVED 2026-09-02 — see D12–D16 above; kept for context)
 
 ### Q1 — Are open-threads-with-others optionally visible to the other person?
 
