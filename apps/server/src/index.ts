@@ -25,7 +25,7 @@ import { ensureAssistantUser } from './services/assistant.js';
 import { ensureGroupbrainBotUser } from './services/groupbrainBot.js';
 import { ensureWebhookIndex } from './services/webhookDispatch.js';
 import { ensureVectorIndex } from './services/embeddings.js';
-import { ensureAgentIntentIndexes } from './services/agentNetwork.js';
+import { ensureAgentIntentIndexes, reconcileAgentDeliveries } from './services/agentNetwork.js';
 import { openapiSpec } from './openapi.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 import { parseCorsOrigins } from './config/cors.js';
@@ -460,6 +460,7 @@ async function start() {
 
     try {
       await ensureAgentIntentIndexes();
+      await reconcileAgentDeliveries(io);
       console.log('Agent intent indexes ensured');
     } catch (e) {
       console.error('Failed to ensure agent intent indexes:', e);

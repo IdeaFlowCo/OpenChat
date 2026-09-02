@@ -46,7 +46,7 @@ function notifyParticipants(
  * Return the one exact direct conversation for two users, or create it.
  * This is the canonical DM dedup path used by both the public chat route and
  * agent-network connections. A self-DM has one participant edge; a human DM
- * has exactly two. Newly created conversations are explicitly non-bot DMs.
+ * has exactly two.
  */
 export async function ensureDirectConversation(
   userId: string,
@@ -79,7 +79,8 @@ export async function ensureDirectConversation(
       )
       MERGE (c:Conversation {directPairKey: $directPairKey})
       ON CREATE SET c.id = $id, c.title = null, c.type = 'direct',
-                    c.containsBot = false, c.createdAt = datetime($now),
+                    c.containsBot = coalesce(first.isBot, false) OR coalesce(second.isBot, false),
+                    c.createdAt = datetime($now),
                     c.updatedAt = datetime($now), c.lastMessageAt = datetime($now),
                     c.creationToken = $creationToken
       WITH c, c.creationToken = $creationToken AS created

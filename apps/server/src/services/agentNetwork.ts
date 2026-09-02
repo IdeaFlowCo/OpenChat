@@ -257,13 +257,20 @@ async function postAgentCard(
   cardKind: 'match_proposal' | 'match_status',
   payload: Record<string, unknown>,
   content: string,
-): Promise<void> {
+  deliveryKey: string,
+): Promise<boolean> {
   const conversationId = await ensureAssistantConversation(userId, io);
-  await persistMessage(io, ASSISTANT_USER_ID, conversationId, content, {
+  const persisted = await persistMessage(io, ASSISTANT_USER_ID, conversationId, content, {
     messageType: 'card',
     cardKind,
     cardPayload: JSON.stringify(payload),
+    agentDeliveryKey: deliveryKey,
   });
+  return persisted?.created === true;
+}
+
+function matchDeliveryKey(kind: string, matchId: string, userId: string): string {
+  return JSON.stringify([kind, matchId, userId]);
 }
 
 function emitMatchUpdated(
@@ -276,29 +283,17 @@ function emitMatchUpdated(
 
 async function deliverProposal(
   io: IOServer | undefined,
-  matchId: string,
   ownerUserId: string,
-  ownIntent: MatchIntent,
-  otherIntent: MatchIntent,
-  createdAt: string,
+  match: AgentMatchProjection,
 ): Promise<void> {
-  const match = projectMatchForViewer({
-    id: matchId,
-    matchStatus: 'proposed',
-    ownResponse: null,
-    ownIntent,
-    otherIntent,
-    createdAt,
-    updatedAt: createdAt,
-  });
-  await postAgentCard(io, ownerUserId, 'match_proposal', {
-    matchId,
+  const created = await postAgentCard(io, ownerUserId, 'match_proposal', {
+    matchId: match.id,
     ownIntent: match.ownIntent,
     otherTerms: match.otherTerms,
     otherKind: match.otherKind,
     status: match.status,
-  }, 'Your agent found a possible match.');
-  emitMatchUpdated(io, ownerUserId, match);
+  }, 'Your agent found a possible match.', matchDeliveryKey('proposal', match.id, ownerUserId));
+  if (created) emitMatchUpdated(io, ownerUserId, match);
 }
 
 export async function createIntent(
@@ -396,14 +391,23 @@ const MATCH_PROJECTION_QUERY = `
          match.conversationId AS conversationId
 `;
 
-export async function listMatches(userId: string): Promise<AgentMatchProjection[]> {
+export async function listMatches(userId: string, io?: IOServer): Promise<AgentMatchProjection[]> {
   const session = getDriver().session();
   try {
     const result = await session.run(`${MATCH_PROJECTION_QUERY} ORDER BY createdAt DESC`, {
       userId,
       matchId: null,
     });
-    return result.records.map(projectionFromRecord);
+    const matches = result.records.map(projectionFromRecord);
+    return Promise.all(matches.map(async (match) => {
+      if (match.status === 'pending' || match.status === 'awaiting_other') {
+        await deliverProposal(io, userId, match);
+      } else if (match.status === 'connected') {
+        const current = await loadMatchForResponse(userId, match.id);
+        if (current) return (await completeConnectedMatch(userId, match.id, current, io)) ?? match;
+      }
+      return match;
+    }));
   } finally {
     await session.close();
   }
@@ -426,6 +430,7 @@ export async function scanIntentForMatches(
         AND NOT EXISTS {
           MATCH (existing:AgentMatch)-[:MATCHES]->(source)
           MATCH (existing)-[:MATCHES]->(candidate)
+          WHERE existing.status <> 'proposed'
         }
       RETURN source { .id, .kind, .terms, .ownerUserId } AS source,
              candidate { .id, .kind, .terms, .ownerUserId } AS candidate
@@ -474,6 +479,8 @@ export async function scanIntentForMatches(
                candidate { .id, .kind, .terms } AS candidate,
                sourceOwner.id AS sourceOwnerId,
                candidateOwner.id AS candidateOwnerId,
+               match.id AS resolvedMatchId,
+               match.status AS matchStatus,
                created
         `,
         {
@@ -486,15 +493,20 @@ export async function scanIntentForMatches(
           now,
         },
       );
-      if (created.records.length === 0 || !created.records[0].get('created')) continue;
-      createdIds.push(matchId);
+      if (created.records.length === 0) continue;
       const record = created.records[0];
-      const source = toJS(record.get('source')) as MatchIntent;
-      const candidate = toJS(record.get('candidate')) as MatchIntent;
-      await Promise.all([
-        deliverProposal(options.io, matchId, record.get('sourceOwnerId') as string, source, candidate, now),
-        deliverProposal(options.io, matchId, record.get('candidateOwnerId') as string, candidate, source, now),
-      ]);
+      const resolvedMatchId = record.get('resolvedMatchId') as string;
+      if (record.get('created')) createdIds.push(resolvedMatchId);
+      if (record.get('matchStatus') === 'proposed') {
+        const ownerIds = [
+          record.get('sourceOwnerId') as string,
+          record.get('candidateOwnerId') as string,
+        ];
+        const views = await Promise.all(ownerIds.map((ownerId) => loadMatchForResponse(ownerId, resolvedMatchId)));
+        await Promise.all(views.map((view, index) => view
+          ? deliverProposal(options.io, ownerIds[index]!, view.projection)
+          : Promise.resolve()));
+      }
     }
     return createdIds;
   } finally {
@@ -578,13 +590,62 @@ async function completeConnectedMatch(
   const updated = await loadMatchForResponse(userId, matchId);
   if (!updated) return null;
   const otherView = await loadMatchForResponse(updated.otherOwnerId, matchId);
-  await Promise.all([
-    postAgentCard(io, userId, 'match_status', { matchId, status: 'connected' }, 'Your match is connected.'),
-    postAgentCard(io, updated.otherOwnerId, 'match_status', { matchId, status: 'connected' }, 'Your match is connected.'),
+  const [ownStatusCreated, otherStatusCreated] = await Promise.all([
+    postAgentCard(
+      io,
+      userId,
+      'match_status',
+      { matchId, status: 'connected' },
+      'Your match is connected.',
+      matchDeliveryKey('connected', matchId, userId),
+    ),
+    postAgentCard(
+      io,
+      updated.otherOwnerId,
+      'match_status',
+      { matchId, status: 'connected' },
+      'Your match is connected.',
+      matchDeliveryKey('connected', matchId, updated.otherOwnerId),
+    ),
   ]);
-  emitMatchUpdated(io, userId, updated.projection);
-  if (otherView) emitMatchUpdated(io, updated.otherOwnerId, otherView.projection);
+  if (ownStatusCreated) emitMatchUpdated(io, userId, updated.projection);
+  if (otherStatusCreated && otherView) {
+    emitMatchUpdated(io, updated.otherOwnerId, otherView.projection);
+  }
   return updated.projection;
+}
+
+export async function reconcileAgentDeliveries(io?: IOServer): Promise<void> {
+  const session = getDriver().session();
+  let pending: Array<{ userId: string; matchId: string }> = [];
+  try {
+    const result = await session.run(
+      `MATCH (owner:User)-[:OWNS_INTENT]->(own:AgentIntent)<-[:MATCHES]-(match:AgentMatch)-[:MATCHES]->(other:AgentIntent)
+       WHERE own <> other AND match.status IN ['proposed', 'connected']
+       RETURN DISTINCT owner.id AS userId, match.id AS matchId`,
+    );
+    pending = result.records.map((record) => ({
+      userId: record.get('userId') as string,
+      matchId: record.get('matchId') as string,
+    }));
+  } finally {
+    await session.close();
+  }
+
+  const results = await Promise.allSettled(pending.map(async ({ userId, matchId }) => {
+    const current = await loadMatchForResponse(userId, matchId);
+    if (!current) return;
+    if (current.matchStatus === 'proposed') {
+      await deliverProposal(io, userId, current.projection);
+    } else {
+      await completeConnectedMatch(userId, matchId, current, io);
+    }
+  }));
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.warn('[agent-network] delivery reconciliation failed:', result.reason);
+    }
+  }
 }
 
 export async function respondToMatch(
@@ -596,8 +657,19 @@ export async function respondToMatch(
   const current = await loadMatchForResponse(userId, matchId);
   if (!current) return null;
   if (current.matchStatus !== 'proposed') {
-    if (current.matchStatus === 'connected' && !current.projection.conversationId) {
-      return completeConnectedMatch(userId, matchId, current, io);
+    if (current.matchStatus === 'connected') {
+      const completed = await completeConnectedMatch(userId, matchId, current, io);
+      return completed ? { ...completed, alreadyResolved: true } : null;
+    }
+    if (current.matchStatus === 'closed') {
+      await postAgentCard(
+        io,
+        userId,
+        'match_status',
+        { matchId, status: 'closed' },
+        'That match is now closed.',
+        matchDeliveryKey('closed', matchId, userId),
+      );
     }
     return { ...current.projection, alreadyResolved: true };
   }
@@ -644,7 +716,14 @@ export async function respondToMatch(
   }
 
   if (transitionStatus === 'closed') {
-    await postAgentCard(io, userId, 'match_status', { matchId, status: 'closed' }, 'That match is now closed.');
+    await postAgentCard(
+      io,
+      userId,
+      'match_status',
+      { matchId, status: 'closed' },
+      'That match is now closed.',
+      matchDeliveryKey('closed', matchId, userId),
+    );
     const otherView = await loadMatchForResponse(updated.otherOwnerId, matchId);
     emitMatchUpdated(io, userId, updated.projection);
     if (otherView) emitMatchUpdated(io, updated.otherOwnerId, otherView.projection);

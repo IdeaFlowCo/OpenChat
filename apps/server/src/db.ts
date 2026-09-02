@@ -43,6 +43,11 @@ export async function initDatabase(): Promise<void> {
     `);
 
     await session.run(`
+      CREATE CONSTRAINT message_agent_delivery IF NOT EXISTS
+      FOR (m:Message) REQUIRE m.agentDeliveryKey IS UNIQUE
+    `);
+
+    await session.run(`
       CREATE CONSTRAINT conversation_direct_pair IF NOT EXISTS
       FOR (c:Conversation) REQUIRE c.directPairKey IS UNIQUE
     `);

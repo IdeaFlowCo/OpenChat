@@ -211,16 +211,33 @@ integration('agent-network quiet-match loop', () => {
       service.scanIntentForMatches(offer.id, { scoring }),
     ]);
     expect(results.flat()).toHaveLength(1);
+    const matchId = results.flat()[0]!;
 
     const session = driver.session();
     try {
+      await session.run(
+        `MATCH (message:Message {agentDeliveryKey: $deliveryKey}) DETACH DELETE message`,
+        { deliveryKey: JSON.stringify(['proposal', matchId, scanA]) },
+      );
+      await Promise.all([
+        service.scanIntentForMatches(ask.id, { scoring }),
+        service.scanIntentForMatches(offer.id, { scoring }),
+      ]);
       const result = await session.run(
         `MATCH (match:AgentMatch)-[:MATCHES]->(intent:AgentIntent)
          WHERE intent.id IN [$askId, $offerId]
-         RETURN count(DISTINCT match) AS count`,
-        { askId: ask.id, offerId: offer.id },
+         WITH count(DISTINCT match) AS matchCount
+         MATCH (proposal:Message)
+         WHERE proposal.agentDeliveryKey IN $deliveryKeys
+         RETURN matchCount, count(proposal) AS proposalCount`,
+        {
+          askId: ask.id,
+          offerId: offer.id,
+          deliveryKeys: [scanA, scanB].map((userId) => JSON.stringify(['proposal', matchId, userId])),
+        },
       );
-      expect(result.records[0].get('count').toNumber()).toBe(1);
+      expect(result.records[0].get('matchCount').toNumber()).toBe(1);
+      expect(result.records[0].get('proposalCount').toNumber()).toBe(2);
     } finally {
       await session.close();
     }
@@ -299,20 +316,49 @@ integration('agent-network quiet-match loop', () => {
       await session.close();
     }
 
-    const recovered = await service.respondToMatch(recoveryA, matchId, 'approve');
+    const [recovered, concurrentRetry] = await Promise.all([
+      service.respondToMatch(recoveryA, matchId, 'approve'),
+      service.respondToMatch(recoveryB, matchId, 'approve'),
+    ]);
     expect(recovered?.status).toBe('connected');
     expect(recovered?.conversationId).toBeTruthy();
-
-    const retry = await service.respondToMatch(recoveryB, matchId, 'approve');
-    expect(retry?.alreadyResolved).toBe(true);
+    expect(concurrentRetry?.conversationId).toBe(recovered?.conversationId);
     const check = driver.session();
     try {
-      const result = await check.run(
-        `MATCH (message:Message {matchContextKey: $matchId})
-         RETURN count(message) AS count`,
-        { matchId },
+      await check.run(
+        `MATCH (message:Message)
+         WHERE message.agentDeliveryKey IN $statusKeys
+         DETACH DELETE message`,
+        {
+          statusKeys: [recoveryA, recoveryB]
+            .map((userId) => JSON.stringify(['connected', matchId, userId])),
+        },
       );
-      expect(result.records[0].get('count').toNumber()).toBe(1);
+      await Promise.all([
+        service.respondToMatch(recoveryA, matchId, 'approve'),
+        service.respondToMatch(recoveryB, matchId, 'approve'),
+      ]);
+      const result = await check.run(
+        `MATCH (context:Message {matchContextKey: $matchId})
+         WITH count(context) AS contextCount
+         MATCH (status:Message)
+         WHERE status.agentDeliveryKey IN $statusKeys
+         WITH contextCount, count(status) AS statusCount
+         MATCH (user:User)-[:PARTICIPATES_IN]->(assistantDm:Conversation {type: 'direct'})
+         MATCH (:User {id: $assistantId})-[:PARTICIPATES_IN]->(assistantDm)
+         WHERE user.id IN $userIds
+         RETURN contextCount, statusCount, count(DISTINCT assistantDm) AS assistantDmCount`,
+        {
+          matchId,
+          assistantId: 'assistant',
+          userIds: [recoveryA, recoveryB],
+          statusKeys: [recoveryA, recoveryB]
+            .map((userId) => JSON.stringify(['connected', matchId, userId])),
+        },
+      );
+      expect(result.records[0].get('contextCount').toNumber()).toBe(1);
+      expect(result.records[0].get('statusCount').toNumber()).toBe(2);
+      expect(result.records[0].get('assistantDmCount').toNumber()).toBe(2);
     } finally {
       await check.close();
     }

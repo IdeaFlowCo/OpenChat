@@ -74,7 +74,12 @@ router.patch('/intents/:id', resolveActor, async (req: Request, res: Response) =
 
 router.get('/matches', resolveActor, async (req: Request, res: Response) => {
   try {
-    res.json({ matches: await listMatches(req.user!.userId) });
+    res.json({
+      matches: await listMatches(
+        req.user!.userId,
+        req.app.get('io') as IOServer | undefined,
+      ),
+    });
   } catch (error) {
     console.error('Error listing matches:', error);
     res.status(500).json({ error: 'Failed to list matches' });
