@@ -13,6 +13,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Audio } from 'expo-av';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
+import { AppIcon } from './AppIcon';
 
 // ── Seeded waveform ───────────────────────────────────────────────────────────
 
@@ -60,11 +61,14 @@ interface Props {
   url: string;
   durationMs: number;
   isOwn: boolean;
+  /** Compact row — used when the transcript renders as the message text and
+   *  the audio is secondary (first-class transcripts, 2026-09-02). */
+  compact?: boolean;
 }
 
 type PlayState = 'idle' | 'loading' | 'playing' | 'paused';
 
-export function VoiceMessageBubble({ messageId, url, durationMs, isOwn }: Props) {
+export function VoiceMessageBubble({ messageId, url, durationMs, isOwn, compact }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
 
@@ -137,29 +141,36 @@ export function VoiceMessageBubble({ messageId, url, durationMs, isOwn }: Props)
   }, [playState, url]);
 
   // ── Colours ───────────────────────────────────────────────────────────────
-  const tint = isOwn ? 'rgba(255,255,255,0.9)' : c.primary;
-  const barBase = isOwn ? 'rgba(255,255,255,0.4)' : c.border;
-  const barActive = isOwn ? 'rgba(255,255,255,0.9)' : c.primary;
-  const textColor = isOwn ? 'rgba(255,255,255,0.8)' : c.textSecondary;
+  // Own-bubble overlays derive from the bubble text color (Ink & Paper: own
+  // bubbles are ink-on-paper light / paper-on-ink dark).
+  const ownRgb = (() => {
+    const hex = c.bubbleOwnText.replace('#', '');
+    return `${parseInt(hex.slice(0, 2), 16)},${parseInt(hex.slice(2, 4), 16)},${parseInt(hex.slice(4, 6), 16)}`;
+  })();
+  const tint = isOwn ? `rgba(${ownRgb},0.9)` : c.primary;
+  const barBase = isOwn ? `rgba(${ownRgb},0.4)` : c.border;
+  const barActive = isOwn ? `rgba(${ownRgb},0.9)` : c.primary;
+  const textColor = isOwn ? `rgba(${ownRgb},0.8)` : c.textSecondary;
 
   // Progress ratio (0–1).
   const total = durationMs > 0 ? durationMs : 1;
   const ratio = Math.min(progressMs / total, 1);
 
+  const barsShown = compact ? bars.slice(0, 16) : bars;
+  const barCount = barsShown.length;
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, compact && styles.containerCompact]}>
       {/* Play / pause button */}
       <TouchableOpacity onPress={() => void handlePlayPause()} style={styles.playBtn} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
-        <Text style={{ fontSize: 18, color: tint }}>
-          {playState === 'playing' ? '❚❚' : '▶'}
-        </Text>
+        <AppIcon name={playState === 'playing' ? 'pause' : 'play'} color={tint} size={compact ? 14 : 18} />
       </TouchableOpacity>
 
       {/* Waveform + progress dot */}
-      <View style={styles.waveWrap}>
-        <View style={styles.wave}>
-          {bars.map((h, i) => {
-            const barRatio = (i + 0.5) / BAR_COUNT;
+      <View style={[styles.waveWrap, compact && styles.waveWrapCompact]}>
+        <View style={[styles.wave, compact && styles.waveWrapCompact]}>
+          {barsShown.map((h, i) => {
+            const barRatio = (i + 0.5) / barCount;
             const isActive = barRatio <= ratio;
             return (
               <View
@@ -167,7 +178,7 @@ export function VoiceMessageBubble({ messageId, url, durationMs, isOwn }: Props)
                 style={[
                   styles.bar,
                   {
-                    height: 4 + h * 20,
+                    height: compact ? 3 + h * 10 : 4 + h * 20,
                     backgroundColor: isActive ? barActive : barBase,
                   },
                 ]}
@@ -205,6 +216,14 @@ const styles = StyleSheet.create({
     gap: 8,
     minWidth: 180,
     paddingVertical: 4,
+  },
+  containerCompact: {
+    minWidth: 130,
+    maxWidth: 190,
+    paddingVertical: 1,
+  },
+  waveWrapCompact: {
+    height: 16,
   },
   playBtn: {
     width: 32,

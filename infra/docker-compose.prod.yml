@@ -59,6 +59,9 @@ services:
       # set", embeddings silently no-op).
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Deepgram fast transcription for voice notes (2026-09-02). Whisper is
+      # the fallback when unset. Same compose-forwarding caveat as above.
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
       - ASSISTANT_MODEL=${ASSISTANT_MODEL:-claude-haiku-4-5}
       # File/attachment storage (S3/GCS) for image + VOICE uploads. Same
       # compose-forwarding caveat: without these the presign endpoint 503s

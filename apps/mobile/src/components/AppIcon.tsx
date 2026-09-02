@@ -17,7 +17,9 @@ export type AppIconName =
   | 'mic'
   | 'more'
   | 'mute'
+  | 'pause'
   | 'pin'
+  | 'play'
   | 'plus'
   | 'reply'
   | 'search'
@@ -72,12 +74,15 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
         </>
       )}
       {name === 'settings' && (
+        /* Sliders — unambiguous "preferences" (the old radiating-gear read as
+           a sun/theme-toggle at small sizes; see 2026-09-02 feedback). */
         <>
-          <Circle cx="12" cy="12" r="3.25" {...common} />
-          <Path
-            d="M12 2v3M12 19v3M2 12h3M19 12h3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M19.07 4.93l-2.12 2.12M7.05 16.95l-2.12 2.12"
-            {...common}
-          />
+          <Line x1="4" y1="7" x2="20" y2="7" {...common} />
+          <Circle cx="9.5" cy="7" r="2" {...common} fill="none" />
+          <Line x1="4" y1="12" x2="20" y2="12" {...common} />
+          <Circle cx="15" cy="12" r="2" {...common} fill="none" />
+          <Line x1="4" y1="17" x2="20" y2="17" {...common} />
+          <Circle cx="8" cy="17" r="2" {...common} fill="none" />
         </>
       )}
       {name === 'chevron-left' && (
@@ -219,6 +224,15 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
         <>
           <Path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" {...common} />
           <Path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8L19 16z" {...common} />
+        </>
+      )}
+      {name === 'play' && (
+        <Path d="M7 5.2v13.6c0 .8.9 1.3 1.6.9l10.8-6.8c.6-.4.6-1.4 0-1.8L8.6 4.3c-.7-.4-1.6.1-1.6.9z" fill={color} stroke="none" />
+      )}
+      {name === 'pause' && (
+        <>
+          <Path d="M7.5 5h2.2v14H7.5z" fill={color} stroke="none" />
+          <Path d="M14.3 5h2.2v14h-2.2z" fill={color} stroke="none" />
         </>
       )}
       {name === 'x' && (
