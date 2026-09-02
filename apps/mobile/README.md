@@ -1,8 +1,9 @@
 # openchat-mobile
 
-React Native (Expo) OpenChat app. Connects to the same production backend at
-`https://chat.globalbr.ai` and also exports the RN-web builds served at `/m`
-and `/d`.
+React Native (Expo) OpenChat implementation. Its native iOS and Android builds
+are private experiments. It connects to the production backend at
+`https://chat.globalbr.ai` and exports the experimental RN-web previews served
+at `/m` and `/d`.
 
 ## What works today (v0 scaffold)
 
@@ -55,7 +56,7 @@ Defaults are the production URLs above.
 
 ### Web and desktop exports
 
-The RN-web app is the source for both production web mounts:
+The RN-web app is the source for both deployed experimental web mounts:
 
 ```bash
 cd apps/mobile

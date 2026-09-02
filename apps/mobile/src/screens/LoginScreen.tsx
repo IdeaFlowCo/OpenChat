@@ -296,6 +296,9 @@ export function LoginScreen() {
     >
       <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
         <Text style={[styles.title, { color: c.textPrimary }]}>OpenChat</Text>
+        <View style={[styles.previewBadge, { backgroundColor: c.primaryMuted }]}>
+          <Text style={[styles.previewBadgeText, { color: c.primary }]}>EXPERIMENTAL REACT NATIVE PREVIEW</Text>
+        </View>
         <Text style={[styles.subtitle, { color: c.textSecondary }]}>
           Real-time messaging powered by the Global Brain
         </Text>
@@ -482,6 +485,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   title: { fontSize: 28, fontWeight: '700', textAlign: 'center' },
+  previewBadge: { alignSelf: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  previewBadgeText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.7 },
   subtitle: { fontSize: 14, textAlign: 'center', marginBottom: 12 },
   input: {
     paddingHorizontal: 14,

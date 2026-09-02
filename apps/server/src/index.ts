@@ -81,8 +81,8 @@ app.get('/health', (_req, res) => {
 // Project landing page (/, /about) — OpenChat-e4n moved / to landing.
 // Single static HTML + the app icon. Legacy Vite web client is now at
 // /legacy (see below).
-// Lists every version of OpenChat (iOS TestFlight, Android APK, Mobile Web,
-// Desktop Web) so we have one shareable URL that branches to all platforms.
+// Promotes the experimental React Native web clients. Native iOS/Android
+// builds stay private experiments and are intentionally absent from acquisition.
 // Must be registered BEFORE express.static(clientDistPath) below so it
 // takes precedence over any /about path the Vite client might claim.
 const landingHtmlPath = path.join(__dirname, 'landing.html');
@@ -180,11 +180,10 @@ app.get('/u/:userId', async (req, res, next) => {
   <h1 class="name">${safe(displayName)}${user.isBot ? ' <span style="font-size:13px;color:var(--text-dim)">· bot</span>' : ''}</h1>
   <p class="invite">wants to connect on OpenChat — tap below to start.</p>
 
-  <a class="cta cta-primary" href="/m/${intentQs}">Open in mobile web · sign in</a>
-  <a class="cta cta-secondary" href="/d/${intentQs}">Open on desktop web</a>
-  <a class="cta cta-secondary" href="https://testflight.apple.com/join/QvUPzDMY">Get the iOS app · TestFlight</a>
+  <a class="cta cta-primary" href="/m/${intentQs}">Open experimental mobile web · sign in</a>
+  <a class="cta cta-secondary" href="/d/${intentQs}">Open experimental desktop web</a>
 
-  <p class="cta-tiny">Already have OpenChat? <a href="openchat://user/${encodeURIComponent(userId)}">Open the app directly</a></p>
+  <p class="cta-tiny">Using a private native test build? <a href="openchat://user/${encodeURIComponent(userId)}">Open it directly</a></p>
 
   <div class="footer">
     <a href="/">chat.globalbr.ai</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
@@ -328,7 +327,7 @@ function getLegacyShell(): string {
   if (legacyShellCache) return legacyShellCache;
   try {
     const html = readFileSync(path.join(clientDistPath, 'index.html'), 'utf8');
-    const banner = `<div id="oc-legacy-banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%);color:#fff;font:600 13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;padding:8px 16px;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;box-shadow:0 2px 12px rgba(0,0,0,0.25);"><span>You're on the legacy OpenChat web client.</span><a href="/" style="color:#fff;text-decoration:underline;font-weight:700;">Go to the new app →</a></div><style>body{padding-top:42px !important;}</style>`;
+    const banner = `<div id="oc-legacy-banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%);color:#fff;font:600 13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;padding:8px 16px;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;box-shadow:0 2px 12px rgba(0,0,0,0.25);"><span>This older web client is out of date and may be missing features.</span><a href="/" style="color:#fff;text-decoration:underline;font-weight:700;">Open the current experimental app →</a></div><style>body{padding-top:42px !important;}</style>`;
     legacyShellCache = html.replace('<body>', `<body>${banner}`);
     return legacyShellCache;
   } catch {

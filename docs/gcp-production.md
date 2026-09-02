@@ -16,6 +16,21 @@ Last verified: 2026-08-28
 | Attachments | GCS bucket `openchat-attachments` through its S3-compatible endpoint |
 | Backups | GCE snapshot policy `migration-daily-14d` on the boot and attached data disks |
 
+## Client surfaces and release status
+
+| URL / build | Source | Status | Intended use |
+|---|---|---|---|
+| `/m/` | `apps/mobile` (React Native / Expo web export) | **Experimental** | Phone-sized browser experience |
+| `/d/` | The same `apps/mobile` source | **Experimental** | Responsive desktop browser experience; switches to master-detail at 900 px and can be installed as a PWA |
+| Native iOS / Android test builds | The same `apps/mobile` source | **Private experiment** | Internal development only; do not promote as a public install path |
+| `/legacy/` | `apps/web` (Vite / React) | **Out of date** | Compatibility fallback that may be missing current features |
+
+`/m/`, `/d/`, and the native test builds are one product implementation, not
+three independent clients. Platform-specific behavior is permitted, but shared
+chat behavior belongs in `apps/mobile`. The public landing page directs people
+only to the two browser exports while the React Native implementation remains
+experimental.
+
 Cloudflare is the public TLS endpoint. The origin currently listens on HTTP;
 Cloudflare-to-origin encryption and origin firewall hardening are tracked as
 follow-up work rather than being implied by the public HTTPS URL.

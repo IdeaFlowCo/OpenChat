@@ -22,9 +22,12 @@ web/server surfaces:
 
 | Path | What it is | Surfaces |
 |------|-----------|----------|
-| `apps/mobile` | React Native / Expo app | native iOS (TestFlight) + RN-web at **`/m`** (mobile web) and **`/d`** (desktop web) |
+| `apps/mobile` | React Native / Expo app | experimental RN-web previews at **`/m`** and **`/d`** + private native experiments |
 | `apps/desktop` | Tauri shell around the `apps/mobile` RN-web app export | native desktop shell |
-| `apps/server` / `apps/web` | Node/Express + Neo4j **server** and legacy Vite **web** client | `chat.globalbr.ai/api/*`, `chat.globalbr.ai/legacy` |
+| `apps/server` / `apps/web` | Node/Express + Neo4j **server** and legacy Vite **web** client | `chat.globalbr.ai/api/*`, `/legacy` compatibility fallback |
+
+The authoritative release status for each client surface is in
+[`docs/gcp-production.md`](../../docs/gcp-production.md#client-surfaces-and-release-status).
 
 **Rule: any user-facing chat change in `apps/mobile` or `apps/web` must be
 mirrored in the other client in the SAME work session** so native and web never

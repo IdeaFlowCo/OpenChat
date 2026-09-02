@@ -284,7 +284,7 @@ export function MasterDetailLayout() {
             <>
               <View style={{ marginRight: 6 }}><AppIcon name="reply" color={c.primary} size={14} /></View>
               <Text style={{ color: c.textSecondary, fontSize: 12, fontWeight: '500' }} numberOfLines={1}>
-                chat.globalbr.ai
+                Experimental React Native preview
               </Text>
             </>
           )}

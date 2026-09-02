@@ -364,20 +364,20 @@ function RootView({
         </div>
       </section>
 
-      {/* Invite people (openchat-37z). QR + link point to the landing page,
-          which branches to iOS TestFlight / web / Android — one QR for anyone. */}
+      {/* Invite people (openchat-37z). The public invite points to the
+          experimental browser experience; native builds stay private. */}
       <section>
         <h3 className={labelCls}>Invite people</h3>
         <div className={`mt-2 ${sectionCls} p-4 flex flex-col items-center`}>
-          <img src="/about/qr.svg" alt="Scan to download OpenChat" className="w-44 h-44 rounded-lg bg-white p-2" />
+          <img src="/about/qr.svg" alt="Scan to open OpenChat in a browser" className="w-44 h-44 rounded-lg bg-white p-2" />
           <p className="mt-2 text-center text-sm text-gray-500 dark:text-slate-400">
-            Scan to open the OpenChat download page — iOS TestFlight, web, or Android.
+            Scan to open the experimental OpenChat web preview.
           </p>
           <button
             type="button"
             onClick={async () => {
               const url = 'https://chat.globalbr.ai';
-              const text = `Try OpenChat — chat with a built-in AI assistant: ${url}`;
+              const text = `Try the experimental OpenChat web preview: ${url}`;
               const nav = navigator as Navigator & { share?: (d: { title?: string; text?: string; url?: string }) => Promise<void> };
               if (nav.share) { try { await nav.share({ title: 'OpenChat', text, url }); } catch { /* cancelled */ } return; }
               try { await navigator.clipboard.writeText(url); } catch { /* ignore */ }
@@ -386,11 +386,8 @@ function RootView({
           >
             📤 Share / copy invite link
           </button>
-          <a href="https://testflight.apple.com/join/QvUPzDMY" target="_blank" rel="noopener" className="mt-2 w-full text-center rounded-lg border border-gray-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-gray-900 dark:text-slate-100 hover:bg-gray-100 dark:hover:bg-slate-800">
-            Get the iOS app · TestFlight
-          </a>
           <a href="/about" target="_blank" rel="noopener" className="mt-2 w-full text-center rounded-lg border border-gray-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-gray-900 dark:text-slate-100 hover:bg-gray-100 dark:hover:bg-slate-800">
-            Open the download page
+            Open the product page
           </a>
         </div>
       </section>
