@@ -217,6 +217,25 @@ export function RecordingProvider({
     setFinishing(true);
     try {
       const attachment = await uploadAudio(uri, durationMs);
+      // Logout or removal can race the upload after the native recorder has
+      // already stopped. Never redirect or attempt an unauthenticated send.
+      if (!isAuthedRef.current) {
+        logWarn('[voice] auth ended during upload; send cancelled', {
+          conversationId: originId,
+        });
+        return false;
+      }
+      if (!conversationExistsRef.current(originId)) {
+        logWarn('[voice] origin conversation removed during upload; send cancelled', {
+          conversationId: originId,
+        });
+        showNotice(
+          originTitle
+            ? `“${originTitle}” is no longer available. Recording cancelled.`
+            : 'That chat is no longer available. Recording cancelled.'
+        );
+        return false;
+      }
       await sendMessageRef.current(originId, '', replyToId, [attachment]);
       logInfo('[voice] recording sent', { conversationId: originId, durationMs });
       hapticSend();
