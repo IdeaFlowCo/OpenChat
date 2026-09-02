@@ -1,12 +1,12 @@
 /**
  * Thoughts list screen — shows the user's personal notes feed. (OpenChat-zi1)
  *
- * Each card shows: text, kind badge (color-coded), status badge, relative time,
- * and edit/delete actions.
+ * NoteStream-style inline editing (2026-09-02, Jacob): entries are edited and
+ * written IN the list — no modal.
  *
- * - Tap a card → edit modal
+ * - FAB (+) → empty editor card appears at the top; type, tap away to save
+ * - Tap a card → edit its text in place; tap away to save
  * - Long-press a card → delete confirmation
- * - FAB (+) → add modal
  * - Pull-to-refresh
  */
 
@@ -25,7 +25,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
-import { fetchThoughts, deleteThought, Thought } from '../services/thoughts';
+import { fetchThoughts, createThought, updateThought, deleteThought, Thought } from '../services/thoughts';
 import { getSocket } from '../api/socket';
 import { ThoughtCard } from '../components/ThoughtCard';
 import type { ThoughtsNavProp } from '../navigation/types';
@@ -126,15 +126,67 @@ export function ThoughtsScreen() {
     }
   }, []);
 
-  const openAdd = useCallback(() => {
-    navigation.navigate('AddEditThought', undefined);
-  }, [navigation]);
+  // ── Inline editing (NoteStream behavior) ─────────────────────────────────
+  const [creating, setCreating] = useState(false);
+  const [newDraft, setNewDraft] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
 
-  const openEdit = useCallback(
-    (thought: Thought) => {
-      navigation.navigate('AddEditThought', { thought });
-    },
-    [navigation]
+  const openAdd = useCallback(() => {
+    setEditingId(null);
+    setCreating(true);
+    setNewDraft('');
+  }, []);
+
+  const startEdit = useCallback((thought: Thought) => {
+    setCreating(false);
+    setEditingId(thought.id);
+    setEditDraft(thought.text);
+  }, []);
+
+  // Commit on blur ("tap away and it just saves").
+  const commitNew = useCallback(async () => {
+    const text = newDraft.trim();
+    setCreating(false);
+    setNewDraft('');
+    if (!text) return;
+    try {
+      const t = await createThought({ text });
+      if (mountedRef.current) setThoughts((prev) => [t, ...prev.filter((x) => x.id !== t.id)]);
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save thought');
+    }
+  }, [newDraft]);
+
+  const commitEdit = useCallback(async () => {
+    const id = editingId;
+    const text = editDraft.trim();
+    setEditingId(null);
+    if (!id) return;
+    const orig = thoughts.find((t) => t.id === id);
+    if (!orig || !text || text === orig.text) return;
+    try {
+      const updated = await updateThought(id, { text });
+      if (mountedRef.current) setThoughts((prev) => prev.map((t) => (t.id === id ? { ...t, ...updated } : t)));
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save edit');
+    }
+  }, [editingId, editDraft, thoughts]);
+
+  /** Index-card editor used for both the new-entry (top) and in-place edits. */
+  const renderEditorCard = (value: string, onChange: (t: string) => void, onBlur: () => void, placeholder?: string) => (
+    <View style={[styles.editorCard, { backgroundColor: c.surface, borderColor: c.border, borderLeftColor: c.primary }]}>
+      <TextInput
+        style={[styles.editorInput, { color: c.textPrimary }]}
+        value={value}
+        onChangeText={onChange}
+        onBlur={onBlur}
+        placeholder={placeholder ?? 'Write a thought…'}
+        placeholderTextColor={c.textMuted}
+        multiline
+        autoFocus
+      />
+    </View>
   );
 
   // Tapping a tag chip filters the list to that tag.
@@ -193,15 +245,23 @@ export function ThoughtsScreen() {
         keyExtractor={(t) => t.id}
         contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"
-        renderItem={({ item }) => (
-          <ThoughtCard
-            item={item}
-            onPress={() => openEdit(item)}
-            onDelete={() => handleDelete(item.id)}
-            onTagPress={handleTagPress}
-            subtitle={item.sourceConversationName ? `from ${item.sourceConversationName}` : null}
-          />
-        )}
+        renderItem={({ item }) =>
+          item.id === editingId ? (
+            renderEditorCard(editDraft, setEditDraft, () => void commitEdit())
+          ) : (
+            <ThoughtCard
+              item={item}
+              onPress={() => startEdit(item)}
+              onDelete={() => handleDelete(item.id)}
+              onTagPress={handleTagPress}
+              subtitle={item.sourceConversationName ? `from ${item.sourceConversationName}` : null}
+            />
+          )
+        }
+        ListHeaderComponent={
+          creating ? renderEditorCard(newDraft, setNewDraft, () => void commitNew(), 'New thought…') : null
+        }
+        keyboardDismissMode="on-drag"
         ListEmptyComponent={renderEmpty}
         refreshControl={
           <RefreshControl
@@ -238,6 +298,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   list: { padding: 12, paddingBottom: 88 },
+  // Same index-card look as ThoughtCard, in edit mode.
+  editorCard: {
+    borderTopLeftRadius: 2,
+    borderBottomLeftRadius: 2,
+    borderTopRightRadius: 10,
+    borderBottomRightRadius: 10,
+    borderWidth: 1,
+    borderLeftWidth: 3,
+    padding: 14,
+    marginBottom: 10,
+  },
+  editorInput: {
+    fontSize: 15,
+    lineHeight: 22,
+    minHeight: 44,
+    padding: 0,
+  },
   emptyContainer: {
     flex: 1,
     alignItems: 'center',

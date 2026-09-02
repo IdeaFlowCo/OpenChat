@@ -1,4 +1,4 @@
-import { ActivityIndicator, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { EXPORT_RANGE_OPTIONS, ExportRangeKey } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
@@ -28,8 +28,10 @@ export function ExportSheet({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={[styles.sheet, { backgroundColor: c.surface, borderColor: c.border }]}>
+      {/* Tap anywhere outside the sheet to dismiss (2026-09-02 feedback:
+          "you shouldn't have to hit X — just tap out"). */}
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <Pressable onPress={() => { /* swallow taps inside the sheet */ }} style={[styles.sheet, { backgroundColor: c.surface, borderColor: c.border }]}>
           <View style={styles.header}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.title, { color: c.textPrimary }]}>{title}</Text>
@@ -77,8 +79,8 @@ export function ExportSheet({
               );
             })}
           </View>
-        </View>
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }

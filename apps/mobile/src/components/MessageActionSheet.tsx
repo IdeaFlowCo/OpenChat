@@ -461,7 +461,12 @@ export function MessageActionSheet({
                 <View style={styles.actionIconBox}>
                   <AppIcon name="pin" color={c.textPrimary} size={20} />
                 </View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Save & pin to chat</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Pin to chat</Text>
+                  <Text style={{ fontSize: 12, color: c.textMuted, marginTop: 1 }}>
+                    Saves to your Thoughts and pins it for everyone here
+                  </Text>
+                </View>
               </TouchableOpacity>
             )}
 
