@@ -137,6 +137,27 @@ describe('agent-network routes', () => {
     expect(response.status).toBe(404);
   });
 
+  it('accepts additive canonical matching fields without changing legacy requirements', async () => {
+    mocks.createIntent.mockResolvedValue({ id: 'canonical', kind: 'ask', terms: 'Build a company' });
+    const body = {
+      kind: 'ask', terms: 'Build a company', goal: 'Start an accessibility company',
+      seeks: ['technical cofounder'], brings: ['sales'], matchingMode: 'reciprocal',
+      openToCollaborators: true, closeOnConnect: false,
+      audience: { userIds: ['friend'], conversationIds: ['group'] },
+    };
+    const response = await fetch(`${baseUrl}/api/intents`, {
+      method: 'POST', headers: { Authorization: bearer(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    expect(response.status).toBe(201);
+    expect(mocks.createIntent).toHaveBeenCalledWith('route-user', {
+      kind: 'ask', terms: 'Build a company', goal: 'Start an accessibility company',
+      seeks: ['technical cofounder'], brings: ['sales'], matchingMode: 'reciprocal',
+      openToCollaborators: true, closeOnConnect: false, audienceRestricted: true,
+      audienceUserIds: ['friend'], audienceConversationIds: ['group'],
+    }, { io: undefined });
+  });
+
   it('validates and returns approve, decline, and already-resolved projections', async () => {
     const headers = { Authorization: bearer(), 'Content-Type': 'application/json' };
     const invalid = await fetch(`${baseUrl}/api/matches/m/respond`, {

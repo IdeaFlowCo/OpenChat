@@ -21,11 +21,13 @@ import feedbackRoutes from './routes/feedback.js';
 import assistantRoutes from './routes/assistant.js';
 import secretaryRoutes from './routes/secretary.js';
 import agentNetworkRoutes from './routes/agentNetwork.js';
+import agentSocialLayerRoutes from './routes/agentSocialLayer.js';
 import { ensureAssistantUser } from './services/assistant.js';
 import { ensureGroupbrainBotUser } from './services/groupbrainBot.js';
 import { ensureWebhookIndex } from './services/webhookDispatch.js';
 import { ensureVectorIndex } from './services/embeddings.js';
 import { ensureAgentIntentIndexes, reconcileAgentDeliveries } from './services/agentNetwork.js';
+import { ensureAgentSocialLayerIndexes } from './services/agentSocialLayer.js';
 import { openapiSpec } from './openapi.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 import { parseCorsOrigins } from './config/cors.js';
@@ -378,6 +380,7 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/assistant', assistantRoutes);
 app.use('/api/secretary', secretaryRoutes);
 app.use('/api', agentNetworkRoutes);
+app.use('/api', agentSocialLayerRoutes);
 
 // API reference (openchat-8md.1) — public spec + Redoc docs page.
 app.get('/api/openapi.json', (_req, res) => res.json(openapiSpec));
@@ -460,6 +463,7 @@ async function start() {
 
     try {
       await ensureAgentIntentIndexes();
+      await ensureAgentSocialLayerIndexes();
       await reconcileAgentDeliveries(io);
       console.log('Agent intent indexes ensured');
     } catch (e) {

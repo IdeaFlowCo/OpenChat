@@ -91,7 +91,7 @@ export interface SearchResult {
 }
 
 export type IntentKind = 'ask' | 'offer';
-export type IntentStatus = 'active' | 'withdrawn' | 'connected';
+export type IntentStatus = 'active' | 'paused' | 'withdrawn' | 'connected';
 
 /** An intent owned by the authenticated user. */
 export interface AgentIntent {
@@ -121,6 +121,59 @@ export interface AgentMatchView {
   conversationId?: string;
   alreadyResolved?: boolean;
   [k: string]: unknown;
+}
+
+export type MatchingMode = 'fulfillment' | 'reciprocal' | 'shared_goal';
+export interface SocialAudience { userIds: string[]; conversationIds: string[] }
+export interface IntentDraft {
+  id: string;
+  ownerUserId: string;
+  goal: string;
+  seeks: string[];
+  brings: string[];
+  matchingMode: MatchingMode;
+  openToCollaborators: boolean;
+  details?: string | null;
+  source?: string | null;
+  provenance?: Record<string, unknown> | null;
+  confidence?: number | null;
+  state: 'pending' | 'dismissed' | 'activated';
+  activatedIntentId?: string | null;
+  activatedStoryId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface OwnedStory {
+  id: string;
+  ownerUserId: string;
+  text?: string | null;
+  goal: string;
+  seeks: string[];
+  brings: string[];
+  matchingMode: MatchingMode;
+  status: 'active' | 'paused' | 'withdrawn';
+  audience: SocialAudience;
+  storyExpiresAt?: string | null;
+  searchExpiresAt: string;
+  intentId: string;
+  [k: string]: unknown;
+}
+export interface FeedStory {
+  id: string;
+  author: { id: string; name: string | null };
+  goal: string;
+  seeks: string[];
+  brings: string[];
+  matchingMode: MatchingMode;
+  openToCollaborators: boolean;
+  text: string;
+  storyExpiresAt: string;
+  createdAt: string;
+}
+export interface SocialPreferences {
+  experienceMode: 'enhanced' | 'simple';
+  networkPaused: boolean;
+  updatedAt: string | null;
 }
 
 export class OpenChatApiError extends Error {
@@ -296,6 +349,74 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<{ match: AgentMatchView }>('POST', `/api/matches/${encodeURIComponent(id)}/respond`, {
         body: { decision },
       }),
+
+    // ---- private capture, Stories, preferences, and review ----
+    createIntentDraft: (body: {
+      goal?: string;
+      seeks?: string[];
+      brings?: string[];
+      matchingMode?: MatchingMode;
+      openToCollaborators?: boolean;
+      details?: string;
+      source?: string;
+      provenance?: Record<string, unknown>;
+      confidence?: number;
+    }) => request<{ draft: IntentDraft }>('POST', '/api/intent-drafts', { body }),
+
+    listIntentDrafts: () =>
+      request<{ drafts: IntentDraft[] }>('GET', '/api/intent-drafts'),
+
+    updateIntentDraft: (id: string, body: Record<string, unknown>) =>
+      request<{ draft: IntentDraft }>('PATCH', `/api/intent-drafts/${encodeURIComponent(id)}`, { body }),
+
+    activateIntentDraft: (id: string, body: {
+      quietSearch?: { enabled: boolean; expiresAt?: string; audience?: SocialAudience };
+      story?: { enabled: boolean; text: string; expiresAt?: string; audience: SocialAudience };
+      closeOnConnect?: boolean;
+    }) => request<{ draft: IntentDraft; story: OwnedStory; intent: AgentIntent }>(
+      'POST', `/api/intent-drafts/${encodeURIComponent(id)}/activate`, { body },
+    ),
+
+    listOwnedStories: () =>
+      request<{ stories: OwnedStory[] }>('GET', '/api/stories/mine'),
+
+    listStoryFeed: () =>
+      request<{ stories: FeedStory[] }>('GET', '/api/stories/feed'),
+
+    createStory: (body: {
+      text: string;
+      audience: SocialAudience;
+      goal?: string;
+      seeks?: string[];
+      brings?: string[];
+      matchingMode?: MatchingMode;
+      openToCollaborators?: boolean;
+      storyExpiresAt?: string;
+      quietSearch?: { enabled: boolean; expiresAt?: string; audience?: SocialAudience };
+      closeOnConnect?: boolean;
+    }) => request<{ story: OwnedStory; intent: AgentIntent }>('POST', '/api/stories', { body }),
+
+    updateStory: (id: string, body: { status?: 'active' | 'paused' | 'withdrawn'; storyExpiresAt?: string }) =>
+      request<{ story: OwnedStory }>('PATCH', `/api/stories/${encodeURIComponent(id)}`, {
+        body,
+      }),
+
+    withdrawStory: (id: string) =>
+      request<{ story: OwnedStory }>('PATCH', `/api/stories/${encodeURIComponent(id)}`, { body: { status: 'withdrawn' } }),
+
+    respondStory: (id: string, message: string) =>
+      request<{ conversationId: string; message: Message }>('POST', `/api/stories/${encodeURIComponent(id)}/respond`, {
+        body: { message },
+      }),
+
+    getSocialPreferences: () =>
+      request<SocialPreferences>('GET', '/api/social/preferences'),
+
+    updateSocialPreferences: (body: Partial<Pick<SocialPreferences, 'experienceMode' | 'networkPaused'>>) =>
+      request<SocialPreferences>('PATCH', '/api/social/preferences', { body }),
+
+    getReviewQueue: () =>
+      request<{ items: unknown[]; hasMore: boolean }>('GET', '/api/review'),
   };
 }
 

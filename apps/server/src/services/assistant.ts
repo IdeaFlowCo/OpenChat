@@ -34,6 +34,21 @@ import {
   respondToMatch,
   withdrawIntent,
 } from './agentNetwork.js';
+import {
+  activateIntentDraft,
+  createIntentDraft,
+  getReviewQueue,
+  getSocialPreferences,
+  listIntentDrafts,
+  listOwnedStories,
+  projectIntentDraftCard,
+  updateIntentDraft,
+  updateSocialPreferences,
+  type ActivationInput,
+  type Audience,
+  type DraftInput,
+  type SocialPreferences,
+} from './agentSocialLayer.js';
 
 export const ASSISTANT_USER_ID = 'assistant';
 export const ASSISTANT_NAME = 'Assistant';
@@ -730,6 +745,116 @@ function buildTools(): AnthropicType.Tool[] {
         required: ['matchId', 'decision'],
       },
     },
+    {
+      name: 'save_intent_draft',
+      description: 'Privately save a structured ask/offer/collaboration draft. This never publishes or enters matching, so no publication confirmation is needed.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          goal: { type: 'string' },
+          seeks: { type: 'array', items: { type: 'string' } },
+          brings: { type: 'array', items: { type: 'string' } },
+          matchingMode: { type: 'string', enum: ['fulfillment', 'reciprocal', 'shared_goal'] },
+          openToCollaborators: { type: 'boolean' },
+          details: { type: 'string', description: 'Private owner-only details' },
+          source: { type: 'string', description: 'Private source note or message reference' },
+          provenance: { type: 'object', description: 'Private owner-only structured evidence references' },
+          confidence: { type: 'number' },
+        },
+      },
+    },
+    {
+      name: 'list_intent_drafts',
+      description: "List the user's private intent drafts. Drafts are not discoverable until explicitly activated.",
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'update_intent_draft',
+      description: 'Edit or dismiss a private pending intent draft.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          draftId: { type: 'string' },
+          goal: { type: 'string' },
+          seeks: { type: 'array', items: { type: 'string' } },
+          brings: { type: 'array', items: { type: 'string' } },
+          matchingMode: { type: 'string', enum: ['fulfillment', 'reciprocal', 'shared_goal'] },
+          openToCollaborators: { type: 'boolean' },
+          details: { type: 'string' },
+          source: { type: 'string' },
+          provenance: { type: 'object', description: 'Private owner-only structured evidence references' },
+          confidence: { type: 'number' },
+          state: { type: 'string', enum: ['dismissed'] },
+        },
+        required: ['draftId'],
+      },
+    },
+    {
+      name: 'activate_intent_draft',
+      description: 'Activate a private draft for quiet agent search and/or a selected human Story. Requires confirm:true after showing the user the exact discoverable terms, Story text, audience, and expiries.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          draftId: { type: 'string' },
+          confirm: { type: 'boolean' },
+          quietSearch: {
+            type: 'object',
+            properties: {
+              enabled: { type: 'boolean' },
+              expiresAt: { type: 'string' },
+              audience: {
+                type: 'object',
+                properties: {
+                  userIds: { type: 'array', items: { type: 'string' } },
+                  conversationIds: { type: 'array', items: { type: 'string' } },
+                },
+              },
+            },
+          },
+          story: {
+            type: 'object',
+            properties: {
+              enabled: { type: 'boolean' }, text: { type: 'string' }, expiresAt: { type: 'string' },
+              audience: {
+                type: 'object',
+                properties: {
+                  userIds: { type: 'array', items: { type: 'string' } },
+                  conversationIds: { type: 'array', items: { type: 'string' } },
+                },
+              },
+            },
+          },
+          closeOnConnect: { type: 'boolean' },
+        },
+        required: ['draftId', 'confirm'],
+      },
+    },
+    {
+      name: 'list_my_stories',
+      description: "List the user's own agent-only and human-visible Story records.",
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'get_social_preferences',
+      description: "Get the user's enhanced/simple presentation preference and independent network pause state.",
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'update_social_preferences',
+      description: 'Set enhanced/simple presentation mode and/or independently pause new agent matching. Simple mode does not delete or pause data.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          experienceMode: { type: 'string', enum: ['enhanced', 'simple'] },
+          networkPaused: { type: 'boolean' },
+        },
+      },
+    },
+    {
+      name: 'get_review_queue',
+      description: "Get the user's bounded actionable review queue for drafts, matches, and expiring items.",
+      input_schema: { type: 'object', properties: {} },
+    },
   ];
 }
 
@@ -809,6 +934,109 @@ async function executeTool(
         const match = await respondToMatch(userId, matchId, decision, io);
         return match ? { match } : { error: 'Match not found' };
       }
+      case 'save_intent_draft': {
+        const draftInput: DraftInput = {
+          ...(typeof input.goal === 'string' ? { goal: input.goal.trim() } : {}),
+          ...(Array.isArray(input.seeks) ? { seeks: input.seeks.filter((item): item is string => typeof item === 'string') } : {}),
+          ...(Array.isArray(input.brings) ? { brings: input.brings.filter((item): item is string => typeof item === 'string') } : {}),
+          ...(input.matchingMode === 'fulfillment' || input.matchingMode === 'reciprocal' || input.matchingMode === 'shared_goal'
+            ? { matchingMode: input.matchingMode } : {}),
+          ...(typeof input.openToCollaborators === 'boolean' ? { openToCollaborators: input.openToCollaborators } : {}),
+          ...(typeof input.details === 'string' ? { details: input.details } : {}),
+          ...(typeof input.source === 'string' ? { source: input.source } : {}),
+          ...(input.provenance && typeof input.provenance === 'object' && !Array.isArray(input.provenance)
+            ? { provenance: input.provenance as Record<string, unknown> } : {}),
+          ...(typeof input.confidence === 'number' ? { confidence: input.confidence } : {}),
+        };
+        const draft = await createIntentDraft(userId, draftInput);
+        const cardPayload = projectIntentDraftCard(draft);
+        const assistantConversationId = await ensureAssistantConversation(userId, io);
+        await persistMessage(
+          io,
+          ASSISTANT_USER_ID,
+          assistantConversationId,
+          'I saved this privately for you to review.',
+          {
+            messageType: 'card',
+            cardKind: 'intent_draft',
+            cardPayload: JSON.stringify(cardPayload),
+            agentDeliveryKey: JSON.stringify(['intent_draft', draft.id, userId]),
+          },
+        );
+        return { draft, card: cardPayload };
+      }
+      case 'list_intent_drafts':
+        return { drafts: await listIntentDrafts(userId) };
+      case 'update_intent_draft': {
+        const draftId = typeof input.draftId === 'string' ? input.draftId : '';
+        if (!draftId) return { error: 'draftId is required' };
+        const patch: DraftInput & { state?: 'dismissed' } = {
+          ...(typeof input.goal === 'string' ? { goal: input.goal.trim() } : {}),
+          ...(Array.isArray(input.seeks) ? { seeks: input.seeks.filter((item): item is string => typeof item === 'string') } : {}),
+          ...(Array.isArray(input.brings) ? { brings: input.brings.filter((item): item is string => typeof item === 'string') } : {}),
+          ...(input.matchingMode === 'fulfillment' || input.matchingMode === 'reciprocal' || input.matchingMode === 'shared_goal'
+            ? { matchingMode: input.matchingMode } : {}),
+          ...(typeof input.openToCollaborators === 'boolean' ? { openToCollaborators: input.openToCollaborators } : {}),
+          ...(typeof input.details === 'string' ? { details: input.details } : {}),
+          ...(typeof input.source === 'string' ? { source: input.source } : {}),
+          ...(input.provenance && typeof input.provenance === 'object' && !Array.isArray(input.provenance)
+            ? { provenance: input.provenance as Record<string, unknown> } : {}),
+          ...(typeof input.confidence === 'number' ? { confidence: input.confidence } : {}),
+          ...(input.state === 'dismissed' ? { state: 'dismissed' as const } : {}),
+        };
+        const draft = await updateIntentDraft(userId, draftId, patch);
+        return draft ? { draft } : { error: 'Pending draft not found' };
+      }
+      case 'activate_intent_draft': {
+        const draftId = typeof input.draftId === 'string' ? input.draftId : '';
+        if (!draftId) return { error: 'draftId is required' };
+        if (input.confirm !== true) {
+          return { needsConfirmation: true, message: 'Show the exact search terms, Story text, audience, and expiries before activation.' };
+        }
+        const parseAudience = (value: unknown): Audience | undefined => {
+          if (!value || typeof value !== 'object') return undefined;
+          const record = value as Record<string, unknown>;
+          return {
+            userIds: Array.isArray(record.userIds) ? record.userIds.filter((id): id is string => typeof id === 'string') : [],
+            conversationIds: Array.isArray(record.conversationIds) ? record.conversationIds.filter((id): id is string => typeof id === 'string') : [],
+          };
+        };
+        const quiet = input.quietSearch && typeof input.quietSearch === 'object'
+          ? input.quietSearch as Record<string, unknown> : undefined;
+        const story = input.story && typeof input.story === 'object'
+          ? input.story as Record<string, unknown> : undefined;
+        const activation: ActivationInput = {
+          ...(quiet ? { quietSearch: {
+            enabled: quiet.enabled === true,
+            ...(typeof quiet.expiresAt === 'string' ? { expiresAt: quiet.expiresAt } : {}),
+            ...(parseAudience(quiet.audience) ? { audience: parseAudience(quiet.audience) } : {}),
+          } } : {}),
+          ...(story ? { story: {
+            enabled: story.enabled === true,
+            text: typeof story.text === 'string' ? story.text : '',
+            audience: parseAudience(story.audience) ?? { userIds: [], conversationIds: [] },
+            ...(typeof story.expiresAt === 'string' ? { expiresAt: story.expiresAt } : {}),
+          } } : {}),
+          ...(typeof input.closeOnConnect === 'boolean' ? { closeOnConnect: input.closeOnConnect } : {}),
+        };
+        const activated = await activateIntentDraft(userId, draftId, activation, { io });
+        return activated ?? { error: 'Pending draft not found' };
+      }
+      case 'list_my_stories':
+        return { stories: await listOwnedStories(userId) };
+      case 'get_social_preferences':
+        return { preferences: await getSocialPreferences(userId) };
+      case 'update_social_preferences': {
+        const patch: Partial<Pick<SocialPreferences, 'experienceMode' | 'networkPaused'>> = {
+          ...(input.experienceMode === 'enhanced' || input.experienceMode === 'simple'
+            ? { experienceMode: input.experienceMode } : {}),
+          ...(typeof input.networkPaused === 'boolean' ? { networkPaused: input.networkPaused } : {}),
+        };
+        if (Object.keys(patch).length === 0) return { error: 'Set experienceMode, networkPaused, or both' };
+        return { preferences: await updateSocialPreferences(userId, patch) };
+      }
+      case 'get_review_queue':
+        return getReviewQueue(userId);
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -860,13 +1088,14 @@ async function loadConversationContext(
 }
 
 const SYSTEM_PROMPT = `You are Assistant, an in-app helper inside OpenChat (a chat application).
-You are talking with a user inside a direct-message conversation. You can search the user's messages, list and read their conversations, send messages on their behalf, create conversations, manage quiet-match asks/offers, and file feedback about OpenChat — all via tools. All tools act on behalf of THIS user only.
+You are talking with a user inside a direct-message conversation. You can search the user's messages, list and read their conversations, send messages on their behalf, create conversations, privately capture asks/offers/collaboration drafts, manage quiet matching and Stories, and file feedback about OpenChat — all via tools. All tools act on behalf of THIS user only.
 
 Guidelines:
 - Be concise and conversational; this is a chat, not an essay.
 - Use tools to ground your answers in the user's actual messages/conversations rather than guessing.
 - Only use send_message / create_conversation when the user clearly asks you to act.
 - Quiet matching uses anonymous asks and offers. Publishing an intent is explicit discovery opt-in. Before calling publish_intent, echo the exact anonymous terms back to the user and wait for explicit confirmation. Explain that only kind and terms are shown before mutual approval; private details are never shown to the other person. Never publish silently.
+- When the user mentions a possible ask, offer, resource, or collaboration, save_intent_draft may capture it privately without publication confirmation. Clearly say it remains private. Never activate it silently. Before activate_intent_draft, show the exact agent-search terms, any human Story text, selected audience, and expiries; wait for an explicit yes, then call with confirm:true. Agent-only items never appear in the human Story feed.
 - Matches are double opt-in. A user's plain-language “yes, connect us” can authorize respond_match approval. Before declining, confirm that choice too. Never reveal or speculate about the other side's response. A closed match does not reveal who declined.
 - Mutual approval creates or reuses a normal DM between the two humans with a neutral context card. It never sends an opener on either person's behalf; tell the user they choose whether and what to write.
 - send_message to OTHER people requires confirmation: the first send_message call to a conversation that includes anyone besides the user returns { needsConfirmation: true, conversationName, recipients, preview } instead of sending. When you get that, DO NOT retry blindly — tell the user exactly what you'll send and to whom, wait for their explicit yes, then call send_message again with the SAME content and confirm:true. If they decline or change the wording, do not send. Messages to the user's own Assistant DM go through immediately with no confirmation.

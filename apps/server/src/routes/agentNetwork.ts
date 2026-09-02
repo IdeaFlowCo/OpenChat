@@ -8,16 +8,34 @@ import {
   respondToMatch,
   withdrawIntent,
   type IntentKind,
+  type MatchingMode,
   type MatchDecision,
 } from '../services/agentNetwork.js';
 
 const router = Router();
 
 function parseIntentBody(body: unknown):
-  | { kind: IntentKind; terms: string; details?: string; expiresAt?: string }
+  | {
+      kind: IntentKind;
+      terms: string;
+      details?: string;
+      expiresAt?: string;
+      goal?: string;
+      seeks?: string[];
+      brings?: string[];
+      matchingMode?: MatchingMode;
+      openToCollaborators?: boolean;
+      audienceRestricted?: boolean;
+      audienceUserIds?: string[];
+      audienceConversationIds?: string[];
+      closeOnConnect?: boolean;
+    }
   | { error: string } {
   if (!body || typeof body !== 'object') return { error: 'Request body is required' };
-  const { kind, terms, details, expiresAt } = body as Record<string, unknown>;
+  const {
+    kind, terms, details, expiresAt, goal, seeks, brings, matchingMode,
+    openToCollaborators, audience, closeOnConnect,
+  } = body as Record<string, unknown>;
   if (kind !== 'ask' && kind !== 'offer') return { error: "kind must be 'ask' or 'offer'" };
   if (typeof terms !== 'string' || terms.trim().length < 1 || terms.trim().length > 500) {
     return { error: 'terms must be between 1 and 500 characters' };
@@ -32,11 +50,62 @@ function parseIntentBody(body: unknown):
   )) {
     return { error: 'expiresAt must be a future ISO date-time' };
   }
+  if (goal !== undefined && (typeof goal !== 'string' || goal.trim().length > 500)) {
+    return { error: 'goal must be a string of at most 500 characters' };
+  }
+  const parseTerms = (value: unknown, field: string): string[] | { error: string } | undefined => {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value) || value.length > 20 || value.some((item) => (
+      typeof item !== 'string' || item.trim().length < 1 || item.trim().length > 500
+    ))) return { error: `${field} must be an array of at most 20 non-empty strings (500 characters each)` };
+    return value.map((item) => (item as string).trim());
+  };
+  const parsedSeeks = parseTerms(seeks, 'seeks');
+  if (parsedSeeks && !Array.isArray(parsedSeeks)) return parsedSeeks;
+  const parsedBrings = parseTerms(brings, 'brings');
+  if (parsedBrings && !Array.isArray(parsedBrings)) return parsedBrings;
+  if (matchingMode !== undefined && !['fulfillment', 'reciprocal', 'shared_goal'].includes(String(matchingMode))) {
+    return { error: 'matchingMode must be fulfillment, reciprocal, or shared_goal' };
+  }
+  if (openToCollaborators !== undefined && typeof openToCollaborators !== 'boolean') {
+    return { error: 'openToCollaborators must be boolean' };
+  }
+  if (closeOnConnect !== undefined && typeof closeOnConnect !== 'boolean') {
+    return { error: 'closeOnConnect must be boolean' };
+  }
+  let audienceUserIds: string[] | undefined;
+  let audienceConversationIds: string[] | undefined;
+  if (audience !== undefined) {
+    if (!audience || typeof audience !== 'object') return { error: 'audience must be an object' };
+    const audienceRecord = audience as Record<string, unknown>;
+    const validIds = (value: unknown): value is string[] => Array.isArray(value)
+      && value.length <= 100
+      && value.every((id) => typeof id === 'string' && id.trim().length > 0);
+    if (!validIds(audienceRecord.userIds ?? []) || !validIds(audienceRecord.conversationIds ?? [])) {
+      return { error: 'audience ids must be arrays of at most 100 non-empty strings' };
+    }
+    audienceUserIds = [...new Set(audienceRecord.userIds as string[] ?? [])];
+    audienceConversationIds = [...new Set(audienceRecord.conversationIds as string[] ?? [])];
+    if (audienceUserIds.length + audienceConversationIds.length === 0) {
+      return { error: 'audience must select at least one user or conversation' };
+    }
+  }
   return {
     kind,
     terms: terms.trim(),
     ...(details === undefined ? {} : { details }),
     ...(expiresAt === undefined ? {} : { expiresAt }),
+    ...(goal === undefined ? {} : { goal: goal.trim() }),
+    ...(parsedSeeks === undefined ? {} : { seeks: parsedSeeks }),
+    ...(parsedBrings === undefined ? {} : { brings: parsedBrings }),
+    ...(matchingMode === undefined ? {} : { matchingMode: matchingMode as MatchingMode }),
+    ...(openToCollaborators === undefined ? {} : { openToCollaborators }),
+    ...(audience === undefined ? {} : {
+      audienceRestricted: true,
+      audienceUserIds,
+      audienceConversationIds,
+    }),
+    ...(closeOnConnect === undefined ? {} : { closeOnConnect }),
   };
 }
 
