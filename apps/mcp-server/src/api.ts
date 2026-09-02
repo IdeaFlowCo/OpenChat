@@ -331,7 +331,7 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       ),
 
     // ---- asks, offers, and quiet matches ----
-    publishIntent: (body: { kind: IntentKind; terms: string; details?: string; expiresAt?: string }) =>
+    publishIntent: (body: { kind: IntentKind; terms: string; details?: string; expiresAt?: string; confirm: true }) =>
       request<{ intent: AgentIntent }>('POST', '/api/intents', { body }),
 
     listIntents: () =>

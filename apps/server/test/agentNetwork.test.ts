@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyMatchDecision,
   canonicalIntentTerms,
+  createIntent,
   projectMatchForViewer,
   scoreCanonicalIntentPair,
   scoreIntentPair,
@@ -13,9 +14,22 @@ const noProviders = {
 };
 
 describe('quiet-match scoring', () => {
+  it('rejects publication without explicit confirmation before persistence', async () => {
+    await expect(createIntent('owner', { kind: 'ask', terms: 'ticket' }, {
+      confirmed: false as never,
+      queueScan: false,
+    })).rejects.toThrow('Explicit confirmation is required');
+  });
+
   it('normalizes legacy asks and offers into canonical seeks and brings', () => {
     expect(canonicalIntentTerms({ id: 'a', kind: 'ask', terms: 'ticket' })).toMatchObject({ seeks: ['ticket'], brings: [] });
     expect(canonicalIntentTerms({ id: 'b', kind: 'offer', terms: 'ticket' })).toMatchObject({ seeks: [], brings: ['ticket'] });
+  });
+
+  it('falls back to text terms when canonical arrays are present but empty', () => {
+    expect(canonicalIntentTerms({
+      id: 'story', kind: 'offer', terms: 'I have one extra ticket', seeks: [], brings: [],
+    })).toMatchObject({ seeks: [], brings: ['I have one extra ticket'] });
   });
 
   it('matches a complementary ask and offer above threshold', async () => {
@@ -58,6 +72,23 @@ describe('quiet-match scoring', () => {
     );
     expect(result).toMatchObject({ matchType: 'reciprocal', leftToRightScore: 1, rightToLeftScore: 1 });
     expect(result!.score).toBeGreaterThan(1 - 0.01);
+  });
+
+  it('verifies only the highest qualifying pair in each direction', async () => {
+    const verified: string[] = [];
+    const result = await scoreCanonicalIntentPair(
+      { id: 'a', ownerUserId: 'a', kind: 'ask', terms: 'a', seeks: ['weak ask', 'best ask'], brings: ['best offer'] },
+      { id: 'b', ownerUserId: 'b', kind: 'ask', terms: 'b', seeks: ['best need'], brings: ['weak offer', 'best offer'] },
+      {
+        threshold: 0,
+        tokenScore: (seek, bring) => seek.startsWith('best') && bring.startsWith('best') ? 1 : 0.1,
+        embeddingScore: async () => null,
+        verify: async (seek, bring) => { verified.push(`${seek}:${bring}`); return true; },
+      },
+    );
+    expect(result?.matchType).toBe('reciprocal');
+    expect(verified).toHaveLength(2);
+    expect(verified).toEqual(expect.arrayContaining(['best ask:best offer', 'best need:best offer']));
   });
 
   it('requires both shared-goal intents to explicitly allow collaborators', async () => {

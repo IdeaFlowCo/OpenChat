@@ -87,7 +87,7 @@ Client rendering (mobile `ChatScreen.tsx` ~line 1380-1443 branch; web `MessageLi
 
 ## REST API (all under `resolveActor` — JWT *and* `oc_` agent keys; this IS the provider-neutral seam)
 
-- `POST /api/intents` `{kind, terms, details?, expiresAt?}` → `201 {intent}`. Validation: kind ∈ {ask, offer}; terms 1–500 chars; details ≤ 2000; optional expiry is a future date-time.
+- `POST /api/intents` `{kind, terms, confirm:true, details?, expiresAt?}` → `201 {intent}`. Validation: explicit confirmation; kind ∈ {ask, offer}; terms 1–500 chars; details ≤ 2000; optional expiry is a future date-time.
 - `GET /api/intents` → own intents (all fields).
 - `PATCH /api/intents/:id` `{status:'withdrawn'}` (owner only) → withdraw from discovery. (Editing terms = withdraw + republish; keeps matching semantics trivial.)
 - `GET /api/matches` → matches involving the caller's intents, per-viewer projection ONLY: `{id, status, ownIntent{id,kind,terms}, otherKind, otherTerms, createdAt, updatedAt}`.
@@ -99,7 +99,7 @@ Client rendering (mobile `ChatScreen.tsx` ~line 1380-1443 branch; web `MessageLi
 ## Hosted Assistant integration (`apps/server/src/services/assistant.ts`)
 
 New tools in the existing tool-use loop (all call the same service functions as the REST routes, scoped to the triggering `userId`):
-- `publish_intent {kind, terms, details?}` — system prompt REQUIRES the assistant to echo the exact anonymous `terms` back to the user and get an explicit confirmation in-chat before calling (publishing is the discovery opt-in; no silent activation).
+- `publish_intent {kind, terms, confirm, details?}` — the tool boundary requires `confirm:true` after the assistant echoes the exact anonymous `terms` and gets explicit confirmation in-chat (publishing is the discovery opt-in; no silent activation).
 - `list_intents`, `withdraw_intent {intentId}`
 - `list_matches`, `respond_match {matchId, decision}` — the assistant may relay a user's plain-language "yes, connect us" but must confirm before `decline` as well.
 System-prompt addition explains asks/offers, anonymity guarantees, and the no-auto-opener rule so the assistant explains the feature accurately.

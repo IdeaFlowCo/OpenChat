@@ -150,7 +150,7 @@ BASE_URL="https://chat.globalbr.ai"
 curl -X POST "$BASE_URL/api/intents" \
   -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
-  -d '{"kind":"ask","terms":"Looking for help repairing a bicycle","details":"Weekends work best"}'
+  -d '{"kind":"ask","terms":"Looking for help repairing a bicycle","confirm":true,"details":"Weekends work best"}'
 
 # List all of your intents, including their private details and status.
 curl "$BASE_URL/api/intents" \

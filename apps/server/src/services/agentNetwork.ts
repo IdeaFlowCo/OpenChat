@@ -105,6 +105,8 @@ export interface ScoringPipeline {
   verify?: (askTerms: string, offerTerms: string) => Promise<boolean>;
 }
 
+export class IntentConsentError extends Error {}
+
 export interface CanonicalMatchScore {
   score: number;
   matchType: MatchType;
@@ -196,9 +198,22 @@ function cosineSimilarity(left: number[], right: number[]): number {
   return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
 }
 
-async function defaultEmbeddingScore(leftTerms: string, rightTerms: string): Promise<number | null> {
+async function defaultEmbeddingScore(
+  leftTerms: string,
+  rightTerms: string,
+  cache: Map<string, Promise<number[] | null>>,
+): Promise<number | null> {
   if (!process.env.OPENAI_API_KEY) return null;
-  const [left, right] = await Promise.all([embedText(leftTerms), embedText(rightTerms)]);
+  const embedding = (terms: string): Promise<number[] | null> => {
+    const key = terms.trim();
+    let pending = cache.get(key);
+    if (!pending) {
+      pending = embedText(key);
+      cache.set(key, pending);
+    }
+    return pending;
+  };
+  const [left, right] = await Promise.all([embedding(leftTerms), embedding(rightTerms)]);
   if (!left || !right) return null;
   return cosineSimilarity(left, right);
 }
@@ -249,7 +264,7 @@ export function canonicalIntentTerms(intent: MatchIntent): {
     : [];
   const explicitSeeks = clean(intent.seeks);
   const explicitBrings = clean(intent.brings);
-  const hasCanonicalTerms = Array.isArray(intent.seeks) || Array.isArray(intent.brings);
+  const hasCanonicalTerms = explicitSeeks.length > 0 || explicitBrings.length > 0;
   return {
     goal: typeof intent.goal === 'string' ? intent.goal.trim() : '',
     seeks: hasCanonicalTerms ? explicitSeeks : intent.kind === 'ask' ? [intent.terms] : [],
@@ -263,32 +278,34 @@ async function scoreTermsPair(
   seek: string,
   bring: string,
   options: ScoringPipeline,
+  embeddingCache: Map<string, Promise<number[] | null>>,
 ): Promise<number | null> {
   const tokenScore = (options.tokenScore ?? intentTokenOverlap)(seek, bring);
   const embeddingScore = options.embeddingScore
     ? await options.embeddingScore(seek, bring)
-    : await defaultEmbeddingScore(seek, bring);
+    : await defaultEmbeddingScore(seek, bring, embeddingCache);
   const score = Math.max(tokenScore, embeddingScore ?? 0);
-  if (score < (options.threshold ?? intentMatchThreshold())) return null;
-  const verified = options.verify
-    ? await options.verify(seek, bring)
-    : await defaultAnthropicVerification(seek, bring);
-  return verified ? score : null;
+  return score >= (options.threshold ?? intentMatchThreshold()) ? score : null;
 }
 
 async function bestDirectionalScore(
   seeks: string[],
   brings: string[],
   options: ScoringPipeline,
+  embeddingCache: Map<string, Promise<number[] | null>>,
 ): Promise<number | null> {
-  let best: number | null = null;
+  let best: { seek: string; bring: string; score: number } | null = null;
   for (const seek of seeks) {
     for (const bring of brings) {
-      const score = await scoreTermsPair(seek, bring, options);
-      if (score !== null && (best === null || score > best)) best = score;
+      const score = await scoreTermsPair(seek, bring, options, embeddingCache);
+      if (score !== null && (best === null || score > best.score)) best = { seek, bring, score };
     }
   }
-  return best;
+  if (!best) return null;
+  const verified = options.verify
+    ? await options.verify(best.seek, best.bring)
+    : await defaultAnthropicVerification(best.seek, best.bring);
+  return verified ? best.score : null;
 }
 
 /** Detailed, pure/injectable pair gate for legacy and canonical v2 intents. */
@@ -300,10 +317,11 @@ export async function scoreCanonicalIntentPair(
   if (left.ownerUserId && right.ownerUserId && left.ownerUserId === right.ownerUserId) return null;
   const leftCanonical = canonicalIntentTerms(left);
   const rightCanonical = canonicalIntentTerms(right);
+  const embeddingCache = new Map<string, Promise<number[] | null>>();
 
   const [leftToRightScore, rightToLeftScore] = await Promise.all([
-    bestDirectionalScore(leftCanonical.seeks, rightCanonical.brings, options),
-    bestDirectionalScore(rightCanonical.seeks, leftCanonical.brings, options),
+    bestDirectionalScore(leftCanonical.seeks, rightCanonical.brings, options, embeddingCache),
+    bestDirectionalScore(rightCanonical.seeks, leftCanonical.brings, options, embeddingCache),
   ]);
   if (leftToRightScore !== null && rightToLeftScore !== null) {
     return {
@@ -330,7 +348,12 @@ export async function scoreCanonicalIntentPair(
     && leftCanonical.goal.length > 0
     && rightCanonical.goal.length > 0;
   if (!sharedGoalAllowed) return null;
-  const sharedGoalScore = await scoreTermsPair(leftCanonical.goal, rightCanonical.goal, options);
+  const sharedGoalScore = await bestDirectionalScore(
+    [leftCanonical.goal],
+    [rightCanonical.goal],
+    options,
+    embeddingCache,
+  );
   return sharedGoalScore === null ? null : {
     score: sharedGoalScore,
     matchType: 'shared_goal',
@@ -461,8 +484,11 @@ export async function createIntent(
     sourceStoryId?: string | null;
     closeOnConnect?: boolean;
   },
-  options: { io?: IOServer; queueScan?: boolean; scoring?: ScoringPipeline } = {},
+  options: { confirmed: true; io?: IOServer; queueScan?: boolean; scoring?: ScoringPipeline },
 ): Promise<AgentIntent> {
+  if (options.confirmed !== true) {
+    throw new IntentConsentError('Explicit confirmation is required to publish an intent');
+  }
   const id = nanoid();
   const now = new Date().toISOString();
   const session = getDriver().session();

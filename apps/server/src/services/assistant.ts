@@ -710,8 +710,9 @@ function buildTools(): AnthropicType.Tool[] {
           terms: { type: 'string', description: 'Exact anonymous public terms, 1-500 characters' },
           details: { type: 'string', description: 'Optional private owner-only context, at most 2000 characters' },
           expiresAt: { type: 'string', description: 'Optional future ISO date-time after which discovery stops' },
+          confirm: { type: 'boolean', description: 'Must be true only after the user explicitly approves these exact discoverable terms' },
         },
-        required: ['kind', 'terms'],
+        required: ['kind', 'terms', 'confirm'],
       },
     },
     {
@@ -906,13 +907,16 @@ async function executeTool(
         const terms = typeof input.terms === 'string' ? input.terms.trim() : '';
         const details = typeof input.details === 'string' ? input.details : undefined;
         const expiresAt = typeof input.expiresAt === 'string' ? input.expiresAt : undefined;
+        if (input.confirm !== true) {
+          return { needsConfirmation: true, message: 'Show the exact discoverable terms before publishing.' };
+        }
         if (!kind) return { error: "kind must be 'ask' or 'offer'" };
         if (!terms || terms.length > 500) return { error: 'terms must be between 1 and 500 characters' };
         if (details && details.length > 2000) return { error: 'details must be at most 2000 characters' };
         if (expiresAt && (!Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now())) {
           return { error: 'expiresAt must be a future ISO date-time' };
         }
-        return { intent: await createIntent(userId, { kind, terms, details, expiresAt }, { io }) };
+        return { intent: await createIntent(userId, { kind, terms, details, expiresAt }, { confirmed: true, io }) };
       }
       case 'list_intents':
         return { intents: await listIntents(userId) };

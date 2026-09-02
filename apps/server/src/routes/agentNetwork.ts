@@ -3,6 +3,7 @@ import type { Server as IOServer } from 'socket.io';
 import { resolveActor } from '../middleware/resolveActor.js';
 import {
   createIntent,
+  IntentConsentError,
   listIntents,
   listMatches,
   respondToMatch,
@@ -29,13 +30,15 @@ function parseIntentBody(body: unknown):
       audienceUserIds?: string[];
       audienceConversationIds?: string[];
       closeOnConnect?: boolean;
+      confirmed: true;
     }
   | { error: string } {
   if (!body || typeof body !== 'object') return { error: 'Request body is required' };
   const {
     kind, terms, details, expiresAt, goal, seeks, brings, matchingMode,
-    openToCollaborators, audience, closeOnConnect,
+    openToCollaborators, audience, closeOnConnect, confirm,
   } = body as Record<string, unknown>;
+  if (confirm !== true) return { error: 'confirm:true is required after the user approves the exact discoverable terms' };
   if (kind !== 'ask' && kind !== 'offer') return { error: "kind must be 'ask' or 'offer'" };
   if (typeof terms !== 'string' || terms.trim().length < 1 || terms.trim().length > 500) {
     return { error: 'terms must be between 1 and 500 characters' };
@@ -93,6 +96,7 @@ function parseIntentBody(body: unknown):
   return {
     kind,
     terms: terms.trim(),
+    confirmed: true,
     ...(details === undefined ? {} : { details }),
     ...(expiresAt === undefined ? {} : { expiresAt }),
     ...(goal === undefined ? {} : { goal: goal.trim() }),
@@ -116,11 +120,17 @@ router.post('/intents', resolveActor, async (req: Request, res: Response) => {
     return;
   }
   try {
-    const intent = await createIntent(req.user!.userId, parsed, {
+    const { confirmed, ...intentInput } = parsed;
+    const intent = await createIntent(req.user!.userId, intentInput, {
+      confirmed,
       io: req.app.get('io') as IOServer | undefined,
     });
     res.status(201).json({ intent });
   } catch (error) {
+    if (error instanceof IntentConsentError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
     console.error('Error publishing intent:', error);
     res.status(500).json({ error: 'Failed to publish intent' });
   }

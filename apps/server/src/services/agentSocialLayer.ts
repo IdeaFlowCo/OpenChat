@@ -495,7 +495,7 @@ function creationValuesFromActivation(draft: IntentDraft, input: ActivationInput
   const storyAudience = storyEnabled ? input.story!.audience : { userIds: [], conversationIds: [] };
   const searchAudience = quietEnabled
     ? input.quietSearch?.audience ?? null
-    : storyAudience;
+    : null;
   const storyExpiresAt = storyEnabled ? input.story!.expiresAt ?? defaultStoryExpiry(now) : null;
   return {
     goal: draft.goal,
@@ -553,7 +553,7 @@ export async function activateIntentDraft(
        WHERE trim(coalesce(draft.goal, '')) <> '' OR size(coalesce(draft.seeks, [])) > 0 OR size(coalesce(draft.brings, [])) > 0
        CREATE (intent:AgentIntent {
          id: $intentId, ownerUserId: $userId, kind: $kind, terms: $terms,
-         details: $details, status: 'active', expiresAt: datetime($searchExpiresAt),
+         details: $details, status: $intentStatus, expiresAt: datetime($searchExpiresAt),
          goal: $goal, seeks: $seeks, brings: $brings, matchingMode: $matchingMode,
          openToCollaborators: $openToCollaborators,
          audienceRestricted: $audienceRestricted,
@@ -566,7 +566,7 @@ export async function activateIntentDraft(
          id: $storyId, ownerUserId: $userId, intentId: $intentId,
          goal: $goal, seeks: $seeks, brings: $brings, matchingMode: $matchingMode,
          openToCollaborators: $openToCollaborators, text: $storyText,
-         humanVisible: $humanVisible, agentSearchEnabled: true,
+         humanVisible: $humanVisible, agentSearchEnabled: $agentSearchEnabled,
          explicitQuietSearch: $explicitQuietSearch, status: 'active',
          audienceUserIds: $storyAudienceUserIds,
          audienceConversationIds: $storyAudienceConversationIds,
@@ -588,6 +588,7 @@ export async function activateIntentDraft(
         kind: intentKind(values.seeks),
         terms: intentSummary(values.goal, values.seeks, values.brings),
         details: values.details,
+        intentStatus: values.explicitQuietSearch ? 'active' : 'paused',
         goal: values.goal,
         seeks: values.seeks,
         brings: values.brings,
@@ -600,6 +601,7 @@ export async function activateIntentDraft(
         storyAudienceConversationIds: values.storyAudience.conversationIds,
         storyText: values.storyText,
         humanVisible: values.humanVisible,
+        agentSearchEnabled: values.explicitQuietSearch,
         explicitQuietSearch: values.explicitQuietSearch,
         storyExpiresAt: values.storyExpiresAt,
         searchExpiresAt: values.searchExpiresAt,
@@ -613,7 +615,7 @@ export async function activateIntentDraft(
       story: ownedStoryFromRecord(result.records[0].get('story')),
       intent: toJS(result.records[0].get('intent')) as AgentIntent,
     };
-    if (options.queueScan !== false) {
+    if (values.explicitQuietSearch && options.queueScan !== false) {
       queueMicrotask(() => void scanIntentForMatches(intentId, { io: options.io })
         .catch((error) => console.warn('[agent-social] quiet scan failed:', error)));
     }
@@ -668,7 +670,7 @@ export async function createStory(
   const quietSearchEnabled = input.quietSearch?.enabled === true;
   const searchAudience = quietSearchEnabled
     ? input.quietSearch?.audience ?? null
-    : input.audience;
+    : null;
   const searchAudienceValues = searchAudience ?? { userIds: [], conversationIds: [] };
   const storyExpiresAt = input.storyExpiresAt ?? defaultStoryExpiry(nowDate);
   const searchExpiresAt = quietSearchEnabled
@@ -680,7 +682,7 @@ export async function createStory(
       `MATCH (owner:User {id: $userId})
        CREATE (intent:AgentIntent {
          id: $intentId, ownerUserId: $userId, kind: $kind, terms: $terms,
-         details: null, status: 'active', expiresAt: datetime($searchExpiresAt),
+         details: null, status: $intentStatus, expiresAt: datetime($searchExpiresAt),
          goal: $goal, seeks: $seeks, brings: $brings, matchingMode: $matchingMode,
          openToCollaborators: $openToCollaborators,
          audienceRestricted: $audienceRestricted,
@@ -693,7 +695,7 @@ export async function createStory(
          id: $storyId, ownerUserId: $userId, intentId: $intentId,
          goal: $goal, seeks: $seeks, brings: $brings, matchingMode: $matchingMode,
          openToCollaborators: $openToCollaborators, text: $text,
-         humanVisible: true, agentSearchEnabled: true,
+         humanVisible: true, agentSearchEnabled: $agentSearchEnabled,
          explicitQuietSearch: $explicitQuietSearch, status: 'active',
          audienceUserIds: $storyAudienceUserIds,
          audienceConversationIds: $storyAudienceConversationIds,
@@ -715,12 +717,14 @@ export async function createStory(
         brings,
         matchingMode: canonical.matchingMode ?? 'fulfillment',
         openToCollaborators: canonical.openToCollaborators ?? false,
+        intentStatus: quietSearchEnabled ? 'active' : 'paused',
         audienceRestricted: searchAudience !== null,
         searchAudienceUserIds: searchAudienceValues.userIds,
         searchAudienceConversationIds: searchAudienceValues.conversationIds,
         storyAudienceUserIds: input.audience.userIds,
         storyAudienceConversationIds: input.audience.conversationIds,
         text: storyText,
+        agentSearchEnabled: quietSearchEnabled,
         explicitQuietSearch: quietSearchEnabled,
         storyExpiresAt,
         searchExpiresAt,
@@ -733,7 +737,7 @@ export async function createStory(
       story: ownedStoryFromRecord(result.records[0].get('story')),
       intent: toJS(result.records[0].get('intent')) as AgentIntent,
     };
-    if (options.queueScan !== false) {
+    if (quietSearchEnabled && options.queueScan !== false) {
       queueMicrotask(() => void scanIntentForMatches(intentId, { io: options.io })
         .catch((error) => console.warn('[agent-social] quiet scan failed:', error)));
     }
@@ -812,6 +816,8 @@ export async function updateStory(
            story.updatedAt = datetime($now),
            intent.status = CASE
              WHEN intent.status = 'connected' THEN intent.status
+             WHEN story.agentSearchEnabled = false AND nextStatus = 'withdrawn' THEN 'withdrawn'
+             WHEN story.agentSearchEnabled = false THEN intent.status
              WHEN story.humanVisible = true AND story.explicitQuietSearch = true THEN intent.status
              WHEN nextStatus = 'active' AND (
                (story.humanVisible = true AND story.explicitQuietSearch = false AND nextStoryExpiry > datetime($now))
@@ -821,7 +827,7 @@ export async function updateStory(
              ELSE 'withdrawn'
            END,
            intent.expiresAt = CASE
-             WHEN story.humanVisible = true AND story.explicitQuietSearch = false THEN nextStoryExpiry
+             WHEN story.agentSearchEnabled = true AND story.humanVisible = true AND story.explicitQuietSearch = false THEN nextStoryExpiry
              ELSE intent.expiresAt
            END,
            intent.updatedAt = datetime($now)

@@ -47,7 +47,7 @@ describe('agent-social defaults and projections', () => {
     const story: OwnedStory = {
       id: 'story-1', ownerUserId: 'owner', goal: 'Find a ticket', seeks: ['ticket'],
       brings: ['face value'], matchingMode: 'fulfillment', openToCollaborators: false,
-      text: 'Looking for one ticket', humanVisible: true, agentSearchEnabled: true,
+      text: 'Looking for one ticket', humanVisible: true, agentSearchEnabled: false,
       status: 'active', audience: { userIds: ['friend'], conversationIds: ['group'] },
       storyExpiresAt: '2026-09-03T12:00:00.000Z', searchExpiresAt: '2026-09-03T12:00:00.000Z',
       intentId: 'private-link', createdAt, updatedAt: createdAt,

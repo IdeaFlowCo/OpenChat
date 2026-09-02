@@ -469,8 +469,8 @@ export const openapiSpec = {
         operationId: 'publishIntent',
         tags: ['Agent network'],
         summary: 'Publish an anonymous ask or offer',
-        description: 'Publishing is explicit discovery opt-in. Only terms and kind are visible to a potential match; details remain private.',
-        requestBody: { required: true, content: json({ type: 'object', properties: { kind: { type: 'string', enum: ['ask', 'offer'] }, terms: { type: 'string', minLength: 1, maxLength: 500 }, details: { type: 'string', maxLength: 2000 }, expiresAt: { type: 'string', format: 'date-time', description: 'Optional future discovery expiry.' }, goal: { type: 'string', maxLength: 500 }, seeks: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 500 } }, brings: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 500 } }, matchingMode: { type: 'string', enum: ['fulfillment', 'reciprocal', 'shared_goal'] }, openToCollaborators: { type: 'boolean' }, audience: { $ref: '#/components/schemas/SocialAudience' }, closeOnConnect: { type: 'boolean' } }, required: ['kind', 'terms'] }) },
+        description: 'Publishing is explicit discovery opt-in and requires confirm:true after approval of the exact terms. Only terms and kind are visible to a potential match; details remain private.',
+        requestBody: { required: true, content: json({ type: 'object', properties: { kind: { type: 'string', enum: ['ask', 'offer'] }, terms: { type: 'string', minLength: 1, maxLength: 500 }, confirm: { type: 'boolean', const: true, description: 'Set only after the user explicitly approves the exact discoverable terms.' }, details: { type: 'string', maxLength: 2000 }, expiresAt: { type: 'string', format: 'date-time', description: 'Optional future discovery expiry.' }, goal: { type: 'string', maxLength: 500 }, seeks: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 500 } }, brings: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 500 } }, matchingMode: { type: 'string', enum: ['fulfillment', 'reciprocal', 'shared_goal'] }, openToCollaborators: { type: 'boolean' }, audience: { $ref: '#/components/schemas/SocialAudience' }, closeOnConnect: { type: 'boolean' } }, required: ['kind', 'terms', 'confirm'] }) },
         responses: { '201': ok({ type: 'object', properties: { intent: { $ref: '#/components/schemas/AgentIntent' } } }, 'Created'), '400': errResp('Bad request'), '401': errResp('Unauthorized') },
       },
     },
@@ -533,7 +533,7 @@ export const openapiSpec = {
     '/api/intent-drafts/{id}/activate': {
       post: {
         operationId: 'activateIntentDraft', tags: ['Agent social'], summary: 'Explicitly activate a private draft',
-        description: 'Enable quietSearch, a human Story, or both. Human Stories require a non-empty selected audience. Defaults: quiet search 30 days; Story 24 hours. A Story-only activation limits structured discovery to the same audience and Story expiry.',
+        description: 'Enable quietSearch, a human Story, or both. Human Stories require a non-empty selected audience. Defaults: quiet search 30 days; Story 24 hours. A Story-only activation remains outside agent matching.',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: { required: true, content: json({ type: 'object', properties: {
           quietSearch: { type: 'object', properties: { enabled: { type: 'boolean' }, expiresAt: { type: 'string', format: 'date-time' }, audience: { $ref: '#/components/schemas/SocialAudience' } }, required: ['enabled'] },
@@ -552,7 +552,7 @@ export const openapiSpec = {
     '/api/stories': {
       post: {
         operationId: 'createStory', tags: ['Agent social'], summary: 'Explicitly publish a selected-audience human Story',
-        description: 'Text alone is sufficient. Structured terms are optional. Without separately enabled quietSearch, the audience-scoped structured intent expires with the Story.',
+        description: 'Text alone is sufficient. Structured terms are optional. Without separately enabled quietSearch, the Story remains outside agent matching.',
         requestBody: { required: true, content: json({ type: 'object', properties: {
           text: { type: 'string', minLength: 1, maxLength: 2000 }, audience: { $ref: '#/components/schemas/SocialAudience' },
           goal: { type: 'string', maxLength: 500 }, seeks: { type: 'array', items: { type: 'string' } }, brings: { type: 'array', items: { type: 'string' } },

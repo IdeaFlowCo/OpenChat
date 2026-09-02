@@ -623,12 +623,14 @@ export function buildServer(
           .datetime()
           .optional()
           .describe('Optional future date-time after which the intent leaves discovery'),
+        confirm: z.boolean().describe('Must be true only after the user explicitly approves these exact discoverable terms'),
       },
     },
-    async ({ kind, terms, details, expiresAt }) => {
+    async ({ kind, terms, details, expiresAt, confirm }) => {
       try {
         requireApiKey(api, 'Publishing intents');
-        return jsonResult(await api.publishIntent({ kind, terms, details, expiresAt }));
+        if (!confirm) return textResult('Not published. Show the exact discoverable terms and ask the user for explicit approval first.');
+        return jsonResult(await api.publishIntent({ kind, terms, details, expiresAt, confirm: true }));
       } catch (e) {
         return intentErrorResult(e);
       }

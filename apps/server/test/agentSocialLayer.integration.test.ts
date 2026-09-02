@@ -102,12 +102,14 @@ integration('agent-social private capture and Story privacy', () => {
     expect((await network.listIntents(owner)).find((item) => item.id === activated!.intent.id)?.status).toBe('withdrawn');
   });
 
-  it('enforces selected-user audience, blocks, expiry, and Story-only search duration', async () => {
+  it('enforces selected-user audience, blocks, expiry, and disables unapproved search', async () => {
     const created = await social.createStory(owner, {
       text: 'I have one extra ticket',
       audience: { userIds: [selected], conversationIds: [] },
     }, { queueScan: false });
     expect(created.story.searchExpiresAt).toBe(created.story.storyExpiresAt);
+    expect(created.story.agentSearchEnabled).toBe(false);
+    expect(created.intent.status).toBe('paused');
     expect((await social.listStoryFeed(selected)).map((story) => story.id)).toContain(created.story.id);
     expect((await social.listStoryFeed(outsider)).map((story) => story.id)).not.toContain(created.story.id);
     const serialized = JSON.stringify((await social.listStoryFeed(selected)).find((story) => story.id === created.story.id));
@@ -172,7 +174,7 @@ integration('agent-social private capture and Story privacy', () => {
     expect((await social.listStoryFeed(selected)).map((story) => story.id)).not.toContain(created.story.id);
   });
 
-  it('pauses/resumes and synchronizes expiry only for Story-scoped discovery', async () => {
+  it('keeps unapproved Story-linked discovery disabled across Story updates', async () => {
     const created = await social.createStory(owner, {
       text: 'Story-scoped search', goal: 'Borrow a truck', seeks: ['truck'],
       audience: { userIds: [selected], conversationIds: [] },
@@ -182,8 +184,8 @@ integration('agent-social private capture and Story privacy', () => {
     const extended = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
     await social.updateStory(owner, created.story.id, { status: 'active', storyExpiresAt: extended });
     const resumed = (await network.listIntents(owner)).find((item) => item.id === created.intent.id);
-    expect(resumed?.status).toBe('active');
-    expect(Date.parse(resumed?.expiresAt ?? '')).toBe(Date.parse(extended));
+    expect(resumed?.status).toBe('paused');
+    expect(Date.parse(resumed?.expiresAt ?? '')).toBe(Date.parse(created.story.searchExpiresAt));
   });
 
   it('persists simple mode separately from network pause and redacts the bounded review queue', async () => {

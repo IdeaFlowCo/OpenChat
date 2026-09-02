@@ -106,10 +106,10 @@ integration('agent-network quiet-match loop', () => {
   ): Promise<string> {
     await service.createIntent(askerId, {
       kind: 'ask', terms: token, details: askDetails,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     const offer = await service.createIntent(offererId, {
       kind: 'offer', terms: token, details: offerDetails,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     const [matchId] = await service.scanIntentForMatches(offer.id, { scoring });
     expect(matchId).toBeTruthy();
     return matchId!;
@@ -212,8 +212,8 @@ integration('agent-network quiet-match loop', () => {
 
   it('claims a concurrent intent pair exactly once', async () => {
     const token = `scantoken${suffix.replace(/[^a-z0-9]/gi, '')}`;
-    const ask = await service.createIntent(scanA, { kind: 'ask', terms: token }, { queueScan: false });
-    const offer = await service.createIntent(scanB, { kind: 'offer', terms: token }, { queueScan: false });
+    const ask = await service.createIntent(scanA, { kind: 'ask', terms: token }, { confirmed: true, queueScan: false });
+    const offer = await service.createIntent(scanB, { kind: 'offer', terms: token }, { confirmed: true, queueScan: false });
     const results = await Promise.all([
       service.scanIntentForMatches(ask.id, { scoring }),
       service.scanIntentForMatches(offer.id, { scoring }),
@@ -437,8 +437,8 @@ integration('agent-network quiet-match loop', () => {
       await check.close();
     }
     const pausedToken = `pausednew${suffix.replace(/[^a-z0-9]/gi, '')}`;
-    await service.createIntent(pauseA, { kind: 'ask', terms: pausedToken }, { queueScan: false });
-    const pausedOffer = await service.createIntent(pauseB, { kind: 'offer', terms: pausedToken }, { queueScan: false });
+    await service.createIntent(pauseA, { kind: 'ask', terms: pausedToken }, { confirmed: true, queueScan: false });
+    const pausedOffer = await service.createIntent(pauseB, { kind: 'offer', terms: pausedToken }, { confirmed: true, queueScan: false });
     expect(await service.scanIntentForMatches(pausedOffer.id, { scoring })).toEqual([]);
   });
 
@@ -446,11 +446,11 @@ integration('agent-network quiet-match loop', () => {
     const reciprocalLeft = await service.createIntent(reciprocalA, {
       kind: 'ask', terms: 'cofounder exchange', seeks: ['technical founder'], brings: ['sales founder'],
       matchingMode: 'reciprocal', openToCollaborators: true, closeOnConnect: false,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     const reciprocalRight = await service.createIntent(reciprocalB, {
       kind: 'ask', terms: 'cofounder exchange', seeks: ['sales founder'], brings: ['technical founder'],
       matchingMode: 'reciprocal', openToCollaborators: true, closeOnConnect: false,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     const reciprocalIds = await service.scanIntentForMatches(reciprocalRight.id, { scoring });
     expect(reciprocalIds).toHaveLength(1);
     expect((await service.listMatches(reciprocalLeft.ownerUserId)).find((match) => match.id === reciprocalIds[0])?.matchType)
@@ -462,11 +462,11 @@ integration('agent-network quiet-match loop', () => {
     await service.createIntent(sharedA, {
       kind: 'ask', terms: 'community solar', goal: 'community solar', seeks: [], brings: [],
       matchingMode: 'shared_goal', openToCollaborators: true,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     const sharedRight = await service.createIntent(sharedB, {
       kind: 'ask', terms: 'community solar', goal: 'community solar', seeks: [], brings: [],
       matchingMode: 'shared_goal', openToCollaborators: true,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     const sharedIds = await service.scanIntentForMatches(sharedRight.id, { scoring });
     expect(sharedIds).toHaveLength(1);
     expect((await service.listMatches(sharedB)).find((match) => match.id === sharedIds[0])?.matchType)
@@ -478,39 +478,39 @@ integration('agent-network quiet-match loop', () => {
 
     const expiredAsk = await service.createIntent(happyA, {
       kind: 'ask', terms: `expired${unique}`,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     const expiredOffer = await service.createIntent(happyB, {
       kind: 'offer', terms: `expired${unique}`,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
 
     const withdrawnAsk = await service.createIntent(declineA, {
       kind: 'ask', terms: `withdrawn${unique}`,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     const withdrawnOffer = await service.createIntent(declineB, {
       kind: 'offer', terms: `withdrawn${unique}`,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     await service.withdrawIntent(declineA, withdrawnAsk.id);
 
     const blockedAsk = await service.createIntent(reuseA, {
       kind: 'ask', terms: `blocked${unique}`,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     const blockedOffer = await service.createIntent(reuseB, {
       kind: 'offer', terms: `blocked${unique}`,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
 
     const sameOwnerAsk = await service.createIntent(scanA, {
       kind: 'ask', terms: `sameowner${unique}`,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     const sameOwnerOffer = await service.createIntent(scanA, {
       kind: 'offer', terms: `sameowner${unique}`,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
 
     const sameKindAskA = await service.createIntent(raceA, {
       kind: 'ask', terms: `samekind${unique}`,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     const sameKindAskB = await service.createIntent(raceB, {
       kind: 'ask', terms: `samekind${unique}`,
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
 
     const session = driver.session();
     try {
