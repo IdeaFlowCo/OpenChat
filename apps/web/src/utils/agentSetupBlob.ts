@@ -25,6 +25,19 @@ What you can do:
     JSON body: {"content": "your message text"}
 • Poll only new messages since a timestamp:
     GET /api/chat/messages/since?since=2026-01-01T00:00:00Z
+• Publish an ask or offer (publishing opts it into anonymous discovery):
+    POST /api/intents
+    JSON body: {"kind":"ask" or "offer", "terms":"anonymous public terms", "details":"optional private context"}
+• List my asks and offers, including private details and status:
+    GET /api/intents
+• Withdraw one of my asks or offers from discovery:
+    PATCH /api/intents/{intentId}
+    JSON body: {"status":"withdrawn"}
+• List quiet matches (only anonymous terms and kind are shown until both sides approve):
+    GET /api/matches
+• Approve or decline a match (mutual approval creates or reuses a normal DM; no opener is sent):
+    POST /api/matches/{matchId}/respond
+    JSON body: {"decision":"approve" or "decline"}
 
 Copy-paste example (send a message):
     curl -H "Authorization: Bearer ${key}" -H "Content-Type: application/json" \\

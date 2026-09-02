@@ -17,6 +17,11 @@
  *   oc_react                — add emoji reaction (write)
  *   oc_create_dm            — start or retrieve a 1:1 DM (write)
  *   oc_register_agent       — mint a new agent API key (write)
+ *   oc_publish_intent       — publish an anonymous ask or offer (write)
+ *   oc_list_intents         — list your asks and offers
+ *   oc_withdraw_intent      — withdraw an ask or offer (write)
+ *   oc_list_matches         — list privacy-safe quiet matches
+ *   oc_respond_match        — approve or decline a quiet match (write)
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -35,10 +40,35 @@ import {
 
 export const VERSION = '0.1.0';
 
+export const TOOL_NAMES = [
+  'oc_list_conversations',
+  'oc_get_messages',
+  'oc_send_message',
+  'oc_search_messages',
+  'oc_list_contacts',
+  'oc_create_conversation',
+  'oc_submit_feedback',
+  'oc_react',
+  'oc_create_dm',
+  'oc_register_agent',
+  'oc_publish_intent',
+  'oc_list_intents',
+  'oc_withdraw_intent',
+  'oc_list_matches',
+  'oc_respond_match',
+] as const;
+
+const INTENTS_UNSUPPORTED_MESSAGE =
+  "This OpenChat server doesn't support intents yet. Upgrade the OpenChat server and try again.";
+
 // ---- formatting helpers ----
 
 function textResult(text: string) {
   return { content: [{ type: 'text' as const, text }] };
+}
+
+function jsonResult(value: unknown) {
+  return textResult(JSON.stringify(value, null, 2));
 }
 
 function errorResult(e: unknown) {
@@ -55,6 +85,13 @@ function errorResult(e: unknown) {
   }
   const msg = e instanceof Error ? e.message : String(e);
   return { isError: true, content: [{ type: 'text' as const, text: `Error: ${msg}` }] };
+}
+
+function intentErrorResult(e: unknown) {
+  if (e instanceof OpenChatApiError && e.status === 404) {
+    return textResult(INTENTS_UNSUPPORTED_MESSAGE);
+  }
+  return errorResult(e);
 }
 
 function requireApiKey(api: OpenChatApi, purpose: string) {
@@ -533,6 +570,119 @@ export function buildServer(
         );
       } catch (e) {
         return errorResult(e);
+      }
+    }
+  );
+
+  // ---- oc_publish_intent ----
+  server.registerTool(
+    'oc_publish_intent',
+    {
+      title: 'Publish an ask or offer',
+      description:
+        'Publish an anonymous ask or offer for quiet matching. Publishing opts this intent into discovery. ' +
+        'Confirm the exact public terms with the user before calling; private details are visible only to the owner and their agent.',
+      inputSchema: {
+        kind: z.enum(['ask', 'offer']).describe('Whether this intent is an ask or an offer'),
+        terms: z
+          .string()
+          .min(1)
+          .max(500)
+          .describe('Anonymous public terms shown to potential matches (1–500 characters)'),
+        details: z
+          .string()
+          .max(2000)
+          .optional()
+          .describe('Optional private context visible only to the owner and their agent'),
+      },
+    },
+    async ({ kind, terms, details }) => {
+      try {
+        requireApiKey(api, 'Publishing intents');
+        return jsonResult(await api.publishIntent({ kind, terms, details }));
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  // ---- oc_list_intents ----
+  server.registerTool(
+    'oc_list_intents',
+    {
+      title: 'List asks and offers',
+      description:
+        'List all asks and offers owned by the authenticated user, including their private details and current status.',
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        requireApiKey(api, 'Listing intents');
+        return jsonResult(await api.listIntents());
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  // ---- oc_withdraw_intent ----
+  server.registerTool(
+    'oc_withdraw_intent',
+    {
+      title: 'Withdraw an ask or offer',
+      description:
+        'Withdraw one of your intents from anonymous discovery. To change its terms, withdraw it and publish a new intent.',
+      inputSchema: {
+        intentId: z.string().min(1).describe('The id of the intent to withdraw'),
+      },
+    },
+    async ({ intentId }) => {
+      try {
+        requireApiKey(api, 'Withdrawing intents');
+        return jsonResult(await api.withdrawIntent(intentId));
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  // ---- oc_list_matches ----
+  server.registerTool(
+    'oc_list_matches',
+    {
+      title: 'List quiet matches',
+      description:
+        'List quiet matches involving your intents. Before mutual approval, results contain only anonymous terms and kind from the other side.',
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        requireApiKey(api, 'Listing quiet matches');
+        return jsonResult(await api.listMatches());
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  // ---- oc_respond_match ----
+  server.registerTool(
+    'oc_respond_match',
+    {
+      title: 'Respond to a quiet match',
+      description:
+        'Approve or decline a quiet match. If both sides approve, OpenChat creates or reuses a normal human DM without sending an opener.',
+      inputSchema: {
+        matchId: z.string().min(1).describe('The id of the match to respond to'),
+        decision: z.enum(['approve', 'decline']).describe('Approve or decline the match'),
+      },
+    },
+    async ({ matchId, decision }) => {
+      try {
+        requireApiKey(api, 'Responding to quiet matches');
+        return jsonResult(await api.respondMatch(matchId, decision));
+      } catch (e) {
+        return intentErrorResult(e);
       }
     }
   );

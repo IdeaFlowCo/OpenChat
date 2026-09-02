@@ -128,7 +128,10 @@ export interface Message {
   content: string;
   senderId: string;
   conversationId: string;
-  messageType: string;
+  messageType?: string;
+  /** Structured system card metadata. cardPayload is JSON encoded by the server. */
+  cardKind?: string;
+  cardPayload?: string;
   createdAt: string;
   editedAt?: string;
   /** Soft-delete marker (server sets content to "Message deleted"). */
@@ -159,6 +162,34 @@ export interface Message {
   transcript?: string;
   /** Owner-approved automatic reply sent by personal Secretary mode. */
   viaSecretary?: boolean;
+}
+
+export type AgentIntentKind = 'ask' | 'offer';
+export type AgentIntentStatus = 'active' | 'withdrawn' | 'connected';
+export type AgentMatchStatus = 'pending' | 'awaiting_other' | 'closed' | 'connected';
+
+export interface AgentIntent {
+  id: string;
+  ownerUserId: string;
+  kind: AgentIntentKind;
+  terms: string;
+  details: string | null;
+  status: AgentIntentStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Privacy-safe, per-viewer match projection returned by the REST API. */
+export interface AgentMatch {
+  id: string;
+  status: AgentMatchStatus;
+  ownIntent: Pick<AgentIntent, 'id' | 'kind' | 'terms'>;
+  otherKind: AgentIntentKind;
+  otherTerms: string;
+  createdAt: string;
+  updatedAt: string;
+  conversationId?: string;
+  alreadyResolved?: boolean;
 }
 
 export interface SecretaryAnswer {
@@ -1216,6 +1247,36 @@ class ApiClient {
   /** Idempotently open/create the caller's Assistant DM. POST /api/assistant/ensure. */
   async ensureAssistant(): Promise<Conversation> {
     return this.authedFetch('/api/assistant/ensure', { method: 'POST' });
+  }
+
+  // ── Agent-network asks, offers, and quiet matches ───────────────────────
+  async publishIntent(params: { kind: AgentIntentKind; terms: string; details?: string }): Promise<{ intent: AgentIntent }> {
+    return this.authedFetch('/api/intents', { method: 'POST', body: JSON.stringify(params) });
+  }
+
+  async listIntents(): Promise<AgentIntent[]> {
+    const { intents } = await this.authedFetch<{ intents: AgentIntent[] }>('/api/intents');
+    return intents;
+  }
+
+  async withdrawIntent(id: string): Promise<{ intent: AgentIntent }> {
+    return this.authedFetch(`/api/intents/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'withdrawn' }),
+    });
+  }
+
+  async listMatches(): Promise<AgentMatch[]> {
+    const { matches } = await this.authedFetch<{ matches: AgentMatch[] }>('/api/matches');
+    return matches;
+  }
+
+  async respondToMatch(id: string, decision: 'approve' | 'decline'): Promise<AgentMatch> {
+    const { match } = await this.authedFetch<{ match: AgentMatch }>(`/api/matches/${encodeURIComponent(id)}/respond`, {
+      method: 'POST',
+      body: JSON.stringify({ decision }),
+    });
+    return match;
   }
 }
 

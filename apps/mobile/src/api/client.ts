@@ -132,6 +132,9 @@ export interface Message {
   senderId: string;
   conversationId: string;
   messageType?: string;
+  /** Structured system card metadata. cardPayload is JSON encoded by the server. */
+  cardKind?: string;
+  cardPayload?: string;
   createdAt: string;
   editedAt?: string;
   /** Set when the message has been soft-deleted. */
@@ -167,6 +170,34 @@ export interface Message {
   transcript?: string;
   /** Owner-approved automatic reply sent by personal Secretary mode. */
   viaSecretary?: boolean;
+}
+
+export type AgentIntentKind = 'ask' | 'offer';
+export type AgentIntentStatus = 'active' | 'withdrawn' | 'connected';
+export type AgentMatchStatus = 'pending' | 'awaiting_other' | 'closed' | 'connected';
+
+export interface AgentIntent {
+  id: string;
+  ownerUserId: string;
+  kind: AgentIntentKind;
+  terms: string;
+  details: string | null;
+  status: AgentIntentStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Privacy-safe, per-viewer match projection returned by the REST API. */
+export interface AgentMatch {
+  id: string;
+  status: AgentMatchStatus;
+  ownIntent: Pick<AgentIntent, 'id' | 'kind' | 'terms'>;
+  otherKind: AgentIntentKind;
+  otherTerms: string;
+  createdAt: string;
+  updatedAt: string;
+  conversationId?: string;
+  alreadyResolved?: boolean;
 }
 
 export interface SecretaryAnswer {
@@ -663,6 +694,25 @@ export const api = {
       // WS-then-REST retry collapses to one row server-side (MERGE). OpenChat-60y.
       body: JSON.stringify({ content, ...(attachments?.length ? { attachments } : {}), ...(id ? { id } : {}) }),
     }),
+
+  // ── Agent-network asks, offers, and quiet matches ───────────────────────
+  publishIntent: (params: { kind: AgentIntentKind; terms: string; details?: string }) =>
+    request<{ intent: AgentIntent }>('/api/intents', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+  listIntents: async () => (await request<{ intents: AgentIntent[] }>('/api/intents')).intents,
+  withdrawIntent: (id: string) =>
+    request<{ intent: AgentIntent }>(`/api/intents/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'withdrawn' }),
+    }),
+  listMatches: async () => (await request<{ matches: AgentMatch[] }>('/api/matches')).matches,
+  respondToMatch: async (id: string, decision: 'approve' | 'decline') =>
+    (await request<{ match: AgentMatch }>(`/api/matches/${encodeURIComponent(id)}/respond`, {
+      method: 'POST',
+      body: JSON.stringify({ decision }),
+    })).match,
 
   /**
    * Request a presigned PUT URL for an image upload. (OpenChat-6bg)

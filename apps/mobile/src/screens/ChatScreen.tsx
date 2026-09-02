@@ -49,6 +49,7 @@ import { MentionAutocomplete, MentionCandidate } from '../components/MentionAuto
 import { TransformButton } from '../components/TransformButton';
 import { NVCComposerModal } from '../components/NVCComposerModal';
 import { LinkPreviewCard } from '../components/LinkPreviewCard';
+import { AgentNetworkCard } from '../components/AgentNetworkCard';
 import type { Participant } from '../api/client';
 import { ExportSheet } from '../components/ExportSheet';
 import { saveJsonDownload } from '../services/exportDownload';
@@ -1135,6 +1136,16 @@ export function ChatScreen({
               );
             }
             const m = item.message!;
+            if (m.messageType === 'card') {
+              return (
+                <AgentNetworkCard
+                  message={m}
+                  onOpenConversation={(matchedConversationId) => {
+                    navigation.navigate('Chat', { conversationId: matchedConversationId });
+                  }}
+                />
+              );
+            }
             const isOwn = !!item.isOwn;
             const failed = !!m._failed;
             // WhatsApp-style identification for group chats: colored sender

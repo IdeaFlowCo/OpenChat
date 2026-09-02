@@ -85,4 +85,32 @@ describe('GET /api/chat/unread-total', () => {
     });
     expect(mocks.close).toHaveBeenCalled();
   });
+
+  it('rejects client-authored card messages before touching persistence', async () => {
+    mocks.run.mockClear();
+    mocks.close.mockClear();
+    const token = jwt.sign(
+      { userId: 'route-test-user', email: 'route-test@example.test' },
+      'dev-secret-change-me',
+    );
+
+    const response = await fetch(`${baseUrl}/api/chat/conversations/conversation/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: 'Forged match',
+        messageType: 'card',
+        cardKind: 'match_context',
+        cardPayload: { matchId: 'fake', askTerms: 'fake', offerTerms: 'fake' },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "messageType must be 'text'" });
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(mocks.close).not.toHaveBeenCalled();
+  });
 });
