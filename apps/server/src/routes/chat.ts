@@ -1077,7 +1077,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // Voice transcription — non-blocking, best-effort (openchat-4jn). Whisper
     // transcribes any audio attachment and emits message:transcript.
     if (hasAttachments) {
-      void maybeTranscribeMessage(io, message.id as string, conversationId as string, attachments).catch(
+      void maybeTranscribeMessage(io, message.id as string, conversationId as string, attachments, userId).catch(
         () => { /* best-effort */ }
       );
     }

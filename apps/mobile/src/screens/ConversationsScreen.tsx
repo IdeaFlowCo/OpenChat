@@ -25,6 +25,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Conversation, CurrentUser } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
+import { serif } from '../theme/typography';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { AppIcon } from '../components/AppIcon';
@@ -185,7 +186,7 @@ export function ConversationsScreen() {
     navigation.setOptions({
       headerTitle: () => (
         <View style={{ alignItems: 'center' }}>
-          <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary }}>Chats</Text>
+          <Text style={{ fontSize: 18, fontWeight: '600', color: c.textPrimary, fontFamily: serif }}>Chats</Text>
           <ConnectionStatusLine
             account={currentUser?.email}
             connected={isConnected}
@@ -215,28 +216,17 @@ export function ConversationsScreen() {
         </View>
       ),
       headerLeft: () => (
-        // OpenChat-8th: wrap in a pill (primaryMuted fill, c.primary icon)
-        // so the Settings affordance reads with the same visual weight as
-        // the right-side header pill (search + new-conversation) instead
-        // of looking like a hollow outlined circle.
+        // Same bare 44x44 icon-button treatment as the right-side actions so
+        // all header icons sit on one visual line (2026-09-02 feedback: the
+        // tinted pill made the left icon look misaligned, and the radiating
+        // gear read as a "sun" — now a sliders glyph).
         <TouchableOpacity
           onPress={() => navigation.navigate('Settings')}
           accessibilityLabel="Settings"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={{
-            marginLeft: 8,
-            minWidth: 44,
-            minHeight: 32,
-            paddingHorizontal: 12,
-            paddingVertical: 6,
-            borderRadius: 16,
-            backgroundColor: c.primaryMuted,
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexDirection: 'row',
-          }}
+          style={styles.headerAction}
         >
-          <AppIcon name="settings" color={c.primary} size={19} strokeWidth={1.8} />
+          <AppIcon name="settings" color={c.primary} size={20} strokeWidth={1.8} />
         </TouchableOpacity>
       ),
     });

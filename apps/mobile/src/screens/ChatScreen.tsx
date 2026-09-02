@@ -797,8 +797,13 @@ export function ChatScreen({
 
   /** Called when the mic button is pressed in. Starts recording. */
   const handleMicPressIn = useCallback(async (pageX: number) => {
-    // If already recording in locked (hands-free) mode, ignore further presses
-    // on the mic — the Stop/Cancel buttons drive the end of a locked recording.
+    // Locked (hands-free) recording: the composer button shows a stop square,
+    // so tapping it must stop-and-send (2026-09-02 feedback: "the one below
+    // doesn't seem to do anything").
+    if (isRecording && recordingLockedRef.current) {
+      void finishRecordingRef.current(false);
+      return;
+    }
     if (sending || uploadingAttachment || isRecording || Platform.OS === 'web') return;
     micPressStartXRef.current = pageX;
     micPressStartTimeRef.current = Date.now();
@@ -1355,15 +1360,32 @@ export function ChatScreen({
                   {/* Attachments: audio (OpenChat-xxc) or image (OpenChat-6bg) */}
                   {m.attachments?.map((att, i) => {
                     // ── Audio attachment ────────────────────────────────────
+                    // Voice notes are first-class text (2026-09-02): the
+                    // transcript IS the message; audio collapses to a compact
+                    // play row under it. Until the transcript arrives (socket
+                    // 'message:transcript'), show the full player + shimmer.
                     if (att.type === 'audio') {
+                      const hasTranscript = !m.deletedAt && !!m.transcript;
                       return (
-                        <VoiceMessageBubble
-                          key={i}
-                          messageId={m.id}
-                          url={att.url}
-                          durationMs={att.durationMs ?? 0}
-                          isOwn={isOwn}
-                        />
+                        <View key={i}>
+                          {hasTranscript && (
+                            <Text style={{ fontSize: 16, color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, marginBottom: 6 }}>
+                              {m.transcript}
+                            </Text>
+                          )}
+                          {!hasTranscript && !m.deletedAt && (
+                            <Text style={{ fontSize: 13, fontStyle: 'italic', color: isOwn ? ownTint(0.6) : c.textMuted, marginBottom: 4 }}>
+                              Transcribing…
+                            </Text>
+                          )}
+                          <VoiceMessageBubble
+                            messageId={m.id}
+                            url={att.url}
+                            durationMs={att.durationMs ?? 0}
+                            isOwn={isOwn}
+                            compact={hasTranscript}
+                          />
+                        </View>
                       );
                     }
                     // ── Image attachment ────────────────────────────────────
@@ -1386,21 +1408,6 @@ export function ChatScreen({
                       </TouchableOpacity>
                     );
                   })}
-                  {/* Voice transcript caption (OpenChat-4jn) — muted line under
-                      the voice bubble. Present on history load and updated live
-                      via the message:transcript socket event. */}
-                  {!m.deletedAt && !!m.transcript && m.attachments?.some(a => a.type === 'audio') && (
-                    <Text
-                      style={{
-                        color: isOwn ? ownTint(0.75) : c.textMuted,
-                        fontSize: 13,
-                        fontStyle: 'italic',
-                        marginTop: 4,
-                      }}
-                    >
-                      {m.transcript}
-                    </Text>
-                  )}
                   {/* Deleted: muted italic tombstone (OpenChat-q9h) */}
                   {m.deletedAt
                     ? <Text style={{ color: isOwn ? ownTint(0.55) : c.textMuted, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
@@ -1599,7 +1606,7 @@ export function ChatScreen({
                 hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
                 accessibilityLabel="Stop and send voice message"
               >
-                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>Stop</Text>
+                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>Send</Text>
               </TouchableOpacity>
             </>
           ) : (
