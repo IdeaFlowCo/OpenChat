@@ -56,6 +56,11 @@ import { ExportSheet } from '../components/ExportSheet';
 import { saveJsonDownload } from '../services/exportDownload';
 import { logError } from '../services/clientLogger';
 import { serif } from '../theme/typography';
+import {
+  getDirectConversationParticipant,
+  isSelfDirectConversation,
+  SELF_CONVERSATION_TITLE,
+} from '../utils/conversationDisplay';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
 
@@ -387,17 +392,13 @@ export function ChatScreen({
   }, [conversationId, setActiveConversation, markConversationRead]);
 
   const isGroup = conversation?.type === 'group';
-  // Self-DM detection: direct conversation with no participant other than me.
-  // Could be a single-edge self conversation or a degenerate 1-participant DM.
-  const isSelfDM = !isGroup
-    && !!conversation?.participants
-    && conversation.participants.every(p => p.user.id === currentUser?.userId);
-  // The 'other' user for a non-self DM. Self-DM = me, so I appear as the
-  // "other" so the header shows my own name + avatar instead of "Unknown".
-  const other = !isGroup
-    ? (isSelfDM
-        ? conversation?.participants?.[0]?.user
-        : conversation?.participants?.find(p => p.user.id !== currentUser?.userId)?.user)
+  // Resolve self-DMs deliberately: there is no "other" participant, so the
+  // signed-in participant supplies the avatar while the title says "Myself".
+  const isSelfDM = conversation
+    ? isSelfDirectConversation(conversation, currentUser)
+    : false;
+  const other = conversation && !isGroup
+    ? getDirectConversationParticipant(conversation, currentUser)
     : null;
 
   // Participants eligible for @-mention — all except self (OpenChat-0jy).
@@ -410,8 +411,7 @@ export function ChatScreen({
   const headerTitle = useMemo(() => {
     if (!conversation) return '';
     if (conversation.title) return conversation.title;
-    // Self-DM: WhatsApp-style "You" label. Matches the "Notes to self" pattern.
-    if (isSelfDM) return 'You';
+    if (isSelfDM) return SELF_CONVERSATION_TITLE;
     if (!isGroup) return other?.name || other?.email || 'Chat';
     const others = (conversation.participants || [])
       .filter(p => p.user.id !== currentUser?.userId)

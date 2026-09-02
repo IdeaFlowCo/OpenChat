@@ -37,6 +37,7 @@ import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import type { NavProp } from '../navigation/types';
+import { SELF_CONVERSATION_TITLE } from '../utils/conversationDisplay';
 
 const DEBOUNCE_MS = 300;
 const MIN_QUERY_LEN = 2;
@@ -159,9 +160,13 @@ export function SearchScreen() {
     if (item.kind === 'conv') {
       const h = item.hit;
       const isGroup = h.type === 'group';
+      const isSelfDM = !isGroup
+        && !!currentUser
+        && !!h.participants?.length
+        && h.participants.every(p => p.id === currentUser.userId);
       const other = !isGroup ? h.participants?.find(p => p.id !== currentUser?.userId) : null;
       const title = h.title
-        || (other ? (other.name || other.email) : 'Group');
+        || (isSelfDM ? SELF_CONVERSATION_TITLE : other ? (other.name || other.email) : 'Group');
       return (
         <TouchableOpacity
           style={[styles.row, { borderColor: c.divider }]}

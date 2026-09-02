@@ -32,6 +32,10 @@ import { AppIcon } from '../components/AppIcon';
 import { AgentOverlayButton } from '../components/AgentOverlayButton';
 import { ConnectionStatusLine } from '../components/ConnectionStatusLine';
 import type { NavProp } from '../navigation/types';
+import {
+  getDirectConversationParticipant,
+  getDirectConversationTitle,
+} from '../utils/conversationDisplay';
 
 function formatTime(iso: string | undefined): string {
   if (!iso) return '';
@@ -44,15 +48,10 @@ function formatTime(iso: string | undefined): string {
   return d.toLocaleDateString();
 }
 
-function getOther(conv: Conversation, me: CurrentUser | null) {
-  return conv.participants?.find(p => p.user.id !== me?.userId)?.user;
-}
-
 function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
   if (conv.title) return conv.title;
   if (conv.type === 'direct') {
-    const other = getOther(conv, me);
-    return other?.name || other?.email || 'Unknown';
+    return getDirectConversationTitle(conv, me, 'Unknown');
   }
   // Group fallback: list first 2 other-participant names.
   const others = (conv.participants || [])
@@ -90,7 +89,9 @@ function ConvRow({
   onPress,
 }: ConvRowProps) {
   const title = getDisplayTitle(item, currentUser);
-  const other = item.type === 'direct' ? getOther(item, currentUser) : null;
+  const other = item.type === 'direct'
+    ? getDirectConversationParticipant(item, currentUser)
+    : null;
   const bgAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -282,7 +283,9 @@ export function ConversationsScreen() {
           </View>
         }
         renderItem={({ item }) => {
-          const other = item.type === 'direct' ? getOther(item, currentUser) : null;
+          const other = item.type === 'direct'
+            ? getDirectConversationParticipant(item, currentUser)
+            : null;
           const unread = unreadByConv.get(item.id) ?? 0;
           const live = other ? presence.get(other.id) : null;
           const typingSet = typingByConv.get(item.id);

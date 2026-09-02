@@ -32,6 +32,10 @@ import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from './Avatar';
 import { BotBadge } from './BotBadge';
+import {
+  getDirectConversationParticipant,
+  getDirectConversationTitle,
+} from '../utils/conversationDisplay';
 
 function formatTime(iso: string | undefined): string {
   if (!iso) return '';
@@ -44,15 +48,10 @@ function formatTime(iso: string | undefined): string {
   return d.toLocaleDateString();
 }
 
-function getOther(conv: Conversation, me: CurrentUser | null) {
-  return conv.participants?.find(p => p.user.id !== me?.userId)?.user;
-}
-
 function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
   if (conv.title) return conv.title;
   if (conv.type === 'direct') {
-    const other = getOther(conv, me);
-    return other?.name || other?.email || 'Unknown';
+    return getDirectConversationTitle(conv, me, 'Unknown');
   }
   const others = (conv.participants || [])
     .filter(p => p.user.id !== me?.userId)
@@ -78,7 +77,9 @@ function ConversationRow({ item, isActive, onPress, compact }: RowProps) {
   const [hovered, setHovered] = useState(false);
 
   const title = getDisplayTitle(item, currentUser);
-  const other = item.type === 'direct' ? getOther(item, currentUser) : null;
+  const other = item.type === 'direct'
+    ? getDirectConversationParticipant(item, currentUser)
+    : null;
   const unread = unreadByConv.get(item.id) ?? 0;
   const live = other ? presence.get(other.id) : null;
   const typingSet = typingByConv.get(item.id);

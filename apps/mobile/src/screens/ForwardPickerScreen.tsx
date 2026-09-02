@@ -24,16 +24,15 @@ import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { api, Conversation, CurrentUser } from '../api/client';
 import type { NavProp, RouteProps } from '../navigation/types';
-
-function getOther(conv: Conversation, me: CurrentUser | null) {
-  return conv.participants?.find(p => p.user.id !== me?.userId)?.user;
-}
+import {
+  getDirectConversationParticipant,
+  getDirectConversationTitle,
+} from '../utils/conversationDisplay';
 
 function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
   if (conv.title) return conv.title;
   if (conv.type === 'direct') {
-    const other = getOther(conv, me);
-    if (other) return other.name || other.email;
+    return getDirectConversationTitle(conv, me, 'Unnamed');
   }
   return 'Unnamed';
 }
@@ -95,7 +94,9 @@ export function ForwardPickerScreen() {
 
   const renderItem = useCallback(({ item: conv }: { item: Conversation }) => {
     const title = getDisplayTitle(conv, currentUser);
-    const other = conv.type === 'direct' ? getOther(conv, currentUser) : undefined;
+    const other = conv.type === 'direct'
+      ? getDirectConversationParticipant(conv, currentUser)
+      : undefined;
     const avatarName = other?.name || other?.email || title;
     const avatarEmail = other?.email;
 

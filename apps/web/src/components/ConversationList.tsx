@@ -3,21 +3,23 @@ import { PresenceIndicator } from './PresenceIndicator';
 import { BotBadge } from './BotBadge';
 import { AppIcon } from './AppIcon';
 import { userDisplayName } from '../utils/userDisplay';
+import {
+  getDirectConversationParticipant,
+  getDirectConversationTitle,
+  isSelfDirectConversation,
+} from '../utils/conversationDisplay';
 
 export function ConversationList() {
   const { conversations, activeConversationId, setActiveConversation, presence, currentUser, unreadByConv, typingUsers } = useChat();
 
   const getOtherParticipant = (conv: typeof conversations[0]) => {
-    const participants = conv.participants || [];
-    return participants.find(p => p.user.id !== currentUser?.userId)?.user
-      || participants.find(p => p.user.id === currentUser?.userId)?.user;
+    return getDirectConversationParticipant(conv, currentUser);
   };
 
   const getConversationTitle = (conv: typeof conversations[0]) => {
     if (conv.title) return conv.title;
     if (conv.type === 'direct') {
-      const other = getOtherParticipant(conv);
-      return other?.name || other?.email || 'Unknown';
+      return getDirectConversationTitle(conv, currentUser, 'Unknown');
     }
     return 'Group Chat';
   };
@@ -47,6 +49,7 @@ export function ConversationList() {
       {conversations.map((conv) => {
         const isActive = conv.id === activeConversationId;
         const other = getOtherParticipant(conv);
+        const isSelfDM = isSelfDirectConversation(conv, currentUser);
         const otherPresence = other ? presence.get(other.id) : null;
         const fallbackStatus = other?.presenceStatus;
         const unread = unreadByConv.get(conv.id) ?? 0;
@@ -83,7 +86,7 @@ export function ConversationList() {
                 <div className="flex justify-between items-center">
                   <span className={`truncate flex items-center min-w-0 ${hasUnread ? 'font-semibold text-gray-900 dark:text-slate-50' : 'font-medium text-gray-900 dark:text-slate-100'}`}>
                     <span className="truncate">
-                      {conv.type === 'direct' && other
+                      {conv.type === 'direct' && other && !isSelfDM
                         ? userDisplayName(other, currentUser)
                         : getConversationTitle(conv)}
                     </span>

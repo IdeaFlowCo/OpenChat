@@ -11,6 +11,10 @@ import { Avatar } from './Avatar';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import type { Conversation, CurrentUser } from '../api/client';
+import {
+  getDirectConversationParticipant,
+  isSelfDirectConversation,
+} from '../utils/conversationDisplay';
 
 interface Props {
   conversation: Conversation | undefined;
@@ -24,8 +28,9 @@ export function ChatEmptyState({ conversation, currentUser }: Props) {
   if (!conversation) return null;
 
   const isGroup = conversation.type === 'group';
+  const isSelfDM = isSelfDirectConversation(conversation, currentUser);
   const other = !isGroup
-    ? conversation.participants?.find(p => p.user.id !== currentUser?.userId)?.user
+    ? getDirectConversationParticipant(conversation, currentUser)
     : null;
 
   const avatarName = isGroup
@@ -39,7 +44,9 @@ export function ChatEmptyState({ conversation, currentUser }: Props) {
 
   const label = isGroup
     ? `This is a new group with ${conversation.participants?.length ?? 0} people`
-    : `This is the start of your chat with ${other?.name || other?.email || 'someone'}`;
+    : isSelfDM
+      ? 'Messages here are just for you'
+      : `This is the start of your chat with ${other?.name || other?.email || 'someone'}`;
 
   return (
     <View style={styles.wrap}>
