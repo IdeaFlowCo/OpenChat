@@ -50,6 +50,7 @@ import { TransformButton } from '../components/TransformButton';
 import { NVCComposerModal } from '../components/NVCComposerModal';
 import { LinkPreviewCard } from '../components/LinkPreviewCard';
 import { AgentNetworkCard } from '../components/AgentNetworkCard';
+import { AgentOverlayButton } from '../components/AgentOverlayButton';
 import type { Participant } from '../api/client';
 import { ExportSheet } from '../components/ExportSheet';
 import { saveJsonDownload } from '../services/exportDownload';
@@ -564,6 +565,10 @@ export function ChatScreen({
       ),
       headerRight: () => (
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <AgentOverlayButton
+            color={c.primary}
+            onPress={() => navigation.navigate('AgentOverlay')}
+          />
           <TouchableOpacity
             onPress={() =>
               navigation.navigate('ConversationThoughts', {

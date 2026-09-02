@@ -20,6 +20,7 @@ import {
 } from '../services/notifications';
 import {
   api,
+  AgentMatch,
   Attachment,
   Conversation,
   CurrentUser,
@@ -46,6 +47,7 @@ import {
   ParticipantEvent,
   PresenceEvent,
   TypingEvent,
+  MatchEvent,
 } from '../api/socket';
 import { showInAppBanner } from '../components/InAppMessageBanner';
 
@@ -103,6 +105,12 @@ interface ChatContextValue {
   // Unread counters
   unreadByConv: Map<string, number>;
 
+  // Agent network — always privacy-safe per-viewer projections.
+  matches: Map<string, AgentMatch>;
+  pendingMatchCount: number;
+  refetchMatches: () => Promise<void>;
+  respondToAgentMatch: (id: string, decision: 'approve' | 'decline') => Promise<AgentMatch>;
+
   // AI disclosure (OpenChat-ds3)
   aiDisclosureAcceptedAt: string | null;
   acceptAiDisclosure: () => Promise<void>;
@@ -147,6 +155,30 @@ function sortByRecent(list: Conversation[]): Conversation[] {
   });
 }
 
+const MATCH_STATUS_ORDER: Record<AgentMatch['status'], number> = {
+  pending: 0,
+  awaiting_other: 1,
+  closed: 2,
+  connected: 2,
+};
+
+/** Keep a later socket projection from being overwritten by a slower REST response. */
+function withNewestMatch(current: Map<string, AgentMatch>, incoming: AgentMatch): Map<string, AgentMatch> {
+  const existing = current.get(incoming.id);
+  if (existing) {
+    const existingTime = new Date(existing.updatedAt).getTime();
+    const incomingTime = new Date(incoming.updatedAt).getTime();
+    if (incomingTime < existingTime) return current;
+    if (incomingTime === existingTime
+      && MATCH_STATUS_ORDER[incoming.status] < MATCH_STATUS_ORDER[existing.status]) {
+      return current;
+    }
+  }
+  const next = new Map(current);
+  next.set(incoming.id, incoming);
+  return next;
+}
+
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
@@ -172,6 +204,33 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [presence, setPresence] = useState<Map<string, { status: string; statusMessage?: string }>>(new Map());
   const [typingByConv, setTypingByConv] = useState<Map<string, Set<string>>>(new Map());
   const [unreadByConv, setUnreadByConv] = useState<Map<string, number>>(new Map());
+  const [matches, setMatches] = useState<Map<string, AgentMatch>>(new Map());
+
+  const pendingMatchCount = useMemo(
+    () => Array.from(matches.values()).filter(match => match.status === 'pending').length,
+    [matches]
+  );
+
+  const refetchMatches = useCallback(async () => {
+    try {
+      const latest = await api.listMatches();
+      setMatches(prev => latest.reduce(withNewestMatch, new Map(prev)));
+    } catch (err) {
+      console.warn('[ChatContext] refetchMatches failed:', err);
+      throw err;
+    }
+  }, []);
+
+  const respondToAgentMatch = useCallback(async (
+    id: string,
+    decision: 'approve' | 'decline'
+  ): Promise<AgentMatch> => {
+    const match = await api.respondToMatch(id, decision);
+    // Socket delivery is best-effort. Apply the authoritative response now;
+    // a later match:updated event will merge the same per-viewer projection.
+    setMatches(prev => withNewestMatch(prev, match));
+    return match;
+  }, []);
 
   // Sync total unread count to the app icon badge (OpenChat-9sp).
   // setUnreadBadgeCount is a no-op on web.
@@ -265,6 +324,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       console.warn('[ChatContext] socket connect failed during bootstrap:', e);
     }
     await refreshConversations();
+    // Seed the global pending badge. Non-fatal: opening the overlay always
+    // retries, and match:updated keeps the map current while connected.
+    try {
+      await refetchMatches();
+    } catch {
+      /* best effort during bootstrap */
+    }
     // Seed lastSyncAt from now so that on reconnect we only fetch messages
     // that arrived after this bootstrap, not everything since epoch.
     lastSyncAtRef.current = new Date().toISOString();
@@ -279,7 +345,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const muted = await loadMutedConvs();
     setMutedConvs(muted);
     return true;
-  }, [refreshConversations]);
+  }, [refreshConversations, refetchMatches]);
 
   // Wire socket listeners exactly ONCE per authed session.
   useEffect(() => {
@@ -293,6 +359,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setIsConnected(true);
 
       if (wasEverConnectedRef.current) {
+        // Match socket events are best-effort too; repair badge/card state at
+        // the same reconnect boundary used for missed chat messages.
+        void refetchMatches().catch(() => { /* already logged by refetchMatches */ });
         // This is a RECONNECT. Fetch missed messages.
         const since = lastSyncAtRef.current;
         console.log('[ChatContext] reconnect — fetching messages since', since);
@@ -498,6 +567,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       });
     };
 
+    const onMatchUpdated = ({ match }: MatchEvent) => {
+      if (!match?.id) return;
+      // `match` is already the server's per-viewer projection. Store it as-is;
+      // never combine it with conversation participants or other identity data.
+      setMatches(prev => withNewestMatch(prev, match));
+    };
+
     // read:updated — another participant marked the conversation read (OpenChat-0nj)
     const onReadUpdated = (e: {
       conversationId: string;
@@ -598,6 +674,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     sock.on('typing:start', onTypingStart);
     sock.on('typing:stop', onTypingStop);
     sock.on('presence:updated', onPresence);
+    sock.on('match:updated', onMatchUpdated);
     sock.on('read:updated', onReadUpdated);
     sock.on('user:profile-updated', onProfileUpdated);
 
@@ -618,10 +695,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sock.off('typing:start', onTypingStart);
       sock.off('typing:stop', onTypingStop);
       sock.off('presence:updated', onPresence);
+      sock.off('match:updated', onMatchUpdated);
       sock.off('read:updated', onReadUpdated);
       sock.off('user:profile-updated', onProfileUpdated);
     };
-  }, [isAuthed, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage]);
+  }, [isAuthed, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage, refetchMatches]);
 
   // setActiveConversation: clears unread, joins/leaves rooms, loads messages.
   const setActiveConversation = useCallback((id: string | null) => {
@@ -990,6 +1068,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setPresence(new Map());
     setTypingByConv(new Map());
     setUnreadByConv(new Map());
+    setMatches(new Map());
     setAiDisclosureAcceptedAt(null);
     setReadByOthers(new Map());
     setOnlineUsers(new Map());
@@ -1017,6 +1096,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     toggleReaction,
     blockUser,
     presence, typingByConv, reportTyping, unreadByConv,
+    matches, pendingMatchCount, refetchMatches, respondToAgentMatch,
     aiDisclosureAcceptedAt, acceptAiDisclosure,
     mutedConvs, muteConv,
     readByOthers, onlineUsers, markConversationRead,
@@ -1034,6 +1114,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     toggleReaction,
     blockUser,
     presence, typingByConv, reportTyping, unreadByConv,
+    matches, pendingMatchCount, refetchMatches, respondToAgentMatch,
     aiDisclosureAcceptedAt, acceptAiDisclosure,
     mutedConvs, muteConv,
     readByOthers, onlineUsers, markConversationRead,

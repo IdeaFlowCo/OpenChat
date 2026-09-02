@@ -22,6 +22,8 @@ export type RootStackParamList = {
   Conversations: undefined;
   Chat: { conversationId: string };
   NewConversation: undefined;
+  /** App-wide agent network overlay (asks, offers, and anonymous matches; OpenChat-a0e.5). */
+  AgentOverlay: undefined;
   GroupSettings: { conversationId: string };
   Settings: undefined;
   Search: undefined;

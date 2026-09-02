@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { api, type AgentIntentKind, type AgentMatch, type AgentMatchStatus, type Message } from '../api/client';
+import { type AgentIntentKind, type AgentMatchStatus, type Message } from '../api/client';
+import { useChat } from '../contexts/ChatContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 
@@ -116,8 +117,8 @@ interface AgentNetworkCardProps {
 export function AgentNetworkCard({ message, onOpenConversation }: AgentNetworkCardProps) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
+  const { matches, respondToAgentMatch } = useChat();
   const payload = parseCard(message);
-  const [response, setResponse] = useState<AgentMatch | null>(null);
   const [busyDecision, setBusyDecision] = useState<'approve' | 'decline' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -126,7 +127,7 @@ export function AgentNetworkCard({ message, onOpenConversation }: AgentNetworkCa
     setBusyDecision(decision);
     setError(null);
     try {
-      setResponse(await api.respondToMatch(proposal.matchId, decision));
+      await respondToAgentMatch(proposal.matchId, decision);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not update this match.');
     } finally {
@@ -174,8 +175,9 @@ export function AgentNetworkCard({ message, onOpenConversation }: AgentNetworkCa
     );
   }
 
-  const status = response?.status ?? payload.status;
-  const isUnavailable = status === 'closed' || (!!response?.alreadyResolved && status !== 'connected');
+  const liveMatch = matches.get(payload.matchId);
+  const status = liveMatch?.status ?? payload.status;
+  const isUnavailable = status === 'closed' || (!!liveMatch?.alreadyResolved && status !== 'connected');
 
   return (
     <View style={styles.centered}>
@@ -193,7 +195,7 @@ export function AgentNetworkCard({ message, onOpenConversation }: AgentNetworkCa
           <Text style={[styles.terms, { color: c.textSecondary }]}>{payload.ownIntent.terms}</Text>
         </View>
 
-        {status === 'pending' && !response?.alreadyResolved && (
+        {status === 'pending' && !liveMatch?.alreadyResolved && (
           <View style={styles.actions}>
             <TouchableOpacity
               onPress={() => void respond(payload, 'approve')}
@@ -226,8 +228,8 @@ export function AgentNetworkCard({ message, onOpenConversation }: AgentNetworkCa
         {status === 'connected' && (
           <View style={styles.connectedRow}>
             <Text style={[styles.stateText, { color: c.textSecondary }]}>You’re connected.</Text>
-            {response?.conversationId && (
-              <TouchableOpacity accessibilityRole="button" onPress={() => onOpenConversation(response.conversationId!)}>
+            {liveMatch?.conversationId && (
+              <TouchableOpacity accessibilityRole="button" onPress={() => onOpenConversation(liveMatch.conversationId!)}>
                 <Text style={[styles.openLink, { color: c.primary }]}>Open conversation</Text>
               </TouchableOpacity>
             )}
