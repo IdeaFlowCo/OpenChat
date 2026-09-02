@@ -49,10 +49,10 @@ function formatTime(iso: string | undefined): string {
 }
 
 function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
-  if (conv.title) return conv.title;
   if (conv.type === 'direct') {
     return getDirectConversationTitle(conv, me, 'Unknown');
   }
+  if (conv.title) return conv.title;
   const others = (conv.participants || [])
     .filter(p => p.user.id !== me?.userId)
     .map(p => p.user.name || p.user.email?.split('@')[0] || '?');

@@ -9,6 +9,10 @@ import { BotBadge } from '../components/BotBadge';
 import { ConversationHeaderMenu } from '../components/ConversationHeaderMenu';
 import { userDisplayName } from '../utils/userDisplay';
 import { AppIcon } from '../components/AppIcon';
+import {
+  getDirectConversationParticipant,
+  getDirectConversationTitle,
+} from '../utils/conversationDisplay';
 
 export function ChatPage() {
   const { loadConversations, activeConversationId, setActiveConversation, conversations, isConnected, currentUser } = useChat();
@@ -47,8 +51,7 @@ export function ChatPage() {
   const activeConversation = conversations.find(c => c.id === activeConversationId);
   const isGroup = activeConversation?.type === 'group';
   const directParticipant = activeConversation?.type === 'direct'
-    ? activeConversation.participants?.find(p => p.user.id !== currentUser?.userId)?.user
-      || activeConversation.participants?.find(p => p.user.id === currentUser?.userId)?.user
+    ? getDirectConversationParticipant(activeConversation, currentUser)
     : null;
 
   // On mobile, the layout is a stack: list OR chat. On md+, side-by-side.
@@ -93,12 +96,9 @@ export function ChatPage() {
                 >
                   <h2 className="font-semibold truncate text-gray-900 dark:text-slate-100 flex items-center min-w-0">
                     <span className="truncate">
-                      {activeConversation.title ||
-                        (activeConversation.type === 'direct'
-                          ? directParticipant
-                            ? userDisplayName(directParticipant, currentUser)
-                            : 'Chat'
-                          : 'Group Chat')}
+                      {activeConversation.type === 'direct'
+                        ? getDirectConversationTitle(activeConversation, currentUser, 'Chat')
+                        : activeConversation.title || 'Group Chat'}
                     </span>
                     {activeConversation.type === 'direct' && (
                       <BotBadge

@@ -17,10 +17,10 @@ export function ConversationList() {
   };
 
   const getConversationTitle = (conv: typeof conversations[0]) => {
-    if (conv.title) return conv.title;
     if (conv.type === 'direct') {
       return getDirectConversationTitle(conv, currentUser, 'Unknown');
     }
+    if (conv.title) return conv.title;
     return 'Group Chat';
   };
 

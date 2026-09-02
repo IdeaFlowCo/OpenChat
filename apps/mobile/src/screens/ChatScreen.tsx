@@ -410,16 +410,15 @@ export function ChatScreen({
   }, [isGroup, conversation?.participants, currentUser?.userId]);
   const headerTitle = useMemo(() => {
     if (!conversation) return '';
+    if (!isGroup) return getDirectConversationTitle(conversation, currentUser, 'Chat');
     if (conversation.title) return conversation.title;
-    if (isSelfDM) return SELF_CONVERSATION_TITLE;
-    if (!isGroup) return other?.name || other?.email || 'Chat';
     const others = (conversation.participants || [])
       .filter(p => p.user.id !== currentUser?.userId)
       .map(p => p.user.name || p.user.email?.split('@')[0] || '?');
     if (others.length === 0) return 'Group';
     if (others.length <= 2) return others.join(', ');
     return `${others[0]} +${others.length - 1}`;
-  }, [conversation, isGroup, isSelfDM, other, currentUser?.userId]);
+  }, [conversation, isGroup, currentUser]);
 
   // Does this conversation include any bot participant? (OpenChat-ds3)
   const containsBot = useMemo(

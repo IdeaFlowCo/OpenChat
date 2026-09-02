@@ -53,4 +53,19 @@ describe('self-conversation display helpers', () => {
     expect(getMobileParticipant(direct, me)).toEqual(otherParticipant.user);
     expect(getMobileTitle({ ...direct, title: 'Project room' }, me, 'Unknown')).toBe('Project room');
   });
+
+  it('keeps the self label authoritative over an explicit direct-chat title', () => {
+    expect(getMobileTitle({ ...mobileSelfConversation, title: 'Saved notes' }, me, 'Unknown')).toBe('Myself');
+    expect(getWebTitle({ ...webSelfConversation, title: 'Saved notes' }, me, 'Unknown')).toBe('Myself');
+  });
+
+  it('supports flat participant data returned by search', () => {
+    const searchHit = { type: 'direct' as const, participants: [selfParticipant.user] };
+    expect(isMobileSelfConversation(searchHit, me)).toBe(true);
+    expect(getMobileTitle(searchHit, me, 'Unknown')).toBe('Myself');
+    expect(getMobileParticipant(searchHit, me)).toEqual(selfParticipant.user);
+    expect(isWebSelfConversation(searchHit, me)).toBe(true);
+    expect(getWebTitle(searchHit, me, 'Unknown')).toBe('Myself');
+    expect(getWebParticipant(searchHit, me)).toEqual(selfParticipant.user);
+  });
 });

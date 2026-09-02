@@ -14,6 +14,7 @@ import type { Conversation, CurrentUser } from '../api/client';
 import {
   getDirectConversationParticipant,
   isSelfDirectConversation,
+  SELF_CONVERSATION_TITLE,
 } from '../utils/conversationDisplay';
 
 interface Props {
@@ -45,7 +46,7 @@ export function ChatEmptyState({ conversation, currentUser }: Props) {
   const label = isGroup
     ? `This is a new group with ${conversation.participants?.length ?? 0} people`
     : isSelfDM
-      ? 'Messages here are just for you'
+      ? `This is the start of your chat with ${SELF_CONVERSATION_TITLE}`
       : `This is the start of your chat with ${other?.name || other?.email || 'someone'}`;
 
   return (

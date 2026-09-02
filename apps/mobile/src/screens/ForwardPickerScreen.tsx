@@ -30,10 +30,10 @@ import {
 } from '../utils/conversationDisplay';
 
 function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
-  if (conv.title) return conv.title;
   if (conv.type === 'direct') {
     return getDirectConversationTitle(conv, me, 'Unnamed');
   }
+  if (conv.title) return conv.title;
   return 'Unnamed';
 }
 
