@@ -26,7 +26,7 @@ OpenChat is a GChat-inspired messaging application that integrates with the Noos
 - Protected routes - redirect to login if not authenticated
 
 ### Contact Selection UI
-**Location:** `client/src/components/ChatSidebar.tsx`
+**Location:** `apps/web/src/components/ChatSidebar.tsx`
 
 Flow:
 1. User clicks "New" button in sidebar header
@@ -34,7 +34,7 @@ Flow:
 3. Contact picker UI slides in with:
    - Back button to return to conversation list
    - Search input reflecting the caller's exact-email or trusted-directory access
-   - A matching person row with:
+   - Matching person rows with:
      - Avatar (first letter of name)
      - Presence indicator (green/yellow/red dot)
      - Name and status message
