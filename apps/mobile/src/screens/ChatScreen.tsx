@@ -961,6 +961,21 @@ export function ChatScreen({
     }
   }, [sendMessage, replyTo, uploadAudio]);
 
+  // Cancel any live recording when the chat unmounts — otherwise expo-av's
+  // singleton recorder stays prepared and the NEXT mic press throws
+  // ("failed the first time, worked the second"). Also clears the tickers.
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (recordingMaxTimerRef.current) clearTimeout(recordingMaxTimerRef.current);
+      const rec = recordingRef.current;
+      if (rec) {
+        recordingRef.current = null;
+        void cancelRecording(rec);
+      }
+    };
+  }, []);
+
   // Keep the ref up to date so the max-duration timer (and any other
   // out-of-render caller) always invokes the current finishRecording closure.
   useEffect(() => {
@@ -1048,6 +1063,12 @@ export function ChatScreen({
 
   // Edit: load message content into composer in edit mode (OpenChat-q9h).
   const handleEdit = useCallback((message: Message) => {
+    // Editing while a voice recording is live crashed / wedged the recorder
+    // (2026-09-02 iPad report) — discard the recording before switching the
+    // composer into edit mode.
+    if (recordingRef.current) {
+      void finishRecordingRef.current(true);
+    }
     setEditingMessage(message);
     setReplyTo(null);
     setText(message.content);
