@@ -113,14 +113,11 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
       )}
       {name === 'thought' && (
         <>
-          {/* Cloud-style thought bubble with trailing dots — dots tucked so the
-              glyph fits the standard 14-unit optical box (2026-09-02). */}
-          <Path
-            d="M18.5 12.5a4 4 0 0 0-1-7.9 5 5 0 0 0-9.4.9A3.6 3.6 0 0 0 8 12.7c.4 0 9.5 0 10.5-.2z"
-            {...common}
-          />
-          <Circle cx="8" cy="16.2" r="1.4" fill={color} stroke="none" />
-          <Circle cx="5.4" cy="19" r="0.9" fill={color} stroke="none" />
+          {/* Open book / journal — Jacob's pick for the Thoughts glyph
+              (design-audit section 4, 2026-09-02). 14-unit optical box. */}
+          <Path d="M12 7.3A3.8 3.8 0 0 0 8.6 5.2H3.2v12.4h5.4a3.4 3.4 0 0 1 3.4 1.6" {...common} />
+          <Path d="M12 7.3a3.8 3.8 0 0 1 3.4-2.1h5.4v12.4h-5.4a3.4 3.4 0 0 0-3.4 1.6" {...common} />
+          <Line x1="12" y1="7.3" x2="12" y2="19.2" {...common} />
         </>
       )}
       {name === 'pin' && (
