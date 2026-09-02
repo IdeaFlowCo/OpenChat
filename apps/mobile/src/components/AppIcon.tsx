@@ -63,8 +63,8 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
     >
       {name === 'search' && (
         <>
-          <Circle cx="11" cy="11" r="7" {...common} />
-          <Line x1="16.2" y1="16.2" x2="21" y2="21" {...common} />
+          <Circle cx="11" cy="11" r="6" {...common} />
+          <Line x1="15.4" y1="15.4" x2="19" y2="19" {...common} />
         </>
       )}
       {name === 'plus' && (
@@ -113,13 +113,14 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
       )}
       {name === 'thought' && (
         <>
-          {/* Cloud-style thought bubble with trailing dots */}
+          {/* Cloud-style thought bubble with trailing dots — dots tucked so the
+              glyph fits the standard 14-unit optical box (2026-09-02). */}
           <Path
-            d="M18.5 13.5a4 4 0 0 0-1-7.9 5 5 0 0 0-9.4.9A3.6 3.6 0 0 0 8 13.7c.4 0 9.5 0 10.5-.2z"
+            d="M18.5 12.5a4 4 0 0 0-1-7.9 5 5 0 0 0-9.4.9A3.6 3.6 0 0 0 8 12.7c.4 0 9.5 0 10.5-.2z"
             {...common}
           />
-          <Circle cx="8" cy="17.5" r="1.3" {...common} />
-          <Circle cx="5" cy="20.5" r="0.8" {...common} />
+          <Circle cx="8" cy="16.2" r="1.4" fill={color} stroke="none" />
+          <Circle cx="5.4" cy="19" r="0.9" fill={color} stroke="none" />
         </>
       )}
       {name === 'pin' && (
