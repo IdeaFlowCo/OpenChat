@@ -26,6 +26,7 @@ import { broadcastMessageToParticipants } from '../websocket/chatHandler.js';
 import { processLinkPreviews } from '../services/linkPreview.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from './embeddings.js';
 import { dispatchMessageEvent } from './webhookDispatch.js';
+import { ensureDirectConversation } from './directConversation.js';
 import {
   createIntent,
   listIntents,
@@ -113,8 +114,10 @@ export async function persistMessage(
     cardPayload?: string;
     /** Caller-chosen id; the MERGE above makes reuse exactly-once. */
     messageId?: string;
+    matchContextKey?: string;
+    agentDeliveryKey?: string;
   }
-): Promise<{ message: Record<string, unknown>; participantIds: string[] } | null> {
+): Promise<{ message: Record<string, unknown>; participantIds: string[]; created: boolean } | null> {
   const messageId = opts?.messageId ?? nanoid();
   const now = new Date().toISOString();
   const messageContent = content.trim();
@@ -126,6 +129,14 @@ export async function persistMessage(
   const messageType = opts?.messageType ?? 'text';
   const cardKind = messageType === 'card' ? opts?.cardKind ?? null : null;
   const cardPayload = messageType === 'card' ? opts?.cardPayload ?? null : null;
+  const matchContextKey = opts?.matchContextKey;
+  const agentDeliveryKey = opts?.agentDeliveryKey;
+  const creationToken = nanoid();
+  const messageIdentity = matchContextKey
+    ? 'MERGE (m:Message {matchContextKey: $matchContextKey})'
+    : agentDeliveryKey
+      ? 'MERGE (m:Message {agentDeliveryKey: $agentDeliveryKey})'
+    : 'MERGE (m:Message {id: $id})';
 
   const s = getDriver().session();
   try {
@@ -133,8 +144,9 @@ export async function persistMessage(
       `
       MATCH (c:Conversation {id: $conversationId})
       MATCH (sender:User {id: $senderId})
-      MERGE (m:Message {id: $id})
+      ${messageIdentity}
       ON CREATE SET
+        m.id = $id,
         m.content = $content,
         m.senderId = $senderId,
         m.conversationId = $conversationId,
@@ -142,16 +154,22 @@ export async function persistMessage(
         m.cardKind = $cardKind,
         m.cardPayload = $cardPayload,
         m.viaAssistant = $viaAssistant,
-        m.createdAt = datetime($now)
+        m.createdAt = datetime($now),
+        m.creationToken = $creationToken
       MERGE (m)-[:IN_CONVERSATION]->(c)
       MERGE (sender)-[:SENT]->(m)
-      SET c.updatedAt = datetime($now),
-          c.lastMessageAt = datetime($now),
-          c.lastMessagePreview = left($content, 100)
-      WITH c, m, sender
+      WITH c, m, sender, m.creationToken = $creationToken AS created
+      REMOVE m.creationToken
+      FOREACH (_ IN CASE WHEN created THEN [1] ELSE [] END |
+        SET c.updatedAt = datetime($now),
+            c.lastMessageAt = datetime($now),
+            c.lastMessagePreview = left($content, 100)
+      )
+      WITH c, m, sender, created
       MATCH (p:User)-[:PARTICIPATES_IN]->(c)
       RETURN m { .*, sender: sender { .id, .name, .email } } AS message,
-             collect(DISTINCT p.id) AS participantIds
+             collect(DISTINCT p.id) AS participantIds,
+             created
       `,
       {
         id: messageId,
@@ -163,23 +181,28 @@ export async function persistMessage(
         messageType,
         cardKind,
         cardPayload,
+        matchContextKey: matchContextKey ?? null,
+        agentDeliveryKey: agentDeliveryKey ?? null,
+        creationToken,
       }
     );
 
     if (result.records.length === 0) return null;
     const message = toJS(result.records[0].get('message')) as Record<string, unknown>;
     const participantIds = result.records[0].get('participantIds') as string[];
+    const created = result.records[0].get('created') as boolean;
 
-    if (io) {
+    if (io && created) {
       broadcastMessageToParticipants(io, participantIds, message);
       processLinkPreviews(io, message.id as string, conversationId, messageContent);
     }
-    dispatchMessageEvent(message, participantIds);
+    if (created) dispatchMessageEvent(message, participantIds);
 
-    // Best-effort: embed the new message for semantic search (openchat-bfn.2).
-    void embedAndStoreMessage(message.id as string, messageContent).catch(() => { /* best-effort */ });
+    if (created) {
+      void embedAndStoreMessage(message.id as string, messageContent).catch(() => { /* best-effort */ });
+    }
 
-    return { message, participantIds };
+    return { message, participantIds, created };
   } finally {
     await s.close();
   }
@@ -190,54 +213,14 @@ export async function persistMessage(
  * return its conversation id. Shared by POST /api/assistant/ensure (which also
  * returns the full hydrated conversation) and POST /api/assistant/forward.
  *
- * Mirrors the MERGE logic in routes/assistant.ts: find an existing direct
- * conversation that has BOTH the user and the assistant bot, else create one
- * flagged containsBot=true. Pass `io` to join the user's sockets to the room.
  */
 export async function ensureAssistantConversation(
   userId: string,
   io?: IOServer
 ): Promise<string> {
   await ensureAssistantUser();
-  const s = getDriver().session();
-  try {
-    const existing = await s.run(
-      `
-      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {type: 'direct'})
-      MATCH (bot:User {id: $assistantId})-[:PARTICIPATES_IN]->(c)
-      RETURN c.id AS id
-      LIMIT 1
-      `,
-      { userId, assistantId: ASSISTANT_USER_ID }
-    );
-    let conversationId: string;
-    if (existing.records.length > 0) {
-      conversationId = existing.records[0].get('id') as string;
-    } else {
-      conversationId = nanoid();
-      const now = new Date().toISOString();
-      await s.run(
-        `
-        MATCH (u:User {id: $userId})
-        MATCH (bot:User {id: $assistantId})
-        CREATE (c:Conversation {
-          id: $id, title: null, type: 'direct', containsBot: true,
-          createdAt: datetime($now), updatedAt: datetime($now), lastMessageAt: datetime($now)
-        })
-        CREATE (u)-[:PARTICIPATES_IN { joinedAt: datetime($now), role: 'owner' }]->(c)
-        CREATE (bot)-[:PARTICIPATES_IN { joinedAt: datetime($now), role: 'member' }]->(c)
-        `,
-        { id: conversationId, userId, assistantId: ASSISTANT_USER_ID, now }
-      );
-    }
-    if (io) {
-      const { joinUserSocketsToConversation } = await import('../websocket/chatHandler.js');
-      joinUserSocketsToConversation(io, userId, conversationId);
-    }
-    return conversationId;
-  } finally {
-    await s.close();
-  }
+  const result = await ensureDirectConversation(userId, ASSISTANT_USER_ID, io);
+  return result.conversation.id as string;
 }
 
 /**
@@ -251,7 +234,7 @@ export async function postMessageAs(
   senderId: string,
   conversationId: string,
   content: string
-): Promise<{ message: Record<string, unknown>; participantIds: string[] } | null> {
+): Promise<{ message: Record<string, unknown>; participantIds: string[]; created: boolean } | null> {
   return persistMessage(io, senderId, conversationId, content);
 }
 
@@ -499,16 +482,27 @@ async function toolSendMessage(
   return { ok: true, messageId: persisted.message.id, conversationId };
 }
 
-async function toolCreateConversation(
+export async function createConversationForAssistant(
   io: IOServer | undefined,
   userId: string,
   participantIds: string[],
   title?: string
 ): Promise<unknown> {
+  const allParticipants = [userId, ...new Set(participantIds.filter((id) => id !== userId))];
+  const type = allParticipants.length <= 2 ? 'direct' : 'group';
+
+  if (type === 'direct') {
+    const result = await ensureDirectConversation(userId, allParticipants[1] ?? userId, io, title);
+    return {
+      id: result.conversation.id,
+      type,
+      title: result.conversation.title ?? null,
+      participantIds: allParticipants,
+    };
+  }
+
   const conversationId = nanoid();
   const now = new Date().toISOString();
-  const type = participantIds.filter((id) => id !== userId).length <= 1 ? 'direct' : 'group';
-  const allParticipants = [userId, ...participantIds.filter((id) => id !== userId)];
 
   const s = getDriver().session();
   try {
@@ -700,6 +694,7 @@ function buildTools(): AnthropicType.Tool[] {
           kind: { type: 'string', enum: ['ask', 'offer'] },
           terms: { type: 'string', description: 'Exact anonymous public terms, 1-500 characters' },
           details: { type: 'string', description: 'Optional private owner-only context, at most 2000 characters' },
+          expiresAt: { type: 'string', description: 'Optional future ISO date-time after which discovery stops' },
         },
         required: ['kind', 'terms'],
       },
@@ -773,7 +768,7 @@ async function executeTool(
           : [];
         const title = typeof input.title === 'string' ? input.title : undefined;
         if (participantIds.length === 0) return { error: 'participantIds is required' };
-        return await toolCreateConversation(io, userId, participantIds, title);
+        return await createConversationForAssistant(io, userId, participantIds, title);
       }
       case 'submit_feedback': {
         const message = typeof input.message === 'string' ? input.message : '';
@@ -785,10 +780,14 @@ async function executeTool(
         const kind = input.kind === 'ask' || input.kind === 'offer' ? input.kind : null;
         const terms = typeof input.terms === 'string' ? input.terms.trim() : '';
         const details = typeof input.details === 'string' ? input.details : undefined;
+        const expiresAt = typeof input.expiresAt === 'string' ? input.expiresAt : undefined;
         if (!kind) return { error: "kind must be 'ask' or 'offer'" };
         if (!terms || terms.length > 500) return { error: 'terms must be between 1 and 500 characters' };
         if (details && details.length > 2000) return { error: 'details must be at most 2000 characters' };
-        return { intent: await createIntent(userId, { kind, terms, details }, { io }) };
+        if (expiresAt && (!Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now())) {
+          return { error: 'expiresAt must be a future ISO date-time' };
+        }
+        return { intent: await createIntent(userId, { kind, terms, details, expiresAt }, { io }) };
       }
       case 'list_intents':
         return { intents: await listIntents(userId) };

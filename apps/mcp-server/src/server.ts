@@ -594,12 +594,17 @@ export function buildServer(
           .max(2000)
           .optional()
           .describe('Optional private context visible only to the owner and their agent'),
+        expiresAt: z
+          .string()
+          .datetime()
+          .optional()
+          .describe('Optional future date-time after which the intent leaves discovery'),
       },
     },
-    async ({ kind, terms, details }) => {
+    async ({ kind, terms, details, expiresAt }) => {
       try {
         requireApiKey(api, 'Publishing intents');
-        return jsonResult(await api.publishIntent({ kind, terms, details }));
+        return jsonResult(await api.publishIntent({ kind, terms, details, expiresAt }));
       } catch (e) {
         return intentErrorResult(e);
       }

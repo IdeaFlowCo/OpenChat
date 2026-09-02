@@ -23,6 +23,7 @@ export interface AgentIntent {
   terms: string;
   details: string | null;
   status: IntentStatus;
+  expiresAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -33,6 +34,8 @@ interface MatchIntent {
   terms: string;
   ownerUserId?: string;
   details?: string | null;
+  status?: IntentStatus;
+  expiresAt?: string | null;
 }
 
 export interface AgentMatchProjection {
@@ -243,6 +246,7 @@ export async function ensureAgentIntentIndexes(): Promise<void> {
   try {
     await session.run(`CREATE CONSTRAINT agent_intent_id IF NOT EXISTS FOR (intent:AgentIntent) REQUIRE intent.id IS UNIQUE`);
     await session.run(`CREATE CONSTRAINT agent_match_id IF NOT EXISTS FOR (match:AgentMatch) REQUIRE match.id IS UNIQUE`);
+    await session.run(`CREATE CONSTRAINT agent_match_pair IF NOT EXISTS FOR (match:AgentMatch) REQUIRE match.pairKey IS UNIQUE`);
     await session.run(`CREATE INDEX agent_intent_owner IF NOT EXISTS FOR (intent:AgentIntent) ON (intent.ownerUserId)`);
     await session.run(`CREATE INDEX agent_intent_status IF NOT EXISTS FOR (intent:AgentIntent) ON (intent.status)`);
   } finally {
@@ -256,13 +260,20 @@ async function postAgentCard(
   cardKind: 'match_proposal' | 'match_status',
   payload: Record<string, unknown>,
   content: string,
-): Promise<void> {
+  deliveryKey: string,
+): Promise<boolean> {
   const conversationId = await ensureAssistantConversation(userId, io);
-  await persistMessage(io, ASSISTANT_USER_ID, conversationId, content, {
+  const persisted = await persistMessage(io, ASSISTANT_USER_ID, conversationId, content, {
     messageType: 'card',
     cardKind,
     cardPayload: JSON.stringify(payload),
+    agentDeliveryKey: deliveryKey,
   });
+  return persisted?.created === true;
+}
+
+function matchDeliveryKey(kind: string, matchId: string, userId: string): string {
+  return JSON.stringify([kind, matchId, userId]);
 }
 
 function emitMatchUpdated(
@@ -275,34 +286,22 @@ function emitMatchUpdated(
 
 async function deliverProposal(
   io: IOServer | undefined,
-  matchId: string,
   ownerUserId: string,
-  ownIntent: MatchIntent,
-  otherIntent: MatchIntent,
-  createdAt: string,
+  match: AgentMatchProjection,
 ): Promise<void> {
-  const match = projectMatchForViewer({
-    id: matchId,
-    matchStatus: 'proposed',
-    ownResponse: null,
-    ownIntent,
-    otherIntent,
-    createdAt,
-    updatedAt: createdAt,
-  });
-  await postAgentCard(io, ownerUserId, 'match_proposal', {
-    matchId,
+  const created = await postAgentCard(io, ownerUserId, 'match_proposal', {
+    matchId: match.id,
     ownIntent: match.ownIntent,
     otherTerms: match.otherTerms,
     otherKind: match.otherKind,
     status: match.status,
-  }, 'Your agent found a possible match.');
-  emitMatchUpdated(io, ownerUserId, match);
+  }, 'Your agent found a possible match.', matchDeliveryKey('proposal', match.id, ownerUserId));
+  if (created) emitMatchUpdated(io, ownerUserId, match);
 }
 
 export async function createIntent(
   userId: string,
-  input: { kind: IntentKind; terms: string; details?: string | null },
+  input: { kind: IntentKind; terms: string; details?: string | null; expiresAt?: string | null },
   options: { io?: IOServer; queueScan?: boolean; scoring?: ScoringPipeline } = {},
 ): Promise<AgentIntent> {
   const id = nanoid();
@@ -315,12 +314,21 @@ export async function createIntent(
       CREATE (intent:AgentIntent {
         id: $id, ownerUserId: $userId, kind: $kind, terms: $terms,
         details: $details, status: 'active',
+        expiresAt: CASE WHEN $expiresAt IS NULL THEN null ELSE datetime($expiresAt) END,
         createdAt: datetime($now), updatedAt: datetime($now)
       })
       CREATE (owner)-[:OWNS_INTENT]->(intent)
       RETURN intent { .* } AS intent
       `,
-      { id, userId, kind: input.kind, terms: input.terms, details: input.details ?? null, now },
+      {
+        id,
+        userId,
+        kind: input.kind,
+        terms: input.terms,
+        details: input.details ?? null,
+        expiresAt: input.expiresAt ?? null,
+        now,
+      },
     );
     if (result.records.length === 0) throw new Error('Intent owner not found');
     const intent = toJS(result.records[0].get('intent')) as AgentIntent;
@@ -395,17 +403,31 @@ const MATCH_PROJECTION_QUERY = `
          match.conversationId AS conversationId
 `;
 
-export async function listMatches(userId: string): Promise<AgentMatchProjection[]> {
+export async function listMatches(userId: string, io?: IOServer): Promise<AgentMatchProjection[]> {
   const session = getDriver().session();
   try {
     const result = await session.run(`${MATCH_PROJECTION_QUERY} ORDER BY createdAt DESC`, {
       userId,
       matchId: null,
     });
-    return result.records.map(projectionFromRecord);
+    const matches = result.records.map(projectionFromRecord);
+    return Promise.all(matches.map(async (match) => {
+      if (match.status === 'pending' || match.status === 'awaiting_other') {
+        await deliverProposal(io, userId, match);
+      } else if (match.status === 'connected') {
+        const current = await loadMatchForResponse(userId, match.id);
+        if (current) return (await completeConnectedMatch(userId, match.id, current, io)) ?? match;
+      }
+      return match;
+    }));
   } finally {
     await session.close();
   }
+}
+
+function isDiscoverableIntent(intent: MatchIntent, now: number): boolean {
+  return intent.status === 'active'
+    && (intent.expiresAt == null || Date.parse(intent.expiresAt) > now);
 }
 
 export async function scanIntentForMatches(
@@ -418,24 +440,31 @@ export async function scanIntentForMatches(
       `
       MATCH (sourceOwner:User)-[:OWNS_INTENT]->(source:AgentIntent {id: $intentId, status: 'active'})
       MATCH (candidateOwner:User)-[:OWNS_INTENT]->(candidate:AgentIntent {status: 'active'})
-      WHERE candidate.kind <> source.kind
+      WHERE (source.expiresAt IS NULL OR source.expiresAt > datetime($now))
+        AND (candidate.expiresAt IS NULL OR candidate.expiresAt > datetime($now))
+        AND candidate.kind <> source.kind
         AND candidateOwner.id <> sourceOwner.id
         AND NOT (sourceOwner)-[:BLOCKED]->(candidateOwner)
         AND NOT (candidateOwner)-[:BLOCKED]->(sourceOwner)
         AND NOT EXISTS {
           MATCH (existing:AgentMatch)-[:MATCHES]->(source)
           MATCH (existing)-[:MATCHES]->(candidate)
+          WHERE existing.status <> 'proposed'
         }
-      RETURN source { .id, .kind, .terms, .ownerUserId } AS source,
-             candidate { .id, .kind, .terms, .ownerUserId } AS candidate
+      RETURN source { .id, .kind, .terms, .ownerUserId, .status, .expiresAt } AS source,
+             candidate { .id, .kind, .terms, .ownerUserId, .status, .expiresAt } AS candidate
       `,
-      { intentId },
+      { intentId, now: new Date().toISOString() },
     );
 
     const scored: Array<{ source: MatchIntent; candidate: MatchIntent; score: number }> = [];
     for (const record of candidates.records) {
       const source = toJS(record.get('source')) as MatchIntent;
       const candidate = toJS(record.get('candidate')) as MatchIntent;
+      const scanTime = Date.now();
+      if (!isDiscoverableIntent(source, scanTime) || !isDiscoverableIntent(candidate, scanTime)) {
+        continue;
+      }
       const score = await scoreIntentPair(source, candidate, options.scoring);
       if (score !== null) scored.push({ source, candidate, score });
     }
@@ -444,46 +473,65 @@ export async function scanIntentForMatches(
     const createdIds: string[] = [];
     for (const pair of scored) {
       const matchId = nanoid();
+      const pairKey = JSON.stringify([pair.source.id, pair.candidate.id].sort());
+      const creationToken = nanoid();
       const now = new Date().toISOString();
       const created = await session.run(
         `
         MATCH (sourceOwner:User)-[:OWNS_INTENT]->(source:AgentIntent {id: $sourceId, status: 'active'})
         MATCH (candidateOwner:User)-[:OWNS_INTENT]->(candidate:AgentIntent {id: $candidateId, status: 'active'})
-        WHERE sourceOwner.id <> candidateOwner.id
+        WHERE (source.expiresAt IS NULL OR source.expiresAt > datetime($now))
+          AND (candidate.expiresAt IS NULL OR candidate.expiresAt > datetime($now))
+          AND sourceOwner.id <> candidateOwner.id
           AND NOT (sourceOwner)-[:BLOCKED]->(candidateOwner)
           AND NOT (candidateOwner)-[:BLOCKED]->(sourceOwner)
-          AND NOT EXISTS {
-            MATCH (existing:AgentMatch)-[:MATCHES]->(source)
-            MATCH (existing)-[:MATCHES]->(candidate)
-          }
-        CREATE (match:AgentMatch {
-          id: $matchId, status: 'proposed', score: $score,
-          createdAt: datetime($now), updatedAt: datetime($now)
-        })
-        CREATE (match)-[:MATCHES]->(source)
-        CREATE (match)-[:MATCHES]->(candidate)
+        OPTIONAL MATCH (existing:AgentMatch)-[:MATCHES]->(source)
+        WHERE (existing)-[:MATCHES]->(candidate)
+        WITH sourceOwner, candidateOwner, source, candidate, head(collect(existing)) AS existing
+        FOREACH (_ IN CASE WHEN existing IS NULL THEN [] ELSE [1] END |
+          SET existing.pairKey = $pairKey
+        )
+        MERGE (match:AgentMatch {pairKey: $pairKey})
+        ON CREATE SET match.id = $matchId, match.status = 'proposed', match.score = $score,
+                      match.createdAt = datetime($now), match.updatedAt = datetime($now),
+                      match.creationToken = $creationToken
+        WITH match, sourceOwner, candidateOwner, source, candidate,
+             match.creationToken = $creationToken AS created
+        REMOVE match.creationToken
+        MERGE (match)-[:MATCHES]->(source)
+        MERGE (match)-[:MATCHES]->(candidate)
         RETURN source { .id, .kind, .terms } AS source,
                candidate { .id, .kind, .terms } AS candidate,
                sourceOwner.id AS sourceOwnerId,
-               candidateOwner.id AS candidateOwnerId
+               candidateOwner.id AS candidateOwnerId,
+               match.id AS resolvedMatchId,
+               match.status AS matchStatus,
+               created
         `,
         {
           sourceId: pair.source.id,
           candidateId: pair.candidate.id,
           matchId,
+          pairKey,
+          creationToken,
           score: pair.score,
           now,
         },
       );
       if (created.records.length === 0) continue;
-      createdIds.push(matchId);
       const record = created.records[0];
-      const source = toJS(record.get('source')) as MatchIntent;
-      const candidate = toJS(record.get('candidate')) as MatchIntent;
-      await Promise.all([
-        deliverProposal(options.io, matchId, record.get('sourceOwnerId') as string, source, candidate, now),
-        deliverProposal(options.io, matchId, record.get('candidateOwnerId') as string, candidate, source, now),
-      ]);
+      const resolvedMatchId = record.get('resolvedMatchId') as string;
+      if (record.get('created')) createdIds.push(resolvedMatchId);
+      if (record.get('matchStatus') === 'proposed') {
+        const ownerIds = [
+          record.get('sourceOwnerId') as string,
+          record.get('candidateOwnerId') as string,
+        ];
+        const views = await Promise.all(ownerIds.map((ownerId) => loadMatchForResponse(ownerId, resolvedMatchId)));
+        await Promise.all(views.map((view, index) => view
+          ? deliverProposal(options.io, ownerIds[index]!, view.projection)
+          : Promise.resolve()));
+      }
     }
     return createdIds;
   } finally {
@@ -524,6 +572,107 @@ async function loadMatchForResponse(userId: string, matchId: string): Promise<Re
   }
 }
 
+async function completeConnectedMatch(
+  userId: string,
+  matchId: string,
+  current: RespondRecord,
+  io?: IOServer,
+): Promise<AgentMatchProjection | null> {
+  const dm = await ensureDirectConversation(userId, current.otherOwnerId, io);
+  const conversationId = dm.conversation.id as string;
+  const ask = current.ownIntent.kind === 'ask' ? current.ownIntent : current.otherIntent;
+  const offer = current.ownIntent.kind === 'offer' ? current.ownIntent : current.otherIntent;
+  await ensureAssistantUser();
+  await persistMessage(
+    io,
+    ASSISTANT_USER_ID,
+    conversationId,
+    `Your agents matched an ask and an offer. Ask: ${ask.terms} / Offer: ${offer.terms}`,
+    {
+      messageType: 'card',
+      cardKind: 'match_context',
+      cardPayload: JSON.stringify({ matchId, askTerms: ask.terms, offerTerms: offer.terms }),
+      matchContextKey: matchId,
+    },
+  );
+
+  const finishSession = getDriver().session();
+  try {
+    await finishSession.run(
+      `
+      MATCH (match:AgentMatch {id: $matchId})-[:MATCHES]->(intent:AgentIntent)
+      SET match.conversationId = $conversationId,
+          match.updatedAt = datetime($now),
+          intent.status = 'connected',
+          intent.updatedAt = datetime($now)
+      `,
+      { matchId, conversationId, now: new Date().toISOString() },
+    );
+  } finally {
+    await finishSession.close();
+  }
+
+  const updated = await loadMatchForResponse(userId, matchId);
+  if (!updated) return null;
+  const otherView = await loadMatchForResponse(updated.otherOwnerId, matchId);
+  const [ownStatusCreated, otherStatusCreated] = await Promise.all([
+    postAgentCard(
+      io,
+      userId,
+      'match_status',
+      { matchId, status: 'connected' },
+      'Your match is connected.',
+      matchDeliveryKey('connected', matchId, userId),
+    ),
+    postAgentCard(
+      io,
+      updated.otherOwnerId,
+      'match_status',
+      { matchId, status: 'connected' },
+      'Your match is connected.',
+      matchDeliveryKey('connected', matchId, updated.otherOwnerId),
+    ),
+  ]);
+  if (ownStatusCreated) emitMatchUpdated(io, userId, updated.projection);
+  if (otherStatusCreated && otherView) {
+    emitMatchUpdated(io, updated.otherOwnerId, otherView.projection);
+  }
+  return updated.projection;
+}
+
+export async function reconcileAgentDeliveries(io?: IOServer): Promise<void> {
+  const session = getDriver().session();
+  let pending: Array<{ userId: string; matchId: string }> = [];
+  try {
+    const result = await session.run(
+      `MATCH (owner:User)-[:OWNS_INTENT]->(own:AgentIntent)<-[:MATCHES]-(match:AgentMatch)-[:MATCHES]->(other:AgentIntent)
+       WHERE own <> other AND match.status IN ['proposed', 'connected']
+       RETURN DISTINCT owner.id AS userId, match.id AS matchId`,
+    );
+    pending = result.records.map((record) => ({
+      userId: record.get('userId') as string,
+      matchId: record.get('matchId') as string,
+    }));
+  } finally {
+    await session.close();
+  }
+
+  const results = await Promise.allSettled(pending.map(async ({ userId, matchId }) => {
+    const current = await loadMatchForResponse(userId, matchId);
+    if (!current) return;
+    if (current.matchStatus === 'proposed') {
+      await deliverProposal(io, userId, current.projection);
+    } else {
+      await completeConnectedMatch(userId, matchId, current, io);
+    }
+  }));
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.warn('[agent-network] delivery reconciliation failed:', result.reason);
+    }
+  }
+}
+
 export async function respondToMatch(
   userId: string,
   matchId: string,
@@ -533,6 +682,20 @@ export async function respondToMatch(
   const current = await loadMatchForResponse(userId, matchId);
   if (!current) return null;
   if (current.matchStatus !== 'proposed') {
+    if (current.matchStatus === 'connected') {
+      const completed = await completeConnectedMatch(userId, matchId, current, io);
+      return completed ? { ...completed, alreadyResolved: true } : null;
+    }
+    if (current.matchStatus === 'closed') {
+      await postAgentCard(
+        io,
+        userId,
+        'match_status',
+        { matchId, status: 'closed' },
+        'That match is now closed.',
+        matchDeliveryKey('closed', matchId, userId),
+      );
+    }
     return { ...current.projection, alreadyResolved: true };
   }
   if (current.ownResponse) return current.projection;
@@ -545,6 +708,7 @@ export async function respondToMatch(
       `
       MATCH (:User {id: $userId})-[:OWNS_INTENT]->(own:AgentIntent)<-[:MATCHES]-(match:AgentMatch {id: $matchId})-[:MATCHES]->(other:AgentIntent)
       WHERE own <> other AND match.status = 'proposed'
+        AND CASE WHEN own.id < other.id THEN match.aResponse ELSE match.bResponse END IS NULL
       SET match.aResponse = CASE WHEN own.id < other.id THEN $response ELSE match.aResponse END,
           match.bResponse = CASE WHEN own.id > other.id THEN $response ELSE match.bResponse END,
           match.updatedAt = datetime($now)
@@ -564,7 +728,7 @@ export async function respondToMatch(
     await session.close();
   }
 
-  let updated = await loadMatchForResponse(userId, matchId);
+  const updated = await loadMatchForResponse(userId, matchId);
   if (!updated) return null;
   if (!transitionStatus) {
     return updated.matchStatus === 'proposed'
@@ -572,58 +736,19 @@ export async function respondToMatch(
       : { ...updated.projection, alreadyResolved: true };
   }
 
-  // Only the request whose write actually performs the second approval may
-  // create the DM/context card. A racing first approval can observe the final
-  // connected state on reload, but must not duplicate these side effects.
   if (transitionStatus === 'connected') {
-    const dm = await ensureDirectConversation(userId, updated.otherOwnerId, io);
-    const conversationId = dm.conversation.id as string;
-    const ask = updated.ownIntent.kind === 'ask' ? updated.ownIntent : updated.otherIntent;
-    const offer = updated.ownIntent.kind === 'offer' ? updated.ownIntent : updated.otherIntent;
-    await ensureAssistantUser();
-    await persistMessage(
-      io,
-      ASSISTANT_USER_ID,
-      conversationId,
-      `Your agents matched an ask and an offer. Ask: ${ask.terms} / Offer: ${offer.terms}`,
-      {
-        messageType: 'card',
-        cardKind: 'match_context',
-        cardPayload: JSON.stringify({ matchId, askTerms: ask.terms, offerTerms: offer.terms }),
-        // Reusing the match id makes the context card exactly-once even if a
-        // connection completion is retried after an interrupted response.
-        messageId: matchId,
-      },
-    );
-    const finishSession = getDriver().session();
-    try {
-      await finishSession.run(
-        `
-        MATCH (match:AgentMatch {id: $matchId})-[:MATCHES]->(intent:AgentIntent)
-        SET match.conversationId = $conversationId,
-            match.updatedAt = datetime($now),
-            intent.status = 'connected',
-            intent.updatedAt = datetime($now)
-        `,
-        { matchId, conversationId, now: new Date().toISOString() },
-      );
-    } finally {
-      await finishSession.close();
-    }
-    updated = await loadMatchForResponse(userId, matchId);
-    if (!updated) return null;
-    const otherView = await loadMatchForResponse(updated.otherOwnerId, matchId);
-    await Promise.all([
-      postAgentCard(io, userId, 'match_status', { matchId, status: 'connected' }, 'Your match is connected.'),
-      postAgentCard(io, updated.otherOwnerId, 'match_status', { matchId, status: 'connected' }, 'Your match is connected.'),
-    ]);
-    emitMatchUpdated(io, userId, updated.projection);
-    if (otherView) emitMatchUpdated(io, updated.otherOwnerId, otherView.projection);
-    return updated.projection;
+    return completeConnectedMatch(userId, matchId, updated, io);
   }
 
   if (transitionStatus === 'closed') {
-    await postAgentCard(io, userId, 'match_status', { matchId, status: 'closed' }, 'That match is now closed.');
+    await postAgentCard(
+      io,
+      userId,
+      'match_status',
+      { matchId, status: 'closed' },
+      'That match is now closed.',
+      matchDeliveryKey('closed', matchId, userId),
+    );
     const otherView = await loadMatchForResponse(updated.otherOwnerId, matchId);
     emitMatchUpdated(io, userId, updated.projection);
     if (otherView) emitMatchUpdated(io, updated.otherOwnerId, otherView.projection);

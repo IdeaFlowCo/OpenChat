@@ -162,7 +162,8 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
   const userId = req.user!.userId;
   const { participantIds, title, type = 'direct' } = req.body;
 
-  if (!participantIds || !Array.isArray(participantIds) || participantIds.length === 0) {
+  if (!participantIds || !Array.isArray(participantIds) || participantIds.length === 0
+      || participantIds.some((id: unknown) => typeof id !== 'string')) {
     res.status(400).json({ error: 'participantIds required' });
     return;
   }
@@ -170,12 +171,20 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
   // Direct messages use the shared exact-participant dedup path. Quiet-match
   // connections call this same helper, so human DMs cannot drift into a
   // second implementation.
-  if (type === 'direct' && participantIds.length === 1) {
+  if (type === 'direct') {
+    const otherIds = [...new Set(
+      (participantIds as string[]).filter((id) => id !== userId),
+    )];
+    if (otherIds.length > 1) {
+      res.status(400).json({ error: 'Direct conversations require exactly two participants' });
+      return;
+    }
     try {
       const result = await ensureDirectConversation(
         userId,
-        participantIds[0] as string,
+        otherIds[0] ?? userId,
         req.app.get('io') as IOServer | undefined,
+        typeof title === 'string' ? title : undefined,
       );
       res.status(result.created ? 201 : 200).json(result.conversation);
     } catch (error) {

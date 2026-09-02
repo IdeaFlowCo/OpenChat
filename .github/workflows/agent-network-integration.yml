@@ -1,0 +1,50 @@
+name: Agent network integration
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  agent-network:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/openchat-test
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p openchat-test 'RETURN 1;'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      NEO4J_TEST_URI: bolt://localhost:7687
+      NEO4J_TEST_USER: neo4j
+      NEO4J_TEST_PASSWORD: openchat-test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run focused agent-network tests against Neo4j
+        run: >-
+          ./node_modules/.bin/vitest run
+          apps/server/test/agentNetwork.test.ts
+          apps/server/test/agentNetwork.expiry.test.ts
+          apps/server/test/agentNetwork.route.test.ts
+          apps/server/test/agentNetwork.integration.test.ts
+          apps/server/test/chatUnread.route.test.ts

@@ -37,6 +37,21 @@ export async function initDatabase(): Promise<void> {
       FOR (m:Message) REQUIRE m.id IS UNIQUE
     `);
 
+    await session.run(`
+      CREATE CONSTRAINT message_match_context IF NOT EXISTS
+      FOR (m:Message) REQUIRE m.matchContextKey IS UNIQUE
+    `);
+
+    await session.run(`
+      CREATE CONSTRAINT message_agent_delivery IF NOT EXISTS
+      FOR (m:Message) REQUIRE m.agentDeliveryKey IS UNIQUE
+    `);
+
+    await session.run(`
+      CREATE CONSTRAINT conversation_direct_pair IF NOT EXISTS
+      FOR (c:Conversation) REQUIRE c.directPairKey IS UNIQUE
+    `);
+
     // Create indexes for common queries
     await session.run(`
       CREATE INDEX message_conversation IF NOT EXISTS

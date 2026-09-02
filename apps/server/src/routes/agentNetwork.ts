@@ -14,10 +14,10 @@ import {
 const router = Router();
 
 function parseIntentBody(body: unknown):
-  | { kind: IntentKind; terms: string; details?: string }
+  | { kind: IntentKind; terms: string; details?: string; expiresAt?: string }
   | { error: string } {
   if (!body || typeof body !== 'object') return { error: 'Request body is required' };
-  const { kind, terms, details } = body as Record<string, unknown>;
+  const { kind, terms, details, expiresAt } = body as Record<string, unknown>;
   if (kind !== 'ask' && kind !== 'offer') return { error: "kind must be 'ask' or 'offer'" };
   if (typeof terms !== 'string' || terms.trim().length < 1 || terms.trim().length > 500) {
     return { error: 'terms must be between 1 and 500 characters' };
@@ -25,7 +25,19 @@ function parseIntentBody(body: unknown):
   if (details !== undefined && (typeof details !== 'string' || details.length > 2000)) {
     return { error: 'details must be a string of at most 2000 characters' };
   }
-  return { kind, terms: terms.trim(), ...(details === undefined ? {} : { details }) };
+  if (expiresAt !== undefined && (
+    typeof expiresAt !== 'string'
+    || !Number.isFinite(Date.parse(expiresAt))
+    || Date.parse(expiresAt) <= Date.now()
+  )) {
+    return { error: 'expiresAt must be a future ISO date-time' };
+  }
+  return {
+    kind,
+    terms: terms.trim(),
+    ...(details === undefined ? {} : { details }),
+    ...(expiresAt === undefined ? {} : { expiresAt }),
+  };
 }
 
 router.post('/intents', resolveActor, async (req: Request, res: Response) => {
@@ -74,7 +86,12 @@ router.patch('/intents/:id', resolveActor, async (req: Request, res: Response) =
 
 router.get('/matches', resolveActor, async (req: Request, res: Response) => {
   try {
-    res.json({ matches: await listMatches(req.user!.userId) });
+    res.json({
+      matches: await listMatches(
+        req.user!.userId,
+        req.app.get('io') as IOServer | undefined,
+      ),
+    });
   } catch (error) {
     console.error('Error listing matches:', error);
     res.status(500).json({ error: 'Failed to list matches' });

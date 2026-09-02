@@ -101,6 +101,7 @@ export interface AgentIntent {
   terms: string;
   details?: string | null;
   status: IntentStatus;
+  expiresAt?: string | null;
   createdAt: string;
   updatedAt: string;
   [k: string]: unknown;
@@ -277,7 +278,7 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       ),
 
     // ---- asks, offers, and quiet matches ----
-    publishIntent: (body: { kind: IntentKind; terms: string; details?: string }) =>
+    publishIntent: (body: { kind: IntentKind; terms: string; details?: string; expiresAt?: string }) =>
       request<{ intent: AgentIntent }>('POST', '/api/intents', { body }),
 
     listIntents: () =>

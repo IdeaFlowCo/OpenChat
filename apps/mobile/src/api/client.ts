@@ -184,6 +184,7 @@ export interface AgentIntent {
   terms: string;
   details: string | null;
   status: AgentIntentStatus;
+  expiresAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -699,7 +700,7 @@ export const api = {
     }),
 
   // ── Agent-network asks, offers, and quiet matches ───────────────────────
-  publishIntent: (params: { kind: AgentIntentKind; terms: string; details?: string }) =>
+  publishIntent: (params: { kind: AgentIntentKind; terms: string; details?: string; expiresAt?: string }) =>
     request<{ intent: AgentIntent }>('/api/intents', {
       method: 'POST',
       body: JSON.stringify(params),
