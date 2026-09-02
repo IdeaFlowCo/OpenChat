@@ -8,7 +8,9 @@ and `/d`.
 
 - Sign in with Noos email/password (Alice / Bob / your account)
 - Conversation list (live-sorted by latest message)
+- Self-conversations, consistently labeled **Myself**
 - Open a conversation → message thread renders
+- Search conversations and messages
 - Send messages via Socket.io (REST fallback)
 - Receive messages live via WebSocket
 - System dark mode (follows system appearance)
@@ -24,7 +26,7 @@ and `/d`.
 - Group creation flow
 - Group settings (rename, add/remove member, leave)
 - Presence indicators, typing indicators
-- @-mentions, reactions, media, search
+- @-mentions, reactions, media
 - Push notifications (APNs) — depends on `OpenChat-t81` server work
 - Manual theme override (currently follows system only)
 
