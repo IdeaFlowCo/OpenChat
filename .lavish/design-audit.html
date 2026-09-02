@@ -302,6 +302,43 @@
     </div>
   </section>
 
+
+  <!-- ═══════════ Section 4: thought icon alternatives (added 2026-09-02) ═══════════ -->
+  <section class="space-y-4">
+    <h2 class="text-2xl font-semibold">4 · Thoughts icon — pick a glyph</h2>
+    <p class="text-base-content/75 max-w-3xl">The current thought-bubble read ambiguously on device ("lightning bolt"). Four candidates, all in the app's stroke style:</p>
+    <form data-lavish-question="thought-icon" class="card bg-base-200" onsubmit="event.preventDefault();
+      const choice = new FormData(event.currentTarget).get('ticon');
+      if (!choice) return;
+      window.lavish.queuePrompt('Thoughts icon decision: use ' + choice, { tag: 'choice', text: 'Thoughts icon: ' + choice, element: event.currentTarget, data: { question: 'thought-icon', answer: choice } });">
+      <div class="card-body p-5 space-y-3">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <label class="flex flex-col items-center gap-2 cursor-pointer p-3 rounded-box border border-base-300">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 13.5a4 4 0 0 0-1-7.9 5 5 0 0 0-9.4.9A3.6 3.6 0 0 0 8 13.7c.4 0 9.5 0 10.5-.2z"/><circle cx="8" cy="17.5" r="1.75" fill="currentColor" stroke="none"/><circle cx="5" cy="20.5" r="1.1" fill="currentColor" stroke="none"/></svg>
+            <span class="text-sm">Cloud (current)</span>
+            <input type="radio" name="ticon" value="thought cloud (current)" class="radio radio-sm">
+          </label>
+          <label class="flex flex-col items-center gap-2 cursor-pointer p-3 rounded-box border border-base-300">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 3.8c-4.2.3-8.9 1.7-11.6 4.4-2.2 2.2-2.8 5-1.5 7.4L3 19.7l1 1 4.1-4.1c2.4 1.3 5.2.7 7.4-1.5 2.7-2.7 4.1-7.4 4.4-11.6z"/><path d="M9.5 14.5C11 11 14 8.5 17 7"/></svg>
+            <span class="text-sm">Quill — on-theme for Ink &amp; Paper</span>
+            <input type="radio" name="ticon" value="quill pen" class="radio radio-sm">
+          </label>
+          <label class="flex flex-col items-center gap-2 cursor-pointer p-3 rounded-box border border-base-300">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6.5 6.5 0 0 0-3.9 11.7c.6.5.9 1.1.9 1.8v.5h6v-.5c0-.7.3-1.3.9-1.8A6.5 6.5 0 0 0 12 3z"/></svg>
+            <span class="text-sm">Lightbulb</span>
+            <input type="radio" name="ticon" value="lightbulb" class="radio radio-sm">
+          </label>
+          <label class="flex flex-col items-center gap-2 cursor-pointer p-3 rounded-box border border-base-300">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.5A2.5 2.5 0 0 1 4.5 4H11v16H4.5A2.5 2.5 0 0 0 2 22.5z"/><path d="M22 6.5A2.5 2.5 0 0 0 19.5 4H13v16h6.5a2.5 2.5 0 0 1 2.5 2.5z"/><path d="M2 6.5V22.5M22 6.5V22.5"/></svg>
+            <span class="text-sm">Open book / journal</span>
+            <input type="radio" name="ticon" value="open book" class="radio radio-sm">
+          </label>
+        </div>
+        <button type="submit" class="btn btn-primary w-fit btn-sm">Queue icon choice</button>
+      </div>
+    </form>
+  </section>
+
   <!-- ═══════════ Section 3: decision form ═══════════ -->
   <section class="space-y-4">
     <h2 class="text-2xl font-semibold">3 · Pick the direction</h2>

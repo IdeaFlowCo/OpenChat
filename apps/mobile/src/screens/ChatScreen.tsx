@@ -463,18 +463,25 @@ export function ChatScreen({
     }
   }, [conversationId, exportBusyRange, isConnected, showToast]);
 
+  // "…" menu: mute controls + export (export moved out of the header per
+  // 2026-09-02 feedback — the download icon crowded the contact name).
   const showMuteMenu = () => {
-    const muteLabel = isMuted ? 'Unmute' : 'Mute';
-    const options = isMuted
-      ? ['Unmute', 'Cancel']
-      : ['For 1 hour', 'For 8 hours', 'Until tomorrow', 'Always', 'Cancel'];
+    const muteOptions = isMuted
+      ? ['Unmute']
+      : ['Mute for 1 hour', 'Mute for 8 hours', 'Mute until tomorrow', 'Mute always'];
+    const options = [...muteOptions, 'Export conversation…', 'Cancel'];
+    const exportIndex = muteOptions.length;
     const cancelIndex = options.length - 1;
 
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
-        { options, cancelButtonIndex: cancelIndex, title: isMuted ? 'Unmute conversation' : 'Mute notifications' },
+        { options, cancelButtonIndex: cancelIndex },
         async (idx) => {
           if (idx === cancelIndex) return;
+          if (idx === exportIndex) {
+            setExportSheetVisible(true);
+            return;
+          }
           if (isMuted) {
             await muteConv(conversationId, null);
           } else {
@@ -503,6 +510,7 @@ export function ChatScreen({
         isMuted ? undefined : 'You will stop receiving notification banners for this chat.',
         [
           { text: 'Cancel', style: 'cancel' },
+          { text: 'Export conversation…', onPress: () => setExportSheetVisible(true) },
           {
             text: isMuted ? 'Unmute' : 'Mute always',
             onPress: () => void muteConv(conversationId, isMuted ? null : 'always'),
@@ -530,7 +538,7 @@ export function ChatScreen({
           }}
           disabled={!isGroup && !isSelfDM && !other?.id}
           activeOpacity={0.7}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '80%' }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}
         >
           <Avatar
             name={!isGroup ? (other?.name || other?.email) : headerTitle}
@@ -539,9 +547,9 @@ export function ChatScreen({
             avatarUrl={!isGroup ? other?.avatarUrl : undefined}
             size={28}
           />
-          <View style={{ flexShrink: 1 }}>
+          <View style={{ flexShrink: 1, flexGrow: 1, minWidth: 0 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={{ color: c.textPrimary, fontWeight: '600', fontSize: 17, fontFamily: serif }} numberOfLines={1}>
+              <Text style={{ color: c.textPrimary, fontWeight: '600', fontSize: 19, fontFamily: serif, flexShrink: 1 }} numberOfLines={1}>
                 {headerTitle}
               </Text>
               {!isGroup && <BotBadge isBot={other?.isBot} compact />}
@@ -576,13 +584,6 @@ export function ChatScreen({
             style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
           >
             <AppIcon name="thought" color={c.primary} size={20} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setExportSheetVisible(true)}
-            accessibilityLabel="Export conversation"
-            style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
-          >
-            <AppIcon name="download" color={c.primary} size={20} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={showMuteMenu}
