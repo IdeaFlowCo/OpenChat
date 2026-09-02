@@ -527,9 +527,8 @@ export function SettingsScreen() {
         </View>
       </View>
 
-      {/* Invite people (openchat-37z). Shareable QR/link points to the landing
-          page (chat.globalbr.ai) which branches to iOS TestFlight, web, and
-          Android — so one QR works for whoever scans it. */}
+      {/* Invite people (openchat-37z). The public invite points to the
+          experimental browser experience; native builds stay private. */}
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>INVITE PEOPLE</Text>
         <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -538,14 +537,14 @@ export function SettingsScreen() {
               <QRCode value="https://chat.globalbr.ai" size={168} />
             </View>
             <Text style={[styles.optionHint, { color: c.textSecondary, marginTop: 10, textAlign: 'center', paddingHorizontal: 16 }]}>
-              Scan to open the OpenChat download page — iOS TestFlight, web, or Android
+              Scan to open the experimental OpenChat web preview
             </Text>
           </View>
           <TouchableOpacity
             style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
             onPress={async () => {
               const url = 'https://chat.globalbr.ai';
-              const message = `Try OpenChat — chat with a built-in AI assistant: ${url}`;
+              const message = `Try the experimental OpenChat web preview: ${url}`;
               if (Platform.OS === 'web') {
                 const nav = (globalThis as unknown as { navigator?: { share?: (d: unknown) => Promise<void> } }).navigator;
                 if (nav?.share) { try { await nav.share({ title: 'OpenChat', text: message, url }); } catch { /* cancelled */ } return; }
@@ -562,24 +561,13 @@ export function SettingsScreen() {
             <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
-            onPress={() => Linking.openURL('https://testflight.apple.com/join/QvUPzDMY')}
-            activeOpacity={0.7}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Get the iOS app · TestFlight</Text>
-              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Install the native beta on iPhone</Text>
-            </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
             style={styles.optionRow}
             onPress={() => Linking.openURL('https://chat.globalbr.ai/about')}
             activeOpacity={0.7}
           >
             <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>View the download page</Text>
-              <Text style={[styles.optionHint, { color: c.textSecondary }]}>The landing page with every platform</Text>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>View the product page</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Current web clients and release status</Text>
             </View>
             <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
           </TouchableOpacity>
@@ -590,6 +578,12 @@ export function SettingsScreen() {
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>ABOUT</Text>
         <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <View style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Experimental React Native preview</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Under active development on web, desktop, and private native builds</Text>
+            </View>
+          </View>
           <TouchableOpacity
             style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
             onPress={() => Linking.openURL('https://github.com/IdeaFlowCo/OpenChat')}
