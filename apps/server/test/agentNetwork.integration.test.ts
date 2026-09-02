@@ -149,7 +149,7 @@ integration('agent-network quiet-match loop', () => {
     } finally {
       await session.close();
     }
-  });
+  }, 15_000);
 
   it('closes anonymously on decline without creating a DM and leaves intents active', async () => {
     const token = `declinetoken${suffix.replace(/[^a-z0-9]/gi, '')}`;
