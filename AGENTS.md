@@ -9,13 +9,15 @@ This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get sta
 | Path | What it is | Surfaces |
 |------|-----------|----------|
 | `apps/server` | Node/Express + Socket.io + Neo4j **server** (shared backend) | `chat.globalbr.ai/api/*` |
-| `apps/web` | Vite/React **web** client (legacy) | `chat.globalbr.ai/`, `/legacy` |
-| `apps/mobile` | React Native / Expo app | native iOS (TestFlight) + RN-web at **`/m`** (mobile web) and **`/d`** (desktop web) |
+| `apps/web` | Vite/React **legacy** client | `/legacy` compatibility fallback |
+| `apps/mobile` | React Native / Expo app | experimental RN-web previews at **`/m`** and **`/d`** + private native experiments |
 | `apps/desktop` | Tauri desktop wrapper around the `apps/mobile` RN-web export | native desktop shell |
 | `apps/mcp-server` | MCP REST→tools bridge (Claude-side connector) | run locally / connect to Claude |
 | `infra/` | `deploy.sh`, `docker-compose.prod.yml`, `Dockerfile` | GCP prod deploy |
 
 (The old separate `tmad4000/openchat-mobile` repo is **frozen/archived** — its history is in `apps/mobile`.)
+The authoritative release status for each client surface is in
+[`docs/gcp-production.md`](docs/gcp-production.md#client-surfaces-and-release-status).
 
 **Rule: any user-facing chat change in one client (`apps/web` / `apps/mobile`) must be mirrored in the other in the SAME session** so native and web never drift (composer, send/receive, auth, rendering, presence…). The backend (`apps/server`) is shared, so server changes cover both. `infra/deploy.sh` rebuilds `/m`,`/d` from `apps/mobile`.
 - **Platform-appropriate exceptions are fine** (just document them): e.g. Enter-to-send is **web-only** — on a native touch keyboard the return key stays a newline and sending is the send button. No hardware-keyboard Enter handling is needed.

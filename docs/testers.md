@@ -1,8 +1,9 @@
 # OpenChat — Tester Guide & Release Operator Notes
 
-How testers get OpenChat builds, what updates automatically (and what does
-not), and how to send feedback. Covers iOS (TestFlight), over-the-air (OTA)
-EAS Updates, and the web builds at `/m` and `/d`.
+How invited testers get private OpenChat builds, what updates
+automatically (and what does not), and how to send feedback. Covers private
+iOS experiments (TestFlight), over-the-air (OTA) EAS Updates, and the
+experimental web builds at `/m` and `/d`.
 
 Tracking epic: **openchat-3jq** (release/update pipeline + web↔mobile parity).
 Ticket: **openchat-3jq.6**.
@@ -11,34 +12,32 @@ Ticket: **openchat-3jq.6**.
 
 ## 1. How testers get builds
 
-### iOS (TestFlight)
+The authoritative client hierarchy and release status live in
+[`gcp-production.md`](./gcp-production.md#client-surfaces-and-release-status).
+Public users should be directed to the experimental `/m` or `/d` browser
+preview. Native iOS and Android builds are private experiments, with no public
+enrollment or acquisition link; `/legacy` is an out-of-date compatibility
+fallback that may be missing features.
 
-OpenChat ships to iOS via Apple TestFlight. There are two tester tiers:
+### Private iOS experiment (TestFlight)
+
+Private iOS builds are distributed through Apple TestFlight to two tester
+tiers:
 
 | Tier | Who | How they're added | Wait for a new build |
 |------|-----|-------------------|----------------------|
 | **Internal** (Founders) | App Store Connect team members | Added in ASC → Users | Available ~1 min after `eas submit` finishes processing. **No Apple review.** Max 100 internal testers. |
-| **External** (Friends & Family) | Anyone with an email invite | Assigned to the *Friends and Family* beta group (group id in `publish-to-testers.py`) | Requires **Apple Beta App Review** (typically 24–48h, human-gated) the first time a build is submitted to external testers. Up to 10,000 external testers. |
+| **External** (Friends & Family) | Individually invited private testers | Assigned to the *Friends and Family* beta group (group id in `publish-to-testers.py`) | Requires **Apple Beta App Review** (typically 24–48h, human-gated) the first time a build is submitted to external testers. |
 
-**Join link (external):** https://testflight.apple.com/join/QvUPzDMY
-(also linked from the invite/landing page the server renders).
+There is no public TestFlight enrollment path. Operators provision private
+testers directly through App Store Connect or a private email invitation.
 
-A tester installs the **TestFlight** app from the App Store, opens the join
-link (or accepts the email invite), and installs OpenChat from inside
-TestFlight.
+### Experimental web previews — no install required
 
-### Web — no install required
-
-| Path | Audience | Notes |
-|------|----------|-------|
-| `https://chat.globalbr.ai/m` | Mobile web | Same React-Native-web app, usually opened on mobile; layout still adapts by viewport width. |
-| `https://chat.globalbr.ai/d` | Desktop web | Same app, master-detail layout at widths ≥ 900px. **Installable as a PWA** (manifest + service worker injected at deploy). |
-| `https://chat.globalbr.ai/legacy` | Legacy Vite client | Kept for backward compat. |
-
-`/m` and `/d` are the **same RN-web codebase** — the layout adapts to the
-viewport width at runtime (see `src/theme/breakpoints.ts`, breakpoint 900px).
-The only build-time difference is the asset base path. See
-[`collapse-m-d.md`](./collapse-m-d.md).
+Use `https://chat.globalbr.ai/m` for the mobile web preview and
+`https://chat.globalbr.ai/d` for the responsive desktop web preview. Both are
+under active development. See [`collapse-m-d.md`](./collapse-m-d.md) for the
+shared-export implementation details.
 
 ---
 
