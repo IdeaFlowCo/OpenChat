@@ -243,7 +243,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
                     Cancel
                   </button>
                 </div>
-                {search.length > 0 && (
+                {(search.length > 0 || currentUser?.canBrowseUserDirectory) && (
                   <div className="max-h-48 overflow-y-auto bg-white dark:bg-slate-900 rounded border border-gray-200 dark:border-slate-700">
                     {isSearching ? (
                       <div className="p-3 text-sm text-gray-500 dark:text-slate-400 text-center">Searching…</div>
