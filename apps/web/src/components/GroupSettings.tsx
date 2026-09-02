@@ -61,7 +61,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
   // Search when adding members
   useEffect(() => {
     if (!showAdd) return;
-    if (debouncedSearch.length === 0) {
+    if (debouncedSearch.length === 0 && !currentUser?.canBrowseUserDirectory) {
       setResults([]);
       return;
     }
@@ -78,7 +78,7 @@ export function GroupSettings({ open, onClose, conversation }: GroupSettingsProp
     return () => {
       cancelled = true;
     };
-  }, [debouncedSearch, showAdd, searchContacts, conversation.participants]);
+  }, [debouncedSearch, showAdd, searchContacts, conversation.participants, currentUser?.canBrowseUserDirectory]);
 
   if (!open) return null;
 
