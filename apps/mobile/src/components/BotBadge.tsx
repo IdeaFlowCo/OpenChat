@@ -3,6 +3,7 @@
  * (isBot=true on the server User node). Mirrors the web client BotBadge.
  */
 import { StyleSheet, Text, View } from 'react-native';
+import { AppIcon } from './AppIcon';
 
 interface Props {
   isBot?: boolean;
@@ -12,11 +13,12 @@ interface Props {
 export function BotBadge({ isBot, compact }: Props) {
   if (!isBot) return null;
   if (compact) {
-    return <Text style={styles.compact} accessibilityLabel="AI agent">🤖</Text>;
+    return <View style={styles.compact} accessibilityLabel="AI agent"><AppIcon name="bot" color="#78716c" size={13} /></View>;
   }
   return (
     <View style={styles.pill} accessibilityLabel="AI agent">
-      <Text style={styles.pillText}>🤖 AI</Text>
+      <AppIcon name="bot" color="#78716c" size={12} />
+      <Text style={styles.pillText}>AI</Text>
     </View>
   );
 }

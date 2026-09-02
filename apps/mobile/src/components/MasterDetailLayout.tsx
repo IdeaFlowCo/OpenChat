@@ -277,10 +277,10 @@ export function MasterDetailLayout() {
           style={[styles.homeBar, { borderColor: c.border }]}
         >
           {collapsed ? (
-            <Text style={{ color: c.primary, fontSize: 16 }}>↩</Text>
+            <AppIcon name="reply" color={c.primary} size={16} />
           ) : (
             <>
-              <Text style={{ color: c.primary, fontSize: 13, fontWeight: '600', marginRight: 6 }}>↩</Text>
+              <View style={{ marginRight: 6 }}><AppIcon name="reply" color={c.primary} size={14} /></View>
               <Text style={{ color: c.textSecondary, fontSize: 12, fontWeight: '500' }} numberOfLines={1}>
                 chat.globalbr.ai
               </Text>

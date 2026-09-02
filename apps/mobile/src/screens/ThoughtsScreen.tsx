@@ -29,6 +29,7 @@ import { fetchThoughts, deleteThought, Thought } from '../services/thoughts';
 import { getSocket } from '../api/socket';
 import { ThoughtCard } from '../components/ThoughtCard';
 import type { ThoughtsNavProp } from '../navigation/types';
+import { AppIcon } from '../components/AppIcon';
 
 // ── ThoughtsScreen ────────────────────────────────────────────────────────────
 
@@ -217,7 +218,7 @@ export function ThoughtsScreen() {
         onPress={openAdd}
         activeOpacity={0.8}
       >
-        <Text style={styles.fabIcon}>+</Text>
+        <AppIcon name="plus" color="#ffffff" size={26} strokeWidth={2.2} />
       </TouchableOpacity>
     </View>
   );

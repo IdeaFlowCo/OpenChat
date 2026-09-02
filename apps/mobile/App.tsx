@@ -73,6 +73,7 @@ import { ThoughtsScreen } from './src/screens/ThoughtsScreen';
 import { AddEditThoughtScreen } from './src/screens/AddEditThoughtScreen';
 import { ConversationThoughtsScreen } from './src/screens/ConversationThoughtsScreen';
 import { AppIcon, AppIconName } from './src/components/AppIcon';
+import { serif } from './src/theme/typography';
 import { getColors } from './src/theme/colors';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { InAppMessageBanner } from './src/components/InAppMessageBanner';
@@ -97,7 +98,7 @@ function ChatsNavigator({ currentUser, c }: {
     <ChatsStack.Navigator
       screenOptions={{
         headerStyle: { backgroundColor: c.surface },
-        headerTitleStyle: { color: c.textPrimary },
+        headerTitleStyle: { color: c.textPrimary, fontFamily: serif },
         headerTintColor: c.primary,
         contentStyle: { backgroundColor: c.background },
       }}
@@ -235,7 +236,7 @@ function ThoughtsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
     <ThoughtsStack.Navigator
       screenOptions={{
         headerStyle: { backgroundColor: c.surface },
-        headerTitleStyle: { color: c.textPrimary },
+        headerTitleStyle: { color: c.textPrimary, fontFamily: serif },
         headerTintColor: c.primary,
         contentStyle: { backgroundColor: c.background },
       }}

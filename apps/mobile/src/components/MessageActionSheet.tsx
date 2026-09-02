@@ -407,7 +407,7 @@ export function MessageActionSheet({
                 onPress={handleCopy}
                 activeOpacity={0.7}
               >
-                <Text style={styles.actionIcon}>📋</Text>
+                <View style={styles.actionIconBox}><AppIcon name="copy" color={c.textPrimary} size={20} /></View>
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Copy</Text>
               </TouchableOpacity>
             )}
@@ -419,7 +419,7 @@ export function MessageActionSheet({
                 onPress={handleReply}
                 activeOpacity={0.7}
               >
-                <Text style={styles.actionIcon}>↩</Text>
+                <View style={styles.actionIconBox}><AppIcon name="reply" color={c.textPrimary} size={20} /></View>
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Reply</Text>
               </TouchableOpacity>
             )}
@@ -431,7 +431,7 @@ export function MessageActionSheet({
                 onPress={handleForwardPress}
                 activeOpacity={0.7}
               >
-                <Text style={styles.actionIcon}>↪</Text>
+                <View style={styles.actionIconBox}><AppIcon name="forward" color={c.textPrimary} size={20} /></View>
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Forward</Text>
               </TouchableOpacity>
             )}
@@ -475,7 +475,7 @@ export function MessageActionSheet({
                 onPress={handleForwardToAssistantPress}
                 activeOpacity={0.7}
               >
-                <Text style={styles.actionIcon}>🤖</Text>
+                <View style={styles.actionIconBox}><AppIcon name="bot" color={c.textPrimary} size={20} /></View>
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Forward to Assistant</Text>
               </TouchableOpacity>
             )}
@@ -488,7 +488,7 @@ export function MessageActionSheet({
                 onPress={() => setSubSheet('assistant')}
                 activeOpacity={0.7}
               >
-                <Text style={styles.actionIcon}>💬</Text>
+                <View style={styles.actionIconBox}><AppIcon name="chat" color={c.textPrimary} size={20} /></View>
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Ask my agent about this…</Text>
               </TouchableOpacity>
             )}
@@ -500,7 +500,7 @@ export function MessageActionSheet({
                 onPress={handleEditPress}
                 activeOpacity={0.7}
               >
-                <Text style={styles.actionIcon}>✎</Text>
+                <View style={styles.actionIconBox}><AppIcon name="edit" color={c.textPrimary} size={20} /></View>
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Edit message</Text>
               </TouchableOpacity>
             )}
@@ -512,7 +512,7 @@ export function MessageActionSheet({
                 onPress={handleDeletePress}
                 activeOpacity={0.7}
               >
-                <Text style={styles.actionIcon}>🗑</Text>
+                <View style={styles.actionIconBox}><AppIcon name="trash" color={c.danger} size={20} /></View>
                 <Text style={[styles.actionLabel, { color: c.danger }]}>Delete message</Text>
               </TouchableOpacity>
             )}
@@ -524,7 +524,7 @@ export function MessageActionSheet({
                 onPress={handleBlockPress}
                 activeOpacity={0.7}
               >
-                <Text style={styles.actionIcon}>🚫</Text>
+                <View style={styles.actionIconBox}><AppIcon name="block" color={c.danger} size={20} /></View>
                 <Text style={[styles.actionLabel, { color: c.danger }]}>
                   Block {senderName}
                 </Text>
@@ -538,7 +538,7 @@ export function MessageActionSheet({
                 onPress={() => setSubSheet('report')}
                 activeOpacity={0.7}
               >
-                <Text style={styles.actionIcon}>⚑</Text>
+                <View style={styles.actionIconBox}><AppIcon name="flag" color={c.danger} size={20} /></View>
                 <Text style={[styles.actionLabel, { color: c.danger }]}>Report message</Text>
               </TouchableOpacity>
             )}

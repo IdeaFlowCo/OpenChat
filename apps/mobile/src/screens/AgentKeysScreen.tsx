@@ -21,6 +21,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { api, AgentKey, OPENCHAT_URL } from '../api/client';
 import { getColors } from '../theme/colors';
 import type { NavProp } from '../navigation/types';
+import { AppIcon } from '../components/AppIcon';
 
 const GUIDE_URL = `${OPENCHAT_URL}/about/connect-your-bot`;
 
@@ -156,7 +157,7 @@ export function AgentKeysScreen() {
         onPress={() => navigation.navigate('AddAgentKey')}
         activeOpacity={0.85}
       >
-        <Text style={styles.fabText}>+</Text>
+        <AppIcon name="plus" color="#ffffff" size={26} strokeWidth={2.2} />
       </TouchableOpacity>
     </View>
   );

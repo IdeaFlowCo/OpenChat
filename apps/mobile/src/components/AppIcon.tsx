@@ -2,20 +2,31 @@ import Svg, { Circle, Line, Path, Polyline } from 'react-native-svg';
 
 export type AppIconName =
   | 'attach'
+  | 'block'
+  | 'bot'
   | 'chat'
   | 'chevron-left'
   | 'chevron-right'
+  | 'copy'
   | 'download'
+  | 'edit'
+  | 'flag'
+  | 'forward'
   | 'heart'
+  | 'info'
   | 'mic'
   | 'more'
   | 'mute'
   | 'pin'
   | 'plus'
+  | 'reply'
   | 'search'
   | 'settings'
+  | 'sparkle'
   | 'stop'
-  | 'thought';
+  | 'thought'
+  | 'trash'
+  | 'x';
 
 interface AppIconProps {
   name: AppIconName;
@@ -143,6 +154,78 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
           d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
           {...common}
         />
+      )}
+      {name === 'copy' && (
+        <>
+          <Path d="M9 9h11a1.5 1.5 0 0 1 1.5 1.5V20A1.5 1.5 0 0 1 20 21.5H9A1.5 1.5 0 0 1 7.5 20v-9.5A1.5 1.5 0 0 1 9 9z" {...common} />
+          <Path d="M4.5 15H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5h9.5A1.5 1.5 0 0 1 15 4v.5" {...common} />
+        </>
+      )}
+      {name === 'reply' && (
+        <>
+          <Polyline points="9 14 4 9 9 4" {...common} />
+          <Path d="M4 9h10a6 6 0 0 1 6 6v4" {...common} />
+        </>
+      )}
+      {name === 'forward' && (
+        <>
+          <Polyline points="15 14 20 9 15 4" {...common} />
+          <Path d="M20 9H10a6 6 0 0 0-6 6v4" {...common} />
+        </>
+      )}
+      {name === 'bot' && (
+        <>
+          <Path d="M6 8h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z" {...common} />
+          <Line x1="12" y1="8" x2="12" y2="4.5" {...common} />
+          <Circle cx="12" cy="3.5" r="1" fill={color} />
+          <Circle cx="9" cy="12.5" r="1" fill={color} />
+          <Circle cx="15" cy="12.5" r="1" fill={color} />
+          <Path d="M9.5 16h5" {...common} />
+        </>
+      )}
+      {name === 'edit' && (
+        <>
+          <Path d="M17 3a2.83 2.83 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" {...common} />
+        </>
+      )}
+      {name === 'trash' && (
+        <>
+          <Path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" {...common} />
+          <Path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" {...common} />
+          <Line x1="10" y1="11" x2="10" y2="17" {...common} />
+          <Line x1="14" y1="11" x2="14" y2="17" {...common} />
+        </>
+      )}
+      {name === 'block' && (
+        <>
+          <Circle cx="12" cy="12" r="9" {...common} />
+          <Line x1="5.6" y1="5.6" x2="18.4" y2="18.4" {...common} />
+        </>
+      )}
+      {name === 'flag' && (
+        <>
+          <Path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V4s-1 1-4 1-5-2-8-2-4 1-4 1z" {...common} />
+          <Line x1="4" y1="22" x2="4" y2="15" {...common} />
+        </>
+      )}
+      {name === 'info' && (
+        <>
+          <Circle cx="12" cy="12" r="9" {...common} />
+          <Line x1="12" y1="11" x2="12" y2="16.5" {...common} />
+          <Circle cx="12" cy="7.5" r="1" fill={color} />
+        </>
+      )}
+      {name === 'sparkle' && (
+        <>
+          <Path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" {...common} />
+          <Path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8L19 16z" {...common} />
+        </>
+      )}
+      {name === 'x' && (
+        <>
+          <Line x1="6" y1="6" x2="18" y2="18" {...common} />
+          <Line x1="18" y1="6" x2="6" y2="18" {...common} />
+        </>
       )}
     </Svg>
   );

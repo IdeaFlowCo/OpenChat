@@ -30,11 +30,11 @@ import { createThought, updateThought, ThoughtKind, ThoughtStatus } from '../ser
 import type { ThoughtsNavProp, ThoughtsRouteProps } from '../navigation/types';
 
 const KINDS: { value: ThoughtKind; label: string; color: string }[] = [
-  { value: 'observation', label: 'Observation', color: '#3b82f6' },
-  { value: 'fact',        label: 'Fact',        color: '#6366f1' },
-  { value: 'decision',    label: 'Decision',    color: '#f59e0b' },
-  { value: 'commitment',  label: 'Commitment',  color: '#10b981' },
-  { value: 'reminder',    label: 'Reminder',    color: '#f97316' },
+  { value: 'observation', label: 'Observation', color: '#8a7f6d' },
+  { value: 'fact',        label: 'Fact',        color: '#6d5f8f' },
+  { value: 'decision',    label: 'Decision',    color: '#b3541e' },
+  { value: 'commitment',  label: 'Commitment',  color: '#4a7c59' },
+  { value: 'reminder',    label: 'Reminder',    color: '#c07b28' },
 ];
 
 const STATUSES: { value: ThoughtStatus; label: string }[] = [
@@ -159,7 +159,7 @@ export function AddEditThoughtScreen() {
         <View style={styles.pickerRow}>
           {STATUSES.map((s) => {
             const selected = status === s.value;
-            const activeColor = s.value === 'open' ? '#3b82f6' : s.value === 'closed' ? '#6b7280' : c.primary;
+            const activeColor = s.value === 'open' ? '#4a7c59' : s.value === 'closed' ? '#8a7f6d' : c.primary;
             return (
               <TouchableOpacity
                 key={s.value}

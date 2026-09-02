@@ -25,6 +25,7 @@ import type { NavProp } from '../navigation/types';
 import { registerForPushNotificationsAsync } from '../services/notifications';
 import { ExportSheet } from '../components/ExportSheet';
 import { saveJsonDownload } from '../services/exportDownload';
+import { AppIcon } from '../components/AppIcon';
 
 const OPTIONS: { value: ThemePref; label: string; hint: string }[] = [
   { value: 'system', label: 'System', hint: 'Follow your phone' },
@@ -264,7 +265,7 @@ export function SettingsScreen() {
           <ActivityIndicator color="#fff" />
         ) : (
           <>
-            <Text style={styles.copySetupTitle}>📋  Copy agent setup</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><AppIcon name="copy" color={c.textPrimary} size={16} /><Text style={styles.copySetupTitle}>Copy agent setup</Text></View>
             <Text style={styles.copySetupSub}>
               Mints a key + copies a paste-anywhere setup for ChatGPT, Claude, any LLM
             </Text>

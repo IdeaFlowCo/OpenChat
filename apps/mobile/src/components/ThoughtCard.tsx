@@ -14,12 +14,13 @@ import { getColors } from '../theme/colors';
 import type { Thought } from '../api/client';
 import { AppIcon } from './AppIcon';
 
+// Ink & Paper: warm, muted kind colors (was stock Tailwind indigo/amber/etc).
 const KIND_COLORS: Record<string, string> = {
-  fact:        '#6366f1', // indigo
-  decision:    '#f59e0b', // amber
-  commitment:  '#10b981', // emerald
-  reminder:    '#f97316', // orange
-  observation: '#3b82f6', // blue
+  fact:        '#6d5f8f', // muted plum
+  decision:    '#b3541e', // sienna
+  commitment:  '#4a7c59', // moss
+  reminder:    '#c07b28', // ochre
+  observation: '#8a7f6d', // stone
 };
 
 const KIND_LABELS: Record<string, string> = {
@@ -56,7 +57,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
   const { scheme } = useTheme();
   const c = getColors(scheme);
 
-  const kindColor = KIND_COLORS[item.kind] ?? '#3b82f6';
+  const kindColor = KIND_COLORS[item.kind] ?? '#8a7f6d';
   const kindLabel = KIND_LABELS[item.kind] ?? item.kind;
   const tags = item.tags ?? [];
 
@@ -74,7 +75,14 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
           : undefined
       }
       activeOpacity={0.7}
-      style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}
+      style={[
+        styles.card,
+        {
+          backgroundColor: c.surface,
+          borderColor: c.border,
+          borderLeftColor: item.pinned ? c.primary : kindColor,
+        },
+      ]}
     >
       {/* Header: time leads; pin + status + kind pill float right. The kind
           pill is hidden for 'observation' (the catch-all default) to keep
@@ -88,13 +96,13 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
           <View
             style={[
               styles.badge,
-              { backgroundColor: item.status === 'open' ? '#3b82f622' : '#6b728022' },
+              { backgroundColor: item.status === 'open' ? '#4a7c5922' : '#8a7f6d22' },
             ]}
           >
             <Text
               style={[
                 styles.badgeText,
-                { color: item.status === 'open' ? '#3b82f6' : '#6b7280' },
+                { color: item.status === 'open' ? '#4a7c59' : '#8a7f6d' },
               ]}
             >
               {item.status === 'open' ? 'Open' : 'Closed'}
@@ -156,11 +164,21 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
 }
 
 const styles = StyleSheet.create({
+  // Index card: sharp accent-ruled left edge, soft right corners, faint lift.
   card: {
-    borderRadius: 12,
+    borderTopLeftRadius: 2,
+    borderBottomLeftRadius: 2,
+    borderTopRightRadius: 10,
+    borderBottomRightRadius: 10,
     borderWidth: 1,
+    borderLeftWidth: 3,
     padding: 14,
     marginBottom: 10,
+    shadowColor: '#1c1917',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 2,
+    elevation: 1,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -176,9 +194,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   badgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.2,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   time: {
     fontSize: 11,

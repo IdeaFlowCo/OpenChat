@@ -19,6 +19,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as Updates from 'expo-updates';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
+import { AppIcon } from './AppIcon';
 
 export function UpdateBanner() {
   const { scheme } = useTheme();
@@ -71,7 +72,7 @@ export function UpdateBanner() {
           <Text style={styles.action}>Restart to update</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setDismissed(true)} hitSlop={8} activeOpacity={0.6}>
-          <Text style={styles.dismiss}>✕</Text>
+          <AppIcon name="x" color="#ffffff" size={14} />
         </TouchableOpacity>
       </View>
     </View>

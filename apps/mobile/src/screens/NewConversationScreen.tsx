@@ -174,7 +174,7 @@ export function NewConversationScreen() {
               accessibilityLabel={`Remove ${u.name || u.email}`}
             >
               <Text style={{ color: c.primary, fontSize: 12, fontWeight: '600' }}>
-                {u.name || u.email}  ✕
+                {u.name || u.email}  ×
               </Text>
             </TouchableOpacity>
           ))}

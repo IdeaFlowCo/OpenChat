@@ -27,6 +27,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { OPENCHAT_URL } from '../api/client';
 import { buildAgentSetupBlob } from '../utils/agentSetupBlob';
+import { AppIcon } from './AppIcon';
 
 type Target = 'chatgpt' | 'claude' | 'cursor' | 'codex' | 'code' | 'curl';
 
@@ -163,7 +164,7 @@ export function McpSetupCard({ apiKey }: Props) {
         }}
         activeOpacity={0.85}
       >
-        <Text style={styles.heroBtnText}>📋  Copy agent setup</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><AppIcon name="copy" color="#ffffff" size={16} /><Text style={styles.heroBtnText}>Copy agent setup</Text></View>
         <Text style={styles.heroBtnSub}>Works in ChatGPT, Claude, Gemini — any LLM</Text>
       </TouchableOpacity>
 
@@ -211,7 +212,7 @@ export function McpSetupCard({ apiKey }: Props) {
             }}
             activeOpacity={0.8}
           >
-            <Text style={[styles.oneShotText, { color: c.primary }]}>📋  Copy one-shot setup prompt (coding agents)</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}><AppIcon name="copy" color={c.primary} size={14} /><Text style={[styles.oneShotText, { color: c.primary }]}>Copy one-shot setup prompt (coding agents)</Text></View>
             <Text style={[styles.oneShotSub, { color: c.textMuted }]}>Paste into Claude Code / Cursor / Codex — it installs the MCP server itself</Text>
           </TouchableOpacity>
 

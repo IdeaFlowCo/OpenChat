@@ -31,6 +31,7 @@ import {
   TRANSLATE_LANGUAGES,
 } from '../services/messageTransform';
 import { ApiError } from '../api/client';
+import { AppIcon } from './AppIcon';
 
 interface Props {
   text: string;
@@ -139,7 +140,7 @@ export function TransformButton({ text, disabled, onTransformed, onError }: Prop
           {loading ? (
             <ActivityIndicator size="small" color={c.primary} />
           ) : (
-            <Text style={styles.sparkle}>✨</Text>
+            <AppIcon name="sparkle" color={c.primary} size={18} />
           )}
         </TouchableOpacity>
         <TouchableOpacity
