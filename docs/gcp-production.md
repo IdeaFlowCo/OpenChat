@@ -154,8 +154,7 @@ the client after a grant or revoke to refresh that copy.
 
 Email-bound invitations that resume after TestFlight onboarding, including an
 optional authorized directory grant, remain deferred in
-[GitHub issue #41](https://github.com/IdeaFlowCo/OpenChat/issues/41) and local
-Beads issue `OpenChat-7mv`.
+[GitHub issue #41](https://github.com/IdeaFlowCo/OpenChat/issues/41).
 
 Secrets live in `/opt/openchat/.env` on the GCE instance and must not be copied
 into the repository. The live deployment still accepts the legacy `AWS_*`
