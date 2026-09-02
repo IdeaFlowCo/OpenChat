@@ -12,14 +12,15 @@
  * The "is the user signed in?" gate is driven by ChatContext.isAuthed.
  */
 
-import { useEffect, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 import { ChatProvider, useChat } from './src/contexts/ChatContext';
+import { RecordingProvider } from './src/contexts/RecordingContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import { UpdateBanner } from './src/components/UpdateBanner';
 import {
@@ -78,6 +79,7 @@ import { getColors } from './src/theme/colors';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { InAppMessageBanner } from './src/components/InAppMessageBanner';
 import { PushSoftAsk } from './src/components/PushSoftAsk';
+import { GlobalRecordingBar } from './src/components/GlobalRecordingBar';
 import type {
   RootStackParamList,
   ThoughtsStackParamList,
@@ -283,6 +285,24 @@ function ThoughtsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
 
 const TAB_INDICATOR_HEIGHT = 3;
 
+interface NestedNavigationState {
+  index?: number;
+  routes: Array<{
+    name: string;
+    params?: { conversationId?: string };
+    state?: NestedNavigationState;
+  }>;
+}
+
+// The tab bar sits outside each stack screen, so derive the focused leaf route
+// to hide the global recorder only on its origin chat (build-90 pieces 1+2).
+function focusedChatId(state: NestedNavigationState): string | null {
+  const route = state.routes[state.index ?? 0];
+  if (!route) return null;
+  if (route.state) return focusedChatId(route.state);
+  return route.name === 'Chat' ? route.params?.conversationId ?? null : null;
+}
+
 function TabIcon({ label, icon, focused, color, c }: {
   /** Emoji fallback — used only when `icon` is not provided. */
   label?: string;
@@ -377,6 +397,14 @@ function AuthedTabs({
 }) {
   return (
     <Tab.Navigator
+      tabBar={(props) => (
+        <View>
+          <GlobalRecordingBar
+            activeConversationId={focusedChatId(props.state as unknown as NestedNavigationState)}
+          />
+          <BottomTabBar {...props} />
+        </View>
+      )}
       screenOptions={{
         headerShown: false,
         tabBarStyle: { backgroundColor: c.surface, borderTopColor: c.border },
@@ -546,9 +574,42 @@ function ShellWithBackground() {
     <View style={[styles.root, { backgroundColor: c.background }]}>
       <UpdateBanner />
       <ChatProvider>
-        <Shell />
+        <RecordingBridge>
+          <Shell />
+        </RecordingBridge>
       </ChatProvider>
     </View>
+  );
+}
+
+// Keep RecordingContext independent of ChatContext by adapting the targeted
+// send callback at the provider boundary (build-90 pieces 1+2).
+function RecordingBridge({ children }: { children: ReactNode }) {
+  const {
+    isAuthed,
+    conversations,
+    conversationsLoaded,
+    sendMessageToConversation,
+  } = useChat();
+
+  const conversationIds = useMemo(
+    () => new Set(conversations.map(conversation => conversation.id)),
+    [conversations]
+  );
+  const conversationExists = useCallback(
+    (conversationId: string) => conversationIds.has(conversationId),
+    [conversationIds]
+  );
+
+  return (
+    <RecordingProvider
+      isAuthed={isAuthed}
+      conversationsLoaded={conversationsLoaded}
+      conversationExists={conversationExists}
+      sendMessage={sendMessageToConversation}
+    >
+      {children}
+    </RecordingProvider>
   );
 }
 

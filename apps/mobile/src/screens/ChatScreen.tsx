@@ -31,6 +31,7 @@ import { MessageActionSheet, ReplyToData } from '../components/MessageActionShee
 import { ReactionsBar } from '../components/ReactionsBar';
 import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
+import { useRecording } from '../contexts/RecordingContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { AiDisclosureBanner } from '../components/AiDisclosureBanner';
@@ -42,9 +43,7 @@ import type { NavProp, RouteProps } from '../navigation/types';
 import { setActiveConversationForNotifications } from '../services/notifications';
 import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
-import { pickImage, uploadImage, PickedAsset, uploadAudio } from '../services/attachments';
-import { startRecording, stopRecording, cancelRecording } from '../services/audioRecorder';
-import type { Recording } from '../services/audioRecorder';
+import { pickImage, uploadImage, PickedAsset } from '../services/attachments';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
 import { MentionAutocomplete, MentionCandidate } from '../components/MentionAutocomplete';
 import { TransformButton } from '../components/TransformButton';
@@ -53,17 +52,13 @@ import { LinkPreviewCard } from '../components/LinkPreviewCard';
 import type { Participant } from '../api/client';
 import { ExportSheet } from '../components/ExportSheet';
 import { saveJsonDownload } from '../services/exportDownload';
-import { logError, logWarn } from '../services/clientLogger';
+import { logError } from '../services/clientLogger';
 import { serif } from '../theme/typography';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
 
 // ── Voice message constants (OpenChat-xxc) ─────────────────────────────────
-const MAX_RECORDING_MS = 5 * 60 * 1000; // 5 minutes cap
 const CANCEL_DRAG_PX = 80; // horizontal drag distance to cancel recording
-// Press shorter than this is treated as a TAP → hands-free (locked) recording
-// (OpenChat-9de). A longer press is a HOLD → record-while-held, send on release.
-const TAP_THRESHOLD_MS = 350;
 
 // Distance from the bottom (in px) within which we consider the user to be
 // "at bottom" — i.e. they want to see new messages as they arrive. Beyond
@@ -297,30 +292,25 @@ export function ChatScreen({
   // fullscreen viewer
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
 
-  // ── Voice recording state (OpenChat-xxc) ───────────────────────────────────
-  const [isRecording, setIsRecording] = useState(false);
-  // Hands-free / locked mode (OpenChat-9de): set when the mic was TAPPED rather
-  // than held. Recording continues after the finger lifts; the user ends it with
-  // the Stop button (send) or Cancel button (discard) in the recording bar.
-  const [recordingLocked, setRecordingLocked] = useState(false);
-  const recordingLockedRef = useRef(false);
-  const [recordingCancelled, setRecordingCancelled] = useState(false);
-  const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
-  const recordingRef = useRef<Recording | null>(null);
-  const recordingStartTimeRef = useRef<number>(0);
-  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const recordingMaxTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const micPressStartXRef = useRef<number>(0);
-  // Wall-clock time the mic press began — used to tell a TAP from a HOLD.
-  const micPressStartTimeRef = useRef<number>(0);
-  // Release that happened while the recorder was still starting up
-  // (Audio.Recording.createAsync takes 100-500ms, so a quick TAP lifts before
-  // recordingRef is set). handleMicPressIn applies it once the recording
-  // exists — without this, tap-for-hands-free never engaged (OpenChat-7nu).
-  const pendingReleaseRef = useRef<{ atMs: number; cancelled: boolean } | null>(null);
-  // Stable ref to the current finishRecording closure, so out-of-render callers
-  // (the 5-minute hard-cap timer) avoid a stale closure.
-  const finishRecordingRef = useRef<(wasCancelled: boolean) => Promise<void>>(async () => {});
+  // ── Voice recording state (build-90 pieces 1+2) ────────────────────────────
+  // The provider owns expo-av and all gesture timing so navigation cannot tear
+  // down an active recording. This screen retains the existing composer UX.
+  const {
+    status: recordingStatus,
+    conversationId: recordingConversationId,
+    elapsedMs: recordingElapsedMs,
+    locked: recordingLocked,
+    finishing: finishingRecording,
+    recentlyCancelled: recordingCancelled,
+    beginPress: beginRecordingPress,
+    endPress: endRecordingPress,
+    stopAndSend: stopAndSendRecording,
+    cancel: cancelActiveRecording,
+    pressStartX: micPressStartXRef,
+  } = useRecording();
+  const isAnyRecording = recordingStatus === 'recording';
+  const isRecording = isAnyRecording && recordingConversationId === conversationId;
+  const composerBusy = sending || finishingRecording;
 
   // ── Toast state ────────────────────────────────────────────────────────────
   const [toastVisible, setToastVisible] = useState(false);
@@ -789,77 +779,31 @@ export function ChatScreen({
 
   // ── Attachment pick handler (OpenChat-6bg) ────────────────────────────────
   const handlePickAttachment = useCallback(async () => {
-    if (sending || uploadingAttachment) return;
+    if (composerBusy || uploadingAttachment) return;
     const asset = await pickImage();
     if (asset) setPendingAsset(asset);
-  }, [sending, uploadingAttachment]);
+  }, [composerBusy, uploadingAttachment]);
 
   // ── Voice recording handlers (OpenChat-xxc) ──────────────────────────────
 
-  /** Called when the mic button is pressed in. Starts recording. */
+  /** Called when the mic button is pressed in. Starts the global recording. */
   const handleMicPressIn = useCallback(async (pageX: number) => {
-    // Locked (hands-free) recording: the composer button shows a stop square,
-    // so tapping it must stop-and-send (2026-09-02 feedback: "the one below
-    // doesn't seem to do anything").
-    if (isRecording && recordingLockedRef.current) {
-      void finishRecordingRef.current(false);
-      return;
-    }
-    if (sending || uploadingAttachment || isRecording || Platform.OS === 'web') return;
-    micPressStartXRef.current = pageX;
-    micPressStartTimeRef.current = Date.now();
-    pendingReleaseRef.current = null;
-    setRecordingCancelled(false);
-    setRecordingElapsedMs(0);
-
-    try {
-      const rec = await startRecording();
-      recordingRef.current = rec;
-      recordingStartTimeRef.current = Date.now();
-      setIsRecording(true);
-
-      // Elapsed-time ticker (updates every 100 ms).
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingElapsedMs(Date.now() - recordingStartTimeRef.current);
-      }, 100);
-
-      // Hard cap at 5 minutes. Use ref to avoid stale closure.
-      recordingMaxTimerRef.current = setTimeout(() => {
-        void finishRecordingRef.current(false);
-      }, MAX_RECORDING_MS);
-
-      // Apply a release that landed while the recorder was still starting
-      // (OpenChat-7nu): short press → hands-free lock; long press → send;
-      // drag/cancel → discard.
-      // (assertion: TS keeps the `= null` narrowing from before the await,
-      // but handleMicPressOut may have written here while we awaited)
-      const release = pendingReleaseRef.current as { atMs: number; cancelled: boolean } | null;
-      if (release) {
-        pendingReleaseRef.current = null;
-        const pressMs = release.atMs - micPressStartTimeRef.current;
-        if (release.cancelled) {
-          void finishRecordingRef.current(true);
-        } else if (pressMs < TAP_THRESHOLD_MS) {
-          recordingLockedRef.current = true;
-          setRecordingLocked(true);
-        } else {
-          void finishRecordingRef.current(false);
-        }
-      }
-    } catch (err) {
-      // Most common: microphone permission denied. Surface a clear message
-      // rather than silently failing (OpenChat-9de).
-      logError('[voice] startRecording failed', err);
-      setIsRecording(false);
-      const denied = err instanceof Error && /permission/i.test(err.message);
-      Alert.alert(
-        denied ? 'Microphone access needed' : 'Recording failed',
-        denied
-          ? 'Enable microphone access in Settings to send voice messages.'
-          : 'Could not start recording. Please try again.'
-      );
-    }
-  }, [sending, uploadingAttachment, isRecording]);
+    if (composerBusy || uploadingAttachment || Platform.OS === 'web') return;
+    await beginRecordingPress(
+      conversationId,
+      headerTitle || 'Chat',
+      pageX,
+      replyTo?.messageId,
+      () => setReplyTo(null)
+    );
+  }, [
+    beginRecordingPress,
+    conversationId,
+    headerTitle,
+    replyTo?.messageId,
+    composerBusy,
+    uploadingAttachment,
+  ]);
 
   /**
    * Called when the finger lifts off the mic button. Distinguishes a TAP (short
@@ -867,125 +811,22 @@ export function ChatScreen({
    * on release). A drag-cancel passes wasCancelled=true. (OpenChat-9de)
    */
   const handleMicPressOut = useCallback(async (wasCancelled: boolean) => {
-    if (!recordingRef.current) {
-      // The recorder may still be starting (createAsync in flight). Remember
-      // this release so handleMicPressIn can apply it when the recording
-      // materializes (OpenChat-7nu).
-      if (micPressStartTimeRef.current > 0) {
-        pendingReleaseRef.current = { atMs: Date.now(), cancelled: wasCancelled };
-      }
-      return;
-    }
+    await endRecordingPress(wasCancelled);
+  }, [endRecordingPress]);
 
-    // In locked (hands-free) mode the finger lift is a no-op — recording keeps
-    // going until the user taps Stop or Cancel.
-    if (recordingLockedRef.current) return;
-
-    const pressMs = Date.now() - micPressStartTimeRef.current;
-
-    // Short press that was NOT a drag-cancel → enter hands-free locked mode.
-    if (!wasCancelled && pressMs < TAP_THRESHOLD_MS) {
-      recordingLockedRef.current = true;
-      setRecordingLocked(true);
-      return;
-    }
-
-    // Otherwise it's a HOLD release (or a cancel) → finish the recording.
-    await finishRecording(wasCancelled);
-  }, [isRecording, sending, sendMessage, replyTo, uploadAudio]);
-
-  /**
-   * Ends the current recording: sends it (wasCancelled=false) or discards it
-   * (wasCancelled=true). Shared by the hold-release path, the locked-mode
-   * Stop/Cancel buttons, and the 5-minute hard cap. (OpenChat-xxc / 9de)
-   */
   const finishRecording = useCallback(async (wasCancelled: boolean) => {
-    if (!recordingRef.current) return;
-
-    // Clear timers.
-    if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
-    if (recordingMaxTimerRef.current) { clearTimeout(recordingMaxTimerRef.current); recordingMaxTimerRef.current = null; }
-
-    const rec = recordingRef.current;
-    recordingRef.current = null;
-    setIsRecording(false);
-    recordingLockedRef.current = false;
-    setRecordingLocked(false);
-
-    if (!rec) return;
-
     if (wasCancelled) {
-      setRecordingCancelled(true);
-      setTimeout(() => setRecordingCancelled(false), 1200); // show cancel feedback briefly
-      await cancelRecording(rec);
+      await cancelActiveRecording();
       return;
     }
-
-    // Stop and send.
-    let uri: string;
-    let durationMs: number;
-    try {
-      const result = await stopRecording(rec);
-      uri = result.uri;
-      durationMs = result.durationMs;
-    } catch (err) {
-      logError('[voice] stopRecording failed', err);
-      Alert.alert('Recording failed', 'Could not finish the recording. Please try again.');
-      return;
-    }
-
-    // expo-av can report durationMillis=0 even for a real recording (the
-    // native stop status omits it on some iOS versions) — fall back to
-    // wall-clock elapsed so we don't silently discard it (OpenChat-7nu).
-    const wallMs = Date.now() - recordingStartTimeRef.current;
-    if (durationMs <= 0) durationMs = wallMs;
-
-    // Ignore extremely short recordings (< 500 ms — likely accidental tap).
-    if (durationMs < 500) {
-      logWarn('[voice] discarded ultra-short recording', { durationMs, wallMs });
-      return;
-    }
-
-    setSending(true);
-    try {
-      const att = await uploadAudio(uri, durationMs);
-      await sendMessage('', replyTo?.messageId, [att]);
-      setReplyTo(null);
-      hapticSend();
-    } catch (err) {
-      logError('[voice] upload/send failed', err, { durationMs });
-      Alert.alert('Voice message failed', 'Could not send the voice message. Please try again.');
-    } finally {
-      setSending(false);
-      setRecordingElapsedMs(0);
-    }
-  }, [sendMessage, replyTo, uploadAudio]);
-
-  // Cancel any live recording when the chat unmounts — otherwise expo-av's
-  // singleton recorder stays prepared and the NEXT mic press throws
-  // ("failed the first time, worked the second"). Also clears the tickers.
-  useEffect(() => {
-    return () => {
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-      if (recordingMaxTimerRef.current) clearTimeout(recordingMaxTimerRef.current);
-      const rec = recordingRef.current;
-      if (rec) {
-        recordingRef.current = null;
-        void cancelRecording(rec);
-      }
-    };
-  }, []);
-
-  // Keep the ref up to date so the max-duration timer (and any other
-  // out-of-render caller) always invokes the current finishRecording closure.
-  useEffect(() => {
-    finishRecordingRef.current = finishRecording;
-  }, [finishRecording]);
+    const sent = await stopAndSendRecording();
+    if (sent) setReplyTo(null);
+  }, [cancelActiveRecording, stopAndSendRecording]);
 
   const handleSend = async () => {
     const trimmed = text.trim();
     const hasAttachment = !!pendingAsset;
-    if (!trimmed && !hasAttachment || sending) return;
+    if ((!trimmed && !hasAttachment) || composerBusy) return;
     if (!isConnected) {
       Alert.alert('Offline', 'OpenChat is offline. Your message was not sent. Reconnect, then try again.');
       return;
@@ -1072,13 +913,14 @@ export function ChatScreen({
     // Recording is lightly modal, like every messenger: while a voice note is
     // live, Edit just nudges instead of interrupting (no dialogs, no silent
     // discard — the recording keeps going). See 2026-09-02 discussion; the
-    // cross-app "global recording" model is ticketed for the next native build.
-    if (recordingRef.current) {
+    // The recording may have started in another chat; editing remains blocked
+    // until it is sent or cancelled (build-90 pieces 1+2).
+    if (isAnyRecording) {
       showToast('Voice note in progress — send or cancel it first');
       return;
     }
     beginEdit(message);
-  }, [beginEdit, showToast]);
+  }, [beginEdit, isAnyRecording, showToast]);
 
   // Delete: soft-delete via context (OpenChat-q9h).
   const handleDelete = useCallback(async (messageId: string) => {
@@ -1658,8 +1500,8 @@ export function ChatScreen({
         {!editingMessage && !isRecording && (
           <TouchableOpacity
             onPress={handlePickAttachment}
-            disabled={sending || uploadingAttachment}
-            style={[styles.attachBtn, { opacity: sending || uploadingAttachment ? 0.4 : 1 }]}
+            disabled={composerBusy || uploadingAttachment}
+            style={[styles.attachBtn, { opacity: composerBusy || uploadingAttachment ? 0.4 : 1 }]}
             accessibilityLabel="Attach image"
           >
             <AppIcon name="attach" color={c.textSecondary} size={22} />
@@ -1691,7 +1533,7 @@ export function ChatScreen({
         {!editingMessage && !isRecording && (
           <TransformButton
             text={text}
-            disabled={!text.trim() || sending}
+            disabled={!text.trim() || composerBusy}
             onTransformed={handleTransformed}
             onError={showToast}
           />
@@ -1702,8 +1544,8 @@ export function ChatScreen({
         {!editingMessage && !isRecording && (
           <TouchableOpacity
             onPress={() => setNvcVisible(true)}
-            disabled={sending}
-            style={{ paddingHorizontal: 8, paddingVertical: 8, opacity: sending ? 0.4 : 1 }}
+            disabled={composerBusy}
+            style={{ paddingHorizontal: 8, paddingVertical: 8, opacity: composerBusy ? 0.4 : 1 }}
             accessibilityLabel="NVC compose"
           >
             <AppIcon name="heart" color={c.primary} size={19} />
@@ -1714,7 +1556,8 @@ export function ChatScreen({
           Hold to record; drag left > 80px to cancel.
           On web, always hidden (Platform.OS === 'web').
         */}
-        {!editingMessage && !text.trim() && !pendingAsset && Platform.OS !== 'web' && (
+        {!editingMessage && !text.trim() && !pendingAsset && Platform.OS !== 'web'
+          && (!isAnyRecording || isRecording) && (
           <View
             onTouchStart={(e) => { void handleMicPressIn(e.nativeEvent.pageX); }}
             onTouchEnd={() => { void handleMicPressOut(false); }}
@@ -1729,7 +1572,7 @@ export function ChatScreen({
               styles.send,
               {
                 backgroundColor: isRecording ? '#ef4444' : c.primary,
-                opacity: sending ? 0.5 : 1,
+                opacity: composerBusy ? 0.5 : 1,
                 alignItems: 'center',
                 justifyContent: 'center',
               },
@@ -1744,9 +1587,9 @@ export function ChatScreen({
         {/* Send button: shown when there is text or a pending asset */}
         {(!!text.trim() || !!pendingAsset || editingMessage) && (
           <TouchableOpacity
-            style={[styles.send, { backgroundColor: c.primary, opacity: (!text.trim() && !pendingAsset) || sending ? 0.5 : 1 }]}
+            style={[styles.send, { backgroundColor: c.primary, opacity: (!text.trim() && !pendingAsset) || composerBusy ? 0.5 : 1 }]}
             onPress={handleSend}
-            disabled={(!text.trim() && !pendingAsset) || sending}
+            disabled={(!text.trim() && !pendingAsset) || composerBusy}
             accessibilityLabel="Send message"
           >
             {(sending && uploadingAttachment) ? (

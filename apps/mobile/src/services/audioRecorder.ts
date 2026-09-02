@@ -55,6 +55,9 @@ export async function startRecording(): Promise<Recording> {
   await Audio.setAudioModeAsync({
     allowsRecordingIOS: true,
     playsInSilentModeIOS: true,
+    // JS is OTA-safe; iOS honors this after the matching build-90 background
+    // audio entitlement ships, while Android can keep recording immediately.
+    staysActiveInBackground: true,
   });
 
   try {
