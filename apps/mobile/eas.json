@@ -28,7 +28,7 @@
       "android": {
         "credentialsSource": "remote"
       },
-      "credentialsSource": "local"
+      "credentialsSource": "remote"
     }
   },
   "submit": {
