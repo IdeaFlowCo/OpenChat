@@ -340,7 +340,7 @@
       <a href="#features">Features</a>
       <a href="/about/connect-your-bot">Docs</a>
       <a href="https://github.com/IdeaFlowCo/OpenChat" target="_blank" rel="noopener">GitHub</a>
-      <a class="nav-cta" id="nav-signin" href="/m/">Sign in</a>
+      <a class="nav-cta" id="nav-signin" href="/app/">Sign in</a>
     </nav>
   </header>
 
@@ -352,7 +352,7 @@
       Real-time chat with iMessage-grade polish — read receipts, reactions, voice notes, link previews — and an MCP server that lets Claude, Cursor, or any agent CLI read and send messages as you.
     </p>
     <div class="hero-cta-row">
-      <a class="btn-primary" id="hero-open" href="/m/">Open OpenChat →</a>
+      <a class="btn-primary" id="hero-open" href="/app/">Open OpenChat →</a>
       <a class="btn-secondary" href="#agents">Connect your agent</a>
     </div>
     <!-- Device-aware native-app pointer. Hidden by default; the script below
@@ -384,14 +384,14 @@
         <span class="platform-cta">Download APK</span>
       </a>
 
-      <a class="platform" data-platform="web" href="/m/">
+      <a class="platform" data-platform="web" href="/app/">
         <div class="platform-icon" style="background:linear-gradient(135deg,#5fadf2 0%,#3a7ec1 100%);box-shadow:0 6px 16px rgba(95,173,242,0.4);">M</div>
         <div class="platform-name">Mobile web</div>
         <div class="platform-sub">No install — works in any browser</div>
         <span class="platform-cta">Open</span>
       </a>
 
-      <a class="platform" data-platform="desktop" href="/d/">
+      <a class="platform" data-platform="desktop" href="/app/">
         <div class="platform-icon" style="background:linear-gradient(135deg,#b46cff 0%,#7c41cc 100%);box-shadow:0 6px 16px rgba(180,108,255,0.4);">⬇</div>
         <div class="platform-name">Desktop · install as app</div>
         <div class="platform-sub">Standalone window · OS notifications · works offline</div>
@@ -529,7 +529,7 @@
     <h2>Try it now — no install needed.</h2>
     <p>Sign in, start a conversation, mint an agent key.</p>
     <div class="cta-row">
-      <a class="cta-btn" id="cta-open" href="/m/">Open OpenChat</a>
+      <a class="cta-btn" id="cta-open" href="/app/">Open OpenChat</a>
       <a class="cta-btn ghost" href="https://testflight.apple.com/join/QvUPzDMY" target="_blank" rel="noopener">Join iOS beta</a>
     </div>
   </div>
@@ -544,9 +544,6 @@
       <a href="mailto:support@chat.globalbr.ai">Contact</a>
     </div>
     <div class="small">© 2026 OpenChat · Built with Expo, React Native, Express, Neo4j</div>
-    <div class="legacy">
-      Using the older Vite client? <a href="/legacy/">Open the legacy web app →</a>
-    </div>
   </footer>
 
 </div>
@@ -565,7 +562,7 @@
     var platform = isIOS ? 'ios' : isAndroid ? 'android' : 'desktop';
 
     // 1) Instant-use web app target.
-    var webTarget = isMobile ? '/m/' : '/d/';
+    var webTarget = '/app/';
     ['hero-open', 'nav-signin', 'cta-open'].forEach(function(id) {
       var el = document.getElementById(id);
       if (el) el.setAttribute('href', webTarget);
@@ -575,7 +572,7 @@
     var hints = {
       ios:     { text: 'On iPhone? ',            label: 'Get the native iOS app →', href: 'https://testflight.apple.com/join/QvUPzDMY' },
       android: { text: 'On Android? ',           label: 'Download the app →',        href: '#install' },
-      desktop: { text: 'Prefer a desktop app? ', label: 'Install for desktop →',     href: '/d/' }
+      desktop: { text: 'Prefer a desktop layout? ', label: 'Open responsive web app →', href: '/app/' }
     };
     var hint = hints[platform];
     if (hint) {

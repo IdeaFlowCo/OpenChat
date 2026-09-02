@@ -12,7 +12,9 @@ import {
 import { ensureDirectConversation } from './directConversation.js';
 
 export type IntentKind = 'ask' | 'offer';
-export type IntentStatus = 'active' | 'withdrawn' | 'connected';
+export type IntentStatus = 'active' | 'paused' | 'withdrawn' | 'connected';
+export type MatchingMode = 'fulfillment' | 'reciprocal' | 'shared_goal';
+export type MatchType = 'complementary' | 'reciprocal' | 'shared_goal';
 export type MatchDecision = 'approve' | 'decline';
 export type ViewerMatchStatus = 'pending' | 'awaiting_other' | 'closed' | 'connected';
 
@@ -24,11 +26,21 @@ export interface AgentIntent {
   details: string | null;
   status: IntentStatus;
   expiresAt?: string | null;
+  goal?: string | null;
+  seeks?: string[];
+  brings?: string[];
+  matchingMode?: MatchingMode;
+  openToCollaborators?: boolean;
+  audienceRestricted?: boolean;
+  audienceUserIds?: string[];
+  audienceConversationIds?: string[];
+  sourceStoryId?: string | null;
+  closeOnConnect?: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-interface MatchIntent {
+export interface MatchIntent {
   id: string;
   kind: IntentKind;
   terms: string;
@@ -36,17 +48,40 @@ interface MatchIntent {
   details?: string | null;
   status?: IntentStatus;
   expiresAt?: string | null;
+  goal?: string | null;
+  seeks?: string[];
+  brings?: string[];
+  matchingMode?: MatchingMode;
+  openToCollaborators?: boolean;
+  audienceRestricted?: boolean;
+  audienceUserIds?: string[];
+  audienceConversationIds?: string[];
+  closeOnConnect?: boolean;
 }
 
 export interface AgentMatchProjection {
   id: string;
   status: ViewerMatchStatus;
-  ownIntent: { id: string; kind: IntentKind; terms: string };
+  ownIntent: {
+    id: string;
+    kind: IntentKind;
+    terms: string;
+    goal?: string | null;
+    seeks?: string[];
+    brings?: string[];
+    matchingMode?: MatchingMode;
+  };
   otherKind: IntentKind;
   otherTerms: string;
+  otherGoal?: string | null;
+  otherSeeks?: string[];
+  otherBrings?: string[];
+  otherMatchingMode?: MatchingMode;
   createdAt: string;
   updatedAt: string;
   conversationId?: string;
+  matchType?: MatchType;
+  score?: number;
   alreadyResolved?: true;
 }
 
@@ -59,6 +94,8 @@ export interface ProjectionInput {
   createdAt: string;
   updatedAt: string;
   conversationId?: string | null;
+  matchType?: MatchType | null;
+  score?: number | null;
 }
 
 export interface ScoringPipeline {
@@ -66,6 +103,15 @@ export interface ScoringPipeline {
   tokenScore?: (leftTerms: string, rightTerms: string) => number;
   embeddingScore?: (leftTerms: string, rightTerms: string) => Promise<number | null>;
   verify?: (askTerms: string, offerTerms: string) => Promise<boolean>;
+}
+
+export class IntentConsentError extends Error {}
+
+export interface CanonicalMatchScore {
+  score: number;
+  matchType: MatchType;
+  leftToRightScore: number | null;
+  rightToLeftScore: number | null;
 }
 
 export interface MatchState {
@@ -152,9 +198,22 @@ function cosineSimilarity(left: number[], right: number[]): number {
   return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
 }
 
-async function defaultEmbeddingScore(leftTerms: string, rightTerms: string): Promise<number | null> {
+async function defaultEmbeddingScore(
+  leftTerms: string,
+  rightTerms: string,
+  cache: Map<string, Promise<number[] | null>>,
+): Promise<number | null> {
   if (!process.env.OPENAI_API_KEY) return null;
-  const [left, right] = await Promise.all([embedText(leftTerms), embedText(rightTerms)]);
+  const embedding = (terms: string): Promise<number[] | null> => {
+    const key = terms.trim();
+    let pending = cache.get(key);
+    if (!pending) {
+      pending = embedText(key);
+      cache.set(key, pending);
+    }
+    return pending;
+  };
+  const [left, right] = await Promise.all([embedding(leftTerms), embedding(rightTerms)]);
   if (!left || !right) return null;
   return cosineSimilarity(left, right);
 }
@@ -192,28 +251,124 @@ export function intentMatchThreshold(): number {
   return Number.isFinite(configured) && configured >= 0 && configured <= 1 ? configured : 0.5;
 }
 
-/** Pure/injectable pair gate used by the quiet scan and unit tests. */
+export function canonicalIntentTerms(intent: MatchIntent): {
+  goal: string;
+  seeks: string[];
+  brings: string[];
+  matchingMode: MatchingMode;
+  openToCollaborators: boolean;
+} {
+  const clean = (values: unknown): string[] => Array.isArray(values)
+    ? values.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .map((value) => value.trim())
+    : [];
+  const explicitSeeks = clean(intent.seeks);
+  const explicitBrings = clean(intent.brings);
+  const hasCanonicalTerms = explicitSeeks.length > 0 || explicitBrings.length > 0;
+  return {
+    goal: typeof intent.goal === 'string' ? intent.goal.trim() : '',
+    seeks: hasCanonicalTerms ? explicitSeeks : intent.kind === 'ask' ? [intent.terms] : [],
+    brings: hasCanonicalTerms ? explicitBrings : intent.kind === 'offer' ? [intent.terms] : [],
+    matchingMode: intent.matchingMode ?? 'fulfillment',
+    openToCollaborators: intent.openToCollaborators === true,
+  };
+}
+
+async function scoreTermsPair(
+  seek: string,
+  bring: string,
+  options: ScoringPipeline,
+  embeddingCache: Map<string, Promise<number[] | null>>,
+): Promise<number | null> {
+  const tokenScore = (options.tokenScore ?? intentTokenOverlap)(seek, bring);
+  const embeddingScore = options.embeddingScore
+    ? await options.embeddingScore(seek, bring)
+    : await defaultEmbeddingScore(seek, bring, embeddingCache);
+  const score = Math.max(tokenScore, embeddingScore ?? 0);
+  return score >= (options.threshold ?? intentMatchThreshold()) ? score : null;
+}
+
+async function bestDirectionalScore(
+  seeks: string[],
+  brings: string[],
+  options: ScoringPipeline,
+  embeddingCache: Map<string, Promise<number[] | null>>,
+): Promise<number | null> {
+  let best: { seek: string; bring: string; score: number } | null = null;
+  for (const seek of seeks) {
+    for (const bring of brings) {
+      const score = await scoreTermsPair(seek, bring, options, embeddingCache);
+      if (score !== null && (best === null || score > best.score)) best = { seek, bring, score };
+    }
+  }
+  if (!best) return null;
+  const verified = options.verify
+    ? await options.verify(best.seek, best.bring)
+    : await defaultAnthropicVerification(best.seek, best.bring);
+  return verified ? best.score : null;
+}
+
+/** Detailed, pure/injectable pair gate for legacy and canonical v2 intents. */
+export async function scoreCanonicalIntentPair(
+  left: MatchIntent,
+  right: MatchIntent,
+  options: ScoringPipeline = {},
+): Promise<CanonicalMatchScore | null> {
+  if (left.ownerUserId && right.ownerUserId && left.ownerUserId === right.ownerUserId) return null;
+  const leftCanonical = canonicalIntentTerms(left);
+  const rightCanonical = canonicalIntentTerms(right);
+  const embeddingCache = new Map<string, Promise<number[] | null>>();
+
+  const [leftToRightScore, rightToLeftScore] = await Promise.all([
+    bestDirectionalScore(leftCanonical.seeks, rightCanonical.brings, options, embeddingCache),
+    bestDirectionalScore(rightCanonical.seeks, leftCanonical.brings, options, embeddingCache),
+  ]);
+  if (leftToRightScore !== null && rightToLeftScore !== null) {
+    return {
+      score: Math.min(1, Math.max(leftToRightScore, rightToLeftScore) + 0.05),
+      matchType: 'reciprocal',
+      leftToRightScore,
+      rightToLeftScore,
+    };
+  }
+  const complementaryScore = leftToRightScore ?? rightToLeftScore;
+  if (complementaryScore !== null) {
+    return {
+      score: complementaryScore,
+      matchType: 'complementary',
+      leftToRightScore,
+      rightToLeftScore,
+    };
+  }
+
+  const sharedGoalAllowed = leftCanonical.matchingMode === 'shared_goal'
+    && rightCanonical.matchingMode === 'shared_goal'
+    && leftCanonical.openToCollaborators
+    && rightCanonical.openToCollaborators
+    && leftCanonical.goal.length > 0
+    && rightCanonical.goal.length > 0;
+  if (!sharedGoalAllowed) return null;
+  const sharedGoalScore = await bestDirectionalScore(
+    [leftCanonical.goal],
+    [rightCanonical.goal],
+    options,
+    embeddingCache,
+  );
+  return sharedGoalScore === null ? null : {
+    score: sharedGoalScore,
+    matchType: 'shared_goal',
+    leftToRightScore: null,
+    rightToLeftScore: null,
+  };
+}
+
+/** Backward-compatible score-only gate used by existing callers/tests. */
 export async function scoreIntentPair(
   left: MatchIntent,
   right: MatchIntent,
   options: ScoringPipeline = {},
 ): Promise<number | null> {
-  if (left.kind === right.kind) return null;
-  if (left.ownerUserId && right.ownerUserId && left.ownerUserId === right.ownerUserId) return null;
-
-  const tokenScore = (options.tokenScore ?? intentTokenOverlap)(left.terms, right.terms);
-  const embeddingScore = options.embeddingScore
-    ? await options.embeddingScore(left.terms, right.terms)
-    : await defaultEmbeddingScore(left.terms, right.terms);
-  const score = Math.max(tokenScore, embeddingScore ?? 0);
-  if (score < (options.threshold ?? intentMatchThreshold())) return null;
-
-  const ask = left.kind === 'ask' ? left : right;
-  const offer = left.kind === 'offer' ? left : right;
-  const verified = options.verify
-    ? await options.verify(ask.terms, offer.terms)
-    : await defaultAnthropicVerification(ask.terms, offer.terms);
-  return verified ? score : null;
+  return (await scoreCanonicalIntentPair(left, right, options))?.score ?? null;
 }
 
 export function projectMatchForViewer(input: ProjectionInput): AgentMatchProjection {
@@ -235,9 +390,19 @@ export function projectMatchForViewer(input: ProjectionInput): AgentMatchProject
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
   };
+  if (input.ownIntent.goal != null) projection.ownIntent.goal = input.ownIntent.goal;
+  if (input.ownIntent.seeks) projection.ownIntent.seeks = input.ownIntent.seeks;
+  if (input.ownIntent.brings) projection.ownIntent.brings = input.ownIntent.brings;
+  if (input.ownIntent.matchingMode) projection.ownIntent.matchingMode = input.ownIntent.matchingMode;
+  if (input.otherIntent.goal != null) projection.otherGoal = input.otherIntent.goal;
+  if (input.otherIntent.seeks) projection.otherSeeks = input.otherIntent.seeks;
+  if (input.otherIntent.brings) projection.otherBrings = input.otherIntent.brings;
+  if (input.otherIntent.matchingMode) projection.otherMatchingMode = input.otherIntent.matchingMode;
   if (status === 'connected' && input.conversationId) {
     projection.conversationId = input.conversationId;
   }
+  if (input.matchType) projection.matchType = input.matchType;
+  if (typeof input.score === 'number') projection.score = input.score;
   return projection;
 }
 
@@ -295,15 +460,35 @@ async function deliverProposal(
     otherTerms: match.otherTerms,
     otherKind: match.otherKind,
     status: match.status,
+    matchType: match.matchType,
+    score: match.score,
   }, 'Your agent found a possible match.', matchDeliveryKey('proposal', match.id, ownerUserId));
   if (created) emitMatchUpdated(io, ownerUserId, match);
 }
 
 export async function createIntent(
   userId: string,
-  input: { kind: IntentKind; terms: string; details?: string | null; expiresAt?: string | null },
-  options: { io?: IOServer; queueScan?: boolean; scoring?: ScoringPipeline } = {},
+  input: {
+    kind: IntentKind;
+    terms: string;
+    details?: string | null;
+    expiresAt?: string | null;
+    goal?: string | null;
+    seeks?: string[];
+    brings?: string[];
+    matchingMode?: MatchingMode;
+    openToCollaborators?: boolean;
+    audienceRestricted?: boolean;
+    audienceUserIds?: string[];
+    audienceConversationIds?: string[];
+    sourceStoryId?: string | null;
+    closeOnConnect?: boolean;
+  },
+  options: { confirmed: true; io?: IOServer; queueScan?: boolean; scoring?: ScoringPipeline },
 ): Promise<AgentIntent> {
+  if (options.confirmed !== true) {
+    throw new IntentConsentError('Explicit confirmation is required to publish an intent');
+  }
   const id = nanoid();
   const now = new Date().toISOString();
   const session = getDriver().session();
@@ -315,6 +500,13 @@ export async function createIntent(
         id: $id, ownerUserId: $userId, kind: $kind, terms: $terms,
         details: $details, status: 'active',
         expiresAt: CASE WHEN $expiresAt IS NULL THEN null ELSE datetime($expiresAt) END,
+        goal: $goal, seeks: $seeks, brings: $brings, matchingMode: $matchingMode,
+        openToCollaborators: $openToCollaborators,
+        audienceRestricted: $audienceRestricted,
+        audienceUserIds: $audienceUserIds,
+        audienceConversationIds: $audienceConversationIds,
+        sourceStoryId: $sourceStoryId,
+        closeOnConnect: $closeOnConnect,
         createdAt: datetime($now), updatedAt: datetime($now)
       })
       CREATE (owner)-[:OWNS_INTENT]->(intent)
@@ -327,6 +519,16 @@ export async function createIntent(
         terms: input.terms,
         details: input.details ?? null,
         expiresAt: input.expiresAt ?? null,
+        goal: input.goal ?? null,
+        seeks: input.seeks ?? null,
+        brings: input.brings ?? null,
+        matchingMode: input.matchingMode ?? null,
+        openToCollaborators: input.openToCollaborators ?? null,
+        audienceRestricted: input.audienceRestricted ?? null,
+        audienceUserIds: input.audienceUserIds ?? null,
+        audienceConversationIds: input.audienceConversationIds ?? null,
+        sourceStoryId: input.sourceStoryId ?? null,
+        closeOnConnect: input.closeOnConnect ?? null,
         now,
       },
     );
@@ -388,6 +590,8 @@ function projectionFromRecord(record: { get: (key: string) => unknown }): AgentM
     createdAt: String(toJS(record.get('createdAt'))),
     updatedAt: String(toJS(record.get('updatedAt'))),
     conversationId: (record.get('conversationId') as string | null) ?? null,
+    matchType: (record.get('matchType') as MatchType | null) ?? null,
+    score: (toJS(record.get('score')) as number | null) ?? null,
   });
 }
 
@@ -397,10 +601,15 @@ const MATCH_PROJECTION_QUERY = `
   WITH DISTINCT match, own, other,
        CASE WHEN own.id < other.id THEN match.aResponse ELSE match.bResponse END AS ownResponse
   RETURN match.id AS id, match.status AS matchStatus, ownResponse,
-         own { .id, .kind, .terms } AS ownIntent,
-         other { .id, .kind, .terms } AS otherIntent,
+         own { .id, .kind, .terms, .goal, .seeks, .brings, .matchingMode,
+               .openToCollaborators, .audienceRestricted, .audienceUserIds,
+               .audienceConversationIds, .closeOnConnect, .status, .expiresAt } AS ownIntent,
+         other { .id, .kind, .terms, .goal, .seeks, .brings, .matchingMode,
+                 .openToCollaborators, .audienceRestricted, .audienceUserIds,
+                 .audienceConversationIds, .closeOnConnect, .status, .expiresAt } AS otherIntent,
          match.createdAt AS createdAt, match.updatedAt AS updatedAt,
-         match.conversationId AS conversationId
+         match.conversationId AS conversationId, match.matchType AS matchType,
+         match.score AS score
 `;
 
 export async function listMatches(userId: string, io?: IOServer): Promise<AgentMatchProjection[]> {
@@ -442,22 +651,51 @@ export async function scanIntentForMatches(
       MATCH (candidateOwner:User)-[:OWNS_INTENT]->(candidate:AgentIntent {status: 'active'})
       WHERE (source.expiresAt IS NULL OR source.expiresAt > datetime($now))
         AND (candidate.expiresAt IS NULL OR candidate.expiresAt > datetime($now))
-        AND candidate.kind <> source.kind
         AND candidateOwner.id <> sourceOwner.id
+        AND NOT EXISTS {
+          MATCH (sourceOwner)-[:HAS_SOCIAL_PREFERENCE]->(sourcePref:OpenChatSocialPreference)
+          WHERE coalesce(sourcePref.networkPaused, false) = true
+        }
+        AND NOT EXISTS {
+          MATCH (candidateOwner)-[:HAS_SOCIAL_PREFERENCE]->(candidatePref:OpenChatSocialPreference)
+          WHERE coalesce(candidatePref.networkPaused, false) = true
+        }
         AND NOT (sourceOwner)-[:BLOCKED]->(candidateOwner)
         AND NOT (candidateOwner)-[:BLOCKED]->(sourceOwner)
+        AND (
+          coalesce(source.audienceRestricted, false) = false
+          OR candidateOwner.id IN coalesce(source.audienceUserIds, [])
+          OR EXISTS {
+            MATCH (sourceOwner)-[:PARTICIPATES_IN]->(sourceAudience:Conversation)<-[:PARTICIPATES_IN]-(candidateOwner)
+            WHERE sourceAudience.id IN coalesce(source.audienceConversationIds, [])
+          }
+        )
+        AND (
+          coalesce(candidate.audienceRestricted, false) = false
+          OR sourceOwner.id IN coalesce(candidate.audienceUserIds, [])
+          OR EXISTS {
+            MATCH (candidateOwner)-[:PARTICIPATES_IN]->(candidateAudience:Conversation)<-[:PARTICIPATES_IN]-(sourceOwner)
+            WHERE candidateAudience.id IN coalesce(candidate.audienceConversationIds, [])
+          }
+        )
         AND NOT EXISTS {
           MATCH (existing:AgentMatch)-[:MATCHES]->(source)
           MATCH (existing)-[:MATCHES]->(candidate)
           WHERE existing.status <> 'proposed'
         }
-      RETURN source { .id, .kind, .terms, .ownerUserId, .status, .expiresAt } AS source,
-             candidate { .id, .kind, .terms, .ownerUserId, .status, .expiresAt } AS candidate
+      RETURN source { .id, .kind, .terms, .ownerUserId, .status, .expiresAt,
+                      .goal, .seeks, .brings, .matchingMode, .openToCollaborators,
+                      .audienceRestricted, .audienceUserIds, .audienceConversationIds,
+                      .closeOnConnect } AS source,
+             candidate { .id, .kind, .terms, .ownerUserId, .status, .expiresAt,
+                          .goal, .seeks, .brings, .matchingMode, .openToCollaborators,
+                          .audienceRestricted, .audienceUserIds, .audienceConversationIds,
+                          .closeOnConnect } AS candidate
       `,
       { intentId, now: new Date().toISOString() },
     );
 
-    const scored: Array<{ source: MatchIntent; candidate: MatchIntent; score: number }> = [];
+    const scored: Array<{ source: MatchIntent; candidate: MatchIntent; result: CanonicalMatchScore }> = [];
     for (const record of candidates.records) {
       const source = toJS(record.get('source')) as MatchIntent;
       const candidate = toJS(record.get('candidate')) as MatchIntent;
@@ -465,10 +703,12 @@ export async function scanIntentForMatches(
       if (!isDiscoverableIntent(source, scanTime) || !isDiscoverableIntent(candidate, scanTime)) {
         continue;
       }
-      const score = await scoreIntentPair(source, candidate, options.scoring);
-      if (score !== null) scored.push({ source, candidate, score });
+      const result = await scoreCanonicalIntentPair(source, candidate, options.scoring);
+      if (result !== null) scored.push({ source, candidate, result });
     }
-    scored.sort((left, right) => right.score - left.score);
+    const typeRank: Record<MatchType, number> = { reciprocal: 3, shared_goal: 2, complementary: 1 };
+    scored.sort((left, right) => typeRank[right.result.matchType] - typeRank[left.result.matchType]
+      || right.result.score - left.result.score);
 
     const createdIds: string[] = [];
     for (const pair of scored) {
@@ -483,8 +723,32 @@ export async function scanIntentForMatches(
         WHERE (source.expiresAt IS NULL OR source.expiresAt > datetime($now))
           AND (candidate.expiresAt IS NULL OR candidate.expiresAt > datetime($now))
           AND sourceOwner.id <> candidateOwner.id
+          AND NOT EXISTS {
+            MATCH (sourceOwner)-[:HAS_SOCIAL_PREFERENCE]->(sourcePref:OpenChatSocialPreference)
+            WHERE coalesce(sourcePref.networkPaused, false) = true
+          }
+          AND NOT EXISTS {
+            MATCH (candidateOwner)-[:HAS_SOCIAL_PREFERENCE]->(candidatePref:OpenChatSocialPreference)
+            WHERE coalesce(candidatePref.networkPaused, false) = true
+          }
           AND NOT (sourceOwner)-[:BLOCKED]->(candidateOwner)
           AND NOT (candidateOwner)-[:BLOCKED]->(sourceOwner)
+          AND (
+            coalesce(source.audienceRestricted, false) = false
+            OR candidateOwner.id IN coalesce(source.audienceUserIds, [])
+            OR EXISTS {
+              MATCH (sourceOwner)-[:PARTICIPATES_IN]->(sourceAudience:Conversation)<-[:PARTICIPATES_IN]-(candidateOwner)
+              WHERE sourceAudience.id IN coalesce(source.audienceConversationIds, [])
+            }
+          )
+          AND (
+            coalesce(candidate.audienceRestricted, false) = false
+            OR sourceOwner.id IN coalesce(candidate.audienceUserIds, [])
+            OR EXISTS {
+              MATCH (candidateOwner)-[:PARTICIPATES_IN]->(candidateAudience:Conversation)<-[:PARTICIPATES_IN]-(sourceOwner)
+              WHERE candidateAudience.id IN coalesce(candidate.audienceConversationIds, [])
+            }
+          )
         OPTIONAL MATCH (existing:AgentMatch)-[:MATCHES]->(source)
         WHERE (existing)-[:MATCHES]->(candidate)
         WITH sourceOwner, candidateOwner, source, candidate, head(collect(existing)) AS existing
@@ -493,6 +757,7 @@ export async function scanIntentForMatches(
         )
         MERGE (match:AgentMatch {pairKey: $pairKey})
         ON CREATE SET match.id = $matchId, match.status = 'proposed', match.score = $score,
+                      match.matchType = $matchType,
                       match.createdAt = datetime($now), match.updatedAt = datetime($now),
                       match.creationToken = $creationToken
         WITH match, sourceOwner, candidateOwner, source, candidate,
@@ -514,7 +779,8 @@ export async function scanIntentForMatches(
           matchId,
           pairKey,
           creationToken,
-          score: pair.score,
+          score: pair.result.score,
+          matchType: pair.result.matchType,
           now,
         },
       );
@@ -582,16 +848,26 @@ async function completeConnectedMatch(
   const conversationId = dm.conversation.id as string;
   const ask = current.ownIntent.kind === 'ask' ? current.ownIntent : current.otherIntent;
   const offer = current.ownIntent.kind === 'offer' ? current.ownIntent : current.otherIntent;
+  const contextContent = current.projection.matchType === 'shared_goal'
+    ? `Your agents found a shared goal: ${current.projection.otherGoal ?? current.otherIntent.terms}`
+    : current.projection.matchType === 'reciprocal'
+      ? `Your agents found a reciprocal match. ${current.ownIntent.terms} / ${current.otherIntent.terms}`
+      : `Your agents matched an ask and an offer. Ask: ${ask.terms} / Offer: ${offer.terms}`;
   await ensureAssistantUser();
   await persistMessage(
     io,
     ASSISTANT_USER_ID,
     conversationId,
-    `Your agents matched an ask and an offer. Ask: ${ask.terms} / Offer: ${offer.terms}`,
+    contextContent,
     {
       messageType: 'card',
       cardKind: 'match_context',
-      cardPayload: JSON.stringify({ matchId, askTerms: ask.terms, offerTerms: offer.terms }),
+      cardPayload: JSON.stringify({
+        matchId,
+        matchType: current.projection.matchType ?? 'complementary',
+        askTerms: ask.terms,
+        offerTerms: offer.terms,
+      }),
       matchContextKey: matchId,
     },
   );
@@ -603,7 +879,7 @@ async function completeConnectedMatch(
       MATCH (match:AgentMatch {id: $matchId})-[:MATCHES]->(intent:AgentIntent)
       SET match.conversationId = $conversationId,
           match.updatedAt = datetime($now),
-          intent.status = 'connected',
+          intent.status = CASE WHEN coalesce(intent.closeOnConnect, true) THEN 'connected' ELSE intent.status END,
           intent.updatedAt = datetime($now)
       `,
       { matchId, conversationId, now: new Date().toISOString() },
@@ -673,6 +949,51 @@ export async function reconcileAgentDeliveries(io?: IOServer): Promise<void> {
   }
 }
 
+async function recheckProposedMatchEligibility(matchId: string): Promise<boolean> {
+  const session = getDriver().session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (ownerA:User)-[:OWNS_INTENT]->(a:AgentIntent)<-[:MATCHES]-(match:AgentMatch {id: $matchId, status: 'proposed'})-[:MATCHES]->(b:AgentIntent)<-[:OWNS_INTENT]-(ownerB:User)
+      WHERE a.id < b.id AND ownerA <> ownerB
+      OPTIONAL MATCH (ownerA)-[:HAS_SOCIAL_PREFERENCE]->(prefA:OpenChatSocialPreference)
+      OPTIONAL MATCH (ownerB)-[:HAS_SOCIAL_PREFERENCE]->(prefB:OpenChatSocialPreference)
+      WITH match, ownerA, ownerB, a, b,
+        a.status = 'active' AND b.status = 'active'
+        AND (a.expiresAt IS NULL OR a.expiresAt > datetime($now))
+        AND (b.expiresAt IS NULL OR b.expiresAt > datetime($now))
+        AND coalesce(prefA.networkPaused, false) = false
+        AND coalesce(prefB.networkPaused, false) = false
+        AND NOT (ownerA)-[:BLOCKED]->(ownerB)
+        AND NOT (ownerB)-[:BLOCKED]->(ownerA)
+        AND (
+          coalesce(a.audienceRestricted, false) = false
+          OR ownerB.id IN coalesce(a.audienceUserIds, [])
+          OR EXISTS {
+            MATCH (ownerA)-[:PARTICIPATES_IN]->(audienceA:Conversation)<-[:PARTICIPATES_IN]-(ownerB)
+            WHERE audienceA.id IN coalesce(a.audienceConversationIds, [])
+          }
+        )
+        AND (
+          coalesce(b.audienceRestricted, false) = false
+          OR ownerA.id IN coalesce(b.audienceUserIds, [])
+          OR EXISTS {
+            MATCH (ownerB)-[:PARTICIPATES_IN]->(audienceB:Conversation)<-[:PARTICIPATES_IN]-(ownerA)
+            WHERE audienceB.id IN coalesce(b.audienceConversationIds, [])
+          }
+        ) AS eligible
+      SET match.status = CASE WHEN eligible THEN match.status ELSE 'closed' END,
+          match.updatedAt = CASE WHEN eligible THEN match.updatedAt ELSE datetime($now) END
+      RETURN eligible
+      `,
+      { matchId, now: new Date().toISOString() },
+    );
+    return result.records.length > 0 && result.records[0].get('eligible') === true;
+  } finally {
+    await session.close();
+  }
+}
+
 export async function respondToMatch(
   userId: string,
   matchId: string,
@@ -698,6 +1019,14 @@ export async function respondToMatch(
     }
     return { ...current.projection, alreadyResolved: true };
   }
+  if (!await recheckProposedMatchEligibility(matchId)) {
+    const closed = await loadMatchForResponse(userId, matchId);
+    if (!closed) return null;
+    emitMatchUpdated(io, userId, closed.projection);
+    const otherView = await loadMatchForResponse(closed.otherOwnerId, matchId);
+    if (otherView) emitMatchUpdated(io, closed.otherOwnerId, otherView.projection);
+    return closed.projection;
+  }
   if (current.ownResponse) return current.projection;
 
   const response = decision === 'approve' ? 'approved' : 'declined';
@@ -706,18 +1035,46 @@ export async function respondToMatch(
   try {
     const transition = await session.run(
       `
-      MATCH (:User {id: $userId})-[:OWNS_INTENT]->(own:AgentIntent)<-[:MATCHES]-(match:AgentMatch {id: $matchId})-[:MATCHES]->(other:AgentIntent)
-      WHERE own <> other AND match.status = 'proposed'
-        AND CASE WHEN own.id < other.id THEN match.aResponse ELSE match.bResponse END IS NULL
-      SET match.aResponse = CASE WHEN own.id < other.id THEN $response ELSE match.aResponse END,
-          match.bResponse = CASE WHEN own.id > other.id THEN $response ELSE match.bResponse END,
+      MATCH (owner:User {id: $userId})-[:OWNS_INTENT]->(own:AgentIntent)<-[:MATCHES]-(match:AgentMatch {id: $matchId})-[:MATCHES]->(other:AgentIntent)<-[:OWNS_INTENT]-(otherOwner:User)
+      WHERE own <> other AND match.status = 'proposed' AND owner <> otherOwner
+      OPTIONAL MATCH (owner)-[:HAS_SOCIAL_PREFERENCE]->(ownPref:OpenChatSocialPreference)
+      OPTIONAL MATCH (otherOwner)-[:HAS_SOCIAL_PREFERENCE]->(otherPref:OpenChatSocialPreference)
+      WITH match, owner, otherOwner, own, other,
+           CASE WHEN own.id < other.id THEN match.aResponse ELSE match.bResponse END AS ownResponse,
+           own.status = 'active' AND other.status = 'active'
+           AND (own.expiresAt IS NULL OR own.expiresAt > datetime($now))
+           AND (other.expiresAt IS NULL OR other.expiresAt > datetime($now))
+           AND coalesce(ownPref.networkPaused, false) = false
+           AND coalesce(otherPref.networkPaused, false) = false
+           AND NOT (owner)-[:BLOCKED]->(otherOwner)
+           AND NOT (otherOwner)-[:BLOCKED]->(owner)
+           AND (
+             coalesce(own.audienceRestricted, false) = false
+             OR otherOwner.id IN coalesce(own.audienceUserIds, [])
+             OR EXISTS {
+               MATCH (owner)-[:PARTICIPATES_IN]->(ownAudience:Conversation)<-[:PARTICIPATES_IN]-(otherOwner)
+               WHERE ownAudience.id IN coalesce(own.audienceConversationIds, [])
+             }
+           )
+           AND (
+             coalesce(other.audienceRestricted, false) = false
+             OR owner.id IN coalesce(other.audienceUserIds, [])
+             OR EXISTS {
+               MATCH (otherOwner)-[:PARTICIPATES_IN]->(otherAudience:Conversation)<-[:PARTICIPATES_IN]-(owner)
+               WHERE otherAudience.id IN coalesce(other.audienceConversationIds, [])
+             }
+           ) AS eligible
+      WHERE ownResponse IS NULL
+      SET match.aResponse = CASE WHEN eligible AND own.id < other.id THEN $response ELSE match.aResponse END,
+          match.bResponse = CASE WHEN eligible AND own.id > other.id THEN $response ELSE match.bResponse END,
           match.updatedAt = datetime($now)
       SET match.status = CASE
+        WHEN NOT eligible THEN 'closed'
         WHEN $response = 'declined' THEN 'closed'
         WHEN match.aResponse = 'approved' AND match.bResponse = 'approved' THEN 'connected'
         ELSE 'proposed'
       END
-      RETURN match.status AS matchStatus
+      RETURN match.status AS matchStatus, eligible
       `,
       { userId, matchId, response, now: new Date().toISOString() },
     );

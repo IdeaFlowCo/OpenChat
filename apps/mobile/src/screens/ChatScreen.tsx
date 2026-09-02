@@ -31,6 +31,7 @@ import { MessageActionSheet, ReplyToData } from '../components/MessageActionShee
 import { ReactionsBar } from '../components/ReactionsBar';
 import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
+import { useSocialExperience } from '../contexts/SocialExperienceContext';
 import { useRecording } from '../contexts/RecordingContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
@@ -206,27 +207,30 @@ function buildRows(messages: Message[], myId: string | undefined): RenderRow[] {
  * ChatScreen props (OpenChat-601.2):
  *
  * The component is mounted in two contexts now:
- *   1. /m/ + native — as a stack screen via ChatsNavigator. Reads
+ *   1. compact /app/ + native — as a stack screen via ChatsNavigator. Reads
  *      conversationId from the route, configures the native-stack header
  *      via navigation.setOptions.
- *   2. /d/ — embedded inside MasterDetailLayout's right pane. The parent
+ *   2. wide /app/ — embedded inside MasterDetailLayout's right pane. The parent
  *      passes conversationId via props and asks us to skip header setup
  *      via `embedded` (the master-detail provides its own chrome).
  *
  * Both contexts share the same body: the entire message thread, composer,
  * action sheet, reactions, transforms, voice / image / link previews,
- * mention autocomplete, etc. — giving /d/ full feature parity with /m/.
+ * mention autocomplete, etc. — keeping compact and wide layouts equivalent.
  */
 interface ChatScreenProps {
   /** Override conversationId. Required when used outside the Chat route. */
   conversationId?: string;
   /** When true, skip navigation.setOptions (parent owns the chrome). */
   embedded?: boolean;
+  /** Wide-layout hook that opens My Agent without replacing the chat pane. */
+  onOpenAgent?: () => void;
 }
 
 export function ChatScreen({
   conversationId: conversationIdProp,
   embedded = false,
+  onOpenAgent,
 }: ChatScreenProps = {}) {
   const navigation = useNavigation<NavProp<'Chat'>>();
   // Read route params defensively: when embedded inside MasterDetailLayout
@@ -240,6 +244,7 @@ export function ChatScreen({
         : '');
   const { scheme } = useTheme();
   const c = getColors(scheme);
+  const { enhanced } = useSocialExperience();
   // Dynamic keyboard offset for KeyboardAvoidingView. This is the distance
   // from the top of the screen to the top of the KAV — i.e. the height of
   // the nav-stack header. `useHeaderHeight()` already INCLUDES the safe-area
@@ -247,7 +252,7 @@ export function ChatScreen({
   // (~47px on iPhone 14), causing KAV to overestimate keyboard intrusion and
   // leave an empty gap below the composer when the keyboard opens.
   const headerHeight = useHeaderHeight();
-  const kbOffset = Platform.OS === 'ios' ? headerHeight : 0;
+  const kbOffset = embedded ? 0 : Platform.OS === 'ios' ? headerHeight : 0;
   const {
     currentUser, conversations, messages, loadingMessages, isConnected,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
@@ -410,7 +415,13 @@ export function ChatScreen({
   }, [isGroup, conversation?.participants, currentUser?.userId]);
   const headerTitle = useMemo(() => {
     if (!conversation) return '';
-    if (!isGroup) return getDirectConversationTitle(conversation, currentUser, 'Chat');
+    if (!isGroup) {
+      if (!isSelfDM && !conversation.title
+        && other?.isBot && (other.id === 'assistant' || other.name === 'Assistant')) {
+        return 'My Agent';
+      }
+      return getDirectConversationTitle(conversation, currentUser, 'Chat');
+    }
     if (conversation.title) return conversation.title;
     const others = (conversation.participants || [])
       .filter(p => p.user.id !== currentUser?.userId)
@@ -418,7 +429,7 @@ export function ChatScreen({
     if (others.length === 0) return 'Group';
     if (others.length <= 2) return others.join(', ');
     return `${others[0]} +${others.length - 1}`;
-  }, [conversation, isGroup, currentUser]);
+  }, [conversation, isGroup, isSelfDM, other, currentUser]);
 
   // Does this conversation include any bot participant? (OpenChat-ds3)
   const containsBot = useMemo(
@@ -564,10 +575,12 @@ export function ChatScreen({
       ),
       headerRight: () => (
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <AgentOverlayButton
-            color={c.primary}
-            onPress={() => navigation.navigate('AgentOverlay')}
-          />
+          {enhanced && (
+            <AgentOverlayButton
+              color={c.primary}
+              onPress={() => navigation.navigate('AgentOverlay')}
+            />
+          )}
           <TouchableOpacity
             onPress={() =>
               navigation.navigate('ConversationThoughts', {
@@ -593,7 +606,7 @@ export function ChatScreen({
         </View>
       ),
     });
-  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.primary, c.textPrimary, c.textSecondary, c.textMuted, containsBot, isMuted, showMuteMenu]);
+  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.primary, c.textPrimary, c.textSecondary, c.textMuted, containsBot, enhanced, isMuted, showMuteMenu]);
 
   // Ink & Paper: own bubbles are ink-on-paper (light) / paper-on-ink (dark),
   // so translucent overlays inside them derive from the bubble text color
@@ -1081,6 +1094,61 @@ export function ChatScreen({
       style={[styles.root, { backgroundColor: c.background }]}
       keyboardVerticalOffset={kbOffset}
     >
+      {embedded && (
+        <View style={[styles.embeddedHeader, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+          <TouchableOpacity
+            onPress={() => {
+              if (isGroup) navigation.navigate('GroupSettings', { conversationId });
+              else if (isSelfDM) navigation.navigate('ProfileEdit');
+              else if (other?.id) navigation.navigate('ContactProfile', { userId: other.id });
+            }}
+            disabled={!isGroup && !isSelfDM && !other?.id}
+            style={styles.embeddedIdentity}
+            accessibilityLabel={`Conversation information for ${headerTitle}`}
+          >
+            <Avatar
+              name={!isGroup ? (other?.name || other?.email || headerTitle) : headerTitle}
+              email={other?.email}
+              isBot={!isGroup ? other?.isBot : false}
+              avatarUrl={!isGroup ? other?.avatarUrl : undefined}
+              size={34}
+            />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <View style={styles.embeddedTitleRow}>
+                <Text numberOfLines={1} style={[styles.embeddedTitle, { color: c.textPrimary }]}>{headerTitle || 'Chat'}</Text>
+                {!isGroup && <BotBadge isBot={other?.isBot} compact />}
+                {isGroup && containsBot && <BotBadge isBot compact />}
+              </View>
+              <Text numberOfLines={1} style={[styles.embeddedStatus, { color: c.textSecondary }]}>
+                {isGroup
+                  ? `${conversation?.participants?.length || 0} members`
+                  : isSelfDM
+                    ? 'Private notes and messages to yourself'
+                    : (other && (presence.get(other.id)?.statusMessage || presence.get(other.id)?.status || other.presenceStatus)) || ''}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          <View style={styles.embeddedActions}>
+            {enhanced && (
+              <AgentOverlayButton
+                color={c.primary}
+                onPress={onOpenAgent ?? (() => navigation.navigate('AgentOverlay'))}
+              />
+            )}
+            <TouchableOpacity
+              onPress={() => navigation.navigate('ConversationThoughts', { conversationId, title: headerTitle })}
+              accessibilityLabel="Thoughts for this chat"
+              style={styles.embeddedAction}
+            >
+              <AppIcon name="thought" color={c.primary} size={20} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={showMuteMenu} accessibilityLabel="Conversation menu" style={styles.embeddedAction}>
+              {isMuted && <AppIcon name="mute" color={c.textMuted} size={14} />}
+              <AppIcon name="more" color={c.textSecondary} size={20} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
       {showAiDisclosure && <AiDisclosureBanner />}
 
       <ExportSheet
@@ -1146,6 +1214,9 @@ export function ChatScreen({
                   message={m}
                   onOpenConversation={(matchedConversationId) => {
                     navigation.navigate('Chat', { conversationId: matchedConversationId });
+                  }}
+                  onShareDraft={(draftId, initialText) => {
+                    navigation.navigate('StoryComposer', { draftId, initialText });
                   }}
                 />
               );
@@ -1530,7 +1601,7 @@ export function ChatScreen({
           placeholder="Write…"
           placeholderTextColor={c.textMuted}
           multiline
-          // Web (/m, /d): Enter sends, Shift+Enter inserts a newline. Guarded to
+          // Web (/app): Enter sends, Shift+Enter inserts a newline. Guarded to
           // web only — on a touch keyboard the return key must stay a newline
           // (sending is the send button). The isComposing check keeps IME users
           // (e.g. Chinese input) from sending while confirming a candidate.
@@ -1688,6 +1759,20 @@ export function ChatScreen({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  embeddedHeader: {
+    minHeight: 64,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingLeft: 16,
+    paddingRight: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  embeddedIdentity: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 56 },
+  embeddedTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 0 },
+  embeddedTitle: { fontFamily: serif, fontSize: 19, fontWeight: '600', flexShrink: 1 },
+  embeddedStatus: { fontSize: 11, marginTop: 2 },
+  embeddedActions: { flexDirection: 'row', alignItems: 'center' },
+  embeddedAction: { minWidth: 44, minHeight: 44, paddingHorizontal: 8, flexDirection: 'row', gap: 4, alignItems: 'center', justifyContent: 'center' },
   listWrap: { flex: 1, position: 'relative' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   row: { flexDirection: 'row', gap: 6 },

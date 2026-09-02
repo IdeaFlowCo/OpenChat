@@ -2,7 +2,7 @@
 
 How testers get OpenChat builds, what updates automatically (and what does
 not), and how to send feedback. Covers iOS (TestFlight), over-the-air (OTA)
-EAS Updates, and the web builds at `/m` and `/d`.
+EAS Updates, and the responsive web app at `/app`.
 
 Tracking epic: **openchat-3jq** (release/update pipeline + web↔mobile parity).
 Ticket: **openchat-3jq.6**.
@@ -31,14 +31,10 @@ TestFlight.
 
 | Path | Audience | Notes |
 |------|----------|-------|
-| `https://chat.globalbr.ai/m` | Mobile web | Same React-Native-web app, usually opened on mobile; layout still adapts by viewport width. |
-| `https://chat.globalbr.ai/d` | Desktop web | Same app, master-detail layout at widths ≥ 900px. **Installable as a PWA** (manifest + service worker injected at deploy). |
-| `https://chat.globalbr.ai/legacy` | Legacy Vite client | Kept for backward compat. |
+| `https://chat.globalbr.ai/app` | Phone, tablet, and desktop web | The canonical responsive React-Native-web app. It uses compact navigation on narrow screens and master-detail layout on wide screens. Installable as a PWA. |
 
-`/m` and `/d` are the **same RN-web codebase** — the layout adapts to the
-viewport width at runtime (see `src/theme/breakpoints.ts`, breakpoint 900px).
-The only build-time difference is the asset base path. See
-[`collapse-m-d.md`](./collapse-m-d.md).
+Old `/m`, `/d`, and `/legacy` links redirect to `/app` and preserve their
+remaining path and query. See [`collapse-m-d.md`](./collapse-m-d.md).
 
 ---
 
@@ -100,7 +96,7 @@ For these, run the release pipeline (section 4). Internal testers get it
 | Add a native module / Expo plugin | ❌ No | New TestFlight build |
 | Change a permission string / Info.plist | ❌ No | New TestFlight build |
 | Upgrade Expo SDK / react-native | ❌ No | New TestFlight build |
-| Web-only (`/m`,`/d`) change | n/a | `infra/deploy.sh` redeploys; no app store involved |
+| Web-only (`/app`) change | n/a | `infra/deploy.sh` redeploys; no app store involved |
 
 ---
 
@@ -179,8 +175,8 @@ Reaches all installs whose native version matches (see runtime version gate).
 - [ ] Internal testers: verify the build appears (~1 min).
 - [ ] External testers: confirm Beta App Review submitted (it queues if a prior
       build is still in review — see `publish-to-testers.py` 422 handling).
-- [ ] Web parity: if the change is user-facing chat behavior, also redeploy
-      `/m` + `/d` via `infra/deploy.sh` (see AGENTS.md web↔mobile parity rule).
+- [ ] Web release: if the change should reach browsers, redeploy the canonical
+      `/app` export via `infra/deploy.sh`.
 
 ---
 

@@ -79,8 +79,14 @@ const AgentIntent = {
     kind: { type: 'string', enum: ['ask', 'offer'] },
     terms: { type: 'string', minLength: 1, maxLength: 500, description: 'Anonymous public matching terms.' },
     details: { type: 'string', nullable: true, maxLength: 2000, description: 'Private owner-only context; never shown to a match.' },
-    status: { type: 'string', enum: ['active', 'withdrawn', 'connected'] },
+    status: { type: 'string', enum: ['active', 'paused', 'withdrawn', 'connected'] },
     expiresAt: { type: 'string', format: 'date-time', nullable: true, description: 'Optional discovery expiry. Expired intents are never matched.' },
+    goal: { type: 'string', nullable: true, maxLength: 500 },
+    seeks: { type: 'array', items: { type: 'string' }, description: 'Canonical resources/help sought. Legacy asks normalize to [terms].' },
+    brings: { type: 'array', items: { type: 'string' }, description: 'Canonical resources/help brought. Legacy offers normalize to [terms].' },
+    matchingMode: { type: 'string', enum: ['fulfillment', 'reciprocal', 'shared_goal'] },
+    openToCollaborators: { type: 'boolean' },
+    closeOnConnect: { type: 'boolean', description: 'Defaults true for legacy intents.' },
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' },
   },
@@ -104,12 +110,83 @@ const AgentMatch = {
     },
     otherKind: { type: 'string', enum: ['ask', 'offer'] },
     otherTerms: { type: 'string' },
+    matchType: { type: 'string', enum: ['complementary', 'reciprocal', 'shared_goal'] },
+    score: { type: 'number', minimum: 0, maximum: 1 },
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' },
     conversationId: { type: 'string', description: 'Present only after mutual approval.' },
     alreadyResolved: { type: 'boolean', description: 'True when responding to a match that was already closed or connected.' },
   },
   required: ['id', 'status', 'ownIntent', 'otherKind', 'otherTerms', 'createdAt', 'updatedAt'],
+} as const;
+
+const SocialAudience = {
+  type: 'object',
+  properties: {
+    userIds: { type: 'array', maxItems: 100, items: { type: 'string' } },
+    conversationIds: { type: 'array', maxItems: 100, items: { type: 'string' } },
+  },
+  required: ['userIds', 'conversationIds'],
+} as const;
+
+const IntentDraft = {
+  type: 'object',
+  description: 'Owner-only capture object. Drafts never enter matching or a human Story feed.',
+  properties: {
+    id: { type: 'string' }, ownerUserId: { type: 'string' }, goal: { type: 'string' },
+    seeks: { type: 'array', items: { type: 'string' } },
+    brings: { type: 'array', items: { type: 'string' } },
+    matchingMode: { type: 'string', enum: ['fulfillment', 'reciprocal', 'shared_goal'] },
+    openToCollaborators: { type: 'boolean' },
+    details: { type: 'string', nullable: true, description: 'Private; never copied into Story/match projections.' },
+    source: { type: 'string', nullable: true, description: 'Private capture source.' },
+    provenance: { type: 'object', nullable: true, additionalProperties: true, description: 'Private capture provenance.' },
+    confidence: { type: 'number', nullable: true, minimum: 0, maximum: 1 },
+    state: { type: 'string', enum: ['pending', 'dismissed', 'activated'] },
+    activatedIntentId: { type: 'string', nullable: true }, activatedStoryId: { type: 'string', nullable: true },
+    createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
+  },
+  required: ['id', 'ownerUserId', 'goal', 'seeks', 'brings', 'matchingMode', 'openToCollaborators', 'state', 'createdAt', 'updatedAt'],
+} as const;
+
+const OwnedStory = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' }, ownerUserId: { type: 'string' }, goal: { type: 'string' },
+    seeks: { type: 'array', items: { type: 'string' } }, brings: { type: 'array', items: { type: 'string' } },
+    matchingMode: { type: 'string', enum: ['fulfillment', 'reciprocal', 'shared_goal'] },
+    openToCollaborators: { type: 'boolean' }, text: { type: 'string', nullable: true },
+    humanVisible: { type: 'boolean' }, agentSearchEnabled: { type: 'boolean' }, explicitQuietSearch: { type: 'boolean' },
+    status: { type: 'string', enum: ['active', 'paused', 'withdrawn'] },
+    audience: { $ref: '#/components/schemas/SocialAudience' },
+    storyExpiresAt: { type: 'string', format: 'date-time', nullable: true },
+    searchExpiresAt: { type: 'string', format: 'date-time' }, intentId: { type: 'string' },
+    createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
+  },
+} as const;
+
+const FeedStory = {
+  type: 'object',
+  description: 'Agent-key projection of an audience-visible Story, including approved matching terms. Human JWT clients receive only id, author, text, expiry, and creation time.',
+  properties: {
+    id: { type: 'string' },
+    author: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string', nullable: true } }, required: ['id', 'name'] },
+    goal: { type: 'string' }, seeks: { type: 'array', items: { type: 'string' } },
+    brings: { type: 'array', items: { type: 'string' } },
+    matchingMode: { type: 'string', enum: ['fulfillment', 'reciprocal', 'shared_goal'] },
+    openToCollaborators: { type: 'boolean' }, text: { type: 'string' },
+    storyExpiresAt: { type: 'string', format: 'date-time' }, createdAt: { type: 'string', format: 'date-time' },
+  },
+} as const;
+
+const SocialPreferences = {
+  type: 'object',
+  properties: {
+    experienceMode: { type: 'string', enum: ['enhanced', 'simple'], default: 'enhanced' },
+    networkPaused: { type: 'boolean', default: false },
+    updatedAt: { type: 'string', format: 'date-time', nullable: true },
+  },
+  required: ['experienceMode', 'networkPaused', 'updatedAt'],
 } as const;
 
 const SecretaryAnswer = {
@@ -158,6 +235,11 @@ const AccountExport = {
       items: { $ref: '#/components/schemas/AgentKey' },
     },
     secretary: { $ref: '#/components/schemas/SecretaryConfig' },
+    intentDrafts: { type: 'array', items: { $ref: '#/components/schemas/IntentDraft' } },
+    stories: { type: 'array', items: { $ref: '#/components/schemas/OwnedStory' } },
+    intents: { type: 'array', items: { $ref: '#/components/schemas/AgentIntent' } },
+    socialPreferences: { $ref: '#/components/schemas/SocialPreferences' },
+    agentMatches: { type: 'array', items: { $ref: '#/components/schemas/AgentMatch' }, description: 'Privacy-safe per-viewer projections only; never includes the other owner identity or private fields.' },
   },
 } as const;
 
@@ -312,6 +394,11 @@ export const openapiSpec = {
       AgentKey,
       AgentIntent,
       AgentMatch,
+      SocialAudience,
+      IntentDraft,
+      OwnedStory,
+      FeedStory,
+      SocialPreferences,
       SecretaryAnswer,
       SecretaryConfig,
       AccountExport,
@@ -327,6 +414,7 @@ export const openapiSpec = {
     { name: 'Chat', description: 'Conversations and messages' },
     { name: 'Agent keys', description: 'Mint / manage `oc_` API keys' },
     { name: 'Agent network', description: 'Anonymous asks/offers and double-opt-in quiet matches' },
+    { name: 'Agent social', description: 'Private capture, selected-audience Stories, preferences, and review' },
     { name: 'Webhooks', description: 'Outbound `message.created` subscriptions for bot channels' },
     { name: 'Feedback', description: 'In-app feedback → WorldIssueTracker' },
     { name: 'Secretary', description: 'Owner-approved direct-message auto-replies' },
@@ -340,6 +428,7 @@ export const openapiSpec = {
     },
     '/api/auth/me': {
       get: { operationId: 'getMe', tags: ['Account'], summary: 'Get the authenticated user (or agent-key owner)', responses: { '200': ok({ type: 'object' }), '401': errResp('Unauthorized') } },
+      delete: { operationId: 'deleteAccount', tags: ['Account'], summary: 'Delete the authenticated account and owned data', description: 'Atomically redacts authored messages; deletes account-owned drafts, Stories, intents, preferences, and match objects involving those intents; preserves unrelated users\' intent records; then deletes the user.', responses: { '204': { description: 'Deleted' }, '401': errResp('Unauthorized') } },
     },
     '/api/auth/export': {
       get: {
@@ -380,8 +469,8 @@ export const openapiSpec = {
         operationId: 'publishIntent',
         tags: ['Agent network'],
         summary: 'Publish an anonymous ask or offer',
-        description: 'Publishing is explicit discovery opt-in. Only terms and kind are visible to a potential match; details remain private.',
-        requestBody: { required: true, content: json({ type: 'object', properties: { kind: { type: 'string', enum: ['ask', 'offer'] }, terms: { type: 'string', minLength: 1, maxLength: 500 }, details: { type: 'string', maxLength: 2000 }, expiresAt: { type: 'string', format: 'date-time', description: 'Optional future discovery expiry.' } }, required: ['kind', 'terms'] }) },
+        description: 'Publishing is explicit discovery opt-in and requires confirm:true after approval of the exact terms. Only terms and kind are visible to a potential match; details remain private.',
+        requestBody: { required: true, content: json({ type: 'object', properties: { kind: { type: 'string', enum: ['ask', 'offer'] }, terms: { type: 'string', minLength: 1, maxLength: 500 }, confirm: { type: 'boolean', const: true, description: 'Set only after the user explicitly approves the exact discoverable terms.' }, details: { type: 'string', maxLength: 2000 }, expiresAt: { type: 'string', format: 'date-time', description: 'Optional future discovery expiry.' }, goal: { type: 'string', maxLength: 500 }, seeks: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 500 } }, brings: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 500 } }, matchingMode: { type: 'string', enum: ['fulfillment', 'reciprocal', 'shared_goal'] }, openToCollaborators: { type: 'boolean' }, audience: { $ref: '#/components/schemas/SocialAudience' }, closeOnConnect: { type: 'boolean' } }, required: ['kind', 'terms', 'confirm'] }) },
         responses: { '201': ok({ type: 'object', properties: { intent: { $ref: '#/components/schemas/AgentIntent' } } }, 'Created'), '400': errResp('Bad request'), '401': errResp('Unauthorized') },
       },
     },
@@ -413,6 +502,80 @@ export const openapiSpec = {
         requestBody: { required: true, content: json({ type: 'object', properties: { decision: { type: 'string', enum: ['approve', 'decline'] } }, required: ['decision'] }) },
         responses: { '200': ok({ type: 'object', properties: { match: { $ref: '#/components/schemas/AgentMatch' } } }), '400': errResp('Bad request'), '404': errResp('Not found') },
       },
+    },
+    '/api/intent-drafts': {
+      get: {
+        operationId: 'listIntentDrafts', tags: ['Agent social'], summary: 'List private intent drafts owned by the caller',
+        responses: { '200': ok({ type: 'object', properties: { drafts: { type: 'array', items: { $ref: '#/components/schemas/IntentDraft' } } } }), '401': errResp('Unauthorized') },
+      },
+      post: {
+        operationId: 'createIntentDraft', tags: ['Agent social'], summary: 'Capture a private structured draft',
+        description: 'Private-by-default: creating a draft does not publish it, make it matchable, or place it in a human feed.',
+        requestBody: { required: true, content: json({ type: 'object', properties: {
+          goal: { type: 'string', maxLength: 500 }, seeks: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 500 } },
+          brings: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 500 } },
+          matchingMode: { type: 'string', enum: ['fulfillment', 'reciprocal', 'shared_goal'] }, openToCollaborators: { type: 'boolean' },
+          details: { type: 'string', maxLength: 4000 }, source: { type: 'string', maxLength: 1000 },
+          provenance: { type: 'object', additionalProperties: true }, confidence: { type: 'number', minimum: 0, maximum: 1 },
+        }, description: 'At least one non-empty goal, seek, or bring is required.' }) },
+        responses: { '201': ok({ type: 'object', properties: { draft: { $ref: '#/components/schemas/IntentDraft' } } }, 'Created'), '400': errResp('Bad request') },
+      },
+    },
+    '/api/intent-drafts/{id}': {
+      patch: {
+        operationId: 'updateIntentDraft', tags: ['Agent social'], summary: 'Edit or dismiss a private pending draft',
+        description: 'The merged pending draft must retain a non-empty goal, seek, or bring. state may only be set to dismissed.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: true, content: json({ type: 'object', additionalProperties: true }) },
+        responses: { '200': ok({ type: 'object', properties: { draft: { $ref: '#/components/schemas/IntentDraft' } } }), '400': errResp('Bad request'), '404': errResp('Not found') },
+      },
+    },
+    '/api/intent-drafts/{id}/activate': {
+      post: {
+        operationId: 'activateIntentDraft', tags: ['Agent social'], summary: 'Explicitly activate a private draft',
+        description: 'Enable quietSearch, a human Story, or both. Human Stories require a non-empty selected audience. Defaults: quiet search 30 days; Story 24 hours. A Story-only activation remains outside agent matching.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: true, content: json({ type: 'object', properties: {
+          quietSearch: { type: 'object', properties: { enabled: { type: 'boolean' }, expiresAt: { type: 'string', format: 'date-time' }, audience: { $ref: '#/components/schemas/SocialAudience' } }, required: ['enabled'] },
+          story: { type: 'object', properties: { enabled: { type: 'boolean' }, text: { type: 'string', maxLength: 2000 }, expiresAt: { type: 'string', format: 'date-time' }, audience: { $ref: '#/components/schemas/SocialAudience' } }, required: ['enabled', 'text', 'audience'] },
+          closeOnConnect: { type: 'boolean', default: true },
+        } }) },
+        responses: { '201': ok({ type: 'object', properties: { draft: { $ref: '#/components/schemas/IntentDraft' }, story: { $ref: '#/components/schemas/OwnedStory' }, intent: { $ref: '#/components/schemas/AgentIntent' } } }, 'Activated'), '400': errResp('Bad request'), '404': errResp('Not found') },
+      },
+    },
+    '/api/stories/feed': {
+      get: { operationId: 'listStoryFeed', tags: ['Agent social'], summary: 'List currently visible human Stories', description: 'Enforces selected audience, current conversation membership, bidirectional blocks, status, and expiry. Agent-only objects are never returned.', responses: { '200': ok({ type: 'object', properties: { stories: { type: 'array', items: { $ref: '#/components/schemas/FeedStory' } } } }) } },
+    },
+    '/api/stories/mine': {
+      get: { operationId: 'listOwnedStories', tags: ['Agent social'], summary: 'List the caller\'s Story and agent-only records', responses: { '200': ok({ type: 'object', properties: { stories: { type: 'array', items: { $ref: '#/components/schemas/OwnedStory' } } } }) } },
+    },
+    '/api/stories': {
+      post: {
+        operationId: 'createStory', tags: ['Agent social'], summary: 'Explicitly publish a selected-audience human Story',
+        description: 'Text alone is sufficient. Structured terms are optional. Without separately enabled quietSearch, the Story remains outside agent matching.',
+        requestBody: { required: true, content: json({ type: 'object', properties: {
+          text: { type: 'string', minLength: 1, maxLength: 2000 }, audience: { $ref: '#/components/schemas/SocialAudience' },
+          goal: { type: 'string', maxLength: 500 }, seeks: { type: 'array', items: { type: 'string' } }, brings: { type: 'array', items: { type: 'string' } },
+          matchingMode: { type: 'string', enum: ['fulfillment', 'reciprocal', 'shared_goal'] }, openToCollaborators: { type: 'boolean' },
+          storyExpiresAt: { type: 'string', format: 'date-time' },
+          quietSearch: { type: 'object', properties: { enabled: { type: 'boolean' }, expiresAt: { type: 'string', format: 'date-time' }, audience: { $ref: '#/components/schemas/SocialAudience' } }, required: ['enabled'] },
+          closeOnConnect: { type: 'boolean', default: true },
+        }, required: ['text', 'audience'] }) },
+        responses: { '201': ok({ type: 'object', properties: { story: { $ref: '#/components/schemas/OwnedStory' }, intent: { $ref: '#/components/schemas/AgentIntent' } } }, 'Created'), '400': errResp('Bad request') },
+      },
+    },
+    '/api/stories/{id}': {
+      patch: { operationId: 'updateStory', tags: ['Agent social'], summary: 'Pause, resume, withdraw, or extend an owned Story', description: 'At least one field is required. A separately approved quiet search retains its own state and expiry across human Story changes. Without separate quiet-search approval, pause/resume mirrors the linked audience-scoped intent and expiry extensions stay synchronized.', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: json({ type: 'object', properties: { status: { type: 'string', enum: ['active', 'paused', 'withdrawn'] }, storyExpiresAt: { type: 'string', format: 'date-time' } } }) }, responses: { '200': ok({ type: 'object', properties: { story: { $ref: '#/components/schemas/OwnedStory' } } }), '400': errResp('Bad request'), '404': errResp('Not found') } },
+    },
+    '/api/stories/{id}/respond': {
+      post: { operationId: 'respondToStory', tags: ['Agent social'], summary: 'Reply to a currently visible Story in a normal DM', description: 'Authorization is rechecked against current audience, membership, blocks, status, and expiry before sending.', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: json({ type: 'object', properties: { message: { type: 'string', minLength: 1, maxLength: 2000 } }, required: ['message'] }) }, responses: { '201': ok({ type: 'object', properties: { conversationId: { type: 'string' }, message: { $ref: '#/components/schemas/Message' } } }, 'Sent'), '404': errResp('Visible Story not found') } },
+    },
+    '/api/social/preferences': {
+      get: { operationId: 'getSocialPreferences', tags: ['Agent social'], summary: 'Get presentation mode and independent network pause', responses: { '200': ok({ $ref: '#/components/schemas/SocialPreferences' }) } },
+      patch: { operationId: 'updateSocialPreferences', tags: ['Agent social'], summary: 'Update presentation mode and/or independent network pause', description: 'Simple mode does not delete or pause active data. networkPaused independently prevents new matches.', requestBody: { required: true, content: json({ type: 'object', properties: { experienceMode: { type: 'string', enum: ['enhanced', 'simple'] }, networkPaused: { type: 'boolean' } } }) }, responses: { '200': ok({ $ref: '#/components/schemas/SocialPreferences' }) } },
+    },
+    '/api/review': {
+      get: { operationId: 'getSocialReviewQueue', tags: ['Agent social'], summary: 'Get the bounded actionable review queue', description: 'Returns at most 50 pending drafts, unanswered matches, and searches/Stories expiring within 72 hours. It is a computed projection, not the raw inference backlog.', responses: { '200': ok({ type: 'object', properties: { items: { type: 'array', maxItems: 50, items: { type: 'object' } }, hasMore: { type: 'boolean' } }, required: ['items', 'hasMore'] }) } },
     },
     '/api/chat/conversations': {
       get: {

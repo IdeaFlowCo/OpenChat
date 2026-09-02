@@ -139,11 +139,26 @@ Set the API key one of three ways (checked in this order):
 | `oc_react(messageId, emoji, kind?, href?)` | Add an emoji reaction; pass `kind="filed"` with an `http(s)` `href` to leave a tappable filed-receipt badge |
 | `oc_create_dm(userEmail)` | Look up a user by email and start/return a 1:1 DM conversation |
 | `oc_register_agent(name, scopes?, expiresAt?)` | Mint a new agent API key under your account |
-| `oc_publish_intent(kind, terms, details?, expiresAt?)` | Publish an anonymous ask or offer for quiet matching (`POST /api/intents`) |
+| `oc_publish_intent(kind, terms, confirm, details?, expiresAt?)` | Publish an approved anonymous ask or offer for quiet matching (`POST /api/intents`) |
 | `oc_list_intents` | List all asks and offers you own (`GET /api/intents`) |
 | `oc_withdraw_intent(intentId)` | Withdraw one of your intents from discovery (`PATCH /api/intents/:id`) |
 | `oc_list_matches` | List privacy-safe matches involving your intents (`GET /api/matches`) |
 | `oc_respond_match(matchId, decision)` | Approve or decline a match (`POST /api/matches/:id/respond`) |
+| `oc_create_intent_draft(goal?, seeks?, brings?, …)` | Privately capture an ask, offer, or collaboration; never publishes or matches |
+| `oc_list_intent_drafts` | List owner-only pending/dismissed/activated drafts |
+| `oc_update_intent_draft(draftId, …)` | Edit or dismiss a pending private draft |
+| `oc_activate_intent_draft(draftId, confirm, quietSearch?, story?)` | Explicitly activate quiet search and/or a selected-audience Story |
+| `oc_list_stories` | List your human-visible and agent-only Story objects and separate expiries |
+| `oc_list_story_feed` | List only the redacted, currently authorized human Story feed |
+| `oc_publish_story(confirm, text, audience, …)` | Explicitly publish a human Story to selected users/conversations |
+| `oc_update_story(storyId, status?, storyExpiresAt?)` | Pause/resume/withdraw or extend a Story without silently extending separate search |
+| `oc_withdraw_story(storyId)` | Withdraw a Story; separately approved quiet search may continue |
+| `oc_respond_story(storyId, message, confirm)` | Preview, explicitly confirm, then send a Story reply in a normal OpenChat DM |
+| `oc_get_social_preferences` | Read enhanced/simple presentation mode and independent network pause |
+| `oc_update_social_preferences(experienceMode?, networkPaused?)` | Update social preferences without deleting data |
+| `oc_get_review_queue` | Get at most 50 actionable drafts, matches, and expiring items |
+
+Draft creation is always private. Agents may attach structured `provenance` to a draft so evidence references survive capture; it remains owner-only and is excluded from draft cards, Stories, matches, notifications, and viewer payloads. Before activation or Story publication, an agent must preview the exact discoverable terms, human text, audience, and expiries and receive explicit user approval (`confirm: true`). Story responses also require an exact message-and-context preview before `confirm: true`. Human Stories default to 24 hours. Explicit quiet searches default to 30 days. A Story without a separately enabled quiet search limits its structured agent visibility to the Story audience and expiry. Match proposals remain anonymous and require both people to approve before OpenChat creates one DM with one context card; no opener is sent.
 
 ## How bi-directional access works
 

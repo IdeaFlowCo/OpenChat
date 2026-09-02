@@ -80,10 +80,11 @@ describe('agent-network routes', () => {
   it('rejects invalid kind, terms, details, and unsupported patches', async () => {
     const headers = { Authorization: bearer(), 'Content-Type': 'application/json' };
     for (const body of [
-      { kind: 'need', terms: 'help' },
-      { kind: 'ask', terms: '' },
-      { kind: 'offer', terms: 'x'.repeat(501) },
-      { kind: 'ask', terms: 'help', details: 'x'.repeat(2001) },
+      { kind: 'need', terms: 'help', confirm: true },
+      { kind: 'ask', terms: '', confirm: true },
+      { kind: 'offer', terms: 'x'.repeat(501), confirm: true },
+      { kind: 'ask', terms: 'help', details: 'x'.repeat(2001), confirm: true },
+      { kind: 'ask', terms: 'help', confirm: false },
     ]) {
       const response = await fetch(`${baseUrl}/api/intents`, {
         method: 'POST', headers, body: JSON.stringify(body),
@@ -117,13 +118,13 @@ describe('agent-network routes', () => {
     const response = await fetch(`${baseUrl}/api/intents`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind: 'ask', terms: 'React help' }),
+      body: JSON.stringify({ kind: 'ask', terms: 'React help', confirm: true }),
     });
     expect(response.status).toBe(201);
     expect(mocks.createIntent).toHaveBeenCalledWith(
       'agent-owner',
       { kind: 'ask', terms: 'React help' },
-      { io: undefined },
+      { confirmed: true, io: undefined },
     );
   });
 
@@ -135,6 +136,27 @@ describe('agent-network routes', () => {
       body: JSON.stringify({ status: 'withdrawn' }),
     });
     expect(response.status).toBe(404);
+  });
+
+  it('accepts additive canonical matching fields without changing legacy requirements', async () => {
+    mocks.createIntent.mockResolvedValue({ id: 'canonical', kind: 'ask', terms: 'Build a company' });
+    const body = {
+      kind: 'ask', terms: 'Build a company', confirm: true, goal: 'Start an accessibility company',
+      seeks: ['technical cofounder'], brings: ['sales'], matchingMode: 'reciprocal',
+      openToCollaborators: true, closeOnConnect: false,
+      audience: { userIds: ['friend'], conversationIds: ['group'] },
+    };
+    const response = await fetch(`${baseUrl}/api/intents`, {
+      method: 'POST', headers: { Authorization: bearer(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    expect(response.status).toBe(201);
+    expect(mocks.createIntent).toHaveBeenCalledWith('route-user', {
+      kind: 'ask', terms: 'Build a company', goal: 'Start an accessibility company',
+      seeks: ['technical cofounder'], brings: ['sales'], matchingMode: 'reciprocal',
+      openToCollaborators: true, closeOnConnect: false, audienceRestricted: true,
+      audienceUserIds: ['friend'], audienceConversationIds: ['group'],
+    }, { confirmed: true, io: undefined });
   });
 
   it('validates and returns approve, decline, and already-resolved projections', async () => {

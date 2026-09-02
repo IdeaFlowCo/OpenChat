@@ -22,6 +22,10 @@
  *   oc_withdraw_intent      — withdraw an ask or offer (write)
  *   oc_list_matches         — list privacy-safe quiet matches
  *   oc_respond_match        — approve or decline a quiet match (write)
+ *   oc_create_intent_draft  — privately capture an ask/offer/collaboration
+ *   oc_activate_intent_draft — explicitly activate a draft (write)
+ *   oc_publish_story        — explicitly publish a selected-audience Story (write)
+ *   oc_get_review_queue     — list bounded pending social decisions
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -56,10 +60,30 @@ export const TOOL_NAMES = [
   'oc_withdraw_intent',
   'oc_list_matches',
   'oc_respond_match',
+  'oc_create_intent_draft',
+  'oc_list_intent_drafts',
+  'oc_update_intent_draft',
+  'oc_activate_intent_draft',
+  'oc_list_stories',
+  'oc_list_story_feed',
+  'oc_publish_story',
+  'oc_update_story',
+  'oc_withdraw_story',
+  'oc_respond_story',
+  'oc_get_social_preferences',
+  'oc_update_social_preferences',
+  'oc_get_review_queue',
 ] as const;
 
 const INTENTS_UNSUPPORTED_MESSAGE =
   "This OpenChat server doesn't support intents yet. Upgrade the OpenChat server and try again.";
+
+const audienceSchema = z.object({
+  userIds: z.array(z.string().min(1)).max(100).default([]),
+  conversationIds: z.array(z.string().min(1)).max(100).default([]),
+}).refine((value) => value.userIds.length + value.conversationIds.length > 0, {
+  message: 'Select at least one user or conversation',
+});
 
 // ---- formatting helpers ----
 
@@ -599,12 +623,14 @@ export function buildServer(
           .datetime()
           .optional()
           .describe('Optional future date-time after which the intent leaves discovery'),
+        confirm: z.boolean().describe('Must be true only after the user explicitly approves these exact discoverable terms'),
       },
     },
-    async ({ kind, terms, details, expiresAt }) => {
+    async ({ kind, terms, details, expiresAt, confirm }) => {
       try {
         requireApiKey(api, 'Publishing intents');
-        return jsonResult(await api.publishIntent({ kind, terms, details, expiresAt }));
+        if (!confirm) return textResult('Not published. Show the exact discoverable terms and ask the user for explicit approval first.');
+        return jsonResult(await api.publishIntent({ kind, terms, details, expiresAt, confirm: true }));
       } catch (e) {
         return intentErrorResult(e);
       }
@@ -686,6 +712,317 @@ export function buildServer(
       try {
         requireApiKey(api, 'Responding to quiet matches');
         return jsonResult(await api.respondMatch(matchId, decision));
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  // ---- private capture and the agent-social layer ----
+  server.registerTool(
+    'oc_create_intent_draft',
+    {
+      title: 'Privately capture an ask, offer, or collaboration',
+      description:
+        'Save a private owner-only structured draft. This does not publish, notify people, enter matching, or appear in Stories.',
+      inputSchema: {
+        goal: z.string().max(500).optional(),
+        seeks: z.array(z.string().min(1).max(500)).max(20).optional(),
+        brings: z.array(z.string().min(1).max(500)).max(20).optional(),
+        matchingMode: z.enum(['fulfillment', 'reciprocal', 'shared_goal']).optional(),
+        openToCollaborators: z.boolean().optional(),
+        details: z.string().max(4000).optional().describe('Private owner-only context'),
+        source: z.string().max(1000).optional().describe('Private capture source/reference'),
+        provenance: z.record(z.string(), z.unknown()).optional().describe('Private owner-only structured evidence references'),
+        confidence: z.number().min(0).max(1).optional(),
+      },
+    },
+    async (input) => {
+      try {
+        requireApiKey(api, 'Creating a private intent draft');
+        return jsonResult(await api.createIntentDraft(input));
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    'oc_list_intent_drafts',
+    {
+      title: 'List private intent drafts',
+      description: 'List private drafts owned by the authenticated user, including private capture context and current state.',
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        requireApiKey(api, 'Listing private intent drafts');
+        return jsonResult(await api.listIntentDrafts());
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    'oc_update_intent_draft',
+    {
+      title: 'Edit or dismiss a private intent draft',
+      description: 'Edit a pending private draft or dismiss it. This cannot publish the draft.',
+      inputSchema: {
+        draftId: z.string().min(1),
+        goal: z.string().max(500).optional(),
+        seeks: z.array(z.string().min(1).max(500)).max(20).optional(),
+        brings: z.array(z.string().min(1).max(500)).max(20).optional(),
+        matchingMode: z.enum(['fulfillment', 'reciprocal', 'shared_goal']).optional(),
+        openToCollaborators: z.boolean().optional(),
+        details: z.string().max(4000).optional(),
+        source: z.string().max(1000).optional(),
+        provenance: z.record(z.string(), z.unknown()).optional().describe('Private owner-only structured evidence references'),
+        confidence: z.number().min(0).max(1).optional(),
+        state: z.literal('dismissed').optional(),
+      },
+    },
+    async ({ draftId, ...body }) => {
+      try {
+        requireApiKey(api, 'Updating a private intent draft');
+        return jsonResult(await api.updateIntentDraft(draftId, body));
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    'oc_activate_intent_draft',
+    {
+      title: 'Activate a private intent draft',
+      description:
+        'Explicitly activate a draft for quiet agent search and/or a selected-audience human Story. ' +
+        'Before calling, show the exact discoverable terms, Story text, selected audience, and both expiries; call only after the user approves them.',
+      inputSchema: {
+        draftId: z.string().min(1),
+        confirm: z.boolean().describe('Must be true only after the user explicitly approves this exact activation'),
+        quietSearch: z.object({
+          enabled: z.boolean(),
+          expiresAt: z.string().datetime().optional(),
+          audience: audienceSchema.optional(),
+        }).optional(),
+        story: z.object({
+          enabled: z.boolean(),
+          text: z.string().max(2000),
+          expiresAt: z.string().datetime().optional(),
+          audience: audienceSchema,
+        }).optional(),
+        closeOnConnect: z.boolean().optional(),
+      },
+    },
+    async ({ draftId, confirm, quietSearch, story, closeOnConnect }) => {
+      try {
+        requireApiKey(api, 'Activating an intent draft');
+        if (!confirm) {
+          return textResult('Not activated. Show the exact search terms, Story text, audience, and expiries, then ask the user for explicit approval.');
+        }
+        return jsonResult(await api.activateIntentDraft(draftId, {
+          ...(quietSearch ? { quietSearch } : {}),
+          ...(story ? { story } : {}),
+          ...(closeOnConnect === undefined ? {} : { closeOnConnect }),
+        }));
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    'oc_list_stories',
+    {
+      title: 'List your Stories and agent-only objects',
+      description: 'List Story records owned by the user, including selected audiences and separate Story/search expiries.',
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        requireApiKey(api, 'Listing owned Stories');
+        return jsonResult(await api.listOwnedStories());
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    'oc_list_story_feed',
+    {
+      title: 'List visible friends’ Stories',
+      description: 'Return only the privacy-redacted human Story feed currently visible to the authenticated user. Audience, membership, blocks, status, and expiry are enforced by OpenChat.',
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        requireApiKey(api, 'Reading the Story feed');
+        return jsonResult(await api.listStoryFeed());
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    'oc_publish_story',
+    {
+      title: 'Publish a selected-audience Story',
+      description:
+        'Publish a human-visible Story to explicitly selected users/conversations. Call only after showing and receiving approval for the exact text, audience, structured terms, and expiries.',
+      inputSchema: {
+        confirm: z.boolean(),
+        text: z.string().min(1).max(2000),
+        audience: audienceSchema,
+        goal: z.string().max(500).optional(),
+        seeks: z.array(z.string().min(1).max(500)).max(20).optional(),
+        brings: z.array(z.string().min(1).max(500)).max(20).optional(),
+        matchingMode: z.enum(['fulfillment', 'reciprocal', 'shared_goal']).optional(),
+        openToCollaborators: z.boolean().optional(),
+        storyExpiresAt: z.string().datetime().optional(),
+        quietSearch: z.object({
+          enabled: z.boolean(),
+          expiresAt: z.string().datetime().optional(),
+          audience: audienceSchema.optional(),
+        }).optional(),
+        closeOnConnect: z.boolean().optional(),
+      },
+    },
+    async ({ confirm, ...body }) => {
+      try {
+        requireApiKey(api, 'Publishing a Story');
+        if (!confirm) return textResult('Not published. Ask the user to approve the exact Story text, audience, and expiries first.');
+        return jsonResult(await api.createStory(body));
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    'oc_update_story',
+    {
+      title: 'Pause, resume, withdraw, or extend a Story',
+      description: 'Update an owned Story. A separately approved quiet search keeps its own independent state and expiry.',
+      inputSchema: {
+        storyId: z.string().min(1),
+        status: z.enum(['active', 'paused', 'withdrawn']).optional(),
+        storyExpiresAt: z.string().datetime().optional(),
+      },
+    },
+    async ({ storyId, status, storyExpiresAt }) => {
+      try {
+        requireApiKey(api, 'Updating a Story');
+        return jsonResult(await api.updateStory(storyId, {
+          ...(status ? { status } : {}),
+          ...(storyExpiresAt ? { storyExpiresAt } : {}),
+        }));
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    'oc_withdraw_story',
+    {
+      title: 'Withdraw a Story',
+      description: 'Withdraw an owned Story. A separately approved quiet search continues until its own expiry; an agent-only object is fully withdrawn.',
+      inputSchema: { storyId: z.string().min(1) },
+    },
+    async ({ storyId }) => {
+      try {
+        requireApiKey(api, 'Withdrawing a Story');
+        return jsonResult(await api.withdrawStory(storyId));
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    'oc_respond_story',
+    {
+      title: 'Respond to a friend’s Story',
+      description: 'Reply in a normal OpenChat DM. First call with confirm:false to preview the exact recipient Story context and message; call again with confirm:true only after explicit user approval. Server authorization is rechecked when sending.',
+      inputSchema: {
+        storyId: z.string().min(1),
+        message: z.string().min(1).max(2000),
+        confirm: z.boolean(),
+      },
+    },
+    async ({ storyId, message, confirm }) => {
+      try {
+        requireApiKey(api, 'Responding to a Story');
+        if (!confirm) {
+          const feed = await api.listStoryFeed();
+          const story = feed.stories.find((candidate) => candidate.id === storyId);
+          if (!story) return textResult('That Story is no longer visible, so no response was sent.');
+          return jsonResult({
+            needsConfirmation: true,
+            recipientStory: { id: story.id, author: story.author, text: story.text },
+            message,
+          });
+        }
+        return jsonResult(await api.respondStory(storyId, message));
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    'oc_get_social_preferences',
+    {
+      title: 'Get social-layer preferences',
+      description: 'Get enhanced/simple presentation mode and the independent agent-network pause state.',
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        requireApiKey(api, 'Reading social preferences');
+        return jsonResult(await api.getSocialPreferences());
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    'oc_update_social_preferences',
+    {
+      title: 'Update social-layer preferences',
+      description: 'Set enhanced/simple presentation and/or independently pause new agent matching. Simple mode never deletes or pauses data.',
+      inputSchema: {
+        experienceMode: z.enum(['enhanced', 'simple']).optional(),
+        networkPaused: z.boolean().optional(),
+      },
+    },
+    async (body) => {
+      try {
+        requireApiKey(api, 'Updating social preferences');
+        return jsonResult(await api.updateSocialPreferences(body));
+      } catch (e) {
+        return intentErrorResult(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    'oc_get_review_queue',
+    {
+      title: 'Get actionable social review queue',
+      description: 'Return at most 50 actionable private drafts, pending matches, and soon-expiring searches/Stories—not the raw inference backlog.',
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        requireApiKey(api, 'Reading the review queue');
+        return jsonResult(await api.getReviewQueue());
       } catch (e) {
         return intentErrorResult(e);
       }

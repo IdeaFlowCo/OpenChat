@@ -1,10 +1,10 @@
 # openchat-mobile
 
 React Native (Expo) OpenChat app. Connects to the same production backend at
-`https://chat.globalbr.ai` and also exports the RN-web builds served at `/m`
-and `/d`.
+`https://chat.globalbr.ai` and exports the canonical responsive RN-web app
+served at `/app`.
 
-## What works today (v0 scaffold)
+## What works today
 
 - Sign in with Noos email/password (Alice / Bob / your account)
 - Conversation list (live-sorted by latest message)
@@ -18,6 +18,12 @@ and `/d`.
 - iPad landscape support (`orientation: 'default'`)
 - Web keyboard shortcuts, including Up/Down conversation navigation in the
   wide master-detail layout
+- Private conversational capture in My Agent, with explicit activation for
+  quiet matching or selected-audience, expiring Stories
+- Fulfillment, reciprocal, and shared-goal matching with anonymous proposals
+  and double opt-in before a DM is created
+- Actionable review queue plus reversible Enhanced / Simple chat modes and an
+  independent network pause
 
 ## What's stubbed / TODO
 
@@ -57,43 +63,50 @@ Defaults are the production URLs above.
 
 ### Web and desktop exports
 
-The RN-web app is the source for both production web mounts:
+The RN-web app is the single production web client:
 
 ```bash
 cd apps/mobile
-npm run export:web:mobile   # dist-web-m, assets under /m/
-npm run export:web:desktop  # dist-web-d, assets under /d/
-npm run export:web:app      # dist-web-app, root-relative assets for desktop shells
+npm run export:web:app      # dist-web-app, assets under /app/
 ```
 
 The layout switches at runtime by width (`src/theme/breakpoints.ts`): at
 900px and wider it renders the persistent sidebar + conversation pane; below
 that it uses the phone stack. On native, the split view also requires a
 tablet-sized short side so landscape phones stay in the mobile layout. The
-Tauri desktop wrapper in `../desktop` consumes `dist-web-app`. Reference
-screenshots for the wide split view and narrow phone layout live in
-`docs/screenshots/`.
+Tauri desktop wrapper in `../desktop` consumes the separate `dist-web-shell`
+export. Reference screenshots for the wide split view and narrow phone layout
+live in `docs/screenshots/`.
 
 ## Architecture
 
 ```
 App.tsx                      # screen router (loading → login → conversations → chat)
 src/api/
-  client.ts                  # REST: getConversations, getMessages, sendMessage, login
+  client.ts                  # REST: auth, chat, drafts, Stories, matches, preferences
   socket.ts                  # Socket.io: connect, join, send, message:new listener
 src/components/
   MasterDetailLayout.tsx     # wide iPad / desktop sidebar + chat pane
+  StoriesStrip.tsx           # selected-audience Story rail
+src/contexts/
+  SocialExperienceContext.tsx # enhanced/simple, network, and layout preferences
 src/screens/
   LoginScreen.tsx
   HomeScreen.tsx             # responsive home: master-detail or conversations list
   ConversationsScreen.tsx
   ChatScreenRouter.tsx       # redirects desktop-width chat routes into the right pane
   ChatScreen.tsx
+  AgentOverlayScreen.tsx     # private My Agent capture and activation
+  AsksScreen.tsx             # drafts, searches, Stories, and matches inventory
+  SocialReviewScreen.tsx     # bounded actionable review queue
+  StoryComposerScreen.tsx
+  StoryViewerScreen.tsx
 src/theme/breakpoints.ts     # 900px desktop switch + native tablet guard
-src/theme/colors.ts          # palette tokens (light + dark, parity with web)
+src/theme/colors.ts          # shared light/dark palette tokens
 ```
 
-The auth + chat protocol is identical to the web client — same JWT, same routes, same socket events. Re-uses the same backend deployment.
+Native and RN-web builds use the same JWT, routes, socket events, and backend
+deployment.
 
 ## Codex / Claude review notes
 

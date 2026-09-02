@@ -435,6 +435,65 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
         WITH sa ORDER BY sa.createdAt ASC
         RETURN collect(sa { .id, .question, .answer, .createdAt, .updatedAt }) AS secretaryAnswers
       }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:OWNS_INTENT_DRAFT]->(draft:AgentIntentDraft)
+        WITH draft ORDER BY draft.createdAt ASC
+        RETURN collect(draft {
+          .id, .ownerUserId, .goal, .seeks, .brings, .matchingMode,
+          .openToCollaborators, .details, .source, .provenanceJson, .confidence,
+          .state, .activatedIntentId, .activatedStoryId, .createdAt, .updatedAt
+        }) AS intentDrafts
+      }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:OWNS_STORY]->(story:OpenChatStory)
+        WITH story ORDER BY story.createdAt ASC
+        RETURN collect(story { .* }) AS stories
+      }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:OWNS_INTENT]->(intent:AgentIntent)
+        WITH intent ORDER BY intent.createdAt ASC
+        RETURN collect(intent { .* }) AS intents
+      }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:HAS_SOCIAL_PREFERENCE]->(pref:OpenChatSocialPreference)
+        RETURN head(collect(pref {
+          .experienceMode, .networkPaused, .createdAt, .updatedAt
+        })) AS socialPreferences
+      }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:OWNS_INTENT]->(own:AgentIntent)<-[:MATCHES]-(match:AgentMatch)-[:MATCHES]->(other:AgentIntent)
+        WHERE own <> other
+        WITH DISTINCT match, own, other,
+             CASE WHEN own.id < other.id THEN match.aResponse ELSE match.bResponse END AS ownResponse
+        WITH match, own, other, ownResponse,
+             CASE
+               WHEN match.status = 'connected' THEN 'connected'
+               WHEN match.status = 'closed' THEN 'closed'
+               WHEN ownResponse = 'approved' THEN 'awaiting_other'
+               ELSE 'pending'
+             END AS viewerStatus
+        RETURN collect(CASE WHEN match IS NULL THEN null ELSE {
+          id: match.id,
+          status: viewerStatus,
+          ownIntent: own { .id, .kind, .terms, .goal, .seeks, .brings, .matchingMode },
+          otherKind: other.kind,
+          otherTerms: other.terms,
+          otherGoal: other.goal,
+          otherSeeks: other.seeks,
+          otherBrings: other.brings,
+          otherMatchingMode: other.matchingMode,
+          matchType: match.matchType,
+          score: match.score,
+          createdAt: match.createdAt,
+          updatedAt: match.updatedAt,
+          conversationId: CASE WHEN match.status = 'connected' THEN match.conversationId ELSE null END
+        } END) AS agentMatches
+      }
       RETURN u {
         .id,
         .email,
@@ -452,7 +511,12 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
       thoughts,
       blockedUsers,
       agentKeys,
-      secretaryAnswers
+      secretaryAnswers,
+      intentDrafts,
+      stories,
+      intents,
+      socialPreferences,
+      agentMatches
     `, { userId, since });
 
     if (result.records.length === 0) {
@@ -468,6 +532,16 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
           try { msg.attachments = JSON.parse(msg.attachments); } catch { /* leave raw */ }
         }
         return msg;
+      });
+    const intentDrafts = ((toJS(record.get('intentDrafts')) as Record<string, unknown>[] | undefined) ?? [])
+      .filter(Boolean)
+      .map((draft) => {
+        const { provenanceJson, ...publicDraft } = draft;
+        let provenance: unknown = null;
+        if (typeof provenanceJson === 'string') {
+          try { provenance = JSON.parse(provenanceJson); } catch { provenance = null; }
+        }
+        return { ...publicDraft, provenance };
       });
 
     const exportedAt = new Date().toISOString();
@@ -486,6 +560,16 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
         enabled: (toJS(record.get('user')) as Record<string, unknown>)?.secretaryEnabled === true,
         answers: ((toJS(record.get('secretaryAnswers')) as unknown[] | undefined) ?? []).filter(Boolean),
       },
+      intentDrafts,
+      stories: ((toJS(record.get('stories')) as unknown[] | undefined) ?? []).filter(Boolean),
+      intents: ((toJS(record.get('intents')) as unknown[] | undefined) ?? []).filter(Boolean),
+      socialPreferences: (toJS(record.get('socialPreferences')) as Record<string, unknown> | null) ?? {
+        experienceMode: 'enhanced',
+        networkPaused: false,
+        createdAt: null,
+        updatedAt: null,
+      },
+      agentMatches: ((toJS(record.get('agentMatches')) as unknown[] | undefined) ?? []).filter(Boolean),
     });
   } catch (error) {
     console.error('Error exporting account:', error);
@@ -1012,6 +1096,46 @@ router.delete('/me', requireAuth, async (req: Request, res: Response) => {
       await tx.run(`
         MATCH (u:User {id: $userId})-[:OWNS_SECRETARY_ANSWER]->(entry:SecretaryAnswer)
         DETACH DELETE entry
+      `, { userId });
+
+      // 2d. Remove every quiet match involving one of this user's intents,
+      // plus its idempotent proposal/status/context cards. The other user's
+      // intent remains intact; only the shared match object becomes invalid.
+      const matchResult = await tx.run(`
+        MATCH (u:User {id: $userId})-[:OWNS_INTENT]->(intent:AgentIntent)<-[:MATCHES]-(match:AgentMatch)
+        RETURN collect(DISTINCT match.id) AS matchIds
+      `, { userId });
+      const matchIds = (matchResult.records[0]?.get('matchIds') as string[] | undefined) ?? [];
+      if (matchIds.length > 0) {
+        await tx.run(`
+          MATCH (message:Message)
+          WHERE message.matchContextKey IN $matchIds
+             OR any(matchId IN $matchIds WHERE message.agentDeliveryKey CONTAINS ('"' + matchId + '"'))
+          DETACH DELETE message
+        `, { matchIds });
+        await tx.run(`
+          MATCH (match:AgentMatch) WHERE match.id IN $matchIds
+          DETACH DELETE match
+        `, { matchIds });
+      }
+
+      // 2e. Delete all account-owned social-layer records. Stories are
+      // removed before intents so their ACTIVATES edges cannot dangle.
+      await tx.run(`
+        MATCH (u:User {id: $userId})-[:OWNS_INTENT_DRAFT]->(draft:AgentIntentDraft)
+        DETACH DELETE draft
+      `, { userId });
+      await tx.run(`
+        MATCH (u:User {id: $userId})-[:OWNS_STORY]->(story:OpenChatStory)
+        DETACH DELETE story
+      `, { userId });
+      await tx.run(`
+        MATCH (u:User {id: $userId})-[:OWNS_INTENT]->(intent:AgentIntent)
+        DETACH DELETE intent
+      `, { userId });
+      await tx.run(`
+        MATCH (u:User {id: $userId})-[:HAS_SOCIAL_PREFERENCE]->(pref:OpenChatSocialPreference)
+        DETACH DELETE pref
       `, { userId });
 
       // 3. Delete the User node (and all its relationships).
