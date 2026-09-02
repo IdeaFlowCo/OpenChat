@@ -78,6 +78,12 @@ interface ChatContextValue {
   hasMoreMessages: boolean;
   loadingOlderMessages: boolean;
   sendMessage: (content: string, replyToId?: string, attachments?: Attachment[]) => Promise<void>;
+  sendMessageToConversation: (
+    conversationId: string,
+    content: string,
+    replyToId?: string,
+    attachments?: Attachment[]
+  ) => Promise<void>;
 
   // Edit / delete messages (OpenChat-q9h)
   editMessage: (messageId: string, content: string) => Promise<void>;
@@ -687,8 +693,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // server canonical on success. Accepts optional replyToId for threaded replies
   // (OpenChat-uxj). Server support is a follow-up; the field is passed through
   // in the socket payload so it round-trips once the server handles it.
-  const sendMessage = useCallback(async (content: string, replyToId?: string, attachments?: Attachment[]) => {
-    const id = activeConvIdRef.current;
+  // Target-aware core used by the global voice recorder (build-90 pieces 1+2).
+  // The public sendMessage wrapper below preserves the existing active-chat
+  // API, while a recording can still return to the conversation where it began.
+  const sendMessageToConversation = useCallback(async (
+    id: string,
+    content: string,
+    replyToId?: string,
+    attachments?: Attachment[]
+  ) => {
     const hasText = !!content.trim();
     const hasAttachments = !!attachments?.length;
     if (!id || (!hasText && !hasAttachments)) return;
@@ -708,19 +721,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       replyToId,
       attachments,
     };
-    setMessages(prev => [...prev, optimistic]);
+    const updateActiveMessages = (updater: (prev: Message[]) => Message[]) => {
+      if (activeConvIdRef.current === id) setMessages(updater);
+    };
+    updateActiveMessages(prev => [...prev, optimistic]);
 
     // If there are attachments, always use REST (socket path doesn't carry them).
     if (hasAttachments) {
       try {
         const real = await api.sendMessage(id, content, attachments, clientId);
-        setMessages(prev => {
+        updateActiveMessages(prev => {
           const filtered = prev.filter(m => m.id !== optimistic.id);
           return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
         });
       } catch (e2) {
         console.warn('[ChatContext] attachment message send failed:', e2);
-        setMessages(prev => prev.map(m => m.id === optimistic.id ? { ...m, _failed: true } as Message & { _failed?: boolean } : m));
+        updateActiveMessages(prev => prev.map(m => m.id === optimistic.id ? { ...m, _failed: true } as Message & { _failed?: boolean } : m));
         throw e2;
       }
       return;
@@ -730,7 +746,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     try {
       const real = await wsSend(id, content, replyToId, clientId);
       // Replace the optimistic placeholder with the server message.
-      setMessages(prev => {
+      updateActiveMessages(prev => {
         const filtered = prev.filter(m => m.id !== optimistic.id);
         return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
       });
@@ -738,7 +754,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       // Socket path failed (incl. the new 10s ack timeout) — try REST fallback.
       try {
         const real = await api.sendMessage(id, content, undefined, clientId);
-        setMessages(prev => {
+        updateActiveMessages(prev => {
           const filtered = prev.filter(m => m.id !== optimistic.id);
           return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
         });
@@ -746,11 +762,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         // Mark optimistic as failed (caller will see it didn't disappear).
         console.warn('[ChatContext] message send failed:', e2);
         // Tag the optimistic message; UI can render a retry affordance.
-        setMessages(prev => prev.map(m => m.id === optimistic.id ? { ...m, _failed: true } as Message & { _failed?: boolean } : m));
+        updateActiveMessages(prev => prev.map(m => m.id === optimistic.id ? { ...m, _failed: true } as Message & { _failed?: boolean } : m));
         throw e2;
       }
     }
   }, [currentUser]);
+
+  const sendMessage = useCallback(async (
+    content: string,
+    replyToId?: string,
+    attachments?: Attachment[]
+  ) => {
+    const id = activeConvIdRef.current;
+    if (!id) return;
+    await sendMessageToConversation(id, content, replyToId, attachments);
+  }, [sendMessageToConversation]);
 
   const createConversation = useCallback(async (
     participantIds: string[],
@@ -986,7 +1012,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, setActiveConversation, messages, loadingMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
-    sendMessage,
+    sendMessage, sendMessageToConversation,
     editMessage, deleteMessage,
     toggleReaction,
     blockUser,
@@ -1003,7 +1029,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, setActiveConversation, messages, loadingMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
-    sendMessage,
+    sendMessage, sendMessageToConversation,
     editMessage, deleteMessage,
     toggleReaction,
     blockUser,

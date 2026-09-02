@@ -78,7 +78,9 @@ module.exports = {
       },
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
-        UIBackgroundModes: ['remote-notification'],
+        // Background voice capture ships with native build 90; keep the
+        // existing remote notification entitlement (build-90 pieces 1+2).
+        UIBackgroundModes: ['audio', 'remote-notification'],
         NSCameraUsageDescription:
           'OpenChat uses the camera to scan QR codes for adding contacts and joining group chats.',
         NSPhotoLibraryUsageDescription:
