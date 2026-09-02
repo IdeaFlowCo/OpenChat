@@ -3,9 +3,9 @@
 //   in /packages/* and root-hoisted deps are picked up.
 // - nodeModulesPaths lets Metro resolve packages from both the app's local
 //   node_modules and the root-hoisted node_modules.
-// - disableHierarchicalLookup prevents Metro from walking parent directories
-//   beyond the explicit paths above (avoids duplicate-package surprises with
-//   npm-hoisted deps).
+// - Hierarchical lookup remains enabled so packages can resolve dependencies
+//   that npm nests beneath them when the root workspace has a conflicting
+//   version (for example, @react-navigation/core's nanoid dependency).
 const path = require('path');
 const { getDefaultConfig } = require('expo/metro-config');
 
@@ -19,6 +19,6 @@ config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),
 ];
-config.resolver.disableHierarchicalLookup = true;
+config.resolver.disableHierarchicalLookup = false;
 
 module.exports = config;

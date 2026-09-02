@@ -58,8 +58,8 @@ import { logError } from '../services/clientLogger';
 import { serif } from '../theme/typography';
 import {
   getDirectConversationParticipant,
+  getDirectConversationTitle,
   isSelfDirectConversation,
-  SELF_CONVERSATION_TITLE,
 } from '../utils/conversationDisplay';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
