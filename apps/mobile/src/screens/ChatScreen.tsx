@@ -1069,35 +1069,16 @@ export function ChatScreen({
   }, []);
 
   const handleEdit = useCallback((message: Message) => {
-    // Editing while a voice recording is live used to crash / wedge the
-    // recorder. Don't silently lose the recording either (Jacob 2026-09-02) —
-    // ask what to do with it first.
+    // Recording is lightly modal, like every messenger: while a voice note is
+    // live, Edit just nudges instead of interrupting (no dialogs, no silent
+    // discard — the recording keeps going). See 2026-09-02 discussion; the
+    // cross-app "global recording" model is ticketed for the next native build.
     if (recordingRef.current) {
-      Alert.alert(
-        'Voice note in progress',
-        'What should happen to the recording?',
-        [
-          {
-            text: 'Send it, then edit',
-            onPress: () => {
-              void finishRecordingRef.current(false).then(() => beginEdit(message));
-            },
-          },
-          {
-            text: 'Discard it',
-            style: 'destructive',
-            onPress: () => {
-              void finishRecordingRef.current(true);
-              beginEdit(message);
-            },
-          },
-          { text: 'Keep recording', style: 'cancel' },
-        ]
-      );
+      showToast('Voice note in progress — send or cancel it first');
       return;
     }
     beginEdit(message);
-  }, [beginEdit]);
+  }, [beginEdit, showToast]);
 
   // Delete: soft-delete via context (OpenChat-q9h).
   const handleDelete = useCallback(async (messageId: string) => {
