@@ -1,5 +1,14 @@
 # Design note: collapse `/m` and `/d` onto one responsive RN-web source
 
+## Resolution — 2026-09-02
+
+Option 1 is now the product contract: build one Expo/RN-web bundle with
+`baseUrl=/app`, serve it at `/app`, and redirect `/m`, `/d`, and `/legacy` to
+the corresponding `/app` URL while preserving suffixes and query strings.
+The legacy source remains frozen in the repository but is no longer built or
+served. Layout is a local responsive preference (`auto`, `compact`, or `split`),
+not a URL-selected product variant.
+
 Ticket: **openchat-3jq.4** (depends-on the now-complete monorepo migration
 openchat-3jq.5). Tracking epic: **openchat-3jq**.
 

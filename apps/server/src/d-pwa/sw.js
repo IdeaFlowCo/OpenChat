@@ -1,5 +1,5 @@
 /**
- * OpenChat /d/ service worker (OpenChat-3rw).
+ * OpenChat /app/ service worker (OpenChat-3rw).
  *
  * Minimal PWA-qualifying service worker. Network-first; caches only the
  * app shell so we never stale-serve chat messages. The fetch handler is
@@ -14,9 +14,9 @@
  */
 
 // Bump this when the app shell changes meaningfully — forces re-cache.
-const CACHE_VERSION = 'v1';
-const CACHE_NAME = `openchat-d-shell-${CACHE_VERSION}`;
-const APP_SHELL = ['/d/', '/d/index.html', '/d/favicon.ico'];
+const CACHE_VERSION = 'v2';
+const CACHE_NAME = `openchat-app-shell-${CACHE_VERSION}`;
+const APP_SHELL = ['/app/', '/app/index.html', '/app/favicon.ico'];
 
 self.addEventListener('install', (event) => {
   // Activate the new SW the moment it finishes installing — don't wait
@@ -34,7 +34,10 @@ self.addEventListener('activate', (event) => {
     Promise.all([
       self.clients.claim(),
       caches.keys().then((keys) =>
-        Promise.all(keys.filter((k) => k.startsWith('openchat-d-shell-') && k !== CACHE_NAME).map((k) => caches.delete(k)))
+        Promise.all(keys.filter((k) => (
+          (k.startsWith('openchat-app-shell-') || k.startsWith('openchat-d-shell-'))
+          && k !== CACHE_NAME
+        )).map((k) => caches.delete(k)))
       ),
     ])
   );
@@ -62,7 +65,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(req)
       .then((res) => {
-        if (res.ok && url.pathname.startsWith('/d/')) {
+        if (res.ok && url.pathname.startsWith('/app/')) {
           const clone = res.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
         }
@@ -70,7 +73,7 @@ self.addEventListener('fetch', (event) => {
       })
       .catch(() =>
         caches.match(req).then((cached) =>
-          cached || caches.match('/d/index.html').then((fallback) =>
+          cached || caches.match('/app/index.html').then((fallback) =>
             fallback || new Response('Offline', { status: 503, statusText: 'Offline' })
           )
         )

@@ -255,7 +255,19 @@ router.post('/intent-drafts/:id/activate', resolveActor, async (req: Request, re
 });
 
 router.get('/stories/feed', resolveActor, async (req: Request, res: Response) => {
-  try { res.json({ stories: await listStoryFeed(req.user!.userId) }); }
+  try {
+    const stories = await listStoryFeed(req.user!.userId);
+    // Personal agents receive the structured matching projection. Human JWT
+    // clients receive only the exact Story text they were approved to see;
+    // matching terms never leak through browser devtools or the UI.
+    res.json({
+      stories: req.agentKeyId
+        ? stories
+        : stories.map(({ id, author, text, storyExpiresAt, createdAt }) => ({
+            id, author, text, storyExpiresAt, createdAt,
+          })),
+    });
+  }
   catch (error) { handleError(res, 'Failed to list Story feed', error); }
 });
 

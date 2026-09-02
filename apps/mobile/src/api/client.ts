@@ -200,7 +200,77 @@ export interface AgentMatch {
   updatedAt: string;
   conversationId?: string;
   alreadyResolved?: boolean;
+  matchType?: 'complementary' | 'reciprocal' | 'shared_goal' | null;
+  score?: number | null;
 }
+
+export type MatchingMode = 'fulfillment' | 'reciprocal' | 'shared_goal';
+export type ExperienceMode = 'enhanced' | 'simple';
+
+export interface StoryAudience {
+  userIds: string[];
+  conversationIds: string[];
+}
+
+export interface IntentDraft {
+  id: string;
+  ownerUserId: string;
+  goal: string | null;
+  seeks: string[];
+  brings: string[];
+  matchingMode: MatchingMode;
+  openToCollaborators: boolean;
+  details: string | null;
+  source: string;
+  provenance: Record<string, unknown> | null;
+  confidence: number | null;
+  state: 'pending' | 'dismissed' | 'activated';
+  activatedIntentId?: string | null;
+  activatedStoryId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OwnedStory {
+  id: string;
+  ownerUserId: string;
+  goal: string | null;
+  seeks: string[];
+  brings: string[];
+  matchingMode: MatchingMode;
+  openToCollaborators: boolean;
+  text: string | null;
+  humanVisible: boolean;
+  agentSearchEnabled: boolean;
+  /** True only when a separate, independently expiring quiet search was approved. */
+  explicitQuietSearch: boolean;
+  status: 'active' | 'paused' | 'withdrawn' | 'expired';
+  audience: StoryAudience;
+  storyExpiresAt: string | null;
+  searchExpiresAt: string | null;
+  intentId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FeedStory {
+  id: string;
+  author: { id: string; name: string | null };
+  text: string;
+  storyExpiresAt: string;
+  createdAt: string;
+}
+
+export interface SocialPreferences {
+  experienceMode: ExperienceMode;
+  networkPaused: boolean;
+  updatedAt: string | null;
+}
+
+export type SocialReviewItem =
+  | { id: string; kind: 'draft'; priority: 'action' | 'soon'; title: string; draft: Pick<IntentDraft, 'id' | 'goal' | 'seeks' | 'brings' | 'confidence' | 'createdAt'> }
+  | { id: string; kind: 'match'; priority: 'action' | 'soon'; title: string; match: AgentMatch }
+  | { id: string; kind: 'expiring_story'; priority: 'action' | 'soon'; title: string; storyId: string; dueAt?: string };
 
 export interface SecretaryAnswer {
   id: string;
@@ -717,6 +787,74 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ decision }),
     })).match,
+  createIntentDraft: (params: {
+    goal?: string;
+    seeks?: string[];
+    brings?: string[];
+    matchingMode?: MatchingMode;
+    openToCollaborators?: boolean;
+    details?: string;
+    source?: string;
+    provenance?: Record<string, unknown>;
+    confidence?: number;
+  }) => request<{ draft: IntentDraft }>('/api/intent-drafts', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  }),
+  listIntentDrafts: async () =>
+    (await request<{ drafts: IntentDraft[] }>('/api/intent-drafts')).drafts,
+  updateIntentDraft: (id: string, params: Partial<Pick<IntentDraft,
+    'goal' | 'seeks' | 'brings' | 'matchingMode' | 'openToCollaborators' | 'details'
+  >> & { state?: 'dismissed' }) => request<{ draft: IntentDraft }>(
+    `/api/intent-drafts/${encodeURIComponent(id)}`,
+    { method: 'PATCH', body: JSON.stringify(params) },
+  ),
+  activateIntentDraft: (id: string, params: {
+    quietSearch?: { enabled: boolean; expiresAt?: string; audience?: StoryAudience };
+    story?: { enabled: boolean; text: string; expiresAt?: string; audience: StoryAudience };
+    closeOnConnect?: boolean;
+  }) => request<{ draft: IntentDraft; story?: OwnedStory | null; intent?: AgentIntent | null }>(
+    `/api/intent-drafts/${encodeURIComponent(id)}/activate`,
+    { method: 'POST', body: JSON.stringify(params) },
+  ),
+  listStoryFeed: async () =>
+    (await request<{ stories: FeedStory[] }>('/api/stories/feed')).stories,
+  listMyStories: async () =>
+    (await request<{ stories: OwnedStory[] }>('/api/stories/mine')).stories,
+  createStory: (params: {
+    goal?: string;
+    seeks?: string[];
+    brings?: string[];
+    matchingMode?: MatchingMode;
+    openToCollaborators?: boolean;
+    text: string;
+    audience: StoryAudience;
+    storyExpiresAt?: string;
+    quietSearch?: { enabled: boolean; expiresAt?: string; audience?: StoryAudience };
+    closeOnConnect?: boolean;
+  }) => request<{ story: OwnedStory; intent?: AgentIntent | null }>('/api/stories', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  }),
+  updateStory: (id: string, params: { status?: 'active' | 'paused' | 'withdrawn'; storyExpiresAt?: string }) =>
+    request<{ story: OwnedStory }>(`/api/stories/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(params),
+    }),
+  respondToStory: (id: string, message: string) =>
+    request<{ conversationId: string; message: Message }>(`/api/stories/${encodeURIComponent(id)}/respond`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
+  getSocialPreferences: () => request<SocialPreferences>('/api/social/preferences'),
+  updateSocialPreferences: (params: Partial<Pick<SocialPreferences, 'experienceMode' | 'networkPaused'>>) =>
+    request<SocialPreferences>('/api/social/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(params),
+    }),
+  getSocialReview: (cursor?: string) => request<{ items: SocialReviewItem[]; hasMore: boolean }>(
+    `/api/review${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+  ),
   /** Idempotently create or return the caller's private My Agent conversation. */
   ensureAssistant: () =>
     request<Conversation>('/api/assistant/ensure', { method: 'POST' }),

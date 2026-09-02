@@ -9,22 +9,21 @@ This is a **wrapper only**. There is no separate desktop UI codebase; all
 product code lives in `apps/mobile/src`. API + socket usage is identical to the
 mobile/browser build (it talks to the same `chat.globalbr.ai` backend).
 
-> Do not confuse this with `apps/web` (the standalone Vite client). This wrapper
-> bundles the RNW export, `apps/web` stays the default web app in parallel.
+> Do not confuse this with `apps/web` (the frozen legacy Vite source). This
+> wrapper bundles the same RNW product client served in browsers.
 
 ## The shippable deliverable
 
 The **primary deliverable is the responsive RNW web build itself** — it runs in
-any browser and is what `chat.globalbr.ai` serves at `/d` (desktop) and `/m`
-(mobile). Build it with:
+any browser and is what `chat.globalbr.ai` serves at `/app`. Build it with:
 
 ```bash
 cd apps/mobile
-npm run export:web:desktop   # -> dist-web-d  (assets under /d/, for chat.globalbr.ai/d)
-npm run export:web:app       # -> dist-web-app (root-relative assets, for a bundled shell)
+npm run export:web:app       # -> dist-web-app (browser assets under /app/)
+npm run export:web:shell     # -> dist-web-shell (relative/root shell assets)
 ```
 
-Open `dist-web-app/index.html` through any static server to see the desktop
+Open `dist-web-shell/index.html` through any static server to see the desktop
 split-view. Resize the window across ~900px to watch it collapse to the phone
 layout and back.
 
@@ -57,7 +56,7 @@ The root `npm run build` intentionally filters out `openchat-desktop`; this
 wrapper needs the Rust/Tauri toolchain and should be built explicitly from
 `apps/desktop`.
 
-`tauri.conf.json`'s `frontendDist` points at `../../mobile/dist-web-app`, and
+`tauri.conf.json`'s `frontendDist` points at `../../mobile/dist-web-shell`, and
 `beforeBuildCommand` re-runs the web export so `npm run build:tauri` is one step.
 For local development, `beforeDevCommand` starts the mobile web server that
 `devUrl` loads.

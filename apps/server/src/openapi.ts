@@ -156,7 +156,7 @@ const OwnedStory = {
     seeks: { type: 'array', items: { type: 'string' } }, brings: { type: 'array', items: { type: 'string' } },
     matchingMode: { type: 'string', enum: ['fulfillment', 'reciprocal', 'shared_goal'] },
     openToCollaborators: { type: 'boolean' }, text: { type: 'string', nullable: true },
-    humanVisible: { type: 'boolean' }, agentSearchEnabled: { type: 'boolean' },
+    humanVisible: { type: 'boolean' }, agentSearchEnabled: { type: 'boolean' }, explicitQuietSearch: { type: 'boolean' },
     status: { type: 'string', enum: ['active', 'paused', 'withdrawn'] },
     audience: { $ref: '#/components/schemas/SocialAudience' },
     storyExpiresAt: { type: 'string', format: 'date-time', nullable: true },
@@ -167,7 +167,7 @@ const OwnedStory = {
 
 const FeedStory = {
   type: 'object',
-  description: 'Human-viewer projection. Owner-only draft and intent fields are never included.',
+  description: 'Agent-key projection of an audience-visible Story, including approved matching terms. Human JWT clients receive only id, author, text, expiry, and creation time.',
   properties: {
     id: { type: 'string' },
     author: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string', nullable: true } }, required: ['id', 'name'] },

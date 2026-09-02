@@ -2,18 +2,11 @@
  * app.config.js (OpenChat-601) — env-driven Expo config.
  *
  * Replaces the previous static app.json so the web-target baseUrl can be
- * switched between /m (mobile-web build at /m/*), /d (desktop-responsive
- * build at /d/*), and the root-relative dist-web-app export consumed by the
- * desktop shell. All exports come from this monorepo's `apps/mobile` source —
- * no more desktop-responsive branch to sync.
+ * switched between the canonical responsive web app at /app and compatibility
+ * exports used by older tooling. All exports come from this monorepo's
+ * `apps/mobile` source — there is no separate desktop application UI to sync.
  *
- *   IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/m npx expo export --platform web \
- *     --output-dir dist-web-m --clear
- *
- *   IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/d npx expo export --platform web \
- *     --output-dir dist-web-d --clear
- *
- *   IS_WEB_BUILD=1 npx expo export --platform web \
+ *   IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/app npx expo export --platform web \
  *     --output-dir dist-web-app --clear
  *
  * CRITICAL — DO NOT set OPENCHAT_BASE_URL during native (EAS) builds.

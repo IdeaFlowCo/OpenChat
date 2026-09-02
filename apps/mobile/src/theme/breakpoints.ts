@@ -18,6 +18,7 @@
  * second-opinion reviews on 2026-06-01.
  */
 import { Platform, useWindowDimensions } from 'react-native';
+import { useSocialExperience } from '../contexts/SocialExperienceContext';
 
 export const BREAKPOINT_DESKTOP = 900;
 // Separates tablets from landscape phones before enabling native split view.
@@ -25,8 +26,11 @@ export const BREAKPOINT_TABLET_MIN_SHORT_SIDE = 600;
 
 export function useIsDesktop(): boolean {
   const { width, height } = useWindowDimensions();
+  const { layoutPreference } = useSocialExperience();
 
   if (Platform.OS === 'web') {
+    if (layoutPreference === 'compact') return false;
+    if (layoutPreference === 'split') return width >= 720;
     return width >= BREAKPOINT_DESKTOP;
   }
 

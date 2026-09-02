@@ -70,6 +70,7 @@ export interface OwnedStory {
   text: string | null;
   humanVisible: boolean;
   agentSearchEnabled: boolean;
+  explicitQuietSearch: boolean;
   status: StoryStatus;
   audience: Audience;
   storyExpiresAt: string | null;
@@ -100,7 +101,7 @@ export interface SocialPreferences {
 
 export interface ReviewItem {
   id: string;
-  kind: 'draft' | 'match' | 'expiring_search' | 'expiring_story';
+  kind: 'draft' | 'match' | 'expiring_story';
   priority: 'action' | 'soon';
   title: string;
   dueAt?: string;
@@ -237,6 +238,7 @@ function ownedStoryFromRecord(value: unknown): OwnedStory {
     text: story.text as string | null ?? null,
     humanVisible: story.humanVisible === true,
     agentSearchEnabled: story.agentSearchEnabled === true,
+    explicitQuietSearch: story.explicitQuietSearch === true,
     status: story.status as StoryStatus,
     audience: {
       userIds: story.audienceUserIds as string[] ?? [],
@@ -975,14 +977,12 @@ export async function getReviewQueue(userId: string): Promise<{ items: ReviewIte
       );
     const expiryResult = await session.run(
         `MATCH (:User {id: $userId})-[:OWNS_STORY]->(story:OpenChatStory {status: 'active'})
-         WHERE (story.searchExpiresAt > datetime($now) AND story.searchExpiresAt <= datetime($soon))
-            OR (story.humanVisible = true AND story.storyExpiresAt > datetime($now) AND story.storyExpiresAt <= datetime($soon))
+         WHERE story.humanVisible = true
+           AND story.storyExpiresAt > datetime($now)
+           AND story.storyExpiresAt <= datetime($soon)
          RETURN story.id AS storyId, story.goal AS goal,
-                story.searchExpiresAt AS searchExpiresAt,
-                story.storyExpiresAt AS storyExpiresAt,
-                story.humanVisible AS humanVisible,
-                story.explicitQuietSearch AS explicitQuietSearch
-         ORDER BY coalesce(story.storyExpiresAt, story.searchExpiresAt) ASC LIMIT 26`,
+                story.storyExpiresAt AS storyExpiresAt
+         ORDER BY story.storyExpiresAt ASC LIMIT 26`,
         {
           userId,
           now: new Date().toISOString(),
@@ -1014,30 +1014,16 @@ export async function getReviewQueue(userId: string): Promise<{ items: ReviewIte
     for (const record of expiryResult.records) {
       const storyId = record.get('storyId') as string;
       const goal = record.get('goal') as string | null;
-      const searchExpiry = String(toJS(record.get('searchExpiresAt')));
-      const humanVisible = record.get('humanVisible') === true;
-      const explicitQuietSearch = record.get('explicitQuietSearch') === true;
       const storyExpiry = record.get('storyExpiresAt') == null
         ? null
         : String(toJS(record.get('storyExpiresAt')));
-      if (humanVisible && storyExpiry && Date.parse(storyExpiry) <= Date.now() + 72 * 60 * 60 * 1000) {
+      if (storyExpiry && Date.parse(storyExpiry) <= Date.now() + 72 * 60 * 60 * 1000) {
         items.push({
           id: `expiring_story:${storyId}`,
           kind: 'expiring_story',
           priority: 'soon',
           title: goal ? `Story expiring: ${goal}` : 'Story expiring soon',
           dueAt: storyExpiry,
-          storyId,
-        });
-      }
-      if ((!humanVisible || explicitQuietSearch)
-        && Date.parse(searchExpiry) <= Date.now() + 72 * 60 * 60 * 1000) {
-        items.push({
-          id: `expiring_search:${storyId}`,
-          kind: 'expiring_search',
-          priority: 'soon',
-          title: goal ? `Search expiring: ${goal}` : 'Agent search expiring soon',
-          dueAt: searchExpiry,
           storyId,
         });
       }

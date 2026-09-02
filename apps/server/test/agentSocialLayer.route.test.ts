@@ -91,6 +91,20 @@ describe('agent-social routes', () => {
     expect(mocks.createStory).toHaveBeenCalledWith('social-user', body, { io: undefined });
   });
 
+  it('redacts agent matching context from the human Story feed', async () => {
+    mocks.listStoryFeed.mockResolvedValue([{
+      id: 'story', author: { id: 'owner', name: 'Owner' }, text: 'The approved human text',
+      goal: 'private goal', seeks: ['private seek'], brings: ['private resource'],
+      matchingMode: 'reciprocal', openToCollaborators: true,
+      storyExpiresAt: '2099-09-03T00:00:00.000Z', createdAt: '2099-09-01T00:00:00.000Z',
+    }]);
+    const response = await fetch(`${baseUrl}/api/stories/feed`, { headers: { Authorization: bearer() } });
+    expect(await response.json()).toEqual({ stories: [{
+      id: 'story', author: { id: 'owner', name: 'Owner' }, text: 'The approved human text',
+      storyExpiresAt: '2099-09-03T00:00:00.000Z', createdAt: '2099-09-01T00:00:00.000Z',
+    }] });
+  });
+
   it('rejects human publication without audience and activation without an enabled channel', async () => {
     const headers = { Authorization: bearer(), 'Content-Type': 'application/json' };
     expect((await fetch(`${baseUrl}/api/stories`, {

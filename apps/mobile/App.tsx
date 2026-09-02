@@ -22,6 +22,7 @@ import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom
 import { ChatProvider, useChat } from './src/contexts/ChatContext';
 import { RecordingProvider } from './src/contexts/RecordingContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
+import { SocialExperienceProvider, useSocialExperience } from './src/contexts/SocialExperienceContext';
 import { UpdateBanner } from './src/components/UpdateBanner';
 import {
   configureNotificationHandlers,
@@ -74,6 +75,10 @@ import { AgentKeyDetailScreen } from './src/screens/AgentKeyDetailScreen';
 import { ThoughtsScreen } from './src/screens/ThoughtsScreen';
 import { AddEditThoughtScreen } from './src/screens/AddEditThoughtScreen';
 import { ConversationThoughtsScreen } from './src/screens/ConversationThoughtsScreen';
+import { AsksScreen } from './src/screens/AsksScreen';
+import { StoryComposerScreen } from './src/screens/StoryComposerScreen';
+import { StoryViewerScreen } from './src/screens/StoryViewerScreen';
+import { SocialReviewScreen } from './src/screens/SocialReviewScreen';
 import { AppIcon, AppIconName } from './src/components/AppIcon';
 import { serif } from './src/theme/typography';
 import { getColors } from './src/theme/colors';
@@ -83,11 +88,13 @@ import { PushSoftAsk } from './src/components/PushSoftAsk';
 import { GlobalRecordingBar } from './src/components/GlobalRecordingBar';
 import type {
   RootStackParamList,
+  AsksStackParamList,
   ThoughtsStackParamList,
   TabParamList,
 } from './src/navigation/types';
 
 const ChatsStack = createNativeStackNavigator<RootStackParamList>();
+const AsksStack = createNativeStackNavigator<AsksStackParamList>();
 const ThoughtsStack = createNativeStackNavigator<ThoughtsStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();
 
@@ -125,6 +132,21 @@ function ChatsNavigator({ currentUser, c }: {
         name="AgentOverlay"
         component={AgentOverlayScreen}
         options={{ title: 'Your Agent', presentation: 'modal' }}
+      />
+      <ChatsStack.Screen
+        name="StoryComposer"
+        component={StoryComposerScreen}
+        options={{ title: 'Share a Story', presentation: 'modal' }}
+      />
+      <ChatsStack.Screen
+        name="StoryViewer"
+        component={StoryViewerScreen}
+        options={({ route }) => ({ title: route.params.story.author.name || 'Story' })}
+      />
+      <ChatsStack.Screen
+        name="SocialReview"
+        component={SocialReviewScreen}
+        options={{ title: 'Review' }}
       />
       <ChatsStack.Screen
         name="GroupSettings"
@@ -234,6 +256,26 @@ function ChatsNavigator({ currentUser, c }: {
         })}
       />
     </ChatsStack.Navigator>
+  );
+}
+
+function AsksNavigator({ c }: { c: ReturnType<typeof getColors> }) {
+  return (
+    <AsksStack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: c.surface },
+        headerTitleStyle: { color: c.textPrimary, fontFamily: serif },
+        headerTintColor: c.primary,
+        contentStyle: { backgroundColor: c.background },
+      }}
+    >
+      <AsksStack.Screen name="AsksList" component={AsksScreen} options={{ title: 'Asks' }} />
+      <AsksStack.Screen name="AgentOverlay" component={AgentOverlayScreen} options={{ title: 'My Agent', presentation: 'modal' }} />
+      <AsksStack.Screen name="StoryComposer" component={StoryComposerScreen} options={{ title: 'Share a Story', presentation: 'modal' }} />
+      <AsksStack.Screen name="StoryViewer" component={StoryViewerScreen} options={({ route }) => ({ title: route.params.story.author.name || 'Story' })} />
+      <AsksStack.Screen name="SocialReview" component={SocialReviewScreen} options={{ title: 'Review' }} />
+      <AsksStack.Screen name="Chat" component={ChatScreenRouter} options={{ title: '' }} />
+    </AsksStack.Navigator>
   );
 }
 
@@ -401,6 +443,7 @@ function AuthedTabs({
   currentUser: { email?: string } | null;
   c: ReturnType<typeof getColors>;
 }) {
+  const { enhanced } = useSocialExperience();
   return (
     <Tab.Navigator
       tabBar={(props) => (
@@ -442,6 +485,21 @@ function AuthedTabs({
       >
         {() => <ChatsNavigator currentUser={currentUser} c={c} />}
       </Tab.Screen>
+      {enhanced && (
+        <Tab.Screen
+          name="AsksTab"
+          options={{
+            tabBarLabel: ({ focused, color }) => (
+              <TabLabel text="Asks" focused={focused} color={color} />
+            ),
+            tabBarIcon: ({ focused, color }) => (
+              <TabIcon icon="sparkle" focused={focused} color={color} c={c} />
+            ),
+          }}
+        >
+          {() => <AsksNavigator c={c} />}
+        </Tab.Screen>
+      )}
       <Tab.Screen
         name="ThoughtsTab"
         options={{
@@ -580,9 +638,11 @@ function ShellWithBackground() {
     <View style={[styles.root, { backgroundColor: c.background }]}>
       <UpdateBanner />
       <ChatProvider>
-        <RecordingBridge>
-          <Shell />
-        </RecordingBridge>
+        <SocialExperienceProvider>
+          <RecordingBridge>
+            <Shell />
+          </RecordingBridge>
+        </SocialExperienceProvider>
       </ChatProvider>
     </View>
   );

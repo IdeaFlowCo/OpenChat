@@ -1,8 +1,8 @@
 # openchat-mobile
 
 React Native (Expo) OpenChat app. Connects to the same production backend at
-`https://chat.globalbr.ai` and also exports the RN-web builds served at `/m`
-and `/d`.
+`https://chat.globalbr.ai` and exports the canonical responsive RN-web app
+served at `/app`.
 
 ## What works today (v0 scaffold)
 
@@ -57,13 +57,11 @@ Defaults are the production URLs above.
 
 ### Web and desktop exports
 
-The RN-web app is the source for both production web mounts:
+The RN-web app is the single production web client:
 
 ```bash
 cd apps/mobile
-npm run export:web:mobile   # dist-web-m, assets under /m/
-npm run export:web:desktop  # dist-web-d, assets under /d/
-npm run export:web:app      # dist-web-app, root-relative assets for desktop shells
+npm run export:web:app      # dist-web-app, assets under /app/
 ```
 
 The layout switches at runtime by width (`src/theme/breakpoints.ts`): at

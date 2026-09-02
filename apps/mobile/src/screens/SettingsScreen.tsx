@@ -18,6 +18,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme, ThemePref } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
+import { useSocialExperience, type LayoutPreference } from '../contexts/SocialExperienceContext';
 import { api, ExportRangeKey, OPENCHAT_URL } from '../api/client';
 import { buildAgentSetupBlob } from '../utils/agentSetupBlob';
 import { getColors } from '../theme/colors';
@@ -39,7 +40,52 @@ export function SettingsScreen() {
   const navigation = useNavigation<NavProp<'Settings'>>();
   const { preference, setPreference, scheme } = useTheme();
   const { currentUser, isConnected, signOut } = useChat();
+  const {
+    preferences: socialPreferences,
+    layoutPreference,
+    storiesCollapsed,
+    setExperienceMode,
+    setNetworkPaused,
+    setLayoutPreference,
+    setStoriesCollapsed,
+  } = useSocialExperience();
   const c = getColors(scheme);
+  const [savingExperience, setSavingExperience] = useState(false);
+
+  const switchExperience = useCallback(async (mode: 'enhanced' | 'simple', pauseNetwork = false) => {
+    if (savingExperience || socialPreferences.experienceMode === mode) return;
+    setSavingExperience(true);
+    try {
+      await setExperienceMode(mode, pauseNetwork);
+    } catch (err) {
+      Alert.alert('Could not change experience', err instanceof Error ? err.message : 'Please try again.');
+    } finally {
+      setSavingExperience(false);
+    }
+  }, [savingExperience, setExperienceMode, socialPreferences.experienceMode]);
+
+  const chooseSimpleExperience = useCallback(() => {
+    Alert.alert(
+      'Switch to Simple chat?',
+      'Stories and coordination controls will be hidden. Human-visible Stories stay active until they expire. Your data is preserved. What should happen to quiet searches?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Keep searches active', onPress: () => void switchExperience('simple', false) },
+        { text: 'Pause searches and switch', style: 'destructive', onPress: () => void switchExperience('simple', true) },
+      ],
+    );
+  }, [switchExperience]);
+
+  const toggleNetworkPause = useCallback(async () => {
+    setSavingExperience(true);
+    try {
+      await setNetworkPaused(!socialPreferences.networkPaused);
+    } catch (err) {
+      Alert.alert('Could not update quiet searches', err instanceof Error ? err.message : 'Please try again.');
+    } finally {
+      setSavingExperience(false);
+    }
+  }, [setNetworkPaused, socialPreferences.networkPaused]);
 
   // Account deletion (OpenChat-nhy)
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -319,6 +365,95 @@ export function SettingsScreen() {
           </View>
         </View>
       )}
+
+      <View style={styles.section}>
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>EXPERIENCE</Text>
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <TouchableOpacity
+            style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+            onPress={() => void switchExperience('enhanced')}
+            disabled={savingExperience}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: socialPreferences.experienceMode === 'enhanced' }}
+          >
+            <Text style={[styles.radioMark, { color: c.primary }]}>{socialPreferences.experienceMode === 'enhanced' ? '●' : '○'}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Chat + coordination</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Stories, My Agent review, asks, and quiet matching</Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+            onPress={chooseSimpleExperience}
+            disabled={savingExperience}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: socialPreferences.experienceMode === 'simple' }}
+          >
+            <Text style={[styles.radioMark, { color: c.primary }]}>{socialPreferences.experienceMode === 'simple' ? '●' : '○'}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Simple chat</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Chats and Thoughts without the coordination layer</Text>
+            </View>
+          </TouchableOpacity>
+          {socialPreferences.experienceMode === 'enhanced' && (
+            <TouchableOpacity
+              style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+              onPress={() => void setStoriesCollapsed(!storiesCollapsed)}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: !storiesCollapsed }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Show Stories rail</Text>
+                <Text style={[styles.optionHint, { color: c.textSecondary }]}>Your agent still filters matching opportunities into Review when it is collapsed</Text>
+              </View>
+              <Text style={{ color: c.primary, fontWeight: '700' }}>{storiesCollapsed ? 'Off' : 'On'}</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => void toggleNetworkPause()}
+            disabled={savingExperience}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: socialPreferences.networkPaused }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Pause quiet searches</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Paused searches do not reactivate automatically</Text>
+            </View>
+            <Text style={{ color: socialPreferences.networkPaused ? c.danger : c.textMuted, fontWeight: '700' }}>
+              {socialPreferences.networkPaused ? 'Paused' : 'Active'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={[styles.subsectionLabel, { color: c.textMuted }]}>LAYOUT ON THIS DEVICE</Text>
+        <View style={styles.layoutChoices}>
+          {([
+            ['auto', 'Automatic'],
+            ['compact', 'Compact'],
+            ['split', 'Split view'],
+          ] as Array<[LayoutPreference, string]>).map(([value, label]) => {
+            const selected = layoutPreference === value;
+            return (
+              <TouchableOpacity
+                key={value}
+                onPress={() => void setLayoutPreference(value)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                style={[
+                  styles.layoutChoice,
+                  {
+                    backgroundColor: selected ? c.primaryMuted : c.surface,
+                    borderColor: selected ? c.primary : c.border,
+                  },
+                ]}
+              >
+                <Text style={{ color: selected ? c.primary : c.textSecondary, fontWeight: '700' }}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
 
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>AUTOMATION</Text>
@@ -616,7 +751,7 @@ export function SettingsScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
-            onPress={() => Linking.openURL('https://chat.globalbr.ai/m/')}
+            onPress={() => Linking.openURL('https://chat.globalbr.ai/app/')}
             activeOpacity={0.7}
           >
             <View style={{ flex: 1 }}>
@@ -853,6 +988,23 @@ const styles = StyleSheet.create({
   notifRow: { minHeight: 56 },
   optionLabel: { fontSize: 16, fontWeight: '500' },
   optionHint: { fontSize: 12, marginTop: 2 },
+  radioMark: { width: 28, fontSize: 20, lineHeight: 24 },
+  subsectionLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.9,
+    marginTop: 14,
+    marginBottom: 8,
+  },
+  layoutChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  layoutChoice: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   radio: {
     width: 22,
     height: 22,
