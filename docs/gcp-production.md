@@ -75,36 +75,87 @@ gcloud compute ssh noos \
   --command='sudo docker exec -it noos_neo4j cypher-shell -u neo4j'
 ```
 
-In `cypher-shell`, set the normalized account email, inspect the target, and
+Create the audit identifier constraint once before the first grant or revoke:
+
+```cypher
+CREATE CONSTRAINT directory_capability_audit_id IF NOT EXISTS
+FOR (a:DirectoryCapabilityAudit) REQUIRE a.id IS UNIQUE;
+```
+
+Each operation requires the normalized account email, the operator's durable
+identity, and a non-empty reason. Set those parameters, inspect the target, and
 grant only when exactly one user matches:
 
 ```cypher
 :param email => 'trusted-operator@example.com';
-MATCH (u:User) WHERE toLower(u.email) = toLower($email)
+:param operator => 'operator@example.com';
+:param reason => 'Directory steward for the September mutual-aid intake';
+MATCH (u:User) WHERE toLower(u.email) = toLower(trim($email))
 RETURN u.id AS id, u.email AS email, coalesce(u.canBrowseUserDirectory, false) AS enabled;
 
-MATCH (u:User) WHERE toLower(u.email) = toLower($email)
+MATCH (u:User) WHERE toLower(u.email) = toLower(trim($email))
 WITH collect(u) AS users
-WHERE size(users) = 1
+WHERE size(users) = 1 AND trim($operator) <> '' AND trim($reason) <> ''
 UNWIND users AS u
 SET u.canBrowseUserDirectory = true
-RETURN u.id AS id, u.email AS email, u.canBrowseUserDirectory AS enabled;
+CREATE (a:DirectoryCapabilityAudit {
+  id: randomUUID(),
+  targetUserId: u.id,
+  targetEmail: toLower(u.email),
+  action: 'grant',
+  operator: trim($operator),
+  reason: trim($reason),
+  timestamp: datetime()
+})
+RETURN u.id AS id, u.email AS email, u.canBrowseUserDirectory AS enabled,
+       a.id AS auditId, a.timestamp AS auditedAt;
 ```
 
-Revoke by removing the property, again only when exactly one user matches:
+Revoke with the same required parameters, again only when exactly one user
+matches:
 
 ```cypher
-MATCH (u:User) WHERE toLower(u.email) = toLower($email)
+MATCH (u:User) WHERE toLower(u.email) = toLower(trim($email))
 WITH collect(u) AS users
-WHERE size(users) = 1
+WHERE size(users) = 1 AND trim($operator) <> '' AND trim($reason) <> ''
 UNWIND users AS u
 REMOVE u.canBrowseUserDirectory
-RETURN u.id AS id, u.email AS email, coalesce(u.canBrowseUserDirectory, false) AS enabled;
+CREATE (a:DirectoryCapabilityAudit {
+  id: randomUUID(),
+  targetUserId: u.id,
+  targetEmail: toLower(u.email),
+  action: 'revoke',
+  operator: trim($operator),
+  reason: trim($reason),
+  timestamp: datetime()
+})
+RETURN u.id AS id, u.email AS email,
+       coalesce(u.canBrowseUserDirectory, false) AS enabled,
+       a.id AS auditId, a.timestamp AS auditedAt;
+```
+
+Each query mutates the capability and creates its audit node in one atomic
+transaction. Treat `DirectoryCapabilityAudit` as append-only: never update or
+delete its nodes. There is no client or API write path for the capability or
+its audit history. Inspect history by target email, newest first:
+
+```cypher
+:param email => 'trusted-operator@example.com';
+MATCH (a:DirectoryCapabilityAudit)
+WHERE a.targetEmail = toLower(trim($email))
+RETURN a.id, a.targetUserId, a.targetEmail, a.action, a.operator, a.reason,
+       a.timestamp
+ORDER BY a.timestamp DESC;
 ```
 
 The change is effective for API authorization immediately. Web and mobile copy
 refreshes from `/api/auth/me` on the next authenticated app bootstrap; restart
 the client after a grant or revoke to refresh that copy.
+
+Email-bound invitations that resume after TestFlight onboarding, including an
+optional authorized directory grant, remain deferred in
+[GitHub issue #41](https://github.com/IdeaFlowCo/OpenChat/issues/41) and local
+Beads issue `OpenChat-7mv`.
 
 Secrets live in `/opt/openchat/.env` on the GCE instance and must not be copied
 into the repository. The live deployment still accepts the legacy `AWS_*`
