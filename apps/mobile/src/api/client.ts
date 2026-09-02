@@ -556,6 +556,24 @@ export interface Thought {
   updatedAt: string;
   /** Tags extracted from the thought (e.g. hashtags). Rendered as chips. */
   tags?: string[];
+  /** Provenance: the chat this thought was captured from, if any. */
+  sourceConversationId?: string | null;
+  sourceConversationName?: string | null;
+  /** Pin state (chat-scoped views). */
+  pinned?: boolean;
+  pinnedBy?: string | null;
+  pinnedAt?: string | null;
+  /** Author info — present on pinned thoughts from other participants. */
+  authorId?: string | null;
+  authorName?: string | null;
+}
+
+/** Chat-scoped thoughts payload (GET /api/thoughts/conversation/:id). */
+export interface ConversationThoughts {
+  /** Pinned to this conversation, any participant. */
+  pinned: Thought[];
+  /** The caller's own thoughts captured from this chat (not pinned). */
+  fromChat: Thought[];
 }
 
 // ── Agent key types (OpenChat-7c9) ────────────────────────────────────────────
@@ -1064,12 +1082,48 @@ export const api = {
     return request<Thought[]>(`/api/thoughts${q ? `?${q}` : ''}`);
   },
 
-  /** Create a new thought. */
-  createThought: (body: { text: string; kind?: ThoughtKind; status?: ThoughtStatus }) =>
+  /**
+   * Create a new thought. `sourceMessageId` records save-to-thoughts
+   * provenance from a chat message; `pinToConversationId` additionally pins
+   * the new thought to that conversation ("Save & pin").
+   */
+  createThought: (body: {
+    text: string;
+    kind?: ThoughtKind;
+    status?: ThoughtStatus;
+    sourceMessageId?: string;
+    pinToConversationId?: string;
+  }) =>
     request<Thought>('/api/thoughts', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  /** Chat-scoped thoughts: pinned to + captured from one conversation. */
+  getConversationThoughts: (conversationId: string) =>
+    request<ConversationThoughts>(`/api/thoughts/conversation/${encodeURIComponent(conversationId)}`),
+
+  /** Pin one of my thoughts to a conversation I participate in. */
+  pinThought: (id: string, conversationId: string) =>
+    request<Thought>(`/api/thoughts/${encodeURIComponent(id)}/pin`, {
+      method: 'POST',
+      body: JSON.stringify({ conversationId }),
+    }),
+
+  /** Unpin a thought from a conversation (owner or pinner only). */
+  unpinThought: async (id: string, conversationId: string): Promise<void> => {
+    const token = await getToken();
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (token) headers['authorization'] = `Bearer ${token}`;
+    const res = await fetch(
+      `${OPENCHAT_URL}/api/thoughts/${encodeURIComponent(id)}/pin/${encodeURIComponent(conversationId)}`,
+      { method: 'DELETE', headers }
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      throw new ApiError(res.status, `${res.status}: ${text}`, text);
+    }
+  },
 
   /** Update an existing thought. */
   updateThought: (

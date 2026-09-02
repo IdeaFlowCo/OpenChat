@@ -27,135 +27,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { fetchThoughts, deleteThought, Thought } from '../services/thoughts';
 import { getSocket } from '../api/socket';
+import { ThoughtCard } from '../components/ThoughtCard';
 import type { ThoughtsNavProp } from '../navigation/types';
-
-// ── Badge colors ──────────────────────────────────────────────────────────────
-
-const KIND_COLORS: Record<string, string> = {
-  fact:        '#6366f1', // indigo
-  decision:    '#f59e0b', // amber
-  commitment:  '#10b981', // emerald
-  reminder:    '#f97316', // orange
-  observation: '#3b82f6', // blue
-};
-
-const KIND_LABELS: Record<string, string> = {
-  fact:        'Fact',
-  decision:    'Decision',
-  commitment:  'Commitment',
-  reminder:    'Reminder',
-  observation: 'Observation',
-};
-
-function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 60_000) return 'just now';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
-// ── ThoughtCard ───────────────────────────────────────────────────────────────
-
-interface ThoughtCardProps {
-  item: Thought;
-  onEdit: () => void;
-  onDelete: () => void;
-  onTagPress: (tag: string) => void;
-  surface: string;
-  border: string;
-  textPrimary: string;
-  textSecondary: string;
-  textMuted: string;
-  chipBg: string;
-  chipText: string;
-}
-
-function ThoughtCard({
-  item,
-  onEdit,
-  onDelete,
-  onTagPress,
-  surface,
-  border,
-  textPrimary,
-  textSecondary,
-  textMuted,
-  chipBg,
-  chipText,
-}: ThoughtCardProps) {
-  const kindColor = KIND_COLORS[item.kind] ?? '#3b82f6';
-  const kindLabel = KIND_LABELS[item.kind] ?? item.kind;
-  const tags = item.tags ?? [];
-
-  return (
-    <TouchableOpacity
-      onPress={onEdit}
-      onLongPress={() =>
-        Alert.alert('Delete thought?', item.text.slice(0, 80), [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Delete', style: 'destructive', onPress: onDelete },
-        ])
-      }
-      activeOpacity={0.7}
-      style={[styles.card, { backgroundColor: surface, borderColor: border }]}
-    >
-      {/* Header: time leads; status + the kind pill float to the right. The
-          kind pill is hidden for 'observation' (the catch-all default for any
-          tag) to keep cards quiet — only meaningful types show. */}
-      <View style={styles.cardHeader}>
-        <Text style={[styles.time, { color: textMuted }]}>
-          {formatRelativeTime(item.createdAt)}
-        </Text>
-        {item.status !== 'none' && (
-          <View
-            style={[
-              styles.badge,
-              styles.headerRight,
-              { backgroundColor: item.status === 'open' ? '#3b82f622' : '#6b728022' },
-            ]}
-          >
-            <Text
-              style={[
-                styles.badgeText,
-                { color: item.status === 'open' ? '#3b82f6' : '#6b7280' },
-              ]}
-            >
-              {item.status === 'open' ? 'Open' : 'Closed'}
-            </Text>
-          </View>
-        )}
-        {item.kind !== 'observation' && (
-          <View style={[styles.badge, item.status === 'none' ? styles.headerRight : null, { backgroundColor: kindColor + '22' }]}>
-            <Text style={[styles.badgeText, { color: kindColor }]}>{kindLabel}</Text>
-          </View>
-        )}
-      </View>
-
-      {/* Body text */}
-      <Text style={[styles.bodyText, { color: textPrimary }]}>{item.text}</Text>
-
-      {/* Tag chips — visually distinct from the kind badge (pill, monospace #). */}
-      {tags.length > 0 && (
-        <View style={styles.tagRow}>
-          {tags.map((tag) => (
-            <TouchableOpacity
-              key={tag}
-              onPress={() => onTagPress(tag)}
-              activeOpacity={0.7}
-              style={[styles.chip, { backgroundColor: chipBg }]}
-            >
-              <Text style={[styles.chipText, { color: chipText }]}>
-                #{tag.replace(/^#/, '')}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-    </TouchableOpacity>
-  );
-}
 
 // ── ThoughtsScreen ────────────────────────────────────────────────────────────
 
@@ -322,16 +195,10 @@ export function ThoughtsScreen() {
         renderItem={({ item }) => (
           <ThoughtCard
             item={item}
-            onEdit={() => openEdit(item)}
+            onPress={() => openEdit(item)}
             onDelete={() => handleDelete(item.id)}
             onTagPress={handleTagPress}
-            surface={c.surface}
-            border={c.border}
-            textPrimary={c.textPrimary}
-            textSecondary={c.textSecondary}
-            textMuted={c.textMuted}
-            chipBg={c.primaryMuted}
-            chipText={c.primary}
+            subtitle={item.sourceConversationName ? `from ${item.sourceConversationName}` : null}
           />
         )}
         ListEmptyComponent={renderEmpty}
@@ -370,55 +237,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   list: { padding: 12, paddingBottom: 88 },
-  card: {
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 14,
-    marginBottom: 10,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 8,
-  },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.2,
-  },
-  time: {
-    fontSize: 11,
-  },
-  // Pushes the first trailing element (status or kind pill) to the right edge.
-  headerRight: {
-    marginLeft: 'auto',
-  },
-  bodyText: {
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  tagRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 10,
-  },
-  chip: {
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 999, // fully rounded pill — distinct from the squared kind badge
-  },
-  chipText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
   emptyContainer: {
     flex: 1,
     alignItems: 'center',

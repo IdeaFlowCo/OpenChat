@@ -53,6 +53,7 @@ import { LinkPreviewCard } from '../components/LinkPreviewCard';
 import type { Participant } from '../api/client';
 import { ExportSheet } from '../components/ExportSheet';
 import { saveJsonDownload } from '../services/exportDownload';
+import { logError, logWarn } from '../services/clientLogger';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
 
@@ -311,6 +312,11 @@ export function ChatScreen({
   const micPressStartXRef = useRef<number>(0);
   // Wall-clock time the mic press began — used to tell a TAP from a HOLD.
   const micPressStartTimeRef = useRef<number>(0);
+  // Release that happened while the recorder was still starting up
+  // (Audio.Recording.createAsync takes 100-500ms, so a quick TAP lifts before
+  // recordingRef is set). handleMicPressIn applies it once the recording
+  // exists — without this, tap-for-hands-free never engaged (OpenChat-7nu).
+  const pendingReleaseRef = useRef<{ atMs: number; cancelled: boolean } | null>(null);
   // Stable ref to the current finishRecording closure, so out-of-render callers
   // (the 5-minute hard-cap timer) avoid a stale closure.
   const finishRecordingRef = useRef<(wasCancelled: boolean) => Promise<void>>(async () => {});
@@ -559,6 +565,18 @@ export function ChatScreen({
       headerRight: () => (
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <TouchableOpacity
+            onPress={() =>
+              navigation.navigate('ConversationThoughts', {
+                conversationId,
+                title: headerTitle,
+              })
+            }
+            accessibilityLabel="Thoughts for this chat"
+            style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <AppIcon name="thought" color={c.primary} size={20} />
+          </TouchableOpacity>
+          <TouchableOpacity
             onPress={() => setExportSheetVisible(true)}
             accessibilityLabel="Export conversation"
             style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
@@ -772,6 +790,7 @@ export function ChatScreen({
     if (sending || uploadingAttachment || isRecording || Platform.OS === 'web') return;
     micPressStartXRef.current = pageX;
     micPressStartTimeRef.current = Date.now();
+    pendingReleaseRef.current = null;
     setRecordingCancelled(false);
     setRecordingElapsedMs(0);
 
@@ -790,10 +809,29 @@ export function ChatScreen({
       recordingMaxTimerRef.current = setTimeout(() => {
         void finishRecordingRef.current(false);
       }, MAX_RECORDING_MS);
+
+      // Apply a release that landed while the recorder was still starting
+      // (OpenChat-7nu): short press → hands-free lock; long press → send;
+      // drag/cancel → discard.
+      // (assertion: TS keeps the `= null` narrowing from before the await,
+      // but handleMicPressOut may have written here while we awaited)
+      const release = pendingReleaseRef.current as { atMs: number; cancelled: boolean } | null;
+      if (release) {
+        pendingReleaseRef.current = null;
+        const pressMs = release.atMs - micPressStartTimeRef.current;
+        if (release.cancelled) {
+          void finishRecordingRef.current(true);
+        } else if (pressMs < TAP_THRESHOLD_MS) {
+          recordingLockedRef.current = true;
+          setRecordingLocked(true);
+        } else {
+          void finishRecordingRef.current(false);
+        }
+      }
     } catch (err) {
       // Most common: microphone permission denied. Surface a clear message
       // rather than silently failing (OpenChat-9de).
-      console.warn('[voice] startRecording error:', err);
+      logError('[voice] startRecording failed', err);
       setIsRecording(false);
       const denied = err instanceof Error && /permission/i.test(err.message);
       Alert.alert(
@@ -811,7 +849,15 @@ export function ChatScreen({
    * on release). A drag-cancel passes wasCancelled=true. (OpenChat-9de)
    */
   const handleMicPressOut = useCallback(async (wasCancelled: boolean) => {
-    if (!isRecording && !recordingRef.current) return;
+    if (!recordingRef.current) {
+      // The recorder may still be starting (createAsync in flight). Remember
+      // this release so handleMicPressIn can apply it when the recording
+      // materializes (OpenChat-7nu).
+      if (micPressStartTimeRef.current > 0) {
+        pendingReleaseRef.current = { atMs: Date.now(), cancelled: wasCancelled };
+      }
+      return;
+    }
 
     // In locked (hands-free) mode the finger lift is a no-op — recording keeps
     // going until the user taps Stop or Cancel.
@@ -865,12 +911,22 @@ export function ChatScreen({
       uri = result.uri;
       durationMs = result.durationMs;
     } catch (err) {
-      console.warn('[voice] stopRecording error:', err);
+      logError('[voice] stopRecording failed', err);
+      Alert.alert('Recording failed', 'Could not finish the recording. Please try again.');
       return;
     }
 
+    // expo-av can report durationMillis=0 even for a real recording (the
+    // native stop status omits it on some iOS versions) — fall back to
+    // wall-clock elapsed so we don't silently discard it (OpenChat-7nu).
+    const wallMs = Date.now() - recordingStartTimeRef.current;
+    if (durationMs <= 0) durationMs = wallMs;
+
     // Ignore extremely short recordings (< 500 ms — likely accidental tap).
-    if (durationMs < 500) return;
+    if (durationMs < 500) {
+      logWarn('[voice] discarded ultra-short recording', { durationMs, wallMs });
+      return;
+    }
 
     setSending(true);
     try {
@@ -879,7 +935,7 @@ export function ChatScreen({
       setReplyTo(null);
       hapticSend();
     } catch (err) {
-      console.warn('[voice] upload/send error:', err);
+      logError('[voice] upload/send failed', err, { durationMs });
       Alert.alert('Voice message failed', 'Could not send the voice message. Please try again.');
     } finally {
       setSending(false);
@@ -1055,6 +1111,27 @@ export function ChatScreen({
   const handleAskAssistant = useCallback(
     (message: Message, question: string) => { void forwardToAssistant(message, question); },
     [forwardToAssistant]
+  );
+
+  // ── Save to Thoughts / Save & pin (unified capture affordance) ────────────
+  // Saves the message text as a Thought with provenance back to this message;
+  // pin=true additionally pins it to this conversation so every participant
+  // sees it in the chat-scoped Thoughts view.
+  const handleSaveToThoughts = useCallback(
+    async (message: Message, pin: boolean) => {
+      try {
+        await api.createThought({
+          text: message.content,
+          sourceMessageId: message.id,
+          ...(pin ? { pinToConversationId: conversationId } : {}),
+        });
+        showToast(pin ? 'Saved & pinned to this chat' : 'Saved to Thoughts');
+      } catch (err) {
+        logError('[thoughts] save-from-message failed', err, { pin });
+        Alert.alert('Error', 'Could not save to Thoughts. Please try again.');
+      }
+    },
+    [conversationId, showToast]
   );
 
   // ── Scroll to quoted message ───────────────────────────────────────────────
@@ -1537,7 +1614,7 @@ export function ChatScreen({
             style={[styles.attachBtn, { opacity: sending || uploadingAttachment ? 0.4 : 1 }]}
             accessibilityLabel="Attach image"
           >
-            <Text style={{ fontSize: 22 }}>📎</Text>
+            <AppIcon name="attach" color={c.textSecondary} size={22} />
           </TouchableOpacity>
         )}
         <TextInput
@@ -1578,10 +1655,10 @@ export function ChatScreen({
           <TouchableOpacity
             onPress={() => setNvcVisible(true)}
             disabled={sending}
-            style={{ paddingHorizontal: 8, paddingVertical: 8 }}
+            style={{ paddingHorizontal: 8, paddingVertical: 8, opacity: sending ? 0.4 : 1 }}
             accessibilityLabel="NVC compose"
           >
-            <Text style={{ fontSize: 18, opacity: sending ? 0.4 : 1 }}>💙</Text>
+            <AppIcon name="heart" color={c.primary} size={19} />
           </TouchableOpacity>
         )}
         {/*
@@ -1613,9 +1690,7 @@ export function ChatScreen({
             accessibilityLabel="Hold to record voice message"
             accessibilityRole="button"
           >
-            <Text style={{ fontSize: 18, color: '#fff' }}>
-              {isRecording ? '🔴' : '🎤'}
-            </Text>
+            <AppIcon name={isRecording ? 'stop' : 'mic'} color="#fff" size={19} />
           </View>
         )}
         {/* Send button: shown when there is text or a pending asset */}
@@ -1675,6 +1750,7 @@ export function ChatScreen({
         onForward={handleForward}
         onForwardToAssistant={handleForwardToAssistant}
         onAskAssistant={handleAskAssistant}
+        onSaveToThoughts={handleSaveToThoughts}
         onEdit={handleEdit}
         onDelete={handleDelete}
         onReact={handleReact}

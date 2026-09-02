@@ -99,13 +99,195 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/thoughts/conversation/:conversationId
+ * Chat-scoped Thoughts view (OpenChat-7nu follow-up / thoughts-design.md
+ * "time-shifted contextual surfacing"). Requires the caller to be a
+ * participant. Returns:
+ *   pinned:   thoughts pinned to this conversation by ANY participant
+ *             (pinning = sharing with the conversation, Plan B semantics)
+ *   fromChat: the CALLER'S thoughts whose source message is in this
+ *             conversation (hashtag captures + save-to-thoughts)
+ */
+router.get('/conversation/:conversationId', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { conversationId } = req.params;
+
+  const session = getDriver().session();
+  try {
+    const partCheck = await session.run(
+      `MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId}) RETURN c.id`,
+      { userId, conversationId }
+    );
+    if (partCheck.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    const pinnedResult = await session.run(
+      `
+      MATCH (t:Thought)-[p:PINNED_IN]->(c:Conversation {id: $conversationId})
+      OPTIONAL MATCH (author:User {id: t.userId})
+      RETURN t {
+        .id, .text, .kind, .status, .createdAt, .updatedAt,
+        tags: coalesce(t.tags, []),
+        authorId: t.userId,
+        authorName: author.name,
+        pinnedBy: p.pinnedBy,
+        pinnedAt: p.pinnedAt,
+        pinned: true
+      } AS thought
+      ORDER BY p.pinnedAt DESC
+      LIMIT 100
+      `,
+      { conversationId }
+    );
+
+    const fromChatResult = await session.run(
+      `
+      MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought)-[:FROM_MESSAGE]->(m:Message)
+      WHERE m.conversationId = $conversationId
+        AND NOT (t)-[:PINNED_IN]->(:Conversation {id: $conversationId})
+      RETURN t {
+        .id, .text, .kind, .status, .createdAt, .updatedAt,
+        tags: coalesce(t.tags, []),
+        sourceConversationId: m.conversationId,
+        pinned: false
+      } AS thought
+      ORDER BY t.createdAt DESC
+      LIMIT 100
+      `,
+      { userId, conversationId }
+    );
+
+    res.json({
+      pinned: pinnedResult.records.map((r) => toJS(r.get('thought'))),
+      fromChat: fromChatResult.records.map((r) => toJS(r.get('thought'))),
+    });
+  } catch (err) {
+    console.error('GET /api/thoughts/conversation error:', err);
+    res.status(500).json({ error: 'Failed to fetch conversation thoughts' });
+  } finally {
+    await session.close();
+  }
+});
+
+/**
+ * POST /api/thoughts/:id/pin
+ * Body: { conversationId }
+ * Pins one of the caller's thoughts to a conversation they participate in.
+ * Pinning shares the thought with all current participants (it appears in
+ * their chat-scoped Thoughts view). Idempotent (MERGE).
+ */
+router.post('/:id/pin', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { id } = req.params;
+  const { conversationId } = req.body ?? {};
+
+  if (!conversationId || typeof conversationId !== 'string') {
+    res.status(400).json({ error: 'conversationId is required' });
+    return;
+  }
+
+  const session = getDriver().session();
+  try {
+    const now = new Date().toISOString();
+    const result = await session.run(
+      `
+      MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought {id: $id})
+      MATCH (u)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+      MERGE (t)-[p:PINNED_IN]->(c)
+      ON CREATE SET p.pinnedBy = $userId, p.pinnedAt = datetime($now)
+      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, tags: coalesce(t.tags, []) } AS thought
+      `,
+      { userId, id, conversationId, now }
+    );
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'Thought or conversation not found (or not yours)' });
+      return;
+    }
+
+    const thought = toJS(result.records[0].get('thought')) as Record<string, unknown>;
+
+    // Live-update the conversation room so open chat-scoped views refresh.
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`conversation:${conversationId}`).emit('thought:pinned', {
+        conversationId,
+        thought: { ...thought, pinned: true, pinnedBy: userId, pinnedAt: now, authorId: userId },
+      });
+    }
+
+    res.json({ ...thought, pinned: true });
+  } catch (err) {
+    console.error('POST /api/thoughts/:id/pin error:', err);
+    res.status(500).json({ error: 'Failed to pin thought' });
+  } finally {
+    await session.close();
+  }
+});
+
+/**
+ * DELETE /api/thoughts/:id/pin/:conversationId
+ * Unpins. Allowed for the thought's owner or whoever pinned it.
+ */
+router.delete('/:id/pin/:conversationId', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { id, conversationId } = req.params;
+
+  const session = getDriver().session();
+  try {
+    const result = await session.run(
+      `
+      MATCH (t:Thought {id: $id})-[p:PINNED_IN]->(c:Conversation {id: $conversationId})
+      WHERE t.userId = $userId OR p.pinnedBy = $userId
+      DELETE p
+      RETURN count(p) AS removed
+      `,
+      { userId, id, conversationId }
+    );
+
+    const removed = toJS(result.records[0]?.get('removed')) as number;
+    if (!removed) {
+      res.status(404).json({ error: 'Pin not found or not yours to remove' });
+      return;
+    }
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`conversation:${conversationId}`).emit('thought:unpinned', { conversationId, thoughtId: id });
+    }
+
+    res.status(204).send();
+  } catch (err) {
+    console.error('DELETE /api/thoughts/:id/pin error:', err);
+    res.status(500).json({ error: 'Failed to unpin thought' });
+  } finally {
+    await session.close();
+  }
+});
+
+/**
  * POST /api/thoughts
- * Body: { text: string, kind?: ThoughtKind, status?: ThoughtStatus }
+ * Body: { text: string, kind?: ThoughtKind, status?: ThoughtStatus,
+ *         sourceMessageId?: string, pinToConversationId?: string }
  * Creates a new Thought for the current user.
+ *
+ * sourceMessageId (save-to-thoughts from a chat message): links the thought
+ * back to the message via :FROM_MESSAGE for provenance, after verifying the
+ * caller participates in that message's conversation.
+ * pinToConversationId: additionally pins the new thought to that conversation
+ * in the same call ("Save & pin" — the unified affordance).
  */
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
-  const { text, kind = 'observation', status = 'none' } = req.body ?? {};
+  const {
+    text,
+    kind = 'observation',
+    status = 'none',
+    sourceMessageId,
+    pinToConversationId,
+  } = req.body ?? {};
 
   if (!text || typeof text !== 'string' || !text.trim()) {
     res.status(400).json({ error: 'text is required and must be non-empty' });
@@ -124,10 +306,50 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     return;
   }
 
+  if (sourceMessageId !== undefined && typeof sourceMessageId !== 'string') {
+    res.status(400).json({ error: 'sourceMessageId must be a string' });
+    return;
+  }
+  if (pinToConversationId !== undefined && typeof pinToConversationId !== 'string') {
+    res.status(400).json({ error: 'pinToConversationId must be a string' });
+    return;
+  }
+
   const session = getDriver().session();
   try {
     const now = new Date().toISOString();
     const id = nanoid();
+
+    // Provenance: verify the source message is in a conversation the caller
+    // participates in (otherwise you could link thoughts to strangers'
+    // messages / probe message ids).
+    if (sourceMessageId) {
+      const msgCheck = await session.run(
+        `
+        MATCH (m:Message {id: $sourceMessageId})
+        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: m.conversationId})
+        RETURN m.conversationId AS convId
+        `,
+        { userId, sourceMessageId }
+      );
+      if (msgCheck.records.length === 0) {
+        res.status(404).json({ error: 'Source message not found' });
+        return;
+      }
+      if (pinToConversationId && msgCheck.records[0].get('convId') !== pinToConversationId) {
+        res.status(400).json({ error: 'pinToConversationId must match the source message conversation' });
+        return;
+      }
+    } else if (pinToConversationId) {
+      const partCheck = await session.run(
+        `MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $pinToConversationId}) RETURN c.id`,
+        { userId, pinToConversationId }
+      );
+      if (partCheck.records.length === 0) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+    }
 
     const result = await session.run(
       `
@@ -142,9 +364,29 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         updatedAt: datetime($now)
       })
       CREATE (u)-[:HAS_THOUGHT]->(t)
+      WITH u, t
+      OPTIONAL MATCH (m:Message {id: $sourceMessageId})
+      FOREACH (msg IN CASE WHEN m IS NULL THEN [] ELSE [m] END |
+        CREATE (t)-[:FROM_MESSAGE]->(msg)
+      )
+      WITH u, t
+      OPTIONAL MATCH (pc:Conversation {id: $pinToConversationId})
+      FOREACH (conv IN CASE WHEN pc IS NULL THEN [] ELSE [pc] END |
+        MERGE (t)-[p:PINNED_IN]->(conv)
+        ON CREATE SET p.pinnedBy = $userId, p.pinnedAt = datetime($now)
+      )
       RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, tags: coalesce(t.tags, []) } AS thought
       `,
-      { userId, id, text: text.trim(), kind, status, now }
+      {
+        userId,
+        id,
+        text: text.trim(),
+        kind,
+        status,
+        now,
+        sourceMessageId: sourceMessageId ?? null,
+        pinToConversationId: pinToConversationId ?? null,
+      }
     );
 
     if (result.records.length === 0) {
@@ -152,7 +394,21 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const thought = toJS(result.records[0].get('thought'));
+    const thought = toJS(result.records[0].get('thought')) as Record<string, unknown>;
+
+    // Live updates: the owner's Thoughts tab, and — when pinned — the
+    // conversation room's chat-scoped view.
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user:${userId}`).emit('thought:created', { thought });
+      if (pinToConversationId) {
+        io.to(`conversation:${pinToConversationId}`).emit('thought:pinned', {
+          conversationId: pinToConversationId,
+          thought: { ...thought, pinned: true, pinnedBy: userId, pinnedAt: now, authorId: userId },
+        });
+      }
+    }
+
     res.status(201).json(thought);
   } catch (err) {
     console.error('POST /api/thoughts error:', err);
