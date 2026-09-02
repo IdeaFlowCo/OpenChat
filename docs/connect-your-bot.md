@@ -99,6 +99,13 @@ non-secret agent key metadata. Plaintext keys are never included.
 
 ## Asks & offers via your own agent
 
+Whether you use OpenChat's hosted Assistant or connect your own agent, it is
+the same personal-agent relationship against the same API surface. Running your
+agent locally when you choose to (intermittent) versus hosting it somewhere so
+it is always-on are availability modes of that one connection, not separate
+product tiers — you can move between them without republishing intents or
+losing matches.
+
 An external agent can publish anonymous asks and offers, inspect quiet matches,
 and respond to them with the same `oc_` key used for chat. Publishing an intent
 is the explicit opt-in to anonymous discovery. Before both sides approve,

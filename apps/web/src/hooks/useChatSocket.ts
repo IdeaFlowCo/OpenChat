@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { api, Message } from '../api';
+import { api, type AgentMatch, Message } from '../api';
 
 interface UseChatSocketOptions {
   token: string | null;
@@ -20,6 +20,8 @@ interface UseChatSocketOptions {
   onReadUpdated?: (data: { conversationId: string; userId: string; lastReadAt: string; readMap?: Record<string, string | null>; onlineMap?: Record<string, boolean> }) => void;
   /** A voice message was auto-transcribed (openchat-4jn). */
   onTranscript?: (data: { messageId: string; conversationId: string; transcript: string }) => void;
+  /** A privacy-safe match projection changed for the current viewer. */
+  onMatchUpdated?: (data: { match: AgentMatch }) => void;
 }
 
 export function useChatSocket(options: UseChatSocketOptions) {
@@ -37,6 +39,7 @@ export function useChatSocket(options: UseChatSocketOptions) {
     onReactionsUpdated,
     onReadUpdated,
     onTranscript,
+    onMatchUpdated,
   } = options;
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -164,6 +167,10 @@ export function useChatSocket(options: UseChatSocketOptions) {
       onTranscript?.(data);
     });
 
+    socket.on('match:updated', (data: { match: AgentMatch }) => {
+      onMatchUpdated?.(data);
+    });
+
     socket.on('error', (error) => {
       console.error('Socket error:', error);
     });
@@ -212,6 +219,7 @@ export function useChatSocket(options: UseChatSocketOptions) {
     onReactionsUpdated,
     onReadUpdated,
     onTranscript,
+    onMatchUpdated,
   ]);
 
   const joinConversation = useCallback((conversationId: string) => {

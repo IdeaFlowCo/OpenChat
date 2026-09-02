@@ -29,6 +29,7 @@ import { serif } from '../theme/typography';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { AppIcon } from '../components/AppIcon';
+import { AgentOverlayButton } from '../components/AgentOverlayButton';
 import { ConnectionStatusLine } from '../components/ConnectionStatusLine';
 import type { NavProp } from '../navigation/types';
 
@@ -199,6 +200,10 @@ export function ConversationsScreen() {
       ),
       headerRight: () => (
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <AgentOverlayButton
+            color={c.primary}
+            onPress={() => navigation.navigate('AgentOverlay')}
+          />
           <TouchableOpacity
             onPress={() => navigation.navigate('Search')}
             accessibilityLabel="Search"

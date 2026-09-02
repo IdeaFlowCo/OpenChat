@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api, type AgentIntentKind, type AgentMatch, type AgentMatchStatus, type Message } from '../api';
+import { useChat } from '../contexts/ChatContext';
 
 type CardPayload = MatchProposalPayload | MatchStatusPayload | MatchContextPayload;
 
@@ -112,6 +113,7 @@ interface AgentNetworkCardProps {
 
 export function AgentNetworkCard({ message, onOpenConversation }: AgentNetworkCardProps) {
   const payload = parseCard(message);
+  const { matches, updateMatch } = useChat();
   const [response, setResponse] = useState<AgentMatch | null>(null);
   const [busyDecision, setBusyDecision] = useState<'approve' | 'decline' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -121,7 +123,9 @@ export function AgentNetworkCard({ message, onOpenConversation }: AgentNetworkCa
     setBusyDecision(decision);
     setError(null);
     try {
-      setResponse(await api.respondToMatch(proposal.matchId, decision));
+      const updated = await api.respondToMatch(proposal.matchId, decision);
+      setResponse(updated);
+      updateMatch(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not update this match.');
     } finally {
@@ -169,7 +173,9 @@ export function AgentNetworkCard({ message, onOpenConversation }: AgentNetworkCa
     );
   }
 
-  const status = response?.status ?? payload.status;
+  const liveMatch = matches.get(payload.matchId);
+  const currentMatch = liveMatch ?? response;
+  const status = currentMatch?.status ?? payload.status;
   const isUnavailable = status === 'closed' || (!!response?.alreadyResolved && status !== 'connected');
 
   return (
@@ -215,8 +221,8 @@ export function AgentNetworkCard({ message, onOpenConversation }: AgentNetworkCa
         {status === 'connected' && (
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <span className="text-sm font-medium text-gray-600 dark:text-slate-300">You’re connected.</span>
-            {response?.conversationId && (
-              <button type="button" onClick={() => onOpenConversation(response.conversationId!)} className="text-sm font-semibold text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400">
+            {currentMatch?.conversationId && (
+              <button type="button" onClick={() => onOpenConversation(currentMatch.conversationId!)} className="text-sm font-semibold text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400">
                 Open conversation
               </button>
             )}

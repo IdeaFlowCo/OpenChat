@@ -10,7 +10,7 @@
  */
 
 import { io, Socket } from 'socket.io-client';
-import { OPENCHAT_URL, getToken, Message, Conversation } from './client';
+import { OPENCHAT_URL, getToken, Message, Conversation, AgentMatch } from './client';
 
 export interface ParticipantEvent {
   conversationId: string;
@@ -32,6 +32,11 @@ export interface PresenceEvent {
   userId: string;
   status: string;
   statusMessage?: string;
+}
+
+/** Server-supplied privacy-safe match projection for the current viewer. */
+export interface MatchEvent {
+  match: AgentMatch;
 }
 
 let socket: Socket | null = null;

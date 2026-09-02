@@ -45,6 +45,7 @@ import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { ConversationList } from './ConversationList';
 import { AppIcon } from './AppIcon';
+import { AgentOverlayButton } from './AgentOverlayButton';
 import { ConnectionStatusLine } from './ConnectionStatusLine';
 // /d/ right pane renders the same ChatScreen that /m/ uses — with full
 // feature parity (voice / preview / transform / forwarding / reactions /
@@ -163,6 +164,7 @@ export function MasterDetailLayout() {
   const openSearch = useCallback(() => navigation.navigate('Search'), [navigation]);
   const openNew = useCallback(() => navigation.navigate('NewConversation'), [navigation]);
   const openSettings = useCallback(() => navigation.navigate('Settings'), [navigation]);
+  const openAgentOverlay = useCallback(() => navigation.navigate('AgentOverlay'), [navigation]);
   const openShortcuts = useCallback(() => navigation.navigate('KeyboardShortcuts'), [navigation]);
   const openGroupSettings = useCallback(
     (cid: string) => navigation.navigate('GroupSettings', { conversationId: cid }),
@@ -308,6 +310,7 @@ export function MasterDetailLayout() {
             >
               <AppIcon name="plus" color={c.primary} size={20} />
             </IconButton>
+            <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />
           </View>
         ) : (
           <View style={[styles.sidebarHeader, { borderColor: c.border }]}>
@@ -346,6 +349,7 @@ export function MasterDetailLayout() {
             >
               <AppIcon name="search" color={c.primary} size={19} />
             </IconButton>
+            <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />
             <IconButton
               onPress={openNew}
               title="New conversation (⌘N)"

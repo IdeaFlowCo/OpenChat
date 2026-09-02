@@ -56,6 +56,7 @@ import { KeyboardShortcutsScreen } from './src/screens/KeyboardShortcutsScreen';
 import { PermissionsScreen } from './src/screens/PermissionsScreen';
 import { SecretaryScreen } from './src/screens/SecretaryScreen';
 import { NewConversationScreen } from './src/screens/NewConversationScreen';
+import { AgentOverlayScreen } from './src/screens/AgentOverlayScreen';
 import { GroupSettingsScreen } from './src/screens/GroupSettingsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { SearchScreen } from './src/screens/SearchScreen';
@@ -119,6 +120,11 @@ function ChatsNavigator({ currentUser, c }: {
         name="NewConversation"
         component={NewConversationScreen}
         options={{ title: 'New Chat', presentation: 'modal' }}
+      />
+      <ChatsStack.Screen
+        name="AgentOverlay"
+        component={AgentOverlayScreen}
+        options={{ title: 'Your Agent', presentation: 'modal' }}
       />
       <ChatsStack.Screen
         name="GroupSettings"

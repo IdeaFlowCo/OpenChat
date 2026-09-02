@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import toast from 'react-hot-toast';
-import { api, Attachment, Conversation, isAuthError, Message, User } from '../api';
+import { api, type AgentMatch, Attachment, Conversation, isAuthError, Message, User } from '../api';
 import { useChatSocket } from '../hooks/useChatSocket';
 import {
   clearStoredSession,
@@ -74,6 +74,12 @@ interface ChatContextValue {
   // Per-conversation map of userId -> their lastReadAt ISO timestamp, used to
   // render read receipts on the sender's own messages (openchat-bmp.4).
   readReceiptsByConv: Map<string, Record<string, string | null>>;
+
+  // Agent-network matches are always privacy-safe per-viewer projections.
+  matches: Map<string, AgentMatch>;
+  pendingMatchCount: number;
+  refreshMatches: () => Promise<void>;
+  updateMatch: (match: AgentMatch) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -103,6 +109,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [unreadByConv, setUnreadByConv] = useState<Map<string, number>>(new Map());
   const [readReceiptsByConv, setReadReceiptsByConv] = useState<Map<string, Record<string, string | null>>>(new Map());
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [matches, setMatches] = useState<Map<string, AgentMatch>>(new Map());
   // Load-older pagination state (bmp.9).
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -133,6 +140,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setUnreadByConv(new Map());
     setReadReceiptsByConv(new Map());
     setReplyTo(null);
+    setMatches(new Map());
     clearStoredSession();
     api.setToken(null);
   }, []);
@@ -272,6 +280,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setMessages(prev => prev.map(m => (m.id === data.messageId ? { ...m, transcript: data.transcript } : m)));
   }, []);
 
+  const updateMatch = useCallback((match: AgentMatch) => {
+    setMatches(prev => {
+      const next = new Map(prev);
+      next.set(match.id, match);
+      return next;
+    });
+  }, []);
+
+  const handleMatchUpdated = useCallback((data: { match: AgentMatch }) => {
+    updateMatch(data.match);
+  }, [updateMatch]);
+
+  const refreshMatches = useCallback(async () => {
+    if (!token) {
+      setMatches(new Map());
+      return;
+    }
+    const latest = await api.listMatches();
+    setMatches(new Map(latest.map(match => [match.id, match])));
+  }, [token]);
+
   const handleTypingStart = useCallback((data: { conversationId: string; userId: string }) => {
     setTypingUsers(prev => {
       const newMap = new Map(prev);
@@ -393,11 +422,28 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     onReactionsUpdated: handleReactionsUpdated,
     onReadUpdated: handleReadUpdated,
     onTranscript: handleTranscript,
+    onMatchUpdated: handleMatchUpdated,
   });
 
   // Set API token when auth changes
   useEffect(() => {
     api.setToken(token);
+    if (!token) {
+      setMatches(new Map());
+      return;
+    }
+
+    // Seed the sidebar badge on sign-in. Overlay opens perform their own
+    // authoritative refresh because socket delivery is best-effort.
+    let cancelled = false;
+    api.listMatches()
+      .then(latest => {
+        if (!cancelled) setMatches(new Map(latest.map(match => [match.id, match])));
+      })
+      .catch(error => {
+        if (!cancelled && !isAuthError(error)) console.error('Failed to load agent matches:', error);
+      });
+    return () => { cancelled = true; };
   }, [token]);
 
   useEffect(() => {
@@ -908,6 +954,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     stopTyping,
     unreadByConv,
     readReceiptsByConv,
+    matches,
+    pendingMatchCount: Array.from(matches.values()).filter(match => match.status === 'pending').length,
+    refreshMatches,
+    updateMatch,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

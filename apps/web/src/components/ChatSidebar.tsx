@@ -4,6 +4,7 @@ import { useTheme, ThemePreference } from '../contexts/ThemeContext';
 import { ConversationList } from './ConversationList';
 import { PresenceIndicator } from './PresenceIndicator';
 import { SettingsModal } from './SettingsModal';
+import { AgentOverlayPanel } from './AgentOverlayPanel';
 import { api, User, SearchResults } from '../api';
 import { toastError } from '../utils/toastError';
 import { BotBadge } from './BotBadge';
@@ -90,7 +91,7 @@ function useDebounce<T>(value: T, delay: number): T {
 type PickerMode = 'closed' | 'direct' | 'group';
 
 export function ChatSidebar() {
-  const { searchContacts, createConversation, setActiveConversation, presence, currentUser, isConnected, updatePresence, logout } = useChat();
+  const { searchContacts, createConversation, setActiveConversation, presence, currentUser, isConnected, updatePresence, logout, pendingMatchCount } = useChat();
   // Full directory loaded when the picker opens, so users can browse people
   // to DM without having to type first (openchat-2rn). Search narrows it.
   const [allContacts, setAllContacts] = useState<User[]>([]);
@@ -110,6 +111,7 @@ export function ChatSidebar() {
   const [statusMessage, setStatusMessage] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [agentOverlayOpen, setAgentOverlayOpen] = useState(false);
   const [showVersionInTopBar, setShowVersionInTopBar] = useState(() => readShowVersionInTopBar());
   // Group-creation state
   const [selectedContacts, setSelectedContacts] = useState<User[]>([]);
@@ -342,6 +344,18 @@ export function ChatSidebar() {
             )}
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAgentOverlayOpen(true)}
+              className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 transition-colors hover:bg-gray-100 hover:text-blue-600 active:bg-gray-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-blue-400"
+              aria-label={pendingMatchCount > 0 ? `Agent network, ${pendingMatchCount} pending matches` : 'Agent network'}
+              title="Agent network"
+            >
+              <AppIcon name="agent" size={20} />
+              {pendingMatchCount > 0 && (
+                <span className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-blue-500 dark:border-slate-900" aria-hidden="true" />
+              )}
+            </button>
             <button
               onClick={() => openPicker('direct')}
               className="px-3 py-2 min-h-[40px] text-sm bg-blue-500 text-white rounded-full hover:bg-blue-600 active:bg-blue-700 font-medium transition-colors"
@@ -698,6 +712,7 @@ export function ChatSidebar() {
         showVersionInTopBar={showVersionInTopBar}
         onShowVersionInTopBarChange={handleShowVersionInTopBarChange}
       />
+      <AgentOverlayPanel open={agentOverlayOpen} onClose={() => setAgentOverlayOpen(false)} />
     </div>
   );
 }

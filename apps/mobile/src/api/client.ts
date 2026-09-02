@@ -713,6 +713,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ decision }),
     })).match,
+  /** Idempotently create or return the caller's private My Agent conversation. */
+  ensureAssistant: () =>
+    request<Conversation>('/api/assistant/ensure', { method: 'POST' }),
 
   /**
    * Request a presigned PUT URL for an image upload. (OpenChat-6bg)
