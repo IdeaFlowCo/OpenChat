@@ -145,6 +145,16 @@ export async function maybeTranscribeMessage(
   try {
     await s.run('MATCH (m:Message {id: $id}) SET m.transcript = $t', { id: messageId, t: text });
 
+    // Upgrade the chat-list preview from the "Voice note" placeholder to the
+    // actual transcript (first-class voice notes). Guarded so a newer message
+    // that already replaced the preview is left alone.
+    await s.run(
+      `MATCH (c:Conversation {id: $convId})
+       WHERE c.lastMessagePreview IN ['Voice note', '📷 Photo', '🎤 Voice message']
+       SET c.lastMessagePreview = left($t, 100)`,
+      { convId: conversationId, t: text }
+    ).catch(() => { /* best-effort */ });
+
     if (io) {
       io.to(`conversation:${conversationId}`).emit('message:transcript', {
         messageId,
