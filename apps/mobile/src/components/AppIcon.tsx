@@ -1,14 +1,21 @@
 import Svg, { Circle, Line, Path, Polyline } from 'react-native-svg';
 
 export type AppIconName =
+  | 'attach'
+  | 'chat'
   | 'chevron-left'
   | 'chevron-right'
   | 'download'
+  | 'heart'
+  | 'mic'
   | 'more'
   | 'mute'
+  | 'pin'
   | 'plus'
   | 'search'
-  | 'settings';
+  | 'settings'
+  | 'stop'
+  | 'thought';
 
 interface AppIconProps {
   name: AppIconName;
@@ -87,6 +94,55 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
           <Circle cx="12" cy="12" r="1" fill={color} />
           <Circle cx="19" cy="12" r="1" fill={color} />
         </>
+      )}
+      {name === 'thought' && (
+        <>
+          {/* Cloud-style thought bubble with trailing dots */}
+          <Path
+            d="M18.5 13.5a4 4 0 0 0-1-7.9 5 5 0 0 0-9.4.9A3.6 3.6 0 0 0 8 13.7c.4 0 9.5 0 10.5-.2z"
+            {...common}
+          />
+          <Circle cx="8" cy="17.5" r="1.3" {...common} />
+          <Circle cx="5" cy="20.5" r="0.8" {...common} />
+        </>
+      )}
+      {name === 'pin' && (
+        <>
+          {/* Push-pin: head + body + point */}
+          <Path d="M9 4h6M10 4l-.5 6L6.8 12a1 1 0 0 0 .7 1.7h9a1 1 0 0 0 .7-1.7L14.5 10 14 4" {...common} />
+          <Line x1="12" y1="13.7" x2="12" y2="20" {...common} />
+        </>
+      )}
+      {name === 'chat' && (
+        /* Speech bubble with tail (feather message-circle style) */
+        <Path
+          d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"
+          {...common}
+        />
+      )}
+      {name === 'attach' && (
+        /* Paperclip (feather-style) */
+        <Path
+          d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 0 1-7.78-7.78l8.49-8.49a3.67 3.67 0 0 1 5.19 5.19l-8.49 8.48a1.83 1.83 0 0 1-2.59-2.59l7.78-7.78"
+          {...common}
+        />
+      )}
+      {name === 'mic' && (
+        <>
+          <Path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z" {...common} />
+          <Path d="M19 10v1a7 7 0 0 1-14 0v-1" {...common} />
+          <Line x1="12" y1="18" x2="12" y2="22" {...common} />
+        </>
+      )}
+      {name === 'stop' && (
+        /* Filled rounded square — stop recording */
+        <Path d="M7 7h10a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z" fill={color} stroke={color} strokeWidth={strokeWidth} />
+      )}
+      {name === 'heart' && (
+        <Path
+          d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+          {...common}
+        />
       )}
     </Svg>
   );

@@ -71,6 +71,8 @@ import { AddAgentKeyScreen } from './src/screens/AddAgentKeyScreen';
 import { AgentKeyDetailScreen } from './src/screens/AgentKeyDetailScreen';
 import { ThoughtsScreen } from './src/screens/ThoughtsScreen';
 import { AddEditThoughtScreen } from './src/screens/AddEditThoughtScreen';
+import { ConversationThoughtsScreen } from './src/screens/ConversationThoughtsScreen';
+import { AppIcon, AppIconName } from './src/components/AppIcon';
 import { getColors } from './src/theme/colors';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { InAppMessageBanner } from './src/components/InAppMessageBanner';
@@ -214,6 +216,14 @@ function ChatsNavigator({ currentUser, c }: {
         component={SecretaryScreen}
         options={{ title: 'Secretary' }}
       />
+      {/* Chat-scoped Thoughts: pinned + captured-from-this-chat */}
+      <ChatsStack.Screen
+        name="ConversationThoughts"
+        component={ConversationThoughtsScreen}
+        options={({ route }) => ({
+          title: route.params.title ? `Thoughts · ${route.params.title}` : 'Chat Thoughts',
+        })}
+      />
     </ChatsStack.Navigator>
   );
 }
@@ -272,8 +282,12 @@ function ThoughtsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
 
 const TAB_INDICATOR_HEIGHT = 3;
 
-function TabIcon({ label, focused, color, c }: {
-  label: string;
+function TabIcon({ label, icon, focused, color, c }: {
+  /** Emoji fallback — used only when `icon` is not provided. */
+  label?: string;
+  /** Line-icon name; preferred over emoji so tabs render identically across
+   *  platforms instead of picking up each OS's emoji font (design audit). */
+  icon?: AppIconName;
   focused: boolean;
   color: string;
   c: ReturnType<typeof getColors>;
@@ -307,16 +321,27 @@ function TabIcon({ label, focused, color, c }: {
           }}
         />
       )}
-      <Text
-        style={{
-          fontSize: focused ? 24 : 20,
-          color,
-          lineHeight: 28,
-          fontWeight: focused ? '700' : '400',
-        }}
-      >
-        {label}
-      </Text>
+      {icon ? (
+        <View style={{ height: 28, justifyContent: 'center' }}>
+          <AppIcon
+            name={icon}
+            color={color}
+            size={focused ? 24 : 21}
+            strokeWidth={focused ? 2.3 : 2}
+          />
+        </View>
+      ) : (
+        <Text
+          style={{
+            fontSize: focused ? 24 : 20,
+            color,
+            lineHeight: 28,
+            fontWeight: focused ? '700' : '400',
+          }}
+        >
+          {label}
+        </Text>
+      )}
     </View>
   );
 }
@@ -376,7 +401,7 @@ function AuthedTabs({
             <TabLabel text="Chats" focused={focused} color={color} />
           ),
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon label="💬" focused={focused} color={color} c={c} />
+            <TabIcon icon="chat" focused={focused} color={color} c={c} />
           ),
         }}
       >
@@ -389,7 +414,7 @@ function AuthedTabs({
             <TabLabel text="Thoughts" focused={focused} color={color} />
           ),
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon label="💭" focused={focused} color={color} c={c} />
+            <TabIcon icon="thought" focused={focused} color={color} c={c} />
           ),
         }}
       >

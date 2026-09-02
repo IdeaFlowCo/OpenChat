@@ -63,17 +63,21 @@ export async function startRecording(): Promise<Recording> {
 
 /**
  * Stop an active recording and return its local URI and duration.
+ *
+ * Duration comes from stopAndUnloadAsync's OWN return status — after unload,
+ * getStatusAsync only echoes a cached `_finalDurationMillis` that is 0 when
+ * the native stop result omits durationMillis (seen on iOS 26), which made
+ * every recording look sub-500ms and get silently discarded (OpenChat-7nu).
+ * Callers should still fall back to wall-clock elapsed time if this is 0.
  */
 export async function stopRecording(
   recording: Recording
 ): Promise<{ uri: string; durationMs: number }> {
-  await recording.stopAndUnloadAsync();
+  const status = await recording.stopAndUnloadAsync();
 
   // Restore audio mode so playback works after recording.
   await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
 
-  const status = await recording.getStatusAsync();
-  // RecordingStatus always has durationMillis (it's not optional in the type).
   const durationMs = status.durationMillis ?? 0;
 
   const uri = recording.getURI();

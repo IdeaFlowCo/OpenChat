@@ -53,6 +53,9 @@ export type RootStackParamList = {
   Permissions: undefined;
   /** Owner-approved automatic replies for routine direct-message questions. */
   Secretary: undefined;
+  /** Chat-scoped Thoughts: pinned + captured-from-this-chat (opened from the
+   *  chat header's thought-bubble icon). */
+  ConversationThoughts: { conversationId: string; title?: string };
 };
 
 // ── Thoughts stack (OpenChat-zi1) ─────────────────────────────────────────────

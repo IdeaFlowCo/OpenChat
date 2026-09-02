@@ -29,6 +29,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { Message, ReactionSummary } from '../api/client';
 import { ReactionPicker } from './ReactionPicker';
+import { AppIcon } from './AppIcon';
 
 export interface ReplyToData {
   messageId: string;
@@ -58,6 +59,12 @@ interface Props {
    * then forwards both the quoted message and the question to the Assistant.
    */
   onAskAssistant: (message: Message, question: string) => void;
+  /**
+   * Save the message into the user's Thoughts stream (with provenance).
+   * `pin` additionally pins the new thought to this conversation so all
+   * participants see it in the chat-scoped Thoughts view.
+   */
+  onSaveToThoughts: (message: Message, pin: boolean) => void;
   /** Edit action (own messages) — enters edit mode in composer */
   onEdit: (message: Message) => void;
   /** Delete action (own messages) — confirms and calls back */
@@ -83,6 +90,7 @@ export function MessageActionSheet({
   onForward,
   onForwardToAssistant,
   onAskAssistant,
+  onSaveToThoughts,
   onEdit,
   onDelete,
   onReact,
@@ -148,6 +156,21 @@ export function MessageActionSheet({
     const msg = message;
     handleDismiss();
     onAskAssistant(msg, q);
+  };
+
+  // Save to Thoughts / Save & pin (unified capture affordance).
+  const handleSaveToThoughts = () => {
+    if (!message) return;
+    const msg = message;
+    handleDismiss();
+    onSaveToThoughts(msg, false);
+  };
+
+  const handleSaveAndPin = () => {
+    if (!message) return;
+    const msg = message;
+    handleDismiss();
+    onSaveToThoughts(msg, true);
   };
 
   const handleEditPress = () => {
@@ -413,6 +436,35 @@ export function MessageActionSheet({
               </TouchableOpacity>
             )}
 
+            {/* Save to Thoughts / Save & pin — the unified capture affordance.
+                Saves this message's text into the user's Thoughts stream with
+                provenance; the pin variant also shares it to this chat's
+                pinned notes. Skip for messages with no text (e.g. image-only). */}
+            {!message.deletedAt && !!message.content?.trim() && (
+              <TouchableOpacity
+                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={handleSaveToThoughts}
+                activeOpacity={0.7}
+              >
+                <View style={styles.actionIconBox}>
+                  <AppIcon name="thought" color={c.textPrimary} size={20} />
+                </View>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Save to Thoughts</Text>
+              </TouchableOpacity>
+            )}
+            {!message.deletedAt && !!message.content?.trim() && (
+              <TouchableOpacity
+                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={handleSaveAndPin}
+                activeOpacity={0.7}
+              >
+                <View style={styles.actionIconBox}>
+                  <AppIcon name="pin" color={c.textPrimary} size={20} />
+                </View>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Save & pin to chat</Text>
+              </TouchableOpacity>
+            )}
+
             {/* Forward to Assistant — private "ask my agent" (openchat-ug6).
                 Always shown (own and others'), skip if deleted. Drops the
                 quoted message into the user's PRIVATE Assistant DM — never
@@ -557,6 +609,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     width: 26,
     textAlign: 'center',
+  },
+  // Same footprint as actionIcon, for SVG AppIcon rows.
+  actionIconBox: {
+    width: 26,
+    alignItems: 'center',
   },
   actionLabel: {
     fontSize: 17,
