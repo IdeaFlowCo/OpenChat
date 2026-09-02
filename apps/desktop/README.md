@@ -47,7 +47,7 @@ standard Tauri v2 setup — no custom Rust beyond the boilerplate entry point.
 ```bash
 cd apps/desktop
 npm install
-npm run build:web   # exports apps/mobile -> ../mobile/dist-web-app
+npm run build:web   # exports apps/mobile -> ../mobile/dist-web-shell
 npm run build:tauri # tauri build -> native installer in src-tauri/target/release/bundle
 # or: npm run dev    # starts Expo web on port 8081, then opens the Tauri dev window
 ```
@@ -67,9 +67,9 @@ If a Tauri toolchain isn't viable (e.g. a build host without Rust), an Electron
 wrapper is a drop-in alternative and is left as a documented follow-up:
 
 1. `npm i -D electron electron-builder` in a sibling `apps/desktop-electron`.
-2. A ~20-line `main.js` that `BrowserWindow.loadFile('dist-web-app/index.html')`
+2. A ~20-line `main.js` that `BrowserWindow.loadFile('dist-web-shell/index.html')`
    with `width: 1100, height: 760, minWidth: 380`.
-3. `electron-builder` config pointing `files` at the same `dist-web-app` export.
+3. `electron-builder` config pointing `files` at the same `dist-web-shell` export.
 
 Electron produces a larger binary (~150MB vs ~10MB) but needs no Rust and works
 on any Node host. The responsive RNW build is identical either way — the shell

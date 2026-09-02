@@ -1,5 +1,9 @@
 # Agent Overlay — Milestone 2 (FROZEN SPEC)
 
+> Historical milestone spec. The current product and privacy contract is
+> [`agent-social-layer.md`](./agent-social-layer.md); it supersedes the deferred
+> Stories scope, two-client parity, and modal-only desktop treatment below.
+
 **Status:** frozen implementation spec · **Date:** 2026-09-02 · **Epic:** OpenChat-a0e.5
 **Builds on:** `docs/design/agent-network-quiet-match.md` (M1, deployed 2026-09-02). No server changes required — M1's REST + `match:updated` socket event are the entire backend surface.
 

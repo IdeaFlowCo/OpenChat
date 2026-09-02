@@ -17,23 +17,10 @@ here in `src/`.
 
 ## Canonical client surface
 
-This app lives in the OpenChat monorepo and must stay in sync with the
-web/server surfaces:
+The repository-root `AGENTS.md` owns the client-surface and deployment contract.
+Apply it here: this is the single product client; do not mirror new work into
+the frozen `apps/web` source.
 
-| Path | What it is | Surfaces |
-|------|-----------|----------|
-| `apps/mobile` | React Native / Expo app | native iOS (TestFlight) + responsive RN-web at **`/app`** |
-| `apps/desktop` | Tauri shell around the `apps/mobile` RN-web app export | native desktop shell |
-| `apps/server` / `apps/web` | Node/Express + Neo4j server and frozen legacy Vite client source | `chat.globalbr.ai/api/*`; legacy is not a product surface |
-
-**Rule: `apps/mobile` is the single product client.** User-facing changes belong
-there and automatically reach phone, tablet, and desktop web through responsive
-layout. Do not mirror new work into `apps/web`; that code is retained only for
-history and migration reference.
-
-- The `apps/mobile` RN-web build powers `/app`. `/m`, `/d`, and `/legacy`
-  permanently redirect to `/app` while preserving the remaining path/query.
-  `infra/deploy.sh` runs one export and serves that output.
 - **Platform-appropriate exceptions are fine** (document them): e.g. Enter-to-send is **web-only** (`Platform.OS === 'web'`). On a native touch keyboard the return key stays a newline and sending is the send button. No hardware-keyboard Enter handling needed.
 - Pure platform-native experiments are not the current product focus and must
   not block or silently diverge from the Expo/React Native client.

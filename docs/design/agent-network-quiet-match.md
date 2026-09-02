@@ -1,5 +1,9 @@
 # Agent Network — Milestone 1: Quiet-Match Loop (FROZEN CONTRACT)
 
+> Historical milestone contract. The current product and privacy contract is
+> [`agent-social-layer.md`](./agent-social-layer.md); it supersedes the deferred
+> UI scope and two-client parity notes below.
+
 **Status:** frozen implementation contract · **Date:** 2026-09-02 · **Branch:** `feat/agent-network-quiet-match`
 **Product owner decisions by:** Fable (herder agent), confirmed direction from Jacob.
 **Prior art:** `docs/design/ambient-agents-and-privacy.md` (privacy invariant), `docs/agent-integration-paths.md` (integration layering).

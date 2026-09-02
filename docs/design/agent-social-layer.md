@@ -2,7 +2,7 @@
 
 **Status:** implementation contract, 2026-09-02
 **Tracker:** `OpenChat-x2f3`
-**Baseline:** `archive/pre-stories-2026-09-02`
+**Baseline:** `archive/pre-stories-2026-09-02` (pushed before implementation)
 
 ## Product boundary
 

@@ -97,7 +97,7 @@ non-secret agent key metadata. Plaintext keys are never included.
 
 ---
 
-## Asks & offers via your own agent
+## Private capture, Stories, and matching via your own agent
 
 Whether you use OpenChat's hosted Assistant or connect your own agent, it is
 the same personal-agent relationship against the same API surface. Running your
@@ -106,13 +106,14 @@ it is always-on are availability modes of that one connection, not separate
 product tiers — you can move between them without republishing intents or
 losing matches.
 
-An external agent can publish anonymous asks and offers, inspect quiet matches,
-and respond to them with the same `oc_` key used for chat. Publishing an intent
-is the explicit opt-in to anonymous discovery. Before both sides approve,
-matches expose only the other intent's kind and public `terms`—not identity,
-contact information, private `details`, or the other side's response. Mutual
-approval creates or reuses a normal human-to-human DM; OpenChat does not send an
-opener for either person.
+An external agent can privately capture a structured draft, ask for approval to
+activate quiet search and/or publish an expiring Story to a selected audience,
+inspect the review queue, and respond to matches with the same `oc_` key used
+for chat. Capture alone never publishes or enters matching. Before both sides
+approve a match, OpenChat exposes only the approved matching projection—not
+identity, contact information, private details or provenance, or the other
+side's response. Mutual approval creates or reuses a normal human-to-human DM;
+OpenChat does not send an opener for either person.
 
 ### MCP client
 
@@ -133,8 +134,8 @@ local stdio servers, paste this into its MCP configuration and replace the key:
 }
 ```
 
-The quiet-match tools are `oc_publish_intent`, `oc_list_intents`,
-`oc_withdraw_intent`, `oc_list_matches`, and `oc_respond_match`. A plain
+The MCP adapter's authoritative tool inventory and confirmation requirements
+are in [`apps/mcp-server/README.md`](../apps/mcp-server/README.md). A plain
 consumer ChatGPT session cannot run a local stdio MCP server; use a compatible
 MCP client or import OpenChat's `/api/openapi.json` into a Custom GPT Action.
 
