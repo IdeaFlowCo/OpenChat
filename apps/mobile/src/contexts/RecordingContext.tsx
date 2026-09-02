@@ -105,6 +105,10 @@ export function RecordingProvider({
 }: RecordingProviderProps) {
   const [state, setState] = useState<RecordingState>(initialState);
   const [finishing, setFinishing] = useState(false);
+  // Synchronous mirror of `finishing` — closes the window between nulling
+  // recordingRef and the async setFinishing(true) where a start() from another
+  // chat could race the in-flight native stop (review hardening, 2026-09-02).
+  const finishingRef = useRef(false);
   const [recentlyCancelled, setRecentlyCancelled] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -157,6 +161,7 @@ export function RecordingProvider({
     }
 
     clearTimers();
+    finishingRef.current = true;
     recordingRef.current = null;
     const originId = stateRef.current.conversationId;
     const originTitle = stateRef.current.conversationTitle;
@@ -174,6 +179,7 @@ export function RecordingProvider({
       if (cancelFeedbackTimerRef.current) clearTimeout(cancelFeedbackTimerRef.current);
       cancelFeedbackTimerRef.current = setTimeout(() => setRecentlyCancelled(false), 1200);
       await cancelRecording(recording);
+      finishingRef.current = false;
       return false;
     }
 
@@ -188,6 +194,7 @@ export function RecordingProvider({
           ? `“${originTitle}” is no longer available. Recording cancelled.`
           : 'That chat is no longer available. Recording cancelled.'
       );
+      finishingRef.current = false;
       return false;
     }
 
@@ -200,6 +207,7 @@ export function RecordingProvider({
     } catch (err) {
       logError('[voice] stopRecording failed', err, { conversationId: originId });
       Alert.alert('Recording failed', 'Could not finish the recording. Please try again.');
+      finishingRef.current = false;
       return false;
     }
 
@@ -211,6 +219,7 @@ export function RecordingProvider({
         durationMs,
         wallMs,
       });
+      finishingRef.current = false;
       return false;
     }
 
@@ -247,6 +256,7 @@ export function RecordingProvider({
       return false;
     } finally {
       setFinishing(false);
+      finishingRef.current = false;
     }
   }, [clearTimers, showNotice]);
 
@@ -263,6 +273,7 @@ export function RecordingProvider({
       || startingRef.current
       || recordingRef.current
       || finishing
+      || finishingRef.current
       || !isAuthedRef.current
     ) return;
 
@@ -356,7 +367,7 @@ export function RecordingProvider({
       await finishRef.current(false);
       return;
     }
-    if (startingRef.current || recordingRef.current || finishing) return;
+    if (startingRef.current || recordingRef.current || finishing || finishingRef.current) return;
     pressStartX.current = pageX;
     pressStartTimeRef.current = Date.now();
     pendingReleaseRef.current = null;
