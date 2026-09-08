@@ -50,7 +50,7 @@ services:
       # WIT issues via this agent key. Unset = /api/feedback returns 503.
       # Set: echo 'WIT_AGENT_KEY=wit_...' >> /opt/openchat/.env
       - WIT_AGENT_KEY=${WIT_AGENT_KEY:-}
-      - WIT_API_BASE=${WIT_API_BASE:-https://sthqnyjniclvnflfkyio.supabase.co/functions/v1}
+      - WIT_API_BASE=${WIT_API_BASE:-https://qmzopiburflputowkuhu.supabase.co/functions/v1}
       - WIT_SITE_URL=${WIT_SITE_URL:-https://worldissuetracker.com}
       # AI: message transforms (/api/ai), the in-app Assistant bot (bfn.3),
       # and semantic search embeddings (bfn.2). docker-compose only forwards

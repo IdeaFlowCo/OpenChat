@@ -410,6 +410,51 @@ function sendRateLimited(userId: string): boolean {
   return false;
 }
 
+// ─── Pending outbound send (cross-turn confirmation memory) ──────────────────
+// The confirmation gate below is a TWO-TURN handshake: turn A returns
+// needsConfirmation, the user replies "yes", and turn B is supposed to re-call
+// send_message with the same conversationId + content and confirm:true.
+//
+// But each assistant turn rebuilds its context from the PERSISTED CHAT MESSAGES
+// only (see loadConversationContext) — tool calls and tool results are not
+// stored. So by turn B the conversationId the model discovered in turn A is
+// simply gone, and the model has to guess. That is exactly how Jacob's
+// "Say 'test'" → "Yes" → "I don't have access to that conversation" failure
+// happened on 2026-09-08.
+//
+// Fix: remember the pending send server-side, keyed by user, and re-inject it
+// into the next turn's system prompt so turn B can complete the handshake with
+// the real ids. Single-slot per user: a new proposal replaces the old one.
+const PENDING_SEND_TTL_MS = 15 * 60_000;
+
+interface PendingSend {
+  conversationId: string;
+  content: string;
+  conversationName: string;
+  recipients: string[];
+  at: number;
+}
+
+const pendingSends = new Map<string, PendingSend>();
+
+function rememberPendingSend(userId: string, pending: Omit<PendingSend, 'at'>): void {
+  pendingSends.set(userId, { ...pending, at: Date.now() });
+}
+
+export function getPendingSend(userId: string): PendingSend | null {
+  const p = pendingSends.get(userId);
+  if (!p) return null;
+  if (Date.now() - p.at > PENDING_SEND_TTL_MS) {
+    pendingSends.delete(userId);
+    return null;
+  }
+  return p;
+}
+
+function clearPendingSend(userId: string): void {
+  pendingSends.delete(userId);
+}
+
 async function toolSendMessage(
   io: IOServer | undefined,
   userId: string,
@@ -457,6 +502,14 @@ async function toolSendMessage(
   // model must surface the send to the user and re-call with confirm:true. A
   // self/Assistant-only DM sends freely.
   if (hadOtherHumans && !confirm) {
+    // Stash it so the NEXT turn (after the user says "yes") can still resolve
+    // the real conversationId — see the PendingSend note above.
+    rememberPendingSend(userId, {
+      conversationId,
+      content: content.trim(),
+      conversationName,
+      recipients: otherHumans,
+    });
     return {
       needsConfirmation: true,
       conversationName,
@@ -472,6 +525,7 @@ async function toolSendMessage(
 
   const persisted = await persistMessage(io, userId, conversationId, content, { viaAssistant: true });
   if (!persisted) return { error: 'Failed to send message' };
+  clearPendingSend(userId);
 
   // AUDIT (openchat-bfn.4): log every assistant-initiated send.
   console.log(
@@ -480,6 +534,135 @@ async function toolSendMessage(
   );
 
   return { ok: true, messageId: persisted.message.id, conversationId };
+}
+
+// ─── Person resolution + send-to-person (openchat-0xjt follow-on) ────────────
+// Until now the only way to message somebody was send_message(conversationId),
+// which forced the model to first dig a conversation id out of
+// list_conversations and carry it across turns. That is the indirection that
+// broke Jacob's "send Robert a text" request. These two tools let the model
+// work in the terms the user actually speaks: a person's name.
+//
+// Discovery scope mirrors GET /api/chat/contacts so the Assistant can never
+// surface someone the user couldn't already find themselves:
+//   1. people the user already shares a conversation with -> name/email substring
+//   2. anyone -> complete, case-insensitive email match
+//   3. trusted directory users (canBrowseUserDirectory) -> substring anywhere
+interface ResolvedPerson {
+  id: string;
+  name: string | null;
+  email: string | null;
+  known: boolean;
+}
+
+export async function resolvePeople(userId: string, query: string): Promise<ResolvedPerson[]> {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const s = getDriver().session();
+  try {
+    const result = await s.run(
+      `
+      MATCH (actor:User {id: $userId})
+      WITH coalesce(actor.canBrowseUserDirectory, false) AS directoryAccess
+      MATCH (u:User)
+      WHERE u.id <> $userId AND coalesce(u.isBot, false) = false
+      OPTIONAL MATCH (me:User {id: $userId})-[:PARTICIPATES_IN]->(shared:Conversation)<-[:PARTICIPATES_IN]-(u)
+      WITH u, directoryAccess, count(shared) > 0 AS known
+      WHERE toLower(coalesce(u.email, '')) = $q
+         OR ((known OR directoryAccess) AND (
+              toLower(coalesce(u.name, '')) CONTAINS $q
+              OR toLower(coalesce(u.email, '')) CONTAINS $q
+            ))
+      RETURN u { .id, .name, .email } AS user, known
+      ORDER BY known DESC, u.name
+      LIMIT 10
+      `,
+      { userId, q }
+    );
+    return result.records.map((r) => {
+      const u = toJS(r.get('user')) as { id: string; name: string | null; email: string | null };
+      return { ...u, known: r.get('known') as boolean };
+    });
+  } finally {
+    await s.close();
+  }
+}
+
+async function toolFindPerson(userId: string, query: string): Promise<unknown> {
+  const people = await resolvePeople(userId, query);
+  if (people.length === 0) {
+    return {
+      people: [],
+      note: `No one matching "${query}" is reachable. You can only find people you already share a conversation with, or anyone by their complete email address.`,
+    };
+  }
+  return { people };
+}
+
+export async function toolSendMessageToPerson(
+  io: IOServer | undefined,
+  userId: string,
+  person: string,
+  content: string,
+  confirm: boolean
+): Promise<unknown> {
+  if (!person || !person.trim()) return { error: 'person is required' };
+  if (!content || !content.trim()) return { error: 'content is required' };
+
+  const people = await resolvePeople(userId, person);
+  if (people.length === 0) {
+    return {
+      error: `No one matching "${person}" is reachable. You can only message people you already share a conversation with, or anyone by their complete email address. Ask the user for their email.`,
+    };
+  }
+  if (people.length > 1) {
+    // Don't guess between people — a misdirected message is unrecoverable.
+    return {
+      ambiguous: true,
+      candidates: people.map((p) => ({ name: p.name, email: p.email })),
+      note: 'Ask the user which person they mean, then call again with a more specific person value (their full name or email).',
+    };
+  }
+
+  const target = people[0]!;
+  const displayName = target.name?.trim() || target.email || 'them';
+
+  // Confirmation gate — same policy as send_message: never send to another
+  // human without an explicit OK. Re-uses the pending-send memory so the
+  // "yes" on the NEXT turn can complete the handshake.
+  if (!confirm) {
+    // Resolve (or create) the DM up front so the remembered pending send points
+    // at a real conversation the user participates in.
+    const { conversation } = await ensureDirectConversation(userId, target.id, io);
+    rememberPendingSend(userId, {
+      conversationId: conversation.id as string,
+      content: content.trim(),
+      conversationName: displayName,
+      recipients: [displayName],
+    });
+    return {
+      needsConfirmation: true,
+      recipient: displayName,
+      preview: content.trim().slice(0, 300),
+    };
+  }
+
+  if (sendRateLimited(userId)) {
+    return { error: 'Send rate limit reached — please try again shortly.' };
+  }
+
+  const { conversation } = await ensureDirectConversation(userId, target.id, io);
+  const conversationId = conversation.id as string;
+  const persisted = await persistMessage(io, userId, conversationId, content, { viaAssistant: true });
+  if (!persisted) return { error: 'Failed to send message' };
+  clearPendingSend(userId);
+
+  console.log(
+    '[assistant] send_message_to_person',
+    JSON.stringify({ userId, recipientId: target.id, conversationId, confirmed: true })
+  );
+
+  return { ok: true, sentTo: displayName, messageId: persisted.message.id, conversationId };
 }
 
 export async function createConversationForAssistant(
@@ -536,7 +719,9 @@ export async function createConversationForAssistant(
 // ─── Feedback → WorldIssueTracker (openchat-1ny) ──────────────────────────────
 // Lets the user file feedback by just telling the Assistant. Mirrors the
 // /api/feedback route (same WIT_AGENT_KEY server env).
-const WIT_BASE = process.env.WIT_API_BASE || 'https://sthqnyjniclvnflfkyio.supabase.co/functions/v1';
+// Keep in sync with routes/feedback.ts. The old `sthqnyjniclvnflfkyio` project
+// is PAUSED; pointing at it made every submit_feedback call fail at connect.
+const WIT_BASE = process.env.WIT_API_BASE || 'https://qmzopiburflputowkuhu.supabase.co/functions/v1';
 const WIT_SITE = process.env.WIT_SITE_URL || 'https://worldissuetracker.com';
 const WIT_TRACKER_SLUG = process.env.WIT_FEEDBACK_TRACKER_SLUG || 'openchat'; // file on the OpenChat board, not orphan
 const FEEDBACK_MAX_MESSAGE = 5000; // match POST /api/feedback
@@ -661,6 +846,36 @@ function buildTools(): AnthropicType.Tool[] {
       },
     },
     {
+      name: 'find_person',
+      description:
+        "Look up a person the user can message, by name or email. Returns matching people with their name and email. Use this when the user names someone (\"message Robert\") and you need to know who they mean. Only returns people the user already shares a conversation with, plus anyone matched by a complete email address.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: "The person's name or email as the user said it" },
+        },
+        required: ['query'],
+      },
+    },
+    {
+      name: 'send_message_to_person',
+      description:
+        "Send a message AS THE USER to a person, by name or email — this is the PREFERRED way to message somebody. It finds the person and reuses (or creates) the direct conversation for you, so you do NOT need a conversationId. The first call returns { needsConfirmation: true, recipient, preview } and does NOT send: tell the user exactly what you'll send and to whom, wait for their explicit yes, then call again with the SAME person and content plus confirm:true. If it returns { ambiguous: true, candidates }, ask the user which person they mean instead of guessing.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          person: { type: 'string', description: "The recipient's name or email" },
+          content: { type: 'string', description: 'The message text to send' },
+          confirm: {
+            type: 'boolean',
+            description:
+              'Set true ONLY after the user has explicitly approved sending this exact message to this person. Leave false/omitted on the first attempt.',
+          },
+        },
+        required: ['person', 'content'],
+      },
+    },
+    {
       name: 'create_conversation',
       description: 'Create a new conversation with the given participant user ids (the user is added automatically).',
       input_schema: {
@@ -762,6 +977,17 @@ async function executeTool(
         if (!conversationId) return { error: 'conversationId is required' };
         return await toolSendMessage(io, userId, conversationId, content, confirm);
       }
+      case 'find_person': {
+        const query = typeof input.query === 'string' ? input.query : '';
+        if (!query.trim()) return { error: 'query is required' };
+        return await toolFindPerson(userId, query);
+      }
+      case 'send_message_to_person': {
+        const person = typeof input.person === 'string' ? input.person : '';
+        const content = typeof input.content === 'string' ? input.content : '';
+        const confirm = input.confirm === true;
+        return await toolSendMessageToPerson(io, userId, person, content, confirm);
+      }
       case 'create_conversation': {
         const participantIds = Array.isArray(input.participantIds)
           ? (input.participantIds.filter((x) => typeof x === 'string') as string[])
@@ -860,16 +1086,18 @@ async function loadConversationContext(
 }
 
 const SYSTEM_PROMPT = `You are Assistant, an in-app helper inside OpenChat (a chat application).
-You are talking with a user inside a direct-message conversation. You can search the user's messages, list and read their conversations, send messages on their behalf, create conversations, manage quiet-match asks/offers, and file feedback about OpenChat — all via tools. All tools act on behalf of THIS user only.
+You are talking with a user inside a direct-message conversation. You can search the user's messages, list and read their conversations, look up people, send messages on their behalf, create conversations, manage quiet-match asks/offers, and file feedback about OpenChat — all via tools. All tools act on behalf of THIS user only.
 
 Guidelines:
 - Be concise and conversational; this is a chat, not an essay.
 - Use tools to ground your answers in the user's actual messages/conversations rather than guessing.
-- Only use send_message / create_conversation when the user clearly asks you to act.
+- Only use send_message / send_message_to_person / create_conversation when the user clearly asks you to act.
+- To message a PERSON ("text Robert", "tell Sam I'm running late"), use send_message_to_person with their name — it resolves the person and their DM for you. Do NOT hunt for a conversationId in list_conversations and do NOT invent one; conversation ids are opaque and you will get them wrong. Reserve send_message for when you are already working with a specific conversation you just read.
+- Never guess who someone is. If find_person or send_message_to_person reports the name is ambiguous or unreachable, ask the user — for someone new, ask for their complete email address.
 - Quiet matching uses anonymous asks and offers. Publishing an intent is explicit discovery opt-in. Before calling publish_intent, echo the exact anonymous terms back to the user and wait for explicit confirmation. Explain that only kind and terms are shown before mutual approval; private details are never shown to the other person. Never publish silently.
 - Matches are double opt-in. A user's plain-language “yes, connect us” can authorize respond_match approval. Before declining, confirm that choice too. Never reveal or speculate about the other side's response. A closed match does not reveal who declined.
 - Mutual approval creates or reuses a normal DM between the two humans with a neutral context card. It never sends an opener on either person's behalf; tell the user they choose whether and what to write.
-- send_message to OTHER people requires confirmation: the first send_message call to a conversation that includes anyone besides the user returns { needsConfirmation: true, conversationName, recipients, preview } instead of sending. When you get that, DO NOT retry blindly — tell the user exactly what you'll send and to whom, wait for their explicit yes, then call send_message again with the SAME content and confirm:true. If they decline or change the wording, do not send. Messages to the user's own Assistant DM go through immediately with no confirmation.
+- Sending to OTHER people requires confirmation: the first send_message / send_message_to_person call returns { needsConfirmation: true, ... } instead of sending. When you get that, DO NOT retry blindly — tell the user exactly what you'll send and to whom, wait for their explicit yes, then call the SAME tool again with the SAME content and confirm:true. If they decline or change the wording, do not send. Messages to the user's own Assistant DM go through immediately with no confirmation.
 - If the user wants to report a bug, give feedback, or request a feature about OpenChat (the app), use submit_feedback — it files a tracked issue for the OpenChat team. Confirm what you'll send, then share the resulting link. This is how feedback reaches us, so offer it when the user seems stuck or frustrated with the app.
 - Your final response (plain text, no tool call) is delivered to the user as a chat message.`;
 
@@ -935,11 +1163,24 @@ export async function runAssistantTurn(opts: {
     const model = process.env.ASSISTANT_MODEL || 'claude-haiku-4-5';
     let finalText = '';
 
+    // Carry an unconfirmed send across the turn boundary. Tool results are not
+    // persisted, so without this the model cannot complete the confirm →
+    // "yes" → send handshake (see the PendingSend note above).
+    const pending = getPendingSend(userId);
+    const system = pending
+      ? `${SYSTEM_PROMPT}
+
+PENDING CONFIRMATION: on a previous turn you asked this user to confirm sending the following message, and it has NOT been sent yet:
+  to: ${pending.recipients.join(', ')} (conversationId: ${pending.conversationId})
+  content: ${JSON.stringify(pending.content)}
+If the user's latest message approves it, call send_message with exactly that conversationId and content and confirm:true. If they changed the wording, send the new wording. If they declined or moved on, ignore this and do not send.`
+      : SYSTEM_PROMPT;
+
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       const response = await client.messages.create({
         model,
         max_tokens: 1024,
-        system: SYSTEM_PROMPT,
+        system,
         tools,
         messages,
       });
