@@ -7,7 +7,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { resolveActor } from '../middleware/resolveActor.js';
-import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline, broadcastMessageToParticipants } from '../websocket/chatHandler.js';
+import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline, broadcastMessageToParticipants, fanoutPushForMessage } from '../websocket/chatHandler.js';
 import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPreview.js';
 import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
@@ -1036,6 +1036,18 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // persisted but never delivered live. Clients dedupe by message.id, so the
     // sender receiving its own broadcast is harmless. See OpenChat-5q1 / -60y.
     if (io) broadcastMessageToParticipants(io, participantIds, message);
+    // Push notifications. The socket send path has always fanned these out; this
+    // REST path did not, so a message sent over REST — which is exactly what
+    // happens when the sender's socket isn't up yet, e.g. the first message in a
+    // freshly created conversation — reached the recipient silently, with no
+    // notification. That is the "Robert's first message didn't come through, the
+    // second one did" report. Guarded on wasCreated so a client retry of the
+    // same message id doesn't notify twice.
+    if (wasCreated) {
+      void fanoutPushForMessage(conversationId as string, userId, message).catch((err) =>
+        console.warn('[push] REST fanout error:', err)
+      );
+    }
     // Outbound webhooks (openchat bot-channel): push the message to any external
     // subscriber (e.g. groupbrain). Fire-and-forget, no-ops when no subscription.
     if (wasCreated) dispatchMessageEvent(message, participantIds);
