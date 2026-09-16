@@ -403,6 +403,17 @@ async function request<T>(
   return (await res.json()) as T;
 }
 
+async function approvedPublication<T>(path: string, payload: object): Promise<T> {
+  const preview = await request<{ approvalGrant: string }>(path, {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, confirm: false }),
+  });
+  return request<T>(path, {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, confirm: true, approvalGrant: preview.approvalGrant }),
+  });
+}
+
 /**
  * Public Google OAuth client IDs (PROD). Safe to commit — these are public.
  *
@@ -814,9 +825,9 @@ export const api = {
     quietSearch?: { enabled: boolean; expiresAt?: string; audience?: StoryAudience };
     story?: { enabled: boolean; text: string; expiresAt?: string; audience: StoryAudience };
     closeOnConnect?: boolean;
-  }) => request<{ draft: IntentDraft; story?: OwnedStory | null; intent?: AgentIntent | null }>(
+  }) => approvedPublication<{ draft: IntentDraft; story?: OwnedStory | null; intent?: AgentIntent | null }>(
     `/api/intent-drafts/${encodeURIComponent(id)}/activate`,
-    { method: 'POST', body: JSON.stringify(params) },
+    params,
   ),
   listStoryFeed: async () =>
     (await request<{ stories: FeedStory[] }>('/api/stories/feed')).stories,
@@ -832,23 +843,19 @@ export const api = {
     openToCollaborators?: boolean;
     text: string;
     audience: StoryAudience;
-    storyExpiresAt?: string;
+    storyExpiresAt: string;
     quietSearch?: { enabled: boolean; expiresAt?: string; audience?: StoryAudience };
     closeOnConnect?: boolean;
-  }) => request<{ story: OwnedStory; intent?: AgentIntent | null }>('/api/stories', {
-    method: 'POST',
-    body: JSON.stringify(params),
-  }),
+  }) => approvedPublication<{ story: OwnedStory; intent?: AgentIntent | null }>('/api/stories', params),
   updateStory: (id: string, params: { status?: 'active' | 'paused' | 'withdrawn'; storyExpiresAt?: string }) =>
     request<{ story: OwnedStory }>(`/api/stories/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(params),
     }),
   respondToStory: (id: string, message: string) =>
-    request<{ conversationId: string; message: Message }>(`/api/stories/${encodeURIComponent(id)}/respond`, {
-      method: 'POST',
-      body: JSON.stringify({ message }),
-    }),
+    approvedPublication<{ conversationId: string; message: Message }>(
+      `/api/stories/${encodeURIComponent(id)}/respond`, { message },
+    ),
   getSocialPreferences: () => request<SocialPreferences>('/api/social/preferences'),
   updateSocialPreferences: (params: Partial<Pick<SocialPreferences, 'experienceMode' | 'networkPaused'>>) =>
     request<SocialPreferences>('/api/social/preferences', {

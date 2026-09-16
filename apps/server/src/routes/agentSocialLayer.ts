@@ -20,6 +20,7 @@ import {
   type DirectStoryInput,
   type DraftInput,
 } from '../services/agentSocialLayer.js';
+import { consumePublicationApproval, issuePublicationApproval } from '../services/publicationApproval.js';
 
 const router = Router();
 const MODES = ['fulfillment', 'reciprocal', 'shared_goal'] as const;
@@ -120,12 +121,14 @@ function draftBody(value: unknown, partial = false): DraftInput | { error: strin
 function activationBody(value: unknown): ActivationInput | { error: string } {
   if (!value || typeof value !== 'object') return { error: 'Request body is required' };
   const body = value as Record<string, unknown>;
-  if (body.confirm !== true) return { error: 'confirm must be true after explicit approval' };
   const result: ActivationInput = {};
   if (body.quietSearch !== undefined) {
     if (!body.quietSearch || typeof body.quietSearch !== 'object') return { error: 'quietSearch must be an object' };
     const quiet = body.quietSearch as Record<string, unknown>;
     if (typeof quiet.enabled !== 'boolean') return { error: 'quietSearch.enabled must be boolean' };
+    if (quiet.enabled && quiet.expiresAt === undefined) {
+      return { error: 'quietSearch.expiresAt is required for exact approval' };
+    }
     const expiry = futureDate(quiet.expiresAt, 'quietSearch.expiresAt');
     if (expiry && typeof expiry !== 'string') return expiry;
     const parsedAudience = audience(quiet.audience, false);
@@ -140,6 +143,9 @@ function activationBody(value: unknown): ActivationInput | { error: string } {
     if (!body.story || typeof body.story !== 'object') return { error: 'story must be an object' };
     const story = body.story as Record<string, unknown>;
     if (typeof story.enabled !== 'boolean') return { error: 'story.enabled must be boolean' };
+    if (story.enabled && story.expiresAt === undefined) {
+      return { error: 'story.expiresAt is required for exact approval' };
+    }
     if (story.enabled && (typeof story.text !== 'string' || story.text.trim().length < 1 || story.text.trim().length > 2000)) {
       return { error: 'story.text must be between 1 and 2000 characters' };
     }
@@ -167,7 +173,6 @@ function activationBody(value: unknown): ActivationInput | { error: string } {
 function directStoryBody(value: unknown): DirectStoryInput | { error: string } {
   if (!value || typeof value !== 'object') return { error: 'Request body is required' };
   const body = value as Record<string, unknown>;
-  if (body.confirm !== true) return { error: 'confirm must be true after explicit approval' };
   if (body.kind !== undefined && body.kind !== 'ask' && body.kind !== 'offer') {
     return { error: 'kind must be ask or offer' };
   }
@@ -188,11 +193,15 @@ function directStoryBody(value: unknown): DirectStoryInput | { error: string } {
   if (!parsedAudience || 'error' in parsedAudience) return parsedAudience ?? { error: 'audience is required' };
   const storyExpiry = futureDate(body.storyExpiresAt, 'storyExpiresAt');
   if (storyExpiry && typeof storyExpiry !== 'string') return storyExpiry;
+  if (!storyExpiry) return { error: 'storyExpiresAt is required for exact approval' };
   let quietSearch: DirectStoryInput['quietSearch'];
   if (body.quietSearch !== undefined) {
     if (!body.quietSearch || typeof body.quietSearch !== 'object') return { error: 'quietSearch must be an object' };
     const quiet = body.quietSearch as Record<string, unknown>;
     if (typeof quiet.enabled !== 'boolean') return { error: 'quietSearch.enabled must be boolean' };
+    if (quiet.enabled && quiet.expiresAt === undefined) {
+      return { error: 'quietSearch.expiresAt is required for exact approval' };
+    }
     const expiresAt = futureDate(quiet.expiresAt, 'quietSearch.expiresAt');
     if (expiresAt && typeof expiresAt !== 'string') return expiresAt;
     const quietAudience = audience(quiet.audience, false);
@@ -226,6 +235,33 @@ function handleError(res: Response, context: string, error: unknown): void {
   res.status(500).json({ error: context });
 }
 
+function approvalActor(req: Request): string {
+  return `${req.user!.userId}:${req.agentKeyId ?? 'human'}`;
+}
+
+function requirePublicationApproval(
+  req: Request,
+  res: Response,
+  action: string,
+  payload: unknown,
+): boolean {
+  const body = req.body as Record<string, unknown>;
+  if (body.confirm !== true) {
+    res.json({
+      approvalRequired: true,
+      approvalGrant: issuePublicationApproval(approvalActor(req), action, payload),
+      action,
+      payload,
+    });
+    return false;
+  }
+  if (!consumePublicationApproval(body.approvalGrant, approvalActor(req), action, payload)) {
+    res.status(409).json({ error: 'A valid single-use approval grant for this exact payload is required' });
+    return false;
+  }
+  return true;
+}
+
 router.get('/intent-drafts', resolveActor, async (req: Request, res: Response) => {
   try { res.json({ drafts: await listIntentDrafts(req.user!.userId) }); }
   catch (error) { handleError(res, 'Failed to list intent drafts', error); }
@@ -251,6 +287,8 @@ router.patch('/intent-drafts/:id', resolveActor, async (req: Request, res: Respo
 router.post('/intent-drafts/:id/activate', resolveActor, async (req: Request, res: Response) => {
   const parsed = activationBody(req.body);
   if ('error' in parsed) { res.status(400).json(parsed); return; }
+  const approvalPayload = { draftId: req.params.id as string, ...parsed };
+  if (!requirePublicationApproval(req, res, 'activate_intent_draft', approvalPayload)) return;
   try {
     const activated = await activateIntentDraft(req.user!.userId, req.params.id as string, parsed, {
       confirmed: true,
@@ -264,9 +302,8 @@ router.post('/intent-drafts/:id/activate', resolveActor, async (req: Request, re
 router.get('/stories/feed', resolveActor, async (req: Request, res: Response) => {
   try {
     const stories = await listStoryFeed(req.user!.userId);
-    // Personal agents receive the structured matching projection. Human JWT
-    // clients receive only the exact Story text they were approved to see;
-    // matching terms never leak through browser devtools or the UI.
+    // Personal agents receive structured terms only when agent search was
+    // approved. Human JWT clients receive only the approved Story text.
     res.json({
       stories: req.agentKeyId
         ? stories
@@ -286,6 +323,7 @@ router.get('/stories/mine', resolveActor, async (req: Request, res: Response) =>
 router.post('/stories', resolveActor, async (req: Request, res: Response) => {
   const parsed = directStoryBody(req.body);
   if ('error' in parsed) { res.status(400).json(parsed); return; }
+  if (!requirePublicationApproval(req, res, 'publish_story', parsed)) return;
   try {
     res.status(201).json(await createStory(req.user!.userId, parsed, {
       confirmed: true,
@@ -323,6 +361,8 @@ router.post('/stories/:id/respond', resolveActor, async (req: Request, res: Resp
     res.status(400).json({ error: 'message must be between 1 and 2000 characters' });
     return;
   }
+  const approvalPayload = { storyId: req.params.id as string, message: req.body.message.trim() };
+  if (!requirePublicationApproval(req, res, 'respond_to_story', approvalPayload)) return;
   try {
     const response = await respondToStory(
       req.user!.userId,

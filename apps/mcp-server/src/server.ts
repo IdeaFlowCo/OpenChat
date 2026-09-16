@@ -803,6 +803,7 @@ export function buildServer(
       inputSchema: {
         draftId: z.string().min(1),
         confirm: z.boolean().describe('Must be true only after the user explicitly approves this exact activation'),
+        approvalGrant: z.string().optional().describe('Single-use grant returned by the confirm:false preview'),
         quietSearch: z.object({
           enabled: z.boolean(),
           expiresAt: z.string().datetime().optional(),
@@ -817,14 +818,12 @@ export function buildServer(
         closeOnConnect: z.boolean().optional(),
       },
     },
-    async ({ draftId, confirm, quietSearch, story, closeOnConnect }) => {
+    async ({ draftId, confirm, approvalGrant, quietSearch, story, closeOnConnect }) => {
       try {
         requireApiKey(api, 'Activating an intent draft');
-        if (!confirm) {
-          return textResult('Not activated. Show the exact search terms, Story text, audience, and expiries, then ask the user for explicit approval.');
-        }
         return jsonResult(await api.activateIntentDraft(draftId, {
-          confirm: true,
+          confirm,
+          ...(approvalGrant ? { approvalGrant } : {}),
           ...(quietSearch ? { quietSearch } : {}),
           ...(story ? { story } : {}),
           ...(closeOnConnect === undefined ? {} : { closeOnConnect }),
@@ -877,6 +876,7 @@ export function buildServer(
         'Publish a human-visible Story to explicitly selected users/conversations. Call only after showing and receiving approval for the exact text, audience, structured terms, and expiries.',
       inputSchema: {
         confirm: z.boolean(),
+        approvalGrant: z.string().optional().describe('Single-use grant returned by the confirm:false preview'),
         kind: z.enum(['ask', 'offer']).optional().describe('Required when quiet search uses only free text, with no seeks or brings'),
         text: z.string().min(1).max(2000),
         audience: audienceSchema,
@@ -885,7 +885,7 @@ export function buildServer(
         brings: z.array(z.string().min(1).max(500)).max(20).optional(),
         matchingMode: z.enum(['fulfillment', 'reciprocal', 'shared_goal']).optional(),
         openToCollaborators: z.boolean().optional(),
-        storyExpiresAt: z.string().datetime().optional(),
+        storyExpiresAt: z.string().datetime(),
         quietSearch: z.object({
           enabled: z.boolean(),
           expiresAt: z.string().datetime().optional(),
@@ -894,11 +894,14 @@ export function buildServer(
         closeOnConnect: z.boolean().optional(),
       },
     },
-    async ({ confirm, ...body }) => {
+    async ({ confirm, approvalGrant, ...body }) => {
       try {
         requireApiKey(api, 'Publishing a Story');
-        if (!confirm) return textResult('Not published. Ask the user to approve the exact Story text, audience, and expiries first.');
-        return jsonResult(await api.createStory({ confirm: true, ...body }));
+        return jsonResult(await api.createStory({
+          confirm,
+          ...(approvalGrant ? { approvalGrant } : {}),
+          ...body,
+        }));
       } catch (e) {
         return intentErrorResult(e);
       }
@@ -955,22 +958,13 @@ export function buildServer(
         storyId: z.string().min(1),
         message: z.string().min(1).max(2000),
         confirm: z.boolean(),
+        approvalGrant: z.string().optional().describe('Single-use grant returned by the confirm:false preview'),
       },
     },
-    async ({ storyId, message, confirm }) => {
+    async ({ storyId, message, confirm, approvalGrant }) => {
       try {
         requireApiKey(api, 'Responding to a Story');
-        if (!confirm) {
-          const feed = await api.listStoryFeed();
-          const story = feed.stories.find((candidate) => candidate.id === storyId);
-          if (!story) return textResult('That Story is no longer visible, so no response was sent.');
-          return jsonResult({
-            needsConfirmation: true,
-            recipientStory: { id: story.id, author: story.author, text: story.text },
-            message,
-          });
-        }
-        return jsonResult(await api.respondStory(storyId, message));
+        return jsonResult(await api.respondStory(storyId, message, confirm, approvalGrant));
       } catch (e) {
         return intentErrorResult(e);
       }

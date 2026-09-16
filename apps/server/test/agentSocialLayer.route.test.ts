@@ -31,6 +31,18 @@ function bearer(userId = 'social-user'): string {
   return `Bearer ${jwt.sign({ userId, email: `${userId}@example.test` }, 'dev-secret-change-me')}`;
 }
 
+async function approvedPost(baseUrl: string, path: string, body: Record<string, unknown>) {
+  const headers = { Authorization: bearer(), 'Content-Type': 'application/json' };
+  const preview = await fetch(`${baseUrl}${path}`, {
+    method: 'POST', headers, body: JSON.stringify({ ...body, confirm: false }),
+  });
+  const approval = await preview.json() as { approvalGrant: string };
+  return fetch(`${baseUrl}${path}`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ ...body, confirm: true, approvalGrant: approval.approvalGrant }),
+  });
+}
+
 describe('agent-social routes', () => {
   let server: Server;
   let baseUrl: string;
@@ -82,15 +94,16 @@ describe('agent-social routes', () => {
 
   it('accepts a text-only direct Story with an explicit audience', async () => {
     mocks.createStory.mockResolvedValue({ story: { id: 'story' }, intent: { id: 'intent' } });
-    const body = { confirm: true, text: 'Extra ticket available', audience: { userIds: ['friend'], conversationIds: [] } };
-    const response = await fetch(`${baseUrl}/api/stories`, {
-      method: 'POST', headers: { Authorization: bearer(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const body = {
+      text: 'Extra ticket available', audience: { userIds: ['friend'], conversationIds: [] },
+      storyExpiresAt: '2099-09-03T00:00:00.000Z',
+    };
+    const response = await approvedPost(baseUrl, '/api/stories', body);
     expect(response.status).toBe(201);
     expect(mocks.createStory).toHaveBeenCalledWith('social-user', {
       text: body.text,
       audience: body.audience,
+      storyExpiresAt: body.storyExpiresAt,
     }, { confirmed: true, io: undefined });
   });
 
@@ -123,15 +136,11 @@ describe('agent-social routes', () => {
   it('passes separate search and Story expiries through explicit activation', async () => {
     mocks.activateIntentDraft.mockResolvedValue({ draft: { id: 'draft' }, story: { id: 'story' }, intent: { id: 'intent' } });
     const activation = {
-      confirm: true,
       quietSearch: { enabled: true, expiresAt: '2099-10-02T00:00:00.000Z' },
       story: { enabled: true, text: 'Looking for a ticket', expiresAt: '2099-09-03T00:00:00.000Z', audience: { userIds: ['friend'], conversationIds: [] } },
       closeOnConnect: false,
     };
-    const response = await fetch(`${baseUrl}/api/intent-drafts/draft/activate`, {
-      method: 'POST', headers: { Authorization: bearer(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(activation),
-    });
+    const response = await approvedPost(baseUrl, '/api/intent-drafts/draft/activate', activation);
     expect(response.status).toBe(201);
     expect(mocks.activateIntentDraft).toHaveBeenCalledWith('social-user', 'draft', {
       quietSearch: activation.quietSearch,
@@ -140,38 +149,64 @@ describe('agent-social routes', () => {
     }, { confirmed: true, io: undefined });
   });
 
-  it('requires explicit confirmation for activation and Story publication', async () => {
+  it('requires payload-bound single-use approval for activation and Story publication', async () => {
     const headers = { Authorization: bearer(), 'Content-Type': 'application/json' };
-    const story = await fetch(`${baseUrl}/api/stories`, {
+    const storyPreview = await fetch(`${baseUrl}/api/stories`, {
       method: 'POST', headers,
-      body: JSON.stringify({ text: 'Extra ticket', audience: { userIds: ['friend'], conversationIds: [] } }),
+      body: JSON.stringify({
+        text: 'Extra ticket', audience: { userIds: ['friend'], conversationIds: [] },
+        storyExpiresAt: '2099-09-03T00:00:00.000Z',
+      }),
+    });
+    const storyApproval = await storyPreview.json() as { approvalGrant: string };
+    const changedStory = await fetch(`${baseUrl}/api/stories`, {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        confirm: true,
+        approvalGrant: storyApproval.approvalGrant,
+        text: 'Changed after approval',
+        audience: { userIds: ['friend'], conversationIds: [] },
+        storyExpiresAt: '2099-09-03T00:00:00.000Z',
+      }),
+    });
+    const replay = await fetch(`${baseUrl}/api/stories`, {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        confirm: true,
+        approvalGrant: storyApproval.approvalGrant,
+        text: 'Extra ticket',
+        audience: { userIds: ['friend'], conversationIds: [] },
+        storyExpiresAt: '2099-09-03T00:00:00.000Z',
+      }),
     });
     const activation = await fetch(`${baseUrl}/api/intent-drafts/draft/activate`, {
       method: 'POST', headers,
-      body: JSON.stringify({ quietSearch: { enabled: true } }),
+      body: JSON.stringify({
+        confirm: true,
+        quietSearch: { enabled: true, expiresAt: '2099-10-02T00:00:00.000Z' },
+      }),
     });
-    expect(story.status).toBe(400);
-    expect(activation.status).toBe(400);
+    expect(storyPreview.status).toBe(200);
+    expect(changedStory.status).toBe(409);
+    expect(replay.status).toBe(409);
+    expect(activation.status).toBe(409);
     expect(mocks.createStory).not.toHaveBeenCalled();
     expect(mocks.activateIntentDraft).not.toHaveBeenCalled();
   });
 
   it('preserves explicit direction for a text-only quiet search', async () => {
     mocks.createStory.mockResolvedValue({ story: { id: 'story' }, intent: { id: 'intent' } });
-    const response = await fetch(`${baseUrl}/api/stories`, {
-      method: 'POST', headers: { Authorization: bearer(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        confirm: true,
+    const response = await approvedPost(baseUrl, '/api/stories', {
         kind: 'ask',
         text: 'I need a ticket',
         audience: { userIds: ['friend'], conversationIds: [] },
-        quietSearch: { enabled: true },
-      }),
+        storyExpiresAt: '2099-09-03T00:00:00.000Z',
+        quietSearch: { enabled: true, expiresAt: '2099-10-02T00:00:00.000Z' },
     });
     expect(response.status).toBe(201);
     expect(mocks.createStory).toHaveBeenCalledWith('social-user', expect.objectContaining({
       kind: 'ask',
-      quietSearch: { enabled: true },
+      quietSearch: { enabled: true, expiresAt: '2099-10-02T00:00:00.000Z' },
     }), { confirmed: true, io: undefined });
   });
 

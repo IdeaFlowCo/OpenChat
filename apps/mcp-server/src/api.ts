@@ -161,11 +161,11 @@ export interface OwnedStory {
 export interface FeedStory {
   id: string;
   author: { id: string; name: string | null };
-  goal: string;
-  seeks: string[];
-  brings: string[];
-  matchingMode: MatchingMode;
-  openToCollaborators: boolean;
+  goal?: string;
+  seeks?: string[];
+  brings?: string[];
+  matchingMode?: MatchingMode;
+  openToCollaborators?: boolean;
   text: string;
   storyExpiresAt: string;
   createdAt: string;
@@ -370,7 +370,8 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<{ draft: IntentDraft }>('PATCH', `/api/intent-drafts/${encodeURIComponent(id)}`, { body }),
 
     activateIntentDraft: (id: string, body: {
-      confirm: true;
+      confirm: boolean;
+      approvalGrant?: string;
       quietSearch?: { enabled: boolean; expiresAt?: string; audience?: SocialAudience };
       story?: { enabled: boolean; text: string; expiresAt?: string; audience: SocialAudience };
       closeOnConnect?: boolean;
@@ -385,7 +386,8 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<{ stories: FeedStory[] }>('GET', '/api/stories/feed'),
 
     createStory: (body: {
-      confirm: true;
+      confirm: boolean;
+      approvalGrant?: string;
       kind?: IntentKind;
       text: string;
       audience: SocialAudience;
@@ -394,7 +396,7 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       brings?: string[];
       matchingMode?: MatchingMode;
       openToCollaborators?: boolean;
-      storyExpiresAt?: string;
+      storyExpiresAt: string;
       quietSearch?: { enabled: boolean; expiresAt?: string; audience?: SocialAudience };
       closeOnConnect?: boolean;
     }) => request<{ story: OwnedStory; intent: AgentIntent }>('POST', '/api/stories', { body }),
@@ -407,9 +409,9 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
     withdrawStory: (id: string) =>
       request<{ story: OwnedStory }>('PATCH', `/api/stories/${encodeURIComponent(id)}`, { body: { status: 'withdrawn' } }),
 
-    respondStory: (id: string, message: string) =>
-      request<{ conversationId: string; message: Message }>('POST', `/api/stories/${encodeURIComponent(id)}/respond`, {
-        body: { message },
+    respondStory: (id: string, message: string, confirm: boolean, approvalGrant?: string) =>
+      request<unknown>('POST', `/api/stories/${encodeURIComponent(id)}/respond`, {
+        body: { message, confirm, ...(approvalGrant ? { approvalGrant } : {}) },
       }),
 
     getSocialPreferences: () =>

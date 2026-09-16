@@ -167,7 +167,7 @@ const OwnedStory = {
 
 const FeedStory = {
   type: 'object',
-  description: 'Agent-key projection of an audience-visible Story, including approved matching terms. Human JWT clients receive only id, author, text, expiry, and creation time.',
+  description: 'Audience-visible Story. Agent-key clients receive structured matching terms only when agent search was separately approved. Human JWT clients receive only id, author, text, expiry, and creation time.',
   properties: {
     id: { type: 'string' },
     author: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string', nullable: true } }, required: ['id', 'name'] },
@@ -533,10 +533,11 @@ export const openapiSpec = {
     '/api/intent-drafts/{id}/activate': {
       post: {
         operationId: 'activateIntentDraft', tags: ['Agent social'], summary: 'Explicitly activate a private draft',
-        description: 'Enable quietSearch, a human Story, or both after explicit approval of the exact terms, audience, and expiries. Human Stories require a non-empty selected audience. Defaults: quiet search 30 days; Story 24 hours. A Story-only activation remains outside agent matching.',
+        description: 'Call with confirm:false to receive a single-use approvalGrant and canonical payload. After explicit approval, repeat the exact payload with confirm:true and that grant. Human Stories require a non-empty selected audience and enabled channels require explicit expiries.',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: { required: true, content: json({ type: 'object', properties: {
-          confirm: { type: 'boolean', const: true, description: 'Set only after the user explicitly approves this exact activation.' },
+          confirm: { type: 'boolean', description: 'Use false to preview; true requires approvalGrant.' },
+          approvalGrant: { type: 'string', description: 'Single-use grant returned by the confirm:false preview.' },
           quietSearch: { type: 'object', properties: { enabled: { type: 'boolean' }, expiresAt: { type: 'string', format: 'date-time' }, audience: { $ref: '#/components/schemas/SocialAudience' } }, required: ['enabled'] },
           story: { type: 'object', properties: { enabled: { type: 'boolean' }, text: { type: 'string', maxLength: 2000 }, expiresAt: { type: 'string', format: 'date-time' }, audience: { $ref: '#/components/schemas/SocialAudience' } }, required: ['enabled', 'text', 'audience'] },
           closeOnConnect: { type: 'boolean', default: true },
@@ -553,9 +554,10 @@ export const openapiSpec = {
     '/api/stories': {
       post: {
         operationId: 'createStory', tags: ['Agent social'], summary: 'Explicitly publish a selected-audience human Story',
-        description: 'Publishing requires confirm:true after explicit approval of the exact text, audience, and expiries. Text alone is sufficient. Structured terms are optional. Without separately enabled quietSearch, the Story remains outside agent matching.',
+        description: 'Call with confirm:false to receive a single-use approvalGrant and canonical payload. After explicit approval, repeat the exact payload with confirm:true and that grant. Structured terms are optional and require separately enabled quietSearch for agent visibility.',
         requestBody: { required: true, content: json({ type: 'object', properties: {
-          confirm: { type: 'boolean', const: true, description: 'Set only after the user explicitly approves this exact Story.' },
+          confirm: { type: 'boolean', description: 'Use false to preview; true requires approvalGrant.' },
+          approvalGrant: { type: 'string', description: 'Single-use grant returned by the confirm:false preview.' },
           kind: { type: 'string', enum: ['ask', 'offer'], description: 'Required for a quiet search when seeks and brings are both empty.' },
           text: { type: 'string', minLength: 1, maxLength: 2000 }, audience: { $ref: '#/components/schemas/SocialAudience' },
           goal: { type: 'string', maxLength: 500 }, seeks: { type: 'array', items: { type: 'string' } }, brings: { type: 'array', items: { type: 'string' } },
@@ -563,7 +565,7 @@ export const openapiSpec = {
           storyExpiresAt: { type: 'string', format: 'date-time' },
           quietSearch: { type: 'object', properties: { enabled: { type: 'boolean' }, expiresAt: { type: 'string', format: 'date-time' }, audience: { $ref: '#/components/schemas/SocialAudience' } }, required: ['enabled'] },
           closeOnConnect: { type: 'boolean', default: true },
-        }, required: ['confirm', 'text', 'audience'] }) },
+        }, required: ['confirm', 'text', 'audience', 'storyExpiresAt'] }) },
         responses: { '201': ok({ type: 'object', properties: { story: { $ref: '#/components/schemas/OwnedStory' }, intent: { $ref: '#/components/schemas/AgentIntent' } } }, 'Created'), '400': errResp('Bad request') },
       },
     },
@@ -571,7 +573,7 @@ export const openapiSpec = {
       patch: { operationId: 'updateStory', tags: ['Agent social'], summary: 'Pause, resume, withdraw, or extend an owned Story', description: 'At least one field is required. A separately approved quiet search retains its own state and expiry across human Story changes. Without separate quiet-search approval, pause/resume mirrors the linked audience-scoped intent and expiry extensions stay synchronized.', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: json({ type: 'object', properties: { status: { type: 'string', enum: ['active', 'paused', 'withdrawn'] }, storyExpiresAt: { type: 'string', format: 'date-time' } } }) }, responses: { '200': ok({ type: 'object', properties: { story: { $ref: '#/components/schemas/OwnedStory' } } }), '400': errResp('Bad request'), '404': errResp('Not found') } },
     },
     '/api/stories/{id}/respond': {
-      post: { operationId: 'respondToStory', tags: ['Agent social'], summary: 'Reply to a currently visible Story in a normal DM', description: 'Authorization is rechecked against current audience, membership, blocks, status, and expiry before sending.', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: json({ type: 'object', properties: { message: { type: 'string', minLength: 1, maxLength: 2000 } }, required: ['message'] }) }, responses: { '201': ok({ type: 'object', properties: { conversationId: { type: 'string' }, message: { $ref: '#/components/schemas/Message' } } }, 'Sent'), '404': errResp('Visible Story not found') } },
+      post: { operationId: 'respondToStory', tags: ['Agent social'], summary: 'Reply to a currently visible Story in a normal DM', description: 'Call with confirm:false to receive a payload-bound approvalGrant, then resend the exact message with confirm:true and that grant after approval. Authorization is rechecked before sending.', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: json({ type: 'object', properties: { message: { type: 'string', minLength: 1, maxLength: 2000 }, confirm: { type: 'boolean' }, approvalGrant: { type: 'string' } }, required: ['message', 'confirm'] }) }, responses: { '201': ok({ type: 'object', properties: { conversationId: { type: 'string' }, message: { $ref: '#/components/schemas/Message' } } }, 'Sent'), '404': errResp('Visible Story not found') } },
     },
     '/api/social/preferences': {
       get: { operationId: 'getSocialPreferences', tags: ['Agent social'], summary: 'Get presentation mode and independent network pause', responses: { '200': ok({ $ref: '#/components/schemas/SocialPreferences' }) } },

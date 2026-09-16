@@ -83,11 +83,11 @@ export interface OwnedStory {
 export interface FeedStory {
   id: string;
   author: { id: string; name: string | null };
-  goal: string;
-  seeks: string[];
-  brings: string[];
-  matchingMode: MatchingMode;
-  openToCollaborators: boolean;
+  goal?: string;
+  seeks?: string[];
+  brings?: string[];
+  matchingMode?: MatchingMode;
+  openToCollaborators?: boolean;
   text: string;
   storyExpiresAt: string;
   createdAt: string;
@@ -294,11 +294,13 @@ export function projectStoryForFeed(
   return {
     id: story.id,
     author: { id: author.id, name: author.name ?? null },
-    goal: story.goal,
-    seeks: story.seeks,
-    brings: story.brings,
-    matchingMode: story.matchingMode,
-    openToCollaborators: story.openToCollaborators,
+    ...(story.agentSearchEnabled ? {
+      goal: story.goal,
+      seeks: story.seeks,
+      brings: story.brings,
+      matchingMode: story.matchingMode,
+      openToCollaborators: story.openToCollaborators,
+    } : {}),
     text: story.text,
     storyExpiresAt: story.storyExpiresAt,
     createdAt: story.createdAt,

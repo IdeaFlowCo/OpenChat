@@ -49,6 +49,7 @@ import {
   type DraftInput,
   type SocialPreferences,
 } from './agentSocialLayer.js';
+import { consumePublicationApproval, issuePublicationApproval } from './publicationApproval.js';
 
 export const ASSISTANT_USER_ID = 'assistant';
 export const ASSISTANT_NAME = 'Assistant';
@@ -798,6 +799,7 @@ function buildTools(): AnthropicType.Tool[] {
         properties: {
           draftId: { type: 'string' },
           confirm: { type: 'boolean' },
+          approvalGrant: { type: 'string' },
           quietSearch: {
             type: 'object',
             properties: {
@@ -994,9 +996,6 @@ async function executeTool(
       case 'activate_intent_draft': {
         const draftId = typeof input.draftId === 'string' ? input.draftId : '';
         if (!draftId) return { error: 'draftId is required' };
-        if (input.confirm !== true) {
-          return { needsConfirmation: true, message: 'Show the exact search terms, Story text, audience, and expiries before activation.' };
-        }
         const parseAudience = (value: unknown): Audience | undefined => {
           if (!value || typeof value !== 'object') return undefined;
           const record = value as Record<string, unknown>;
@@ -1023,6 +1022,30 @@ async function executeTool(
           } } : {}),
           ...(typeof input.closeOnConnect === 'boolean' ? { closeOnConnect: input.closeOnConnect } : {}),
         };
+        if (activation.quietSearch?.enabled && !activation.quietSearch.expiresAt) {
+          return { error: 'quietSearch.expiresAt is required for exact approval' };
+        }
+        if (activation.story?.enabled && !activation.story.expiresAt) {
+          return { error: 'story.expiresAt is required for exact approval' };
+        }
+        const approvalPayload = { draftId, ...activation };
+        const approvalActor = `${userId}:assistant`;
+        if (input.confirm !== true) {
+          return {
+            needsConfirmation: true,
+            approvalGrant: issuePublicationApproval(approvalActor, 'activate_intent_draft', approvalPayload),
+            payload: approvalPayload,
+            message: 'Show the exact search terms, Story text, audience, and expiries before activation.',
+          };
+        }
+        if (!consumePublicationApproval(
+          input.approvalGrant,
+          approvalActor,
+          'activate_intent_draft',
+          approvalPayload,
+        )) {
+          return { error: 'A valid single-use approval grant for this exact activation is required' };
+        }
         const activated = await activateIntentDraft(userId, draftId, activation, { confirmed: true, io });
         return activated ?? { error: 'Pending draft not found' };
       }
@@ -1099,7 +1122,7 @@ Guidelines:
 - Use tools to ground your answers in the user's actual messages/conversations rather than guessing.
 - Only use send_message / create_conversation when the user clearly asks you to act.
 - Quiet matching uses anonymous asks and offers. Publishing an intent is explicit discovery opt-in. Before calling publish_intent, echo the exact anonymous terms back to the user and wait for explicit confirmation. Explain that only kind and terms are shown before mutual approval; private details are never shown to the other person. Never publish silently.
-- When the user mentions a possible ask, offer, resource, or collaboration, save_intent_draft may capture it privately without publication confirmation. Clearly say it remains private. Never activate it silently. Before activate_intent_draft, show the exact agent-search terms, any human Story text, selected audience, and expiries; wait for an explicit yes, then call with confirm:true. Agent-only items never appear in the human Story feed.
+- When the user mentions a possible ask, offer, resource, or collaboration, save_intent_draft may capture it privately without publication confirmation. Clearly say it remains private. Never activate it silently. Call activate_intent_draft with confirm:false to get the exact payload and approvalGrant, show the agent-search terms, any human Story text, selected audience, and expiries, then wait for an explicit yes and call again with the same payload, confirm:true, and that approvalGrant. Agent-only items never appear in the human Story feed.
 - Matches are double opt-in. A user's plain-language “yes, connect us” can authorize respond_match approval. Before declining, confirm that choice too. Never reveal or speculate about the other side's response. A closed match does not reveal who declined.
 - Mutual approval creates or reuses a normal DM between the two humans with a neutral context card. It never sends an opener on either person's behalf; tell the user they choose whether and what to write.
 - send_message to OTHER people requires confirmation: the first send_message call to a conversation that includes anyone besides the user returns { needsConfirmation: true, conversationName, recipients, preview } instead of sending. When you get that, DO NOT retry blindly — tell the user exactly what you'll send and to whom, wait for their explicit yes, then call send_message again with the SAME content and confirm:true. If they decline or change the wording, do not send. Messages to the user's own Assistant DM go through immediately with no confirmation.

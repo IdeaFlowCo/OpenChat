@@ -55,7 +55,28 @@ describe('agent-social defaults and projections', () => {
     const feed = projectStoryForFeed(story, { id: 'owner', name: 'Jacob' });
     expect(feed.author).toEqual({ id: 'owner', name: 'Jacob' });
     expect(feed.text).toBe('Looking for one ticket');
-    expect(JSON.stringify(feed)).not.toMatch(/private-link|audience|intentId|ownerUserId|searchExpiresAt/);
+    expect(feed).not.toHaveProperty('goal');
+    expect(feed).not.toHaveProperty('seeks');
+    expect(feed).not.toHaveProperty('brings');
+    expect(feed).not.toHaveProperty('matchingMode');
+    expect(feed).not.toHaveProperty('openToCollaborators');
+    expect(JSON.stringify(feed)).not.toMatch(/private-link|audience|intentId|ownerUserId|searchExpiresAt|face value/);
+  });
+
+  it('includes structured terms only when agent search was explicitly approved', () => {
+    const story: OwnedStory = {
+      id: 'story-1', ownerUserId: 'owner', goal: 'Find a ticket', seeks: ['ticket'],
+      brings: ['face value'], matchingMode: 'reciprocal', openToCollaborators: true,
+      text: 'Looking for one ticket', humanVisible: true, agentSearchEnabled: true,
+      explicitQuietSearch: true, status: 'active',
+      audience: { userIds: ['friend'], conversationIds: [] },
+      storyExpiresAt: '2026-09-03T12:00:00.000Z', searchExpiresAt: '2026-10-02T12:00:00.000Z',
+      intentId: 'intent', createdAt, updatedAt: createdAt,
+    };
+    expect(projectStoryForFeed(story, { id: 'owner' })).toMatchObject({
+      goal: 'Find a ticket', seeks: ['ticket'], brings: ['face value'],
+      matchingMode: 'reciprocal', openToCollaborators: true,
+    });
   });
 
   it('rejects an agent-only object from the human feed projection', () => {
