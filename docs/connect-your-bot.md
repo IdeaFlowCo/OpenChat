@@ -97,7 +97,7 @@ non-secret agent key metadata. Plaintext keys are never included.
 
 ---
 
-## Asks & offers via your own agent
+## Private capture, Stories, and matching via your own agent
 
 Whether you use OpenChat's hosted Assistant or connect your own agent, it is
 the same personal-agent relationship against the same API surface. Running your
@@ -106,37 +106,23 @@ it is always-on are availability modes of that one connection, not separate
 product tiers — you can move between them without republishing intents or
 losing matches.
 
-An external agent can publish anonymous asks and offers, inspect quiet matches,
-and respond to them with the same `oc_` key used for chat. Publishing an intent
-is the explicit opt-in to anonymous discovery. Before both sides approve,
-matches expose only the other intent's kind and public `terms`—not identity,
-contact information, private `details`, or the other side's response. Mutual
-approval creates or reuses a normal human-to-human DM; OpenChat does not send an
-opener for either person.
+An external agent can privately capture a structured draft, ask for approval to
+activate quiet search and/or publish an expiring Story to a selected audience,
+inspect the review queue, and respond to matches with the same `oc_` key used
+for chat. Capture alone never publishes or enters matching. Before both sides
+approve a match, OpenChat exposes only the approved matching projection—not
+identity, contact information, private details or provenance, or the other
+side's response. Mutual approval creates or reuses a normal human-to-human DM;
+OpenChat does not send an opener for either person.
 
 ### MCP client
 
 For Claude Desktop or another Claude/ChatGPT-compatible MCP client that supports
-local stdio servers, paste this into its MCP configuration and replace the key:
-
-```json
-{
-  "mcpServers": {
-    "openchat": {
-      "command": "npx",
-      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
-      "env": {
-        "OPENCHAT_API_KEY": "oc_your_key_here"
-      }
-    }
-  }
-}
-```
-
-The quiet-match tools are `oc_publish_intent`, `oc_list_intents`,
-`oc_withdraw_intent`, `oc_list_matches`, and `oc_respond_match`. A plain
-consumer ChatGPT session cannot run a local stdio MCP server; use a compatible
-MCP client or import OpenChat's `/api/openapi.json` into a Custom GPT Action.
+local stdio servers, follow the maintained build and client configuration in
+[`apps/mcp-server/README.md`](../apps/mcp-server/README.md). That document also
+owns the tool inventory and confirmation requirements. A plain consumer ChatGPT
+session cannot run a local stdio MCP server; use a compatible MCP client or
+import OpenChat's `/api/openapi.json` into a Custom GPT Action.
 
 ### Plain REST
 
@@ -150,7 +136,7 @@ BASE_URL="https://chat.globalbr.ai"
 curl -X POST "$BASE_URL/api/intents" \
   -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
-  -d '{"kind":"ask","terms":"Looking for help repairing a bicycle","details":"Weekends work best"}'
+  -d '{"kind":"ask","terms":"Looking for help repairing a bicycle","confirm":true,"details":"Weekends work best"}'
 
 # List all of your intents, including their private details and status.
 curl "$BASE_URL/api/intents" \
@@ -314,66 +300,15 @@ the owning user until scope enforcement is implemented.
 
 The OpenChat MCP server lets Claude Desktop, Cursor, Codex CLI, Claude Code, and
 any other MCP-aware client read AND write to your OpenChat conversations as
-*you*. It also exposes the quiet-match tools `oc_publish_intent`,
-`oc_list_intents`, `oc_withdraw_intent`, `oc_list_matches`, and
-`oc_respond_match`.
+*you*. See the [MCP server tool inventory](../apps/mcp-server/README.md#tools)
+for the maintained list of chat, private-capture, Story, matching, review, and
+preference tools plus their approval requirements.
 
-Source: <https://github.com/tmad4000/openchat-mcp-server>
+Source: <https://github.com/IdeaFlowCo/OpenChat/tree/main/apps/mcp-server>
 
-### Claude Desktop
-
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "openchat": {
-      "command": "npx",
-      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
-      "env": {
-        "OPENCHAT_API_KEY": "oc_your_key_here"
-      }
-    }
-  }
-}
-```
-
-Restart Claude Desktop — the OpenChat tools appear in the 🔌 menu.
-
-### Cursor
-
-`~/.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "openchat": {
-      "command": "npx",
-      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
-      "env": { "OPENCHAT_API_KEY": "oc_your_key_here" }
-    }
-  }
-}
-```
-
-### Codex CLI
-
-`~/.codex/config.toml`:
-
-```toml
-[mcp_servers.openchat]
-command = "npx"
-args = ["-y", "github:tmad4000/openchat-mcp-server"]
-env = { OPENCHAT_API_KEY = "oc_your_key_here" }
-```
-
-### Claude Code
-
-```bash
-claude mcp add openchat \
-  --env OPENCHAT_API_KEY=oc_your_key_here \
-  -- npx -y github:tmad4000/openchat-mcp-server
-```
+Build and configuration instructions for Claude Desktop, Cursor, Codex CLI,
+Claude Code, and HTTP clients are maintained in the
+[MCP server README](../apps/mcp-server/README.md#30-second-setup).
 
 ### How bi-directional access works
 

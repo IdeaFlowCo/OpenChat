@@ -2,30 +2,34 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
-## 🔁 Web ↔ Mobile parity (MANDATORY)
+## Canonical client surface
 
 **MONOREPO (since 2026-06-04):** everything lives in this one repo, `IdeaFlowCo/OpenChat`:
 
 | Path | What it is | Surfaces |
 |------|-----------|----------|
 | `apps/server` | Node/Express + Socket.io + Neo4j **server** (shared backend) | `chat.globalbr.ai/api/*` |
-| `apps/web` | Vite/React **web** client (legacy) | `chat.globalbr.ai/`, `/legacy` |
-| `apps/mobile` | React Native / Expo app | native iOS (TestFlight) + RN-web at **`/m`** (mobile web) and **`/d`** (desktop web) |
+| `apps/web` | Frozen legacy Vite client source | migration reference only; not built or served |
+| `apps/mobile` | React Native / Expo product client | native iOS (TestFlight) + responsive RN-web at **`/app`** |
 | `apps/desktop` | Tauri desktop wrapper around the `apps/mobile` RN-web export | native desktop shell |
 | `apps/mcp-server` | MCP REST→tools bridge (Claude-side connector) | run locally / connect to Claude |
 | `infra/` | `deploy.sh`, `docker-compose.prod.yml`, `Dockerfile` | GCP prod deploy |
 
 (The old separate `tmad4000/openchat-mobile` repo is **frozen/archived** — its history is in `apps/mobile`.)
 
-**Rule: any user-facing chat change in one client (`apps/web` / `apps/mobile`) must be mirrored in the other in the SAME session** so native and web never drift (composer, send/receive, auth, rendering, presence…). The backend (`apps/server`) is shared, so server changes cover both. `infra/deploy.sh` rebuilds `/m`,`/d` from `apps/mobile`.
+**Rule: `apps/mobile` is the single product client.** User-facing changes belong
+there and reach native, phone web, tablet web, and desktop web through the
+responsive layout. Do not mirror new work into `apps/web`; it is retained only
+for history and migration reference. The backend (`apps/server`) is shared.
+`infra/deploy.sh` builds the one `/app` RN-web export; `/m`, `/d`, and `/legacy`
+redirect to `/app` while preserving the remaining path and query.
 - **Platform-appropriate exceptions are fine** (just document them): e.g. Enter-to-send is **web-only** — on a native touch keyboard the return key stays a newline and sending is the send button. No hardware-keyboard Enter handling is needed.
-- Standing tracker: epic **openchat-3jq** ("keep web/mobile in sync").
 
 ## 🚀 Deploy when done (STANDING RULE — Jacob, 2026-06-04)
 
 When you finish a chunk of work, **deploy both** without asking each time:
 
-1. **Web / server / `/m` / `/d`:**
+1. **Web / server / `/app`:**
    ```bash
    cd ~/code/OpenChat && bash infra/deploy.sh
    ```

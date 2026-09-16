@@ -45,9 +45,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "export:web:mobile": "IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/m expo export --platform web --output-dir dist-web-m --clear",
-    "export:web:desktop": "IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/d expo export --platform web --output-dir dist-web-d --clear",
-    "export:web:app": "IS_WEB_BUILD=1 expo export --platform web --output-dir dist-web-app --clear",
+    "export:web:app": "IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/app expo export --platform web --output-dir dist-web-app --clear",
+    "export:web:shell": "IS_WEB_BUILD=1 expo export --platform web --output-dir dist-web-shell --clear",
     "bump:patch": "node scripts/bump-version.js patch",
     "bump:minor": "node scripts/bump-version.js minor",
     "bump:major": "node scripts/bump-version.js major"

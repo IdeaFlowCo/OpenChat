@@ -6,8 +6,8 @@
  *
  * Web platform: hard-skipped. @sentry/react-native is RN-native only; pulling
  * it into the web bundle causes tslib resolution failures during Expo's web
- * export (verified empirically — broke /m/ and /d/ deploys until this guard
- * was added). Web has its own browser-level crash reporting if/when we need
+ * export (verified empirically — broke the RN-web export until this guard was
+ * added). Web has its own browser-level crash reporting if/when we need
  * it; do not add @sentry/browser through this module without re-checking the
  * web bundle.
  *

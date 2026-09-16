@@ -8,9 +8,19 @@ A [Model Context Protocol](https://modelcontextprotocol.io) adapter for [OpenCha
 
 1. Open OpenChat → **Settings → Agent keys → +** → name it → **Create key**
 2. Copy the key (starts with `oc_`)
-3. Paste one of the snippets below into your MCP client's config
+3. Build this workspace and paste one of the snippets below into your MCP client's config
 
-That's it. No npm install, no clone — the `npx github:…` form below builds and runs the server on first launch.
+The maintained adapter lives in the OpenChat monorepo. Clone and build it once:
+
+```bash
+git clone https://github.com/IdeaFlowCo/OpenChat.git
+cd OpenChat
+npm install
+npm run build --workspace=openchat-mcp-server
+```
+
+In the snippets below, replace `/absolute/path/to/OpenChat` with that checkout's
+absolute path. Rebuild the workspace after pulling updates.
 
 ## Claude Desktop
 
@@ -20,8 +30,8 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 {
   "mcpServers": {
     "openchat": {
-      "command": "npx",
-      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
+      "command": "node",
+      "args": ["/absolute/path/to/OpenChat/apps/mcp-server/dist/index.js"],
       "env": {
         "OPENCHAT_API_KEY": "oc_your_key_here"
       }
@@ -40,8 +50,8 @@ Edit `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project-scoped):
 {
   "mcpServers": {
     "openchat": {
-      "command": "npx",
-      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
+      "command": "node",
+      "args": ["/absolute/path/to/OpenChat/apps/mcp-server/dist/index.js"],
       "env": {
         "OPENCHAT_API_KEY": "oc_your_key_here"
       }
@@ -56,8 +66,8 @@ Add to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.openchat]
-command = "npx"
-args = ["-y", "github:tmad4000/openchat-mcp-server"]
+command = "node"
+args = ["/absolute/path/to/OpenChat/apps/mcp-server/dist/index.js"]
 env = { OPENCHAT_API_KEY = "oc_your_key_here" }
 ```
 
@@ -68,7 +78,7 @@ Add at the project or user level:
 ```bash
 claude mcp add openchat \
   --env OPENCHAT_API_KEY=oc_your_key_here \
-  -- npx -y github:tmad4000/openchat-mcp-server
+  -- node /absolute/path/to/OpenChat/apps/mcp-server/dist/index.js
 ```
 
 ## HTTP transport (for hosted deployments)
@@ -76,8 +86,7 @@ claude mcp add openchat \
 Some clients prefer HTTP over stdio. Run the server yourself:
 
 ```bash
-OPENCHAT_API_KEY=oc_... npx -y github:tmad4000/openchat-mcp-server openchat-mcp-server-http
-# or after cloning: npm run start:http
+OPENCHAT_API_KEY=oc_... npm run start:http --workspace=openchat-mcp-server
 ```
 
 Then point your client at it:
@@ -98,11 +107,12 @@ Then point your client at it:
 ## Local clone (for development)
 
 ```bash
-git clone https://github.com/tmad4000/openchat-mcp-server
-cd openchat-mcp-server
-npm install && npm run build
-OPENCHAT_API_KEY=oc_... npm start         # stdio
-OPENCHAT_API_KEY=oc_... npm run start:http # HTTP transport
+git clone https://github.com/IdeaFlowCo/OpenChat.git
+cd OpenChat
+npm install
+npm run build --workspace=openchat-mcp-server
+OPENCHAT_API_KEY=oc_... npm start --workspace=openchat-mcp-server
+OPENCHAT_API_KEY=oc_... npm run start:http --workspace=openchat-mcp-server
 ```
 
 ## Authentication
@@ -139,11 +149,26 @@ Set the API key one of three ways (checked in this order):
 | `oc_react(messageId, emoji, kind?, href?)` | Add an emoji reaction; pass `kind="filed"` with an `http(s)` `href` to leave a tappable filed-receipt badge |
 | `oc_create_dm(userEmail)` | Look up a user by email and start/return a 1:1 DM conversation |
 | `oc_register_agent(name, scopes?, expiresAt?)` | Mint a new agent API key under your account |
-| `oc_publish_intent(kind, terms, details?, expiresAt?)` | Publish an anonymous ask or offer for quiet matching (`POST /api/intents`) |
+| `oc_publish_intent(kind, terms, confirm, details?, expiresAt?)` | Publish an approved anonymous ask or offer for quiet matching (`POST /api/intents`) |
 | `oc_list_intents` | List all asks and offers you own (`GET /api/intents`) |
 | `oc_withdraw_intent(intentId)` | Withdraw one of your intents from discovery (`PATCH /api/intents/:id`) |
 | `oc_list_matches` | List privacy-safe matches involving your intents (`GET /api/matches`) |
 | `oc_respond_match(matchId, decision)` | Approve or decline a match (`POST /api/matches/:id/respond`) |
+| `oc_create_intent_draft(goal?, seeks?, brings?, …)` | Privately capture an ask, offer, or collaboration; never publishes or matches |
+| `oc_list_intent_drafts` | List owner-only pending/dismissed/activated drafts |
+| `oc_update_intent_draft(draftId, …)` | Edit or dismiss a pending private draft |
+| `oc_activate_intent_draft(draftId, confirm, quietSearch?, story?)` | Explicitly activate quiet search and/or a selected-audience Story |
+| `oc_list_stories` | List your human-visible and agent-only Story objects and separate expiries |
+| `oc_list_story_feed` | List only the redacted, currently authorized human Story feed |
+| `oc_publish_story(confirm, text, audience, …)` | Explicitly publish a human Story to selected users/conversations |
+| `oc_update_story(storyId, status?, storyExpiresAt?)` | Pause/resume/withdraw or extend a Story without silently extending separate search |
+| `oc_withdraw_story(storyId)` | Withdraw a Story; separately approved quiet search may continue |
+| `oc_respond_story(storyId, message, confirm)` | Preview, explicitly confirm, then send a Story reply in a normal OpenChat DM |
+| `oc_get_social_preferences` | Read enhanced/simple presentation mode and independent network pause |
+| `oc_update_social_preferences(experienceMode?, networkPaused?)` | Update social preferences without deleting data |
+| `oc_get_review_queue` | Get at most 50 actionable drafts, matches, and expiring items |
+
+Draft creation is always private. Agents may attach structured `provenance` to a draft so evidence references survive capture; it remains owner-only and is excluded from draft cards, Stories, matches, notifications, and viewer payloads. Activation, Story publication, and Story replies use a payload-bound two-step approval: first call with `confirm: false` to receive the canonical preview and a single-use `approvalGrant`; after the user approves that exact preview, repeat the unchanged payload with `confirm: true` and the grant. Product previews initialize human Stories to 24 hours and explicit quiet searches to 30 days; enabled channels must send those expiries explicitly so the approved payload is exact. A Story without a separately enabled quiet search limits its structured agent visibility to the Story audience and expiry. Match proposals remain anonymous and require both people to approve before OpenChat creates one DM with one context card; no opener is sent.
 
 ## How bi-directional access works
 

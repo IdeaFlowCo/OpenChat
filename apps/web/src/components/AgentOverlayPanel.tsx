@@ -147,7 +147,7 @@ export function AgentOverlayPanel({ open, onClose }: AgentOverlayPanelProps) {
     setPublishing(true);
     setError(null);
     try {
-      const { intent } = await api.publishIntent(publishDraft);
+      const { intent } = await api.publishIntent({ ...publishDraft, confirm: true });
       setIntents(current => [intent, ...current.filter(item => item.id !== intent.id)]);
       setTerms('');
       setDetails('');

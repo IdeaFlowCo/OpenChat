@@ -15,7 +15,7 @@
  * passes undefined so no row is "active").
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -36,6 +36,9 @@ import {
   getDirectConversationParticipant,
   getDirectConversationTitle,
 } from '../utils/conversationDisplay';
+import { StoriesStrip } from './StoriesStrip';
+import type { FeedStory } from '../api/client';
+import { useSocialExperience } from '../contexts/SocialExperienceContext';
 
 function formatTime(iso: string | undefined): string {
   if (!iso) return '';
@@ -50,6 +53,11 @@ function formatTime(iso: string | undefined): string {
 
 function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
   if (conv.type === 'direct') {
+    const other = getDirectConversationParticipant(conv, me);
+    if (!conv.title && other?.isBot
+      && (other.id === 'assistant' || other.name === 'Assistant')) {
+      return 'My Agent';
+    }
     return getDirectConversationTitle(conv, me, 'Unknown');
   }
   if (conv.title) return conv.title;
@@ -112,7 +120,7 @@ function ConversationRow({ item, isActive, onPress, compact }: RowProps) {
       >
         <View>
           <Avatar
-            name={item.type === 'direct' ? (other?.name || other?.email) : title}
+            name={item.type === 'direct' ? (other?.name || other?.email || title) : title}
             email={other?.email}
             isBot={other?.isBot}
             presenceStatus={item.type === 'direct' ? (live?.status || other?.presenceStatus) : undefined}
@@ -142,7 +150,7 @@ function ConversationRow({ item, isActive, onPress, compact }: RowProps) {
         />
       )}
       <Avatar
-        name={item.type === 'direct' ? (other?.name || other?.email) : title}
+        name={item.type === 'direct' ? (other?.name || other?.email || title) : title}
         email={other?.email}
         isBot={other?.isBot}
         presenceStatus={item.type === 'direct' ? (live?.status || other?.presenceStatus) : undefined}
@@ -196,13 +204,22 @@ export interface ConversationListProps {
   onStartChat?: () => void;
   /** When true, rows render avatar + unread badge only (used by collapsed sidebar). */
   compact?: boolean;
+  onCreateStory?: () => void;
+  onOpenStory?: (story: FeedStory) => void;
+  onOpenReview?: () => void;
 }
 
-export function ConversationList({ activeId, onSelect, onStartChat, compact }: ConversationListProps) {
+export function ConversationList({ activeId, onSelect, onStartChat, compact, onCreateStory, onOpenStory, onOpenReview }: ConversationListProps) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const { conversations, conversationsLoaded, refreshConversations } = useChat();
+  const { enhanced } = useSocialExperience();
   const [refreshing, setRefreshing] = useState(false);
+  const orderedConversations = useMemo(() => [...conversations].sort((a, b) => {
+    const aAssistant = a.participants?.some(participant => participant.user.id === 'assistant') ? 1 : 0;
+    const bAssistant = b.participants?.some(participant => participant.user.id === 'assistant') ? 1 : 0;
+    return Number(bAssistant) - Number(aAssistant);
+  }), [conversations]);
 
   if (!conversationsLoaded) {
     return (
@@ -215,8 +232,16 @@ export function ConversationList({ activeId, onSelect, onStartChat, compact }: C
   return (
     <FlatList
       style={{ backgroundColor: c.background }}
-      data={conversations}
+      data={orderedConversations}
       keyExtractor={item => item.id}
+      ListHeaderComponent={onCreateStory && onOpenStory && onOpenReview ? (
+        <StoriesStrip
+          compact={compact}
+          onCreate={onCreateStory}
+          onOpenStory={onOpenStory}
+          onOpenReview={onOpenReview}
+        />
+      ) : null}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}

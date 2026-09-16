@@ -21,11 +21,13 @@ import feedbackRoutes from './routes/feedback.js';
 import assistantRoutes from './routes/assistant.js';
 import secretaryRoutes from './routes/secretary.js';
 import agentNetworkRoutes from './routes/agentNetwork.js';
+import agentSocialLayerRoutes from './routes/agentSocialLayer.js';
 import { ensureAssistantUser } from './services/assistant.js';
 import { ensureGroupbrainBotUser } from './services/groupbrainBot.js';
 import { ensureWebhookIndex } from './services/webhookDispatch.js';
 import { ensureVectorIndex } from './services/embeddings.js';
 import { ensureAgentIntentIndexes, reconcileAgentDeliveries } from './services/agentNetwork.js';
+import { ensureAgentSocialLayerIndexes } from './services/agentSocialLayer.js';
 import { openapiSpec } from './openapi.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 import { parseCorsOrigins } from './config/cors.js';
@@ -78,13 +80,8 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Project landing page (/, /about) — OpenChat-e4n moved / to landing.
-// Single static HTML + the app icon. Legacy Vite web client is now at
-// /legacy (see below).
-// Lists every version of OpenChat (iOS TestFlight, Android APK, Mobile Web,
-// Desktop Web) so we have one shareable URL that branches to all platforms.
-// Must be registered BEFORE express.static(clientDistPath) below so it
-// takes precedence over any /about path the Vite client might claim.
+// Project landing page (/, /about) and static brand assets. The application
+// itself has one canonical responsive browser entry point at /app/.
 const landingHtmlPath = path.join(__dirname, 'landing.html');
 const landingIconPath = path.join(__dirname, 'landing-icon.png');
 const landingQrPath = path.join(__dirname, 'qr-chat-globalbrai.svg');
@@ -180,8 +177,8 @@ app.get('/u/:userId', async (req, res, next) => {
   <h1 class="name">${safe(displayName)}${user.isBot ? ' <span style="font-size:13px;color:var(--text-dim)">· bot</span>' : ''}</h1>
   <p class="invite">wants to connect on OpenChat — tap below to start.</p>
 
-  <a class="cta cta-primary" href="/m/${intentQs}">Open in mobile web · sign in</a>
-  <a class="cta cta-secondary" href="/d/${intentQs}">Open on desktop web</a>
+  <a class="cta cta-primary" href="/app/${intentQs}">Open OpenChat · sign in</a>
+  <a class="cta cta-secondary" href="/app/${intentQs}">Open on the web</a>
   <a class="cta cta-secondary" href="https://testflight.apple.com/join/QvUPzDMY">Get the iOS app · TestFlight</a>
 
   <p class="cta-tiny">Already have OpenChat? <a href="openchat://user/${encodeURIComponent(userId)}">Open the app directly</a></p>
@@ -308,61 +305,24 @@ app.get('/about/connect-your-bot', (_req, res) => {
   res.type('html').send(renderConnectBotHtml());
 });
 
-// Serve static files from client build (production).
-// This is the LEGACY Vite/React web client. The canonical new clients are
-// /m (RN-web mobile) and /d (RN-web desktop). We keep the legacy client
-// reachable at every path it used to claim (for bookmarks + the /i/<token>
-// group-invite deep link), but the discoverable entry point is now /legacy.
-// Monorepo layout: server runs from apps/server/dist, so the web build is a
-// sibling at apps/web/dist (../../web/dist), and the RN-web /m,/d builds live
-// at the repo root (../../../client-mobile{,-desktop}/dist).
-const clientDistPath = path.join(__dirname, '..', '..', 'web', 'dist');
-app.use(express.static(clientDistPath));
-
-// /legacy — official entry point to the legacy Vite web client.
-// Injects a small "deprecated" banner across the top of the SPA shell so
-// users know the new app is at /m, /d, or the home page. The SPA still
-// runs underneath; React Router takes over for sub-routes.
-let legacyShellCache: string | null = null;
-function getLegacyShell(): string {
-  if (legacyShellCache) return legacyShellCache;
-  try {
-    const html = readFileSync(path.join(clientDistPath, 'index.html'), 'utf8');
-    const banner = `<div id="oc-legacy-banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%);color:#fff;font:600 13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;padding:8px 16px;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;box-shadow:0 2px 12px rgba(0,0,0,0.25);"><span>You're on the legacy OpenChat web client.</span><a href="/" style="color:#fff;text-decoration:underline;font-weight:700;">Go to the new app →</a></div><style>body{padding-top:42px !important;}</style>`;
-    legacyShellCache = html.replace('<body>', `<body>${banner}`);
-    return legacyShellCache;
-  } catch {
-    // If the legacy build is missing, fall back to a tiny placeholder
-    // that just links to the new app.
-    return `<!doctype html><html><body><p>The legacy web client is not built. <a href="/">Go to OpenChat</a>.</p></body></html>`;
-  }
-}
-app.get(/^\/legacy(\/|$)/, (_req, res) => {
-  res.type('html').send(getLegacyShell());
-});
-
-// RN-web build of apps/mobile, mounted at /m/*. Built by deploy.sh via
-// `expo export --platform web` with app.config.js experiments.baseUrl=/m.
-// If the dist directory is missing this just no-ops (404 under /m).
-const mobileDistPath = path.join(__dirname, '..', '..', '..', 'client-mobile', 'dist');
-app.use('/m', express.static(mobileDistPath));
-// SPA fallback for the mobile app's own client-side routes. Only matches
-// /m and /m/<anything>; must run BEFORE the catch-all SPA fallback below.
-app.get(/^\/m(\/|$)/, (_req, res, next) => {
-  res.sendFile(path.join(mobileDistPath, 'index.html'), (err) => {
+// One canonical responsive client. The same React Native Web export renders
+// compact, tablet, or split-pane layouts based on the available width and the
+// user's saved preference.
+const appDistPath = path.join(__dirname, '..', '..', '..', 'client-app', 'dist');
+app.use('/app', express.static(appDistPath));
+app.get(/^\/app(\/|$)/, (_req, res, next) => {
+  res.sendFile(path.join(appDistPath, 'index.html'), (err) => {
     if (err) next();
   });
 });
 
-// Desktop-responsive RN-web build, mounted at /d/*. Same apps/mobile codebase
-// as /m, with a multi-pane master-detail layout at widths >=900px. Built by
-// deploy.sh with app.config.js experiments.baseUrl=/d.
-const mobileDesktopDistPath = path.join(__dirname, '..', '..', '..', 'client-mobile-desktop', 'dist');
-app.use('/d', express.static(mobileDesktopDistPath));
-app.get(/^\/d(\/|$)/, (_req, res, next) => {
-  res.sendFile(path.join(mobileDesktopDistPath, 'index.html'), (err) => {
-    if (err) next();
-  });
+// Old browser entry points remain valid bookmarks, but now converge on the
+// one responsive app. Preserve both the suffix and query string so links from
+// older clients keep their intent payloads.
+app.get(/^\/(m|d|legacy)(\/|$)/, (req, res) => {
+  const canonicalPath = req.path.replace(/^\/(m|d|legacy)(?=\/|$)/, '/app');
+  const query = req.originalUrl.slice(req.path.length);
+  res.redirect(308, `${canonicalPath === '/app' ? '/app/' : canonicalPath}${query}`);
 });
 
 // API routes
@@ -378,6 +338,7 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/assistant', assistantRoutes);
 app.use('/api/secretary', secretaryRoutes);
 app.use('/api', agentNetworkRoutes);
+app.use('/api', agentSocialLayerRoutes);
 
 // API reference (openchat-8md.1) — public spec + Redoc docs page.
 app.get('/api/openapi.json', (_req, res) => res.json(openapiSpec));
@@ -401,18 +362,16 @@ app.set('io', io);
 // Setup WebSocket handlers
 setupChatSocket(io);
 
-// Group invite deep-link: /i/<token> → serve the web SPA which handles this
-// route via the React Router /i/:token route. The SPA reads the token from the
-// URL and calls GET /api/chat/invites/:token to show the preview. (OpenChat-240)
-app.get('/i/:token', (_req, res, next) => {
-  res.sendFile(path.join(clientDistPath, 'index.html'), (err) => {
-    if (err) next();
-  });
+// Group invite deep-link: native clients may intercept /i/<token> as a
+// Universal Link. Browsers converge on /app/ with an explicit post-auth
+// intent so Google OAuth can return to the one registered callback URL.
+app.get('/i/:token', (req, res) => {
+  res.redirect(308, `/app/?intent=invite&token=${encodeURIComponent(req.params.token)}`);
 });
 
-// SPA fallback - serve index.html for all non-API routes
+// SPA fallback - serve the canonical responsive client for non-API routes.
 app.use((_req, res) => {
-  res.sendFile(path.join(clientDistPath, 'index.html'));
+  res.sendFile(path.join(appDistPath, 'index.html'));
 });
 
 // Error notifier (must come AFTER the SPA fallback, BEFORE any final
@@ -460,6 +419,7 @@ async function start() {
 
     try {
       await ensureAgentIntentIndexes();
+      await ensureAgentSocialLayerIndexes();
       await reconcileAgentDeliveries(io);
       console.log('Agent intent indexes ensured');
     } catch (e) {

@@ -34,8 +34,8 @@ bash infra/deploy.sh
 curl -fsS https://chat.globalbr.ai/health
 ```
 
-`infra/deploy.sh` builds the server, legacy web client, and both React Native
-web exports before copying the release bundle with `gcloud compute scp`. Its
+`infra/deploy.sh` builds the server and one responsive React Native web export
+for `/app` before copying the release bundle with `gcloud compute scp`. Its
 defaults can be overridden with `GCP_PROJECT`, `GCP_ZONE`, and `GCP_INSTANCE`.
 The script uses explicit project and zone flags so an unrelated active gcloud
 configuration cannot redirect the deploy.

@@ -4,7 +4,7 @@
   "private": true,
   "description": "Tauri desktop wrapper around the OpenChat react-native-web build.",
   "scripts": {
-    "build:web": "npm --prefix ../mobile run export:web:app",
+    "build:web": "npm --prefix ../mobile run export:web:shell",
     "dev": "tauri dev",
     "build:tauri": "tauri build"
   },

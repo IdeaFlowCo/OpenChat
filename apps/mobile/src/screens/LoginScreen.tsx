@@ -28,7 +28,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 // Quick-login test accounts. Only rendered when EXPO_PUBLIC_SHOW_TEST_LOGINS
 // is explicitly set to 'true'. Default is OFF so production builds — both EAS
-// (iOS TestFlight) AND the openchat-server's web bundles at /m/ and /d/ —
+// (iOS compatibility builds) and the server's canonical /app/ RN-web bundle —
 // never accidentally ship the Alice/Bob buttons. Dev/local users who want
 // them must set EXPO_PUBLIC_SHOW_TEST_LOGINS=true in their .env or shell.
 //
@@ -120,7 +120,7 @@ export function LoginScreen() {
   // so iOS deep-links the callback back to the app correctly.
   //
   // The Web flow (GOOGLE_CLIENT_ID + code + secret + /google/exchange) is
-  // still used at chat.globalbr.ai and the RN-web build at /m on web.
+  // still used by the RN-web app at chat.globalbr.ai/app.
   const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest({
     iosClientId: GOOGLE_IOS_CLIENT_ID,
     androidClientId: GOOGLE_ANDROID_CLIENT_ID, // Android-type client (pkg + SHA-1); falls back to iOS until EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID is set
@@ -208,7 +208,7 @@ export function LoginScreen() {
 
     // Web: full-page redirect via our server's /api/auth/google/url. The
     // server holds the web client_id + secret and echoes our redirect_uri
-    // (https://chat.globalbr.ai/m/ or /d/, registered in the GCP OAuth client).
+    // (https://chat.globalbr.ai/app/, registered in the GCP OAuth client).
     // On return, the useEffect above finishes the exchange. See openchat-n9a.
     if (isWeb && typeof window !== 'undefined') {
       setGoogleLoading(true);
@@ -445,18 +445,18 @@ export function LoginScreen() {
             <View style={styles.qrWrap}>
               {/* Light QR on a fixed white background so it scans reliably
                   regardless of theme. Scanning takes you to the mobile web. */}
-              <QRCode value="https://chat.globalbr.ai/m/" size={120} backgroundColor="#ffffff" color="#000000" />
+              <QRCode value="https://chat.globalbr.ai/app/" size={120} backgroundColor="#ffffff" color="#000000" />
             </View>
             <View style={styles.shareTextBlock}>
               <Text style={[styles.shareTitle, { color: c.textPrimary }]}>Scan to open on any phone</Text>
               <TouchableOpacity
-                onPress={() => Linking.openURL('https://chat.globalbr.ai/m/')}
+                onPress={() => Linking.openURL('https://chat.globalbr.ai/app/')}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.shareLink, { color: c.primary }]}>chat.globalbr.ai/m</Text>
+                <Text style={[styles.shareLink, { color: c.primary }]}>chat.globalbr.ai/app</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => Share.share({ message: 'Try OpenChat: https://chat.globalbr.ai/m/' })}
+                onPress={() => Share.share({ message: 'Try OpenChat: https://chat.globalbr.ai/app/' })}
                 activeOpacity={0.7}
                 style={[styles.shareButton, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}
               >
