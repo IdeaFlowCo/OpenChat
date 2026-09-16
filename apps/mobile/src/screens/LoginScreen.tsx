@@ -120,7 +120,7 @@ export function LoginScreen() {
   // so iOS deep-links the callback back to the app correctly.
   //
   // The Web flow (GOOGLE_CLIENT_ID + code + secret + /google/exchange) is
-  // still used at chat.globalbr.ai and the RN-web build at /m on web.
+  // still used by the RN-web app at chat.globalbr.ai/app.
   const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest({
     iosClientId: GOOGLE_IOS_CLIENT_ID,
     androidClientId: GOOGLE_ANDROID_CLIENT_ID, // Android-type client (pkg + SHA-1); falls back to iOS until EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID is set

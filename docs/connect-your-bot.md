@@ -315,9 +315,9 @@ the owning user until scope enforcement is implemented.
 
 The OpenChat MCP server lets Claude Desktop, Cursor, Codex CLI, Claude Code, and
 any other MCP-aware client read AND write to your OpenChat conversations as
-*you*. It also exposes the quiet-match tools `oc_publish_intent`,
-`oc_list_intents`, `oc_withdraw_intent`, `oc_list_matches`, and
-`oc_respond_match`.
+*you*. See the [MCP server tool inventory](../apps/mcp-server/README.md#tools)
+for the maintained list of chat, private-capture, Story, matching, review, and
+preference tools plus their approval requirements.
 
 Source: <https://github.com/tmad4000/openchat-mcp-server>
 

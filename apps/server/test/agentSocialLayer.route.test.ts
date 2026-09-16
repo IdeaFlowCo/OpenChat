@@ -194,6 +194,37 @@ describe('agent-social routes', () => {
     expect(mocks.activateIntentDraft).not.toHaveBeenCalled();
   });
 
+  it('binds Story-response approval to the exact message and approving user', async () => {
+    const body = { message: 'I can help with that ticket' };
+    mocks.respondToStory.mockResolvedValue({ conversationId: 'conversation' });
+    const headers = { Authorization: bearer(), 'Content-Type': 'application/json' };
+    const preview = await fetch(`${baseUrl}/api/stories/story/respond`, {
+      method: 'POST', headers, body: JSON.stringify(body),
+    });
+    const approval = await preview.json() as {
+      approvalRequired: boolean;
+      approvalGrant: string;
+      payload: { storyId: string; message: string };
+    };
+
+    expect(preview.status).toBe(200);
+    expect(approval).toMatchObject({
+      approvalRequired: true,
+      payload: { storyId: 'story', message: body.message },
+    });
+
+    const wrongActor = await fetch(`${baseUrl}/api/stories/story/respond`, {
+      method: 'POST',
+      headers: { Authorization: bearer('other-user'), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, confirm: true, approvalGrant: approval.approvalGrant }),
+    });
+    expect(wrongActor.status).toBe(409);
+
+    const approved = await approvedPost(baseUrl, '/api/stories/story/respond', body);
+    expect(approved.status).toBe(201);
+    expect(mocks.respondToStory).toHaveBeenCalledWith('social-user', 'story', body.message, undefined);
+  });
+
   it('preserves explicit direction for a text-only quiet search', async () => {
     mocks.createStory.mockResolvedValue({ story: { id: 'story' }, intent: { id: 'intent' } });
     const response = await approvedPost(baseUrl, '/api/stories', {

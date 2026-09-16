@@ -1,6 +1,10 @@
 # OpenChat Monorepo Migration Plan (openchat-3jq.5)
 
-**Status:** DRAFT for review — do not execute until Jacob approves. Authored 2026-06-04.
+> Historical migration plan. The migration is complete; the repository-root
+> [`AGENTS.md`](../AGENTS.md) owns the current client-surface contract, and
+> [`collapse-m-d.md`](./collapse-m-d.md) owns the current web-route resolution.
+
+**Status:** Historical plan; migration completed. Authored 2026-06-04.
 **Goal:** One workspace where server, web client, the Expo app, shared API client, shared types, and deploy/EAS scripts are versioned together — so a protocol change lands in one PR instead of drifting across two repos.
 
 ## 1. Current state (the problem)

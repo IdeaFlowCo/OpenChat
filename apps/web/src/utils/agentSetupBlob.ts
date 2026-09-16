@@ -6,7 +6,7 @@
  * blob also explains the one-time Custom GPT Action path using our OpenAPI spec.
  * No MCP server, no shell, no file writes, no external guide required.
  *
- * Keep this identical to the mobile client's copy at
+ * Frozen legacy snapshot. The maintained product-client copy lives at
  * apps/mobile/src/utils/agentSetupBlob.ts.
  */
 export function buildAgentSetupBlob(key: string, baseUrl: string): string {

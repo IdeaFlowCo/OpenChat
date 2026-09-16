@@ -6,8 +6,8 @@
  * blob also explains the one-time Custom GPT Action path using our OpenAPI spec.
  * No MCP server, no shell, no file writes, no external guide required.
  *
- * Keep this identical to the web client's copy at
- * apps/web/src/utils/agentSetupBlob.ts.
+ * This is the product-client copy. `apps/web` is frozen legacy source; do not
+ * treat its retained snapshot as a second synchronization target.
  */
 export function buildAgentSetupBlob(key: string, baseUrl: string): string {
   return `You can read and send messages on my OpenChat account by calling its REST API directly. Works in any agent that can make HTTPS requests (Claude Code, Cursor, Codex, or ChatGPT with a Custom GPT / Code Interpreter).
