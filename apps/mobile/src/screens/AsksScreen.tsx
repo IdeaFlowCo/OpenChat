@@ -67,7 +67,7 @@ export function AsksScreen() {
     setError(null);
     try {
       const expiresAt = new Date(Date.now() + 30 * 24 * 3_600_000).toISOString();
-      await api.activateIntentDraft(draft.id, { quietSearch: { enabled: true, expiresAt } });
+      await api.activateIntentDraft(draft.id, { confirm: true, quietSearch: { enabled: true, expiresAt } });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not start the quiet search.');

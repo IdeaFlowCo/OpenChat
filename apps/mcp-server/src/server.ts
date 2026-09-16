@@ -824,6 +824,7 @@ export function buildServer(
           return textResult('Not activated. Show the exact search terms, Story text, audience, and expiries, then ask the user for explicit approval.');
         }
         return jsonResult(await api.activateIntentDraft(draftId, {
+          confirm: true,
           ...(quietSearch ? { quietSearch } : {}),
           ...(story ? { story } : {}),
           ...(closeOnConnect === undefined ? {} : { closeOnConnect }),
@@ -876,6 +877,7 @@ export function buildServer(
         'Publish a human-visible Story to explicitly selected users/conversations. Call only after showing and receiving approval for the exact text, audience, structured terms, and expiries.',
       inputSchema: {
         confirm: z.boolean(),
+        kind: z.enum(['ask', 'offer']).optional().describe('Required when quiet search uses only free text, with no seeks or brings'),
         text: z.string().min(1).max(2000),
         audience: audienceSchema,
         goal: z.string().max(500).optional(),
@@ -896,7 +898,7 @@ export function buildServer(
       try {
         requireApiKey(api, 'Publishing a Story');
         if (!confirm) return textResult('Not published. Ask the user to approve the exact Story text, audience, and expiries first.');
-        return jsonResult(await api.createStory(body));
+        return jsonResult(await api.createStory({ confirm: true, ...body }));
       } catch (e) {
         return intentErrorResult(e);
       }

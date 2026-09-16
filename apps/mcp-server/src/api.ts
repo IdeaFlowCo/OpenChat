@@ -370,6 +370,7 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<{ draft: IntentDraft }>('PATCH', `/api/intent-drafts/${encodeURIComponent(id)}`, { body }),
 
     activateIntentDraft: (id: string, body: {
+      confirm: true;
       quietSearch?: { enabled: boolean; expiresAt?: string; audience?: SocialAudience };
       story?: { enabled: boolean; text: string; expiresAt?: string; audience: SocialAudience };
       closeOnConnect?: boolean;
@@ -384,6 +385,8 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<{ stories: FeedStory[] }>('GET', '/api/stories/feed'),
 
     createStory: (body: {
+      confirm: true;
+      kind?: IntentKind;
       text: string;
       audience: SocialAudience;
       goal?: string;

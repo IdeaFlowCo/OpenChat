@@ -74,7 +74,7 @@ describe('quiet-match scoring', () => {
     expect(result!.score).toBeGreaterThan(1 - 0.01);
   });
 
-  it('verifies only the highest qualifying pair in each direction', async () => {
+  it('stops verification after the highest accepted pair in each direction', async () => {
     const verified: string[] = [];
     const result = await scoreCanonicalIntentPair(
       { id: 'a', ownerUserId: 'a', kind: 'ask', terms: 'a', seeks: ['weak ask', 'best ask'], brings: ['best offer'] },
@@ -89,6 +89,41 @@ describe('quiet-match scoring', () => {
     expect(result?.matchType).toBe('reciprocal');
     expect(verified).toHaveLength(2);
     expect(verified).toEqual(expect.arrayContaining(['best ask:best offer', 'best need:best offer']));
+  });
+
+  it('falls back to a lower-ranked pair when the verifier rejects the top candidate', async () => {
+    const verified: string[] = [];
+    const result = await scoreCanonicalIntentPair(
+      { id: 'a', ownerUserId: 'a', kind: 'ask', terms: 'a', seeks: ['top ask', 'valid ask'] },
+      { id: 'b', ownerUserId: 'b', kind: 'offer', terms: 'b', brings: ['offer'] },
+      {
+        threshold: 0,
+        tokenScore: seek => seek === 'top ask' ? 1 : 0.8,
+        embeddingScore: async () => null,
+        verify: async seek => {
+          verified.push(seek);
+          return seek === 'valid ask';
+        },
+      },
+    );
+    expect(result).toMatchObject({ matchType: 'complementary', score: 0.8 });
+    expect(verified).toEqual(['top ask', 'valid ask']);
+  });
+
+  it('bounds semantic verification work per direction', async () => {
+    const verified: string[] = [];
+    const result = await scoreCanonicalIntentPair(
+      { id: 'a', ownerUserId: 'a', kind: 'ask', terms: 'a', seeks: ['one', 'two', 'three', 'four'] },
+      { id: 'b', ownerUserId: 'b', kind: 'offer', terms: 'b', brings: ['offer'] },
+      {
+        threshold: 0,
+        tokenScore: () => 1,
+        embeddingScore: async () => null,
+        verify: async seek => { verified.push(seek); return false; },
+      },
+    );
+    expect(result).toBeNull();
+    expect(verified).toHaveLength(3);
   });
 
   it('requires both shared-goal intents to explicitly allow collaborators', async () => {

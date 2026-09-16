@@ -1023,7 +1023,7 @@ async function executeTool(
           } } : {}),
           ...(typeof input.closeOnConnect === 'boolean' ? { closeOnConnect: input.closeOnConnect } : {}),
         };
-        const activated = await activateIntentDraft(userId, draftId, activation, { io });
+        const activated = await activateIntentDraft(userId, draftId, activation, { confirmed: true, io });
         return activated ?? { error: 'Pending draft not found' };
       }
       case 'list_my_stories':

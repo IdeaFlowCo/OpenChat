@@ -770,7 +770,7 @@ export const api = {
     }),
 
   // ── Agent-network asks, offers, and quiet matches ───────────────────────
-  publishIntent: (params: { kind: AgentIntentKind; terms: string; details?: string; expiresAt?: string }) =>
+  publishIntent: (params: { kind: AgentIntentKind; terms: string; confirm: true; details?: string; expiresAt?: string }) =>
     request<{ intent: AgentIntent }>('/api/intents', {
       method: 'POST',
       body: JSON.stringify(params),
@@ -810,6 +810,7 @@ export const api = {
     { method: 'PATCH', body: JSON.stringify(params) },
   ),
   activateIntentDraft: (id: string, params: {
+    confirm: true;
     quietSearch?: { enabled: boolean; expiresAt?: string; audience?: StoryAudience };
     story?: { enabled: boolean; text: string; expiresAt?: string; audience: StoryAudience };
     closeOnConnect?: boolean;
@@ -822,6 +823,8 @@ export const api = {
   listMyStories: async () =>
     (await request<{ stories: OwnedStory[] }>('/api/stories/mine')).stories,
   createStory: (params: {
+    confirm: true;
+    kind?: AgentIntentKind;
     goal?: string;
     seeks?: string[];
     brings?: string[];

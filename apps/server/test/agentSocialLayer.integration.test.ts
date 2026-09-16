@@ -88,7 +88,7 @@ integration('agent-social private capture and Story privacy', () => {
     });
     const activated = await social.activateIntentDraft(owner, draft.id, {
       quietSearch: { enabled: true },
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     expect(activated).not.toBeNull();
     expect(activated!.story.humanVisible).toBe(false);
     expect(activated!.story.storyExpiresAt).toBeNull();
@@ -106,7 +106,7 @@ integration('agent-social private capture and Story privacy', () => {
     const created = await social.createStory(owner, {
       text: 'I have one extra ticket',
       audience: { userIds: [selected], conversationIds: [] },
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     expect(created.story.searchExpiresAt).toBe(created.story.storyExpiresAt);
     expect(created.story.agentSearchEnabled).toBe(false);
     expect(created.intent.status).toBe('paused');
@@ -140,7 +140,7 @@ integration('agent-social private capture and Story privacy', () => {
     const created = await social.createStory(owner, {
       text: 'Group-only opportunity', goal: 'Build something together',
       audience: { userIds: [], conversationIds: [conversationId] },
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     expect((await social.listStoryFeed(groupMember)).map((story) => story.id)).toContain(created.story.id);
     const session = driver.session();
     try {
@@ -158,7 +158,7 @@ integration('agent-social private capture and Story privacy', () => {
     const created = await social.createStory(owner, {
       text: 'Visible briefly, searchable longer', goal: 'Find ticket', seeks: ['ticket'],
       audience: { userIds: [selected], conversationIds: [] }, quietSearch: { enabled: true },
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     expect(Date.parse(created.story.searchExpiresAt)).toBeGreaterThan(Date.parse(created.story.storyExpiresAt!));
     const separatelyApprovedExpiry = created.story.searchExpiresAt;
     await social.updateStory(owner, created.story.id, {
@@ -178,7 +178,7 @@ integration('agent-social private capture and Story privacy', () => {
     const created = await social.createStory(owner, {
       text: 'Story-scoped search', goal: 'Borrow a truck', seeks: ['truck'],
       audience: { userIds: [selected], conversationIds: [] },
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     await social.updateStory(owner, created.story.id, { status: 'paused' });
     expect((await network.listIntents(owner)).find((item) => item.id === created.intent.id)?.status).toBe('paused');
     const extended = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
@@ -200,7 +200,7 @@ integration('agent-social private capture and Story privacy', () => {
     });
     const storyOnly = await social.createStory(quietPeer, {
       text: 'One expiring review item', audience: { userIds: [owner], conversationIds: [] },
-    }, { queueScan: false });
+    }, { confirmed: true, queueScan: false });
     const queue = await social.getReviewQueue(quietPeer);
     expect(queue.items.length).toBeLessThanOrEqual(50);
     expect(queue.items.find((item) => item.id === `draft:${draft.id}`)).toBeTruthy();

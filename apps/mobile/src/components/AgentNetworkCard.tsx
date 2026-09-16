@@ -233,6 +233,7 @@ export function AgentNetworkCard({ message, onOpenConversation, onShareDraft }: 
       setError(null);
       try {
         await api.activateIntentDraft(payload.draft.id, {
+          confirm: true,
           quietSearch: payload.suggestedActivation.quietSearch,
           closeOnConnect: payload.suggestedActivation.closeOnConnect,
         });

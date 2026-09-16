@@ -27,7 +27,8 @@ What you can do:
     GET /api/chat/messages/since?since=2026-01-01T00:00:00Z
 • Publish an ask or offer (publishing opts it into anonymous discovery):
     POST /api/intents
-    JSON body: {"kind":"ask" or "offer", "terms":"anonymous public terms", "details":"optional private context"}
+    First show me the exact discoverable terms and ask for explicit approval.
+    JSON body after approval: {"kind":"ask" or "offer", "terms":"anonymous public terms", "details":"optional private context", "confirm":true}
 • List my asks and offers, including private details and status:
     GET /api/intents
 • Withdraw one of my asks or offers from discovery:

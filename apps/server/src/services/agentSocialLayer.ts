@@ -521,8 +521,11 @@ export async function activateIntentDraft(
   userId: string,
   draftId: string,
   input: ActivationInput,
-  options: { io?: IOServer; queueScan?: boolean } = {},
+  options: { confirmed: true; io?: IOServer; queueScan?: boolean },
 ): Promise<{ draft: IntentDraft; story: OwnedStory; intent: AgentIntent } | null> {
+  if (options.confirmed !== true) {
+    throw new SocialLayerValidationError('Explicit approval is required before activating a draft');
+  }
   if (input.quietSearch?.enabled !== true && input.story?.enabled !== true) {
     throw new SocialLayerValidationError('Enable quietSearch, story, or both');
   }
@@ -626,6 +629,7 @@ export async function activateIntentDraft(
 }
 
 export interface DirectStoryInput {
+  kind?: 'ask' | 'offer';
   goal?: string;
   seeks?: string[];
   brings?: string[];
@@ -641,8 +645,11 @@ export interface DirectStoryInput {
 export async function createStory(
   userId: string,
   input: DirectStoryInput,
-  options: { io?: IOServer; queueScan?: boolean } = {},
+  options: { confirmed: true; io?: IOServer; queueScan?: boolean },
 ): Promise<{ story: OwnedStory; intent: AgentIntent }> {
+  if (options.confirmed !== true) {
+    throw new SocialLayerValidationError('Explicit approval is required before publishing a Story');
+  }
   if (!input.text.trim() || input.text.length > 2000) {
     throw new SocialLayerValidationError('Story text must be between 1 and 2000 characters');
   }
@@ -658,16 +665,20 @@ export async function createStory(
     ...(input.matchingMode === undefined ? {} : { matchingMode: input.matchingMode }),
     ...(input.openToCollaborators === undefined ? {} : { openToCollaborators: input.openToCollaborators }),
   }, false);
+  const goal = canonical.goal ?? '';
+  const seeks = canonical.seeks ?? [];
+  const brings = canonical.brings ?? [];
+  const quietSearchEnabled = input.quietSearch?.enabled === true;
+  const kind = seeks.length > 0 ? 'ask' : brings.length > 0 ? 'offer' : input.kind;
+  if (quietSearchEnabled && kind === undefined) {
+    throw new SocialLayerValidationError('kind is required for a text-only quiet search');
+  }
   await validateAudienceOwner(userId, input.audience);
   if (input.quietSearch?.audience) await validateAudienceOwner(userId, input.quietSearch.audience);
   const storyId = nanoid();
   const intentId = nanoid();
   const nowDate = new Date();
   const now = nowDate.toISOString();
-  const goal = canonical.goal ?? '';
-  const seeks = canonical.seeks ?? [];
-  const brings = canonical.brings ?? [];
-  const quietSearchEnabled = input.quietSearch?.enabled === true;
   const searchAudience = quietSearchEnabled
     ? input.quietSearch?.audience ?? null
     : null;
@@ -710,7 +721,7 @@ export async function createStory(
         userId,
         storyId,
         intentId,
-        kind: intentKind(seeks),
+        kind: kind ?? 'offer',
         terms: intentSummary(goal, seeks, brings) || storyText,
         goal,
         seeks,

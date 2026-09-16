@@ -120,6 +120,7 @@ function draftBody(value: unknown, partial = false): DraftInput | { error: strin
 function activationBody(value: unknown): ActivationInput | { error: string } {
   if (!value || typeof value !== 'object') return { error: 'Request body is required' };
   const body = value as Record<string, unknown>;
+  if (body.confirm !== true) return { error: 'confirm must be true after explicit approval' };
   const result: ActivationInput = {};
   if (body.quietSearch !== undefined) {
     if (!body.quietSearch || typeof body.quietSearch !== 'object') return { error: 'quietSearch must be an object' };
@@ -166,6 +167,10 @@ function activationBody(value: unknown): ActivationInput | { error: string } {
 function directStoryBody(value: unknown): DirectStoryInput | { error: string } {
   if (!value || typeof value !== 'object') return { error: 'Request body is required' };
   const body = value as Record<string, unknown>;
+  if (body.confirm !== true) return { error: 'confirm must be true after explicit approval' };
+  if (body.kind !== undefined && body.kind !== 'ask' && body.kind !== 'offer') {
+    return { error: 'kind must be ask or offer' };
+  }
   if (typeof body.text !== 'string' || body.text.trim().length < 1 || body.text.trim().length > 2000) {
     return { error: 'text must be between 1 and 2000 characters' };
   }
@@ -203,6 +208,7 @@ function directStoryBody(value: unknown): DirectStoryInput | { error: string } {
   }
   return {
     ...draft,
+    ...(body.kind === 'ask' || body.kind === 'offer' ? { kind: body.kind } : {}),
     text: body.text.trim(),
     audience: parsedAudience,
     ...(storyExpiry ? { storyExpiresAt: storyExpiry } : {}),
@@ -247,6 +253,7 @@ router.post('/intent-drafts/:id/activate', resolveActor, async (req: Request, re
   if ('error' in parsed) { res.status(400).json(parsed); return; }
   try {
     const activated = await activateIntentDraft(req.user!.userId, req.params.id as string, parsed, {
+      confirmed: true,
       io: req.app.get('io') as IOServer | undefined,
     });
     if (!activated) { res.status(404).json({ error: 'Pending intent draft not found' }); return; }
@@ -281,6 +288,7 @@ router.post('/stories', resolveActor, async (req: Request, res: Response) => {
   if ('error' in parsed) { res.status(400).json(parsed); return; }
   try {
     res.status(201).json(await createStory(req.user!.userId, parsed, {
+      confirmed: true,
       io: req.app.get('io') as IOServer | undefined,
     }));
   } catch (error) { handleError(res, 'Failed to create Story', error); }

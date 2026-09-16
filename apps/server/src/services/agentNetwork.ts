@@ -103,7 +103,11 @@ export interface ScoringPipeline {
   tokenScore?: (leftTerms: string, rightTerms: string) => number;
   embeddingScore?: (leftTerms: string, rightTerms: string) => Promise<number | null>;
   verify?: (askTerms: string, offerTerms: string) => Promise<boolean>;
+  /** Shared across every candidate in one scan so identical terms embed once. */
+  embeddingCache?: Map<string, Promise<number[] | null>>;
 }
+
+const MAX_VERIFICATION_CANDIDATES = 3;
 
 export class IntentConsentError extends Error {}
 
@@ -294,18 +298,21 @@ async function bestDirectionalScore(
   options: ScoringPipeline,
   embeddingCache: Map<string, Promise<number[] | null>>,
 ): Promise<number | null> {
-  let best: { seek: string; bring: string; score: number } | null = null;
+  const candidates: Array<{ seek: string; bring: string; score: number }> = [];
   for (const seek of seeks) {
     for (const bring of brings) {
       const score = await scoreTermsPair(seek, bring, options, embeddingCache);
-      if (score !== null && (best === null || score > best.score)) best = { seek, bring, score };
+      if (score !== null) candidates.push({ seek, bring, score });
     }
   }
-  if (!best) return null;
-  const verified = options.verify
-    ? await options.verify(best.seek, best.bring)
-    : await defaultAnthropicVerification(best.seek, best.bring);
-  return verified ? best.score : null;
+  candidates.sort((left, right) => right.score - left.score);
+  for (const candidate of candidates.slice(0, MAX_VERIFICATION_CANDIDATES)) {
+    const verified = options.verify
+      ? await options.verify(candidate.seek, candidate.bring)
+      : await defaultAnthropicVerification(candidate.seek, candidate.bring);
+    if (verified) return candidate.score;
+  }
+  return null;
 }
 
 /** Detailed, pure/injectable pair gate for legacy and canonical v2 intents. */
@@ -317,7 +324,7 @@ export async function scoreCanonicalIntentPair(
   if (left.ownerUserId && right.ownerUserId && left.ownerUserId === right.ownerUserId) return null;
   const leftCanonical = canonicalIntentTerms(left);
   const rightCanonical = canonicalIntentTerms(right);
-  const embeddingCache = new Map<string, Promise<number[] | null>>();
+  const embeddingCache = options.embeddingCache ?? new Map<string, Promise<number[] | null>>();
 
   const [leftToRightScore, rightToLeftScore] = await Promise.all([
     bestDirectionalScore(leftCanonical.seeks, rightCanonical.brings, options, embeddingCache),
@@ -696,6 +703,7 @@ export async function scanIntentForMatches(
     );
 
     const scored: Array<{ source: MatchIntent; candidate: MatchIntent; result: CanonicalMatchScore }> = [];
+    const embeddingCache = new Map<string, Promise<number[] | null>>();
     for (const record of candidates.records) {
       const source = toJS(record.get('source')) as MatchIntent;
       const candidate = toJS(record.get('candidate')) as MatchIntent;
@@ -703,7 +711,10 @@ export async function scanIntentForMatches(
       if (!isDiscoverableIntent(source, scanTime) || !isDiscoverableIntent(candidate, scanTime)) {
         continue;
       }
-      const result = await scoreCanonicalIntentPair(source, candidate, options.scoring);
+      const result = await scoreCanonicalIntentPair(source, candidate, {
+        ...options.scoring,
+        embeddingCache,
+      });
       if (result !== null) scored.push({ source, candidate, result });
     }
     const typeRank: Record<MatchType, number> = { reciprocal: 3, shared_goal: 2, complementary: 1 };

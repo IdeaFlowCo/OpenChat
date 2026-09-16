@@ -67,6 +67,7 @@ export function SocialReviewScreen() {
       } else if (item.kind === 'draft') {
         if (action === 'search') {
           await api.activateIntentDraft(item.draft.id, {
+            confirm: true,
             quietSearch: { enabled: true, expiresAt: new Date(Date.now() + 30 * 24 * 3_600_000).toISOString() },
           });
         } else {

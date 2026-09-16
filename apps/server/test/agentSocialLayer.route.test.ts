@@ -82,13 +82,16 @@ describe('agent-social routes', () => {
 
   it('accepts a text-only direct Story with an explicit audience', async () => {
     mocks.createStory.mockResolvedValue({ story: { id: 'story' }, intent: { id: 'intent' } });
-    const body = { text: 'Extra ticket available', audience: { userIds: ['friend'], conversationIds: [] } };
+    const body = { confirm: true, text: 'Extra ticket available', audience: { userIds: ['friend'], conversationIds: [] } };
     const response = await fetch(`${baseUrl}/api/stories`, {
       method: 'POST', headers: { Authorization: bearer(), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     expect(response.status).toBe(201);
-    expect(mocks.createStory).toHaveBeenCalledWith('social-user', body, { io: undefined });
+    expect(mocks.createStory).toHaveBeenCalledWith('social-user', {
+      text: body.text,
+      audience: body.audience,
+    }, { confirmed: true, io: undefined });
   });
 
   it('redacts agent matching context from the human Story feed', async () => {
@@ -108,10 +111,10 @@ describe('agent-social routes', () => {
   it('rejects human publication without audience and activation without an enabled channel', async () => {
     const headers = { Authorization: bearer(), 'Content-Type': 'application/json' };
     expect((await fetch(`${baseUrl}/api/stories`, {
-      method: 'POST', headers, body: JSON.stringify({ text: 'hello' }),
+      method: 'POST', headers, body: JSON.stringify({ confirm: true, text: 'hello' }),
     })).status).toBe(400);
     expect((await fetch(`${baseUrl}/api/intent-drafts/draft/activate`, {
-      method: 'POST', headers, body: JSON.stringify({ quietSearch: { enabled: false } }),
+      method: 'POST', headers, body: JSON.stringify({ confirm: true, quietSearch: { enabled: false } }),
     })).status).toBe(400);
     expect(mocks.createStory).not.toHaveBeenCalled();
     expect(mocks.activateIntentDraft).not.toHaveBeenCalled();
@@ -120,6 +123,7 @@ describe('agent-social routes', () => {
   it('passes separate search and Story expiries through explicit activation', async () => {
     mocks.activateIntentDraft.mockResolvedValue({ draft: { id: 'draft' }, story: { id: 'story' }, intent: { id: 'intent' } });
     const activation = {
+      confirm: true,
       quietSearch: { enabled: true, expiresAt: '2099-10-02T00:00:00.000Z' },
       story: { enabled: true, text: 'Looking for a ticket', expiresAt: '2099-09-03T00:00:00.000Z', audience: { userIds: ['friend'], conversationIds: [] } },
       closeOnConnect: false,
@@ -129,7 +133,46 @@ describe('agent-social routes', () => {
       body: JSON.stringify(activation),
     });
     expect(response.status).toBe(201);
-    expect(mocks.activateIntentDraft).toHaveBeenCalledWith('social-user', 'draft', activation, { io: undefined });
+    expect(mocks.activateIntentDraft).toHaveBeenCalledWith('social-user', 'draft', {
+      quietSearch: activation.quietSearch,
+      story: activation.story,
+      closeOnConnect: activation.closeOnConnect,
+    }, { confirmed: true, io: undefined });
+  });
+
+  it('requires explicit confirmation for activation and Story publication', async () => {
+    const headers = { Authorization: bearer(), 'Content-Type': 'application/json' };
+    const story = await fetch(`${baseUrl}/api/stories`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ text: 'Extra ticket', audience: { userIds: ['friend'], conversationIds: [] } }),
+    });
+    const activation = await fetch(`${baseUrl}/api/intent-drafts/draft/activate`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ quietSearch: { enabled: true } }),
+    });
+    expect(story.status).toBe(400);
+    expect(activation.status).toBe(400);
+    expect(mocks.createStory).not.toHaveBeenCalled();
+    expect(mocks.activateIntentDraft).not.toHaveBeenCalled();
+  });
+
+  it('preserves explicit direction for a text-only quiet search', async () => {
+    mocks.createStory.mockResolvedValue({ story: { id: 'story' }, intent: { id: 'intent' } });
+    const response = await fetch(`${baseUrl}/api/stories`, {
+      method: 'POST', headers: { Authorization: bearer(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        confirm: true,
+        kind: 'ask',
+        text: 'I need a ticket',
+        audience: { userIds: ['friend'], conversationIds: [] },
+        quietSearch: { enabled: true },
+      }),
+    });
+    expect(response.status).toBe(201);
+    expect(mocks.createStory).toHaveBeenCalledWith('social-user', expect.objectContaining({
+      kind: 'ask',
+      quietSearch: { enabled: true },
+    }), { confirmed: true, io: undefined });
   });
 
   it('returns preferences directly and supports pause plus Story expiry updates', async () => {

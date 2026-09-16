@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { api, type IntentDraft, type MatchingMode } from '../api/client';
+import { api, type AgentIntentKind, type IntentDraft, type MatchingMode } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
 import { useTheme } from '../contexts/ThemeContext';
 import type { NavProp, RouteProps } from '../navigation/types';
@@ -43,6 +43,7 @@ export function StoryComposerScreen() {
   const [matchingMode, setMatchingMode] = useState<MatchingMode>('fulfillment');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [quietSearch, setQuietSearch] = useState(false);
+  const [textOnlyKind, setTextOnlyKind] = useState<AgentIntentKind | null>(null);
   const [expiry, setExpiry] = useState<Expiry>('day');
   const [previewing, setPreviewing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -103,6 +104,10 @@ export function StoryComposerScreen() {
       setError('Choose at least one person or group. OpenChat never assumes a global audience.');
       return;
     }
+    if (quietSearch && !draft && splitList(seeks).length === 0 && splitList(brings).length === 0 && textOnlyKind === null) {
+      setError('Choose whether the quiet search is looking for something or offering something.');
+      return;
+    }
     setPreviewing(true);
   };
 
@@ -116,11 +121,14 @@ export function StoryComposerScreen() {
     try {
       if (draft) {
         await api.activateIntentDraft(draft.id, {
+          confirm: true,
           quietSearch: approvedQuietSearch,
           story: { enabled: true, text: text.trim(), expiresAt, audience },
         });
       } else {
         await api.createStory({
+          confirm: true,
+          ...(textOnlyKind ? { kind: textOnlyKind } : {}),
           text: text.trim(),
           goal: goal.trim() || undefined,
           seeks: splitList(seeks),
@@ -213,6 +221,27 @@ export function StoryComposerScreen() {
             </View>
             <Switch value={quietSearch} onValueChange={setQuietSearch} trackColor={{ true: c.primary }} />
           </View>
+          {quietSearch && !draft && splitList(seeks).length === 0 && splitList(brings).length === 0 && (
+            <View style={styles.modeRow} accessibilityRole="radiogroup" accessibilityLabel="Quiet search direction">
+              {([
+                { value: 'ask' as const, label: 'I’m looking for this' },
+                { value: 'offer' as const, label: 'I’m offering this' },
+              ]).map(option => (
+                <TouchableOpacity
+                  key={option.value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: textOnlyKind === option.value }}
+                  onPress={() => setTextOnlyKind(option.value)}
+                  style={[styles.modeChip, {
+                    borderColor: textOnlyKind === option.value ? c.primary : c.border,
+                    backgroundColor: textOnlyKind === option.value ? c.primaryMuted : c.surface,
+                  }]}
+                >
+                  <Text style={{ color: textOnlyKind === option.value ? c.primary : c.textSecondary, fontWeight: '700', fontSize: 12 }}>{option.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
           <View style={styles.expiryRow}>
             {(['day', 'week'] as Expiry[]).map(value => (
               <TouchableOpacity key={value} onPress={() => setExpiry(value)} style={[styles.expiryChoice, { borderColor: expiry === value ? c.primary : c.border, backgroundColor: expiry === value ? c.primaryMuted : c.surface }]}>
@@ -241,8 +270,11 @@ export function StoryComposerScreen() {
               {!!goal.trim() && <Text style={[styles.fact, { color: c.textSecondary }]}>Goal: {goal.trim()}</Text>}
               {splitList(seeks).length > 0 && <Text style={[styles.fact, { color: c.textSecondary }]}>Looking for: {splitList(seeks).join(', ')}</Text>}
               {splitList(brings).length > 0 && <Text style={[styles.fact, { color: c.textSecondary }]}>Can bring: {splitList(brings).join(', ')}</Text>}
-              {!goal.trim() && splitList(seeks).length === 0 && splitList(brings).length === 0 && (
-                <Text style={[styles.fact, { color: c.textSecondary }]}>Matching text: {text.trim()}</Text>
+              {splitList(seeks).length === 0 && splitList(brings).length === 0 && (
+                <>
+                  <Text style={[styles.fact, { color: c.textSecondary }]}>Direction: {textOnlyKind === 'ask' ? 'Looking for' : 'Offering'}</Text>
+                  {!goal.trim() && <Text style={[styles.fact, { color: c.textSecondary }]}>Matching text: {text.trim()}</Text>}
+                </>
               )}
               <Text style={[styles.fact, { color: c.textSecondary }]}>Identity stays hidden until both people approve.</Text>
             </View>

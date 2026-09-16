@@ -533,13 +533,14 @@ export const openapiSpec = {
     '/api/intent-drafts/{id}/activate': {
       post: {
         operationId: 'activateIntentDraft', tags: ['Agent social'], summary: 'Explicitly activate a private draft',
-        description: 'Enable quietSearch, a human Story, or both. Human Stories require a non-empty selected audience. Defaults: quiet search 30 days; Story 24 hours. A Story-only activation remains outside agent matching.',
+        description: 'Enable quietSearch, a human Story, or both after explicit approval of the exact terms, audience, and expiries. Human Stories require a non-empty selected audience. Defaults: quiet search 30 days; Story 24 hours. A Story-only activation remains outside agent matching.',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: { required: true, content: json({ type: 'object', properties: {
+          confirm: { type: 'boolean', const: true, description: 'Set only after the user explicitly approves this exact activation.' },
           quietSearch: { type: 'object', properties: { enabled: { type: 'boolean' }, expiresAt: { type: 'string', format: 'date-time' }, audience: { $ref: '#/components/schemas/SocialAudience' } }, required: ['enabled'] },
           story: { type: 'object', properties: { enabled: { type: 'boolean' }, text: { type: 'string', maxLength: 2000 }, expiresAt: { type: 'string', format: 'date-time' }, audience: { $ref: '#/components/schemas/SocialAudience' } }, required: ['enabled', 'text', 'audience'] },
           closeOnConnect: { type: 'boolean', default: true },
-        } }) },
+        }, required: ['confirm'] }) },
         responses: { '201': ok({ type: 'object', properties: { draft: { $ref: '#/components/schemas/IntentDraft' }, story: { $ref: '#/components/schemas/OwnedStory' }, intent: { $ref: '#/components/schemas/AgentIntent' } } }, 'Activated'), '400': errResp('Bad request'), '404': errResp('Not found') },
       },
     },
@@ -552,15 +553,17 @@ export const openapiSpec = {
     '/api/stories': {
       post: {
         operationId: 'createStory', tags: ['Agent social'], summary: 'Explicitly publish a selected-audience human Story',
-        description: 'Text alone is sufficient. Structured terms are optional. Without separately enabled quietSearch, the Story remains outside agent matching.',
+        description: 'Publishing requires confirm:true after explicit approval of the exact text, audience, and expiries. Text alone is sufficient. Structured terms are optional. Without separately enabled quietSearch, the Story remains outside agent matching.',
         requestBody: { required: true, content: json({ type: 'object', properties: {
+          confirm: { type: 'boolean', const: true, description: 'Set only after the user explicitly approves this exact Story.' },
+          kind: { type: 'string', enum: ['ask', 'offer'], description: 'Required for a quiet search when seeks and brings are both empty.' },
           text: { type: 'string', minLength: 1, maxLength: 2000 }, audience: { $ref: '#/components/schemas/SocialAudience' },
           goal: { type: 'string', maxLength: 500 }, seeks: { type: 'array', items: { type: 'string' } }, brings: { type: 'array', items: { type: 'string' } },
           matchingMode: { type: 'string', enum: ['fulfillment', 'reciprocal', 'shared_goal'] }, openToCollaborators: { type: 'boolean' },
           storyExpiresAt: { type: 'string', format: 'date-time' },
           quietSearch: { type: 'object', properties: { enabled: { type: 'boolean' }, expiresAt: { type: 'string', format: 'date-time' }, audience: { $ref: '#/components/schemas/SocialAudience' } }, required: ['enabled'] },
           closeOnConnect: { type: 'boolean', default: true },
-        }, required: ['text', 'audience'] }) },
+        }, required: ['confirm', 'text', 'audience'] }) },
         responses: { '201': ok({ type: 'object', properties: { story: { $ref: '#/components/schemas/OwnedStory' }, intent: { $ref: '#/components/schemas/AgentIntent' } } }, 'Created'), '400': errResp('Bad request') },
       },
     },
