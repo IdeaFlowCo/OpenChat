@@ -8,9 +8,19 @@ A [Model Context Protocol](https://modelcontextprotocol.io) adapter for [OpenCha
 
 1. Open OpenChat → **Settings → Agent keys → +** → name it → **Create key**
 2. Copy the key (starts with `oc_`)
-3. Paste one of the snippets below into your MCP client's config
+3. Build this workspace and paste one of the snippets below into your MCP client's config
 
-That's it. No npm install, no clone — the `npx github:…` form below builds and runs the server on first launch.
+The maintained adapter lives in the OpenChat monorepo. Clone and build it once:
+
+```bash
+git clone https://github.com/IdeaFlowCo/OpenChat.git
+cd OpenChat
+npm install
+npm run build --workspace=openchat-mcp-server
+```
+
+In the snippets below, replace `/absolute/path/to/OpenChat` with that checkout's
+absolute path. Rebuild the workspace after pulling updates.
 
 ## Claude Desktop
 
@@ -20,8 +30,8 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 {
   "mcpServers": {
     "openchat": {
-      "command": "npx",
-      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
+      "command": "node",
+      "args": ["/absolute/path/to/OpenChat/apps/mcp-server/dist/index.js"],
       "env": {
         "OPENCHAT_API_KEY": "oc_your_key_here"
       }
@@ -40,8 +50,8 @@ Edit `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project-scoped):
 {
   "mcpServers": {
     "openchat": {
-      "command": "npx",
-      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
+      "command": "node",
+      "args": ["/absolute/path/to/OpenChat/apps/mcp-server/dist/index.js"],
       "env": {
         "OPENCHAT_API_KEY": "oc_your_key_here"
       }
@@ -56,8 +66,8 @@ Add to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.openchat]
-command = "npx"
-args = ["-y", "github:tmad4000/openchat-mcp-server"]
+command = "node"
+args = ["/absolute/path/to/OpenChat/apps/mcp-server/dist/index.js"]
 env = { OPENCHAT_API_KEY = "oc_your_key_here" }
 ```
 
@@ -68,7 +78,7 @@ Add at the project or user level:
 ```bash
 claude mcp add openchat \
   --env OPENCHAT_API_KEY=oc_your_key_here \
-  -- npx -y github:tmad4000/openchat-mcp-server
+  -- node /absolute/path/to/OpenChat/apps/mcp-server/dist/index.js
 ```
 
 ## HTTP transport (for hosted deployments)
@@ -76,8 +86,7 @@ claude mcp add openchat \
 Some clients prefer HTTP over stdio. Run the server yourself:
 
 ```bash
-OPENCHAT_API_KEY=oc_... npx -y github:tmad4000/openchat-mcp-server openchat-mcp-server-http
-# or after cloning: npm run start:http
+OPENCHAT_API_KEY=oc_... npm run start:http --workspace=openchat-mcp-server
 ```
 
 Then point your client at it:
@@ -98,11 +107,12 @@ Then point your client at it:
 ## Local clone (for development)
 
 ```bash
-git clone https://github.com/tmad4000/openchat-mcp-server
-cd openchat-mcp-server
-npm install && npm run build
-OPENCHAT_API_KEY=oc_... npm start         # stdio
-OPENCHAT_API_KEY=oc_... npm run start:http # HTTP transport
+git clone https://github.com/IdeaFlowCo/OpenChat.git
+cd OpenChat
+npm install
+npm run build --workspace=openchat-mcp-server
+OPENCHAT_API_KEY=oc_... npm start --workspace=openchat-mcp-server
+OPENCHAT_API_KEY=oc_... npm run start:http --workspace=openchat-mcp-server
 ```
 
 ## Authentication

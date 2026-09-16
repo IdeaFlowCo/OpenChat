@@ -118,26 +118,11 @@ OpenChat does not send an opener for either person.
 ### MCP client
 
 For Claude Desktop or another Claude/ChatGPT-compatible MCP client that supports
-local stdio servers, paste this into its MCP configuration and replace the key:
-
-```json
-{
-  "mcpServers": {
-    "openchat": {
-      "command": "npx",
-      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
-      "env": {
-        "OPENCHAT_API_KEY": "oc_your_key_here"
-      }
-    }
-  }
-}
-```
-
-The MCP adapter's authoritative tool inventory and confirmation requirements
-are in [`apps/mcp-server/README.md`](../apps/mcp-server/README.md). A plain
-consumer ChatGPT session cannot run a local stdio MCP server; use a compatible
-MCP client or import OpenChat's `/api/openapi.json` into a Custom GPT Action.
+local stdio servers, follow the maintained build and client configuration in
+[`apps/mcp-server/README.md`](../apps/mcp-server/README.md). That document also
+owns the tool inventory and confirmation requirements. A plain consumer ChatGPT
+session cannot run a local stdio MCP server; use a compatible MCP client or
+import OpenChat's `/api/openapi.json` into a Custom GPT Action.
 
 ### Plain REST
 
@@ -319,62 +304,11 @@ any other MCP-aware client read AND write to your OpenChat conversations as
 for the maintained list of chat, private-capture, Story, matching, review, and
 preference tools plus their approval requirements.
 
-Source: <https://github.com/tmad4000/openchat-mcp-server>
+Source: <https://github.com/IdeaFlowCo/OpenChat/tree/main/apps/mcp-server>
 
-### Claude Desktop
-
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "openchat": {
-      "command": "npx",
-      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
-      "env": {
-        "OPENCHAT_API_KEY": "oc_your_key_here"
-      }
-    }
-  }
-}
-```
-
-Restart Claude Desktop — the OpenChat tools appear in the 🔌 menu.
-
-### Cursor
-
-`~/.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "openchat": {
-      "command": "npx",
-      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
-      "env": { "OPENCHAT_API_KEY": "oc_your_key_here" }
-    }
-  }
-}
-```
-
-### Codex CLI
-
-`~/.codex/config.toml`:
-
-```toml
-[mcp_servers.openchat]
-command = "npx"
-args = ["-y", "github:tmad4000/openchat-mcp-server"]
-env = { OPENCHAT_API_KEY = "oc_your_key_here" }
-```
-
-### Claude Code
-
-```bash
-claude mcp add openchat \
-  --env OPENCHAT_API_KEY=oc_your_key_here \
-  -- npx -y github:tmad4000/openchat-mcp-server
-```
+Build and configuration instructions for Claude Desktop, Cursor, Codex CLI,
+Claude Code, and HTTP clients are maintained in the
+[MCP server README](../apps/mcp-server/README.md#30-second-setup).
 
 ### How bi-directional access works
 
