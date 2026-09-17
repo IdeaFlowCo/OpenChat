@@ -11,14 +11,13 @@
 #   - Xcode 26+ (xcode-select -p == /Applications/Xcode.app/Contents/Developer)
 #   - CocoaPods 1.16+
 #   - Node 18+
-#   - Apple Distribution cert in login keychain with codesign ACL granted
+#   - Apple Distribution cert accessible in the login keychain with codesign
+#     ACL granted
 #     (security set-key-partition-list -S apple-tool:,apple:,codesign:)
-#   - Provisioning profile installed at
-#     ~/Library/MobileDevice/Provisioning Profiles/<UUID>.mobileprovision
-#   - .credentials/Distribution.p12 + .credentials/Distribution.mobileprovision
-#     in the repo root (gitignored)
-#   - credentials.json in repo root with credentialsSource: local config
-#   - ~/.config/m3-login.txt with the login keychain password (mode 600)
+#   - EAS remote distribution certificate + provisioning profile configured
+#     for the production profile
+#   - Optional ~/.config/m3-login.txt (mode 600) when the login keychain is
+#     locked in a headless session
 #
 # Usage:
 #   bash scripts/local-build.sh           # bump patch + build + submit
@@ -98,32 +97,35 @@ case "$NODE_MAJOR" in
     ;;
 esac
 
-# ── Pre-unlock login keychain so codesign can access the signing key ─────────
+# ── Ensure codesign can access the signing key ───────────────────────────────
 LOGIN_PW_FILE="$HOME/.config/m3-login.txt"
-if [ ! -f "$LOGIN_PW_FILE" ]; then
-  echo "ERROR: $LOGIN_PW_FILE not found."
-  echo "       Create it (mode 600) with the M3 login keychain password:"
-  echo "         echo 'YOUR_PASSWORD' > $LOGIN_PW_FILE && chmod 600 $LOGIN_PW_FILE"
+SIGNING_IDENTITY="Apple Distribution: IdeaFlow, Inc. (JESMXK96LG)"
+
+if [ -f "$LOGIN_PW_FILE" ]; then
+  LOGIN_PW=$(cat "$LOGIN_PW_FILE")
+  security unlock-keychain -p "$LOGIN_PW" "$HOME/Library/Keychains/login.keychain-db" || {
+    echo "ERROR: failed to unlock login keychain — check $LOGIN_PW_FILE"
+    exit 1
+  }
+  # Keep it unlocked during the build by extending the lock timeout.
+  security set-keychain-settings -lut 21600 "$HOME/Library/Keychains/login.keychain-db"
+
+  # Re-unlock periodically in case Apple's tooling changes keychain state.
+  (
+    while true; do
+      sleep 60
+      security unlock-keychain -p "$LOGIN_PW" "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null
+    done
+  ) &
+  UNLOCK_PID=$!
+  trap 'kill "$UNLOCK_PID" 2>/dev/null' EXIT
+elif security find-identity -v -p codesigning | grep -Fq "\"$SIGNING_IDENTITY\""; then
+  echo "── login keychain already exposes $SIGNING_IDENTITY ──"
+else
+  echo "ERROR: $SIGNING_IDENTITY is not accessible and $LOGIN_PW_FILE is absent."
+  echo "       Unlock the login keychain in this GUI session or provide the mode-600 password file."
   exit 1
 fi
-LOGIN_PW=$(cat "$LOGIN_PW_FILE")
-security unlock-keychain -p "$LOGIN_PW" "$HOME/Library/Keychains/login.keychain-db" || {
-  echo "ERROR: failed to unlock login keychain — check $LOGIN_PW_FILE"
-  exit 1
-}
-# Keep it unlocked during the build by extending the lock timeout
-security set-keychain-settings -lut 21600 "$HOME/Library/Keychains/login.keychain-db"
-
-# Background loop that re-unlocks periodically (in case Apple's tooling
-# re-locks it). Kill on exit.
-(
-  while true; do
-    sleep 60
-    security unlock-keychain -p "$LOGIN_PW" "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null
-  done
-) &
-UNLOCK_PID=$!
-trap "kill $UNLOCK_PID 2>/dev/null" EXIT
 
 # ── Version bump ─────────────────────────────────────────────────────────────
 if [ "$BUMP" = "1" ]; then
