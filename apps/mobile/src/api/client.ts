@@ -559,6 +559,43 @@ export async function signInWithApple(
   return { user, token: body.token };
 }
 
+/**
+ * Finish the web-only IdeaFlow ID Authorization Code + PKCE flow. The server
+ * holds the confidential client secret, verifies the ID token, links the
+ * external issuer+subject pair, and returns an ordinary OpenChat session.
+ */
+export async function ideaflowExchange(
+  code: string,
+  codeVerifier: string,
+  nonce: string,
+): Promise<{ user: CurrentUser; token: string }> {
+  const res = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/exchange`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code, codeVerifier, nonce }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try {
+      const parsed = JSON.parse(text);
+      msg = parsed.error || parsed.message || text;
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(`IdeaFlow ID sign-in failed (${res.status}): ${msg}`);
+  }
+
+  const body = await res.json();
+  const user: CurrentUser = {
+    userId: body.user.id,
+    email: body.user.email,
+    name: body.user.name,
+  };
+  await setSession(body.token, user);
+  return { user, token: body.token };
+}
+
 // Auth — uses Noos directly for now (mirrors what the web client does via SSO).
 export async function loginWithPassword(
   email: string,
