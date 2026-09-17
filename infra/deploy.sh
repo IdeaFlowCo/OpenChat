@@ -138,7 +138,7 @@ OC_BRIDGE_SECRET=CHANGE_ME
 NOOS_API_URL=http://noos_api:4000/api
 NOOS_URL=https://globalbr.ai
 OPENCHAT_URL=https://chat.globalbr.ai
-# Stage IdeaFlow ID credentials separately, then switch this to true only
+# Stage Ideaflow ID credentials separately, then switch this to true only
 # after the registered callback has passed a production smoke test.
 IDEAFLOW_ID_ENABLED=false
 IDEAFLOW_ID_ISSUER=https://id.ideaflow.app/api/auth

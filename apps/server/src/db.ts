@@ -70,7 +70,7 @@ export async function initDatabase(): Promise<void> {
 
     // Additive centralized identity mapping. A single-property key keeps this
     // compatible with Neo4j Community while preventing two OpenChat User nodes
-    // from claiming the same IdeaFlow ID issuer+subject pair.
+    // from claiming the same Ideaflow ID issuer+subject pair.
     await session.run(`
       CREATE CONSTRAINT openchat_user_ideaflow_identity IF NOT EXISTS
       FOR (u:User) REQUIRE u.ideaflowIdentityKey IS UNIQUE
