@@ -3,11 +3,14 @@ const SELF_QUERIES = new Set(['me', 'self', 'myself']);
 export type ContactDiscoveryQuery =
   | { kind: 'self'; normalized: string }
   | { kind: 'email'; normalized: string }
+  | { kind: 'name'; normalized: string }
   | { kind: 'invalid'; normalized: string };
 
 /**
- * Classifies the restricted discovery behavior used for ordinary callers.
- * Trusted-directory authorization remains server-owned at the database query.
+ * Classifies a people-discovery query without ever treating an email fragment
+ * as a name search. Complete emails remain exact-match only; ordinary text is
+ * a display-name query. Single-character queries are rejected to keep the
+ * early-beta directory useful without making it trivially enumerable.
  */
 export function classifyContactDiscoveryQuery(raw: unknown): ContactDiscoveryQuery {
   const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
@@ -22,7 +25,9 @@ export function classifyContactDiscoveryQuery(raw: unknown): ContactDiscoveryQue
   const looksLikeCompleteEmail = normalized.length <= 254
     && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
 
-  return looksLikeCompleteEmail
-    ? { kind: 'email', normalized }
-    : { kind: 'invalid', normalized };
+  if (looksLikeCompleteEmail) return { kind: 'email', normalized };
+  if (normalized.length >= 2 && !normalized.includes('@')) {
+    return { kind: 'name', normalized };
+  }
+  return { kind: 'invalid', normalized };
 }

@@ -16,8 +16,9 @@ import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from '../services/embeddings.js';
 import { maybeTranscribeMessage } from '../services/transcribeVoice.js';
 import { CONVERSATIONS_QUERY, UNREAD_TOTAL_QUERY } from '../queries/chatUnread.js';
-import { ensureDirectConversation } from '../services/directConversation.js';
+import { DirectConversationNotAllowedError, ensureDirectConversation } from '../services/directConversation.js';
 import { classifyContactDiscoveryQuery } from '../privacy/contactDiscovery.js';
+import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
 let _s3: S3Client | null = null;
@@ -188,18 +189,52 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
       );
       res.status(result.created ? 201 : 200).json(result.conversation);
     } catch (error) {
+      if (error instanceof DirectConversationNotAllowedError) {
+        res.status(404).json({ error: 'Participant unavailable' });
+        return;
+      }
       console.error('Error ensuring direct conversation:', error);
       res.status(500).json({ error: 'Failed to create conversation' });
     }
     return;
   }
 
+  if (type !== 'group') {
+    res.status(400).json({ error: 'type must be direct or group' });
+    return;
+  }
+
+  const otherParticipantIds = [...new Set(
+    (participantIds as string[]).filter((id) => id !== userId),
+  )];
+  if (otherParticipantIds.length < 2) {
+    res.status(400).json({ error: 'Group conversations require at least three participants' });
+    return;
+  }
+
   const session = getDriver().session();
   const conversationId = nanoid();
   const now = new Date().toISOString();
-  const allParticipants = [userId, ...participantIds.filter((id: string) => id !== userId)];
+  const allParticipants = [userId, ...otherParticipantIds];
 
   try {
+    const participantCheck = await session.run(`
+      MATCH (actor:User {id: $userId})
+      UNWIND $participantIds AS participantId
+      OPTIONAL MATCH (target:User {id: participantId})
+      WITH actor, collect(target) AS targets
+      RETURN size(targets) = size($participantIds)
+        AND all(target IN targets WHERE
+          NOT EXISTS { MATCH (actor)-[:BLOCKED]->(target) }
+          AND NOT EXISTS { MATCH (target)-[:BLOCKED]->(actor) }
+        ) AS allowed
+    `, { userId, participantIds: otherParticipantIds });
+
+    if (participantCheck.records[0]?.get('allowed') !== true) {
+      res.status(404).json({ error: 'Participant unavailable' });
+      return;
+    }
+
     const result = await session.run(`
       CREATE (c:Conversation {
         id: $id,
@@ -216,7 +251,7 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
         joinedAt: datetime($now),
         role: CASE WHEN pid = $userId THEN 'owner' ELSE 'member' END
       }]->(c)
-      WITH c, collect({user: u {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
+      WITH c, collect({user: u {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
       RETURN c { .*, participants: participants } AS conversation
     `, {
       id: conversationId,
@@ -270,7 +305,7 @@ async function loadConversation(
     OPTIONAL MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
     WITH c, collect(
       CASE WHEN participant IS NULL THEN NULL
-      ELSE {user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}
+      ELSE {user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}
       END
     ) AS rawParticipants
     WITH c, [p IN rawParticipants WHERE p IS NOT NULL] AS participants
@@ -441,9 +476,14 @@ router.post('/conversations/:id/participants', requireAuth, async (req: Request,
       return;
     }
 
-    // Verify target user exists
-    const userCheck = await session.run(`MATCH (u:User {id: $targetId}) RETURN u`, { targetId });
-    if (userCheck.records.length === 0) {
+    // A block in either direction makes the target unavailable. Return the
+    // same response as a missing user so this endpoint cannot probe blocks.
+    const userCheck = await session.run(`
+      MATCH (actor:User {id: $userId}), (target:User {id: $targetId})
+      RETURN NOT EXISTS { MATCH (actor)-[:BLOCKED]->(target) }
+        AND NOT EXISTS { MATCH (target)-[:BLOCKED]->(actor) } AS allowed
+    `, { userId, targetId });
+    if (userCheck.records.length === 0 || userCheck.records[0].get('allowed') !== true) {
       res.status(404).json({ error: 'User not found' });
       return;
     }
@@ -589,7 +629,7 @@ router.get('/conversations/:id', resolveActor, async (req: Request, res: Respons
     const result = await session.run(`
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $id})
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-      RETURN c, collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
+      RETURN c, collect({user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
     `, { userId, id });
 
     if (result.records.length === 0) {
@@ -632,7 +672,7 @@ router.get('/conversations/:id/export', requireAuth, async (req: Request, res: R
         WITH c
         MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
         RETURN collect({
-          user: participant { .id, .name, .email, .isBot },
+          user: participant { .id, .name, .avatarUrl, .isBot },
           role: rel.role,
           joinedAt: rel.joinedAt
         }) AS participants
@@ -648,12 +688,11 @@ router.get('/conversations/:id/export', requireAuth, async (req: Request, res: R
           kind: reaction.kind,
           href: reaction.href,
           userId: reactor.id,
-          name: reactor.name,
-          email: reactor.email
+          name: reactor.name
         }) AS rawReactions
         RETURN collect(m {
           .*,
-          sender: sender { .id, .name, .email, .isBot },
+          sender: sender { .id, .name, .avatarUrl, .isBot },
           reactions: [r IN rawReactions WHERE r.emoji IS NOT NULL]
         }) AS messages
       }
@@ -739,7 +778,7 @@ router.get('/conversations/:id/messages', resolveActor, async (req: Request, res
               id: reply.id,
               content: left(reply.content, 200),
               senderId: reply.senderId,
-              sender: { id: replySender.id, name: replySender.name, email: replySender.email },
+              sender: { id: replySender.id, name: replySender.name },
               messageType: reply.messageType
             }
           END AS replyTo
@@ -758,7 +797,7 @@ router.get('/conversations/:id/messages', resolveActor, async (req: Request, res
           RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors, kind: kind, href: href }) AS reactions
         }
         ${replyHydrate}
-        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions, replyTo: replyTo } AS message
+        RETURN m { .*, sender: sender { .id, .name, .avatarUrl }, reactions: reactions, replyTo: replyTo } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
       `
@@ -773,7 +812,7 @@ router.get('/conversations/:id/messages', resolveActor, async (req: Request, res
           RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors, kind: kind, href: href }) AS reactions
         }
         ${replyHydrate}
-        RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions, replyTo: replyTo } AS message
+        RETURN m { .*, sender: sender { .id, .name, .avatarUrl }, reactions: reactions, replyTo: replyTo } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
       `;
@@ -924,14 +963,25 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
 
   const session = getDriver().session();
   try {
-    // Verify user is participant
+    // Verify participation and check blocks in both directions. Match the
+    // socket path's anti-probe behavior: blocked sends report success but are
+    // neither persisted nor delivered.
     const check = await session.run(`
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-      RETURN c
+      RETURN c, exists {
+        MATCH (other:User)-[:PARTICIPATES_IN]->(c)
+        WHERE other.id <> u.id
+          AND ((u)-[:BLOCKED]->(other) OR (other)-[:BLOCKED]->(u))
+      } AS blockedRelationship
     `, { userId, conversationId });
 
     if (check.records.length === 0) {
       res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    if (check.records[0].get('blockedRelationship') === true) {
+      res.status(200).json({ success: true, dropped: true });
       return;
     }
 
@@ -995,7 +1045,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       MATCH (p:User)-[:PARTICIPATES_IN]->(c)
       RETURN m {
         .*,
-        sender: sender { .id, .name, .email },
+        sender: sender { .id, .name, .avatarUrl },
         replyTo: CASE
           WHEN reply IS NULL THEN NULL
           ELSE {
@@ -1098,8 +1148,10 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
 });
 
 // GET /api/chat/contacts - Find a user for starting a conversation.
-// Empty/self queries return only the caller. Other users require a complete,
-// case-insensitive email match unless the caller has trusted directory access.
+// Empty/self queries return only the caller. Everyone is display-name
+// discoverable by default during beta, while profile-level discoveryMode can
+// restrict an account to exact-email lookup or hide it entirely. Email is
+// intentionally never projected in a discovery response.
 router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
@@ -1109,27 +1161,39 @@ router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
 
     const query = `
         MATCH (actor:User {id: $userId})
-        WITH coalesce(actor.canBrowseUserDirectory, false) AS directoryAccess
+        WITH actor
         MATCH (u:User)
-        WHERE (directoryAccess = true AND (
-                 $search = ''
-                 OR toLower(coalesce(u.name, '')) CONTAINS $search
-                 OR toLower(coalesce(u.email, '')) CONTAINS $search
-                 OR ($selfOnly = true AND u.id = $userId)
+        WHERE ($selfOnly = true AND u.id = $userId)
+           OR (u.id = $userId AND (
+                 ($email <> '' AND toLower(u.email) = $email)
+                 OR ($name <> '' AND toLower(coalesce(u.name, '')) CONTAINS $name)
                ))
-           OR (directoryAccess = false AND (
-                 ($selfOnly = true AND u.id = $userId)
-                 OR ($email <> '' AND toLower(u.email) = $email)
+           OR (u.id <> $userId
+               AND NOT (actor)-[:BLOCKED]->(u)
+               AND NOT (u)-[:BLOCKED]->(actor)
+               AND coalesce(u.discoveryMode, 'name') <> 'hidden'
+               AND (
+                 ($email <> '' AND toLower(u.email) = $email)
+                 OR ($name <> ''
+                     AND coalesce(u.discoveryMode, 'name') = 'name'
+                     AND NOT coalesce(u.name, '') CONTAINS '@'
+                     AND toLower(coalesce(u.name, '')) CONTAINS $name)
                ))
-        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
+        RETURN u { .id,
+          name: CASE WHEN u.name IS NULL OR trim(u.name) = '' OR u.name CONTAINS '@'
+            THEN $fallbackName ELSE u.name END,
+          .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
         ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
+        LIMIT $limit
       `;
 
     const result = await session.run(query, {
       userId,
-      search: discovery.normalized,
       selfOnly: discovery.kind === 'self',
       email: discovery.kind === 'email' ? discovery.normalized : '',
+      name: discovery.kind === 'name' ? discovery.normalized : '',
+      limit: neo4j.int(50),
+      fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME,
     });
     const contacts = result.records.map(r => toJS(r.get('user')));
     res.json(contacts);
@@ -1156,8 +1220,9 @@ router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
 //     message in the graph.
 //   - Conversations: same — only conversations the user is a member of are
 //     considered, and we match by title.
-//   - Contacts: trusted directory users may browse by partial name/email;
-//     other callers get self keywords or complete exact-email matches.
+//   - Contacts: default-discoverable users match partial display names;
+//     email-only users require an exact complete email. Discovery results
+//     never contain email addresses.
 //
 // Backed by CONTAINS (case-insensitive via toLower) rather than a Neo4j
 // full-text index. Reasoning: CONTAINS works against the existing schema
@@ -1214,7 +1279,7 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
         MATCH (sender:User {id: m.senderId})
         RETURN m {
           .id, .content, .conversationId, .senderId, .createdAt,
-          sender: sender { .id, .name, .email, .isBot }
+          sender: sender { .id, .name, .avatarUrl, .isBot }
         } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
@@ -1254,7 +1319,7 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
     // - Conversations matches on the conversation TITLE only. Participant
     //   details remain available inside conversations the caller already
     //   belongs to; they are never used as a global people directory.
-    // - Contacts follow the caller's server-owned discovery capability.
+    // - Contacts follow each target user's discoveryMode.
     //
     // Each query runs on its OWN session: a single Neo4j session cannot run
     // multiple queries concurrently (Promise.all on one session throws
@@ -1278,7 +1343,7 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
         MATCH (c:Conversation {id: m.conversationId})
         RETURN m {
           .id, .content, .conversationId, .senderId, .createdAt,
-          sender: sender { .id, .name, .email, .isBot },
+          sender: sender { .id, .name, .avatarUrl, .isBot },
           conversationTitle: c.title,
           conversationType: c.type
         } AS message
@@ -1293,7 +1358,7 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
         CALL {
           WITH c
           MATCH (participant:User)-[:PARTICIPATES_IN]->(c)
-          RETURN collect(participant { .id, .name, .email, .isBot })[0..3] AS participants
+          RETURN collect(participant { .id, .name, .avatarUrl, .isBot })[0..3] AS participants
         }
         RETURN c {
           .id, .title, .type, .lastMessageAt, .lastMessagePreview,
@@ -1305,26 +1370,37 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
 
       runQ(`
         MATCH (actor:User {id: $userId})
-        WITH coalesce(actor.canBrowseUserDirectory, false) AS directoryAccess
+        WITH actor
         MATCH (u:User)
-        WHERE (directoryAccess = true AND (
-                 toLower(coalesce(u.name, '')) CONTAINS $contactSearch
-                 OR toLower(coalesce(u.email, '')) CONTAINS $contactSearch
-                 OR ($selfOnly = true AND u.id = $userId)
+        WHERE ($selfOnly = true AND u.id = $userId)
+           OR (u.id = $userId AND (
+                 ($contactEmail <> '' AND toLower(u.email) = $contactEmail)
+                 OR ($contactName <> '' AND toLower(coalesce(u.name, '')) CONTAINS $contactName)
                ))
-           OR (directoryAccess = false AND (
-                 ($selfOnly = true AND u.id = $userId)
-                 OR ($contactEmail <> '' AND toLower(u.email) = $contactEmail)
+           OR (u.id <> $userId
+               AND NOT (actor)-[:BLOCKED]->(u)
+               AND NOT (u)-[:BLOCKED]->(actor)
+               AND coalesce(u.discoveryMode, 'name') <> 'hidden'
+               AND (
+                 ($contactEmail <> '' AND toLower(u.email) = $contactEmail)
+                 OR ($contactName <> ''
+                     AND coalesce(u.discoveryMode, 'name') = 'name'
+                     AND NOT coalesce(u.name, '') CONTAINS '@'
+                     AND toLower(coalesce(u.name, '')) CONTAINS $contactName)
                ))
-        RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
+        RETURN u { .id,
+          name: CASE WHEN u.name IS NULL OR trim(u.name) = '' OR u.name CONTAINS '@'
+            THEN $fallbackName ELSE u.name END,
+          .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
         ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
         LIMIT $limit
       `, {
         userId,
-        contactSearch: contactDiscovery.normalized,
         selfOnly: contactDiscovery.kind === 'self',
         contactEmail: contactDiscovery.kind === 'email' ? contactDiscovery.normalized : '',
+        contactName: contactDiscovery.kind === 'name' ? contactDiscovery.normalized : '',
         limit: neo4j.int(limit),
+        fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME,
       }),
     ]);
 
@@ -1379,11 +1455,21 @@ router.get('/users/by-email/:email', requireAuth, async (req: Request, res: Resp
     }
 
     const result = await session.run(`
-      MATCH (u:User)
+      MATCH (actor:User {id: $userId}), (u:User)
       WHERE toLower(u.email) = $email
-      RETURN u { .id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
+        AND (u.id = actor.id OR coalesce(u.discoveryMode, 'name') <> 'hidden')
+        AND NOT (actor)-[:BLOCKED]->(u)
+        AND NOT (u)-[:BLOCKED]->(actor)
+      RETURN u { .id,
+        name: CASE WHEN u.name IS NULL OR trim(u.name) = '' OR u.name CONTAINS '@'
+          THEN $fallbackName ELSE u.name END,
+        .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
       LIMIT 1
-    `, { email: discovery.normalized });
+    `, {
+      userId: req.user!.userId,
+      email: discovery.normalized,
+      fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME,
+    });
 
     if (result.records.length === 0) {
       res.status(404).json({ error: 'User not found' });
@@ -1490,7 +1576,7 @@ router.get('/blocks', requireAuth, async (req: Request, res: Response) => {
   try {
     const result = await session.run(`
       MATCH (me:User {id: $myId})-[r:BLOCKED]->(target:User)
-      RETURN target { .id, .name, .email, .presenceStatus, .isBot } AS user, r.createdAt AS blockedAt
+      RETURN target { .id, .name, .avatarUrl, .presenceStatus, .isBot } AS user, r.createdAt AS blockedAt
       ORDER BY r.createdAt DESC
     `, { myId });
     const blocks = result.records.map(r => ({
@@ -1535,7 +1621,7 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
         .id, .content, .attachments, .conversationId,
         .forwardedFromMessageId, .forwardedFromSenderId, .forwardedFromSenderName
       } AS msg,
-      originalSender { .id, .name, .email } AS sender
+      originalSender { .id, .name } AS sender
     `, { sourceMessageId, userId });
 
     if (sourceResult.records.length === 0) {
@@ -1549,6 +1635,14 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
     // 2. Verify caller participates in the target conversation.
     const targetCheck = await session.run(`
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $toConversationId})
+      WHERE NOT EXISTS {
+        MATCH (other:User)-[:PARTICIPATES_IN]->(c)
+        WHERE other.id <> u.id
+          AND (
+            EXISTS { MATCH (u)-[:BLOCKED]->(other) }
+            OR EXISTS { MATCH (other)-[:BLOCKED]->(u) }
+          )
+      }
       RETURN c
     `, { userId, toConversationId });
 
@@ -1567,7 +1661,6 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
     const forwardedFromSenderName =
       (sourceMsg.forwardedFromSenderName as string | null) ??
       (originalSender.name as string | null) ??
-      (originalSender.email as string | null) ??
       'Unknown';
 
     // 4. Copy attachments (still references the same S3 objects — no re-upload).
@@ -1607,7 +1700,7 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
           c.lastMessagePreview = left($preview, 100)
       WITH c, m, forwarder
       MATCH (p:User)-[:PARTICIPATES_IN]->(c)
-      RETURN m { .*, sender: forwarder { .id, .name, .email } } AS message,
+      RETURN m { .*, sender: forwarder { .id, .name, .avatarUrl } } AS message,
              collect(DISTINCT p.id) AS participantIds
     `, {
       id: messageId,
@@ -1873,7 +1966,7 @@ router.patch('/messages/:id', resolveActor, async (req: Request, res: Response) 
       MATCH (m:Message {id: $messageId})
       MATCH (sender:User {id: m.senderId})
       SET m.content = $content, m.editedAt = datetime($now)
-      RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+      RETURN m { .*, sender: sender { .id, .name, .avatarUrl } } AS message
     `, { messageId, content: content.trim(), now });
 
     const message = toJS(result.records[0].get('message'));
@@ -1920,7 +2013,7 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
       SET m.content = 'Message deleted',
           m.deletedAt = datetime($now),
           m.attachments = null
-      RETURN m { .*, sender: sender { .id, .name, .email } } AS message
+      RETURN m { .*, sender: sender { .id, .name, .avatarUrl } } AS message
     `, { messageId, now });
 
     const message = toJS(result.records[0].get('message'));
@@ -2262,7 +2355,7 @@ router.get('/messages/since', resolveActor, async (req: Request, res: Response) 
         WHERE emoji IS NOT NULL
         RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors, kind: kind, href: href }) AS reactions
       }
-      RETURN m { .*, sender: sender { .id, .name, .email }, reactions: reactions } AS message
+      RETURN m { .*, sender: sender { .id, .name, .avatarUrl }, reactions: reactions } AS message
       ORDER BY m.createdAt ASC
       LIMIT $cap
     `, {

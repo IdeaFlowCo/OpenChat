@@ -108,15 +108,11 @@ export function NewConversationScreen() {
   };
 
   const headerInstructions = useMemo(() => {
-    if (mode === 'direct') return currentUser?.canBrowseUserDirectory
-      ? 'Pick someone to start chatting'
-      : 'Enter their full email or scan their QR code';
-    if (selected.length === 0) return currentUser?.canBrowseUserDirectory
-      ? 'Pick people to start a group'
-      : 'Find people by full email to start a group';
+    if (mode === 'direct') return 'Search by name to start chatting';
+    if (selected.length === 0) return 'Search for people to start a group';
     if (selected.length === 1) return 'Pick one more — groups need at least 2 others';
     return `${selected.length} selected — tap Create when ready`;
-  }, [currentUser?.canBrowseUserDirectory, mode, selected.length]);
+  }, [mode, selected.length]);
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
@@ -150,15 +146,13 @@ export function NewConversationScreen() {
         style={[styles.search, { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border }]}
         value={query}
         onChangeText={setQuery}
-        placeholder={currentUser?.canBrowseUserDirectory ? 'Search by name or email' : 'Enter a complete email address'}
+        placeholder="Search by name or exact email"
         placeholderTextColor={c.textMuted}
         autoCapitalize="none"
         autoCorrect={false}
       />
       <Text style={[styles.discoveryHint, { color: c.textMuted }]}>
-        {currentUser?.canBrowseUserDirectory
-          ? 'Trusted directory access is enabled for this account.'
-          : 'People are shown only for an exact email match.'}
+        Email addresses stay private in search results.
       </Text>
 
       {mode === 'group' && (
@@ -211,9 +205,7 @@ export function NewConversationScreen() {
           ListEmptyComponent={
             <View style={styles.center}>
               <Text style={{ color: c.textSecondary, marginTop: 24 }}>
-                {currentUser?.canBrowseUserDirectory
-                  ? (query ? `No contacts found for "${query}"` : 'No contacts yet.')
-                  : (query ? `No exact email match for "${query}"` : 'Enter a complete email address to find someone.')}
+                {query ? `No people found for "${query}"` : 'Type a name or complete email address.'}
               </Text>
               {!query && Platform.OS !== 'web' && (
                 <TouchableOpacity
@@ -240,6 +232,7 @@ export function NewConversationScreen() {
                 <Avatar
                   name={item.name}
                   email={item.email}
+                  avatarUrl={item.avatarUrl}
                   isBot={item.isBot}
                   presenceStatus={live?.status || item.presenceStatus}
                   size={40}
@@ -247,16 +240,14 @@ export function NewConversationScreen() {
                 <View style={{ flex: 1 }}>
                   <View style={styles.rowTop}>
                     <Text style={[styles.name, { color: c.textPrimary }]} numberOfLines={1}>
-                      {item.id === currentUser?.userId ? `${item.name || item.email} (You)` : (item.name || item.email)}
+                      {item.id === currentUser?.userId ? `${item.name || currentUser?.name || 'You'} (You)` : (item.name || 'OpenChat member')}
                     </Text>
                     <BotBadge isBot={item.isBot} compact />
                   </View>
                   <Text style={[styles.email, { color: c.textSecondary }]} numberOfLines={1}>
                     {item.id === currentUser?.userId
-                      ? (item.email || currentUser?.email
-                          ? `Note to self · ${item.email || currentUser?.email}`
-                          : 'Note to self')
-                      : item.email}
+                      ? 'Note to self'
+                      : `OpenChat · ${item.id.slice(0, 6)}`}
                   </Text>
                 </View>
                 {mode === 'group' && (

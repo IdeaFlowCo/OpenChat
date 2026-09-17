@@ -30,23 +30,24 @@ OpenChat is a GChat-inspired messaging application that integrates with the Noos
 
 Flow:
 1. User clicks "New" button in sidebar header
-2. A person is found via exact email, or by partial name/email when the caller has server-granted trusted directory access (`GET /api/chat/contacts?q=...`)
+2. A person is found by display name (default) or exact email, subject to that person's discoverability setting (`GET /api/chat/contacts?q=...`)
 3. Contact picker UI slides in with:
    - Back button to return to conversation list
-   - Search input reflecting the caller's exact-email or trusted-directory access
+   - Search input for a display name or exact email
    - Matching person rows with:
      - Avatar (first letter of name)
      - Presence indicator (green/yellow/red dot)
-     - Name and status message
+     - Name, profile photo, privacy-safe handle/id hint, and status message; email is never returned
 4. Clicking a contact:
    - Creates conversation via `POST /api/chat/conversations`
    - Sets it as active conversation
    - Returns to conversation view
 
 ### Contact Search (API)
-- `GET /api/chat/contacts?q=email` - ordinary members use exact, case-insensitive email discovery and empty/self returns only the caller; server-granted trusted directory callers may browse and use partial name/email
-- `GET /api/chat/users/by-email/:email` - exact, case-insensitive email lookup
-- No browsable public account directory; a narrowly granted trusted-directory capability supports club operators while existing conversations and private invite/QR flows provide relationship-scoped discovery
+- `GET /api/chat/contacts?q=...` - partial display-name search for default-discoverable accounts or exact, case-insensitive email lookup for name/email-only accounts; empty/self returns only the caller
+- `GET /api/chat/users/by-email/:email` - exact, case-insensitive lookup honoring the target's setting
+- Discovery responses expose id, display name, avatar, status, and bot state but never email
+- Each profile chooses `name` (default), `email_only`, or `hidden`; existing conversations are unaffected
 
 ### Conversations
 - List conversations in sidebar with last message preview
@@ -76,7 +77,8 @@ Flow:
 ### Neo4j Schema
 ```cypher
 (:User {
-  id, email, name,
+  id, email, name, avatarUrl,
+  discoveryMode: "name"|"email_only"|"hidden",
   presenceStatus, statusMessage, lastSeenAt
 })
 
@@ -163,8 +165,8 @@ App.tsx
 - `POST /api/chat/conversations/:id/messages` - Send message
 - `POST /api/chat/messages/:id/reactions` - Add a plain reaction or `filed` receipt reaction with `href` (JWT or agent key)
 - `DELETE /api/chat/messages/:id/reactions/:emoji` - Remove own plain reaction; `?kind=filed` removes a filed receipt (JWT or agent key)
-- `GET /api/chat/contacts` - Return self or an exact-email match for ordinary members; trusted directory callers may browse and search partial names/emails
-- `GET /api/chat/users/by-email/:email` - Direct email lookup
+- `GET /api/chat/contacts` - Privacy-safe name or exact-email discovery; never returns email
+- `GET /api/chat/users/by-email/:email` - Exact lookup honoring target settings; never returns email
 - `PUT /api/chat/presence` - Update own presence
 
 ### Agent Keys
@@ -193,4 +195,4 @@ App.tsx
 3. **Chat nodes don't inherit :Node** - Keeps chat immutable, knowledge editable
 4. **JWT sharing** - Same secret allows seamless SSO between OpenChat and Noos
 5. **Identity bridge separation** - SocialSphere uses `OC_BRIDGE_SECRET`, distinct from `JWT_SECRET`, to assert verified emails and receive normal OpenChat user JWTs; email verification stays upstream in SocialSphere
-6. **Private contact discovery** - No public account directory; ordinary members require an exact complete email, QR code, or private group invite, while trusted directory access is granted only by operators
+6. **Name discovery with private email** - Beta accounts are display-name searchable by default; people can opt down to exact-email-only or hidden, and discovery responses never reveal email addresses

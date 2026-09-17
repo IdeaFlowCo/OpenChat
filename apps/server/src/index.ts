@@ -33,6 +33,10 @@ import { setupChatSocket } from './websocket/chatHandler.js';
 import { parseCorsOrigins } from './config/cors.js';
 import googleWebCallbackRoutes from './routes/googleWebCallback.js';
 import ideaflowWebCallbackRoutes from './routes/ideaflowWebCallback.js';
+import {
+  normalizePublicDisplayName,
+  sanitizeLegacyPublicDisplayNames,
+} from './privacy/profilePrivacy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -118,15 +122,16 @@ app.get('/u/:userId', async (req, res, next) => {
   try {
     const result = await session.run(
       `MATCH (u:User {id: $userId})
-       RETURN u { .id, .name, .email, .avatarUrl, .isBot } AS user LIMIT 1`,
+       WHERE coalesce(u.discoveryMode, 'name') <> 'hidden'
+       RETURN u { .id, .name, .avatarUrl, .isBot } AS user LIMIT 1`,
       { userId }
     );
     if (result.records.length === 0) return next();
     const user = result.records[0].get('user') as {
-      id: string; name?: string | null; email: string;
+      id: string; name?: string | null;
       avatarUrl?: string | null; isBot?: boolean | null;
     };
-    const displayName = (user.name || user.email.split('@')[0] || 'OpenChat user');
+    const displayName = normalizePublicDisplayName(user.name);
     const initial = (displayName[0] || '?').toUpperCase();
     const intentQs = `?intent=add-user&id=${encodeURIComponent(userId)}`;
     const safe = (s: string) => s
@@ -401,6 +406,11 @@ async function start() {
   try {
     await initDatabase();
     console.log('Connected to Neo4j database');
+
+    const sanitizedNames = await sanitizeLegacyPublicDisplayNames();
+    if (sanitizedNames > 0) {
+      console.log(`Replaced ${sanitizedNames} legacy email-like display name(s)`);
+    }
 
     // In-app Assistant bot (openchat-bfn.3): ensure the singleton bot User
     // exists so direct conversations can include it.

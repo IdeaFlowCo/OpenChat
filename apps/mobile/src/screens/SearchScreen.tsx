@@ -231,16 +231,16 @@ export function SearchScreen() {
         disabled={opening === u.id}
         activeOpacity={0.7}
       >
-        <Avatar name={u.name} email={u.email} isBot={u.isBot} size={40} />
+        <Avatar name={u.name} email={u.email} avatarUrl={u.avatarUrl} isBot={u.isBot} size={40} />
         <View style={{ flex: 1 }}>
           <View style={styles.rowTop}>
             <Text style={[styles.rowTitle, { color: c.textPrimary }]} numberOfLines={1}>
-              {u.name || u.email}
+              {u.name || 'OpenChat member'}
             </Text>
             <BotBadge isBot={u.isBot} compact />
           </View>
           <Text style={[styles.rowPreview, { color: c.textSecondary }]} numberOfLines={1}>
-            {u.email}
+            {`OpenChat · ${u.id.slice(0, 6)}`}
           </Text>
         </View>
       </TouchableOpacity>
@@ -258,9 +258,7 @@ export function SearchScreen() {
           style={[styles.input, { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border }]}
           value={query}
           onChangeText={setQuery}
-          placeholder={currentUser?.canBrowseUserDirectory
-            ? 'Search chats or people'
-            : 'Search chats; full email finds people'}
+          placeholder="Search chats or people"
           placeholderTextColor={c.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
@@ -272,9 +270,7 @@ export function SearchScreen() {
       {trimmed.length < MIN_QUERY_LEN ? (
         <View style={styles.empty}>
           <Text style={{ color: c.textSecondary, textAlign: 'center', paddingHorizontal: 32 }}>
-            {currentUser?.canBrowseUserDirectory
-              ? 'Search messages, conversations, and people by name or email.'
-              : 'Search messages and conversations. To find a person, enter their complete email address.'}
+            Search messages and conversations, or find people by name or exact email. Email addresses stay private.
           </Text>
         </View>
       ) : showEmpty && !loading ? (

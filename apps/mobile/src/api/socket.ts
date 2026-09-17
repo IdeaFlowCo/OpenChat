@@ -79,7 +79,7 @@ export function sendMessage(
   content: string,
   replyToId?: string,
   id?: string
-): Promise<Message> {
+): Promise<Message | null> {
   return new Promise((resolve, reject) => {
     if (!socket?.connected) {
       reject(new Error('Not connected'));
@@ -102,10 +102,11 @@ export function sendMessage(
     socket.timeout(10000).emit(
       'message:send',
       payload,
-      (err: Error | null, response: { success?: boolean; message?: Message; error?: string }) => {
+      (err: Error | null, response: { success?: boolean; dropped?: boolean; message?: Message; error?: string }) => {
         if (err) reject(new Error('Send timed out'));
         else if (response?.error) reject(new Error(response.error));
         else if (response?.message) resolve(response.message);
+        else if (response?.success && response?.dropped) resolve(null);
         else reject(new Error('No response from server'));
       }
     );

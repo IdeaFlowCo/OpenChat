@@ -32,7 +32,7 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { uploadAsync, FileSystemUploadType } from 'expo-file-system/legacy';
+import { getInfoAsync, uploadAsync, FileSystemUploadType } from 'expo-file-system/legacy';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { useTheme } from '../contexts/ThemeContext';
@@ -72,6 +72,7 @@ export function OnboardingScreen({ navigation }: Props) {
   const [name, setName] = useState(currentUser?.name ?? '');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [avatarMime, setAvatarMime] = useState('image/jpeg');
+  const [avatarSize, setAvatarSize] = useState<number | undefined>();
   const [savingProfile, setSavingProfile] = useState(false);
 
   // ── step 2 state ─────────────────────────────────────────────────────────
@@ -130,6 +131,7 @@ export function OnboardingScreen({ navigation }: Props) {
     let mime = asset.mimeType || 'image/jpeg';
     if (mime === 'image/jpg') mime = 'image/jpeg';
     setAvatarMime(mime);
+    setAvatarSize(asset.fileSize);
   }, []);
 
   // ── save profile (step 1) ─────────────────────────────────────────────────
@@ -142,7 +144,16 @@ export function OnboardingScreen({ navigation }: Props) {
       if (avatarUri) {
         try {
           const fileName = `avatar_${Date.now()}.jpg`;
-          const fileSize = 1; // server cap will still protect; expo doesn't always give size for cropped
+          let webBlob: Blob | undefined;
+          let fileSize = avatarSize;
+          if (Platform.OS === 'web') {
+            webBlob = await (await fetch(avatarUri)).blob();
+            fileSize = webBlob.size;
+          } else if (!fileSize) {
+            const info = await getInfoAsync(avatarUri);
+            if (info.exists) fileSize = info.size;
+          }
+          if (!fileSize || fileSize <= 0) throw new Error('Could not determine avatar size');
           const { putUrl, getUrl } = await api.presignAvatar({
             filename: fileName,
             mimeType: avatarMime,
@@ -150,12 +161,10 @@ export function OnboardingScreen({ navigation }: Props) {
           });
 
           if (Platform.OS === 'web') {
-            const res = await fetch(avatarUri);
-            const blob = await res.blob();
             const putRes = await fetch(putUrl, {
               method: 'PUT',
               headers: { 'Content-Type': avatarMime },
-              body: blob,
+              body: webBlob,
             });
             if (!putRes.ok) throw new Error(`Upload failed: ${putRes.status}`);
           } else {
@@ -188,7 +197,7 @@ export function OnboardingScreen({ navigation }: Props) {
       setSavingProfile(false);
     }
     goToStep(2);
-  }, [avatarUri, avatarMime, name, updateProfile, goToStep]);
+  }, [avatarUri, avatarMime, avatarSize, name, updateProfile, goToStep]);
 
   // ── notifications (step 2) ────────────────────────────────────────────────
 
