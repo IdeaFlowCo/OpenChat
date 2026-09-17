@@ -37,7 +37,10 @@ import { hasCompletedOnboarding } from './src/services/onboarding';
 // post-OAuth replay lands the user on the right screen.
 import { installDeepLinkHandling, resumePendingIntent } from './src/services/deepLinks';
 import { completeIdeaflowLinkFromLocation } from './src/services/ideaflowLink';
-import { IDEAFLOW_LINK_RECOVERY_KEY } from './src/services/authPresentation';
+import {
+  IDEAFLOW_LINK_RECOVERY_KEY,
+  isIdeaflowLinkRecoveryActive,
+} from './src/services/authPresentation';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 
@@ -609,12 +612,13 @@ function Shell() {
   // browser marker so that, after the user signs in with an existing method,
   // we can take them directly to the authenticated Settings link action.
   useEffect(() => {
-    if (
-      Platform.OS !== 'web'
-      || typeof window === 'undefined'
-      || !isAuthed
-      || window.sessionStorage.getItem(IDEAFLOW_LINK_RECOVERY_KEY) !== '1'
-    ) return;
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !isAuthed) return;
+
+    const recovery = window.sessionStorage.getItem(IDEAFLOW_LINK_RECOVERY_KEY);
+    if (!isIdeaflowLinkRecoveryActive(recovery)) {
+      if (recovery !== null) window.sessionStorage.removeItem(IDEAFLOW_LINK_RECOVERY_KEY);
+      return;
+    }
 
     let cancelled = false;
     let attempts = 0;

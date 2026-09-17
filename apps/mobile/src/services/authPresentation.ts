@@ -1,4 +1,15 @@
 export const IDEAFLOW_LINK_RECOVERY_KEY = 'openchat_ideaflow_link_recovery';
+export const IDEAFLOW_LINK_RECOVERY_TTL_MS = 5 * 60 * 1000;
+
+export function createIdeaflowLinkRecovery(now = Date.now()): string {
+  return String(now + IDEAFLOW_LINK_RECOVERY_TTL_MS);
+}
+
+export function isIdeaflowLinkRecoveryActive(value: string | null, now = Date.now()): boolean {
+  if (!value || !/^\d+$/.test(value)) return false;
+  const expiresAt = Number(value);
+  return Number.isSafeInteger(expiresAt) && expiresAt > now;
+}
 
 export interface AuthNotice {
   title: string;

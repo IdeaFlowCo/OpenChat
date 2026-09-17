@@ -25,6 +25,7 @@ import { useChat } from '../contexts/ChatContext';
 import { randomBase64Url, pkceChallenge } from '../utils/pkce';
 import {
   authNoticeForFailure,
+  createIdeaflowLinkRecovery,
   IDEAFLOW_LINK_RECOVERY_KEY,
   type AuthNotice,
 } from '../services/authPresentation';
@@ -87,7 +88,7 @@ export function LoginScreen() {
     setAuthNotice(notice);
     setLegacyExpanded(true);
     if (notice.recovery && typeof window !== 'undefined') {
-      window.sessionStorage.setItem(IDEAFLOW_LINK_RECOVERY_KEY, '1');
+      window.sessionStorage.setItem(IDEAFLOW_LINK_RECOVERY_KEY, createIdeaflowLinkRecovery());
     }
   }, [isWeb]);
 
@@ -493,7 +494,12 @@ export function LoginScreen() {
               </Text>
             </View>
             <TouchableOpacity
-              onPress={() => setAuthNotice(null)}
+              onPress={() => {
+                if (authNotice.recovery && typeof window !== 'undefined') {
+                  window.sessionStorage.removeItem(IDEAFLOW_LINK_RECOVERY_KEY);
+                }
+                setAuthNotice(null);
+              }}
               accessibilityRole="button"
               accessibilityLabel="Dismiss sign-in message"
               style={styles.authNoticeDismiss}
