@@ -32,6 +32,7 @@ import { openapiSpec } from './openapi.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 import { parseCorsOrigins } from './config/cors.js';
 import googleWebCallbackRoutes from './routes/googleWebCallback.js';
+import ideaflowWebCallbackRoutes from './routes/ideaflowWebCallback.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -333,6 +334,7 @@ app.get(/^\/(m|d|legacy)(\/|$)/, (req, res) => {
 // redirect. The 302 is intentional: this is the completion of a GET flow and
 // must not be cached as a permanent route change.
 app.use(googleWebCallbackRoutes);
+app.use(ideaflowWebCallbackRoutes);
 
 // API routes
 app.use('/api/auth', authRoutes);
