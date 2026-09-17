@@ -3,80 +3,78 @@ import jwt from 'jsonwebtoken';
 import type { Server } from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({
-  run: vi.fn(),
-  close: vi.fn(),
-}));
+const mocks = vi.hoisted(() => ({ run: vi.fn(), close: vi.fn() }));
 
 vi.mock('../src/db.js', () => ({
   getDriver: () => ({
-    session: () => ({
-      run: mocks.run,
-      close: mocks.close,
-    }),
+    session: () => ({ run: mocks.run, close: mocks.close }),
   }),
 }));
 
 import chatRouter from '../src/routes/chat.js';
 
-const caller = {
+type DiscoveryMode = 'name' | 'email_only' | 'hidden';
+type StoredUser = {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl?: string;
+  discoveryMode?: DiscoveryMode;
+};
+
+const caller: StoredUser = {
   id: 'route-test-user',
   name: 'Route Test User',
   email: 'route-test@example.test',
 };
-const other = {
-  id: 'other-user',
+const nameDiscoverable: StoredUser = {
+  id: 'name-user',
   name: 'Alice Other',
-  email: 'Alice.Other@Example.test',
+  email: 'alice.other@example.test',
+  avatarUrl: 'https://cdn.example.test/alice.jpg',
 };
-const trustedCaller = {
-  id: 'trusted-route-test-user',
-  name: 'Trusted Route Test User',
-  email: 'trusted-route-test@example.test',
-  canBrowseUserDirectory: true,
+const emailOnly: StoredUser = {
+  id: 'email-only-user',
+  name: 'Bob Private',
+  email: 'bob.private@example.test',
+  discoveryMode: 'email_only',
+};
+const hidden: StoredUser = {
+  id: 'hidden-user',
+  name: 'Eve Hidden',
+  email: 'eve.hidden@example.test',
+  discoveryMode: 'hidden',
 };
 
-type StoredUser = typeof caller | typeof other | typeof trustedCaller;
-
-function resultWith(user: StoredUser | null) {
-  return {
-    records: user ? [{ get: () => user }] : [],
-  };
-}
+const publicProjection = (user: StoredUser) => ({
+  id: user.id,
+  name: user.name,
+  ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
+});
 
 function discoveryResult(params: Record<string, unknown>) {
-  const users: StoredUser[] = [caller, trustedCaller, other];
+  const users = [caller, nameDiscoverable, emailOnly, hidden];
   const actor = users.find(user => user.id === params.userId);
   if (!actor) return { records: [] };
 
-  const search = String(params.search ?? params.contactSearch ?? '').toLowerCase();
+  const name = String(params.name ?? params.contactName ?? '').toLowerCase();
   const email = String(params.email ?? params.contactEmail ?? '').toLowerCase();
-  const canBrowse = 'canBrowseUserDirectory' in actor && actor.canBrowseUserDirectory === true;
-  const matches = users.filter(user => canBrowse
-    ? search === ''
-      || user.name.toLowerCase().includes(search)
-      || user.email.toLowerCase().includes(search)
-      || (params.selfOnly === true && user.id === actor.id)
-    : (params.selfOnly === true && user.id === actor.id)
-      || (email !== '' && user.email.toLowerCase() === email))
-    .sort((a, b) => {
-      if (a.id === actor.id) return -1;
-      if (b.id === actor.id) return 1;
-      return a.name.localeCompare(b.name);
-    });
+  const matches = users.filter(user => {
+    if (params.selfOnly === true && user.id === actor.id) return true;
+    if (user.id === actor.id || user.discoveryMode === 'hidden') return false;
+    if (email && user.email.toLowerCase() === email) return true;
+    return Boolean(name)
+      && (user.discoveryMode ?? 'name') === 'name'
+      && user.name.toLowerCase().includes(name);
+  });
 
-  return {
-    records: matches.map(user => ({
-      get: () => ({ id: user.id, name: user.name, email: user.email }),
-    })),
-  };
+  return { records: matches.map(user => ({ get: () => publicProjection(user) })) };
 }
 
-describe('private contact discovery routes', () => {
+describe('privacy-conscious contact discovery routes', () => {
   let server: Server;
   let baseUrl: string;
   let authorization: string;
-  let trustedAuthorization: string;
 
   beforeAll(async () => {
     const app = express();
@@ -92,19 +90,13 @@ describe('private contact discovery routes', () => {
       { userId: caller.id, email: caller.email },
       'dev-secret-change-me',
     )}`;
-    trustedAuthorization = `Bearer ${jwt.sign(
-      { userId: trustedCaller.id, email: trustedCaller.email },
-      'dev-secret-change-me',
-    )}`;
   });
 
   beforeEach(() => {
     mocks.run.mockReset();
     mocks.close.mockReset();
     mocks.run.mockImplementation(async (cypher: string, params: Record<string, unknown>) => {
-      if (cypher.includes('coalesce(actor.canBrowseUserDirectory, false)')) {
-        return discoveryResult(params);
-      }
+      if (cypher.includes('discoveryMode')) return discoveryResult(params);
       return { records: [] };
     });
   });
@@ -115,123 +107,111 @@ describe('private contact discovery routes', () => {
     });
   });
 
-  it('returns only the caller for an empty contact query', async () => {
+  it('returns only a privacy-safe self projection for an empty query', async () => {
     const response = await fetch(`${baseUrl}/api/chat/contacts`, {
       headers: { Authorization: authorization },
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual([caller]);
-    expect(mocks.run).toHaveBeenCalledWith(expect.stringContaining('u.id = $userId'), {
+    expect(await response.json()).toEqual([publicProjection(caller)]);
+    expect(mocks.run).toHaveBeenCalledWith(expect.stringContaining('u.id = $userId'), expect.objectContaining({
       userId: caller.id,
-      search: '',
       selfOnly: true,
       email: '',
-    });
+      name: '',
+      limit: expect.anything(),
+    }));
   });
 
-  it.each(['me', 'self', 'myself'])('returns only the caller for the %s keyword', async keyword => {
-    const response = await fetch(`${baseUrl}/api/chat/contacts?q=${keyword}`, {
+  it('finds default accounts by partial display name without exposing email', async () => {
+    const response = await fetch(`${baseUrl}/api/chat/contacts?q=Alice`, {
       headers: { Authorization: authorization },
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual([caller]);
-    expect(mocks.run).toHaveBeenCalledWith(expect.any(String), {
+    const body = await response.json();
+    expect(body).toEqual([publicProjection(nameDiscoverable)]);
+    expect(body[0]).not.toHaveProperty('email');
+    expect(mocks.run).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
       userId: caller.id,
-      search: keyword,
-      selfOnly: true,
-      email: '',
-    });
-  });
-
-  it.each(['Alice', 'alice@', 'example.test', 'alice.other@example'])('keeps the ordinary contact result empty for partial discovery input %s', async partial => {
-    const response = await fetch(`${baseUrl}/api/chat/contacts?q=${encodeURIComponent(partial)}`, {
-      headers: { Authorization: authorization },
-    });
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual([]);
-    expect(mocks.run).toHaveBeenCalledTimes(1);
-    expect(String(mocks.run.mock.calls[0][0])).toContain('canBrowseUserDirectory');
-  });
-
-  it('normalizes a complete email and performs one exact lookup', async () => {
-    const response = await fetch(`${baseUrl}/api/chat/contacts?q=${encodeURIComponent('  ALICE.OTHER@EXAMPLE.TEST  ')}`, {
-      headers: { Authorization: authorization },
-    });
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual([other]);
-    expect(mocks.run).toHaveBeenCalledWith(expect.stringContaining('toLower(u.email) = $email'), {
-      userId: caller.id,
-      search: 'alice.other@example.test',
       selfOnly: false,
-      email: 'alice.other@example.test',
-    });
+      email: '',
+      name: 'alice',
+      limit: expect.anything(),
+    }));
+    const cypher = String(mocks.run.mock.calls[0][0]);
+    expect(cypher).toContain('NOT (u)-[:BLOCKED]->(actor)');
+    expect(cypher).toContain('LIMIT $limit');
   });
 
-  it('uses the stored capability for the same partial query and trusted browsing', async () => {
-    const ordinaryPartialResponse = await fetch(`${baseUrl}/api/chat/contacts?q=Alice`, {
+  it('does not find email-only or hidden accounts by name', async () => {
+    const emailOnlyResponse = await fetch(`${baseUrl}/api/chat/contacts?q=Bob`, {
       headers: { Authorization: authorization },
     });
-    const browseResponse = await fetch(`${baseUrl}/api/chat/contacts`, {
-      headers: { Authorization: trustedAuthorization },
-    });
-    const partialResponse = await fetch(`${baseUrl}/api/chat/contacts?q=Alice`, {
-      headers: { Authorization: trustedAuthorization },
-    });
-
-    expect(await ordinaryPartialResponse.json()).toEqual([]);
-    expect(await browseResponse.json()).toEqual([
-      { id: trustedCaller.id, name: trustedCaller.name, email: trustedCaller.email },
-      other,
-      caller,
-    ]);
-    expect(await partialResponse.json()).toEqual([other]);
-    expect(String(mocks.run.mock.calls[0][0])).toContain('coalesce(actor.canBrowseUserDirectory, false)');
-    expect(mocks.run.mock.calls[0][1]).toMatchObject({ userId: caller.id, search: 'alice' });
-    expect(mocks.run.mock.calls[1][1]).toMatchObject({ userId: trustedCaller.id, search: '' });
-    expect(mocks.run.mock.calls[2][1]).toMatchObject({ userId: trustedCaller.id, search: 'alice' });
-  });
-
-  it('uses the same exact-email rule in global search while preserving other search buckets', async () => {
-    const partialResponse = await fetch(`${baseUrl}/api/chat/search?q=Alice`, {
-      headers: { Authorization: authorization },
-    });
-    const exactResponse = await fetch(`${baseUrl}/api/chat/search?q=${encodeURIComponent('ALICE.OTHER@EXAMPLE.TEST')}`, {
+    const hiddenResponse = await fetch(`${baseUrl}/api/chat/contacts?q=Eve`, {
       headers: { Authorization: authorization },
     });
 
-    expect((await partialResponse.json()).contacts).toEqual([]);
-    expect((await exactResponse.json()).contacts).toEqual([other]);
-    const contactCalls = mocks.run.mock.calls.filter(([cypher]) => String(cypher).includes('contactEmail'));
-    expect(contactCalls[0][1]).toMatchObject({ selfOnly: false, contactEmail: '' });
-    expect(contactCalls[1][1]).toMatchObject({ selfOnly: false, contactEmail: 'alice.other@example.test' });
+    expect(await emailOnlyResponse.json()).toEqual([]);
+    expect(await hiddenResponse.json()).toEqual([]);
   });
 
-  it('uses trusted partial discovery in the contacts bucket of global search', async () => {
-    const response = await fetch(`${baseUrl}/api/chat/search?q=Alice`, {
-      headers: { Authorization: trustedAuthorization },
-    });
-
-    expect((await response.json()).contacts).toEqual([other]);
-    const contactCall = mocks.run.mock.calls.find(([cypher]) => String(cypher).includes('contactEmail'));
-    expect(String(contactCall?.[0])).toContain('coalesce(actor.canBrowseUserDirectory, false)');
-    expect(contactCall?.[1]).toMatchObject({ userId: trustedCaller.id, contactSearch: 'alice' });
-  });
-
-  it('normalizes case in the dedicated by-email lookup', async () => {
-    mocks.run.mockResolvedValueOnce(resultWith(other));
-
-    const response = await fetch(`${baseUrl}/api/chat/users/by-email/${encodeURIComponent('ALICE.OTHER@EXAMPLE.TEST')}`, {
+  it('finds an email-only account by exact email without echoing the email', async () => {
+    const response = await fetch(`${baseUrl}/api/chat/contacts?q=${encodeURIComponent('  BOB.PRIVATE@EXAMPLE.TEST  ')}`, {
       headers: { Authorization: authorization },
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(other);
-    expect(mocks.run).toHaveBeenCalledWith(expect.stringContaining('toLower(u.email) = $email'), {
-      email: 'alice.other@example.test',
+    const body = await response.json();
+    expect(body).toEqual([publicProjection(emailOnly)]);
+    expect(body[0]).not.toHaveProperty('email');
+  });
+
+  it('does not find a hidden account even by exact email', async () => {
+    const response = await fetch(`${baseUrl}/api/chat/contacts?q=${hidden.email}`, {
+      headers: { Authorization: authorization },
     });
+    expect(await response.json()).toEqual([]);
+  });
+
+  it('uses the same name and exact-email rules in global search', async () => {
+    const nameResponse = await fetch(`${baseUrl}/api/chat/search?q=Alice`, {
+      headers: { Authorization: authorization },
+    });
+    const emailResponse = await fetch(`${baseUrl}/api/chat/search?q=${encodeURIComponent(emailOnly.email)}`, {
+      headers: { Authorization: authorization },
+    });
+
+    expect((await nameResponse.json()).contacts).toEqual([publicProjection(nameDiscoverable)]);
+    expect((await emailResponse.json()).contacts).toEqual([publicProjection(emailOnly)]);
+    const contactCalls = mocks.run.mock.calls.filter(([cypher]) => String(cypher).includes('contactName'));
+    expect(contactCalls[0][1]).toMatchObject({ contactName: 'alice', contactEmail: '' });
+    expect(contactCalls[1][1]).toMatchObject({ contactName: '', contactEmail: emailOnly.email });
+  });
+
+  it('normalizes the dedicated exact-email lookup and returns no email field', async () => {
+    mocks.run.mockResolvedValueOnce({
+      records: [{ get: () => publicProjection(emailOnly) }],
+    });
+
+    const response = await fetch(`${baseUrl}/api/chat/users/by-email/${encodeURIComponent('BOB.PRIVATE@EXAMPLE.TEST')}`, {
+      headers: { Authorization: authorization },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(publicProjection(emailOnly));
+    expect(mocks.run).toHaveBeenCalledWith(expect.stringContaining("discoveryMode, 'name'"), expect.objectContaining({
+      userId: caller.id,
+      email: emailOnly.email,
+    }));
+  });
+
+  it('does not treat a non-email by-email path as a name lookup', async () => {
+    const response = await fetch(`${baseUrl}/api/chat/users/by-email/Alice`, {
+      headers: { Authorization: authorization },
+    });
+
+    expect(response.status).toBe(404);
+    expect(mocks.run).not.toHaveBeenCalled();
   });
 });

@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
-import { api, type Message, type SocialReviewItem } from '../api/client';
+import { api, isDroppedMessageSend, type Message, type SocialReviewItem } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
 import { useTheme } from '../contexts/ThemeContext';
 import type { NavProp, RouteProps } from '../navigation/types';
@@ -113,6 +113,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
     setError(null);
     try {
       const message = await api.sendMessage(agentConversationId, content);
+      if (isDroppedMessageSend(message)) return;
       setThreadMessages(previous => previous.some(item => item.id === message.id) ? previous : [...previous, message]);
       setPrompt('');
       setTimeout(() => { void refreshThread(); }, 800);

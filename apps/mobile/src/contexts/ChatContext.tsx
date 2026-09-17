@@ -30,6 +30,7 @@ import {
   User,
   getUser,
   getToken,
+  isDroppedMessageSend,
   setSession,
   clearSession,
   onAuthExpired,
@@ -128,7 +129,7 @@ interface ChatContextValue {
   markConversationRead: (conversationId: string) => void;
 
   // Profile editing (OpenChat-tml)
-  updateProfile: (fields: { name?: string; statusMessage?: string; avatarUrl?: string }) => Promise<void>;
+  updateProfile: (fields: { name?: string; statusMessage?: string; avatarUrl?: string; discoveryMode?: 'name' | 'email_only' | 'hidden' }) => Promise<void>;
 
   // Reconnect catch-up (OpenChat-qz0)
   // convIds that received new messages during a recent reconnect catch-up.
@@ -319,13 +320,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     let u = await getUser();
     try {
       const me = await api.getMe();
-      u = {
+      const refreshed: CurrentUser = {
         userId: me.id,
-        email: me.email,
+        email: me.email ?? u?.email ?? '',
         name: me.name,
-        canBrowseUserDirectory: me.canBrowseUserDirectory === true,
+        avatarUrl: me.avatarUrl,
+        discoveryMode: me.discoveryMode ?? 'name',
       };
-      await setSession(token, u);
+      u = refreshed;
+      await setSession(token, refreshed);
     } catch (error) {
       console.warn('[ChatContext] current-user refresh failed:', error);
     }
@@ -821,6 +824,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (hasAttachments) {
       try {
         const real = await api.sendMessage(id, content, attachments, clientId);
+        if (isDroppedMessageSend(real)) return;
         updateActiveMessages(prev => {
           const filtered = prev.filter(m => m.id !== optimistic.id);
           return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
@@ -836,6 +840,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // Text-only path: try socket first, fall back to REST.
     try {
       const real = await wsSend(id, content, replyToId, clientId);
+      if (real === null) return;
       // Replace the optimistic placeholder with the server message.
       updateActiveMessages(prev => {
         const filtered = prev.filter(m => m.id !== optimistic.id);
@@ -845,6 +850,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       // Socket path failed (incl. the new 10s ack timeout) — try REST fallback.
       try {
         const real = await api.sendMessage(id, content, undefined, clientId);
+        if (isDroppedMessageSend(real)) return;
         updateActiveMessages(prev => {
           const filtered = prev.filter(m => m.id !== optimistic.id);
           return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
@@ -1040,7 +1046,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Update own profile (OpenChat-tml).
-  const updateProfile = useCallback(async (fields: { name?: string; statusMessage?: string; avatarUrl?: string }) => {
+  const updateProfile = useCallback(async (fields: { name?: string; statusMessage?: string; avatarUrl?: string; discoveryMode?: 'name' | 'email_only' | 'hidden' }) => {
     const updated = await api.updateProfile(fields);
     // Optimistically patch currentUser in memory so the UI sees the change immediately.
     setCurrentUser(prev => {
@@ -1048,6 +1054,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       return {
         ...prev,
         name: updated.name ?? prev.name,
+        avatarUrl: updated.avatarUrl ?? prev.avatarUrl,
+        discoveryMode: updated.discoveryMode ?? prev.discoveryMode,
       };
     });
     // Also update the user's own participant entry in conversations.
@@ -1058,7 +1066,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           ...conv,
           participants: conv.participants.map(p =>
             p.user.id === currentUser.userId
-              ? { ...p, user: { ...p.user, name: updated.name ?? p.user.name, statusMessage: updated.statusMessage ?? p.user.statusMessage } }
+              ? { ...p, user: { ...p.user, name: updated.name ?? p.user.name, statusMessage: updated.statusMessage ?? p.user.statusMessage, avatarUrl: updated.avatarUrl ?? p.user.avatarUrl, discoveryMode: updated.discoveryMode ?? p.user.discoveryMode } }
               : p
           ),
         };

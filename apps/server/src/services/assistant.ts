@@ -183,7 +183,7 @@ export async function persistMessage(
       )
       WITH c, m, sender, created
       MATCH (p:User)-[:PARTICIPATES_IN]->(c)
-      RETURN m { .*, sender: sender { .id, .name, .email } } AS message,
+      RETURN m { .*, sender: sender { .id, .name, .avatarUrl } } AS message,
              collect(DISTINCT p.id) AS participantIds,
              created
       `,

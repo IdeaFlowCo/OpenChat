@@ -13,6 +13,10 @@ import {
   getIdeaflowOidcConfig,
   IdeaflowIdentityClaims,
 } from '../services/ideaflowOidc.js';
+import {
+  isSafePublicDisplayName,
+  normalizePublicDisplayName,
+} from '../privacy/profilePrivacy.js';
 
 const router = Router();
 function getJwtSecret(): string {
@@ -197,7 +201,7 @@ export function createBridgeExchangeHandler(
         MERGE (u:User {email: $email})
         ON CREATE SET
           u.id = $id,
-          u.name = coalesce($name, $email),
+          u.name = $name,
           u.avatarUrl = $avatarUrl,
           u.signupProvider = 'social-bridge',
           u.createdAt = datetime($now),
@@ -209,7 +213,7 @@ export function createBridgeExchangeHandler(
         RETURN u { .id, .email, .name } AS user
       `, {
         email,
-        name: name?.trim() || null,
+        name: normalizePublicDisplayName(name),
         avatarUrl: avatarUrl || null,
         id: nanoid(),
         now,
@@ -335,7 +339,7 @@ export async function linkIdeaflowIdentity(
     subject: identity.subject,
     identityKey,
     email: identity.email,
-    name: identity.name || identity.email,
+    name: normalizePublicDisplayName(identity.name),
     picture: identity.picture,
     id: nanoid(),
     now: new Date().toISOString(),
@@ -552,7 +556,7 @@ router.post('/dev-login', async (req: Request, res: Response) => {
       MERGE (u:User {email: $email})
       ON CREATE SET
         u.id = $id,
-        u.name = coalesce($name, $email),
+        u.name = $name,
         u.createdAt = datetime($now),
         u.presenceStatus = 'available',
         u.lastSeenAt = datetime($now)
@@ -562,7 +566,7 @@ router.post('/dev-login', async (req: Request, res: Response) => {
       RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .isBot } AS user
     `, {
       email,
-      name: name || null,
+      name: normalizePublicDisplayName(name),
       id: nanoid(),
       now
     });
@@ -599,7 +603,8 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
   try {
     const result = await session.run(`
       MATCH (u:User {id: $userId})
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .lastSeenAt, .isBot, .canBrowseUserDirectory } AS user
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .lastSeenAt, .avatarUrl, .isBot,
+        discoveryMode: coalesce(u.discoveryMode, 'name') } AS user
     `, { userId });
 
     if (result.records.length === 0) {
@@ -655,7 +660,7 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
         ORDER BY m.createdAt ASC
         RETURN collect(m {
           .*,
-          sender: sender { .id, .name, .email, .isBot }
+          sender: sender { .id, .name, .avatarUrl, .isBot }
         }) AS messages
       }
       CALL {
@@ -668,7 +673,7 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
       CALL {
         WITH u
         OPTIONAL MATCH (u)-[:BLOCKED]->(blocked:User)
-        RETURN collect(blocked { .id, .name, .email }) AS blockedUsers
+        RETURN collect(blocked { .id, .name }) AS blockedUsers
       }
       CALL {
         WITH u
@@ -838,7 +843,8 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
 
 /**
  * PATCH /api/auth/me — Update current user's profile (OpenChat-tml + OpenChat-x2s)
- * Body: { name?: string, statusMessage?: string, avatarUrl?: string, onboardingComplete?: boolean }
+ * Body: { name?: string, statusMessage?: string, avatarUrl?: string,
+ *   discoveryMode?: 'name' | 'email_only' | 'hidden', onboardingComplete?: boolean }
  *
  * Persists name, statusMessage, avatarUrl, and/or marks onboarding complete
  * (sets `onboardedAt` to now on first call with onboardingComplete=true).
@@ -847,12 +853,12 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
  * without polling.
  */
 router.patch('/me', requireAuth, async (req: Request, res: Response) => {
-  const session = getDriver().session();
   const userId = req.user!.userId;
-  const { name, statusMessage, avatarUrl, onboardingComplete } = (req.body ?? {}) as {
+  const { name, statusMessage, avatarUrl, discoveryMode, onboardingComplete } = (req.body ?? {}) as {
     name?: string;
     statusMessage?: string;
     avatarUrl?: string;
+    discoveryMode?: string;
     onboardingComplete?: boolean;
   };
 
@@ -861,11 +867,22 @@ router.patch('/me', requireAuth, async (req: Request, res: Response) => {
     return;
   }
 
+  if (name !== undefined && !isSafePublicDisplayName(name)) {
+    res.status(400).json({ error: 'name must not contain an email address' });
+    return;
+  }
+
   if (avatarUrl !== undefined && typeof avatarUrl !== 'string') {
     res.status(400).json({ error: 'avatarUrl must be a string' });
     return;
   }
 
+  if (discoveryMode !== undefined && !['name', 'email_only', 'hidden'].includes(discoveryMode)) {
+    res.status(400).json({ error: 'discoveryMode must be name, email_only, or hidden' });
+    return;
+  }
+
+  const session = getDriver().session();
   try {
     const now = new Date().toISOString();
     const result = await session.run(`
@@ -873,14 +890,17 @@ router.patch('/me', requireAuth, async (req: Request, res: Response) => {
       SET u.name = CASE WHEN $name IS NOT NULL THEN $name ELSE u.name END,
           u.statusMessage = CASE WHEN $statusMessage IS NOT NULL THEN $statusMessage ELSE u.statusMessage END,
           u.avatarUrl = CASE WHEN $avatarUrl IS NOT NULL THEN $avatarUrl ELSE u.avatarUrl END,
+          u.discoveryMode = CASE WHEN $discoveryMode IS NOT NULL THEN $discoveryMode ELSE u.discoveryMode END,
           u.onboardedAt = CASE WHEN $onboardingComplete = true AND u.onboardedAt IS NULL THEN datetime($now) ELSE u.onboardedAt END,
           u.updatedAt = datetime($now)
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot, .onboardedAt } AS user
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot, .onboardedAt,
+        discoveryMode: coalesce(u.discoveryMode, 'name') } AS user
     `, {
       userId,
       name: name?.trim() ?? null,
       statusMessage: statusMessage ?? null,
       avatarUrl: avatarUrl ?? null,
+      discoveryMode: discoveryMode ?? null,
       onboardingComplete: onboardingComplete === true,
       now,
     });
@@ -1132,9 +1152,9 @@ router.post('/google/exchange', async (req: Request, res: Response) => {
   const session = getDriver().session();
   try {
     const now = new Date().toISOString();
-    const displayName = userinfo.name
-      || [userinfo.given_name, userinfo.family_name].filter(Boolean).join(' ')
-      || userinfo.email;
+    const displayName = normalizePublicDisplayName(
+      userinfo.name || [userinfo.given_name, userinfo.family_name].filter(Boolean).join(' '),
+    );
 
     const result = await session.run(`
       MERGE (u:User {email: $email})
@@ -1251,9 +1271,9 @@ router.post('/google/idtoken-exchange', async (req: Request, res: Response) => {
   const session = getDriver().session();
   try {
     const now = new Date().toISOString();
-    const displayName = payload.name
-      || [payload.given_name, payload.family_name].filter(Boolean).join(' ')
-      || payload.email;
+    const displayName = normalizePublicDisplayName(
+      payload.name || [payload.given_name, payload.family_name].filter(Boolean).join(' '),
+    );
 
     const result = await session.run(`
       MERGE (u:User {email: $email})
@@ -1477,10 +1497,10 @@ router.post('/apple/idtoken-exchange', async (req: Request, res: Response) => {
   // Derive a display name from the one-time fullName payload Apple sends on
   // first sign-in. On subsequent sign-ins fullName is empty — we preserve
   // whatever was stored on first sign-in via ON MATCH coalesce.
-  const displayName =
-    [fullName?.givenName, fullName?.familyName].filter(Boolean).join(' ').trim() ||
-    (email && !isPrivateRelay ? email : null) ||
-    'Apple User';
+  const displayName = normalizePublicDisplayName(
+    [fullName?.givenName, fullName?.familyName].filter(Boolean).join(' '),
+    'Apple User',
+  );
 
   const dbSession = getDriver().session();
   try {

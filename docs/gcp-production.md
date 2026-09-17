@@ -59,102 +59,21 @@ gcloud compute ssh noos \
   --command='sudo docker logs openchat_app --since 30m'
 ```
 
-### Trusted user-directory access
+### User-controlled discovery
 
-`User.canBrowseUserDirectory` is a sparse, server-owned capability. Ordinary
-signup, login, identity-bridge, and profile-update requests cannot set it. Grant
-it only to people who need to operate a trusted club or mutual-aid directory.
+`User.discoveryMode` controls whether an account appears in people search:
 
-Connect to the production Neo4j shell without putting its password in shell
-history or process arguments; `cypher-shell` prompts for it:
+- `name` (the default, including for existing rows with no property): partial
+  display-name and exact-email lookup.
+- `email_only`: exact-email lookup only.
+- `hidden`: no discovery lookup; existing conversations still work.
 
-```bash
-gcloud compute ssh noos \
-  --project=lightsail-migration \
-  --zone=us-central1-a \
-  --command='sudo docker exec -it noos_neo4j cypher-shell -u neo4j'
-```
-
-Create the audit identifier constraint once before the first grant or revoke:
-
-```cypher
-CREATE CONSTRAINT directory_capability_audit_id IF NOT EXISTS
-FOR (a:DirectoryCapabilityAudit) REQUIRE a.id IS UNIQUE;
-```
-
-Each operation requires the normalized account email, the operator's durable
-identity, and a non-empty reason. Set those parameters, inspect the target, and
-grant only when exactly one user matches:
-
-```cypher
-:param email => 'trusted-operator@example.com';
-:param operator => 'operator@example.com';
-:param reason => 'Directory steward for the September mutual-aid intake';
-MATCH (u:User) WHERE toLower(u.email) = toLower(trim($email))
-RETURN u.id AS id, u.email AS email, coalesce(u.canBrowseUserDirectory, false) AS enabled;
-
-MATCH (u:User) WHERE toLower(u.email) = toLower(trim($email))
-WITH collect(u) AS users
-WHERE size(users) = 1 AND trim($operator) <> '' AND trim($reason) <> ''
-UNWIND users AS u
-SET u.canBrowseUserDirectory = true
-CREATE (a:DirectoryCapabilityAudit {
-  id: randomUUID(),
-  targetUserId: u.id,
-  targetEmail: toLower(u.email),
-  action: 'grant',
-  operator: trim($operator),
-  reason: trim($reason),
-  timestamp: datetime()
-})
-RETURN u.id AS id, u.email AS email, u.canBrowseUserDirectory AS enabled,
-       a.id AS auditId, a.timestamp AS auditedAt;
-```
-
-Revoke with the same required parameters, again only when exactly one user
-matches:
-
-```cypher
-MATCH (u:User) WHERE toLower(u.email) = toLower(trim($email))
-WITH collect(u) AS users
-WHERE size(users) = 1 AND trim($operator) <> '' AND trim($reason) <> ''
-UNWIND users AS u
-REMOVE u.canBrowseUserDirectory
-CREATE (a:DirectoryCapabilityAudit {
-  id: randomUUID(),
-  targetUserId: u.id,
-  targetEmail: toLower(u.email),
-  action: 'revoke',
-  operator: trim($operator),
-  reason: trim($reason),
-  timestamp: datetime()
-})
-RETURN u.id AS id, u.email AS email,
-       coalesce(u.canBrowseUserDirectory, false) AS enabled,
-       a.id AS auditId, a.timestamp AS auditedAt;
-```
-
-Each query mutates the capability and creates its audit node in one atomic
-transaction. Treat `DirectoryCapabilityAudit` as append-only: never update or
-delete its nodes. There is no client or API write path for the capability or
-its audit history. Inspect history by target email, newest first:
-
-```cypher
-:param email => 'trusted-operator@example.com';
-MATCH (a:DirectoryCapabilityAudit)
-WHERE a.targetEmail = toLower(trim($email))
-RETURN a.id, a.targetUserId, a.targetEmail, a.action, a.operator, a.reason,
-       a.timestamp
-ORDER BY a.timestamp DESC;
-```
-
-The change is effective for API authorization immediately. Web and mobile copy
-refreshes from `/api/auth/me` on the next authenticated app bootstrap; restart
-the client after a grant or revoke to refresh that copy.
-
-Email-bound invitations that resume after TestFlight onboarding, including an
-optional authorized directory grant, remain deferred in
-[GitHub issue #41](https://github.com/IdeaFlowCo/OpenChat/issues/41).
+Users change this property from Edit profile in the responsive app. Search
+responses never project `User.email`, even after an exact-email match. No
+schema migration is needed because `coalesce(u.discoveryMode, 'name')` gives
+every existing account the beta default. Server startup also runs an
+idempotent data repair that replaces legacy blank or email-like display names
+with `OpenChat member` while preserving ids, memberships, and conversations.
 
 Secrets live in `/opt/openchat/.env` on the GCE instance and must not be copied
 into the repository. The live deployment still accepts the legacy `AWS_*`

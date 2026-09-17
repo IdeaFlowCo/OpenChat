@@ -8,6 +8,13 @@ export interface DirectConversationResult {
   created: boolean;
 }
 
+export class DirectConversationNotAllowedError extends Error {
+  constructor() {
+    super('Direct conversation is not allowed');
+    this.name = 'DirectConversationNotAllowedError';
+  }
+}
+
 function toJS(value: unknown): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value === 'object' && 'toNumber' in value) {
@@ -61,6 +68,19 @@ export async function ensureDirectConversation(
     const participantIds = [...new Set([userId, otherId])].sort();
     const directPairKey = JSON.stringify(participantIds);
     const creationToken = nanoid();
+    if (userId !== otherId) {
+      const permission = await session.run(`
+        MATCH (first:User {id: $userId}), (second:User {id: $otherId})
+        RETURN NOT (first)-[:BLOCKED]->(second)
+          AND NOT (second)-[:BLOCKED]->(first) AS allowed
+      `, { userId, otherId });
+      if (permission.records.length === 0) {
+        throw new Error('Direct conversation participants not found');
+      }
+      if (permission.records[0].get('allowed') !== true) {
+        throw new DirectConversationNotAllowedError();
+      }
+    }
     const result = await session.run(
       `
       MATCH (first:User {id: $firstId}), (second:User {id: $secondId})
@@ -93,7 +113,7 @@ export async function ensureDirectConversation(
       ON CREATE SET rel.joinedAt = datetime($now),
                     rel.role = CASE WHEN participantId = $userId THEN 'owner' ELSE 'member' END
       WITH c, created,
-           collect({user: user {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
+           collect({user: user {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
       RETURN c { .*, participants: participants } AS conversation, created
       `,
       {

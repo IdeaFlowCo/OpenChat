@@ -90,4 +90,22 @@ describe('linkIdeaflowIdentity', () => {
       email: identity.email,
     });
   });
+
+  it('never falls back to the IdeaFlow login email for a public display name', async () => {
+    const emailOnlyIdentity = { ...identity, name: undefined };
+    const created = {
+      id: 'new-email-only-user',
+      email: identity.email,
+      name: 'OpenChat member',
+    };
+    const session = sessionWithResults(result([]), result([]), result([created]));
+
+    await linkIdeaflowIdentity(session as never, emailOnlyIdentity);
+
+    expect(session.run.mock.calls[2][1]).toMatchObject({
+      email: identity.email,
+      name: 'OpenChat member',
+    });
+    expect(session.run.mock.calls[2][1]).not.toMatchObject({ name: identity.email });
+  });
 });

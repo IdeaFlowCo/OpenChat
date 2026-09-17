@@ -107,13 +107,11 @@ function renderContentWithMentions(
   scheme: 'light' | 'dark'
 ): React.ReactElement {
   // Build a name → userId map for quick lookup.
-  const nameMap = new Map<string, string>();
+  const nameMap = new Map<string, string | null>();
   for (const p of participants) {
-    const displayName = p.user.name || p.user.email.split('@')[0] || p.user.email;
-    nameMap.set(displayName.toLowerCase(), p.user.id);
-    // Also map by email local part as fallback.
-    const localPart = p.user.email.split('@')[0].toLowerCase();
-    if (!nameMap.has(localPart)) nameMap.set(localPart, p.user.id);
+    const displayName = p.user.name || 'OpenChat member';
+    const key = displayName.toLowerCase();
+    nameMap.set(key, nameMap.has(key) ? null : p.user.id);
   }
 
   const parts: React.ReactElement[] = [];

@@ -75,15 +75,15 @@ const USER_KEY = 'openchat_user';
 
 export interface User {
   id: string;
-  email: string;
+  email?: string;
   name?: string;
   presenceStatus?: string;
   statusMessage?: string;
   lastSeenAt?: string;
   avatarUrl?: string;
+  discoveryMode?: 'name' | 'email_only' | 'hidden';
   /** True for AI / agent users (picortex, future agents). Surface as a badge. */
   isBot?: boolean;
-  canBrowseUserDirectory?: boolean;
 }
 
 export interface Participant {
@@ -140,7 +140,7 @@ export interface Message {
   editedAt?: string;
   /** Set when the message has been soft-deleted. */
   deletedAt?: string;
-  sender?: { id: string; name?: string; email: string };
+  sender?: { id: string; name?: string; email?: string };
   /** ID of the message this message is replying to (OpenChat-uxj).
    *  Server support is a follow-up ticket; field is passed through on send
    *  and stored locally on optimistic messages. */
@@ -150,7 +150,7 @@ export interface Message {
     id: string;
     content: string;
     senderId: string;
-    sender?: { id: string; name?: string; email: string };
+    sender?: { id: string; name?: string; email?: string };
   };
   /** Aggregated reactions, including optional semantic kind receipts. */
   reactions?: ReactionSummary[];
@@ -171,6 +171,15 @@ export interface Message {
   transcript?: string;
   /** Owner-approved automatic reply sent by personal Secretary mode. */
   viaSecretary?: boolean;
+}
+
+export interface DroppedMessageSend {
+  success: true;
+  dropped: true;
+}
+
+export function isDroppedMessageSend(value: Message | DroppedMessageSend): value is DroppedMessageSend {
+  return 'dropped' in value && value.dropped === true;
 }
 
 export type AgentIntentKind = 'ask' | 'offer';
@@ -301,7 +310,8 @@ export interface CurrentUser {
   userId: string;
   email: string;
   name?: string;
-  canBrowseUserDirectory?: boolean;
+  avatarUrl?: string;
+  discoveryMode?: 'name' | 'email_only' | 'hidden';
 }
 
 let memToken: string | null = null;
@@ -810,7 +820,7 @@ export const api = {
       `/api/chat/conversations/${conversationId}/messages?before=${encodeURIComponent(before)}&limit=${limit}`
     ),
   sendMessage: (conversationId: string, content: string, attachments?: Attachment[], id?: string) =>
-    request<Message>(`/api/chat/conversations/${conversationId}/messages`, {
+    request<Message | DroppedMessageSend>(`/api/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
       // id: client-generated idempotency key shared with the socket path so a
       // WS-then-REST retry collapses to one row server-side (MERGE). OpenChat-60y.
@@ -1136,6 +1146,7 @@ export const api = {
     name?: string;
     statusMessage?: string;
     avatarUrl?: string;
+    discoveryMode?: 'name' | 'email_only' | 'hidden';
     onboardingComplete?: boolean;
   }) =>
     request<{
@@ -1144,6 +1155,7 @@ export const api = {
       name?: string;
       statusMessage?: string;
       avatarUrl?: string;
+      discoveryMode?: 'name' | 'email_only' | 'hidden';
       onboardedAt?: string;
     }>('/api/auth/me', {
       method: 'PATCH',
