@@ -97,6 +97,7 @@ export function SettingsScreen() {
   const [ideaflowLinked, setIdeaflowLinked] = useState<boolean | null>(null);
   const [ideaflowEmail, setIdeaflowEmail] = useState<string | null>(null);
   const [ideaflowLinkLoading, setIdeaflowLinkLoading] = useState(false);
+  const [ideaflowLinkError, setIdeaflowLinkError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isWeb) return;
@@ -122,23 +123,29 @@ export function SettingsScreen() {
         setIdeaflowEmail(status.ideaflowEmail);
       })
       .catch(() => {
-        if (!cancelled) setIdeaflowLinked(null);
+        if (!cancelled) {
+          setIdeaflowLinked(null);
+          setIdeaflowLinkError('OpenChat could not load the current Ideaflow ID link status. Refresh and try again.');
+        }
       });
     return () => { cancelled = true; };
   }, [isWeb, ideaflowEnabled]);
 
   const handleLinkIdeaflow = useCallback(async () => {
     if (ideaflowLinkLoading || ideaflowLinked) return;
+    setIdeaflowLinkError(null);
     setIdeaflowLinkLoading(true);
     try {
       await startIdeaflowLink();
       // startIdeaflowLink navigates the page away on success — this only
       // resolves without redirecting if something upstream is misconfigured.
     } catch (err) {
-      Alert.alert('Could not start Ideaflow ID linking', err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      if (isWeb) setIdeaflowLinkError(message);
+      else Alert.alert('Could not start Ideaflow ID linking', message);
       setIdeaflowLinkLoading(false);
     }
-  }, [ideaflowLinkLoading, ideaflowLinked]);
+  }, [ideaflowLinkLoading, ideaflowLinked, isWeb]);
 
   // Account deletion (OpenChat-nhy)
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -449,6 +456,24 @@ export function SettingsScreen() {
               )}
             </TouchableOpacity>
           </View>
+          {ideaflowLinkError && (
+            <View
+              style={[styles.linkError, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}
+              accessibilityRole="alert"
+              accessibilityLiveRegion="assertive"
+            >
+              <Text style={[styles.linkErrorTitle, { color: c.textPrimary }]}>Could not start linking</Text>
+              <Text style={[styles.linkErrorMessage, { color: c.textSecondary }]}>{ideaflowLinkError}</Text>
+              <TouchableOpacity
+                onPress={() => setIdeaflowLinkError(null)}
+                accessibilityRole="button"
+                accessibilityLabel="Dismiss linking error"
+                style={styles.linkErrorDismiss}
+              >
+                <Text style={{ color: c.primary, fontWeight: '600' }}>Dismiss</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       )}
 
@@ -1074,6 +1099,15 @@ const styles = StyleSheet.create({
   notifRow: { minHeight: 56 },
   optionLabel: { fontSize: 16, fontWeight: '500' },
   optionHint: { fontSize: 12, marginTop: 2 },
+  linkError: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    marginTop: 8,
+    padding: 12,
+  },
+  linkErrorTitle: { fontSize: 13, fontWeight: '700' },
+  linkErrorMessage: { fontSize: 12, lineHeight: 18, marginTop: 3 },
+  linkErrorDismiss: { alignSelf: 'flex-start', minHeight: 36, justifyContent: 'center', marginTop: 3 },
   radioMark: { width: 28, fontSize: 20, lineHeight: 24 },
   subsectionLabel: {
     fontSize: 10,

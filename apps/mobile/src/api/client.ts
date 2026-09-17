@@ -588,13 +588,19 @@ export async function ideaflowExchange(
   if (!res.ok) {
     const text = await res.text();
     let msg = text;
+    let code: string | undefined;
     try {
       const parsed = JSON.parse(text);
       msg = parsed.error || parsed.message || text;
+      code = typeof parsed.code === 'string' ? parsed.code : undefined;
     } catch {
       /* not JSON */
     }
-    throw new Error(`Ideaflow ID sign-in failed (${res.status}): ${msg}`);
+    throw new IdeaflowSignInError(
+      `Ideaflow ID sign-in failed (${res.status}): ${msg}`,
+      res.status,
+      code,
+    );
   }
 
   const body = await res.json();
@@ -605,6 +611,17 @@ export async function ideaflowExchange(
   };
   await setSession(body.token, user);
   return { user, token: body.token };
+}
+
+export class IdeaflowSignInError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'IdeaflowSignInError';
+  }
 }
 
 async function ideaflowErrorMessage(res: Response, fallback: string): Promise<string> {

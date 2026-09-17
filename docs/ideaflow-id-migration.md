@@ -305,9 +305,17 @@ The active pilot configuration is intentionally narrow:
 
 ```text
 IDEAFLOW_ID_ENABLED=true
-IDEAFLOW_ID_COHORT_ALLOWLIST=jacob@ideaflow.io
+IDEAFLOW_ID_COHORT_ALLOWLIST=jacob@ideaflow.io,tmad4000@gmail.com
 IDEAFLOW_ID_ALLOW_NEW_USER_CREATION=false
 ```
+
+RN-web presents Ideaflow as the primary sign-in method while the pilot is
+enabled. Existing Google and password methods remain available under an
+accessible disclosure and expand automatically after any provider error. A
+`link_required` response displays an inline recovery explanation, then routes
+the user to Settings after they authenticate with an existing OpenChat method.
+This is navigation only: the mapping is still created exclusively by the
+authenticated, one-use Settings linking flow and never by matching email.
 
 This evidence covers RN-web at `/app`. The current implementation deliberately
 does not render or run Ideaflow ID login on native iOS or Android. Native
