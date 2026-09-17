@@ -36,3 +36,5 @@ apps/mobile/dist-web-shell/
 .beads/.jsonl.lock
 .beads/last-touched
 .beads/export-state.json
+# Local iOS release artifacts
+apps/mobile/build-*.ipa

@@ -31,7 +31,7 @@
 #   - publish-to-testers.py assigns to Friends and Family + triggers Apple
 #     Beta App Review
 
-set -o pipefail
+set -eo pipefail
 
 cd "$(dirname "$0")/.."
 
@@ -221,10 +221,12 @@ echo "── submitting $IPA_OUT to App Store Connect ──"
 eas submit \
   --platform ios \
   --path "$IPA_OUT" \
-  --non-interactive
+  --non-interactive \
+  --no-wait
 
 # ── Push the build to external testers (Friends and Family) ─────────────────
-# eas submit makes the build VALID for internal Founders within ~1 minute.
+# App Store processing time varies; the poller waits for this upload to become
+# VALID before assigning it to a tester group.
 # External testers (Sandeep, Whimsi, Kristen, etc.) require:
 #   1. explicit assignment to the Friends and Family beta group
 #   2. Apple Beta App Review approval (24-48h typical)
@@ -235,5 +237,6 @@ python3 "$(dirname "$0")/publish-to-testers.py"
 
 echo ""
 echo "════ DONE ════"
-echo "Built locally on $(hostname). On TestFlight for internal + external testers."
-echo "Check status:  eas submit:list --platform ios --limit 1"
+echo "Built locally on $(hostname). Submitted to App Store Connect; tester distribution status is reported above."
+echo "External availability depends on Apple Beta App Review."
+echo "Check status in the OpenChat project on expo.dev or App Store Connect."
