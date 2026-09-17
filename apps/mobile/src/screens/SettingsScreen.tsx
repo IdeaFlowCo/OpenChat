@@ -8,7 +8,7 @@
  * just grows downward.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Clipboard, Linking, Modal, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import * as Notifications from 'expo-notifications';
@@ -19,7 +19,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useTheme, ThemePref } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
 import { useSocialExperience, type LayoutPreference } from '../contexts/SocialExperienceContext';
-import { api, ExportRangeKey, OPENCHAT_URL } from '../api/client';
+import { api, ExportRangeKey, ideaflowLinkStatus, OPENCHAT_URL } from '../api/client';
 import { buildAgentSetupBlob } from '../utils/agentSetupBlob';
 import { getColors } from '../theme/colors';
 import type { NavProp } from '../navigation/types';
@@ -28,6 +28,7 @@ import { ExportSheet } from '../components/ExportSheet';
 import { FeedbackModal } from '../components/FeedbackModal';
 import { saveJsonDownload } from '../services/exportDownload';
 import { AppIcon } from '../components/AppIcon';
+import { startIdeaflowLink } from '../services/ideaflowLink';
 
 const OPTIONS: { value: ThemePref; label: string; hint: string }[] = [
   { value: 'system', label: 'System', hint: 'Follow your phone' },
@@ -87,6 +88,58 @@ export function SettingsScreen() {
       setSavingExperience(false);
     }
   }, [setNetworkPaused, socialPreferences.networkPaused]);
+
+  // Ideaflow ID account linking — explicit, authenticated (web-only for now;
+  // native remains a future separate public client). Reuses the same
+  // PKCE/state/nonce machinery as the LoginScreen sign-in button, but hits
+  // the authenticated /ideaflow/link/* endpoints via src/services/ideaflowLink.
+  const isWeb = Platform.OS === 'web';
+  const [ideaflowEnabled, setIdeaflowEnabled] = useState(false);
+  const [ideaflowLinked, setIdeaflowLinked] = useState<boolean | null>(null);
+  const [ideaflowEmail, setIdeaflowEmail] = useState<string | null>(null);
+  const [ideaflowLinkLoading, setIdeaflowLinkLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isWeb) return;
+    let cancelled = false;
+    fetch(`${OPENCHAT_URL}/api/auth/ideaflow/config`)
+      .then(response => response.ok ? response.json() : { enabled: false })
+      .then((body: { enabled?: boolean }) => {
+        if (!cancelled) setIdeaflowEnabled(body.enabled === true);
+      })
+      .catch(() => {
+        if (!cancelled) setIdeaflowEnabled(false);
+      });
+    return () => { cancelled = true; };
+  }, [isWeb]);
+
+  useEffect(() => {
+    if (!isWeb || !ideaflowEnabled) return;
+    let cancelled = false;
+    ideaflowLinkStatus()
+      .then((status) => {
+        if (cancelled) return;
+        setIdeaflowLinked(status.linked);
+        setIdeaflowEmail(status.ideaflowEmail);
+      })
+      .catch(() => {
+        if (!cancelled) setIdeaflowLinked(null);
+      });
+    return () => { cancelled = true; };
+  }, [isWeb, ideaflowEnabled]);
+
+  const handleLinkIdeaflow = useCallback(async () => {
+    if (ideaflowLinkLoading || ideaflowLinked) return;
+    setIdeaflowLinkLoading(true);
+    try {
+      await startIdeaflowLink();
+      // startIdeaflowLink navigates the page away on success — this only
+      // resolves without redirecting if something upstream is misconfigured.
+    } catch (err) {
+      Alert.alert('Could not start Ideaflow ID linking', err instanceof Error ? err.message : String(err));
+      setIdeaflowLinkLoading(false);
+    }
+  }, [ideaflowLinkLoading, ideaflowLinked]);
 
   // Account deletion (OpenChat-nhy)
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -356,6 +409,39 @@ export function SettingsScreen() {
             <View style={[styles.optionRow]}>
               <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>{currentUser.email}</Text>
             </View>
+          </View>
+        </View>
+      )}
+
+      {isWeb && ideaflowEnabled && (
+        <View style={styles.section}>
+          <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>LINKED ACCOUNTS</Text>
+          <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+            <TouchableOpacity
+              style={[styles.optionRow, { opacity: ideaflowLinked ? 1 : (ideaflowLinkLoading ? 0.6 : 1) }]}
+              onPress={ideaflowLinked ? undefined : handleLinkIdeaflow}
+              disabled={ideaflowLinked === true || ideaflowLinkLoading || ideaflowLinked === null}
+              activeOpacity={0.7}
+              accessibilityLabel="Link Ideaflow ID"
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Ideaflow ID</Text>
+                <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                  {ideaflowLinked === null
+                    ? 'Checking link status…'
+                    : ideaflowLinked
+                      ? `Linked${ideaflowEmail ? ` as ${ideaflowEmail}` : ''}`
+                      : 'Not linked — tap to link with Ideaflow ID'}
+                </Text>
+              </View>
+              {ideaflowLinkLoading ? (
+                <ActivityIndicator color={c.textMuted} />
+              ) : ideaflowLinked ? (
+                <Text style={{ color: c.textMuted, fontSize: 16 }}>✓</Text>
+              ) : (
+                <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
       )}
