@@ -653,7 +653,7 @@ export async function bindIdeaflowIdentityToUser(
 
 /**
  * POST /api/auth/ideaflow/exchange
- * Body: { code, codeVerifier, nonce, state }
+ * Body: { code, codeVerifier, nonce }
  *
  * Unauthenticated sign-in. Exchanges the one-time code server-side so the
  * confidential client secret never reaches the browser, verifies the OIDC ID

@@ -571,8 +571,9 @@ export async function signInWithApple(
 
 /**
  * Finish the web-only Ideaflow ID Authorization Code + PKCE flow. The server
- * holds the confidential client secret, verifies the ID token, links the
- * external issuer+subject pair, and returns an ordinary OpenChat session.
+ * holds the confidential client secret, verifies the ID token, resolves the
+ * identity under the server's account-linking policy, and returns an ordinary
+ * OpenChat session.
  */
 export async function ideaflowExchange(
   code: string,
