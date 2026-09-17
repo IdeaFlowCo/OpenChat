@@ -31,6 +31,7 @@ import { ensureAgentSocialLayerIndexes } from './services/agentSocialLayer.js';
 import { openapiSpec } from './openapi.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 import { parseCorsOrigins } from './config/cors.js';
+import googleWebCallbackRoutes from './routes/googleWebCallback.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -324,6 +325,14 @@ app.get(/^\/(m|d|legacy)(\/|$)/, (req, res) => {
   const query = req.originalUrl.slice(req.path.length);
   res.redirect(308, `${canonicalPath === '/app' ? '/app/' : canonicalPath}${query}`);
 });
+
+// Google only accepts an exactly registered redirect URI. Production's web
+// OAuth client is registered for /auth/google/callback, while the RN-web app
+// handles the returned code and state at /app/. Keep the destination fixed and
+// copy only OAuth response fields so this endpoint cannot become an open
+// redirect. The 302 is intentional: this is the completion of a GET flow and
+// must not be cached as a permanent route change.
+app.use(googleWebCallbackRoutes);
 
 // API routes
 app.use('/api/auth', authRoutes);
