@@ -252,12 +252,12 @@ are unaffected, and an interrupted link only needs to be restarted.
    `IDEAFLOW_ID_COHORT_ALLOWLIST` unset).
 2. Register the confidential web client without changing any existing client,
    credential, session, or cookie.
-3. Add OpenChat secrets and smoke-test the server capability endpoint while the
-   UI build flag remains off.
+3. Add OpenChat secrets, deploy the web/server release with the server kill
+   switch still off, and confirm the capability endpoint reports disabled.
 4. Enable the server flag and set `IDEAFLOW_ID_COHORT_ALLOWLIST` to one or a
    few test account emails; verify explicit linking from Settings for an
-   already-registered legacy account, then ship a web build with the client
-   flag on.
+   already-registered legacy account. RN-web reads the server capability at
+   runtime, so this enable step does not require a second client build.
 5. Grow `IDEAFLOW_ID_COHORT_ALLOWLIST` incrementally. Only set it to `*` (full
    rollout) once explicit linking and unauthenticated sign-in have both been
    verified in the cohort. Only set `IDEAFLOW_ID_ALLOW_NEW_USER_CREATION=true`
@@ -269,6 +269,57 @@ are unaffected, and an interrupted link only needs to be restarted.
    user IDs automatically.
 7. Add native clients separately. Removing old providers or moving password
    credentials is a later explicit project, not part of this rollout.
+
+## Production execution record (2026-09-17)
+
+The reviewed web rollout is deployed from commit `6fa2850` and remains
+reviewable in [OpenChat PR 54](https://github.com/IdeaFlowCo/OpenChat/pull/54).
+The release was first deployed with `IDEAFLOW_ID_ENABLED=false`; production
+health, the disabled capability response, and the existing Google and Noos
+redirects all passed before the pilot was enabled.
+
+The deployed `bindIdeaflowIdentityToUser` helper was then exercised against
+production Neo4j using four tagged disposable `User` nodes. Proof run
+`openchat-oidc-proof-9229e0b1-1fee-42c9-aeaa-f6076e00fb6a` verified:
+
+- concurrent different subjects targeting one user produced one link and one
+  conflict;
+- concurrent different users targeting one subject produced one link and one
+  conflict;
+- repeating the winning bind was idempotent; and
+- an incompatible partial mapping was rejected.
+
+All four proof nodes were deleted and a follow-up query returned zero tagged
+fixtures.
+
+The browser flow was verified separately with the provider's public demo
+account and one uniquely tagged disposable OpenChat user. The production UI
+completed Settings → Link Ideaflow ID, retained the existing OpenChat session,
+signed out locally, and then signed back in through Ideaflow ID to the exact
+same OpenChat user ID. The temporary demo cohort entry, disposable user,
+issuer/subject mapping, browser state, and local/remote credential files were
+removed afterward; follow-up queries returned zero tagged users and zero demo
+identity mappings.
+
+The active pilot configuration is intentionally narrow:
+
+```text
+IDEAFLOW_ID_ENABLED=true
+IDEAFLOW_ID_COHORT_ALLOWLIST=jacob@ideaflow.io
+IDEAFLOW_ID_ALLOW_NEW_USER_CREATION=false
+```
+
+This evidence covers RN-web at `/app`. The current implementation deliberately
+does not render or run Ideaflow ID login on native iOS or Android. Native
+support remains a separate task requiring public clients, native redirect
+handling, PKCE, and no embedded client secret (`OpenChat-mt6`). Publishing the
+current shared client to TestFlight does not imply native Ideaflow support.
+
+Upstream Google login at the identity provider also remains a distinct,
+unverified path because its real-account password challenge was not used for
+this proof. Email/password continuity and the OpenChat OIDC integration were
+verified independently; existing OpenChat Google, Apple, password, Noos, and
+already-issued application sessions remain available.
 
 ## Rollback
 
