@@ -100,6 +100,14 @@ esac
 # ── Ensure codesign can access the signing key ───────────────────────────────
 LOGIN_PW_FILE="$HOME/.config/m3-login.txt"
 SIGNING_IDENTITY="Apple Distribution: IdeaFlow, Inc. (JESMXK96LG)"
+UNLOCK_PID=""
+PRE_BUILD_MARKER=""
+
+cleanup() {
+  if [ -n "$UNLOCK_PID" ]; then kill "$UNLOCK_PID" 2>/dev/null; fi
+  if [ -n "$PRE_BUILD_MARKER" ]; then /bin/rm -f "$PRE_BUILD_MARKER"; fi
+}
+trap cleanup EXIT
 
 if [ -f "$LOGIN_PW_FILE" ]; then
   LOGIN_PW=$(cat "$LOGIN_PW_FILE")
@@ -118,7 +126,6 @@ if [ -f "$LOGIN_PW_FILE" ]; then
     done
   ) &
   UNLOCK_PID=$!
-  trap 'kill "$UNLOCK_PID" 2>/dev/null' EXIT
 elif security find-identity -v -p codesigning | grep -Fq "\"$SIGNING_IDENTITY\""; then
   echo "── login keychain already exposes $SIGNING_IDENTITY ──"
 else
@@ -148,10 +155,6 @@ export EXPO_APPLE_TEAM_TYPE=COMPANY_OR_ORGANIZATION
 DEFAULT_MSG="Local build $(date +%Y-%m-%d) — built on $(hostname -s)"
 MSG="${MESSAGE:-$DEFAULT_MSG}"
 
-# Record the archive timestamp BEFORE running eas build so we can find
-# the new archive after the build (regardless of exportArchive failing).
-PRE_BUILD_TS=$(date +%s)
-
 echo ""
 echo "════ STARTING LOCAL EAS BUILD ════"
 echo "  Profile:  production"
@@ -167,6 +170,7 @@ echo ""
 # constructs. We tolerate that failure with `|| true` and do the IPA
 # packaging manually below.
 THROWAWAY_IPA="./build-throwaway-$(date +%Y%m%d-%H%M%S).ipa"
+PRE_BUILD_MARKER=$(mktemp "$TMPDIR/openchat-eas-pre-build.XXXXXX")
 eas build \
   --platform ios \
   --profile production \
@@ -177,12 +181,7 @@ eas build \
 
 # ── Find the .xcarchive the build just produced ──────────────────────────────
 ARCHIVES_DIR="$HOME/Library/Developer/Xcode/Archives"
-LATEST_ARCHIVE=$(find "$ARCHIVES_DIR" -name "*.xcarchive" -newer /tmp/.eas-pre-build-marker 2>/dev/null | tail -1)
-if [ -z "$LATEST_ARCHIVE" ]; then
-  # Fallback: pick the newest archive from today's folder
-  TODAY=$(date +%Y-%m-%d)
-  LATEST_ARCHIVE=$(ls -td "$ARCHIVES_DIR/$TODAY"/*.xcarchive 2>/dev/null | head -1)
-fi
+LATEST_ARCHIVE=$(find "$ARCHIVES_DIR" -name "*.xcarchive" -newer "$PRE_BUILD_MARKER" 2>/dev/null | tail -1)
 if [ -z "$LATEST_ARCHIVE" ] || [ ! -d "$LATEST_ARCHIVE" ]; then
   echo "ERROR: could not find a .xcarchive produced by this build."
   echo "       Check eas build output above for the actual failure."
