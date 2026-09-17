@@ -68,8 +68,9 @@ export function LoginScreen() {
     if (!isWeb || typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
+    const oauthError = params.get('error');
     const returnedState = params.get('state');
-    if (!code) return;
+    if (!code && !oauthError) return;
 
     // Strip the OAuth params immediately so a refresh can't replay the code
     // (auth codes are single-use) and the URL stays clean.
@@ -88,10 +89,16 @@ export function LoginScreen() {
       return;
     }
 
+    if (oauthError) {
+      const description = params.get('error_description');
+      Alert.alert('Google sign-in failed', description || oauthError);
+      return;
+    }
+
     setGoogleLoading(true);
     (async () => {
       try {
-        await googleExchange(code, stored!.redirectUri);
+        await googleExchange(code!, stored!.redirectUri);
         await bootstrapIfAuthed();
       } catch (err) {
         Alert.alert('Google sign-in failed', err instanceof Error ? err.message : String(err));
@@ -207,14 +214,14 @@ export function LoginScreen() {
     if (googleLoading || loading) return;
 
     // Web: full-page redirect via our server's /api/auth/google/url. The
-    // server holds the web client_id + secret and echoes our redirect_uri
-    // (https://chat.globalbr.ai/app/, registered in the GCP OAuth client).
-    // On return, the useEffect above finishes the exchange. See openchat-n9a.
+    // server holds the web client_id + secret and echoes our redirect_uri.
+    // Google returns to the exactly registered /auth/google/callback endpoint;
+    // the server then preserves code/state in a same-origin redirect to /app/,
+    // where the useEffect above finishes the exchange. See openchat-n9a.
     if (isWeb && typeof window !== 'undefined') {
       setGoogleLoading(true);
       try {
-        const seg = window.location.pathname.split('/')[1] || '';
-        const redirectUri = `${window.location.origin}/${seg}/`;
+        const redirectUri = `${window.location.origin}/auth/google/callback`;
         const state = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
           ? crypto.randomUUID()
           : Math.random().toString(36).slice(2);
