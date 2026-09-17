@@ -13,7 +13,7 @@
  */
 
 import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -36,6 +36,7 @@ import { hasCompletedOnboarding } from './src/services/onboarding';
 // Links to chat.globalbr.ai/{i,u}/<id>. Stashes the intent if unauthed so
 // post-OAuth replay lands the user on the right screen.
 import { installDeepLinkHandling, resumePendingIntent } from './src/services/deepLinks';
+import { completeIdeaflowLinkFromLocation } from './src/services/ideaflowLink';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 
@@ -569,6 +570,29 @@ function Shell() {
     const dispose = installDeepLinkHandling();
     return dispose;
   }, []);
+
+  // Finish explicit Ideaflow ID account linking (Settings → Link Ideaflow
+  // ID). The provider redirect is a full page load that always lands here
+  // first, on web, regardless of which screen initiated it — so this lives
+  // at the app shell rather than in SettingsScreen. Gated on isAuthed so it
+  // never fires before session bootstrap has had a chance to restore the
+  // existing token (linking never signs anyone out or in).
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !isAuthed) return;
+    completeIdeaflowLinkFromLocation().then((result) => {
+      if (!result.handled) return;
+      if (result.success) {
+        Alert.alert(
+          'Ideaflow ID linked',
+          result.ideaflowEmail
+            ? `Your account is now linked to Ideaflow ID (${result.ideaflowEmail}).`
+            : 'Your account is now linked to Ideaflow ID.',
+        );
+      } else {
+        Alert.alert('Ideaflow ID linking failed', result.message || 'Please try again from Settings.');
+      }
+    });
+  }, [isAuthed]);
 
   // Resume any pending deep-link intent the moment the user becomes
   // authenticated AND onboarded. Covers the canonical use case: unsigned-in

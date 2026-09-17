@@ -570,7 +570,7 @@ export async function signInWithApple(
 }
 
 /**
- * Finish the web-only IdeaFlow ID Authorization Code + PKCE flow. The server
+ * Finish the web-only Ideaflow ID Authorization Code + PKCE flow. The server
  * holds the confidential client secret, verifies the ID token, links the
  * external issuer+subject pair, and returns an ordinary OpenChat session.
  */
@@ -593,7 +593,7 @@ export async function ideaflowExchange(
     } catch {
       /* not JSON */
     }
-    throw new Error(`IdeaFlow ID sign-in failed (${res.status}): ${msg}`);
+    throw new Error(`Ideaflow ID sign-in failed (${res.status}): ${msg}`);
   }
 
   const body = await res.json();
@@ -604,6 +604,85 @@ export async function ideaflowExchange(
   };
   await setSession(body.token, user);
   return { user, token: body.token };
+}
+
+async function ideaflowErrorMessage(res: Response, fallback: string): Promise<string> {
+  const text = await res.text();
+  try {
+    const parsed = JSON.parse(text);
+    return parsed.error || parsed.message || text || fallback;
+  } catch {
+    return text || fallback;
+  }
+}
+
+/**
+ * Whether the caller's own OpenChat account already has a durable Ideaflow ID
+ * mapping. Used by Settings to render "Link Ideaflow ID" vs. linked status.
+ */
+export async function ideaflowLinkStatus(): Promise<{ linked: boolean; ideaflowEmail: string | null }> {
+  const token = await getToken();
+  const res = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/link/status`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    throw new Error(`Could not load Ideaflow ID link status (${await ideaflowErrorMessage(res, String(res.status))})`);
+  }
+  return res.json();
+}
+
+/**
+ * Start explicit, authenticated account linking from Settings. Same
+ * state/nonce/PKCE contract as the unauthenticated sign-in flow, but
+ * requires the caller's existing session. The server checks cohort membership
+ * later against the verified IdP email returned by the code exchange.
+ */
+export async function ideaflowLinkUrl(params: {
+  state: string;
+  nonce: string;
+  codeChallenge: string;
+}): Promise<string> {
+  const token = await getToken();
+  if (!token) throw new Error('Sign in before linking Ideaflow ID');
+  const query = new URLSearchParams({
+    state: params.state,
+    nonce: params.nonce,
+    code_challenge: params.codeChallenge,
+  });
+  const res = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/link/url?${query}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Could not start Ideaflow ID linking (${await ideaflowErrorMessage(res, String(res.status))})`);
+  }
+  const body = await res.json() as { url?: string };
+  if (!body.url) throw new Error('Ideaflow ID linking did not return an authorization URL');
+  return body.url;
+}
+
+/**
+ * Finish explicit, authenticated account linking. Binds the exact
+ * (issuer, sub) pair to the caller's current OpenChat user — this never
+ * mints a new session or changes who the client is signed in as.
+ */
+export async function ideaflowLinkExchange(
+  code: string,
+  codeVerifier: string,
+  nonce: string,
+  state: string,
+): Promise<{ ideaflowEmail: string | null }> {
+  const token = await getToken();
+  if (!token) throw new Error('Sign in before linking Ideaflow ID');
+  const res = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/link/exchange`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ code, codeVerifier, nonce, state }),
+  });
+  if (!res.ok) {
+    throw new Error(`Ideaflow ID linking failed (${await ideaflowErrorMessage(res, String(res.status))})`);
+  }
+  const body = await res.json();
+  return { ideaflowEmail: body.ideaflowEmail ?? null };
 }
 
 // Auth — uses Noos directly for now (mirrors what the web client does via SSO).

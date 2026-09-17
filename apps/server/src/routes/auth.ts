@@ -14,6 +14,15 @@ import {
   IdeaflowIdentityClaims,
 } from '../services/ideaflowOidc.js';
 import {
+  getIdeaflowCohortConfig,
+  isCohortEmailAllowed,
+  IdeaflowCohortConfig,
+} from '../services/ideaflowCohort.js';
+import {
+  consumeIdeaflowLinkFlow,
+  rememberIdeaflowLinkFlow,
+} from '../services/ideaflowLinkFlow.js';
+import {
   isSafePublicDisplayName,
   normalizePublicDisplayName,
 } from '../privacy/profilePrivacy.js';
@@ -273,13 +282,15 @@ router.get('/ideaflow/config', (_req: Request, res: Response) => {
  *
  * Starts an OIDC Authorization Code + PKCE flow using browser-generated state,
  * nonce, and code challenge. The redirect URI is server-owned and cannot be
- * overridden by the caller.
+ * overridden by the caller. This is the unauthenticated sign-in entry point;
+ * the cohort gate is enforced later, at /ideaflow/exchange, once the ID
+ * token's verified email is known.
  */
 router.get('/ideaflow/url', async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
   const config = getIdeaflowOidcConfig();
   if (!config) {
-    res.status(503).json({ error: 'IdeaFlow ID sign-in is not enabled' });
+    res.status(503).json({ error: 'Ideaflow ID sign-in is not enabled' });
     return;
   }
 
@@ -306,8 +317,102 @@ router.get('/ideaflow/url', async (req: Request, res: Response) => {
     });
     res.json({ url });
   } catch (error) {
-    console.error('IdeaFlow ID authorization setup failed:', error);
-    res.status(502).json({ error: 'Could not reach IdeaFlow ID' });
+    console.error('Ideaflow ID authorization setup failed:', error);
+    res.status(502).json({ error: 'Could not reach Ideaflow ID' });
+  }
+});
+
+/**
+ * GET /api/auth/ideaflow/link/url
+ *
+ * Same authorization-URL construction as /ideaflow/url, but for an
+ * already-authenticated OpenChat user explicitly starting account linking
+ * from Settings. There is deliberately no cohort check here: a legacy
+ * session's `req.user.email` may be unverified or stale, so it must never be
+ * used to gate anything. The cohort gate is enforced once, at
+ * POST /ideaflow/link/exchange, against the ID token's verified email after
+ * the OIDC exchange completes. This endpoint only requires an authenticated
+ * session and the global kill switch.
+ */
+router.get('/ideaflow/link/url', requireAuth, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const config = getIdeaflowOidcConfig();
+  if (!config) {
+    res.status(503).json({ error: 'Ideaflow ID sign-in is not enabled' });
+    return;
+  }
+
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+  const nonce = typeof req.query.nonce === 'string' ? req.query.nonce : '';
+  const codeChallenge = typeof req.query.code_challenge === 'string'
+    ? req.query.code_challenge
+    : '';
+
+  if (!OAUTH_OPAQUE_VALUE.test(state) || !OAUTH_OPAQUE_VALUE.test(nonce)) {
+    res.status(400).json({ error: 'Valid state and nonce are required' });
+    return;
+  }
+  if (!PKCE_CHALLENGE.test(codeChallenge)) {
+    res.status(400).json({ error: 'A valid S256 code challenge is required' });
+    return;
+  }
+
+  try {
+    const url = await buildIdeaflowAuthorizationUrl(config, { state, nonce, codeChallenge });
+    if (!rememberIdeaflowLinkFlow({
+      state,
+      userId: req.user!.userId,
+      authorization: req.headers.authorization!,
+      nonce,
+      codeChallenge,
+    })) {
+      res.status(409).json({ error: 'Could not reserve this Ideaflow ID linking attempt' });
+      return;
+    }
+    res.json({ url });
+  } catch (error) {
+    console.error('Ideaflow ID link authorization setup failed:', error);
+    res.status(502).json({ error: 'Could not reach Ideaflow ID' });
+  }
+});
+
+/**
+ * GET /api/auth/ideaflow/link/status
+ *
+ * Reports whether the caller's OpenChat account already has a durable
+ * Ideaflow ID mapping, for the Settings screen to render.
+ */
+router.get('/ideaflow/link/status', requireAuth, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const session = getDriver().session();
+  try {
+    const result = await session.run(`
+      MATCH (u:User {id: $userId})
+      RETURN u { .ideaflowIssuer, .ideaflowSub, .ideaflowIdentityKey, .ideaflowEmail } AS user
+    `, { userId: req.user!.userId });
+    const user = result.records[0]?.get('user') as
+      {
+        ideaflowIssuer?: string | null;
+        ideaflowSub?: string | null;
+        ideaflowIdentityKey?: string | null;
+        ideaflowEmail?: string | null;
+      } | undefined;
+    const expectedKey = user?.ideaflowIssuer && user.ideaflowSub
+      ? `${user.ideaflowIssuer}\u001f${user.ideaflowSub}`
+      : null;
+    const linked = Boolean(expectedKey && user?.ideaflowIdentityKey === expectedKey);
+    res.json({
+      linked,
+      incomplete: Boolean(!linked && (
+        user?.ideaflowIssuer || user?.ideaflowSub || user?.ideaflowIdentityKey
+      )),
+      ideaflowEmail: user?.ideaflowEmail ?? null,
+    });
+  } catch (error) {
+    console.error('Ideaflow ID link status lookup failed:', error);
+    res.status(500).json({ error: 'Could not load Ideaflow ID link status' });
+  } finally {
+    await session.close();
   }
 });
 
@@ -320,38 +425,71 @@ interface LinkedOpenChatUser {
   avatarUrl?: string | null;
 }
 
+interface IdentityMappedOpenChatUser extends LinkedOpenChatUser {
+  ideaflowIssuer?: string | null;
+  ideaflowSub?: string | null;
+  ideaflowIdentityKey?: string | null;
+}
+
 function recordsToUsers(result: { records: Array<{ get: (key: string) => unknown }> }): LinkedOpenChatUser[] {
   return result.records.map(record => toJS(record.get('user')) as LinkedOpenChatUser);
 }
 
+function ideaflowIdentityKey(identity: Pick<IdeaflowIdentityClaims, 'issuer' | 'subject'>): string {
+  return `${identity.issuer}\u001f${identity.subject}`;
+}
+
+function isNeo4jConstraintViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null
+    && (error as { code?: unknown }).code === 'Neo.ClientError.Schema.ConstraintValidationFailed';
+}
+
 /**
- * Resolve the durable issuer+subject mapping first. A verified email may link
- * an unmapped legacy OpenChat user only when that email identifies exactly one
- * local account. Existing conflicting mappings are never overwritten.
+ * Unauthenticated Ideaflow ID sign-in. Resolves the durable issuer+subject
+ * mapping first. If none exists, a verified email is used only to detect a
+ * conflict with a legacy OpenChat account -- never to auto-link it -- and
+ * brand-new user creation is refused unless explicitly enabled for the
+ * rollout cohort. See docs/ideaflow-id-migration.md for the full contract.
  */
-export async function linkIdeaflowIdentity(
+export async function resolveIdeaflowSignIn(
   session: AuthDbSession,
   identity: IdeaflowIdentityClaims,
+  cohort: IdeaflowCohortConfig,
 ): Promise<LinkedOpenChatUser> {
-  const identityKey = `${identity.issuer}\u001f${identity.subject}`;
+  if (!isCohortEmailAllowed(identity.email, cohort)) {
+    throw new Error('IDEAFLOW_COHORT_DENIED');
+  }
+
+  const identityKey = ideaflowIdentityKey(identity);
   const params = {
     issuer: identity.issuer,
     subject: identity.subject,
     identityKey,
     email: identity.email,
+    emailLookup: identity.email.trim().toLowerCase(),
     name: normalizePublicDisplayName(identity.name),
     picture: identity.picture,
     id: nanoid(),
     now: new Date().toISOString(),
   };
 
-  const mapped = recordsToUsers(await session.run(`
-    MATCH (u:User {ideaflowIdentityKey: $identityKey})
-    WHERE u.ideaflowIssuer = $issuer AND u.ideaflowSub = $subject
-    RETURN u { .id, .email, .name, .avatarUrl } AS user
-    LIMIT 2
-  `, params));
-  if (mapped.length > 1) {
+  const candidates = recordsToUsers(await session.run(`
+    MATCH (u:User)
+    WHERE u.ideaflowIdentityKey = $identityKey
+       OR (u.ideaflowSub = $subject
+           AND (u.ideaflowIssuer IS NULL OR u.ideaflowIssuer = $issuer))
+    RETURN u {
+      .id, .email, .name, .avatarUrl,
+      .ideaflowIssuer, .ideaflowSub, .ideaflowIdentityKey
+    } AS user
+    LIMIT 3
+  `, params)) as IdentityMappedOpenChatUser[];
+  const mapped = candidates.filter(user =>
+    user.ideaflowIssuer === identity.issuer
+    && user.ideaflowSub === identity.subject
+    && user.ideaflowIdentityKey === identityKey
+  );
+  if (candidates.length > 0 && (candidates.length !== 1 || mapped.length !== 1)) {
     throw new Error('IDEAFLOW_IDENTITY_COLLISION');
   }
   if (mapped.length === 1) {
@@ -369,84 +507,164 @@ export async function linkIdeaflowIdentity(
     return refreshed[0];
   }
 
+  // No durable mapping yet. A matching local email is a conflict to surface
+  // for explicit, authenticated linking -- not a reason to auto-link.
   const byEmail = recordsToUsers(await session.run(`
     MATCH (u:User)
-    WHERE toLower(u.email) = $email
-    RETURN u { .id, .email, .name, .avatarUrl, .ideaflowIssuer, .ideaflowSub, .ideaflowIdentityKey } AS user
-    LIMIT 2
+    WHERE toLower(u.email) = $emailLookup
+    RETURN u { .id } AS user
+    LIMIT 1
   `, params));
-  if (byEmail.length > 1) {
-    throw new Error('IDEAFLOW_EMAIL_COLLISION');
+  if (byEmail.length > 0) {
+    throw new Error('IDEAFLOW_LINK_REQUIRED');
   }
 
-  if (byEmail.length === 1) {
-    const existing = byEmail[0] as LinkedOpenChatUser & {
-      ideaflowIssuer?: string | null;
-      ideaflowSub?: string | null;
-      ideaflowIdentityKey?: string | null;
-    };
-    if (
-      (existing.ideaflowIssuer && existing.ideaflowIssuer !== identity.issuer)
-      || (existing.ideaflowSub && existing.ideaflowSub !== identity.subject)
-      || (existing.ideaflowIdentityKey && existing.ideaflowIdentityKey !== identityKey)
-    ) {
-      throw new Error('IDEAFLOW_EMAIL_COLLISION');
-    }
+  if (!cohort.allowNewUserCreation) {
+    throw new Error('IDEAFLOW_NEW_USER_CREATION_DISABLED');
+  }
 
-    const linked = recordsToUsers(await session.run(`
-      MATCH (u:User {id: $userId})
-      WHERE (u.ideaflowIssuer IS NULL OR u.ideaflowIssuer = $issuer)
-        AND (u.ideaflowSub IS NULL OR u.ideaflowSub = $subject)
-        AND (u.ideaflowIdentityKey IS NULL OR u.ideaflowIdentityKey = $identityKey)
-      SET u.ideaflowIssuer = $issuer,
-          u.ideaflowSub = $subject,
-          u.ideaflowIdentityKey = $identityKey,
-          u.ideaflowEmail = $email,
-          u.ideaflowEmailVerified = true,
-          u.lastSeenAt = datetime($now),
-          u.presenceStatus = 'available',
-          u.avatarUrl = coalesce(u.avatarUrl, $picture)
+  try {
+    const created = recordsToUsers(await session.run(`
+      CREATE (u:User {
+        id: $id,
+        email: $email,
+        name: $name,
+        avatarUrl: $picture,
+        ideaflowIssuer: $issuer,
+        ideaflowSub: $subject,
+        ideaflowIdentityKey: $identityKey,
+        ideaflowEmail: $email,
+        ideaflowEmailVerified: true,
+        ideaflowLinkedAt: datetime($now),
+        signupProvider: 'ideaflow-id',
+        createdAt: datetime($now),
+        lastSeenAt: datetime($now),
+        presenceStatus: 'available'
+      })
       RETURN u { .id, .email, .name, .avatarUrl } AS user
-    `, { ...params, userId: existing.id }));
-    if (linked.length !== 1) throw new Error('IDEAFLOW_EMAIL_COLLISION');
-    return linked[0];
+    `, params));
+    if (created.length !== 1) throw new Error('IDEAFLOW_IDENTITY_CREATE_FAILED');
+    return created[0];
+  } catch (error) {
+    if (isNeo4jConstraintViolation(error)) {
+      throw new Error('IDEAFLOW_IDENTITY_COLLISION', { cause: error });
+    }
+    throw error;
   }
+}
 
-  const created = recordsToUsers(await session.run(`
-    CREATE (u:User {
-      id: $id,
-      email: $email,
-      name: $name,
-      avatarUrl: $picture,
-      ideaflowIssuer: $issuer,
-      ideaflowSub: $subject,
-      ideaflowIdentityKey: $identityKey,
-      ideaflowEmail: $email,
-      ideaflowEmailVerified: true,
-      signupProvider: 'ideaflow-id',
-      createdAt: datetime($now),
-      lastSeenAt: datetime($now),
-      presenceStatus: 'available'
-    })
-    RETURN u { .id, .email, .name, .avatarUrl } AS user
-  `, params));
-  if (created.length !== 1) throw new Error('IDEAFLOW_IDENTITY_CREATE_FAILED');
-  return created[0];
+/**
+ * Explicit, authenticated account linking. The caller must already hold a
+ * valid OpenChat session; that session is the linking proof, so the verified
+ * Ideaflow ID email does not need to match the OpenChat account email. Binds
+ * the exact (issuer, sub) pair to req.user.userId -- addressed by id, so this
+ * can never create a second User node for an already-authenticated caller.
+ * Refuses if the identity is already mapped to a different user, or if the
+ * current user already carries a different mapping.
+ */
+export async function bindIdeaflowIdentityToUser(
+  session: AuthDbSession,
+  userId: string,
+  identity: IdeaflowIdentityClaims,
+): Promise<LinkedOpenChatUser> {
+  const identityKey = ideaflowIdentityKey(identity);
+  const params = {
+    userId,
+    issuer: identity.issuer,
+    subject: identity.subject,
+    identityKey,
+    email: identity.email,
+    picture: identity.picture,
+    now: new Date().toISOString(),
+  };
+
+  try {
+    return await session.executeWrite(async tx => {
+      // Acquire the User write lock before reading its current mapping. Without
+      // this, two different subjects can both pass a read-then-WHERE check and
+      // overwrite one another under Neo4j's read-committed isolation.
+      const currentRows = recordsToUsers(await tx.run(`
+        MATCH (u:User {id: $userId})
+        SET u._ideaflowBindingLock = true
+        REMOVE u._ideaflowBindingLock
+        RETURN u {
+          .id, .email, .name, .avatarUrl,
+          .ideaflowIssuer, .ideaflowSub, .ideaflowIdentityKey
+        } AS user
+      `, params));
+      if (currentRows.length !== 1) throw new Error('IDEAFLOW_USER_NOT_FOUND');
+      const current = currentRows[0] as IdentityMappedOpenChatUser;
+
+      if (
+        (current.ideaflowIssuer && current.ideaflowIssuer !== identity.issuer)
+        || (current.ideaflowSub && current.ideaflowSub !== identity.subject)
+        || (current.ideaflowIdentityKey && current.ideaflowIdentityKey !== identityKey)
+      ) {
+        throw new Error('IDEAFLOW_ACCOUNT_ALREADY_LINKED');
+      }
+
+      const ownedElsewhere = recordsToUsers(await tx.run(`
+        MATCH (u:User)
+        WHERE u.id <> $userId
+          AND (
+            u.ideaflowIdentityKey = $identityKey
+            OR (u.ideaflowSub = $subject
+                AND (u.ideaflowIssuer IS NULL OR u.ideaflowIssuer = $issuer))
+          )
+        RETURN u { .id } AS user
+        LIMIT 1
+      `, params));
+      if (ownedElsewhere.length > 0) {
+        throw new Error('IDEAFLOW_ALREADY_LINKED_ELSEWHERE');
+      }
+
+      if (
+        current.ideaflowIssuer === identity.issuer
+        && current.ideaflowSub === identity.subject
+        && current.ideaflowIdentityKey === identityKey
+      ) {
+        // Already bound to exactly this identity -- idempotent, not an error.
+        return { id: current.id, email: current.email, name: current.name, avatarUrl: current.avatarUrl };
+      }
+
+      const bound = recordsToUsers(await tx.run(`
+        MATCH (u:User {id: $userId})
+        SET u.ideaflowIssuer = $issuer,
+            u.ideaflowSub = $subject,
+            u.ideaflowIdentityKey = $identityKey,
+            u.ideaflowEmail = $email,
+            u.ideaflowEmailVerified = true,
+            u.ideaflowLinkedAt = datetime($now),
+            u.avatarUrl = coalesce(u.avatarUrl, $picture)
+        RETURN u { .id, .email, .name, .avatarUrl } AS user
+      `, params));
+      if (bound.length !== 1) throw new Error('IDEAFLOW_USER_NOT_FOUND');
+      return bound[0];
+    });
+  } catch (error) {
+    // Lost a race against a concurrent bind of the same identity to a
+    // different user -- the unique constraint on ideaflowIdentityKey caught it.
+    if (isNeo4jConstraintViolation(error)) {
+      throw new Error('IDEAFLOW_ALREADY_LINKED_ELSEWHERE', { cause: error });
+    }
+    throw error;
+  }
 }
 
 /**
  * POST /api/auth/ideaflow/exchange
- * Body: { code, codeVerifier, nonce }
+ * Body: { code, codeVerifier, nonce, state }
  *
- * Exchanges the one-time code server-side so the confidential client secret
- * never reaches the browser, verifies the OIDC ID token, safely links the
- * identity, and returns an ordinary OpenChat JWT. Existing JWTs are untouched.
+ * Unauthenticated sign-in. Exchanges the one-time code server-side so the
+ * confidential client secret never reaches the browser, verifies the OIDC ID
+ * token, resolves sign-in under the rules in resolveIdeaflowSignIn, and
+ * returns an ordinary OpenChat JWT. Existing JWTs are untouched.
  */
 router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
   const config = getIdeaflowOidcConfig();
   if (!config) {
-    res.status(503).json({ error: 'IdeaFlow ID sign-in is not enabled' });
+    res.status(503).json({ error: 'Ideaflow ID sign-in is not enabled' });
     return;
   }
 
@@ -472,14 +690,15 @@ router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
       nonce,
     });
   } catch (error) {
-    console.error('IdeaFlow ID token exchange failed:', error);
-    res.status(401).json({ error: 'IdeaFlow ID sign-in could not be verified' });
+    console.error('Ideaflow ID token exchange failed:', error);
+    res.status(401).json({ error: 'Ideaflow ID sign-in could not be verified' });
     return;
   }
 
   const session = getDriver().session();
   try {
-    const user = await linkIdeaflowIdentity(session, identity);
+    const cohort = getIdeaflowCohortConfig();
+    const user = await resolveIdeaflowSignIn(session, identity, cohort);
     const token = jwt.sign(
       { userId: user.id, email: user.email } as AuthUser,
       getJwtSecret(),
@@ -492,13 +711,102 @@ router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
       provider: 'ideaflow-id',
     });
   } catch (error) {
-    const collision = error instanceof Error && error.message.includes('COLLISION');
-    console.error('IdeaFlow ID account linking failed:', error);
-    res.status(collision ? 409 : 500).json({
-      error: collision
-        ? 'This IdeaFlow ID cannot be linked automatically. Contact support.'
-        : 'Sign-in failed',
-    });
+    console.error('Ideaflow ID sign-in failed:', error);
+    const message = error instanceof Error ? error.message : '';
+    if (message === 'IDEAFLOW_COHORT_DENIED') {
+      res.status(403).json({ error: 'This account is not part of the current Ideaflow ID rollout.' });
+    } else if (message === 'IDEAFLOW_LINK_REQUIRED') {
+      res.status(409).json({
+        error: 'An OpenChat account with this email already exists. Sign in to OpenChat and link Ideaflow ID from Settings.',
+        code: 'link_required',
+      });
+    } else if (message === 'IDEAFLOW_NEW_USER_CREATION_DISABLED') {
+      res.status(403).json({ error: 'Creating a new OpenChat account via Ideaflow ID is not enabled yet.' });
+    } else if (message.includes('COLLISION')) {
+      res.status(409).json({ error: 'This Ideaflow ID cannot be used automatically. Contact support.' });
+    } else {
+      res.status(500).json({ error: 'Sign-in failed' });
+    }
+  } finally {
+    await session.close();
+  }
+});
+
+/**
+ * POST /api/auth/ideaflow/link/exchange
+ * Body: { code, codeVerifier, nonce, state }
+ *
+ * Explicit, authenticated account linking (Settings -> Link Ideaflow ID).
+ * Cohort membership is checked only after exchange, against the verified
+ * OIDC email. The exact OpenChat user and bearer session that started the
+ * one-use flow must still be present here; its legacy email is not
+ * identity-provider verification.
+ */
+router.post('/ideaflow/link/exchange', requireAuth, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const config = getIdeaflowOidcConfig();
+  if (!config) {
+    res.status(503).json({ error: 'Ideaflow ID sign-in is not enabled' });
+    return;
+  }
+
+  const { code, codeVerifier, nonce, state } = req.body ?? {};
+  if (typeof code !== 'string' || code.length < 8 || code.length > 4096) {
+    res.status(400).json({ error: 'A valid authorization code is required' });
+    return;
+  }
+  if (typeof codeVerifier !== 'string' || !PKCE_VERIFIER.test(codeVerifier)) {
+    res.status(400).json({ error: 'A valid PKCE code verifier is required' });
+    return;
+  }
+  if (typeof nonce !== 'string' || !OAUTH_OPAQUE_VALUE.test(nonce)) {
+    res.status(400).json({ error: 'A valid nonce is required' });
+    return;
+  }
+  if (typeof state !== 'string' || !OAUTH_OPAQUE_VALUE.test(state)) {
+    res.status(400).json({ error: 'A valid state is required' });
+    return;
+  }
+  if (!consumeIdeaflowLinkFlow({
+    state,
+    userId: req.user!.userId,
+    authorization: req.headers.authorization!,
+    nonce,
+    codeVerifier,
+  })) {
+    res.status(401).json({ error: 'This Ideaflow ID linking attempt expired, changed session, or was already used.' });
+    return;
+  }
+
+  let identity: IdeaflowIdentityClaims;
+  try {
+    identity = await exchangeIdeaflowAuthorizationCode(config, { code, codeVerifier, nonce });
+  } catch (error) {
+    console.error('Ideaflow ID link token exchange failed:', error);
+    res.status(401).json({ error: 'Ideaflow ID sign-in could not be verified' });
+    return;
+  }
+
+  const cohort = getIdeaflowCohortConfig();
+  if (!isCohortEmailAllowed(identity.email, cohort)) {
+    res.status(403).json({ error: 'This account is not part of the current Ideaflow ID rollout.' });
+    return;
+  }
+
+  const session = getDriver().session();
+  try {
+    const user = await bindIdeaflowIdentityToUser(session, req.user!.userId, identity);
+    res.json({ linked: true, user, ideaflowEmail: identity.email });
+  } catch (error) {
+    console.error('Ideaflow ID account linking failed:', error);
+    const message = error instanceof Error ? error.message : '';
+    if (message === 'IDEAFLOW_ALREADY_LINKED_ELSEWHERE') {
+      res.status(409).json({ error: 'This Ideaflow ID is already linked to a different OpenChat account.' });
+    } else if (message === 'IDEAFLOW_ACCOUNT_ALREADY_LINKED') {
+      res.status(409).json({ error: 'Your account is already linked to a different Ideaflow ID.' });
+    } else {
+      res.status(500).json({ error: 'Linking failed' });
+    }
   } finally {
     await session.close();
   }
