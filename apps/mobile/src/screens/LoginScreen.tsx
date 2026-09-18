@@ -60,8 +60,10 @@ const SHOW_TEST_LOGINS =
 
 const IDEAFLOW_WEB_STATE_KEY = 'openchat_ideaflow_web';
 
-// Small text tag (not colour-only) straddling the top edge of a method's
-// control, so it costs no layout space and never shifts the screen.
+// Small text tag (not colour-only). By default it straddles the top edge of a
+// method's control and costs no layout space; the Apple variant sits in the
+// flow above the native button, so the screen waits for the stored hint before
+// first paint (see the early return in LoginScreen) instead of shifting.
 function LastUsedBadge({
   method,
   colors: c,
@@ -100,7 +102,8 @@ export function LoginScreen() {
   const [ideaflowEnabled, setIdeaflowEnabled] = useState(false);
   const [authNotice, setAuthNotice] = useState<AuthNotice | null>(null);
   const [legacyExpanded, setLegacyExpanded] = useState(false);
-  const [storedLastMethod, setStoredLastMethod] = useState<string | null>(null);
+  // undefined until the stored value has been read (null = none stored).
+  const [storedLastMethod, setStoredLastMethod] = useState<string | null | undefined>(undefined);
 
   // Last completed sign-in method on this browser/device (code-v8l). Read only;
   // it is written by the sign-in handlers below once a session is established,
@@ -476,6 +479,12 @@ export function LoginScreen() {
     if (loading) return;
     await doLogin(acct.email, acct.password);
   };
+
+  // Hold first paint until the stored hint is known, so the inline Apple marker
+  // can never push the buttons down under a finger.
+  if (storedLastMethod === undefined) {
+    return <View style={[styles.root, { backgroundColor: c.background }]} />;
+  }
 
   return (
     <KeyboardAvoidingView
