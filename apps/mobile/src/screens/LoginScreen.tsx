@@ -62,10 +62,21 @@ const IDEAFLOW_WEB_STATE_KEY = 'openchat_ideaflow_web';
 
 // Small text tag (not colour-only) straddling the top edge of a method's
 // control, so it costs no layout space and never shifts the screen.
-function LastUsedBadge({ method, colors: c }: { method: LoginMethod; colors: ReturnType<typeof getColors> }) {
+function LastUsedBadge({
+  method,
+  colors: c,
+  inline = false,
+}: {
+  method: LoginMethod;
+  colors: ReturnType<typeof getColors>;
+  // Sits in the flow instead of overlapping its control (the native Apple
+  // button must not be overlaid).
+  inline?: boolean;
+}) {
   return (
     <View
-      style={[styles.lastUsedBadge, { backgroundColor: c.surface, borderColor: c.primary }]}
+      accessible
+      style={[inline ? styles.lastUsedBadgeInline : styles.lastUsedBadge, { backgroundColor: c.surface, borderColor: c.primary }]}
       accessibilityLabel={`Last used sign-in method: ${LOGIN_METHOD_LABELS[method]}`}
     >
       <Text style={[styles.lastUsedBadgeText, { color: c.primary }]}>Last used</Text>
@@ -481,6 +492,7 @@ export function LoginScreen() {
             as any other social login, so it goes ABOVE Google. (OpenChat-c08) */}
         {Platform.OS === 'ios' && (
           <View>
+            {lastMethod === 'apple' && <LastUsedBadge method="apple" colors={c} inline />}
             {appleLoading ? (
               <View style={styles.appleButtonPlaceholder}>
                 <ActivityIndicator color="#fff" />
@@ -494,7 +506,6 @@ export function LoginScreen() {
                 onPress={handleAppleSignIn}
               />
             )}
-            {lastMethod === 'apple' && <LastUsedBadge method="apple" colors={c} />}
           </View>
         )}
 
@@ -810,6 +821,14 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
     pointerEvents: 'none',
+  },
+  lastUsedBadgeInline: {
+    alignSelf: 'flex-end',
+    marginBottom: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   lastUsedBadgeText: { fontSize: 11, fontWeight: '700' },
   footer: { fontSize: 12, textAlign: 'center', marginTop: 8 },
