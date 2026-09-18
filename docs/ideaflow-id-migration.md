@@ -29,8 +29,25 @@ sub    = <Ideaflow ID subject>
 
 OpenChat stores that pair as `User.ideaflowIssuer` and `User.ideaflowSub` and
 enforces a unique derived `User.ideaflowIdentityKey`. Email is never the
-durable cross-application identity key. There are two, deliberately different,
-ways an (issuer, sub) pair reaches a `User` node:
+durable cross-application identity key. There are three, deliberately
+different, ways an (issuer, sub) pair reaches a `User` node:
+
+### 0. Guarded administrative pre-link (migration batches)
+
+High-confidence existing accounts can be linked before their next login with
+`apps/server/scripts/link-ideaflow-identities.mjs`. The input manifest is never
+committed and must contain the exact local user ID, current local email, exact
+Ideaflow provider subject, canonical issuer, and an assertion that the central
+email is verified. The script also rejects duplicate local IDs, duplicate
+issuer/subject pairs, local email drift, existing conflicting mappings, and
+cross-user identity claims. It is dry-run by default and writes all requested
+links in one transaction only with `--apply`.
+
+This path is for an audited migration assembled from both authoritative
+databases. It does not turn email into an identity key and does not permit
+runtime email auto-linking. Existing sessions and legacy login methods are
+untouched. Accounts that cannot meet every pre-link proof requirement use the
+authenticated linking flow below.
 
 ### 1. Explicit, authenticated linking (Settings → Link Ideaflow ID)
 
@@ -255,8 +272,9 @@ are unaffected, and an interrupted link only needs to be restarted.
 3. Add OpenChat secrets, deploy the web/server release with the server kill
    switch still off, and confirm the capability endpoint reports disabled.
 4. Enable the server flag and set `IDEAFLOW_ID_COHORT_ALLOWLIST` to one or a
-   few test account emails; verify explicit linking from Settings for an
-   already-registered legacy account. RN-web reads the server capability at
+   few test account emails. Guardedly pre-link high-confidence accounts from
+   both authoritative databases; use explicit Settings linking for every
+   ambiguous or unmatched account. RN-web reads the server capability at
    runtime, so this enable step does not require a second client build.
 5. Grow `IDEAFLOW_ID_COHORT_ALLOWLIST` incrementally. Only set it to `*` (full
    rollout) once explicit linking and unauthenticated sign-in have both been
@@ -269,6 +287,12 @@ are unaffected, and an interrupted link only needs to be restarted.
    user IDs automatically.
 7. Add native clients separately. Removing old providers or moving password
    credentials is a later explicit project, not part of this rollout.
+
+On 2026-09-18, both allowlisted pilot accounts were pre-linked with the guarded
+administrative tool. The dry run reported two ready mappings, the apply linked
+both in one transaction, and a repeat dry run reported both as already linked.
+The shared Noos/OpenChat graph then contained two distinct identity keys. No
+credentials, application-local IDs, sessions, or legacy login methods changed.
 
 ## Production execution record (2026-09-17)
 
@@ -314,8 +338,8 @@ enabled. Existing Google and password methods remain available under an
 accessible disclosure and expand automatically after any provider error. A
 `link_required` response displays an inline recovery explanation, then routes
 the user to Settings after they authenticate with an existing OpenChat method.
-This is navigation only: the mapping is still created exclusively by the
-authenticated, one-use Settings linking flow and never by matching email.
+This navigation does not create a mapping: this recovery flow still requires
+the authenticated, one-use Settings linking flow and never links by email.
 
 This evidence covers RN-web at `/app`. The current implementation deliberately
 does not render or run Ideaflow ID login on native iOS or Android. Native
