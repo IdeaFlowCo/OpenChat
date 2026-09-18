@@ -93,6 +93,32 @@ installation. Confirm both variables are present without printing their values,
 then run the normal deploy and verify both an existing OpenChat session and a
 fresh Noos session.
 
+### Coordinated Noos JWT hard cutover
+
+Production Noos previously had no `JWT_SECRET` configured at all and fell back
+to a secret published in source (`dev-secret-change-me`), making Noos-issued
+tokens forgeable. The fix is a one-way hard cutover to a single new strong
+key — **never** a transitional dual-key window, and never a fallback to the
+public default, even temporarily:
+
+1. Create one dedicated random Noos signing key of at least 32 random bytes.
+   Store it in the canonical credential store and the mode-0600 runtime caches;
+   coordinate it by fingerprint only.
+2. On OpenChat, keep `JWT_SECRET` unchanged and set `NOOS_JWT_SECRET` to the
+   new key. Deploy OpenChat first and prove an existing OpenChat token still
+   validates, then prove a token freshly signed with the new key validates.
+   There is no previous-key grace period: existing Noos sessions signed with
+   the old public default are expected to require re-login.
+3. Deploy Noos (see the Noos repo's GCE release runbook) configured to sign
+   with the same new key. Its own rollback path never restarts a runtime that
+   signs or verifies the public default — the Noos runbook stages a
+   strong-key-but-disabled baseline first specifically so any rollback target
+   already carries the new key. Prove a fresh Noos token works in both
+   services, and that a token forged with the old public default is rejected
+   by both.
+4. `NOOS_JWT_SECRET` on OpenChat only changes again if Noos's key is rotated
+   again later; there's no "previous" value to retire.
+
 ## Verified migration status
 
 The public `/api/openapi.json` response exactly matched the response fetched
