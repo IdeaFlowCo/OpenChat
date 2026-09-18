@@ -12,6 +12,7 @@ import {
   Platform,
   Share,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import QRCode from 'react-native-qrcode-svg';
 import * as Google from 'expo-auth-session/providers/google';
 // AuthSession previously used for makeRedirectUri — removed; Google.useAuthRequest
@@ -29,6 +30,13 @@ import {
   IDEAFLOW_LINK_RECOVERY_KEY,
   type AuthNotice,
 } from '../services/authPresentation';
+import {
+  LOGIN_METHOD_LABELS,
+  readLastLoginMethod,
+  resolveLastLoginMethod,
+  signInAndRemember,
+  type LoginMethod,
+} from '../services/lastLoginMethod';
 
 // Required for the in-app browser to dismiss properly after the OAuth round-trip.
 WebBrowser.maybeCompleteAuthSession();
@@ -52,6 +60,19 @@ const SHOW_TEST_LOGINS =
 
 const IDEAFLOW_WEB_STATE_KEY = 'openchat_ideaflow_web';
 
+// Small text tag (not colour-only) straddling the top edge of a method's
+// control, so it costs no layout space and never shifts the screen.
+function LastUsedBadge({ method, colors: c }: { method: LoginMethod; colors: ReturnType<typeof getColors> }) {
+  return (
+    <View
+      style={[styles.lastUsedBadge, { backgroundColor: c.surface, borderColor: c.primary }]}
+      accessibilityLabel={`Last used sign-in method: ${LOGIN_METHOD_LABELS[method]}`}
+    >
+      <Text style={[styles.lastUsedBadgeText, { color: c.primary }]}>Last used</Text>
+    </View>
+  );
+}
+
 export function LoginScreen() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -68,6 +89,18 @@ export function LoginScreen() {
   const [ideaflowEnabled, setIdeaflowEnabled] = useState(false);
   const [authNotice, setAuthNotice] = useState<AuthNotice | null>(null);
   const [legacyExpanded, setLegacyExpanded] = useState(false);
+  const [storedLastMethod, setStoredLastMethod] = useState<string | null>(null);
+
+  // Last completed sign-in method on this browser/device (code-v8l). Read only;
+  // it is written by the sign-in handlers below once a session is established,
+  // never by restoring a session or by clicking a button.
+  useEffect(() => {
+    let cancelled = false;
+    readLastLoginMethod(AsyncStorage).then(value => {
+      if (!cancelled) setStoredLastMethod(value);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   // Web Google sign-in uses a full-page REDIRECT, not the expo-auth-session
   // popup: Google's pages set Cross-Origin-Opener-Policy, which severs the
@@ -75,6 +108,15 @@ export function LoginScreen() {
   // flow stalls. See openchat-n9a. Native (iOS) keeps the ID-token flow below.
   const isWeb = Platform.OS === 'web';
   const GOOGLE_WEB_STATE_KEY = 'openchat_google_web';
+
+  const enabledMethods: LoginMethod[] = [
+    ...(Platform.OS === 'ios' ? ['apple' as const] : []),
+    ...(isWeb && ideaflowEnabled ? ['ideaflow' as const] : []),
+    'google',
+    'password',
+  ];
+  const lastMethod = resolveLastLoginMethod(storedLastMethod, enabledMethods);
+  const legacyCollapsed = isWeb && ideaflowEnabled && !legacyExpanded;
 
   const reportAuthFailure = useCallback((
     provider: 'Ideaflow' | 'Google' | 'password' | 'registration',
@@ -144,7 +186,7 @@ export function LoginScreen() {
     setIdeaflowLoading(true);
     (async () => {
       try {
-        await ideaflowExchange(code, stored!.codeVerifier, stored!.nonce);
+        await signInAndRemember(AsyncStorage, 'ideaflow', () => ideaflowExchange(code, stored!.codeVerifier, stored!.nonce));
         await bootstrapIfAuthed();
       } catch (err) {
         reportAuthFailure('Ideaflow', err);
@@ -195,7 +237,7 @@ export function LoginScreen() {
     setGoogleLoading(true);
     (async () => {
       try {
-        await googleExchange(code!, stored!.redirectUri);
+        await signInAndRemember(AsyncStorage, 'google', () => googleExchange(code!, stored!.redirectUri));
         await bootstrapIfAuthed();
       } catch (err) {
         reportAuthFailure('Google', err);
@@ -256,7 +298,7 @@ export function LoginScreen() {
       }
       (async () => {
         try {
-          await googleIdTokenExchange(idToken);
+          await signInAndRemember(AsyncStorage, 'google', () => googleIdTokenExchange(idToken));
           await bootstrapIfAuthed();
         } catch (err) {
           Alert.alert(
@@ -290,11 +332,12 @@ export function LoginScreen() {
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
       });
-      if (!cred.identityToken) {
+      const identityToken = cred.identityToken;
+      if (!identityToken) {
         Alert.alert('Apple sign-in failed', 'Apple did not return an identity token.');
         return;
       }
-      await signInWithApple(cred.identityToken, cred.fullName, cred.email);
+      await signInAndRemember(AsyncStorage, 'apple', () => signInWithApple(identityToken, cred.fullName, cred.email));
       await bootstrapIfAuthed();
     } catch (err: unknown) {
       // User cancelled — err.code === 'ERR_REQUEST_CANCELED'. Don't alert on cancel.
@@ -385,7 +428,7 @@ export function LoginScreen() {
   const doLogin = async (e: string, p: string): Promise<void> => {
     setLoading(true);
     try {
-      await loginWithPassword(e.trim(), p);
+      await signInAndRemember(AsyncStorage, 'password', () => loginWithPassword(e.trim(), p));
       // Flip auth state in the context — the navigator swaps stacks.
       await bootstrapIfAuthed();
     } catch (err) {
@@ -398,7 +441,7 @@ export function LoginScreen() {
   const doRegister = async (n: string, e: string, p: string): Promise<void> => {
     setLoading(true);
     try {
-      await registerWithPassword(e.trim(), p, n.trim());
+      await signInAndRemember(AsyncStorage, 'password', () => registerWithPassword(e.trim(), p, n.trim()));
       // Flip auth state in the context — the navigator swaps stacks.
       await bootstrapIfAuthed();
     } catch (err) {
@@ -437,40 +480,46 @@ export function LoginScreen() {
         {/* Sign in with Apple — iOS only. Apple requires SIWA to be at least as prominent
             as any other social login, so it goes ABOVE Google. (OpenChat-c08) */}
         {Platform.OS === 'ios' && (
-          appleLoading ? (
-            <View style={styles.appleButtonPlaceholder}>
-              <ActivityIndicator color="#fff" />
-            </View>
-          ) : (
-            <AppleAuthentication.AppleAuthenticationButton
-              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-              cornerRadius={10}
-              style={styles.appleButton}
-              onPress={handleAppleSignIn}
-            />
-          )
+          <View>
+            {appleLoading ? (
+              <View style={styles.appleButtonPlaceholder}>
+                <ActivityIndicator color="#fff" />
+              </View>
+            ) : (
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                cornerRadius={10}
+                style={styles.appleButton}
+                onPress={handleAppleSignIn}
+              />
+            )}
+            {lastMethod === 'apple' && <LastUsedBadge method="apple" colors={c} />}
+          </View>
         )}
 
         {isWeb && ideaflowEnabled && (
-          <TouchableOpacity
-            style={[
-              styles.ideaflowButton,
-              {
-                backgroundColor: c.primary,
-                opacity: (ideaflowLoading || loading || googleLoading) ? 0.6 : 1,
-              },
-            ]}
-            onPress={handleIdeaflowSignIn}
-            disabled={ideaflowLoading || loading || googleLoading}
-            accessibilityLabel="Continue with Ideaflow"
-          >
-            {ideaflowLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.ideaflowButtonText}>Continue with Ideaflow</Text>
-            )}
-          </TouchableOpacity>
+          <View>
+            <TouchableOpacity
+              style={[
+                styles.ideaflowButton,
+                {
+                  backgroundColor: c.primary,
+                  opacity: (ideaflowLoading || loading || googleLoading) ? 0.6 : 1,
+                },
+              ]}
+              onPress={handleIdeaflowSignIn}
+              disabled={ideaflowLoading || loading || googleLoading}
+              accessibilityLabel="Continue with Ideaflow"
+            >
+              {ideaflowLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.ideaflowButtonText}>Continue with Ideaflow</Text>
+              )}
+            </TouchableOpacity>
+            {lastMethod === 'ideaflow' && <LastUsedBadge method="ideaflow" colors={c} />}
+          </View>
         )}
 
         {isWeb && authNotice && (
@@ -518,6 +567,9 @@ export function LoginScreen() {
           >
             <Text style={[styles.legacyDisclosureText, { color: c.textSecondary }]}>
               {legacyExpanded ? 'Hide other sign-in methods' : 'Use another sign-in method'}
+              {legacyCollapsed && (lastMethod === 'google' || lastMethod === 'password')
+                ? ` (last used: ${LOGIN_METHOD_LABELS[lastMethod]})`
+                : ''}
             </Text>
             <Text style={{ color: c.textMuted }}>{legacyExpanded ? '⌃' : '⌄'}</Text>
           </TouchableOpacity>
@@ -525,26 +577,29 @@ export function LoginScreen() {
 
         {(!isWeb || !ideaflowEnabled || legacyExpanded) && (
           <>
-            <TouchableOpacity
-              style={[
-                styles.googleButton,
-                { borderColor: c.border, opacity: (googleLoading || loading || (!isWeb && !googleRequest)) ? 0.6 : 1 },
-              ]}
-              onPress={handleGoogleSignIn}
-              disabled={googleLoading || loading || (!isWeb && !googleRequest)}
-              accessibilityLabel="Continue with Google"
-            >
-              {googleLoading ? (
-                <ActivityIndicator color="#1f1f1f" />
-              ) : (
-                <>
-                  <View style={styles.googleGlyph}>
-                    <Text style={styles.googleGlyphText}>G</Text>
-                  </View>
-                  <Text style={styles.googleButtonText}>Continue with Google</Text>
-                </>
-              )}
-            </TouchableOpacity>
+            <View>
+              <TouchableOpacity
+                style={[
+                  styles.googleButton,
+                  { borderColor: c.border, opacity: (googleLoading || loading || (!isWeb && !googleRequest)) ? 0.6 : 1 },
+                ]}
+                onPress={handleGoogleSignIn}
+                disabled={googleLoading || loading || (!isWeb && !googleRequest)}
+                accessibilityLabel="Continue with Google"
+              >
+                {googleLoading ? (
+                  <ActivityIndicator color="#1f1f1f" />
+                ) : (
+                  <>
+                    <View style={styles.googleGlyph}>
+                      <Text style={styles.googleGlyphText}>G</Text>
+                    </View>
+                    <Text style={styles.googleButtonText}>Continue with Google</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              {lastMethod === 'google' && <LastUsedBadge method="google" colors={c} />}
+            </View>
 
             <View style={styles.orRow}>
               <View style={[styles.orLine, { backgroundColor: c.border }]} />
@@ -588,17 +643,20 @@ export function LoginScreen() {
               editable={!loading}
             />
 
-            <TouchableOpacity
-              style={[styles.button, { backgroundColor: c.primary, opacity: loading ? 0.6 : 1 }]}
-              onPress={handleSubmit}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.buttonText}>{mode === 'register' ? 'Create account' : 'Sign In'}</Text>
-              )}
-            </TouchableOpacity>
+            <View style={styles.submitWrap}>
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: c.primary, opacity: loading ? 0.6 : 1 }]}
+                onPress={handleSubmit}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.buttonText}>{mode === 'register' ? 'Create account' : 'Sign In'}</Text>
+                )}
+              </TouchableOpacity>
+              {lastMethod === 'password' && <LastUsedBadge method="password" colors={c} />}
+            </View>
 
             <TouchableOpacity
               onPress={() => setMode(mode === 'register' ? 'signin' : 'register')}
@@ -704,8 +762,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 4,
   },
+  submitWrap: { marginTop: 4 },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   ideaflowButton: {
     height: 50,
@@ -743,6 +801,17 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   legacyDisclosureText: { fontSize: 13, fontWeight: '600' },
+  lastUsedBadge: {
+    position: 'absolute',
+    top: -9,
+    right: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    pointerEvents: 'none',
+  },
+  lastUsedBadgeText: { fontSize: 11, fontWeight: '700' },
   footer: { fontSize: 12, textAlign: 'center', marginTop: 8 },
   shareSection: { width: '100%', maxWidth: 520, alignSelf: 'center', marginTop: 32, alignItems: 'stretch', opacity: 0.88 },
   shareLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8, textAlign: 'center' },
