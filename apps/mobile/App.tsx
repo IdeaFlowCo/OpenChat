@@ -13,7 +13,7 @@
  */
 
 import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -36,6 +36,11 @@ import { hasCompletedOnboarding } from './src/services/onboarding';
 // Links to chat.globalbr.ai/{i,u}/<id>. Stashes the intent if unauthed so
 // post-OAuth replay lands the user on the right screen.
 import { installDeepLinkHandling, resumePendingIntent } from './src/services/deepLinks';
+import { completeIdeaflowLinkFromLocation } from './src/services/ideaflowLink';
+import {
+  IDEAFLOW_LINK_RECOVERY_KEY,
+  isIdeaflowLinkRecoveryActive,
+} from './src/services/authPresentation';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 
@@ -536,6 +541,11 @@ function Shell() {
   // Onboarding gate (OpenChat-x2s): null = not yet checked, true/false = result.
   const [onboardingChecked, setOnboardingChecked] = useState<boolean | null>(null);
   const [onboardingDone, setOnboardingDone] = useState(false);
+  const [ideaflowLinkNotice, setIdeaflowLinkNotice] = useState<{
+    title: string;
+    message: string;
+    error: boolean;
+  } | null>(null);
 
   useEffect(() => {
     bootstrapIfAuthed();
@@ -570,6 +580,71 @@ function Shell() {
     return dispose;
   }, []);
 
+  // Finish explicit Ideaflow ID account linking (Settings → Link Ideaflow
+  // ID). The provider redirect is a full page load that always lands here
+  // first, on web, regardless of which screen initiated it — so this lives
+  // at the app shell rather than in SettingsScreen. Gated on isAuthed so it
+  // never fires before session bootstrap has had a chance to restore the
+  // existing token (linking never signs anyone out or in).
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !isAuthed) return;
+    completeIdeaflowLinkFromLocation().then((result) => {
+      if (!result.handled) return;
+      if (result.success) {
+        setIdeaflowLinkNotice({
+          title: 'Ideaflow ID linked',
+          message: result.ideaflowEmail
+            ? `Your account is now linked to Ideaflow ID (${result.ideaflowEmail}).`
+            : 'Your account is now linked to Ideaflow ID.',
+          error: false,
+        });
+      } else {
+        setIdeaflowLinkNotice({
+          title: 'Ideaflow ID linking failed',
+          message: result.message || 'Please try again from Settings.',
+          error: true,
+        });
+      }
+    });
+  }, [isAuthed]);
+
+  // A link_required response never binds by email. It leaves a short-lived
+  // browser marker so that, after the user signs in with an existing method,
+  // we can take them directly to the authenticated Settings link action.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !isAuthed) return;
+
+    const recovery = window.sessionStorage.getItem(IDEAFLOW_LINK_RECOVERY_KEY);
+    if (!isIdeaflowLinkRecoveryActive(recovery)) {
+      if (recovery !== null) window.sessionStorage.removeItem(IDEAFLOW_LINK_RECOVERY_KEY);
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const openSettings = () => {
+      if (cancelled) return;
+      if (navigationRef.isReady()) {
+        navigationRef.navigate('Settings');
+        window.sessionStorage.removeItem(IDEAFLOW_LINK_RECOVERY_KEY);
+        setIdeaflowLinkNotice({
+          title: 'Finish linking Ideaflow ID',
+          message: 'You are signed in. Choose “Link Ideaflow ID” below to connect this account.',
+          error: false,
+        });
+        return;
+      }
+      attempts += 1;
+      if (attempts < 20) timer = setTimeout(openSettings, 100);
+    };
+    timer = setTimeout(openSettings, 0);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [isAuthed]);
+
   // Resume any pending deep-link intent the moment the user becomes
   // authenticated AND onboarded. Covers the canonical use case: unsigned-in
   // user taps a share/invite link, lands on Login, OAuth → here.
@@ -601,6 +676,36 @@ function Shell() {
         backgroundColor={c.background}
       />
       <OfflineBanner />
+      {Platform.OS === 'web' && ideaflowLinkNotice && (
+        <View
+          style={[
+            styles.ideaflowNotice,
+            {
+              backgroundColor: ideaflowLinkNotice.error ? c.surfaceElevated : c.primaryMuted,
+              borderColor: ideaflowLinkNotice.error ? c.border : c.primary,
+            },
+          ]}
+          accessibilityRole="alert"
+          accessibilityLiveRegion={ideaflowLinkNotice.error ? 'assertive' : 'polite'}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.ideaflowNoticeTitle, { color: c.textPrimary }]}>
+              {ideaflowLinkNotice.title}
+            </Text>
+            <Text style={[styles.ideaflowNoticeMessage, { color: c.textSecondary }]}>
+              {ideaflowLinkNotice.message}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setIdeaflowLinkNotice(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss Ideaflow ID message"
+            style={styles.ideaflowNoticeDismiss}
+          >
+            <Text style={{ color: c.textSecondary, fontSize: 18 }}>×</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       <PushSoftAsk isAuthed={isAuthed && onboardingDone} />
       {/* In-app banner for messages arriving in a DIFFERENT conversation.
           Matches iMessage/WhatsApp/Signal pattern — when you're in app but
@@ -691,4 +796,23 @@ export default function App() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  ideaflowNotice: {
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 10,
+    paddingLeft: 16,
+    paddingRight: 8,
+    gap: 8,
+  },
+  ideaflowNoticeTitle: { fontSize: 14, fontWeight: '700' },
+  ideaflowNoticeMessage: { fontSize: 13, lineHeight: 18, marginTop: 2 },
+  ideaflowNoticeDismiss: {
+    minWidth: 40,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -5,
+  },
 });

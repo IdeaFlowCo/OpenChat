@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,13 @@ import { useTheme } from '../contexts/ThemeContext';
 import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, ideaflowExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
+import { randomBase64Url, pkceChallenge } from '../utils/pkce';
+import {
+  authNoticeForFailure,
+  createIdeaflowLinkRecovery,
+  IDEAFLOW_LINK_RECOVERY_KEY,
+  type AuthNotice,
+} from '../services/authPresentation';
 
 // Required for the in-app browser to dismiss properly after the OAuth round-trip.
 WebBrowser.maybeCompleteAuthSession();
@@ -45,29 +52,6 @@ const SHOW_TEST_LOGINS =
 
 const IDEAFLOW_WEB_STATE_KEY = 'openchat_ideaflow_web';
 
-function bytesToBase64Url(bytes: Uint8Array): string {
-  let binary = '';
-  for (const value of bytes) binary += String.fromCharCode(value);
-  return btoa(binary)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-
-function randomBase64Url(byteLength: number): string {
-  const bytes = new Uint8Array(byteLength);
-  globalThis.crypto.getRandomValues(bytes);
-  return bytesToBase64Url(bytes);
-}
-
-async function pkceChallenge(verifier: string): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(verifier),
-  );
-  return bytesToBase64Url(new Uint8Array(digest));
-}
-
 export function LoginScreen() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -82,6 +66,8 @@ export function LoginScreen() {
   const [appleLoading, setAppleLoading] = useState(false);
   const [ideaflowLoading, setIdeaflowLoading] = useState(false);
   const [ideaflowEnabled, setIdeaflowEnabled] = useState(false);
+  const [authNotice, setAuthNotice] = useState<AuthNotice | null>(null);
+  const [legacyExpanded, setLegacyExpanded] = useState(false);
 
   // Web Google sign-in uses a full-page REDIRECT, not the expo-auth-session
   // popup: Google's pages set Cross-Origin-Opener-Policy, which severs the
@@ -89,6 +75,22 @@ export function LoginScreen() {
   // flow stalls. See openchat-n9a. Native (iOS) keeps the ID-token flow below.
   const isWeb = Platform.OS === 'web';
   const GOOGLE_WEB_STATE_KEY = 'openchat_google_web';
+
+  const reportAuthFailure = useCallback((
+    provider: 'Ideaflow' | 'Google' | 'password' | 'registration',
+    error: unknown,
+  ) => {
+    const notice = authNoticeForFailure(provider, error);
+    if (!isWeb) {
+      Alert.alert(notice.title, notice.message);
+      return;
+    }
+    setAuthNotice(notice);
+    setLegacyExpanded(true);
+    if (notice.recovery && typeof window !== 'undefined') {
+      window.sessionStorage.setItem(IDEAFLOW_LINK_RECOVERY_KEY, createIdeaflowLinkRecovery());
+    }
+  }, [isWeb]);
 
   // The server-side flag is the rollout source of truth. This keeps the
   // button hidden until a production client is registered and allows an
@@ -107,7 +109,7 @@ export function LoginScreen() {
     return () => { cancelled = true; };
   }, [isWeb]);
 
-  // Web: finish the IdeaFlow ID redirect. The callback route adds a provider
+  // Web: finish the Ideaflow ID redirect. The callback route adds a provider
   // marker because Google and OIDC both use standard `code` and `state` keys.
   useEffect(() => {
     if (!isWeb || typeof window === 'undefined') return;
@@ -128,12 +130,12 @@ export function LoginScreen() {
     window.sessionStorage.removeItem(IDEAFLOW_WEB_STATE_KEY);
 
     if (!stored || !returnedState || returnedState !== stored.state) {
-      Alert.alert('Ideaflow sign-in failed', 'Session expired or state mismatch — please try again.');
+      reportAuthFailure('Ideaflow', 'Session expired or state mismatch — please try again.');
       return;
     }
     if (oauthError || !code) {
-      Alert.alert(
-        'Ideaflow sign-in failed',
+      reportAuthFailure(
+        'Ideaflow',
         params.get('error_description') || oauthError || 'No authorization code was returned.',
       );
       return;
@@ -145,18 +147,23 @@ export function LoginScreen() {
         await ideaflowExchange(code, stored!.codeVerifier, stored!.nonce);
         await bootstrapIfAuthed();
       } catch (err) {
-        Alert.alert('Ideaflow sign-in failed', err instanceof Error ? err.message : String(err));
+        reportAuthFailure('Ideaflow', err);
       } finally {
         setIdeaflowLoading(false);
       }
     })();
-  }, [isWeb, bootstrapIfAuthed]);
+  }, [isWeb, bootstrapIfAuthed, reportAuthFailure]);
 
   // Web: finish the redirect flow when we return from Google with ?code&state.
   useEffect(() => {
     if (!isWeb || typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get('provider') === 'ideaflow') return;
+    // 'ideaflow-link' is the authenticated account-linking redirect (handled
+    // in App.tsx, which stays mounted across the redirect unlike this
+    // unauthenticated-only screen) — skip it here too, or a brief pre-bootstrap
+    // render of this screen could consume and strip its query params first.
+    const provider = params.get('provider');
+    if (provider === 'ideaflow' || provider === 'ideaflow-link') return;
     const code = params.get('code');
     const oauthError = params.get('error');
     const returnedState = params.get('state');
@@ -175,13 +182,13 @@ export function LoginScreen() {
     window.sessionStorage.removeItem(GOOGLE_WEB_STATE_KEY);
 
     if (!stored || !returnedState || returnedState !== stored.state) {
-      Alert.alert('Google sign-in failed', 'Session expired or state mismatch — please try again.');
+      reportAuthFailure('Google', 'Session expired or state mismatch — please try again.');
       return;
     }
 
     if (oauthError) {
       const description = params.get('error_description');
-      Alert.alert('Google sign-in failed', description || oauthError);
+      reportAuthFailure('Google', description || oauthError);
       return;
     }
 
@@ -191,12 +198,12 @@ export function LoginScreen() {
         await googleExchange(code!, stored!.redirectUri);
         await bootstrapIfAuthed();
       } catch (err) {
-        Alert.alert('Google sign-in failed', err instanceof Error ? err.message : String(err));
+        reportAuthFailure('Google', err);
       } finally {
         setGoogleLoading(false);
       }
     })();
-  }, [isWeb, bootstrapIfAuthed]);
+  }, [isWeb, bootstrapIfAuthed, reportAuthFailure]);
 
   // Google OAuth — iOS native flow.
   //
@@ -326,7 +333,7 @@ export function LoginScreen() {
         }));
         window.location.href = data.url;
       } catch (err) {
-        Alert.alert('Google sign-in failed', err instanceof Error ? err.message : String(err));
+        reportAuthFailure('Google', err);
         setGoogleLoading(false);
       }
       return;
@@ -370,7 +377,7 @@ export function LoginScreen() {
       }));
       window.location.href = body.url;
     } catch (err) {
-      Alert.alert('Ideaflow sign-in failed', err instanceof Error ? err.message : String(err));
+      reportAuthFailure('Ideaflow', err);
       setIdeaflowLoading(false);
     }
   };
@@ -382,7 +389,7 @@ export function LoginScreen() {
       // Flip auth state in the context — the navigator swaps stacks.
       await bootstrapIfAuthed();
     } catch (err) {
-      Alert.alert('Sign-in failed', err instanceof Error ? err.message : String(err));
+      reportAuthFailure('password', err);
     } finally {
       setLoading(false);
     }
@@ -395,7 +402,7 @@ export function LoginScreen() {
       // Flip auth state in the context — the navigator swaps stacks.
       await bootstrapIfAuthed();
     } catch (err) {
-      Alert.alert('Sign-up failed', err instanceof Error ? err.message : String(err));
+      reportAuthFailure('registration', err);
     } finally {
       setLoading(false);
     }
@@ -466,121 +473,175 @@ export function LoginScreen() {
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity
-          style={[
-            styles.googleButton,
-            { borderColor: c.border, opacity: (googleLoading || loading || (!isWeb && !googleRequest)) ? 0.6 : 1 },
-          ]}
-          onPress={handleGoogleSignIn}
-          disabled={googleLoading || loading || (!isWeb && !googleRequest)}
-          accessibilityLabel="Continue with Google"
-        >
-          {googleLoading ? (
-            <ActivityIndicator color="#1f1f1f" />
-          ) : (
-            <>
-              <View style={styles.googleGlyph}>
-                <Text style={styles.googleGlyphText}>G</Text>
-              </View>
-              <Text style={styles.googleButtonText}>Continue with Google</Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        <View style={styles.orRow}>
-          <View style={[styles.orLine, { backgroundColor: c.border }]} />
-          <Text style={[styles.orLabel, { color: c.textMuted }]}>or</Text>
-          <View style={[styles.orLine, { backgroundColor: c.border }]} />
-        </View>
-
-        {mode === 'register' && (
-          <TextInput
-            style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
-            value={name}
-            onChangeText={setName}
-            placeholder="Your name"
-            placeholderTextColor={c.textMuted}
-            autoCapitalize="words"
-            autoComplete="name"
-            editable={!loading}
-          />
-        )}
-        <TextInput
-          style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
-          value={email}
-          onChangeText={setEmail}
-          placeholder="Email"
-          placeholderTextColor={c.textMuted}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoComplete="email"
-          editable={!loading}
-        />
-        <TextInput
-          style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
-          value={password}
-          onChangeText={setPassword}
-          placeholder="Password"
-          placeholderTextColor={c.textMuted}
-          secureTextEntry
-          autoCapitalize="none"
-          autoCorrect={false}
-          editable={!loading}
-        />
-
-        <TouchableOpacity
-          style={[styles.button, { backgroundColor: c.primary, opacity: loading ? 0.6 : 1 }]}
-          onPress={handleSubmit}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>{mode === 'register' ? 'Create account' : 'Sign In'}</Text>
-          )}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={() => setMode(mode === 'register' ? 'signin' : 'register')}
-          disabled={loading}
-          style={{ marginTop: 14, alignSelf: 'center' }}
-        >
-          <Text style={{ color: c.primary, fontSize: 14, fontWeight: '600' }}>
-            {mode === 'register' ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
-          </Text>
-        </TouchableOpacity>
-
-        {SHOW_TEST_LOGINS && (
-          <View style={styles.quickLogin}>
-            <View style={[styles.divider, { backgroundColor: c.border }]} />
-            <Text style={[styles.quickLabel, { color: c.textMuted }]}>Quick login (testing)</Text>
-            <View style={styles.quickRow}>
-              {TEST_ACCOUNTS.map((acct) => (
-                <TouchableOpacity
-                  key={acct.email}
-                  style={[
-                    styles.quickButton,
-                    {
-                      backgroundColor: c.surfaceElevated,
-                      borderColor: c.border,
-                      opacity: loading ? 0.6 : 1,
-                    },
-                  ]}
-                  onPress={() => handleQuickLogin(acct)}
-                  disabled={loading}
-                >
-                  <Text style={[styles.quickButtonText, { color: c.textPrimary }]}>{acct.label}</Text>
-                  <Text style={[styles.quickButtonSub, { color: c.textMuted }]}>{acct.email}</Text>
-                </TouchableOpacity>
-              ))}
+        {isWeb && authNotice && (
+          <View
+            style={[
+              styles.authNotice,
+              {
+                backgroundColor: authNotice.recovery ? c.primaryMuted : c.surfaceElevated,
+                borderColor: authNotice.recovery ? c.primary : c.border,
+              },
+            ]}
+            accessibilityRole="alert"
+            accessibilityLiveRegion="assertive"
+          >
+            <View style={styles.authNoticeCopy}>
+              <Text style={[styles.authNoticeTitle, { color: c.textPrimary }]}>
+                {authNotice.title}
+              </Text>
+              <Text style={[styles.authNoticeMessage, { color: c.textSecondary }]}>
+                {authNotice.message}
+              </Text>
             </View>
+            <TouchableOpacity
+              onPress={() => {
+                if (authNotice.recovery && typeof window !== 'undefined') {
+                  window.sessionStorage.removeItem(IDEAFLOW_LINK_RECOVERY_KEY);
+                }
+                setAuthNotice(null);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss sign-in message"
+              style={styles.authNoticeDismiss}
+            >
+              <Text style={{ color: c.textSecondary, fontSize: 18 }}>×</Text>
+            </TouchableOpacity>
           </View>
         )}
 
-        <Text style={[styles.footer, { color: c.textMuted }]}>
-          Uses your Noos credentials. Phone sign-in coming soon.
-        </Text>
+        {isWeb && ideaflowEnabled && (
+          <TouchableOpacity
+            onPress={() => setLegacyExpanded(expanded => !expanded)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: legacyExpanded }}
+            style={styles.legacyDisclosure}
+          >
+            <Text style={[styles.legacyDisclosureText, { color: c.textSecondary }]}>
+              {legacyExpanded ? 'Hide other sign-in methods' : 'Use another sign-in method'}
+            </Text>
+            <Text style={{ color: c.textMuted }}>{legacyExpanded ? '⌃' : '⌄'}</Text>
+          </TouchableOpacity>
+        )}
+
+        {(!isWeb || !ideaflowEnabled || legacyExpanded) && (
+          <>
+            <TouchableOpacity
+              style={[
+                styles.googleButton,
+                { borderColor: c.border, opacity: (googleLoading || loading || (!isWeb && !googleRequest)) ? 0.6 : 1 },
+              ]}
+              onPress={handleGoogleSignIn}
+              disabled={googleLoading || loading || (!isWeb && !googleRequest)}
+              accessibilityLabel="Continue with Google"
+            >
+              {googleLoading ? (
+                <ActivityIndicator color="#1f1f1f" />
+              ) : (
+                <>
+                  <View style={styles.googleGlyph}>
+                    <Text style={styles.googleGlyphText}>G</Text>
+                  </View>
+                  <Text style={styles.googleButtonText}>Continue with Google</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.orRow}>
+              <View style={[styles.orLine, { backgroundColor: c.border }]} />
+              <Text style={[styles.orLabel, { color: c.textMuted }]}>or</Text>
+              <View style={[styles.orLine, { backgroundColor: c.border }]} />
+            </View>
+
+            {mode === 'register' && (
+              <TextInput
+                style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
+                value={name}
+                onChangeText={setName}
+                placeholder="Your name"
+                placeholderTextColor={c.textMuted}
+                autoCapitalize="words"
+                autoComplete="name"
+                editable={!loading}
+              />
+            )}
+            <TextInput
+              style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
+              value={email}
+              onChangeText={setEmail}
+              placeholder="Email"
+              placeholderTextColor={c.textMuted}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              editable={!loading}
+            />
+            <TextInput
+              style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Password"
+              placeholderTextColor={c.textMuted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!loading}
+            />
+
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: c.primary, opacity: loading ? 0.6 : 1 }]}
+              onPress={handleSubmit}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>{mode === 'register' ? 'Create account' : 'Sign In'}</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setMode(mode === 'register' ? 'signin' : 'register')}
+              disabled={loading}
+              style={{ marginTop: 14, alignSelf: 'center' }}
+            >
+              <Text style={{ color: c.primary, fontSize: 14, fontWeight: '600' }}>
+                {mode === 'register' ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
+              </Text>
+            </TouchableOpacity>
+
+            {SHOW_TEST_LOGINS && (
+              <View style={styles.quickLogin}>
+                <View style={[styles.divider, { backgroundColor: c.border }]} />
+                <Text style={[styles.quickLabel, { color: c.textMuted }]}>Quick login (testing)</Text>
+                <View style={styles.quickRow}>
+                  {TEST_ACCOUNTS.map((acct) => (
+                    <TouchableOpacity
+                      key={acct.email}
+                      style={[
+                        styles.quickButton,
+                        {
+                          backgroundColor: c.surfaceElevated,
+                          borderColor: c.border,
+                          opacity: loading ? 0.6 : 1,
+                        },
+                      ]}
+                      onPress={() => handleQuickLogin(acct)}
+                      disabled={loading}
+                    >
+                      <Text style={[styles.quickButtonText, { color: c.textPrimary }]}>{acct.label}</Text>
+                      <Text style={[styles.quickButtonSub, { color: c.textMuted }]}>{acct.email}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            <Text style={[styles.footer, { color: c.textMuted }]}>
+              Uses your Noos credentials. Phone sign-in coming soon.
+            </Text>
+          </>
+        )}
       </View>
 
       {/* Share-the-app QR — only on native (web users don't need it).
@@ -653,6 +714,35 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ideaflowButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  authNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingLeft: 14,
+    paddingRight: 8,
+    gap: 8,
+  },
+  authNoticeCopy: { flex: 1, gap: 3 },
+  authNoticeTitle: { fontSize: 14, fontWeight: '700' },
+  authNoticeMessage: { fontSize: 13, lineHeight: 19 },
+  authNoticeDismiss: {
+    minWidth: 36,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -6,
+    marginRight: -2,
+  },
+  legacyDisclosure: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  legacyDisclosureText: { fontSize: 13, fontWeight: '600' },
   footer: { fontSize: 12, textAlign: 'center', marginTop: 8 },
   shareSection: { width: '100%', maxWidth: 520, alignSelf: 'center', marginTop: 32, alignItems: 'stretch', opacity: 0.88 },
   shareLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8, textAlign: 'center' },

@@ -50,7 +50,7 @@ function isHttpsUrl(value: string): boolean {
 }
 
 /**
- * IdeaFlow ID is deliberately opt-in. Supplying credentials alone is not
+ * Ideaflow ID is deliberately opt-in. Supplying credentials alone is not
  * enough to expose the button or endpoints; the rollout flag must also be on.
  */
 export function getIdeaflowOidcConfig(
@@ -170,7 +170,7 @@ export async function exchangeIdeaflowAuthorizationCode(
   },
 ): Promise<IdeaflowIdentityClaims> {
   const discovery = await getOidcDiscovery(config.issuer, fetchImpl);
-  // IdeaFlow ID's pinned Better Auth provider decodes the Basic payload and
+  // Ideaflow ID's pinned Better Auth provider decodes the Basic payload and
   // splits on the first colon without an additional form-url-decode step.
   const credentials = Buffer.from(
     `${config.clientId}:${config.clientSecret}`,

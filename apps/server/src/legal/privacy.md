@@ -1,12 +1,12 @@
 # Privacy Policy
 
-**Last updated: June 1, 2026**
+**Last updated: September 17, 2026**
 
 This Privacy Policy describes how OpenChat (operated by chat.globalbr.ai) collects, uses, and handles your information when you use our service.
 
 ## Information We Collect
 
-**Account information.** When you sign up, we collect your email address and display name. If you sign in with Google or Apple, we receive your profile information from that provider.
+**Account information.** When you sign up, we collect your email address and display name. If you sign in with Ideaflow, Google, or Apple, we receive profile information from that provider.
 
 **Secretary quick answers.** If you enable Secretary mode, we store the questions and exact answers you approve so OpenChat can automatically reply to matching questions in your direct chats. Secretary mode is optional and disabled by default.
 

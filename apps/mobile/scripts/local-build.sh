@@ -11,14 +11,13 @@
 #   - Xcode 26+ (xcode-select -p == /Applications/Xcode.app/Contents/Developer)
 #   - CocoaPods 1.16+
 #   - Node 18+
-#   - Apple Distribution cert in login keychain with codesign ACL granted
+#   - Apple Distribution cert accessible in the login keychain with codesign
+#     ACL granted
 #     (security set-key-partition-list -S apple-tool:,apple:,codesign:)
-#   - Provisioning profile installed at
-#     ~/Library/MobileDevice/Provisioning Profiles/<UUID>.mobileprovision
-#   - .credentials/Distribution.p12 + .credentials/Distribution.mobileprovision
-#     in the repo root (gitignored)
-#   - credentials.json in repo root with credentialsSource: local config
-#   - ~/.config/m3-login.txt with the login keychain password (mode 600)
+#   - EAS remote distribution certificate + provisioning profile configured
+#     for the production profile
+#   - Optional ~/.config/m3-login.txt (mode 600) when the login keychain is
+#     locked in a headless session
 #
 # Usage:
 #   bash scripts/local-build.sh           # bump patch + build + submit
@@ -32,7 +31,7 @@
 #   - publish-to-testers.py assigns to Friends and Family + triggers Apple
 #     Beta App Review
 
-set -o pipefail
+set -eo pipefail
 
 cd "$(dirname "$0")/.."
 
@@ -98,32 +97,42 @@ case "$NODE_MAJOR" in
     ;;
 esac
 
-# ── Pre-unlock login keychain so codesign can access the signing key ─────────
+# ── Ensure codesign can access the signing key ───────────────────────────────
 LOGIN_PW_FILE="$HOME/.config/m3-login.txt"
-if [ ! -f "$LOGIN_PW_FILE" ]; then
-  echo "ERROR: $LOGIN_PW_FILE not found."
-  echo "       Create it (mode 600) with the M3 login keychain password:"
-  echo "         echo 'YOUR_PASSWORD' > $LOGIN_PW_FILE && chmod 600 $LOGIN_PW_FILE"
+SIGNING_IDENTITY="Apple Distribution: IdeaFlow, Inc. (JESMXK96LG)"
+UNLOCK_PID=""
+PRE_BUILD_MARKER=""
+
+cleanup() {
+  if [ -n "$UNLOCK_PID" ]; then kill "$UNLOCK_PID" 2>/dev/null; fi
+  if [ -n "$PRE_BUILD_MARKER" ]; then /bin/rm -f "$PRE_BUILD_MARKER"; fi
+}
+trap cleanup EXIT
+
+if [ -f "$LOGIN_PW_FILE" ]; then
+  LOGIN_PW=$(cat "$LOGIN_PW_FILE")
+  security unlock-keychain -p "$LOGIN_PW" "$HOME/Library/Keychains/login.keychain-db" || {
+    echo "ERROR: failed to unlock login keychain — check $LOGIN_PW_FILE"
+    exit 1
+  }
+  # Keep it unlocked during the build by extending the lock timeout.
+  security set-keychain-settings -lut 21600 "$HOME/Library/Keychains/login.keychain-db"
+
+  # Re-unlock periodically in case Apple's tooling changes keychain state.
+  (
+    while true; do
+      sleep 60
+      security unlock-keychain -p "$LOGIN_PW" "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null
+    done
+  ) &
+  UNLOCK_PID=$!
+elif security find-identity -v -p codesigning | grep -Fq "\"$SIGNING_IDENTITY\""; then
+  echo "── login keychain already exposes $SIGNING_IDENTITY ──"
+else
+  echo "ERROR: $SIGNING_IDENTITY is not accessible and $LOGIN_PW_FILE is absent."
+  echo "       Unlock the login keychain in this GUI session or provide the mode-600 password file."
   exit 1
 fi
-LOGIN_PW=$(cat "$LOGIN_PW_FILE")
-security unlock-keychain -p "$LOGIN_PW" "$HOME/Library/Keychains/login.keychain-db" || {
-  echo "ERROR: failed to unlock login keychain — check $LOGIN_PW_FILE"
-  exit 1
-}
-# Keep it unlocked during the build by extending the lock timeout
-security set-keychain-settings -lut 21600 "$HOME/Library/Keychains/login.keychain-db"
-
-# Background loop that re-unlocks periodically (in case Apple's tooling
-# re-locks it). Kill on exit.
-(
-  while true; do
-    sleep 60
-    security unlock-keychain -p "$LOGIN_PW" "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null
-  done
-) &
-UNLOCK_PID=$!
-trap "kill $UNLOCK_PID 2>/dev/null" EXIT
 
 # ── Version bump ─────────────────────────────────────────────────────────────
 if [ "$BUMP" = "1" ]; then
@@ -146,10 +155,6 @@ export EXPO_APPLE_TEAM_TYPE=COMPANY_OR_ORGANIZATION
 DEFAULT_MSG="Local build $(date +%Y-%m-%d) — built on $(hostname -s)"
 MSG="${MESSAGE:-$DEFAULT_MSG}"
 
-# Record the archive timestamp BEFORE running eas build so we can find
-# the new archive after the build (regardless of exportArchive failing).
-PRE_BUILD_TS=$(date +%s)
-
 echo ""
 echo "════ STARTING LOCAL EAS BUILD ════"
 echo "  Profile:  production"
@@ -165,6 +170,7 @@ echo ""
 # constructs. We tolerate that failure with `|| true` and do the IPA
 # packaging manually below.
 THROWAWAY_IPA="./build-throwaway-$(date +%Y%m%d-%H%M%S).ipa"
+PRE_BUILD_MARKER=$(mktemp "$TMPDIR/openchat-eas-pre-build.XXXXXX")
 eas build \
   --platform ios \
   --profile production \
@@ -175,12 +181,7 @@ eas build \
 
 # ── Find the .xcarchive the build just produced ──────────────────────────────
 ARCHIVES_DIR="$HOME/Library/Developer/Xcode/Archives"
-LATEST_ARCHIVE=$(find "$ARCHIVES_DIR" -name "*.xcarchive" -newer /tmp/.eas-pre-build-marker 2>/dev/null | tail -1)
-if [ -z "$LATEST_ARCHIVE" ]; then
-  # Fallback: pick the newest archive from today's folder
-  TODAY=$(date +%Y-%m-%d)
-  LATEST_ARCHIVE=$(ls -td "$ARCHIVES_DIR/$TODAY"/*.xcarchive 2>/dev/null | head -1)
-fi
+LATEST_ARCHIVE=$(find "$ARCHIVES_DIR" -name "*.xcarchive" -newer "$PRE_BUILD_MARKER" 2>/dev/null | tail -1)
 if [ -z "$LATEST_ARCHIVE" ] || [ ! -d "$LATEST_ARCHIVE" ]; then
   echo "ERROR: could not find a .xcarchive produced by this build."
   echo "       Check eas build output above for the actual failure."
@@ -220,10 +221,12 @@ echo "── submitting $IPA_OUT to App Store Connect ──"
 eas submit \
   --platform ios \
   --path "$IPA_OUT" \
-  --non-interactive
+  --non-interactive \
+  --no-wait
 
 # ── Push the build to external testers (Friends and Family) ─────────────────
-# eas submit makes the build VALID for internal Founders within ~1 minute.
+# App Store processing time varies; the poller waits for this upload to become
+# VALID before assigning it to a tester group.
 # External testers (Sandeep, Whimsi, Kristen, etc.) require:
 #   1. explicit assignment to the Friends and Family beta group
 #   2. Apple Beta App Review approval (24-48h typical)
@@ -234,5 +237,6 @@ python3 "$(dirname "$0")/publish-to-testers.py"
 
 echo ""
 echo "════ DONE ════"
-echo "Built locally on $(hostname). On TestFlight for internal + external testers."
-echo "Check status:  eas submit:list --platform ios --limit 1"
+echo "Built locally on $(hostname). Submitted to App Store Connect; tester distribution status is reported above."
+echo "External availability depends on Apple Beta App Review."
+echo "Check status in the OpenChat project on expo.dev or App Store Connect."

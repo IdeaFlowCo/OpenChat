@@ -6,6 +6,13 @@ served at `/app`.
 
 ## What works today
 
+- On RN-web, cohort-controlled Ideaflow sign-in is primary; existing Google
+  and email/password sign-in remain available through “Use another sign-in
+  method.” Existing local accounts must use the explicit Settings linking flow
+  rather than being matched by email. Native continues to use its existing
+  sign-in flows; Ideaflow is web-only for this rollout. See
+  [`docs/ideaflow-id-migration.md`](../../docs/ideaflow-id-migration.md) for
+  the rollout contract.
 - Sign in with Noos email/password (Alice / Bob / your account)
 - Conversation list (live-sorted by latest message)
 - Self-conversations, consistently labeled **Myself**
@@ -28,7 +35,7 @@ served at `/app`.
 ## What's stubbed / TODO
 
 - Noos SSO via WebView (currently using direct password POST to `/api/auth/login`)
-- Google sign-in / phone OTP
+- Phone OTP
 - Group creation flow
 - Group settings (rename, add/remove member, leave)
 - Presence indicators, typing indicators
