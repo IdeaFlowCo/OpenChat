@@ -34,6 +34,12 @@
 
 set -o pipefail
 
+# Capture the script's own directory BEFORE cd'ing away — $0 is only valid
+# relative to the original cwd, so any later "$(dirname "$0")" resolves
+# against the wrong (post-cd) directory and silently doubles the path
+# (e.g. apps/mobile/apps/mobile/scripts/...). See OpenChat-all7.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 cd "$(dirname "$0")/.."
 
 if [ ! -f app.config.js ]; then
@@ -229,8 +235,8 @@ eas submit \
 #   2. Apple Beta App Review approval (24-48h typical)
 echo ""
 echo "── publishing to external testers (Friends and Family) ──"
-chmod +x "$(dirname "$0")/publish-to-testers.py"
-python3 "$(dirname "$0")/publish-to-testers.py"
+chmod +x "$SCRIPT_DIR/publish-to-testers.py"
+python3 "$SCRIPT_DIR/publish-to-testers.py"
 
 echo ""
 echo "════ DONE ════"
