@@ -182,11 +182,29 @@ describe('privacy-conscious contact discovery routes', () => {
       headers: { Authorization: authorization },
     });
 
-    expect((await nameResponse.json()).contacts).toEqual([publicProjection(nameDiscoverable)]);
+    const nameBody = await nameResponse.json();
+    expect(nameBody.contacts).toEqual([publicProjection(nameDiscoverable)]);
+    expect(nameBody.contacts[0].avatarUrl).toBe(nameDiscoverable.avatarUrl);
     expect((await emailResponse.json()).contacts).toEqual([publicProjection(emailOnly)]);
     const contactCalls = mocks.run.mock.calls.filter(([cypher]) => String(cypher).includes('contactName'));
     expect(contactCalls[0][1]).toMatchObject({ contactName: 'alice', contactEmail: '' });
     expect(contactCalls[1][1]).toMatchObject({ contactName: '', contactEmail: emailOnly.email });
+    expect(String(contactCalls[0][0])).toContain('.avatarUrl');
+  });
+
+  it('projects avatarUrl for every person-bearing global search result', async () => {
+    await fetch(`${baseUrl}/api/chat/search?q=Alice`, {
+      headers: { Authorization: authorization },
+    });
+
+    const cypher = mocks.run.mock.calls.map(([query]) => String(query));
+    const messageQuery = cypher.find(query => query.includes('conversationTitle: c.title'));
+    const conversationQuery = cypher.find(query => query.includes('participants: participants'));
+    const contactQuery = cypher.find(query => query.includes('contactName'));
+
+    expect(messageQuery).toContain('sender: sender { .id, .name, .avatarUrl, .isBot }');
+    expect(conversationQuery).toContain('participant { .id, .name, .avatarUrl, .isBot }');
+    expect(contactQuery).toContain('.avatarUrl');
   });
 
   it('normalizes the dedicated exact-email lookup and returns no email field', async () => {

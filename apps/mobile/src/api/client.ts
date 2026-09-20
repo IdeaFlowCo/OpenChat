@@ -686,7 +686,7 @@ export interface SearchMessageHit {
   conversationId: string;
   senderId: string;
   createdAt: string;
-  sender?: { id: string; name?: string; email: string; isBot?: boolean };
+  sender?: Pick<User, 'id' | 'name' | 'email' | 'avatarUrl' | 'isBot'>;
   conversationTitle?: string | null;
   conversationType?: 'direct' | 'group';
 }
@@ -697,7 +697,7 @@ export interface SearchConversationHit {
   type: 'direct' | 'group';
   lastMessageAt?: string;
   lastMessagePreview?: string;
-  participants?: Array<{ id: string; name?: string; email: string; isBot?: boolean }>;
+  participants?: Array<Pick<User, 'id' | 'name' | 'email' | 'avatarUrl' | 'isBot'>>;
 }
 
 export interface SearchResults {
