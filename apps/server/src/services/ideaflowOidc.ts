@@ -32,6 +32,10 @@ export interface IdeaflowIdentityClaims {
   emailVerified: boolean;
   name: string | null;
   picture: string | null;
+  /** Seconds since the epoch of the provider's last real authentication, or
+   * null when the ID token carries none. Used to require a fresh login for the
+   * explicit Connect fallback. */
+  authTime: number | null;
 }
 
 const discoveryCache = new Map<string, Promise<OidcDiscovery>>();
@@ -124,6 +128,10 @@ export async function buildIdeaflowAuthorizationUrl(
     state: string;
     nonce: string;
     codeChallenge: string;
+    /** Only `login` is ever sent: it forces the provider to show its sign-in
+     * page (Use another Ideaflow account, explicit Connect). Nothing else is
+     * forwarded from callers. */
+    prompt?: 'login';
   },
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
@@ -137,6 +145,7 @@ export async function buildIdeaflowAuthorizationUrl(
   url.searchParams.set('nonce', input.nonce);
   url.searchParams.set('code_challenge', input.codeChallenge);
   url.searchParams.set('code_challenge_method', 'S256');
+  if (input.prompt === 'login') url.searchParams.set('prompt', 'login');
   return url.toString();
 }
 
@@ -215,5 +224,8 @@ export async function exchangeIdeaflowAuthorizationCode(
     emailVerified: true,
     name: typeof payload.name === 'string' ? payload.name : null,
     picture: typeof payload.picture === 'string' ? payload.picture : null,
+    authTime: typeof payload.auth_time === 'number' && Number.isFinite(payload.auth_time)
+      ? payload.auth_time
+      : null,
   };
 }

@@ -98,7 +98,7 @@ describe('resolveIdeaflowSignIn', () => {
     await expect(resolveIdeaflowSignIn(session as never, identity, OPEN_COHORT_WITH_CREATION))
       .rejects.toThrow('IDEAFLOW_LINK_REQUIRED');
     expect(session.run).toHaveBeenCalledTimes(2);
-    expect(String(session.run.mock.calls[1][0])).toContain('toLower(u.email) = $email');
+    expect(String(session.run.mock.calls[1][0])).toContain("toLower(coalesce(u.email, '')) = $emailLookup");
   });
 
   it('treats an ambiguous email match the same as a single match — link required, not a chosen account', async () => {

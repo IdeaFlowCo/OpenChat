@@ -49,12 +49,16 @@ runtime email auto-linking. Existing sessions and legacy login methods are
 untouched. Accounts that cannot meet every pre-link proof requirement use the
 authenticated linking flow below.
 
-### 1. Explicit, authenticated linking (Settings → Link Ideaflow ID)
+### 1. Explicit, authenticated linking (Settings → Connect Ideaflow ID; fallback)
 
 An already-signed-in OpenChat user completes the Ideaflow ID Authorization
 Code + PKCE flow from their account settings. Their existing OpenChat session
 is the linking proof — the verified Ideaflow ID email does **not** need to
-match the OpenChat account email. The server:
+match the OpenChat account email. This is now only the fallback: it forces
+`prompt=login` and requires a fresh `auth_time` (within 120 s of the attempt's
+start) so a signed-in OpenChat session never authorizes binding whichever
+Ideaflow session happens to be open, and it refuses privileged accounts. The
+server:
 
 1. Requires a valid OpenChat session (`requireAuth`) and addresses the target
    `User` node by `req.user.userId` — never by email, and never by creating a
@@ -89,11 +93,28 @@ implemented by `resolveIdeaflowSignIn`:
 
 1. **Existing durable mapping** — if this (issuer, sub) is already mapped to a
    `User`, sign that user in. No email comparison is needed or performed.
-2. **No mapping, but a local email match** — the ID token's verified email
-   matches an existing OpenChat account by email alone. This is **never**
-   auto-linked. The server returns HTTP 409 with `code: "link_required"`; the
-   client tells the person to sign in with their existing credentials and link
-   Ideaflow ID from Settings (path 1, above).
+2. **No mapping, but a local email match** (code-d96, seamless accounts) — the
+   ID token's email is already required to be the JSON boolean
+   `email_verified === true`. The match is a *counted*, case-insensitive
+   lookup (never `LIMIT 1`; no dot/plus normalization). Then, identical to the
+   Noos resolver because both apps share one `:User` node:
+   - more than one match, a match already mapped to another subject, or a
+     privileged (`role` other than `user`) account → refused (`link_required`,
+     `already_linked`, `needs_admin_proof`);
+   - a passwordless account **created by a Google sign-in whose Google email was
+     verified** (`signupProvider` `google`/`google-ios`, `googleEmailVerified
+     === true`, `googleSub` present) → linked automatically (`via: google-proof`);
+   - an account with a password → HTTP 409 `confirm_required` with an opaque
+     `confirmId` (held only by the starting tab) and a masked email; the person
+     enters that account's password once (`POST /api/auth/ideaflow/confirm`) and
+     the identity is bound (`via: password`). At most 5 attempts per check and
+     10 failures per account per 15 minutes, single use, 10-minute expiry,
+     re-validated (still exactly one unmapped, unprivileged, password account)
+     right before binding. The password is judged by Noos's own login endpoint
+     (`NOOS_URL`), the only password verifier in the shared graph;
+   - anything else (Apple/bridge/legacy accounts with no independent proof) →
+     `link_required`; the person signs in another way and uses Settings →
+     Connect (path 1).
 3. **No mapping, no local email match** — this identity has never been seen.
    Whether a brand-new `User` may be created from it is gated by
    `IDEAFLOW_ID_ALLOW_NEW_USER_CREATION` (see Cohort gate, below). The default
@@ -107,6 +128,13 @@ After either path succeeds, OpenChat mints its ordinary seven-day application
 JWT (unauthenticated sign-in) or simply keeps the caller's existing session
 (explicit linking). OpenChat does not use the Ideaflow ID access token as an
 OpenChat API token, and does not share provider cookies across domains.
+
+### Use another Ideaflow account
+
+`GET /api/auth/ideaflow/url?switch=1` adds `prompt=login` (only that; no other
+`prompt`, `max_age` or `login_hint` from the caller is forwarded). The login
+screen shows **Use another Ideaflow account** under the Ideaflow button. Fast
+SSO stays the default.
 
 ## Cohort gate (production-safe rollout control)
 

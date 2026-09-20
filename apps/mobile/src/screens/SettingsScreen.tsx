@@ -435,7 +435,7 @@ export function SettingsScreen() {
               onPress={ideaflowLinked ? undefined : handleLinkIdeaflow}
               disabled={ideaflowLinked === true || ideaflowLinkLoading || ideaflowLinked === null}
               activeOpacity={0.7}
-              accessibilityLabel="Link Ideaflow ID"
+              accessibilityLabel={ideaflowLinked ? 'Ideaflow ID: connected' : 'Connect Ideaflow ID'}
             >
               <View style={{ flex: 1 }}>
                 <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Ideaflow ID</Text>
@@ -443,8 +443,8 @@ export function SettingsScreen() {
                   {ideaflowLinked === null
                     ? 'Checking link status…'
                     : ideaflowLinked
-                      ? `Linked${ideaflowEmail ? ` as ${ideaflowEmail}` : ''}`
-                      : 'Not linked — tap to link with Ideaflow ID'}
+                      ? `Connected${ideaflowEmail ? ` as ${ideaflowEmail}` : ''}`
+                      : 'Not connected — signing in with Ideaflow connects it automatically; tap to connect now'}
                 </Text>
               </View>
               {ideaflowLinkLoading ? (

@@ -23,11 +23,21 @@ describe('authNoticeForFailure', () => {
         message: 'server wording can change',
       }),
     ).toEqual({
-      title: 'Link your existing account first',
+      title: 'Connect your existing account',
       message:
-        'This Ideaflow ID matches an existing OpenChat account. Sign in below with an existing method, then link Ideaflow ID in Settings.',
+        'An OpenChat account with this email exists, but we could not confirm it is yours automatically. Sign in below with an existing method, then connect Ideaflow ID in Settings.',
       recovery: true,
     });
+  });
+
+  it('explains the other resolver outcomes by their stable codes, never by server prose', () => {
+    for (const code of ['already_linked', 'needs_admin_proof', 'confirm_expired', 'confirm_locked']) {
+      const notice = authNoticeForFailure('Ideaflow', { code, message: 'server wording can change' });
+      expect(notice.recovery).toBe(false);
+      expect(notice.message).not.toContain('server wording');
+    }
+    // Only Ideaflow failures use these notices.
+    expect(authNoticeForFailure('Google', { code: 'already_linked', message: 'x' }).title).toBe('Google sign-in failed');
   });
 
   it('does not treat matching email prose as permission to link', () => {

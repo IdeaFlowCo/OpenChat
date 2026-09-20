@@ -76,6 +76,7 @@ describe('Ideaflow ID auth routes', () => {
       emailVerified: true,
       name: 'Verified Person',
       picture: null,
+      authTime: Math.floor(Date.now() / 1000),
     });
   });
 

@@ -29,11 +29,38 @@ export function authNoticeForFailure(
   const coded = error as CodedError | null;
   if (provider === 'Ideaflow' && coded?.code === 'link_required') {
     return {
-      title: 'Link your existing account first',
+      title: 'Connect your existing account',
       message:
-        'This Ideaflow ID matches an existing OpenChat account. Sign in below with an existing method, then link Ideaflow ID in Settings.',
+        'An OpenChat account with this email exists, but we could not confirm it is yours automatically. Sign in below with an existing method, then connect Ideaflow ID in Settings.',
       recovery: true,
     };
+  }
+  if (provider === 'Ideaflow') {
+    const byCode: Record<string, AuthNotice> = {
+      already_linked: {
+        title: 'Already connected to another Ideaflow account',
+        message:
+          'The OpenChat account with this email is connected to a different Ideaflow account. Use that Ideaflow account, or choose Use another Ideaflow account.',
+        recovery: false,
+      },
+      needs_admin_proof: {
+        title: 'This account cannot be connected automatically',
+        message: 'This account has elevated access, so it needs an administrator to connect Ideaflow ID.',
+        recovery: false,
+      },
+      confirm_expired: {
+        title: 'That confirmation expired',
+        message: 'Continue with Ideaflow again to start over.',
+        recovery: false,
+      },
+      confirm_locked: {
+        title: 'Too many incorrect attempts',
+        message: 'Try again in a few minutes.',
+        recovery: false,
+      },
+    };
+    const notice = typeof coded?.code === 'string' ? byCode[coded.code] : undefined;
+    if (notice) return notice;
   }
 
   const message =

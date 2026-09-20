@@ -575,34 +575,7 @@ export async function signInWithApple(
  * identity under the server's account-linking policy, and returns an ordinary
  * OpenChat session.
  */
-export async function ideaflowExchange(
-  code: string,
-  codeVerifier: string,
-  nonce: string,
-): Promise<{ user: CurrentUser; token: string }> {
-  const res = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/exchange`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code, codeVerifier, nonce }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    let msg = text;
-    let code: string | undefined;
-    try {
-      const parsed = JSON.parse(text);
-      msg = parsed.error || parsed.message || text;
-      code = typeof parsed.code === 'string' ? parsed.code : undefined;
-    } catch {
-      /* not JSON */
-    }
-    throw new IdeaflowSignInError(
-      `Ideaflow ID sign-in failed (${res.status}): ${msg}`,
-      res.status,
-      code,
-    );
-  }
-
+async function readIdeaflowSession(res: Response): Promise<{ user: CurrentUser; token: string }> {
   const body = await res.json();
   const user: CurrentUser = {
     userId: body.user.id,
@@ -613,11 +586,63 @@ export async function ideaflowExchange(
   return { user, token: body.token };
 }
 
+async function throwIdeaflowSignInError(res: Response, label: string): Promise<never> {
+  const text = await res.text();
+  let msg = text;
+  let code: string | undefined;
+  let confirmId: string | undefined;
+  let maskedEmail: string | undefined;
+  try {
+    const parsed = JSON.parse(text);
+    msg = parsed.error || parsed.message || text;
+    code = typeof parsed.code === 'string' ? parsed.code : undefined;
+    confirmId = typeof parsed.confirmId === 'string' ? parsed.confirmId : undefined;
+    maskedEmail = typeof parsed.email === 'string' ? parsed.email : undefined;
+  } catch {
+    /* not JSON */
+  }
+  throw new IdeaflowSignInError(`${label} (${res.status}): ${msg}`, res.status, code, confirmId, maskedEmail);
+}
+
+export async function ideaflowExchange(
+  code: string,
+  codeVerifier: string,
+  nonce: string,
+): Promise<{ user: CurrentUser; token: string }> {
+  const res = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/exchange`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code, codeVerifier, nonce }),
+  });
+  if (!res.ok) return throwIdeaflowSignInError(res, 'Ideaflow ID sign-in failed');
+  return readIdeaflowSession(res);
+}
+
+/**
+ * One-time ownership check inside Ideaflow sign-in: the exchange answered
+ * `confirm_required`; the person proves they own the matching OpenChat account
+ * with its current password and the server binds the identity and signs in.
+ */
+export async function ideaflowConfirm(
+  confirmId: string,
+  password: string,
+): Promise<{ user: CurrentUser; token: string }> {
+  const res = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/confirm`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ confirmId, password }),
+  });
+  if (!res.ok) return throwIdeaflowSignInError(res, 'Ideaflow ID confirmation failed');
+  return readIdeaflowSession(res);
+}
+
 export class IdeaflowSignInError extends Error {
   constructor(
     message: string,
     readonly status: number,
     readonly code?: string,
+    readonly confirmId?: string,
+    readonly maskedEmail?: string,
   ) {
     super(message);
     this.name = 'IdeaflowSignInError';

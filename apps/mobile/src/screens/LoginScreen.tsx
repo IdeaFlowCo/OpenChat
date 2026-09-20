@@ -20,7 +20,7 @@ import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useTheme } from '../contexts/ThemeContext';
-import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, ideaflowExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL } from '../api/client';
+import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, ideaflowExchange, ideaflowConfirm, IdeaflowSignInError, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
 import { randomBase64Url, pkceChallenge } from '../utils/pkce';
@@ -100,6 +100,12 @@ export function LoginScreen() {
   const [appleLoading, setAppleLoading] = useState(false);
   const [ideaflowLoading, setIdeaflowLoading] = useState(false);
   const [ideaflowEnabled, setIdeaflowEnabled] = useState(false);
+  // One-time ownership check inside Ideaflow sign-in. The confirm id lives only
+  // in this component's memory: it is bound to the tab that started sign-in.
+  const [ideaflowConfirmState, setIdeaflowConfirmState] = useState<{ confirmId: string; email: string } | null>(null);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [authNotice, setAuthNotice] = useState<AuthNotice | null>(null);
   const [legacyExpanded, setLegacyExpanded] = useState(false);
   // undefined until the stored value has been read (null = none stored).
@@ -203,7 +209,15 @@ export function LoginScreen() {
         await signInAndRemember(AsyncStorage, 'ideaflow', () => ideaflowExchange(code, stored!.codeVerifier, stored!.nonce));
         await bootstrapIfAuthed();
       } catch (err) {
-        reportAuthFailure('Ideaflow', err);
+        if (err instanceof IdeaflowSignInError && err.code === 'confirm_required' && err.confirmId) {
+          // Not a failure: exactly one existing account matches, ask for its
+          // password once instead of sending the person to Settings.
+          setIdeaflowConfirmState({ confirmId: err.confirmId, email: err.maskedEmail ?? '' });
+          setConfirmPassword('');
+          setConfirmError(null);
+        } else {
+          reportAuthFailure('Ideaflow', err);
+        }
       } finally {
         setIdeaflowLoading(false);
       }
@@ -409,8 +423,12 @@ export function LoginScreen() {
     }
   };
 
-  const handleIdeaflowSignIn = async () => {
+  // switchAccount = "Use another Ideaflow account": asks the server to send
+  // prompt=login (the only thing it can add) so the provider shows its sign-in
+  // page even when an Ideaflow session is already open in this browser.
+  const handleIdeaflowSignIn = async (switchAccount = false) => {
     if (!isWeb || typeof window === 'undefined' || ideaflowLoading || loading) return;
+    setIdeaflowConfirmState(null);
     setIdeaflowLoading(true);
     try {
       const state = randomBase64Url(32);
@@ -421,6 +439,7 @@ export function LoginScreen() {
         state,
         nonce,
         code_challenge: codeChallenge,
+        ...(switchAccount ? { switch: '1' } : {}),
       });
       const response = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/url?${query}`);
       if (!response.ok) throw new Error(`Could not start Ideaflow sign-in (${response.status})`);
@@ -436,6 +455,30 @@ export function LoginScreen() {
     } catch (err) {
       reportAuthFailure('Ideaflow', err);
       setIdeaflowLoading(false);
+    }
+  };
+
+  const handleIdeaflowConfirm = async () => {
+    if (!ideaflowConfirmState || confirmBusy || !confirmPassword) return;
+    setConfirmBusy(true);
+    setConfirmError(null);
+    try {
+      await signInAndRemember(AsyncStorage, 'ideaflow', () => ideaflowConfirm(ideaflowConfirmState.confirmId, confirmPassword));
+      setIdeaflowConfirmState(null);
+      setConfirmPassword('');
+      await bootstrapIfAuthed();
+    } catch (err) {
+      const code = err instanceof IdeaflowSignInError ? err.code : undefined;
+      if (code === 'confirm_invalid') {
+        setConfirmError('That password did not match. Try again.');
+      } else {
+        // Expired, locked, or anything else ends this check; start over.
+        setIdeaflowConfirmState(null);
+        setConfirmPassword('');
+        reportAuthFailure('Ideaflow', err);
+      }
+    } finally {
+      setConfirmBusy(false);
     }
   };
 
@@ -528,7 +571,7 @@ export function LoginScreen() {
                   opacity: (ideaflowLoading || loading || googleLoading) ? 0.6 : 1,
                 },
               ]}
-              onPress={handleIdeaflowSignIn}
+              onPress={() => { void handleIdeaflowSignIn(false); }}
               disabled={ideaflowLoading || loading || googleLoading}
               accessibilityLabel="Continue with Ideaflow"
             >
@@ -539,6 +582,64 @@ export function LoginScreen() {
               )}
             </TouchableOpacity>
             {lastMethod === 'ideaflow' && <LastUsedBadge method="ideaflow" colors={c} />}
+            <TouchableOpacity
+              onPress={() => { void handleIdeaflowSignIn(true); }}
+              disabled={ideaflowLoading || loading || googleLoading}
+              accessibilityRole="link"
+              accessibilityLabel="Use another Ideaflow account"
+              style={styles.ideaflowSwitchLink}
+            >
+              <Text style={[styles.ideaflowSwitchText, { color: c.textSecondary }]}>
+                Use another Ideaflow account
+              </Text>
+            </TouchableOpacity>
+            {ideaflowConfirmState && (
+              <View
+                style={[styles.confirmPanel, { backgroundColor: c.surfaceElevated, borderColor: c.primary }]}
+                accessibilityLiveRegion="polite"
+              >
+                <Text style={[styles.authNoticeTitle, { color: c.textPrimary }]}>
+                  Connect your existing OpenChat account
+                </Text>
+                <Text style={[styles.authNoticeMessage, { color: c.textSecondary }]}>
+                  {`Your Ideaflow account${ideaflowConfirmState.email ? ` (${ideaflowConfirmState.email})` : ''} matches an existing OpenChat account. Enter that account's password once to connect them. You will not be asked again.`}
+                </Text>
+                <TextInput
+                  style={[styles.input, { color: c.textPrimary, borderColor: c.border, backgroundColor: c.surface }]}
+                  placeholder="OpenChat account password"
+                  placeholderTextColor={c.textMuted}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="current-password"
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  onSubmitEditing={() => { void handleIdeaflowConfirm(); }}
+                  editable={!confirmBusy}
+                  accessibilityLabel="OpenChat account password"
+                />
+                {confirmError && (
+                  <Text style={[styles.authNoticeMessage, { color: c.danger }]} accessibilityRole="alert">
+                    {confirmError}
+                  </Text>
+                )}
+                <TouchableOpacity
+                  style={[styles.button, { backgroundColor: c.primary, opacity: confirmBusy || !confirmPassword ? 0.6 : 1 }]}
+                  onPress={() => { void handleIdeaflowConfirm(); }}
+                  disabled={confirmBusy || !confirmPassword}
+                  accessibilityLabel="Connect and continue"
+                >
+                  {confirmBusy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Connect and continue</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => { setIdeaflowConfirmState(null); setConfirmPassword(''); setConfirmError(null); }}
+                  accessibilityRole="button"
+                  style={styles.ideaflowSwitchLink}
+                >
+                  <Text style={[styles.ideaflowSwitchText, { color: c.textSecondary }]}>Use another way to sign in</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         )}
 
@@ -821,6 +922,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   legacyDisclosureText: { fontSize: 13, fontWeight: '600' },
+  ideaflowSwitchLink: { alignItems: 'center', paddingVertical: 8 },
+  ideaflowSwitchText: { fontSize: 13, textDecorationLine: 'underline' },
+  confirmPanel: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+    marginTop: 4,
+  },
   lastUsedBadge: {
     position: 'absolute',
     top: -9,
