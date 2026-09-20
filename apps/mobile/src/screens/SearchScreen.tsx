@@ -174,7 +174,13 @@ export function SearchScreen() {
           onPress={() => openConversation(h.id)}
           activeOpacity={0.7}
         >
-          <Avatar name={title} email={other?.email} isBot={other?.isBot} size={40} />
+          <Avatar
+            name={title}
+            email={other?.email}
+            avatarUrl={other?.avatarUrl}
+            isBot={other?.isBot}
+            size={40}
+          />
           <View style={{ flex: 1 }}>
             <View style={styles.rowTop}>
               <Text style={[styles.rowTitle, { color: c.textPrimary }]} numberOfLines={1}>{title}</Text>
@@ -203,7 +209,13 @@ export function SearchScreen() {
           onPress={() => openConversation(h.conversationId)}
           activeOpacity={0.7}
         >
-          <Avatar name={h.sender?.name || h.sender?.email} email={h.sender?.email} isBot={h.sender?.isBot} size={40} />
+          <Avatar
+            name={h.sender?.name || h.sender?.email}
+            email={h.sender?.email}
+            avatarUrl={h.sender?.avatarUrl}
+            isBot={h.sender?.isBot}
+            size={40}
+          />
           <View style={{ flex: 1 }}>
             <View style={styles.rowTop}>
               <Text style={[styles.rowTitle, { color: c.textPrimary }]} numberOfLines={1}>
