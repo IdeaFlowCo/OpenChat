@@ -44,6 +44,13 @@ describe('validateToken', () => {
     expect(validateToken(token)).toBeNull();
   });
 
+  it('rejects a token signed with the public default secret once a real Noos secret is configured (hard cutover)', () => {
+    process.env.NOOS_JWT_SECRET = NOOS_SECRET;
+    const token = jwt.sign(AUTH_USER, 'dev-secret-change-me');
+
+    expect(validateToken(token)).toBeNull();
+  });
+
   it('rejects signed payloads that do not contain required auth claims', () => {
     const token = jwt.sign({ subject: 'missing-user-claims' }, PRIMARY_SECRET);
 

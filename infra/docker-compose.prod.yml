@@ -45,6 +45,9 @@ services:
       - IDEAFLOW_ID_CLIENT_ID=${IDEAFLOW_ID_CLIENT_ID:-}
       - IDEAFLOW_ID_CLIENT_SECRET=${IDEAFLOW_ID_CLIENT_SECRET:-}
       - IDEAFLOW_ID_REDIRECT_URI=${IDEAFLOW_ID_REDIRECT_URI:-https://chat.globalbr.ai/auth/ideaflow/callback}
+      # Rollout controls fail closed even when the global flag is enabled.
+      - IDEAFLOW_ID_COHORT_ALLOWLIST=${IDEAFLOW_ID_COHORT_ALLOWLIST:-}
+      - IDEAFLOW_ID_ALLOW_NEW_USER_CREATION=${IDEAFLOW_ID_ALLOW_NEW_USER_CREATION:-false}
       # Agent API key encryption secret (OpenChat-7c9). 32-byte hex string.
       # Generate: openssl rand -hex 32 >> /opt/openchat/.env
       - OC_KEY_ENCRYPTION_SECRET=${OC_KEY_ENCRYPTION_SECRET:-}

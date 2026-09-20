@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Last updated: June 1, 2026**
+**Last updated: September 17, 2026**
 
 These Terms of Service ("Terms") govern your use of OpenChat, a messaging service available at https://chat.globalbr.ai and through the OpenChat mobile apps for iOS and Android (collectively, the "Service"). The Service is operated by Jacob Cole on behalf of the OpenChat project ("we", "us", "our").
 
@@ -14,7 +14,7 @@ If you are using OpenChat on behalf of an organization, you represent that you h
 
 ## 2. Your Account
 
-You sign in with Google, Apple, or an email and password. You are responsible for:
+You sign in with Ideaflow, Google, Apple, or an email and password. You are responsible for:
 
 - Keeping your sign-in credentials secure.
 - All activity that occurs under your account.
