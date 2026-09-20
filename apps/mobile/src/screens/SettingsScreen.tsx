@@ -25,6 +25,7 @@ import { getColors } from '../theme/colors';
 import type { NavProp } from '../navigation/types';
 import { registerForPushNotificationsAsync } from '../services/notifications';
 import { ExportSheet } from '../components/ExportSheet';
+import { FeedbackModal } from '../components/FeedbackModal';
 import { saveJsonDownload } from '../services/exportDownload';
 import { AppIcon } from '../components/AppIcon';
 
@@ -122,34 +123,27 @@ export function SettingsScreen() {
   }, [mintingSetup]);
 
   // Send feedback -> server creates a WorldIssueTracker issue (oc8.3).
+  // A cross-platform modal (FeedbackModal) replaces Alert.prompt, which only
+  // iOS implements — Android and web previously had no in-app path at all
+  // (OpenChat-k9hj).
   const [sendingFeedback, setSendingFeedback] = useState(false);
+  const [feedbackModalVisible, setFeedbackModalVisible] = useState(false);
   const handleSendFeedback = useCallback(() => {
-    const submit = async (message?: string) => {
-      const text = (message || '').trim();
-      if (!text) return;
-      setSendingFeedback(true);
-      try {
-        const { url } = await api.submitFeedback(text);
-        Alert.alert('Thanks!', `Your feedback was sent.${url ? `\n\n${url}` : ''}`);
-      } catch (err) {
-        Alert.alert(
-          'Couldn’t send feedback',
-          err instanceof Error ? err.message : 'Please try again later.'
-        );
-      } finally {
-        setSendingFeedback(false);
-      }
-    };
-    if (Platform.OS === 'ios') {
-      Alert.prompt(
-        'Send feedback',
-        'What’s working, broken, or missing?',
-        submit,
-        'plain-text'
+    setFeedbackModalVisible(true);
+  }, []);
+  const handleSubmitFeedback = useCallback(async (text: string) => {
+    setSendingFeedback(true);
+    try {
+      const { url } = await api.submitFeedback(text);
+      setFeedbackModalVisible(false);
+      Alert.alert('Thanks!', `Your feedback was sent.${url ? `\n\n${url}` : ''}`);
+    } catch (err) {
+      Alert.alert(
+        'Couldn’t send feedback',
+        err instanceof Error ? err.message : 'Please try again later.'
       );
-    } else {
-      // Android has no Alert.prompt; v1 falls back to the web tracker.
-      Linking.openURL('https://worldissuetracker.com');
+    } finally {
+      setSendingFeedback(false);
     }
   }, []);
 
@@ -857,6 +851,13 @@ export function SettingsScreen() {
         busyRange={exportBusyRange}
         onClose={() => !exportBusyRange && setExportSheetVisible(false)}
         onExport={handleAccountExport}
+      />
+
+      <FeedbackModal
+        visible={feedbackModalVisible}
+        sending={sendingFeedback}
+        onSubmit={handleSubmitFeedback}
+        onCancel={() => setFeedbackModalVisible(false)}
       />
 
       {/* Android delete-account confirmation modal (fallback for platforms without Alert.prompt) */}

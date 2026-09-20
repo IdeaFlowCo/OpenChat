@@ -1613,27 +1613,19 @@ export function ChatScreen({
             }
           }}
         />
-        {/* Transform sparkle button (OpenChat-8a0) — hidden in edit mode or while recording */}
+        {/* Transform sparkle button (OpenChat-8a0) — hidden in edit mode or
+            while recording. The chevron menu includes "NVC Compose...",
+            which opens the 4-field Observation/Feeling/Need/Request
+            scaffold modal (OpenChat-3kr.2) instead of running an AI
+            rewrite. */}
         {!editingMessage && !isRecording && (
           <TransformButton
             text={text}
             disabled={!text.trim() || composerBusy}
             onTransformed={handleTransformed}
             onError={showToast}
+            onNvcCompose={() => setNvcVisible(true)}
           />
-        )}
-        {/* NVC composer button (OpenChat-3kr.2) — opens the 4-field
-            Observation/Feeling/Need/Request scaffold modal. Hidden in
-            edit mode or while voice-recording. */}
-        {!editingMessage && !isRecording && (
-          <TouchableOpacity
-            onPress={() => setNvcVisible(true)}
-            disabled={composerBusy}
-            style={{ paddingHorizontal: 8, paddingVertical: 8, opacity: composerBusy ? 0.4 : 1 }}
-            accessibilityLabel="NVC compose"
-          >
-            <AppIcon name="heart" color={c.primary} size={19} />
-          </TouchableOpacity>
         )}
         {/*
           Mic button (OpenChat-xxc): shown on native when text is empty and not editing.
