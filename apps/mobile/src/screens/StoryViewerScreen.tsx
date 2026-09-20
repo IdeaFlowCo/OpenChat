@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -54,44 +57,50 @@ export function StoryViewerScreen() {
   };
 
   return (
-    <View style={[styles.page, { backgroundColor: c.background }]}>
-      <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <View style={styles.authorRow}>
-            <Avatar name={authorName} size={46} />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.author, { color: c.textPrimary }]}>{authorName}</Text>
-            <Text style={[styles.expiry, { color: c.textMuted }]}>{remaining(story.storyExpiresAt)}</Text>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView
+        contentContainerStyle={styles.page}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+      >
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <View style={styles.authorRow}>
+              <Avatar name={authorName} size={46} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.author, { color: c.textPrimary }]}>{authorName}</Text>
+              <Text style={[styles.expiry, { color: c.textMuted }]}>{remaining(story.storyExpiresAt)}</Text>
+            </View>
+            <Text style={[styles.eyebrow, { color: c.primary }]}>STORY</Text>
           </View>
-          <Text style={[styles.eyebrow, { color: c.primary }]}>STORY</Text>
+          <Text style={[styles.storyText, { color: c.textPrimary }]}>{story.text}</Text>
         </View>
-        <Text style={[styles.storyText, { color: c.textPrimary }]}>{story.text}</Text>
-      </View>
 
-      <View style={[styles.replyCard, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <Text style={[styles.replyTitle, { color: c.textPrimary }]}>Reply privately</Text>
-        <Text style={[styles.replyHint, { color: c.textSecondary }]}>Your response starts or opens a direct chat. Nothing is posted publicly.</Text>
-        <TextInput
-          value={reply}
-          onChangeText={setReply}
-          placeholder={`Message ${authorName}`}
-          placeholderTextColor={c.textMuted}
-          multiline
-          style={[styles.input, { color: c.textPrimary, borderColor: c.border, backgroundColor: c.background }]}
-        />
-        <View style={styles.actions}>
-          <TouchableOpacity disabled={busy} onPress={() => void respond(reply)} style={[styles.primary, { backgroundColor: c.primary }, busy && styles.disabled]}>
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Reply</Text>}
+        <View style={[styles.replyCard, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <Text style={[styles.replyTitle, { color: c.textPrimary }]}>Reply privately</Text>
+          <Text style={[styles.replyHint, { color: c.textSecondary }]}>Your response starts or opens a direct chat. Nothing is posted publicly.</Text>
+          <TextInput
+            value={reply}
+            onChangeText={setReply}
+            placeholder={`Message ${authorName}`}
+            placeholderTextColor={c.textMuted}
+            multiline
+            style={[styles.input, { color: c.textPrimary, borderColor: c.border, backgroundColor: c.background }]}
+          />
+          <View style={styles.actions}>
+            <TouchableOpacity disabled={busy} onPress={() => void respond(reply)} style={[styles.primary, { backgroundColor: c.primary }, busy && styles.disabled]}>
+              {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Reply</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity disabled={busy} onPress={() => void respond(`I may be able to help with this. Want to talk?`)} style={[styles.secondary, { borderColor: c.border }]}>
+              <Text style={[styles.secondaryText, { color: c.primary }]}>I may be able to help</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity onPress={() => navigation.navigate('AgentOverlay', { prompt: agentPrompt })} style={styles.agentAction}>
+            <Text style={{ color: c.primary, fontWeight: '700' }}>Ask My Agent about this</Text>
           </TouchableOpacity>
-          <TouchableOpacity disabled={busy} onPress={() => void respond(`I may be able to help with this. Want to talk?`)} style={[styles.secondary, { borderColor: c.border }]}>
-            <Text style={[styles.secondaryText, { color: c.primary }]}>I may be able to help</Text>
-          </TouchableOpacity>
+          {error && <Text accessibilityRole="alert" style={[styles.error, { color: c.danger }]}>{error}</Text>}
         </View>
-        <TouchableOpacity onPress={() => navigation.navigate('AgentOverlay', { prompt: agentPrompt })} style={styles.agentAction}>
-          <Text style={{ color: c.primary, fontWeight: '700' }}>Ask My Agent about this</Text>
-        </TouchableOpacity>
-        {error && <Text accessibilityRole="alert" style={[styles.error, { color: c.danger }]}>{error}</Text>}
-      </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

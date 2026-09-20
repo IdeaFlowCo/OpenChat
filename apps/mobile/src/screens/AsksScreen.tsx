@@ -23,9 +23,18 @@ function draftTitle(draft: IntentDraft): string {
   return draft.goal || draft.seeks[0] || draft.brings[0] || 'Private intention';
 }
 
+function relevantExpiresAt(story: OwnedStory): string | null {
+  return (story.humanVisible ? story.storyExpiresAt : null) ?? story.searchExpiresAt;
+}
+
 function inventoryExpiry(story: OwnedStory): string {
-  const value = (story.humanVisible ? story.storyExpiresAt : null) ?? story.searchExpiresAt;
+  const value = relevantExpiresAt(story);
   return value ? new Date(value).toLocaleDateString() : '';
+}
+
+function isStoryExpired(story: OwnedStory): boolean {
+  const value = relevantExpiresAt(story);
+  return value ? Date.parse(value) < Date.now() : false;
 }
 
 export function AsksScreen() {
@@ -59,7 +68,7 @@ export function AsksScreen() {
 
   const items = useMemo<InventoryItem[]>(() => [
     ...drafts.filter(draft => draft.state === 'pending').map(draft => ({ key: `draft-${draft.id}`, kind: 'draft' as const, draft })),
-    ...stories.filter(story => story.status !== 'withdrawn' && story.status !== 'expired').map(story => ({ key: `story-${story.id}`, kind: 'story' as const, story })),
+    ...stories.filter(story => story.status !== 'withdrawn').map(story => ({ key: `story-${story.id}`, kind: 'story' as const, story })),
   ], [drafts, stories]);
 
   const searchQuietly = async (draft: IntentDraft) => {
@@ -161,7 +170,9 @@ export function AsksScreen() {
           ) : (
             <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
               <View style={styles.cardHeading}>
-                <Text style={[styles.state, { color: c.primary }]}>{item.story.humanVisible ? 'STORY' : 'QUIET SEARCH'} · {item.story.status.toUpperCase()}</Text>
+                <Text style={[styles.state, { color: isStoryExpired(item.story) ? c.textMuted : c.primary }]}>
+                  {item.story.humanVisible ? 'STORY' : 'QUIET SEARCH'} · {isStoryExpired(item.story) ? 'EXPIRED' : item.story.status.toUpperCase()}
+                </Text>
                 <Text style={[styles.date, { color: c.textMuted }]}>{inventoryExpiry(item.story)}</Text>
               </View>
               <Text style={[styles.cardTitle, { color: c.textPrimary }]}>{item.story.humanVisible ? item.story.text : (item.story.goal || item.story.seeks[0] || item.story.brings[0] || 'Agent-only search')}</Text>

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -149,147 +151,154 @@ export function StoryComposerScreen() {
   };
 
   return (
-    <ScrollView style={{ backgroundColor: c.background }} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-      <View style={styles.headingBlock}>
-        <Text style={[styles.eyebrow, { color: c.primary }]}>SHARE WITH PEOPLE</Text>
-        <Text style={[styles.title, { color: c.textPrimary }]}>What should your friends know?</Text>
-        <Text style={[styles.lede, { color: c.textSecondary }]}>Write it naturally. Your agent can also search quietly without making the search visible to people.</Text>
-      </View>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView
+        style={{ backgroundColor: c.background }}
+        contentContainerStyle={styles.page}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+      >
+        <View style={styles.headingBlock}>
+          <Text style={[styles.eyebrow, { color: c.primary }]}>SHARE WITH PEOPLE</Text>
+          <Text style={[styles.title, { color: c.textPrimary }]}>What should your friends know?</Text>
+          <Text style={[styles.lede, { color: c.textSecondary }]}>Write it naturally. Your agent can also search quietly without making the search visible to people.</Text>
+        </View>
 
-      {!previewing ? (
-        <>
-          <TextInput
-            autoFocus
-            multiline
-            value={text}
-            onChangeText={setText}
-            placeholder="I’m looking for a Burning Man ticket for a friend…"
-            placeholderTextColor={c.textMuted}
-            accessibilityLabel="Story text"
-            style={[styles.storyInput, { color: c.textPrimary, backgroundColor: c.surface, borderColor: c.border }]}
-          />
+        {!previewing ? (
+          <>
+            <TextInput
+              autoFocus
+              multiline
+              value={text}
+              onChangeText={setText}
+              placeholder="I’m looking for a Burning Man ticket for a friend…"
+              placeholderTextColor={c.textMuted}
+              accessibilityLabel="Story text"
+              style={[styles.storyInput, { color: c.textPrimary, backgroundColor: c.surface, borderColor: c.border }]}
+            />
 
-          <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>WHO CAN SEE IT</Text>
-          <View style={[styles.choiceCard, { backgroundColor: c.surface, borderColor: c.border }]}>
-            {shareableConversations.map(conversation => {
-              const label = conversation.title || conversation.participants
-                ?.filter(participant => participant.user.id !== currentUser?.userId)
-                .map(participant => participant.user.name || participant.user.email)
-                .join(', ') || 'Chat';
-              const checked = selected.has(conversation.id);
-              return (
-                <TouchableOpacity
-                  key={conversation.id}
-                  onPress={() => toggleAudience(conversation.id)}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked }}
-                  style={[styles.audienceRow, { borderBottomColor: c.border }]}
-                >
-                  <View style={[styles.checkbox, { borderColor: checked ? c.primary : c.border, backgroundColor: checked ? c.primary : 'transparent' }]}>
-                    {checked && <Text style={styles.checkmark}>✓</Text>}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: c.textPrimary, fontWeight: '600' }}>{label}</Text>
-                    <Text style={{ color: c.textMuted, fontSize: 12 }}>{conversation.type === 'group' ? 'Group chat' : 'Direct chat'}</Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-            {shareableConversations.length === 0 && (
-              <Text style={[styles.noAudience, { color: c.textSecondary }]}>Start a chat with someone before sharing a Story. For an agent-only search, tell My Agent instead.</Text>
-            )}
-          </View>
-
-          <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>AGENT CONTEXT · OPTIONAL</Text>
-          <View style={[styles.detailsCard, { backgroundColor: c.surface, borderColor: c.border }]}>
-            <TextInput value={goal} onChangeText={setGoal} placeholder="Goal" placeholderTextColor={c.textMuted} style={[styles.lineInput, { color: c.textPrimary, borderBottomColor: c.border }]} />
-            <TextInput value={seeks} onChangeText={setSeeks} placeholder="Looking for (comma separated)" placeholderTextColor={c.textMuted} style={[styles.lineInput, { color: c.textPrimary, borderBottomColor: c.border }]} />
-            <TextInput value={brings} onChangeText={setBrings} placeholder="I can bring (comma separated)" placeholderTextColor={c.textMuted} style={[styles.lineInput, { color: c.textPrimary }]} />
-          </View>
-          <View style={styles.modeRow}>
-            {MATCH_OPTIONS.map(option => (
-              <TouchableOpacity key={option.value} onPress={() => setMatchingMode(option.value)} style={[styles.modeChip, { borderColor: matchingMode === option.value ? c.primary : c.border, backgroundColor: matchingMode === option.value ? c.primaryMuted : c.surface }]}>
-                <Text style={{ color: matchingMode === option.value ? c.primary : c.textSecondary, fontWeight: '700', fontSize: 12 }}>{option.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          <View style={[styles.settingRow, { borderColor: c.border, backgroundColor: c.surface }]}>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: c.textPrimary, fontWeight: '700' }}>Also search this audience’s agents</Text>
-              <Text style={{ color: c.textSecondary, fontSize: 12, marginTop: 3 }}>Off by default. If enabled, the matching terms below are searchable for 30 days by agents belonging to the selected people and groups.</Text>
+            <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>WHO CAN SEE IT</Text>
+            <View style={[styles.choiceCard, { backgroundColor: c.surface, borderColor: c.border }]}>
+              {shareableConversations.map(conversation => {
+                const label = conversation.title || conversation.participants
+                  ?.filter(participant => participant.user.id !== currentUser?.userId)
+                  .map(participant => participant.user.name || participant.user.email)
+                  .join(', ') || 'Chat';
+                const checked = selected.has(conversation.id);
+                return (
+                  <TouchableOpacity
+                    key={conversation.id}
+                    onPress={() => toggleAudience(conversation.id)}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked }}
+                    style={[styles.audienceRow, { borderBottomColor: c.border }]}
+                  >
+                    <View style={[styles.checkbox, { borderColor: checked ? c.primary : c.border, backgroundColor: checked ? c.primary : 'transparent' }]}>
+                      {checked && <Text style={styles.checkmark}>✓</Text>}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: c.textPrimary, fontWeight: '600' }}>{label}</Text>
+                      <Text style={{ color: c.textMuted, fontSize: 12 }}>{conversation.type === 'group' ? 'Group chat' : 'Direct chat'}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+              {shareableConversations.length === 0 && (
+                <Text style={[styles.noAudience, { color: c.textSecondary }]}>Start a chat with someone before sharing a Story. For an agent-only search, tell My Agent instead.</Text>
+              )}
             </View>
-            <Switch value={quietSearch} onValueChange={setQuietSearch} trackColor={{ true: c.primary }} />
-          </View>
-          {quietSearch && !draft && splitList(seeks).length === 0 && splitList(brings).length === 0 && (
-            <View style={styles.modeRow} accessibilityRole="radiogroup" accessibilityLabel="Quiet search direction">
-              {([
-                { value: 'ask' as const, label: 'I’m looking for this' },
-                { value: 'offer' as const, label: 'I’m offering this' },
-              ]).map(option => (
-                <TouchableOpacity
-                  key={option.value}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: textOnlyKind === option.value }}
-                  onPress={() => setTextOnlyKind(option.value)}
-                  style={[styles.modeChip, {
-                    borderColor: textOnlyKind === option.value ? c.primary : c.border,
-                    backgroundColor: textOnlyKind === option.value ? c.primaryMuted : c.surface,
-                  }]}
-                >
-                  <Text style={{ color: textOnlyKind === option.value ? c.primary : c.textSecondary, fontWeight: '700', fontSize: 12 }}>{option.label}</Text>
+
+            <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>AGENT CONTEXT · OPTIONAL</Text>
+            <View style={[styles.detailsCard, { backgroundColor: c.surface, borderColor: c.border }]}>
+              <TextInput value={goal} onChangeText={setGoal} placeholder="Goal" placeholderTextColor={c.textMuted} style={[styles.lineInput, { color: c.textPrimary, borderBottomColor: c.border }]} />
+              <TextInput value={seeks} onChangeText={setSeeks} placeholder="Looking for (comma separated)" placeholderTextColor={c.textMuted} style={[styles.lineInput, { color: c.textPrimary, borderBottomColor: c.border }]} />
+              <TextInput value={brings} onChangeText={setBrings} placeholder="I can bring (comma separated)" placeholderTextColor={c.textMuted} style={[styles.lineInput, { color: c.textPrimary }]} />
+            </View>
+            <View style={styles.modeRow}>
+              {MATCH_OPTIONS.map(option => (
+                <TouchableOpacity key={option.value} onPress={() => setMatchingMode(option.value)} style={[styles.modeChip, { borderColor: matchingMode === option.value ? c.primary : c.border, backgroundColor: matchingMode === option.value ? c.primaryMuted : c.surface }]}>
+                  <Text style={{ color: matchingMode === option.value ? c.primary : c.textSecondary, fontWeight: '700', fontSize: 12 }}>{option.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-          )}
-          <View style={styles.expiryRow}>
-            {(['day', 'week'] as Expiry[]).map(value => (
-              <TouchableOpacity key={value} onPress={() => setExpiry(value)} style={[styles.expiryChoice, { borderColor: expiry === value ? c.primary : c.border, backgroundColor: expiry === value ? c.primaryMuted : c.surface }]}>
-                <Text style={{ color: expiry === value ? c.primary : c.textSecondary, fontWeight: '700' }}>{value === 'day' ? '24 hours' : '7 days'}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {error && <Text accessibilityRole="alert" style={[styles.error, { color: c.danger }]}>{error}</Text>}
-          <TouchableOpacity onPress={review} style={[styles.primary, { backgroundColor: c.primary }]}>
-            <Text style={styles.primaryText}>Review exact Story</Text>
-          </TouchableOpacity>
-        </>
-      ) : (
-        <View style={[styles.preview, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <Text style={[styles.eyebrow, { color: c.primary }]}>EXACT PUBLISH PREVIEW</Text>
-          <Text style={[styles.previewText, { color: c.textPrimary }]}>{text.trim()}</Text>
-          <View style={[styles.rule, { backgroundColor: c.border }]} />
-          <Text style={[styles.fact, { color: c.textSecondary }]}>Audience: {audienceNames.join(' · ')}</Text>
-          <Text style={[styles.fact, { color: c.textSecondary }]}>Expires: {expiry === 'day' ? '24 hours' : '7 days'}</Text>
-          <Text style={[styles.fact, { color: c.textSecondary }]}>Agent search: {quietSearch ? 'Selected audience’s agents · 30 days' : 'Off'}</Text>
-          {quietSearch && (
-            <View
-              style={[styles.searchPreview, { borderColor: c.border, backgroundColor: c.background }]}
-            >
-              <Text style={[styles.searchPreviewTitle, { color: c.textPrimary }]}>What those agents can search</Text>
-              {!!goal.trim() && <Text style={[styles.fact, { color: c.textSecondary }]}>Goal: {goal.trim()}</Text>}
-              {splitList(seeks).length > 0 && <Text style={[styles.fact, { color: c.textSecondary }]}>Looking for: {splitList(seeks).join(', ')}</Text>}
-              {splitList(brings).length > 0 && <Text style={[styles.fact, { color: c.textSecondary }]}>Can bring: {splitList(brings).join(', ')}</Text>}
-              {splitList(seeks).length === 0 && splitList(brings).length === 0 && (
-                <>
-                  <Text style={[styles.fact, { color: c.textSecondary }]}>Direction: {textOnlyKind === 'ask' ? 'Looking for' : 'Offering'}</Text>
-                  {!goal.trim() && <Text style={[styles.fact, { color: c.textSecondary }]}>Matching text: {text.trim()}</Text>}
-                </>
-              )}
-              <Text style={[styles.fact, { color: c.textSecondary }]}>Identity stays hidden until both people approve.</Text>
+
+            <View style={[styles.settingRow, { borderColor: c.border, backgroundColor: c.surface }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: c.textPrimary, fontWeight: '700' }}>Also search this audience’s agents</Text>
+                <Text style={{ color: c.textSecondary, fontSize: 12, marginTop: 3 }}>Off by default. If enabled, the matching terms below are searchable for 30 days by agents belonging to the selected people and groups.</Text>
+              </View>
+              <Switch value={quietSearch} onValueChange={setQuietSearch} trackColor={{ true: c.primary }} />
             </View>
-          )}
-          <Text style={[styles.privacy, { color: c.textMuted }]}>Only this text is shown to the selected people. Private agent context is not included.</Text>
-          {error && <Text accessibilityRole="alert" style={[styles.error, { color: c.danger }]}>{error}</Text>}
-          <TouchableOpacity disabled={busy} onPress={() => void publish()} style={[styles.primary, { backgroundColor: c.primary }, busy && { opacity: 0.55 }]}>
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Approve and share</Text>}
-          </TouchableOpacity>
-          <TouchableOpacity disabled={busy} onPress={() => setPreviewing(false)} style={styles.editButton}>
-            <Text style={{ color: c.primary, fontWeight: '700' }}>Edit</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-    </ScrollView>
+            {quietSearch && !draft && splitList(seeks).length === 0 && splitList(brings).length === 0 && (
+              <View style={styles.modeRow} accessibilityRole="radiogroup" accessibilityLabel="Quiet search direction">
+                {([
+                  { value: 'ask' as const, label: 'I’m looking for this' },
+                  { value: 'offer' as const, label: 'I’m offering this' },
+                ]).map(option => (
+                  <TouchableOpacity
+                    key={option.value}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: textOnlyKind === option.value }}
+                    onPress={() => setTextOnlyKind(option.value)}
+                    style={[styles.modeChip, {
+                      borderColor: textOnlyKind === option.value ? c.primary : c.border,
+                      backgroundColor: textOnlyKind === option.value ? c.primaryMuted : c.surface,
+                    }]}
+                  >
+                    <Text style={{ color: textOnlyKind === option.value ? c.primary : c.textSecondary, fontWeight: '700', fontSize: 12 }}>{option.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            <View style={styles.expiryRow}>
+              {(['day', 'week'] as Expiry[]).map(value => (
+                <TouchableOpacity key={value} onPress={() => setExpiry(value)} style={[styles.expiryChoice, { borderColor: expiry === value ? c.primary : c.border, backgroundColor: expiry === value ? c.primaryMuted : c.surface }]}>
+                  <Text style={{ color: expiry === value ? c.primary : c.textSecondary, fontWeight: '700' }}>{value === 'day' ? '24 hours' : '7 days'}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {error && <Text accessibilityRole="alert" style={[styles.error, { color: c.danger }]}>{error}</Text>}
+            <TouchableOpacity onPress={review} style={[styles.primary, { backgroundColor: c.primary }]}>
+              <Text style={styles.primaryText}>Review exact Story</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <View style={[styles.preview, { backgroundColor: c.surface, borderColor: c.border }]}>
+            <Text style={[styles.eyebrow, { color: c.primary }]}>EXACT PUBLISH PREVIEW</Text>
+            <Text style={[styles.previewText, { color: c.textPrimary }]}>{text.trim()}</Text>
+            <View style={[styles.rule, { backgroundColor: c.border }]} />
+            <Text style={[styles.fact, { color: c.textSecondary }]}>Audience: {audienceNames.join(' · ')}</Text>
+            <Text style={[styles.fact, { color: c.textSecondary }]}>Expires: {expiry === 'day' ? '24 hours' : '7 days'}</Text>
+            <Text style={[styles.fact, { color: c.textSecondary }]}>Agent search: {quietSearch ? 'Selected audience’s agents · 30 days' : 'Off'}</Text>
+            {quietSearch && (
+              <View
+                style={[styles.searchPreview, { borderColor: c.border, backgroundColor: c.background }]}
+              >
+                <Text style={[styles.searchPreviewTitle, { color: c.textPrimary }]}>What those agents can search</Text>
+                {!!goal.trim() && <Text style={[styles.fact, { color: c.textSecondary }]}>Goal: {goal.trim()}</Text>}
+                {splitList(seeks).length > 0 && <Text style={[styles.fact, { color: c.textSecondary }]}>Looking for: {splitList(seeks).join(', ')}</Text>}
+                {splitList(brings).length > 0 && <Text style={[styles.fact, { color: c.textSecondary }]}>Can bring: {splitList(brings).join(', ')}</Text>}
+                {splitList(seeks).length === 0 && splitList(brings).length === 0 && (
+                  <>
+                    <Text style={[styles.fact, { color: c.textSecondary }]}>Direction: {textOnlyKind === 'ask' ? 'Looking for' : 'Offering'}</Text>
+                    {!goal.trim() && <Text style={[styles.fact, { color: c.textSecondary }]}>Matching text: {text.trim()}</Text>}
+                  </>
+                )}
+                <Text style={[styles.fact, { color: c.textSecondary }]}>Identity stays hidden until both people approve.</Text>
+              </View>
+            )}
+            <Text style={[styles.privacy, { color: c.textMuted }]}>Only this text is shown to the selected people. Private agent context is not included.</Text>
+            {error && <Text accessibilityRole="alert" style={[styles.error, { color: c.danger }]}>{error}</Text>}
+            <TouchableOpacity disabled={busy} onPress={() => void publish()} style={[styles.primary, { backgroundColor: c.primary }, busy && { opacity: 0.55 }]}>
+              {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Approve and share</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity disabled={busy} onPress={() => setPreviewing(false)} style={styles.editButton}>
+              <Text style={{ color: c.primary, fontWeight: '700' }}>Edit</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
