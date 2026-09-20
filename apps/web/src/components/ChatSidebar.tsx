@@ -93,13 +93,16 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 type PickerMode = 'closed' | 'direct' | 'group';
+const DIRECTORY_PAGE_SIZE = 50;
 
 export function ChatSidebar() {
   const { conversations, searchContacts, createConversation, setActiveConversation, presence, currentUser, isConnected, updatePresence, logout, pendingMatchCount } = useChat();
-  // Empty discovery returns only the current user, keeping note-to-self handy
-  // without exposing a browsable account directory.
+  // Empty discovery becomes the browsable directory while the server flag is
+  // enabled. Pages are appended as the picker scrolls.
   const [initialContacts, setInitialContacts] = useState<User[]>([]);
   const [loadingInitialContacts, setLoadingInitialContacts] = useState(false);
+  const [loadingMoreInitialContacts, setLoadingMoreInitialContacts] = useState(false);
+  const [hasMoreInitialContacts, setHasMoreInitialContacts] = useState(false);
   const { preference: themePref, setPreference: setThemePref } = useTheme();
   const [pickerMode, setPickerMode] = useState<PickerMode>('closed');
   const [searchTerm, setSearchTerm] = useState('');
@@ -223,12 +226,48 @@ export function ChatSidebar() {
     setSearchResults([]);
     setSelectedContacts([]);
     setGroupTitle('');
+    setHasMoreInitialContacts(false);
     setTimeout(() => searchInputRef.current?.focus(), 100);
     setLoadingInitialContacts(true);
-    searchContacts('')
-      .then(results => setInitialContacts(rankSelfFirst(results, currentUser)))
-      .catch(() => setInitialContacts([]))
+    api.getContacts(undefined, { limit: DIRECTORY_PAGE_SIZE, offset: 0 })
+      .then(results => {
+        setInitialContacts(rankSelfFirst(results, currentUser));
+        setHasMoreInitialContacts(
+          currentUser?.openUserDirectoryEnabled === true
+            && results.length === DIRECTORY_PAGE_SIZE,
+        );
+      })
+      .catch(() => {
+        setInitialContacts([]);
+        setHasMoreInitialContacts(false);
+      })
       .finally(() => setLoadingInitialContacts(false));
+  };
+
+  const loadMoreInitialContacts = () => {
+    if (
+      currentUser?.openUserDirectoryEnabled !== true
+      || pickerMode === 'closed'
+      || searchTerm.length > 0
+      || loadingInitialContacts
+      || loadingMoreInitialContacts
+      || !hasMoreInitialContacts
+    ) return;
+
+    setLoadingMoreInitialContacts(true);
+    api.getContacts(undefined, {
+      limit: DIRECTORY_PAGE_SIZE,
+      offset: initialContacts.length,
+    })
+      .then(results => {
+        setInitialContacts(previous => {
+          const known = new Set(previous.map(user => user.id));
+          return [...previous, ...results.filter(user => !known.has(user.id))];
+        });
+        setHasMoreInitialContacts(results.length === DIRECTORY_PAGE_SIZE);
+      })
+      .catch(() => setHasMoreInitialContacts(false))
+      .finally(() => setLoadingMoreInitialContacts(false));
   };
 
   const handleStatusChange = (nextStatus: 'available' | 'away' | 'busy' | 'invisible') => {
@@ -541,16 +580,16 @@ export function ChatSidebar() {
             <input
               ref={searchInputRef}
               type="text"
-              placeholder={currentUser?.canBrowseUserDirectory ? 'Search by name or email' : 'Enter a complete email address'}
+              placeholder="Search by name or exact email"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full px-3 py-2 min-h-[40px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-lg focus:outline-none focus:border-blue-500 text-base"
               autoFocus
             />
             <p className="mt-1.5 text-xs text-gray-500 dark:text-slate-400">
-              {currentUser?.canBrowseUserDirectory
-                ? 'Trusted directory access is enabled for this account.'
-                : 'People appear only after an exact email match. Accounts are not listed publicly.'}
+              {currentUser?.openUserDirectoryEnabled
+                ? 'Browse everyone, or search by name or exact email.'
+                : 'Type a name or exact email to find someone.'}
             </p>
 
             {/* Selected pills + Create button (group mode) */}
@@ -591,7 +630,15 @@ export function ChatSidebar() {
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto bg-white dark:bg-slate-900">
+          <div
+            className="flex-1 overflow-y-auto bg-white dark:bg-slate-900"
+            onScroll={(event) => {
+              const target = event.currentTarget;
+              if (target.scrollHeight - target.scrollTop - target.clientHeight < 160) {
+                loadMoreInitialContacts();
+              }
+            }}
+          >
             {(() => {
               const browsing = searchTerm.length === 0;
               const list = browsing ? initialContacts : searchResults;
@@ -606,13 +653,13 @@ export function ChatSidebar() {
               if (list.length === 0) {
                 return (
                   <div className="p-4 text-center text-gray-500 dark:text-slate-400">
-                    {currentUser?.canBrowseUserDirectory
-                      ? (browsing ? 'No contacts yet' : `No contacts found for "${searchTerm}"`)
-                      : (browsing ? 'Enter their complete email address to find them.' : `No exact email match for "${searchTerm}"`)}
+                    {currentUser?.openUserDirectoryEnabled
+                      ? (browsing ? 'No people are available yet' : `No contacts found for "${searchTerm}"`)
+                      : (browsing ? 'Type a name or exact email to find someone.' : `No contacts found for "${searchTerm}"`)}
                   </div>
                 );
               }
-              return list.map((contact) => {
+              return <>{list.map((contact) => {
                 const contactPresence = presence.get(contact.id);
                 const selected = isContactSelected(contact.id);
 
@@ -663,7 +710,9 @@ export function ChatSidebar() {
                     </div>
                   </div>
                 );
-              });
+              })}{browsing && loadingMoreInitialContacts && (
+                <div className="p-3 text-center text-sm text-gray-500 dark:text-slate-400">Loading more…</div>
+              )}</>;
             })()}
           </div>
         </div>
@@ -676,9 +725,9 @@ export function ChatSidebar() {
                 type="search"
                 value={globalSearchTerm}
                 onChange={(e) => setGlobalSearchTerm(e.target.value)}
-                placeholder={currentUser?.canBrowseUserDirectory
-                  ? 'Search chats or people…'
-                  : 'Search chats; use full email for people…'}
+                placeholder={currentUser?.openUserDirectoryEnabled
+                  ? 'Search chats or browse people with + New…'
+                  : 'Search chats or people…'}
                 className="w-full pl-8 pr-8 py-2 min-h-[36px] border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
                 aria-label="Search"
               />

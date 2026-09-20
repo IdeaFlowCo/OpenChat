@@ -17,6 +17,7 @@ import {
   isSafePublicDisplayName,
   normalizePublicDisplayName,
 } from '../privacy/profilePrivacy.js';
+import { isOpenUserDirectoryEnabled } from '../config/features.js';
 
 const router = Router();
 function getJwtSecret(): string {
@@ -612,8 +613,11 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const user = toJS(result.records[0].get('user'));
-    res.json(user);
+    const user = toJS(result.records[0].get('user')) as Record<string, unknown>;
+    res.json({
+      ...user,
+      openUserDirectoryEnabled: isOpenUserDirectoryEnabled(),
+    });
   } catch (error) {
     console.error('Error fetching user:', error);
     res.status(500).json({ error: 'Failed to fetch user' });

@@ -86,6 +86,7 @@ export interface User {
   isBot?: boolean;
   /** Count of conversations the requesting user shares with this candidate. */
   sharedConversations?: number;
+  openUserDirectoryEnabled?: boolean;
 }
 
 export interface Participant {
@@ -314,6 +315,7 @@ export interface CurrentUser {
   name?: string;
   avatarUrl?: string;
   discoveryMode?: 'name' | 'email_only' | 'hidden';
+  openUserDirectoryEnabled?: boolean;
 }
 
 let memToken: string | null = null;
@@ -938,8 +940,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
     }),
-  getContacts: (q?: string) =>
-    request<User[]>(`/api/chat/contacts${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  getContacts: (q?: string, pagination?: { limit?: number; offset?: number }) => {
+    const qs = new URLSearchParams();
+    if (q) qs.set('q', q);
+    if (pagination?.limit) qs.set('limit', String(pagination.limit));
+    if (pagination?.offset) qs.set('offset', String(pagination.offset));
+    const suffix = qs.toString();
+    return request<User[]>(`/api/chat/contacts${suffix ? `?${suffix}` : ''}`);
+  },
   createConversation: (participantIds: string[], title?: string, type: 'direct' | 'group' = 'direct') =>
     request<Conversation>('/api/chat/conversations', {
       method: 'POST',
