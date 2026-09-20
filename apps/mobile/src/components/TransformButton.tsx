@@ -3,12 +3,15 @@
  *
  * UX: tap the ✨ sparkle = run the DEFAULT transform (NVC). Tap the small
  * ▾ chevron next to it = open the picker for other transforms (concise,
- * formal, casual, translate). Translate opens a second language picker.
+ * formal, casual, translate) plus "NVC Compose...", which opens the
+ * Observation/Feeling/Need/Request scaffold modal (OpenChat-3kr.2) instead of
+ * running an AI rewrite. Translate opens a second language picker.
  *
  * Props:
  *   disabled   — true while text is empty or a request is in-flight
  *   onTransformed(text, label) — called with the rewritten text + label
  *   onError(msg) — called with a user-visible error string
+ *   onNvcCompose() — called when "NVC Compose..." is picked from the menu
  */
 
 import React, { useState } from 'react';
@@ -38,12 +41,13 @@ interface Props {
   disabled?: boolean;
   onTransformed: (rewrittenText: string, label: string) => void;
   onError: (msg: string) => void;
+  onNvcCompose: () => void;
 }
 
 const DEFAULT_TRANSFORM: TransformType = 'nvc';
 const TRANSFORMS: TransformType[] = ['nvc', 'concise', 'formal', 'casual', 'translate'];
 
-export function TransformButton({ text, disabled, onTransformed, onError }: Props) {
+export function TransformButton({ text, disabled, onTransformed, onError, onNvcCompose }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const [loading, setLoading] = useState(false);
@@ -84,11 +88,16 @@ export function TransformButton({ text, disabled, onTransformed, onError }: Prop
 
   function showTransformPicker() {
     if (Platform.OS === 'ios') {
-      const options = [...TRANSFORMS.map(t => TRANSFORM_LABELS[t]), 'Cancel'];
+      const nvcComposeIndex = TRANSFORMS.length;
+      const options = [...TRANSFORMS.map(t => TRANSFORM_LABELS[t]), 'NVC Compose...', 'Cancel'];
       ActionSheetIOS.showActionSheetWithOptions(
         { options, cancelButtonIndex: options.length - 1, title: 'Transform message' },
         async (idx) => {
-          if (idx >= TRANSFORMS.length) return; // Cancel
+          if (idx >= nvcComposeIndex + 1) return; // Cancel
+          if (idx === nvcComposeIndex) {
+            onNvcCompose();
+            return;
+          }
           const picked = TRANSFORMS[idx];
           if (picked === 'translate') {
             showLanguagePicker_iOS();
@@ -120,6 +129,11 @@ export function TransformButton({ text, disabled, onTransformed, onError }: Prop
     } else {
       await runTransform(transform);
     }
+  }
+
+  function handleNvcComposePick() {
+    setModalVisible(false);
+    onNvcCompose();
   }
 
   async function handleAndroidLangPick(lang: string) {
@@ -178,6 +192,12 @@ export function TransformButton({ text, disabled, onTransformed, onError }: Prop
                 </Text>
               </TouchableOpacity>
             ))}
+            <TouchableOpacity
+              style={[styles.sheetRow, { borderTopColor: c.divider }]}
+              onPress={handleNvcComposePick}
+            >
+              <Text style={[styles.sheetRowText, { color: c.textPrimary }]}>NVC Compose...</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={[styles.sheetRow, { borderTopColor: c.divider }]}
               onPress={() => setModalVisible(false)}
