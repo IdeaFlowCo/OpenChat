@@ -740,6 +740,16 @@ export interface ConversationThoughts {
   fromChat: Thought[];
 }
 
+export interface HashtagSuggestion {
+  /** Lowercase tag name without the leading '#'. */
+  tag: string;
+  /** Whether the tag comes from my library, this chat, or both. */
+  source: 'mine' | 'chat' | 'both';
+  ownCount: number;
+  chatCount: number;
+  lastUsedAt: string;
+}
+
 // ── Agent key types (OpenChat-7c9) ────────────────────────────────────────────
 
 export interface AgentKey {
@@ -1358,6 +1368,12 @@ export const api = {
   /** Chat-scoped thoughts: pinned to + captured from one conversation. */
   getConversationThoughts: (conversationId: string) =>
     request<ConversationThoughts>(`/api/thoughts/conversation/${encodeURIComponent(conversationId)}`),
+
+  /** Ranked hashtag suggestions for the message composer. */
+  getHashtagSuggestions: (conversationId: string, q = '', limit = 8) => {
+    const params = new URLSearchParams({ conversationId, q, limit: String(limit) });
+    return request<HashtagSuggestion[]>(`/api/thoughts/tags/suggestions?${params}`);
+  },
 
   /** Pin one of my thoughts to a conversation I participate in. */
   pinThought: (id: string, conversationId: string) =>

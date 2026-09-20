@@ -22,6 +22,7 @@ const router = Router();
 const VALID_KINDS = new Set(['fact', 'decision', 'commitment', 'reminder', 'observation']);
 const VALID_STATUSES = new Set(['none', 'open', 'closed']);
 const MAX_TEXT_LENGTH = 4000;
+const MAX_TAG_SUGGESTIONS = 12;
 
 // Helper to convert Neo4j types to plain JS values
 function toJS(value: unknown): unknown {
@@ -92,6 +93,114 @@ export function mergeDuplicateThoughtsFromSameMessage(
 
   return merged;
 }
+
+/**
+ * GET /api/thoughts/tags/suggestions?conversationId=<id>&q=<prefix>&limit=8
+ *
+ * Composer hashtag suggestions combine two deliberately bounded sources:
+ *   - the caller's own previously-used tags (across all of their Thoughts)
+ *   - tags other participants used in this conversation
+ *
+ * There is intentionally no global cross-user pool. The membership check and
+ * the FROM_MESSAGE conversation constraint keep the shared half chat-scoped.
+ */
+router.get('/tags/suggestions', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const conversationId = typeof req.query.conversationId === 'string'
+    ? req.query.conversationId.trim()
+    : '';
+  const rawPrefix = typeof req.query.q === 'string' ? req.query.q.trim().replace(/^#/, '') : '';
+  const prefix = rawPrefix.toLowerCase();
+  const limit = Math.min(
+    Math.max(parseInt(String(req.query.limit || '8'), 10) || 8, 1),
+    MAX_TAG_SUGGESTIONS,
+  );
+
+  if (!conversationId) {
+    res.status(400).json({ error: 'conversationId is required' });
+    return;
+  }
+  // Hashtag extraction currently accepts ASCII letters only. Rejecting an
+  // incompatible prefix keeps this endpoint aligned with what sending stores.
+  if (!/^[a-z]*$/i.test(prefix)) {
+    res.status(400).json({ error: 'q must contain letters only' });
+    return;
+  }
+
+  const session = getDriver().session();
+  try {
+    const partCheck = await session.run(
+      `MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId}) RETURN c.id`,
+      { userId, conversationId },
+    );
+    if (partCheck.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    const result = await session.run(
+      `
+      MATCH (caller:User {id: $userId})
+      MATCH (conversation:Conversation {id: $conversationId})
+      CALL {
+        WITH caller
+        MATCH (caller)-[:HAS_THOUGHT]->(t:Thought)
+        UNWIND coalesce(t.tags, []) AS rawTag
+        WITH toLower(rawTag) AS tag, t
+        WHERE tag STARTS WITH $prefix AND tag <> ''
+        RETURN tag, count(*) AS ownCount, max(t.createdAt) AS ownLastUsedAt,
+               0 AS chatCount, null AS chatLastUsedAt
+
+        UNION ALL
+
+        WITH caller, conversation
+        MATCH (author:User)-[:PARTICIPATES_IN]->(conversation)
+        WHERE author.id <> caller.id
+        MATCH (author)-[:HAS_THOUGHT]->(t:Thought)-[:FROM_MESSAGE]->(m:Message)
+        WHERE m.conversationId = $conversationId
+        UNWIND coalesce(t.tags, []) AS rawTag
+        WITH toLower(rawTag) AS tag, t
+        WHERE tag STARTS WITH $prefix AND tag <> ''
+        RETURN tag, 0 AS ownCount, null AS ownLastUsedAt,
+               count(*) AS chatCount, max(t.createdAt) AS chatLastUsedAt
+      }
+      WITH tag,
+           sum(ownCount) AS ownCount,
+           sum(chatCount) AS chatCount,
+           max(ownLastUsedAt) AS ownLastUsedAt,
+           max(chatLastUsedAt) AS chatLastUsedAt
+      WITH tag, ownCount, chatCount,
+           CASE
+             WHEN ownLastUsedAt IS NULL THEN chatLastUsedAt
+             WHEN chatLastUsedAt IS NULL THEN ownLastUsedAt
+             WHEN ownLastUsedAt >= chatLastUsedAt THEN ownLastUsedAt
+             ELSE chatLastUsedAt
+           END AS lastUsedAt
+      RETURN {
+        tag: tag,
+        source: CASE
+          WHEN ownCount > 0 AND chatCount > 0 THEN 'both'
+          WHEN ownCount > 0 THEN 'mine'
+          ELSE 'chat'
+        END,
+        ownCount: ownCount,
+        chatCount: chatCount,
+        lastUsedAt: lastUsedAt
+      } AS suggestion
+      ORDER BY (ownCount + chatCount) DESC, lastUsedAt DESC, tag ASC
+      LIMIT $limit
+      `,
+      { userId, conversationId, prefix, limit: neo4j.int(limit) },
+    );
+
+    res.json(result.records.map((record) => toJS(record.get('suggestion'))));
+  } catch (err) {
+    console.error('GET /api/thoughts/tags/suggestions error:', err);
+    res.status(500).json({ error: 'Failed to fetch tag suggestions' });
+  } finally {
+    await session.close();
+  }
+});
 
 /**
  * GET /api/thoughts?limit=50&before=<ISO createdAt>
