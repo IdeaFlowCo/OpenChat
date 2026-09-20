@@ -1194,7 +1194,10 @@ router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
         RETURN u { .id,
           name: CASE WHEN u.name IS NULL OR trim(u.name) = '' OR u.name CONTAINS '@'
             THEN $fallbackName ELSE u.name END,
-          .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
+          .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot,
+          sharedConversations: CASE WHEN u.id = actor.id THEN 0
+            ELSE COUNT { (u)-[:PARTICIPATES_IN]->(:Conversation)<-[:PARTICIPATES_IN]-(actor) } END
+        } AS user
         ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
         LIMIT $limit
       `;
@@ -1403,7 +1406,10 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
         RETURN u { .id,
           name: CASE WHEN u.name IS NULL OR trim(u.name) = '' OR u.name CONTAINS '@'
             THEN $fallbackName ELSE u.name END,
-          .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
+          .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot,
+          sharedConversations: CASE WHEN u.id = actor.id THEN 0
+            ELSE COUNT { (u)-[:PARTICIPATES_IN]->(:Conversation)<-[:PARTICIPATES_IN]-(actor) } END
+        } AS user
         ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
         LIMIT $limit
       `, {

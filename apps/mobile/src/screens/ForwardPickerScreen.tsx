@@ -106,7 +106,7 @@ export function ForwardPickerScreen() {
         onPress={() => handleSelect(conv)}
         activeOpacity={0.7}
       >
-        <Avatar name={avatarName} email={avatarEmail} size={40} />
+        <Avatar name={avatarName} email={avatarEmail} avatarUrl={other?.avatarUrl} size={40} />
         <View style={styles.rowText}>
           <Text style={[styles.title, { color: c.textPrimary }]} numberOfLines={1}>
             {title}
