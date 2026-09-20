@@ -320,7 +320,7 @@ describe('Ideaflow seamless account resolution (OpenChat)', () => {
       mocks.users.push(passwordUser());
       const confirmId = await startConfirm();
       mocks.verifyPassword.mockResolvedValue({ status: 'unavailable' });
-      for (let i = 0; i < 12; i += 1) {
+      for (let i = 0; i < 5; i += 1) {
         const res = await confirm(confirmId);
         expect(res.status).toBe(503);
         expect((await res.json()).code).toBe('confirm_unavailable');
@@ -328,6 +328,15 @@ describe('Ideaflow seamless account resolution (OpenChat)', () => {
       // Nothing was spent: the right password still works afterwards.
       mocks.verifyPassword.mockResolvedValue({ status: 'ok', userId: 'u-pass' });
       expect((await confirm(confirmId)).status).toBe(200);
+    });
+
+    it('bounds refunds so an outage is not a free request loop', async () => {
+      mocks.users.push(passwordUser());
+      const confirmId = await startConfirm();
+      mocks.verifyPassword.mockResolvedValue({ status: 'unavailable' });
+      // Five refunded outcomes, then five that are charged, then the check is spent.
+      for (let i = 0; i < 10; i += 1) expect((await confirm(confirmId)).status).toBe(503);
+      expect((await confirm(confirmId)).status).toBe(429);
     });
 
     it('fails closed without calling anything when production has no NOOS_URL', async () => {

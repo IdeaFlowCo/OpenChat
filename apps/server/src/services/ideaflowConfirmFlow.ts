@@ -15,6 +15,7 @@ import type { IdeaflowIdentityClaims } from './ideaflowOidc.js';
  */
 export const IDEAFLOW_CONFIRM_TTL_MS = 10 * 60 * 1000;
 export const IDEAFLOW_CONFIRM_MAX_ATTEMPTS = 5;
+export const IDEAFLOW_CONFIRM_MAX_REFUNDS = 5;
 export const IDEAFLOW_CONFIRM_ACCOUNT_MAX_FAILURES = 10;
 export const IDEAFLOW_CONFIRM_ACCOUNT_WINDOW_MS = 15 * 60 * 1000;
 const MAX_PENDING_CONFIRMS = 5_000;
@@ -23,6 +24,7 @@ interface PendingConfirm {
   identity: IdeaflowIdentityClaims;
   targetUserId: string;
   attempts: number;
+  refunds: number;
   expiresAt: number;
 }
 
@@ -55,6 +57,7 @@ export function startIdeaflowConfirm(
     identity,
     targetUserId,
     attempts: 0,
+    refunds: 0,
     expiresAt: now + IDEAFLOW_CONFIRM_TTL_MS,
   });
   return id;
@@ -108,11 +111,14 @@ export function recordIdeaflowConfirmFailure(id: string): void {
 /**
  * The password oracle could not answer (outage, rate limit). That says nothing
  * about the person's password, so give the attempt back instead of locking out.
+ * Refunds are bounded per check so an outage cannot become a free request loop.
  */
 export function refundIdeaflowConfirmAttempt(id: string, attempt: { targetUserId: string; reservedAt: number }): void {
-  removeReservation(attempt.targetUserId, attempt.reservedAt);
   const entry = pending.get(id);
-  if (entry && entry.attempts > 0) entry.attempts -= 1;
+  if (!entry || entry.refunds >= IDEAFLOW_CONFIRM_MAX_REFUNDS) return;
+  entry.refunds += 1;
+  removeReservation(attempt.targetUserId, attempt.reservedAt);
+  if (entry.attempts > 0) entry.attempts -= 1;
 }
 
 /** Single use: a confirmed (or abandoned) check can never be replayed. */

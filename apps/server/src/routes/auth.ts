@@ -928,6 +928,7 @@ router.post('/ideaflow/confirm', async (req: Request, res: Response) => {
     }
 
     const oracleUrl = resolveNoosPasswordOracleUrl(process.env.NOOS_URL);
+    if (!oracleUrl) console.warn('Ideaflow confirm: NOOS_URL is unset or not https/loopback; password check unavailable');
     const verified = oracleUrl
       ? await verifyPasswordViaNoos(target.email, password, oracleUrl)
       : { status: 'unavailable' as const };

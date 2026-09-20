@@ -51,7 +51,9 @@ export async function verifyPasswordViaNoos(
       redirect: 'error',
       signal: AbortSignal.timeout(8000),
     });
-    if (res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404) {
+    // Noos answers a wrong or unknown login with 400/401. Anything else (a WAF 403,
+    // a wrong path 404, 429, 5xx) is not a verdict about the password.
+    if (res.status === 400 || res.status === 401) {
       return { status: 'invalid' };
     }
     if (!res.ok) return { status: 'unavailable' };

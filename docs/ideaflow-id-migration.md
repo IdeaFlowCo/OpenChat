@@ -115,7 +115,8 @@ implemented by `resolveIdeaflowSignIn`:
      own login endpoint (`NOOS_URL`), the only password verifier in the shared
      graph. `NOOS_URL` must be set in production and be https or loopback; if
      Noos is down, rate limiting or unconfigured the check answers 503
-     `confirm_unavailable` and the attempt is **not** counted;
+     `confirm_unavailable` and the attempt is **not** counted (up to 5 refunds per
+     check; only Noos 400/401 count as a wrong password);
    - anything else (Apple/bridge/legacy accounts with no independent proof) →
      `link_required`; the person signs in another way and uses Settings →
      Connect (path 1).

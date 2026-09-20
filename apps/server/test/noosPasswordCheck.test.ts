@@ -10,12 +10,12 @@ describe('verifyPasswordViaNoos', () => {
       .toEqual({ status: 'ok', userId: 'u1' });
   });
 
-  it.each([400, 401, 403, 404])('treats %i as a wrong password', async (status) => {
+  it.each([400, 401])('treats %i as a wrong password', async (status) => {
     expect(await verifyPasswordViaNoos('a@b.test', 'pw', 'http://localhost:1', reply(status)))
       .toEqual({ status: 'invalid' });
   });
 
-  it.each([429, 500, 502, 503])('treats %i as unavailable, not as a wrong password', async (status) => {
+  it.each([403, 404, 429, 500, 502, 503])('treats %i as unavailable, not as a wrong password', async (status) => {
     expect(await verifyPasswordViaNoos('a@b.test', 'pw', 'http://localhost:1', reply(status)))
       .toEqual({ status: 'unavailable' });
   });
