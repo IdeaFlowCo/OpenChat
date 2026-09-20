@@ -30,8 +30,16 @@ function fakeRun(query: string, params: Record<string, unknown>) {
   const q = String(query);
   const rows = (found: Array<Record<string, unknown>>) => ({ records: found.map(u => ({ get: () => u })) });
   const users = mocks.users;
+  const hasPassword = (u: Record<string, unknown>) => u.passwordHash != null && u.passwordHash !== '';
+  if (q.includes('mapped: true') && q.includes('MATCH (u:User {id: $userId})')) {
+    return rows(users
+      .filter(u => u.id === params.userId && u.ideaflowIdentityKey === params.identityKey)
+      .map(u => ({ id: u.id, email: u.email, name: u.name, role: u.role, hasPassword: hasPassword(u), mapped: true })));
+  }
   if (q.includes('u.ideaflowIdentityKey = $identityKey') && q.includes('LIMIT 3') && !q.includes('u.id <>')) {
-    return rows(users.filter(u => u.ideaflowIdentityKey === params.identityKey));
+    return rows(users
+      .filter(u => u.ideaflowIdentityKey === params.identityKey)
+      .map(u => ({ ...u, linkedVia: u.ideaflowLinkedVia, hasPassword: hasPassword(u) })));
   }
   if (q.includes("toLower(coalesce(u.email, '')) = $emailLookup")) {
     return rows(users
@@ -39,13 +47,18 @@ function fakeRun(query: string, params: Record<string, unknown>) {
       .map(u => ({
         id: u.id, email: u.email, name: u.name, role: u.role,
         signupProvider: u.signupProvider, googleEmailVerified: u.googleEmailVerified,
-        hasPassword: u.passwordHash != null,
+        hasPassword: hasPassword(u),
         hasGoogleSub: u.googleSub != null,
         mapped: u.ideaflowIdentityKey != null || u.ideaflowSub != null,
       })));
   }
   if (q.includes('_ideaflowBindingLock')) {
-    return rows(users.filter(u => u.id === params.userId));
+    return rows(users.filter(u => u.id === params.userId).map(u => ({ ...u, linkedVia: u.ideaflowLinkedVia })));
+  }
+  if (q.includes('SET u.ideaflowLinkedVia = $provenance')) {
+    const user = users.find(u => u.id === params.userId && u.ideaflowIdentityKey === params.identityKey);
+    if (user) user.ideaflowLinkedVia = params.provenance;
+    return rows([]);
   }
   if (q.includes('u.id <> $userId')) {
     return rows(users.filter(u => u.id !== params.userId && u.ideaflowIdentityKey === params.identityKey));
@@ -56,7 +69,7 @@ function fakeRun(query: string, params: Record<string, unknown>) {
       ideaflowIssuer: params.issuer,
       ideaflowSub: params.subject,
       ideaflowIdentityKey: params.identityKey,
-      ideaflowLinkedVia: user.ideaflowLinkedVia ?? params.via,
+      ideaflowLinkedVia: user.ideaflowLinkedVia ?? params.provenance ?? undefined,
     });
     return rows([{ id: user.id, email: user.email, name: user.name }]);
   }
@@ -165,16 +178,6 @@ describe('Ideaflow seamless account resolution (OpenChat)', () => {
       expect((await res.json()).user.id).toBe('u1');
     });
 
-    it('keeps signing in an already-mapped privileged account (exact mapping is step one)', async () => {
-      mocks.users.push({
-        id: 'u-admin', email: 'boss@example.test', name: 'Boss', role: 'admin',
-        ideaflowIssuer: ISSUER, ideaflowSub: 'sub-new', ideaflowIdentityKey: KEY('sub-new'),
-      });
-      const res = await exchange();
-      expect(res.status).toBe(200);
-      expect((await res.json()).user.id).toBe('u-admin');
-    });
-
     it('does not create a second account while new-user creation is off', async () => {
       mocks.exchangeAuthorizationCode.mockResolvedValue(identity({ email: 'nobody@example.test' }));
       const res = await exchange();
@@ -264,7 +267,7 @@ describe('Ideaflow seamless account resolution (OpenChat)', () => {
       expect(res.status).toBe(409);
       const body = await res.json();
       expect(body.code).toBe('confirm_required');
-      expect(body.email).toBe('p***@example.test');
+      expect(body.email).toBe('P***@Example.test');
       expect(JSON.stringify(body)).not.toContain('person@example.test');
       return body.confirmId as string;
     }
@@ -474,6 +477,36 @@ describe('Ideaflow seamless account resolution (OpenChat)', () => {
       expect(mocks.users[0].ideaflowIdentityKey).toBe(KEY('sub-new'));
     });
 
+    it('explicit Connect on a password account cannot mint trusted provenance; sign-in still proves the password', async () => {
+      mocks.users.push(passwordUser({ id: 'u-conn', email: 'conn@example.test' }));
+      const headers = sessionHeaders('u-conn', 'conn@example.test');
+      await linkStart(headers, STATE);
+      mocks.exchangeAuthorizationCode.mockResolvedValue(identity({ email: 'idp@example.test' }));
+      expect((await linkExchange(headers, STATE)).status).toBe(200);
+      expect(mocks.users[0].ideaflowIdentityKey).toBe(KEY('sub-new'));
+      expect(mocks.users[0].ideaflowLinkedVia).toBeUndefined();
+
+      // Signing in with that mapping is NOT seamless: it asks for the password once.
+      const res = await exchange();
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.code).toBe('confirm_required');
+      expect(body.token).toBeUndefined();
+      mocks.verifyPassword.mockResolvedValue({ status: 'ok', userId: 'u-conn' });
+      expect((await confirm(body.confirmId)).status).toBe(200);
+      expect(mocks.users[0].ideaflowLinkedVia).toBe('password');
+    });
+
+    it('explicit Connect on a passwordless account is unchanged and records no provenance', async () => {
+      mocks.users.push({ id: 'u-nopw', email: 'nopw@example.test', name: 'N' });
+      const headers = sessionHeaders('u-nopw', 'nopw@example.test');
+      await linkStart(headers, STATE);
+      mocks.exchangeAuthorizationCode.mockResolvedValue(identity({ email: 'idp@example.test' }));
+      expect((await linkExchange(headers, STATE)).status).toBe(200);
+      expect(mocks.users[0].ideaflowLinkedVia).toBeUndefined();
+      expect((await exchange()).status).toBe(200);
+    });
+
     it('explicit Connect refuses a privileged account', async () => {
       mocks.users.push({ id: 'u-admin', email: 'admin@example.test', role: 'admin' });
       const headers = sessionHeaders('u-admin', 'admin@example.test');
@@ -481,6 +514,147 @@ describe('Ideaflow seamless account resolution (OpenChat)', () => {
       const res = await linkExchange(headers, STATE);
       expect(res.status).toBe(403);
       expect((await res.json()).code).toBe('needs_admin_proof');
+    });
+  });
+
+  describe('unproven and privileged mappings (shared-identity rules with Noos)', () => {
+    const mapped = (over: Record<string, unknown> = {}) => passwordUser({
+      id: 'u-map', ideaflowIssuer: ISSUER, ideaflowSub: 'sub-new', ideaflowIdentityKey: KEY('sub-new'), ...over,
+    });
+    const withAttested = (pairs: unknown) => { process.env.IDEAFLOW_ID_ATTESTED_PAIRS = JSON.stringify(pairs); };
+
+    it.each([
+      ['password proof', 'password'],
+      ['google proof', 'google-proof'],
+      ['pilot proof written by Noos', 'pilot'],
+    ])('a mapping with trusted %s stays seamless on a password account', async (_label, via) => {
+      mocks.users.push(mapped({ ideaflowLinkedVia: via }));
+      const res = await exchange();
+      expect(res.status).toBe(200);
+      expect((await res.json()).user.id).toBe('u-map');
+      expect(mocks.verifyPassword).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['legacy (no provenance)', undefined],
+      ['an unknown provenance value', 'explicit'],
+      ['a non-string provenance', true],
+    ])('an unproven mapping (%s) on a password account needs the password once, then is trusted', async (_label, via) => {
+      mocks.users.push(mapped({ ideaflowLinkedVia: via }));
+      const res = await exchange();
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body).toMatchObject({ code: 'confirm_required', email: 'P***@Example.test' });
+      expect(body.token).toBeUndefined();
+
+      // Wrong proof never mints a session and leaves the mapping unproven.
+      mocks.verifyPassword.mockResolvedValueOnce({ status: 'invalid' });
+      const wrong = await confirm(body.confirmId);
+      expect(wrong.status).toBe(401);
+      expect((await wrong.json()).token).toBeUndefined();
+      expect(mocks.users[0].ideaflowLinkedVia).toBe(via);
+
+      mocks.verifyPassword.mockResolvedValueOnce({ status: 'ok', userId: 'u-map' });
+      const ok = await confirm(body.confirmId);
+      expect(ok.status).toBe(200);
+      expect((await ok.json()).user.id).toBe('u-map');
+      expect(mocks.users).toHaveLength(1);
+      expect(mocks.users[0].ideaflowLinkedVia).toBe('password');
+      // Same local user, same mapping, and the next sign-in is the fast path.
+      expect(mocks.users[0].ideaflowIdentityKey).toBe(KEY('sub-new'));
+      mocks.verifyPassword.mockClear();
+      expect((await exchange()).status).toBe(200);
+      expect(mocks.verifyPassword).not.toHaveBeenCalled();
+    });
+
+    it('an unproven mapping on a passwordless (or empty-hash-only) account still signs in', async () => {
+      mocks.users.push(mapped({ passwordHash: undefined }));
+      expect((await exchange()).status).toBe(200);
+      mocks.users.length = 0;
+      // An empty hash is not a password: Noos would set one for any caller.
+      mocks.users.push(mapped({ passwordHash: '' }));
+      expect((await exchange()).status).toBe(200);
+      expect(mocks.users[0].ideaflowLinkedVia).toBeUndefined();
+    });
+
+    it('never trusts an empty password hash as a way to bind an identity by email', async () => {
+      mocks.users.push(passwordUser({ passwordHash: '' }));
+      const res = await exchange();
+      expect(res.status).toBe(409);
+      expect((await res.json()).code).toBe('link_required');
+    });
+
+    it('re-proving cannot be completed if the mapping moved or the account became privileged meanwhile', async () => {
+      mocks.users.push(mapped());
+      const first = (await (await exchange()).json()).confirmId as string;
+      mocks.verifyPassword.mockResolvedValue({ status: 'ok', userId: 'u-map' });
+      mocks.users[0].ideaflowIdentityKey = KEY('someone-else');
+      expect((await confirm(first)).status).toBe(401);
+
+      mocks.users[0].ideaflowIdentityKey = KEY('sub-new');
+      const second = (await (await exchange()).json()).confirmId as string;
+      mocks.users[0].role = 'admin';
+      expect((await confirm(second)).status).toBe(401);
+      expect(mocks.verifyPassword).not.toHaveBeenCalled();
+      expect(mocks.users[0].ideaflowLinkedVia).toBeUndefined();
+    });
+
+    it('never downgrades or replaces an existing trusted proof when a password proof lands', async () => {
+      mocks.users.push(mapped({ ideaflowLinkedVia: 'google-proof' }));
+      // Trusted already, so no confirm; the value stays.
+      expect((await exchange()).status).toBe(200);
+      expect(mocks.users[0].ideaflowLinkedVia).toBe('google-proof');
+    });
+
+    it('a privileged account is not reachable through a mapping alone', async () => {
+      mocks.users.push(mapped({ role: 'admin', ideaflowLinkedVia: 'password' }));
+      const res = await exchange();
+      expect(res.status).toBe(403);
+      expect((await res.json()).code).toBe('needs_admin_proof');
+    });
+
+    it('the deployer-attested pair keeps signing in, privileged or unproven, without a password', async () => {
+      withAttested([{ userId: 'u-map', sub: 'sub-new' }]);
+      mocks.users.push(mapped({ role: 'admin' }));
+      const res = await exchange();
+      expect(res.status).toBe(200);
+      expect((await res.json()).user.id).toBe('u-map');
+      expect(mocks.verifyPassword).not.toHaveBeenCalled();
+      // Attestation records nothing in the shared graph.
+      expect(mocks.users[0].ideaflowLinkedVia).toBeUndefined();
+
+      mocks.users.length = 0;
+      mocks.users.push(mapped());
+      expect((await exchange()).status).toBe(200);
+    });
+
+    it.each([
+      ['wrong user id', [{ userId: 'other', sub: 'sub-new' }]],
+      ['wrong subject', [{ userId: 'u-map', sub: 'other' }]],
+      ['malformed JSON shape', [{ userId: 'u-map' }]],
+      ['not an array', { userId: 'u-map', sub: 'sub-new' }],
+    ])('an attested pair that does not match exactly (%s) grants nothing', async (_label, pairs) => {
+      withAttested(pairs);
+      mocks.users.push(mapped({ role: 'admin' }));
+      expect((await exchange()).status).toBe(403);
+    });
+
+    it('attestation cannot be created from the graph or from an unmapped identity', async () => {
+      withAttested([{ userId: 'u-admin', sub: 'sub-new' }]);
+      // Unmapped privileged account: attestation only exempts an EXISTING mapping.
+      mocks.users.push({ id: 'u-admin', email: 'person@example.test', role: 'admin', passwordHash: 'x' });
+      const res = await exchange();
+      expect(res.status).toBe(403);
+      expect((await res.json()).code).toBe('needs_admin_proof');
+      expect(mocks.users[0].ideaflowIdentityKey).toBeUndefined();
+    });
+
+    it('cancelled or failed provider sign-in leaves an unproven mapping exactly as it was', async () => {
+      mocks.users.push(mapped());
+      mocks.exchangeAuthorizationCode.mockRejectedValue(new Error('access_denied'));
+      expect((await exchange()).status).toBe(401);
+      expect(mocks.users[0].ideaflowLinkedVia).toBeUndefined();
+      expect(mocks.users[0].ideaflowIdentityKey).toBe(KEY('sub-new'));
     });
   });
 });

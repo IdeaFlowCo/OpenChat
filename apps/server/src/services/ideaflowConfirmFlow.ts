@@ -20,9 +20,13 @@ export const IDEAFLOW_CONFIRM_ACCOUNT_MAX_FAILURES = 10;
 export const IDEAFLOW_CONFIRM_ACCOUNT_WINDOW_MS = 15 * 60 * 1000;
 const MAX_PENDING_CONFIRMS = 5_000;
 
+export type ConfirmMode = 'link' | 'reprove';
+
 interface PendingConfirm {
   identity: IdeaflowIdentityClaims;
   targetUserId: string;
+  mode: ConfirmMode;
+  accountEmail: string | null;
   attempts: number;
   refunds: number;
   expiresAt: number;
@@ -48,6 +52,8 @@ function prune(now: number): void {
 export function startIdeaflowConfirm(
   identity: IdeaflowIdentityClaims,
   targetUserId: string,
+  mode: ConfirmMode = 'link',
+  accountEmail: string | null = null,
   now = Date.now(),
 ): string | null {
   prune(now);
@@ -56,6 +62,8 @@ export function startIdeaflowConfirm(
   pending.set(id, {
     identity,
     targetUserId,
+    mode,
+    accountEmail,
     attempts: 0,
     refunds: 0,
     expiresAt: now + IDEAFLOW_CONFIRM_TTL_MS,
@@ -64,7 +72,7 @@ export function startIdeaflowConfirm(
 }
 
 export type ConfirmAttempt =
-  | { ok: true; identity: IdeaflowIdentityClaims; targetUserId: string; reservedAt: number }
+  | { ok: true; identity: IdeaflowIdentityClaims; targetUserId: string; mode: ConfirmMode; reservedAt: number }
   | { ok: false; reason: 'expired' | 'locked' };
 
 function removeReservation(targetUserId: string, reservedAt: number): void {
@@ -99,7 +107,7 @@ export function beginIdeaflowConfirmAttempt(id: string, now = Date.now()): Confi
   }
   failures.push(now);
   accountFailures.set(entry.targetUserId, failures);
-  return { ok: true, identity: entry.identity, targetUserId: entry.targetUserId, reservedAt: now };
+  return { ok: true, identity: entry.identity, targetUserId: entry.targetUserId, mode: entry.mode, reservedAt: now };
 }
 
 /** A wrong (or unverifiable) password: the up-front charge stands. */

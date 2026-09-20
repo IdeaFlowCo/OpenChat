@@ -92,7 +92,29 @@ With no OpenChat session yet, the server resolves sign-in conservatively,
 implemented by `resolveIdeaflowSignIn`:
 
 1. **Existing durable mapping** — if this (issuer, sub) is already mapped to a
-   `User`, sign that user in. No email comparison is needed or performed.
+   `User`, no email comparison is needed or performed, but the mapping is only
+   as good as the proof behind it (same rules as Noos, code-d96 shared-identity
+   protocol):
+   - a **privileged** user is never reachable through a mapping alone
+     (`needs_admin_proof`), except a deployer-attested pair (below);
+   - a **password-bearing** user whose mapping has no *trusted provenance*
+     (`ideaflowLinkedVia` outside `password` / `google-proof` / `pilot`: absent,
+     legacy, or written by a generic-session Connect) is asked for the account
+     password once, exactly like the unmapped case (`confirm_required`); the
+     check re-validates the mapping, then records `ideaflowLinkedVia = password`.
+     After that the mapping is seamless;
+   - passwordless users sign in as before (an empty `passwordHash` is not a
+     password);
+   - **deployer-attested pair**: `IDEAFLOW_ID_ATTESTED_PAIRS='[{"userId":"…","sub":"…"}]'`
+     (server config only; malformed = none). An EXISTING mapping matching both
+     halves signs in regardless of role/provenance (the pilot/admin pair). It
+     writes nothing to the graph and cannot create a mapping. Set it to the
+     current pilot pairs **before** deploying this change, or those accounts
+     fall back to Google/password sign-in.
+   Provenance is only ever written after a proof this server verified: the
+   Google-created check (`google-proof`) or the password check (`password`).
+   A generic-session Connect ('explicit') writes none, so it cannot turn an
+   unproven mapping into a trusted one.
 2. **No mapping, but a local email match** (code-d96, seamless accounts) — the
    ID token's email is already required to be the JSON boolean
    `email_verified === true`. The match is a *counted*, case-insensitive
@@ -114,7 +136,8 @@ implemented by `resolveIdeaflowSignIn`:
      concurrent guesses cannot exceed the cap. The password is judged by Noos's
      own login endpoint (`NOOS_URL`), the only password verifier in the shared
      graph. `NOOS_URL` must be set in production and be https or loopback; if
-     Noos is down, rate limiting or unconfigured the check answers 503
+     Noos is down, rate limiting or unconfigured (Noos has no login limiter of
+     its own; these caps are the only guard) the check answers 503
      `confirm_unavailable` and the attempt is **not** counted (up to 5 refunds per
      check; only Noos 400/401 count as a wrong password);
    - anything else (Apple/bridge/legacy accounts with no independent proof) →

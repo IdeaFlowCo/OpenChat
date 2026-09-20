@@ -31,6 +31,7 @@ import {
   startIdeaflowConfirm,
 } from '../services/ideaflowConfirmFlow.js';
 import { resolveNoosPasswordOracleUrl, verifyPasswordViaNoos } from '../services/noosPasswordCheck.js';
+import { isIdeaflowAttestedPair } from '../services/ideaflowAttestedPairs.js';
 import {
   isSafePublicDisplayName,
   normalizePublicDisplayName,
@@ -451,6 +452,12 @@ interface IdentityMappedOpenChatUser extends LinkedOpenChatUser {
   ideaflowIdentityKey?: string | null;
 }
 
+interface MappedSignInRow extends IdentityMappedOpenChatUser {
+  role?: unknown;
+  linkedVia?: unknown;
+  hasPassword?: boolean;
+}
+
 function recordsToUsers(result: { records: Array<{ get: (key: string) => unknown }> }): LinkedOpenChatUser[] {
   return result.records.map(record => toJS(record.get('user')) as LinkedOpenChatUser);
 }
@@ -476,9 +483,30 @@ export function isPrivilegedRole(role: unknown): boolean {
  */
 const GOOGLE_CREATED_SIGNUP_PROVIDERS = new Set(['google', 'google-ios']);
 
-/** Thrown when exactly one password account matches and needs the one-time check. */
+/**
+ * `ideaflowLinkedVia` values that record a proof this server (or Noos) actually
+ * verified. Anything else -- absent, legacy, or written by a generic-session
+ * Connect -- is an UNPROVEN mapping. The same rule is applied by Noos, which
+ * shares the `:User` node; see the shared-identity protocol in
+ * docs/ideaflow-id-migration.md.
+ */
+export const TRUSTED_IDEAFLOW_PROVENANCE = new Set(['password', 'google-proof', 'pilot']);
+
+export function isTrustedIdeaflowProvenance(value: unknown): boolean {
+  return typeof value === 'string' && TRUSTED_IDEAFLOW_PROVENANCE.has(value);
+}
+
+/**
+ * Thrown when the one-time ownership check is needed: either exactly one
+ * password account matches an unmapped identity ('link'), or a mapping already
+ * exists on a password account without a trusted proof ('reprove').
+ */
 export class IdeaflowConfirmRequired extends Error {
-  constructor(readonly targetUserId: string) {
+  constructor(
+    readonly targetUserId: string,
+    readonly mode: 'link' | 'reprove' = 'link',
+    readonly accountEmail: string | null = null,
+  ) {
     super('IDEAFLOW_CONFIRM_REQUIRED');
     this.name = 'IdeaflowConfirmRequired';
   }
@@ -504,13 +532,39 @@ async function findEmailCandidates(session: AuthDbSession, emailLookup: string):
     WHERE toLower(coalesce(u.email, '')) = $emailLookup
     RETURN u {
       .id, .email, .name, .avatarUrl, .role, .signupProvider, .googleEmailVerified,
-      hasPassword: u.passwordHash IS NOT NULL,
+      hasPassword: (u.passwordHash IS NOT NULL AND u.passwordHash <> ''),
       hasGoogleSub: u.googleSub IS NOT NULL,
       mapped: (u.ideaflowIdentityKey IS NOT NULL OR u.ideaflowSub IS NOT NULL)
     } AS user
     LIMIT 3
   `, { emailLookup });
   return result.records.map(record => toJS(record.get('user')) as EmailCandidate);
+}
+
+let noosOracleWarned = false;
+function warnNoosOracleUnusableOnce(): void {
+  if (noosOracleWarned) return;
+  noosOracleWarned = true;
+  console.warn('Ideaflow confirm: NOOS_URL is unset or not https/loopback; password check unavailable');
+}
+
+/** The parked account, but only while it is still mapped to exactly this identity. */
+async function findMappedPasswordTarget(
+  session: AuthDbSession,
+  userId: string,
+  identityKey: string,
+): Promise<EmailCandidate | null> {
+  const result = await session.run(`
+    MATCH (u:User {id: $userId})
+    WHERE u.ideaflowIdentityKey = $identityKey
+    RETURN u {
+      .id, .email, .name, .avatarUrl, .role,
+      hasPassword: (u.passwordHash IS NOT NULL AND u.passwordHash <> ''),
+      mapped: true
+    } AS user
+    LIMIT 2
+  `, { userId, identityKey });
+  return result.records.length === 1 ? toJS(result.records[0].get('user')) as EmailCandidate : null;
 }
 
 /**
@@ -548,11 +602,13 @@ export async function resolveIdeaflowSignIn(
        OR (u.ideaflowSub = $subject
            AND (u.ideaflowIssuer IS NULL OR u.ideaflowIssuer = $issuer))
     RETURN u {
-      .id, .email, .name, .avatarUrl,
-      .ideaflowIssuer, .ideaflowSub, .ideaflowIdentityKey
+      .id, .email, .name, .avatarUrl, .role,
+      .ideaflowIssuer, .ideaflowSub, .ideaflowIdentityKey,
+      linkedVia: u.ideaflowLinkedVia,
+      hasPassword: (u.passwordHash IS NOT NULL AND u.passwordHash <> '')
     } AS user
     LIMIT 3
-  `, params)) as IdentityMappedOpenChatUser[];
+  `, params)) as MappedSignInRow[];
   const mapped = candidates.filter(user =>
     user.ideaflowIssuer === identity.issuer
     && user.ideaflowSub === identity.subject
@@ -562,6 +618,19 @@ export async function resolveIdeaflowSignIn(
     throw new Error('IDEAFLOW_IDENTITY_COLLISION');
   }
   if (mapped.length === 1) {
+    const row = mapped[0];
+    // An exact mapping is the fast path, but it is only as good as the proof
+    // behind it. The deployer-attested pilot/admin pair keeps signing in; every
+    // other mapping must clear the same rules as Noos (shared `:User` node):
+    // privileged accounts are never reachable through a mapping alone, and a
+    // password account whose mapping has no trusted proof (legacy or written by
+    // a generic-session Connect) proves ownership once, inside sign-in.
+    if (!isIdeaflowAttestedPair(row.id, identity.subject)) {
+      if (isPrivilegedRole(row.role)) throw new Error('IDEAFLOW_NEEDS_ADMIN_PROOF');
+      if (row.hasPassword === true && !isTrustedIdeaflowProvenance(row.linkedVia)) {
+        throw new IdeaflowConfirmRequired(row.id, 'reprove', typeof row.email === 'string' ? row.email : null);
+      }
+    }
     const refreshed = recordsToUsers(await session.run(`
       MATCH (u:User {id: $userId, ideaflowIdentityKey: $identityKey})
       WHERE u.ideaflowIssuer = $issuer AND u.ideaflowSub = $subject
@@ -602,7 +671,7 @@ export async function resolveIdeaflowSignIn(
     if (googleProof) {
       return bindIdeaflowIdentityToUser(session, candidate.id, identity, 'google-proof');
     }
-    if (candidate.hasPassword === true) throw new IdeaflowConfirmRequired(candidate.id);
+    if (candidate.hasPassword === true) throw new IdeaflowConfirmRequired(candidate.id, 'link', candidate.email ?? null);
     throw new Error('IDEAFLOW_LINK_REQUIRED');
   }
 
@@ -656,6 +725,10 @@ export async function bindIdeaflowIdentityToUser(
   via: 'explicit' | 'google-proof' | 'password' = 'explicit',
 ): Promise<LinkedOpenChatUser> {
   const identityKey = ideaflowIdentityKey(identity);
+  // Only a proof the server verified is recorded as provenance. A generic
+  // session Connect ('explicit') proves nothing about ownership of a password
+  // account, so it leaves provenance unset and the mapping stays unproven.
+  const provenance = via === 'explicit' ? null : via;
   const params = {
     userId,
     issuer: identity.issuer,
@@ -663,7 +736,7 @@ export async function bindIdeaflowIdentityToUser(
     identityKey,
     email: identity.email,
     picture: identity.picture,
-    via,
+    provenance,
     now: new Date().toISOString(),
   };
 
@@ -678,11 +751,12 @@ export async function bindIdeaflowIdentityToUser(
         REMOVE u._ideaflowBindingLock
         RETURN u {
           .id, .email, .name, .avatarUrl, .role,
-          .ideaflowIssuer, .ideaflowSub, .ideaflowIdentityKey
+          .ideaflowIssuer, .ideaflowSub, .ideaflowIdentityKey,
+          linkedVia: u.ideaflowLinkedVia
         } AS user
       `, params));
       if (currentRows.length !== 1) throw new Error('IDEAFLOW_USER_NOT_FOUND');
-      const current = currentRows[0] as IdentityMappedOpenChatUser & { role?: unknown };
+      const current = currentRows[0] as MappedSignInRow;
       // A password, a Google-created account, or a logged-in session is never
       // enough to attach an identity to a privileged account (Noos shares it).
       if (isPrivilegedRole(current.role)) throw new Error('IDEAFLOW_NEEDS_ADMIN_PROOF');
@@ -716,6 +790,15 @@ export async function bindIdeaflowIdentityToUser(
         && current.ideaflowIdentityKey === identityKey
       ) {
         // Already bound to exactly this identity -- idempotent, not an error.
+        // A proof that was actually verified upgrades an unproven mapping (the
+        // one-time password check on a legacy/Connect mapping); it never
+        // downgrades or replaces an existing trusted proof.
+        if (provenance && !isTrustedIdeaflowProvenance(current.linkedVia)) {
+          await tx.run(`
+            MATCH (u:User {id: $userId, ideaflowIdentityKey: $identityKey})
+            SET u.ideaflowLinkedVia = $provenance
+          `, { ...params, provenance });
+        }
         return { id: current.id, email: current.email, name: current.name, avatarUrl: current.avatarUrl };
       }
 
@@ -727,7 +810,7 @@ export async function bindIdeaflowIdentityToUser(
             u.ideaflowEmail = $email,
             u.ideaflowEmailVerified = true,
             u.ideaflowLinkedAt = datetime($now),
-            u.ideaflowLinkedVia = coalesce(u.ideaflowLinkedVia, $via),
+            u.ideaflowLinkedVia = coalesce(u.ideaflowLinkedVia, $provenance),
             u.avatarUrl = coalesce(u.avatarUrl, $picture)
         RETURN u { .id, .email, .name, .avatarUrl } AS user
       `, params));
@@ -841,7 +924,7 @@ router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Ideaflow ID sign-in failed:', error);
     if (error instanceof IdeaflowConfirmRequired) {
-      const confirmId = startIdeaflowConfirm(identity, error.targetUserId);
+      const confirmId = startIdeaflowConfirm(identity, error.targetUserId, error.mode, error.accountEmail);
       if (!confirmId) {
         res.status(503).json({ error: 'Ideaflow ID sign-in is busy. Please try again in a moment.' });
       } else {
@@ -849,7 +932,9 @@ router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
           error: 'This Ideaflow account matches an existing OpenChat account. Enter that account\'s password once to connect them.',
           code: 'confirm_required',
           confirmId,
-          email: maskEmail(identity.email),
+          // The account whose password is asked for (a mapping can predate an
+          // email change), not just the Ideaflow email.
+          email: maskEmail(error.accountEmail ?? identity.email),
         });
       }
     } else {
@@ -915,20 +1000,28 @@ router.post('/ideaflow/confirm', async (req: Request, res: Response) => {
 
   const session = getDriver().session();
   try {
-    // Re-validate the target right now: still exactly one account for this
-    // verified email, the one we parked, unmapped, unprivileged, with a password.
-    const candidates = await findEmailCandidates(session, identity.email.trim().toLowerCase());
-    const target = candidates.length === 1 && candidates[0].id === attempt.targetUserId
-      ? candidates[0]
-      : null;
-    if (!target || target.mapped === true || isPrivilegedRole(target.role)
+    // Re-validate the target right now. 'link': still exactly one account for
+    // this verified email, the one we parked, unmapped, unprivileged, with a
+    // password. 'reprove': the parked account is still mapped to exactly this
+    // identity, unprivileged, with a password.
+    let target: EmailCandidate | null = null;
+    if (attempt.mode === 'reprove') {
+      target = await findMappedPasswordTarget(session, attempt.targetUserId, ideaflowIdentityKey(identity));
+    } else {
+      const candidates = await findEmailCandidates(session, identity.email.trim().toLowerCase());
+      target = candidates.length === 1 && candidates[0].id === attempt.targetUserId
+        && candidates[0].mapped !== true
+        ? candidates[0]
+        : null;
+    }
+    if (!target || isPrivilegedRole(target.role)
       || target.hasPassword !== true || typeof target.email !== 'string') {
       invalid();
       return;
     }
 
     const oracleUrl = resolveNoosPasswordOracleUrl(process.env.NOOS_URL);
-    if (!oracleUrl) console.warn('Ideaflow confirm: NOOS_URL is unset or not https/loopback; password check unavailable');
+    if (!oracleUrl) warnNoosOracleUnusableOnce();
     const verified = oracleUrl
       ? await verifyPasswordViaNoos(target.email, password, oracleUrl)
       : { status: 'unavailable' as const };

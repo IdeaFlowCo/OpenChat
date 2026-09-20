@@ -2,9 +2,10 @@
  * OpenChat has no password verifier of its own: password sign-in is delegated
  * to Noos (`POST /api/auth/login`), which owns the shared `:User.passwordHash`.
  * The one-time Ideaflow ownership check reuses that same endpoint as its oracle
- * so there is exactly one place that judges a password, with its own rate
- * limiting. The caller must still confirm the returned id is the account it
- * meant to check.
+ * so there is exactly one place that judges a password. Noos has no login
+ * limiter of its own here, so the caps in ideaflowConfirmFlow are the guard.
+ * The caller must still confirm the returned id is the account it meant to
+ * check.
  */
 /**
  * Where the password oracle lives, or null when it must not be used: unset in
