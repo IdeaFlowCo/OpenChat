@@ -186,7 +186,7 @@ app.get('/u/:userId', async (req, res, next) => {
 
   <a class="cta cta-primary" href="/app/${intentQs}">Open OpenChat · sign in</a>
   <a class="cta cta-secondary" href="/app/${intentQs}">Open on the web</a>
-  <a class="cta cta-secondary" href="https://testflight.apple.com/join/QvUPzDMY">Get the iOS app · TestFlight</a>
+  <a class="cta cta-secondary" href="https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932">Get the iOS app · App Store</a>
 
   <p class="cta-tiny">Already have OpenChat? <a href="openchat://user/${encodeURIComponent(userId)}">Open the app directly</a></p>
 

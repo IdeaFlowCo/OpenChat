@@ -657,7 +657,7 @@ export function SettingsScreen() {
       </View>
 
       {/* Invite people (openchat-37z). Shareable QR/link points to the landing
-          page (chat.globalbr.ai) which branches to iOS TestFlight, web, and
+          page (chat.globalbr.ai) which branches to iOS App Store, web, and
           Android — so one QR works for whoever scans it. */}
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>INVITE PEOPLE</Text>
@@ -667,7 +667,7 @@ export function SettingsScreen() {
               <QRCode value="https://chat.globalbr.ai" size={168} />
             </View>
             <Text style={[styles.optionHint, { color: c.textSecondary, marginTop: 10, textAlign: 'center', paddingHorizontal: 16 }]}>
-              Scan to open the OpenChat download page — iOS TestFlight, web, or Android
+              Scan to open the OpenChat download page — iOS App Store, web, or Android
             </Text>
           </View>
           <TouchableOpacity
@@ -692,12 +692,12 @@ export function SettingsScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
-            onPress={() => Linking.openURL('https://testflight.apple.com/join/QvUPzDMY')}
+            onPress={() => Linking.openURL('https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932')}
             activeOpacity={0.7}
           >
             <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Get the iOS app · TestFlight</Text>
-              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Install the native beta on iPhone</Text>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Get the iOS app · App Store</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Install the native app on iPhone or iPad</Text>
             </View>
             <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
           </TouchableOpacity>

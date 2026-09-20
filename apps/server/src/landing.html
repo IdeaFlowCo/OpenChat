@@ -169,6 +169,12 @@
   }
   .platform-cta::after { content: "→"; transition: transform 160ms ease; }
   .platform:hover .platform-cta::after { transform: translateX(3px); }
+  .app-store-badge {
+    display: block;
+    width: 150px;
+    height: auto;
+    margin-top: 6px;
+  }
 
   /* Feature grid */
   .feature-grid {
@@ -346,7 +352,7 @@
 
   <section class="hero">
     <img src="/about/icon.png" alt="" class="icon" loading="eager">
-    <div class="badge"><span class="badge-dot"></span>Live · TestFlight + Web · 35+ builds shipped</div>
+    <div class="badge"><span class="badge-dot"></span>Live · App Store + Web · 35+ builds shipped</div>
     <h1>Messaging built<br>for you and your agents.</h1>
     <p class="lede">
       Real-time chat with iMessage-grade polish — read receipts, reactions, voice notes, link previews — and an MCP server that lets Claude, Cursor, or any agent CLI read and send messages as you.
@@ -370,11 +376,11 @@
     <p class="section-sub">Same conversations across iOS, Android, and the web. Same account, same agent keys.</p>
     <div class="platforms">
 
-      <a class="platform" data-platform="ios" href="https://testflight.apple.com/join/QvUPzDMY" target="_blank" rel="noopener">
+      <a class="platform" data-platform="ios" href="https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932" target="_blank" rel="noopener">
         <div class="platform-icon"></div>
-        <div class="platform-name">iOS · TestFlight</div>
-        <div class="platform-sub">Native app via Apple's beta program</div>
-        <span class="platform-cta">Join TestFlight</span>
+        <div class="platform-name">iOS · App Store</div>
+        <div class="platform-sub">Native app for iPhone and iPad</div>
+        <img class="app-store-badge" src="https://toolbox.marketingtools.apple.com/api/badges/download-on-the-app-store/black/en-us?size=250x83" alt="Download on the App Store">
       </a>
 
       <a class="platform" data-platform="android" href="https://expo.dev/artifacts/eas/94tzwhaMkezUC89qCpXoXx.apk" target="_blank" rel="noopener">
@@ -530,7 +536,7 @@
     <p>Sign in, start a conversation, mint an agent key.</p>
     <div class="cta-row">
       <a class="cta-btn" id="cta-open" href="/app/">Open OpenChat</a>
-      <a class="cta-btn ghost" href="https://testflight.apple.com/join/QvUPzDMY" target="_blank" rel="noopener">Join iOS beta</a>
+      <a class="cta-btn ghost" href="https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932" target="_blank" rel="noopener">Download on the App Store</a>
     </div>
   </div>
 
@@ -570,7 +576,7 @@
 
     // 2) Above-the-fold native-app pointer.
     var hints = {
-      ios:     { text: 'On iPhone? ',            label: 'Get the native iOS app →', href: 'https://testflight.apple.com/join/QvUPzDMY' },
+      ios:     { text: 'On iPhone? ',            label: 'Get it on the App Store →', href: 'https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932' },
       android: { text: 'On Android? ',           label: 'Download the app →',        href: '#install' },
       desktop: { text: 'Prefer a desktop layout? ', label: 'Open responsive web app →', href: '/app/' }
     };

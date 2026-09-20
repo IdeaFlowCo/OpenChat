@@ -365,13 +365,13 @@ function RootView({
       </section>
 
       {/* Invite people (openchat-37z). QR + link point to the landing page,
-          which branches to iOS TestFlight / web / Android — one QR for anyone. */}
+          which branches to iOS App Store / web / Android — one QR for anyone. */}
       <section>
         <h3 className={labelCls}>Invite people</h3>
         <div className={`mt-2 ${sectionCls} p-4 flex flex-col items-center`}>
           <img src="/about/qr.svg" alt="Scan to download OpenChat" className="w-44 h-44 rounded-lg bg-white p-2" />
           <p className="mt-2 text-center text-sm text-gray-500 dark:text-slate-400">
-            Scan to open the OpenChat download page — iOS TestFlight, web, or Android.
+            Scan to open the OpenChat download page — iOS App Store, web, or Android.
           </p>
           <button
             type="button"
@@ -386,8 +386,8 @@ function RootView({
           >
             📤 Share / copy invite link
           </button>
-          <a href="https://testflight.apple.com/join/QvUPzDMY" target="_blank" rel="noopener" className="mt-2 w-full text-center rounded-lg border border-gray-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-gray-900 dark:text-slate-100 hover:bg-gray-100 dark:hover:bg-slate-800">
-            Get the iOS app · TestFlight
+          <a href="https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932" target="_blank" rel="noopener" className="mt-2 w-full text-center rounded-lg border border-gray-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-gray-900 dark:text-slate-100 hover:bg-gray-100 dark:hover:bg-slate-800">
+            Get the iOS app · App Store
           </a>
           <a href="/about" target="_blank" rel="noopener" className="mt-2 w-full text-center rounded-lg border border-gray-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-gray-900 dark:text-slate-100 hover:bg-gray-100 dark:hover:bg-slate-800">
             Open the download page
