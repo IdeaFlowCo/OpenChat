@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   consumeIdeaflowLinkFlow,
   IDEAFLOW_LINK_FLOW_TTL_MS,
+  isFreshIdeaflowAuthTime,
   rememberIdeaflowLinkFlow,
   resetIdeaflowLinkFlows,
 } from '../src/services/ideaflowLinkFlow.js';
@@ -45,5 +46,25 @@ describe('Ideaflow link flow registry', () => {
       codeChallenge: challenge,
     }, 101)).toBe(false);
     expect(consumeIdeaflowLinkFlow({ ...base, codeVerifier: verifier }, 100 + IDEAFLOW_LINK_FLOW_TTL_MS)).toBe(false);
+  });
+});
+
+describe('isFreshIdeaflowAuthTime', () => {
+  const started = 1_800_000_000_000;
+  const seconds = started / 1000;
+
+  it('accepts an authentication inside the attempt window (seconds, with skew)', () => {
+    expect(isFreshIdeaflowAuthTime(seconds + 5, started, started + 60_000)).toBe(true);
+    expect(isFreshIdeaflowAuthTime(seconds - 100, started, started + 60_000)).toBe(true);
+  });
+
+  it('rejects old, far-future, millisecond, missing and non-numeric values', () => {
+    expect(isFreshIdeaflowAuthTime(seconds - 3600, started, started + 60_000)).toBe(false);
+    expect(isFreshIdeaflowAuthTime(seconds + 3600, started, started + 60_000)).toBe(false);
+    expect(isFreshIdeaflowAuthTime(started, started, started + 60_000)).toBe(false);
+    expect(isFreshIdeaflowAuthTime(null, started)).toBe(false);
+    expect(isFreshIdeaflowAuthTime(undefined, started)).toBe(false);
+    expect(isFreshIdeaflowAuthTime(Number.NaN, started)).toBe(false);
+    expect(isFreshIdeaflowAuthTime('1800000000' as unknown as number, started)).toBe(false);
   });
 });

@@ -8,6 +8,7 @@ interface PendingLinkFlow {
   sessionHash: string;
   nonce: string;
   codeChallenge: string;
+  startedAt: number;
   expiresAt: number;
 }
 
@@ -77,6 +78,7 @@ export function rememberIdeaflowLinkFlow(
     sessionHash: digest(token),
     nonce: input.nonce,
     codeChallenge: input.codeChallenge,
+    startedAt: now,
     expiresAt: now + IDEAFLOW_LINK_FLOW_TTL_MS,
   });
   return true;
@@ -91,17 +93,45 @@ export function consumeIdeaflowLinkFlow(
   input: IdeaflowLinkFlowExchangeInput,
   now = Date.now(),
 ): boolean {
+  return consumeIdeaflowLinkFlowStartedAt(input, now) !== null;
+}
+
+/** Same as consumeIdeaflowLinkFlow, returning when the flow started (ms). */
+export function consumeIdeaflowLinkFlowStartedAt(
+  input: IdeaflowLinkFlowExchangeInput,
+  now = Date.now(),
+): number | null {
   const flow = pendingLinkFlows.get(input.state);
   pendingLinkFlows.delete(input.state);
-  if (!flow || flow.expiresAt <= now) return false;
+  if (!flow || flow.expiresAt <= now) return null;
 
   const token = bearerToken(input.authorization);
-  if (!token) return false;
+  if (!token) return null;
 
-  return flow.userId === input.userId
+  const valid = flow.userId === input.userId
     && equalDigest(flow.sessionHash, digest(token))
     && equalDigest(flow.nonce, input.nonce)
     && equalDigest(flow.codeChallenge, digest(input.codeVerifier));
+  return valid ? flow.startedAt : null;
+}
+
+/**
+ * Explicit Connect only counts when the person really authenticated at the
+ * provider during THIS attempt: `auth_time` must sit inside the attempt window
+ * (seconds, with a small skew allowance on both sides). A logged-in OpenChat
+ * session alone never authorizes binding whichever Ideaflow session happens to
+ * be open in the browser.
+ */
+export const IDEAFLOW_FRESH_AUTH_SKEW_SECONDS = 120;
+export function isFreshIdeaflowAuthTime(
+  authTime: number | null | undefined,
+  startedAtMs: number,
+  now = Date.now(),
+): boolean {
+  if (typeof authTime !== 'number' || !Number.isFinite(authTime)) return false;
+  const started = startedAtMs / 1000;
+  return authTime >= started - IDEAFLOW_FRESH_AUTH_SKEW_SECONDS
+    && authTime <= now / 1000 + IDEAFLOW_FRESH_AUTH_SKEW_SECONDS;
 }
 
 /** Test-only reset for the process-local pending registry. */

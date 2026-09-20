@@ -118,6 +118,7 @@ describe('exchangeIdeaflowAuthorizationCode', () => {
       emailVerified: true,
       name: 'Person Example',
       picture: 'https://images.example.test/person.jpg',
+      authTime: null,
     });
     const tokenRequest = fetchImpl.mock.calls[1];
     expect(tokenRequest[0]).toBe(discovery.token_endpoint);
