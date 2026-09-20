@@ -53,7 +53,7 @@ function fakeRun(query: string, params: Record<string, unknown>) {
       })));
   }
   if (q.includes('_ideaflowBindingLock')) {
-    return rows(users.filter(u => u.id === params.userId).map(u => ({ ...u, linkedVia: u.ideaflowLinkedVia })));
+    return rows(users.filter(u => u.id === params.userId).map(u => ({ ...u, linkedVia: u.ideaflowLinkedVia, hasPassword: hasPassword(u) })));
   }
   if (q.includes('SET u.ideaflowLinkedVia = $provenance')) {
     const user = users.find(u => u.id === params.userId && u.ideaflowIdentityKey === params.identityKey);
@@ -69,7 +69,7 @@ function fakeRun(query: string, params: Record<string, unknown>) {
       ideaflowIssuer: params.issuer,
       ideaflowSub: params.subject,
       ideaflowIdentityKey: params.identityKey,
-      ideaflowLinkedVia: user.ideaflowLinkedVia ?? params.provenance ?? undefined,
+      ideaflowLinkedVia: params.provenance ?? undefined,
     });
     return rows([{ id: user.id, email: user.email, name: user.name }]);
   }
@@ -604,6 +604,27 @@ describe('Ideaflow seamless account resolution (OpenChat)', () => {
       // Trusted already, so no confirm; the value stays.
       expect((await exchange()).status).toBe(200);
       expect(mocks.users[0].ideaflowLinkedVia).toBe('google-proof');
+    });
+
+    it('the Google proof is re-checked under the bind lock: an account that gained a password is not bound', async () => {
+      mocks.users.push({
+        id: 'u-race', email: 'race@example.test', passwordHash: 'x',
+        signupProvider: 'google', googleEmailVerified: true, googleSub: 'g',
+      });
+      const { bindIdeaflowIdentityToUser } = await import('../src/routes/auth.js');
+      const session = { executeWrite: async (fn: (tx: unknown) => Promise<unknown>) => fn({ run: async (q: string, p: Record<string, unknown>) => fakeRun(q, p) }) };
+      await expect(bindIdeaflowIdentityToUser(session as never, 'u-race', identity(), 'google-proof'))
+        .rejects.toThrow('IDEAFLOW_LINK_REQUIRED');
+      expect(mocks.users[0].ideaflowIdentityKey).toBeUndefined();
+    });
+
+    it('a fresh bind never inherits a stale provenance left on the node', async () => {
+      mocks.users.push({ id: 'u-stale', email: 'stale@example.test', ideaflowLinkedVia: 'google-proof' });
+      const { bindIdeaflowIdentityToUser } = await import('../src/routes/auth.js');
+      const session = { executeWrite: async (fn: (tx: unknown) => Promise<unknown>) => fn({ run: async (q: string, p: Record<string, unknown>) => fakeRun(q, p) }) };
+      await bindIdeaflowIdentityToUser(session as never, 'u-stale', identity(), 'explicit');
+      expect(mocks.users[0].ideaflowIdentityKey).toBe(KEY('sub-new'));
+      expect(mocks.users[0].ideaflowLinkedVia).toBeUndefined();
     });
 
     it('a privileged account is not reachable through a mapping alone', async () => {

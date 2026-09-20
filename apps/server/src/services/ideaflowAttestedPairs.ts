@@ -24,21 +24,31 @@ function validValue(value: unknown): value is string {
     && !/[\0\r\n]/.test(value);
 }
 
+let warnedMalformed = false;
+function malformed(): IdeaflowAttestedPair[] {
+  // A typo must not silently lock the pilot out. Log once, never the value.
+  if (!warnedMalformed) {
+    warnedMalformed = true;
+    console.warn('IDEAFLOW_ID_ATTESTED_PAIRS is set but malformed; no attested pairs are in effect');
+  }
+  return [];
+}
+
 export function getIdeaflowAttestedPairs(env: NodeJS.ProcessEnv = process.env): IdeaflowAttestedPair[] {
   const raw = env.IDEAFLOW_ID_ATTESTED_PAIRS?.trim();
   if (!raw) return [];
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length > MAX_PAIRS) return [];
+    if (!Array.isArray(parsed) || parsed.length > MAX_PAIRS) return malformed();
     const pairs: IdeaflowAttestedPair[] = [];
     for (const entry of parsed) {
       const candidate = entry as { userId?: unknown; sub?: unknown } | null;
-      if (!candidate || !validValue(candidate.userId) || !validValue(candidate.sub)) return [];
+      if (!candidate || !validValue(candidate.userId) || !validValue(candidate.sub)) return malformed();
       pairs.push({ userId: candidate.userId, sub: candidate.sub });
     }
     return pairs;
   } catch {
-    return [];
+    return malformed();
   }
 }
 

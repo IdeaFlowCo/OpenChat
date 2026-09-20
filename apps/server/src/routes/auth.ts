@@ -752,7 +752,8 @@ export async function bindIdeaflowIdentityToUser(
         RETURN u {
           .id, .email, .name, .avatarUrl, .role,
           .ideaflowIssuer, .ideaflowSub, .ideaflowIdentityKey,
-          linkedVia: u.ideaflowLinkedVia
+          linkedVia: u.ideaflowLinkedVia,
+          hasPassword: (u.passwordHash IS NOT NULL AND u.passwordHash <> '')
         } AS user
       `, params));
       if (currentRows.length !== 1) throw new Error('IDEAFLOW_USER_NOT_FOUND');
@@ -760,6 +761,11 @@ export async function bindIdeaflowIdentityToUser(
       // A password, a Google-created account, or a logged-in session is never
       // enough to attach an identity to a privileged account (Noos shares it).
       if (isPrivilegedRole(current.role)) throw new Error('IDEAFLOW_NEEDS_ADMIN_PROOF');
+      // The Google-created proof only ever covers a passwordless account; the
+      // eligibility read in the resolver is re-checked here under the node lock.
+      if (via === 'google-proof' && current.hasPassword === true) {
+        throw new Error('IDEAFLOW_LINK_REQUIRED');
+      }
 
       if (
         (current.ideaflowIssuer && current.ideaflowIssuer !== identity.issuer)
@@ -810,7 +816,7 @@ export async function bindIdeaflowIdentityToUser(
             u.ideaflowEmail = $email,
             u.ideaflowEmailVerified = true,
             u.ideaflowLinkedAt = datetime($now),
-            u.ideaflowLinkedVia = coalesce(u.ideaflowLinkedVia, $provenance),
+            u.ideaflowLinkedVia = $provenance,
             u.avatarUrl = coalesce(u.avatarUrl, $picture)
         RETURN u { .id, .email, .name, .avatarUrl } AS user
       `, params));
