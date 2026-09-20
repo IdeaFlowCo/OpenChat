@@ -605,7 +605,7 @@ export function LoginScreen() {
                   Connect your existing OpenChat account
                 </Text>
                 <Text style={[styles.authNoticeMessage, { color: c.textSecondary }]}>
-                  {`Your Ideaflow account${ideaflowConfirmState.email ? ` (${ideaflowConfirmState.email})` : ''} matches an existing OpenChat account. Enter that account's password once to connect them. You will not be asked again.`}
+                  {`Confirm you own the OpenChat account${ideaflowConfirmState.email ? ` ${ideaflowConfirmState.email}` : ''}. Enter its password once to connect it to your Ideaflow account. You will not be asked again.`}
                 </Text>
                 <TextInput
                   style={[styles.input, { color: c.textPrimary, borderColor: c.border, backgroundColor: c.surface }]}
