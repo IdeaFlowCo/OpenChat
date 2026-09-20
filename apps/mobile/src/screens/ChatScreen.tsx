@@ -47,6 +47,7 @@ import { colorForUserId } from '../utils/colorForUserId';
 import { pickImage, uploadImage, PickedAsset } from '../services/attachments';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
 import { MentionAutocomplete, MentionCandidate } from '../components/MentionAutocomplete';
+import { HashtagAutocomplete } from '../components/HashtagAutocomplete';
 import { TransformButton } from '../components/TransformButton';
 import { NVCComposerModal } from '../components/NVCComposerModal';
 import { LinkPreviewCard } from '../components/LinkPreviewCard';
@@ -56,7 +57,17 @@ import type { Participant } from '../api/client';
 import { ExportSheet } from '../components/ExportSheet';
 import { saveJsonDownload } from '../services/exportDownload';
 import { logError } from '../services/clientLogger';
+import {
+  fetchHashtagSuggestions,
+  HashtagSuggestion,
+  invalidateHashtagSuggestions,
+} from '../services/hashtagSuggestions';
 import { serif } from '../theme/typography';
+import {
+  ActiveHashtag,
+  applyHashtagSuggestion,
+  findActiveHashtag,
+} from '../utils/hashtagAutocomplete';
 import {
   getDirectConversationParticipant,
   getDirectConversationTitle,
@@ -278,9 +289,43 @@ export function ChatScreen({
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   // Tracks the char-offset of the '@' that triggered the current mention pick.
   const mentionAtOffset = useRef<number>(-1);
+
+  // ── Hashtag autocomplete state (openchat-05n) ─────────────────────────────
+  const [activeHashtag, setActiveHashtag] = useState<ActiveHashtag | null>(null);
+  const [hashtagSuggestions, setHashtagSuggestions] = useState<HashtagSuggestion[]>([]);
+  const [hashtagSelectedIndex, setHashtagSelectedIndex] = useState(0);
+  const [hashtagDismissed, setHashtagDismissed] = useState(false);
   const textInputRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList<RenderRow>>(null);
   const typingTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Fetching never sits in the input handler: a short debounce plus the
+  // service cache keeps typing synchronous and makes offline failure silent.
+  useEffect(() => {
+    if (!activeHashtag || hashtagDismissed) {
+      setHashtagSuggestions([]);
+      setHashtagSelectedIndex(0);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void fetchHashtagSuggestions(conversationId, activeHashtag.query)
+        .then((suggestions) => {
+          if (cancelled) return;
+          setHashtagSuggestions(suggestions);
+          setHashtagSelectedIndex(0);
+        })
+        .catch(() => {
+          if (!cancelled) setHashtagSuggestions([]);
+        });
+    }, 160);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [activeHashtag?.query, activeHashtag?.start, conversationId, hashtagDismissed]);
 
   // ── ActionSheet state (OpenChat-uxj, OpenChat-46p, OpenChat-wgl, OpenChat-q9h, OpenChat-7bd)
   const [actionSheetVisible, setActionSheetVisible] = useState(false);
@@ -734,18 +779,30 @@ export function ChatScreen({
   // stay pinned there after the layout settles. (If they were reading
   // history, leave them alone.)
   useEffect(() => {
-    const sub = Keyboard.addListener('keyboardDidShow', () => {
+    const showSub = Keyboard.addListener('keyboardDidShow', () => {
       if (isAtBottomRef.current) {
         // Defer past the layout animation so contentSize reflects the new
         // (smaller) layout before we scroll.
         setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 50);
       }
     });
-    return () => sub.remove();
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setMentionQuery(null);
+      setHashtagDismissed(true);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
   }, []);
 
   const handleTextChange = (next: string) => {
     setText(next);
+    // onChangeText does not carry the caret offset. Most changes append at the
+    // end, so update immediately for that fast path; onSelectionChange below
+    // corrects this after edits in the middle of a draft.
+    setActiveHashtag(findActiveHashtag(next, next.length));
+    setHashtagDismissed(false);
     // Dismiss transform banner on any manual edit — the user has moved on.
     if (originalText !== null) {
       setOriginalText(null);
@@ -792,6 +849,25 @@ export function ChatScreen({
     // Focus the input so the user can keep typing after selection.
     textInputRef.current?.focus();
   }, [text]);
+
+  const handleHashtagSelect = useCallback((suggestion: HashtagSuggestion) => {
+    if (!activeHashtag) return;
+    const applied = applyHashtagSuggestion(text, activeHashtag, suggestion.tag);
+    setText(applied.text);
+    setActiveHashtag(null);
+    setHashtagSuggestions([]);
+    setHashtagSelectedIndex(0);
+    setHashtagDismissed(true);
+
+    // Keep the software keyboard open after a tap and place the caret after
+    // the inserted space so mobile composition continues without another tap.
+    requestAnimationFrame(() => {
+      textInputRef.current?.focus();
+      textInputRef.current?.setNativeProps({
+        selection: { start: applied.cursor, end: applied.cursor },
+      });
+    });
+  }, [activeHashtag, text]);
 
   // ── Attachment pick handler (OpenChat-6bg) ────────────────────────────────
   const handlePickAttachment = useCallback(async () => {
@@ -872,6 +948,9 @@ export function ChatScreen({
     setPendingAsset(null);
     setMentionQuery(null);
     mentionAtOffset.current = -1;
+    setActiveHashtag(null);
+    setHashtagSuggestions([]);
+    setHashtagDismissed(true);
     // Dismiss transform banner on send (intentional commit of the transform).
     setOriginalText(null);
     setTransformLabel('');
@@ -890,12 +969,52 @@ export function ChatScreen({
         }
       }
       await sendMessage(trimmed, currentReplyToId, attachments);
+      invalidateHashtagSuggestions(conversationId);
       hapticSend();
     } catch (err) {
       console.warn('[ChatScreen] send failed:', err);
       Alert.alert('Upload failed', 'Could not send the image. Please try again.');
     } finally {
       setSending(false);
+    }
+  };
+
+  // React Native's onKeyPress only reliably covers character keys on web.
+  // RN Web forwards onKeyDown to its underlying textarea, which is what lets
+  // arrow, Tab, and Escape controls work without a global document listener.
+  const handleComposerWebKeyDown = (event: React.KeyboardEvent) => {
+    const hashtagPickerOpen = !!activeHashtag
+      && !hashtagDismissed
+      && hashtagSuggestions.length > 0;
+
+    if (hashtagPickerOpen) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        setHashtagSelectedIndex((index) => (index + 1) % hashtagSuggestions.length);
+        return;
+      }
+      if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+        event.preventDefault();
+        setHashtagSelectedIndex(
+          (index) => (index - 1 + hashtagSuggestions.length) % hashtagSuggestions.length,
+        );
+        return;
+      }
+      if ((event.key === 'Enter' || event.key === 'Tab') && !event.nativeEvent.isComposing) {
+        event.preventDefault();
+        handleHashtagSelect(hashtagSuggestions[hashtagSelectedIndex]);
+        return;
+      }
+    }
+    if (event.key === 'Escape' && activeHashtag) {
+      event.preventDefault();
+      setHashtagDismissed(true);
+      setHashtagSuggestions([]);
+      return;
+    }
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      void handleSend();
     }
   };
 
@@ -1509,6 +1628,15 @@ export function ChatScreen({
         />
       )}
 
+      {activeHashtag && !hashtagDismissed && hashtagSuggestions.length > 0 && (
+        <HashtagAutocomplete
+          suggestions={hashtagSuggestions}
+          selectedIndex={hashtagSelectedIndex}
+          onSelect={handleHashtagSelect}
+          scheme={scheme}
+        />
+      )}
+
       {/* Transform banner — shown above composer after a transform (OpenChat-8a0) */}
       {originalText !== null && (
         <View style={[styles.replyBar, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -1599,19 +1727,14 @@ export function ChatScreen({
           placeholder="Write…"
           placeholderTextColor={c.textMuted}
           multiline
-          // Web (/app): Enter sends, Shift+Enter inserts a newline. Guarded to
-          // web only — on a touch keyboard the return key must stay a newline
-          // (sending is the send button). The isComposing check keeps IME users
-          // (e.g. Chinese input) from sending while confirming a candidate.
-          // See openchat-4hq.
-          onKeyPress={(e) => {
-            if (Platform.OS !== 'web') return;
-            const ne = e.nativeEvent as unknown as KeyboardEvent;
-            if (ne.key === 'Enter' && !ne.shiftKey && !ne.isComposing) {
-              e.preventDefault();
-              void handleSend();
-            }
+          {...(Platform.OS === 'web' ? { onKeyDown: handleComposerWebKeyDown } : {})}
+          onSelectionChange={(event) => {
+            const cursor = event.nativeEvent.selection.end;
+            setActiveHashtag(findActiveHashtag(text, cursor));
+            setHashtagDismissed(false);
           }}
+          // Web (/app): Enter sends, Shift+Enter inserts a newline. Native
+          // touch keyboards keep return as newline and use the send button.
         />
         {/* Transform sparkle button (OpenChat-8a0) — hidden in edit mode or
             while recording. The chevron menu includes "NVC Compose...",
