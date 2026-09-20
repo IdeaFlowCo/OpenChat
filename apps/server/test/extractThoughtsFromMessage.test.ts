@@ -38,17 +38,22 @@ describe('createThoughtsFromMessageTags', () => {
     expect(run).toHaveBeenCalledTimes(1);
     expect(ids).toHaveLength(1);
 
-    const [, params] = run.mock.calls[0] as [string, Record<string, unknown>];
+    const [query, params] = run.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain("captureMethod: 'inline-tag'");
     expect(params.tags).toEqual(['fact', 'decision']);
     expect(params.kind).toBe('fact'); // first tag's kind is primary
     expect(params.text).toBe('#fact #decision we ship Friday');
   });
 
-  it('emits a single thought:created event carrying all tags', async () => {
+  it('emits the tagged thought to the author and the whole conversation', async () => {
     const run = vi.fn().mockResolvedValue({ records: [] });
     const session = { run } as unknown as Session;
-    const emit = vi.fn();
-    const io = { to: vi.fn(() => ({ emit })) } as unknown as Parameters<
+    const personalEmit = vi.fn();
+    const conversationEmit = vi.fn();
+    const to = vi.fn((room: string) => ({
+      emit: room.startsWith('user:') ? personalEmit : conversationEmit,
+    }));
+    const io = { to } as unknown as Parameters<
       typeof createThoughtsFromMessageTags
     >[1]['io'];
 
@@ -60,11 +65,29 @@ describe('createThoughtsFromMessageTags', () => {
       io,
     });
 
-    expect(emit).toHaveBeenCalledTimes(1);
-    const [eventName, payload] = emit.mock.calls[0] as [string, { thought: { tags: string[]; kind: string } }];
-    expect(eventName).toBe('thought:created');
-    expect(payload.thought.tags).toEqual(['fact', 'decision']);
-    expect(payload.thought.kind).toBe('fact');
+    expect(to).toHaveBeenCalledWith('user:user-1');
+    expect(to).toHaveBeenCalledWith('conversation:conv-1');
+    expect(personalEmit).toHaveBeenCalledWith(
+      'thought:created',
+      expect.objectContaining({
+        thought: expect.objectContaining({
+          tags: ['fact', 'decision'],
+          kind: 'fact',
+          authorId: 'user-1',
+        }),
+      }),
+    );
+    expect(conversationEmit).toHaveBeenCalledWith(
+      'thought:shared',
+      expect.objectContaining({
+        conversationId: 'conv-1',
+        thought: expect.objectContaining({
+          tags: ['fact', 'decision'],
+          kind: 'fact',
+          authorId: 'user-1',
+        }),
+      }),
+    );
   });
 
   it('returns no ids and does not throw when there are no tags', async () => {

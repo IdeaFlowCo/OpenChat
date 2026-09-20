@@ -4,12 +4,13 @@
  * Opened from a chat's header (thought-bubble icon). Shows two sections:
  *   Pinned          — thoughts pinned to this conversation by any participant
  *                     (pinning shares the thought with the whole chat)
- *   From this chat  — the caller's own thoughts captured from this chat
- *                     (#hashtag captures + "Save to Thoughts")
+ *   From this chat  — all participants' shared #hashtag captures plus the
+ *                     caller's private "Save to Thoughts" captures
  *
  * Pin toggles: own thoughts can be pinned/unpinned; another participant's
  * pinned thought can't be modified here. Long-press deletes own thoughts.
- * Live updates via 'thought:pinned' / 'thought:unpinned' socket events.
+ * Live updates via 'thought:shared' / 'thought:pinned' /
+ * 'thought:unpinned' socket events.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -68,10 +69,16 @@ export function ConversationThoughtsScreen() {
 
   useEffect(() => { void load(); }, [load]);
 
-  // Live pin/unpin updates from other participants.
+  // Live tag/pin updates from participants in this conversation.
   useEffect(() => {
     const sock = getSocket();
     if (!sock) return;
+    const onShared = (p: { conversationId: string; thought: Thought }) => {
+      if (p?.conversationId !== conversationId || !p.thought) return;
+      setFromChat((prev) =>
+        prev.some((t) => t.id === p.thought.id) ? prev : [p.thought, ...prev]
+      );
+    };
     const onPinned = (p: { conversationId: string; thought: Thought }) => {
       if (p?.conversationId !== conversationId || !p.thought) return;
       setPinned((prev) =>
@@ -85,9 +92,11 @@ export function ConversationThoughtsScreen() {
       // The thought may still belong in "From this chat" — just refetch.
       void load(true);
     };
+    sock.on('thought:shared', onShared);
     sock.on('thought:pinned', onPinned);
     sock.on('thought:unpinned', onUnpinned);
     return () => {
+      sock.off('thought:shared', onShared);
       sock.off('thought:pinned', onPinned);
       sock.off('thought:unpinned', onUnpinned);
     };
@@ -160,16 +169,17 @@ export function ConversationThoughtsScreen() {
       </Text>
       {fromChat.length === 0 && !loading && (
         <Text style={[styles.emptyText, { color: c.textMuted }]}>
-          Your thoughts captured from this chat land here — use #fact, #idea,
-          #todo… in a message, or long-press a message → “Save to Thoughts”.
+          Shared tags from this chat land here — use #fact, #idea, #todo… in a
+          message, or long-press a message → “Save to Thoughts” for a private capture.
         </Text>
       )}
       {fromChat.map((t) => (
         <ThoughtCard
           key={t.id}
           item={{ ...t, pinned: false }}
-          onDelete={() => handleDelete(t.id)}
-          onTogglePin={() => handleTogglePin(t, false)}
+          subtitle={mine(t) ? undefined : `by ${t.authorName || 'a participant'}`}
+          onDelete={mine(t) ? () => handleDelete(t.id) : undefined}
+          onTogglePin={mine(t) ? () => handleTogglePin(t, false) : undefined}
         />
       ))}
     </ScrollView>

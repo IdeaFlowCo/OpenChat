@@ -727,7 +727,7 @@ export interface Thought {
   pinned?: boolean;
   pinnedBy?: string | null;
   pinnedAt?: string | null;
-  /** Author info — present on pinned thoughts from other participants. */
+  /** Author info — present on shared chat-scoped thoughts. */
   authorId?: string | null;
   authorName?: string | null;
 }
@@ -736,7 +736,7 @@ export interface Thought {
 export interface ConversationThoughts {
   /** Pinned to this conversation, any participant. */
   pinned: Thought[];
-  /** The caller's own thoughts captured from this chat (not pinned). */
+  /** Private captures owned by the caller plus shared inline-tag thoughts. */
   fromChat: Thought[];
 }
 
