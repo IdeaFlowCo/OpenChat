@@ -84,6 +84,8 @@ export interface User {
   discoveryMode?: 'name' | 'email_only' | 'hidden';
   /** True for AI / agent users (picortex, future agents). Surface as a badge. */
   isBot?: boolean;
+  /** Count of conversations the requesting user shares with this candidate. */
+  sharedConversations?: number;
 }
 
 export interface Participant {

@@ -25,6 +25,7 @@ import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
+import { YouBadge } from '../components/YouBadge';
 import type { NavProp } from '../navigation/types';
 
 type Mode = 'direct' | 'group';
@@ -240,8 +241,9 @@ export function NewConversationScreen() {
                 <View style={{ flex: 1 }}>
                   <View style={styles.rowTop}>
                     <Text style={[styles.name, { color: c.textPrimary }]} numberOfLines={1}>
-                      {item.id === currentUser?.userId ? `${item.name || currentUser?.name || 'You'} (You)` : (item.name || 'OpenChat member')}
+                      {item.id === currentUser?.userId ? (item.name || currentUser?.name || 'You') : (item.name || 'OpenChat member')}
                     </Text>
+                    <YouBadge isSelf={item.id === currentUser?.userId} compact />
                     <BotBadge isBot={item.isBot} compact />
                   </View>
                   <Text style={[styles.email, { color: c.textSecondary }]} numberOfLines={1}>
@@ -249,6 +251,11 @@ export function NewConversationScreen() {
                       ? 'Note to self'
                       : `OpenChat · ${item.id.slice(0, 6)}`}
                   </Text>
+                  {!!item.sharedConversations && (
+                    <Text style={[styles.sharedSubtitle, { color: c.textMuted }]} numberOfLines={1}>
+                      {item.sharedConversations} shared conversation{item.sharedConversations === 1 ? '' : 's'}
+                    </Text>
+                  )}
                 </View>
                 {mode === 'group' && (
                   <View style={[styles.check, {
@@ -336,6 +343,7 @@ const styles = StyleSheet.create({
   rowTop: { flexDirection: 'row', alignItems: 'center' },
   name: { fontSize: 16, fontWeight: '600' },
   email: { fontSize: 13, marginTop: 2 },
+  sharedSubtitle: { fontSize: 12, marginTop: 2 },
   check: {
     width: 24, height: 24, borderRadius: 12,
     borderWidth: 2, alignItems: 'center', justifyContent: 'center',
