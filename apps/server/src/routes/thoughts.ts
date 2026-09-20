@@ -45,6 +45,52 @@ function toJS(value: unknown): unknown {
 }
 
 /**
+ * Legacy dedupe (OpenChat-kb7f): before the write-side fix, a message with N
+ * hashtags fanned out into N :Thought nodes sharing the same source message
+ * and full message text. Merge any such rows into one — union their tags,
+ * keep the earliest row's id/kind/createdAt — so old duplicates render once.
+ * Rows without a sourceMessageId (or with no duplicates) pass through
+ * untouched. Rows are expected newest-first, so for a given key the
+ * earliest duplicate is the LAST one encountered.
+ */
+export function mergeDuplicateThoughtsFromSameMessage(
+  thoughts: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  const indexByKey = new Map<string, number>();
+  const merged: Array<Record<string, unknown>> = [];
+
+  for (const thought of thoughts) {
+    const sourceMessageId = thought.sourceMessageId as string | null | undefined;
+    const key = sourceMessageId ? `${sourceMessageId}::${thought.text as string}` : null;
+    if (!key) {
+      merged.push(thought);
+      continue;
+    }
+
+    const idx = indexByKey.get(key);
+    if (idx === undefined) {
+      indexByKey.set(key, merged.length);
+      merged.push({ ...thought, tags: [...((thought.tags as string[]) ?? [])] });
+      continue;
+    }
+
+    const canonical = merged[idx] as Record<string, unknown> & { tags: string[] };
+    for (const tag of (thought.tags as string[]) ?? []) {
+      if (!canonical.tags.includes(tag)) canonical.tags.push(tag);
+    }
+    merged[idx] = {
+      ...canonical,
+      id: thought.id,
+      kind: thought.kind,
+      createdAt: thought.createdAt,
+      updatedAt: thought.updatedAt,
+    };
+  }
+
+  return merged;
+}
+
+/**
  * GET /api/thoughts?limit=50&before=<ISO createdAt>
  * List the current user's thoughts, newest first.
  */
@@ -76,6 +122,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       RETURN t {
         .id, .text, .kind, .status, .createdAt, .updatedAt,
         tags: coalesce(t.tags, []),
+        sourceMessageId: m.id,
         sourceConversationId: m.conversationId,
         sourceConversationName: conv.name
       } AS thought
@@ -88,7 +135,9 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       { userId, before: before ?? undefined, q: q ?? undefined, limit: neo4j.int(limit) }
     );
 
-    const thoughts = result.records.map((r) => toJS(r.get('thought')));
+    const thoughts = mergeDuplicateThoughtsFromSameMessage(
+      result.records.map((r) => toJS(r.get('thought')) as Record<string, unknown>)
+    );
     res.json(thoughts);
   } catch (err) {
     console.error('GET /api/thoughts error:', err);
@@ -150,6 +199,7 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
       RETURN t {
         .id, .text, .kind, .status, .createdAt, .updatedAt,
         tags: coalesce(t.tags, []),
+        sourceMessageId: m.id,
         sourceConversationId: m.conversationId,
         pinned: false
       } AS thought
@@ -161,7 +211,9 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
 
     res.json({
       pinned: pinnedResult.records.map((r) => toJS(r.get('thought'))),
-      fromChat: fromChatResult.records.map((r) => toJS(r.get('thought'))),
+      fromChat: mergeDuplicateThoughtsFromSameMessage(
+        fromChatResult.records.map((r) => toJS(r.get('thought')) as Record<string, unknown>)
+      ),
     });
   } catch (err) {
     console.error('GET /api/thoughts/conversation error:', err);

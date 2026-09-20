@@ -15,7 +15,8 @@
  *   "#todo follow up with Sandeep"       → kind=reminder (alias)
  *   "#note keyboard shortcut is Cmd-K"   → kind=observation (alias)
  *
- * Multiple tags on one message → one Thought per tag.
+ * Multiple tags on one message → ONE Thought per message. All tag names are
+ * unioned into `tags: string[]`; `kind` is the FIRST tag's kind (primary).
  *
  * The Thought text is the message content with the tag itself stripped,
  * leading/trailing whitespace trimmed. If stripping leaves an empty
@@ -92,13 +93,14 @@ export function extractTagsFromMessage(content: string): ExtractedTag[] {
 }
 
 /**
- * Side-effectful: for each tag, create a :Thought node owned by the
- * sender + linked to the source message. Best-effort — failures are
- * logged but do NOT propagate (we don't want a Thought-creation hiccup
- * to break a chat message send).
+ * Side-effectful: create a single :Thought node owned by the sender,
+ * carrying ALL of the message's tags, linked to the source message.
+ * Best-effort — failures are logged but do NOT propagate (we don't want a
+ * Thought-creation hiccup to break a chat message send).
  *
- * Returns the list of created Thought ids so the caller (or socket
- * fan-out, eventually) can emit a 'thought:created' event.
+ * Returns the created Thought's id (as a single-element array, for
+ * backward compatibility with callers) so the caller (or socket fan-out)
+ * can emit a 'thought:created' event.
  */
 export async function createThoughtsFromMessageTags(
   session: Session,
@@ -115,66 +117,64 @@ export async function createThoughtsFromMessageTags(
   const tags = extractTagsFromMessage(params.content);
   if (tags.length === 0) return [];
 
-  const createdIds: string[] = [];
   console.log(`[thought-from-tag] extracted ${tags.length} tag(s) from message ${params.messageId}:`, tags.map((t) => t.raw).join(', '));
-  for (const tag of tags) {
-    try {
-      // Keep the FULL message text incl. the hashtags (per Jacob 2026-06-04):
-      // the tag stays visible in the Thought, and is also elevated into the
-      // `tags` metadata below. Don't strip.
-      const text = params.content.trim();
-      const id = nanoid();
-      const now = new Date().toISOString();
-      await session.run(
-        `
-        MATCH (u:User {id: $senderId})
-        OPTIONAL MATCH (m:Message {id: $messageId})
-        CREATE (t:Thought {
-          id: $id,
-          userId: $senderId,
-          text: $text,
-          kind: $kind,
-          tags: $tags,
-          status: 'none',
-          createdAt: datetime($now),
-          updatedAt: datetime($now)
-        })
-        CREATE (u)-[:HAS_THOUGHT]->(t)
-        FOREACH (msg IN CASE WHEN m IS NULL THEN [] ELSE [m] END |
-          CREATE (t)-[:FROM_MESSAGE]->(msg)
-        )
-        `,
-        { id, senderId: params.senderId, messageId: params.messageId, text, kind: tag.kind, tags: [tag.name], now }
-      );
-      createdIds.push(id);
-      console.log(`[thought-from-tag] created Thought ${id} (kind=${tag.kind}) for user ${params.senderId} from message ${params.messageId}`);
+  try {
+    // Keep the FULL message text incl. the hashtags (per Jacob 2026-06-04):
+    // the tags stay visible in the Thought, and are also elevated into the
+    // `tags` metadata below. Don't strip.
+    const text = params.content.trim();
+    const id = nanoid();
+    const now = new Date().toISOString();
+    const kind = tags[0].kind;
+    const tagNames = tags.map((tag) => tag.name);
+    await session.run(
+      `
+      MATCH (u:User {id: $senderId})
+      OPTIONAL MATCH (m:Message {id: $messageId})
+      CREATE (t:Thought {
+        id: $id,
+        userId: $senderId,
+        text: $text,
+        kind: $kind,
+        tags: $tags,
+        status: 'none',
+        createdAt: datetime($now),
+        updatedAt: datetime($now)
+      })
+      CREATE (u)-[:HAS_THOUGHT]->(t)
+      FOREACH (msg IN CASE WHEN m IS NULL THEN [] ELSE [m] END |
+        CREATE (t)-[:FROM_MESSAGE]->(msg)
+      )
+      `,
+      { id, senderId: params.senderId, messageId: params.messageId, text, kind, tags: tagNames, now }
+    );
+    console.log(`[thought-from-tag] created Thought ${id} (kind=${kind}, tags=${tagNames.join(', ')}) for user ${params.senderId} from message ${params.messageId}`);
 
-      // Emit to the sender's user room so the Thoughts tab can refresh
-      // without polling. Same room-naming pattern other emits use
-      // (chatHandler joins each user to `user:${userId}` on connect).
-      if (params.io) {
-        try {
-          params.io.to(`user:${params.senderId}`).emit('thought:created', {
-            thought: {
-              id,
-              text,
-              kind: tag.kind,
-              tags: [tag.name],
-              status: 'none',
-              createdAt: now,
-              updatedAt: now,
-              fromMessageId: params.messageId,
-              fromConversationId: params.conversationId,
-            },
-          });
-        } catch (e) {
-          console.warn('[thought-from-tag] socket emit failed:', e);
-        }
+    // Emit to the sender's user room so the Thoughts tab can refresh
+    // without polling. Same room-naming pattern other emits use
+    // (chatHandler joins each user to `user:${userId}` on connect).
+    if (params.io) {
+      try {
+        params.io.to(`user:${params.senderId}`).emit('thought:created', {
+          thought: {
+            id,
+            text,
+            kind,
+            tags: tagNames,
+            status: 'none',
+            createdAt: now,
+            updatedAt: now,
+            fromMessageId: params.messageId,
+            fromConversationId: params.conversationId,
+          },
+        });
+      } catch (e) {
+        console.warn('[thought-from-tag] socket emit failed:', e);
       }
-    } catch (err) {
-      console.warn('[thought-from-tag] failed to create Thought for tag', tag.raw, err);
-      // Continue with the other tags.
     }
+    return [id];
+  } catch (err) {
+    console.warn('[thought-from-tag] failed to create Thought for message', params.messageId, err);
+    return [];
   }
-  return createdIds;
 }
