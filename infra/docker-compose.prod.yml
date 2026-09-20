@@ -38,6 +38,13 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - GOOGLE_IOS_CLIENT_ID=${GOOGLE_IOS_CLIENT_ID:-}
+      # Additive centralized identity login. The explicit enabled flag is a
+      # kill switch; credentials can be staged while the UI remains off.
+      - IDEAFLOW_ID_ENABLED=${IDEAFLOW_ID_ENABLED:-false}
+      - IDEAFLOW_ID_ISSUER=${IDEAFLOW_ID_ISSUER:-https://id.ideaflow.app/api/auth}
+      - IDEAFLOW_ID_CLIENT_ID=${IDEAFLOW_ID_CLIENT_ID:-}
+      - IDEAFLOW_ID_CLIENT_SECRET=${IDEAFLOW_ID_CLIENT_SECRET:-}
+      - IDEAFLOW_ID_REDIRECT_URI=${IDEAFLOW_ID_REDIRECT_URI:-https://chat.globalbr.ai/auth/ideaflow/callback}
       # Agent API key encryption secret (OpenChat-7c9). 32-byte hex string.
       # Generate: openssl rand -hex 32 >> /opt/openchat/.env
       - OC_KEY_ENCRYPTION_SECRET=${OC_KEY_ENCRYPTION_SECRET:-}

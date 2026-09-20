@@ -14,6 +14,33 @@ interface AuthenticatedSocket extends Socket {
   user?: AuthUser;
 }
 
+type MessageAuthorizationSession = {
+  run: (query: string, params: Record<string, unknown>) => Promise<{
+    records: Array<{ get: (key: string) => unknown }>;
+  }>;
+};
+
+export type MessageSendAuthorization = 'allowed' | 'blocked' | 'not_participant';
+
+/** Shared, directly testable authorization boundary for the primary socket send path. */
+export async function authorizeSocketMessageSend(
+  session: MessageAuthorizationSession,
+  userId: string,
+  conversationId: string,
+): Promise<MessageSendAuthorization> {
+  const check = await session.run(`
+    MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+    RETURN exists {
+      MATCH (other:User)-[:PARTICIPATES_IN]->(c)
+      WHERE other.id <> $userId
+        AND ((other)-[:BLOCKED]->(u) OR (u)-[:BLOCKED]->(other))
+    } AS blockedRelationship
+  `, { userId, conversationId });
+
+  if (check.records.length === 0) return 'not_participant';
+  return check.records[0].get('blockedRelationship') === true ? 'blocked' : 'allowed';
+}
+
 // Track which sockets are in which conversations
 const conversationSockets = new Map<string, Set<string>>(); // conversationId -> socketIds
 const socketConversations = new Map<string, Set<string>>(); // socketId -> conversationIds
@@ -187,25 +214,17 @@ export function setupChatSocket(io: Server): void {
 
       const session = getDriver().session();
       try {
-        // Verify participation AND check for block (OpenChat-46p):
-        // If any recipient in a direct conversation has blocked the sender,
-        // silently drop the message (no error to sender).
-        const check = await session.run(`
-          MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-          RETURN c,
-            exists {
-              MATCH (other:User)-[:PARTICIPATES_IN]->(c)
-              WHERE other.id <> $userId AND (other)-[:BLOCKED]->(u)
-            } AS blockedBySomeone
-        `, { userId, conversationId });
+        // Verify participation and enforce blocks in both directions. A block
+        // means neither side can send to the other, including through a group.
+        const authorization = await authorizeSocketMessageSend(session, userId, conversationId);
 
-        if (check.records.length === 0) {
+        if (authorization === 'not_participant') {
           callback?.({ error: 'Not a participant' });
           return;
         }
 
         // Silently drop if blocked — return success to sender but don't persist or fan out.
-        if (check.records[0].get('blockedBySomeone') === true) {
+        if (authorization === 'blocked') {
           callback?.({ success: true, dropped: true });
           return;
         }
@@ -240,20 +259,21 @@ export function setupChatSocket(io: Server): void {
             const participantsResult = await session.run(`
               MATCH (p:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
               WHERE p.id <> $senderId
-              RETURN p.id AS pid, p.name AS pname, p.email AS pemail
+              RETURN p.id AS pid, p.name AS pname
             `, { conversationId, senderId: userId });
             const participants = participantsResult.records.map(r => ({
               id: r.get('pid') as string,
               name: (r.get('pname') as string | null) || '',
-              email: (r.get('pemail') as string | null) || '',
             }));
             for (const token of mentionTokens) {
               const lower = token.toLowerCase();
-              const matched = participants.find(p =>
-                p.name.toLowerCase() === lower ||
-                p.name.toLowerCase().startsWith(lower) ||
-                p.email.split('@')[0].toLowerCase() === lower
-              );
+              const exact = participants.filter(p => p.name.toLowerCase() === lower);
+              const candidates = exact.length > 0
+                ? exact
+                : participants.filter(p => p.name.toLowerCase().startsWith(lower));
+              // Duplicate names are common (especially for neutral fallback
+              // names). Never guess which participant should be notified.
+              const matched = candidates.length === 1 ? candidates[0] : undefined;
               if (matched && !mentionedUserIds.includes(matched.id)) {
                 mentionedUserIds.push(matched.id);
               }
@@ -282,7 +302,7 @@ export function setupChatSocket(io: Server): void {
           REMOVE m._created
           WITH c, m, sender, wasCreated
           MATCH (p:User)-[:PARTICIPATES_IN]->(c)
-          RETURN m { .*, sender: sender { .id, .name, .email } } AS message,
+          RETURN m { .*, sender: sender { .id, .name, .avatarUrl } } AS message,
                  collect(DISTINCT p.id) AS participantIds,
                  wasCreated
         `, {
@@ -543,7 +563,7 @@ export async function fanoutPushForMessage(
       .map((r) => r.id);
     if (recipientIds.length === 0) return;
 
-    const senderName = (m.sender?.name || m.sender?.email || 'Someone').trim();
+    const senderName = (m.sender?.name || 'Someone').trim();
     const preview = (m.content || '').slice(0, 140);
     const mentionSet = new Set(mentionedUserIds);
 

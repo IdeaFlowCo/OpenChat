@@ -1,6 +1,6 @@
 /**
  * MaxWidthContent — reusable layout wrapper that caps content width and
- * centers it horizontally within its parent. Used in the desktop /d/ build
+ * centers it horizontally within its parent. Used in the wide /app/ layout
  * so chat bubbles, composers, and similar content don't stretch edge-to-
  * edge on wide monitors (1920+ px). On narrower screens (mobile/tablet),
  * the maxWidth never binds and behavior is identical to a plain View.

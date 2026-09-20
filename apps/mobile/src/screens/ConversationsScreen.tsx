@@ -9,7 +9,7 @@
  * a reconnect catch-up briefly pulse with a highlight background.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -31,6 +31,8 @@ import { BotBadge } from '../components/BotBadge';
 import { AppIcon } from '../components/AppIcon';
 import { AgentOverlayButton } from '../components/AgentOverlayButton';
 import { ConnectionStatusLine } from '../components/ConnectionStatusLine';
+import { StoriesStrip } from '../components/StoriesStrip';
+import { useSocialExperience } from '../contexts/SocialExperienceContext';
 import type { NavProp } from '../navigation/types';
 import {
   getDirectConversationParticipant,
@@ -50,6 +52,11 @@ function formatTime(iso: string | undefined): string {
 
 function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
   if (conv.type === 'direct') {
+    const other = getDirectConversationParticipant(conv, me);
+    if (!conv.title && other?.isBot
+      && (other.id === 'assistant' || other.name === 'Assistant')) {
+      return 'My Agent';
+    }
     return getDirectConversationTitle(conv, me, 'Unknown');
   }
   if (conv.title) return conv.title;
@@ -122,7 +129,7 @@ function ConvRow({
         activeOpacity={0.7}
       >
         <Avatar
-          name={item.type === 'direct' ? (other?.name || other?.email) : title}
+          name={item.type === 'direct' ? (other?.name || other?.email || title) : title}
           email={other?.email}
           isBot={isBot}
           presenceStatus={item.type === 'direct' ? presenceStatus : undefined}
@@ -177,12 +184,18 @@ export function ConversationsScreen() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const navigation = useNavigation<NavProp<'Conversations'>>();
+  const { enhanced } = useSocialExperience();
   const {
     currentUser, conversations, conversationsLoaded, refreshConversations,
     isConnected, presence, unreadByConv, typingByConv, signOut, mutedConvs,
     reconnectNewConvIds,
   } = useChat();
   const [refreshing, setRefreshing] = useState(false);
+  const orderedConversations = useMemo(() => [...conversations].sort((a, b) => {
+    const aAssistant = a.participants?.some(participant => participant.user.id === 'assistant') ? 1 : 0;
+    const bAssistant = b.participants?.some(participant => participant.user.id === 'assistant') ? 1 : 0;
+    return bAssistant - aAssistant;
+  }), [conversations, currentUser]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -201,10 +214,12 @@ export function ConversationsScreen() {
       ),
       headerRight: () => (
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <AgentOverlayButton
-            color={c.primary}
-            onPress={() => navigation.navigate('AgentOverlay')}
-          />
+          {enhanced && (
+            <AgentOverlayButton
+              color={c.primary}
+              onPress={() => navigation.navigate('AgentOverlay')}
+            />
+          )}
           <TouchableOpacity
             onPress={() => navigation.navigate('Search')}
             accessibilityLabel="Search"
@@ -236,7 +251,7 @@ export function ConversationsScreen() {
         </TouchableOpacity>
       ),
     });
-  }, [navigation, c.primary, c.danger, c.textPrimary, c.textSecondary, currentUser?.email, isConnected, signOut]);
+  }, [navigation, c.primary, c.danger, c.textPrimary, c.textSecondary, currentUser?.email, enhanced, isConnected, signOut]);
 
   useEffect(() => {
     if (!conversationsLoaded) refreshConversations();
@@ -253,8 +268,15 @@ export function ConversationsScreen() {
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
       <FlatList
-        data={conversations}
+        data={orderedConversations}
         keyExtractor={item => item.id}
+        ListHeaderComponent={
+          <StoriesStrip
+            onCreate={() => navigation.navigate('StoryComposer')}
+            onOpenStory={(story) => navigation.navigate('StoryViewer', { story })}
+            onOpenReview={() => navigation.navigate('SocialReview')}
+          />
+        }
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

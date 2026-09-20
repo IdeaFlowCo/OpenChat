@@ -294,15 +294,13 @@ export function GroupSettingsScreen() {
                       }]}
                       value={addQuery}
                       onChangeText={setAddQuery}
-                      placeholder={currentUser?.canBrowseUserDirectory ? 'Search by name or email' : 'Enter a complete email address'}
+                      placeholder="Search by name or exact email"
                       placeholderTextColor={c.textMuted}
                       autoCapitalize="none"
                       autoCorrect={false}
                     />
                     <Text style={{ color: c.textMuted, fontSize: 12, marginTop: 6 }}>
-                      {currentUser?.canBrowseUserDirectory
-                        ? 'Trusted directory access is enabled, or use the private QR / invite link above.'
-                        : 'Exact email only, or use the private QR / invite link above.'}
+                      Email addresses stay private, or use the private QR / invite link above.
                     </Text>
                     {addResults.slice(0, 10).map(u => (
                       <TouchableOpacity
@@ -311,16 +309,16 @@ export function GroupSettingsScreen() {
                         onPress={() => onAdd(u)}
                         disabled={adding === u.id}
                       >
-                        <Avatar name={u.name} email={u.email} isBot={u.isBot} size={36} />
+                        <Avatar name={u.name} email={u.email} avatarUrl={u.avatarUrl} isBot={u.isBot} size={36} />
                         <View style={{ flex: 1 }}>
                           <View style={styles.rowTop}>
                             <Text style={[styles.memberName, { color: c.textPrimary }]} numberOfLines={1}>
-                              {u.name || u.email}
+                              {u.name || 'OpenChat member'}
                             </Text>
                             <BotBadge isBot={u.isBot} compact />
                           </View>
                           <Text style={[styles.memberEmail, { color: c.textSecondary }]} numberOfLines={1}>
-                            {u.email}
+                            {`OpenChat · ${u.id.slice(0, 6)}`}
                           </Text>
                         </View>
                         <Text style={{ color: c.primary, fontWeight: '600', opacity: adding === u.id ? 0.4 : 1 }}>

@@ -7,7 +7,7 @@
     "comment": "frontendDist points at the react-native-web export built WITHOUT a baseUrl (root-relative assets) so it loads from the tauri:// origin. beforeBuildCommand runs the export; run it manually with `npm run build:web` during development.",
     "beforeDevCommand": "npm --prefix ../../mobile run web",
     "beforeBuildCommand": "npm --prefix .. run build:web",
-    "frontendDist": "../../mobile/dist-web-app",
+    "frontendDist": "../../mobile/dist-web-shell",
     "devUrl": "http://localhost:8081"
   },
   "app": {

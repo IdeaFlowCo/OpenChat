@@ -26,8 +26,6 @@ import type { Participant } from '../api/client';
 
 export interface MentionCandidate {
   userId: string;
-  name: string;
-  email: string;
   displayName: string;
 }
 
@@ -46,14 +44,9 @@ export function MentionAutocomplete({ query, participants, onSelect, scheme }: P
     return participants
       .map((p): MentionCandidate => ({
         userId: p.user.id,
-        name: p.user.name || '',
-        email: p.user.email,
-        displayName: p.user.name || p.user.email.split('@')[0] || p.user.email,
+        displayName: p.user.name || 'OpenChat member',
       }))
-      .filter(c =>
-        c.displayName.toLowerCase().includes(lower) ||
-        c.email.toLowerCase().includes(lower)
-      )
+      .filter(c => c.displayName.toLowerCase().includes(lower))
       .slice(0, 8); // cap to 8 visible candidates
   }, [query, participants]);
 
@@ -72,7 +65,7 @@ export function MentionAutocomplete({ query, participants, onSelect, scheme }: P
             onPress={() => onSelect(item)}
             activeOpacity={0.7}
           >
-            <Avatar name={item.displayName} email={item.email} size={28} />
+            <Avatar name={item.displayName} size={28} />
             <View style={styles.textCol}>
               <Text
                 style={[styles.name, { color: colorForUserId(item.userId, scheme) }]}
@@ -80,11 +73,9 @@ export function MentionAutocomplete({ query, participants, onSelect, scheme }: P
               >
                 {item.displayName}
               </Text>
-              {item.name ? (
-                <Text style={[styles.email, { color: c.textMuted }]} numberOfLines={1}>
-                  {item.email}
-                </Text>
-              ) : null}
+              <Text style={[styles.email, { color: c.textMuted }]} numberOfLines={1}>
+                OpenChat · {item.userId.slice(0, 6)}
+              </Text>
             </View>
           </TouchableOpacity>
         )}

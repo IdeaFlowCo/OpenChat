@@ -54,6 +54,17 @@ const mocks = vi.hoisted(() => {
           thoughts: [],
           blockedUsers: [],
           agentKeys,
+          intentDrafts: [{
+            id: 'draft-1', ownerUserId: params.userId, goal: 'Find a ticket', seeks: ['ticket'], brings: [],
+            details: 'owner-private', source: 'private-message', provenanceJson: '{"messageId":"source-1"}', state: 'pending',
+          }],
+          stories: [{ id: 'story-1', ownerUserId: params.userId, text: 'Looking for a ticket', status: 'active' }],
+          intents: [{ id: 'intent-1', ownerUserId: params.userId, kind: 'ask', terms: 'ticket', details: 'owner-private' }],
+          socialPreferences: { experienceMode: 'simple', networkPaused: true, updatedAt: '2026-09-02T00:00:00Z' },
+          agentMatches: [{
+            id: 'match-1', status: 'pending', ownIntent: { id: 'intent-1', kind: 'ask', terms: 'ticket' },
+            otherKind: 'offer', otherTerms: 'one ticket', matchType: 'complementary', score: 0.9,
+          }],
         };
         return {
           records: [{ get: (key: string) => values[key] }],
@@ -136,7 +147,7 @@ describe('GET /api/auth/export', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(exportResponse.status).toBe(200);
-    const exported = await exportResponse.json() as { agentKeys: AgentKey[] };
+    const exported = await exportResponse.json() as Record<string, unknown> & { agentKeys: AgentKey[] };
 
     expect(exported.agentKeys).toEqual([
       expect.objectContaining({
@@ -147,5 +158,20 @@ describe('GET /api/auth/export', () => {
         agentName: 'audit-agent',
       }),
     ]);
+    expect(exported).toMatchObject({
+      schema: 'openchat.account_export.v1',
+      intentDrafts: [{
+        id: 'draft-1', ownerUserId: 'owner-1', details: 'owner-private',
+        source: 'private-message', provenance: { messageId: 'source-1' },
+      }],
+      stories: [{ id: 'story-1', ownerUserId: 'owner-1' }],
+      intents: [{ id: 'intent-1', ownerUserId: 'owner-1', details: 'owner-private' }],
+      socialPreferences: { experienceMode: 'simple', networkPaused: true },
+      agentMatches: [{
+        id: 'match-1', status: 'pending', otherKind: 'offer', otherTerms: 'one ticket',
+        ownIntent: { id: 'intent-1', kind: 'ask', terms: 'ticket' },
+      }],
+    });
+    expect(JSON.stringify((exported.agentMatches as unknown[]))).not.toMatch(/otherOwner|ownerUserId|private|details|source|provenance|response/i);
   });
 });

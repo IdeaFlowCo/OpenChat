@@ -111,7 +111,7 @@ export function maybeTriggerSecretary(opts: {
              c.lastMessagePreview = left($content, 100)
          WITH c, m, owner
          MATCH (participant:User)-[:PARTICIPATES_IN]->(c)
-         RETURN m { .*, sender: owner { .id, .name, .email } } AS message,
+         RETURN m { .*, sender: owner { .id, .name, .avatarUrl } } AS message,
                 collect(DISTINCT participant.id) AS participantIds`,
         {
           conversationId,

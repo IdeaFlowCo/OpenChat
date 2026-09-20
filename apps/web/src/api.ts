@@ -1252,7 +1252,7 @@ class ApiClient {
   }
 
   // ── Agent-network asks, offers, and quiet matches ───────────────────────
-  async publishIntent(params: { kind: AgentIntentKind; terms: string; details?: string; expiresAt?: string }): Promise<{ intent: AgentIntent }> {
+  async publishIntent(params: { kind: AgentIntentKind; terms: string; confirm: true; details?: string; expiresAt?: string }): Promise<{ intent: AgentIntent }> {
     return this.authedFetch('/api/intents', { method: 'POST', body: JSON.stringify(params) });
   }
 

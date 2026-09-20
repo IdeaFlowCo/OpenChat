@@ -20,7 +20,7 @@ export const CONVERSATIONS_QUERY = `
   CALL {
     WITH c
     MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-    RETURN collect({user: participant {.id, .name, .email, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
+    RETURN collect({user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
   }
   CALL {
     WITH c

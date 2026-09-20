@@ -42,17 +42,19 @@ import { useNavigation } from '@react-navigation/native';
 import { OPENCHAT_URL } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
+import { useSocialExperience } from '../contexts/SocialExperienceContext';
 import { getColors } from '../theme/colors';
 import { ConversationList } from './ConversationList';
 import { AppIcon } from './AppIcon';
 import { AgentOverlayButton } from './AgentOverlayButton';
 import { ConnectionStatusLine } from './ConnectionStatusLine';
-// /d/ right pane renders the same ChatScreen that /m/ uses — with full
+// The wide /app/ pane renders the same ChatScreen as the compact layout — with full
 // feature parity (voice / preview / transform / forwarding / reactions /
 // edit / delete / mentions / attachments / read receipts / pagination).
 // Pass embedded=true so it doesn't try to configure a stack header
 // (MasterDetailLayout owns the chrome). OpenChat-601.2.
 import { ChatScreen } from '../screens/ChatScreen';
+import { AgentOverlayScreen } from '../screens/AgentOverlayScreen';
 import type { NavProp } from '../navigation/types';
 
 const SIDEBAR_WIDTH_EXPANDED = 320;
@@ -98,6 +100,7 @@ export function MasterDetailLayout() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const navigation = useNavigation<NavProp<'Conversations'>>();
+  const { enhanced } = useSocialExperience();
   const {
     currentUser, isConnected, activeConversationId, setActiveConversation,
     conversationsLoaded, refreshConversations, conversations,
@@ -112,6 +115,7 @@ export function MasterDetailLayout() {
   activeIdRef.current = activeConversationId;
 
   const [collapsed, setCollapsed] = useState(false);
+  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
   // Animated width — initialized to expanded; we'll snap (no animation) to
   // the persisted value on mount once we've read AsyncStorage, then any
   // subsequent toggles animate. Avoids a flash-of-expanded-then-collapsed.
@@ -164,7 +168,7 @@ export function MasterDetailLayout() {
   const openSearch = useCallback(() => navigation.navigate('Search'), [navigation]);
   const openNew = useCallback(() => navigation.navigate('NewConversation'), [navigation]);
   const openSettings = useCallback(() => navigation.navigate('Settings'), [navigation]);
-  const openAgentOverlay = useCallback(() => navigation.navigate('AgentOverlay'), [navigation]);
+  const openAgentOverlay = useCallback(() => setAgentPanelOpen(true), []);
   const openShortcuts = useCallback(() => navigation.navigate('KeyboardShortcuts'), [navigation]);
   const openGroupSettings = useCallback(
     (cid: string) => navigation.navigate('GroupSettings', { conversationId: cid }),
@@ -241,6 +245,10 @@ export function MasterDetailLayout() {
         return;
       }
       if (key === 'Escape') {
+        if (agentPanelOpen) {
+          setAgentPanelOpen(false);
+          return;
+        }
         // If a modal is open (NewConv/Settings/Search/GroupSettings/Shortcuts),
         // close it. Else deselect the active conversation.
         const state = navigation.getState?.();
@@ -257,7 +265,11 @@ export function MasterDetailLayout() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [openSearch, openNew, openSettings, openShortcuts, navigation, activeConversationId, setActiveConversation]);
+  }, [openSearch, openNew, openSettings, openShortcuts, navigation, activeConversationId, agentPanelOpen, setActiveConversation]);
+
+  useEffect(() => {
+    if (!enhanced) setAgentPanelOpen(false);
+  }, [enhanced]);
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
@@ -310,7 +322,7 @@ export function MasterDetailLayout() {
             >
               <AppIcon name="plus" color={c.primary} size={20} />
             </IconButton>
-            <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />
+            {enhanced && <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />}
           </View>
         ) : (
           <View style={[styles.sidebarHeader, { borderColor: c.border }]}>
@@ -349,7 +361,7 @@ export function MasterDetailLayout() {
             >
               <AppIcon name="search" color={c.primary} size={19} />
             </IconButton>
-            <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />
+            {enhanced && <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />}
             <IconButton
               onPress={openNew}
               title="New conversation (⌘N)"
@@ -366,6 +378,9 @@ export function MasterDetailLayout() {
             onSelect={setActiveConversation}
             onStartChat={openNew}
             compact={collapsed}
+            onCreateStory={() => navigation.navigate('StoryComposer')}
+            onOpenStory={(story) => navigation.navigate('StoryViewer', { story })}
+            onOpenReview={() => navigation.navigate('SocialReview')}
           />
         </View>
       </Animated.View>
@@ -376,6 +391,7 @@ export function MasterDetailLayout() {
             key={activeConversationId}
             conversationId={activeConversationId}
             embedded
+            onOpenAgent={openAgentOverlay}
           />
         ) : (
           <View style={styles.emptyDetail}>
@@ -388,6 +404,20 @@ export function MasterDetailLayout() {
           </View>
         )}
       </View>
+      {enhanced && agentPanelOpen && (
+        <View
+          style={[styles.agentPanel, { backgroundColor: c.background, borderLeftColor: c.border }]}
+        >
+          <AgentOverlayScreen
+            embedded
+            onClose={() => setAgentPanelOpen(false)}
+            onOpenConversation={(conversationId) => {
+              setActiveConversation(conversationId);
+              setAgentPanelOpen(false);
+            }}
+          />
+        </View>
+      )}
     </View>
   );
 }
@@ -435,5 +465,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   detail: { flex: 1 },
+  agentPanel: { width: 420, maxWidth: '42%', borderLeftWidth: StyleSheet.hairlineWidth },
   emptyDetail: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });

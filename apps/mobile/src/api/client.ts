@@ -75,15 +75,15 @@ const USER_KEY = 'openchat_user';
 
 export interface User {
   id: string;
-  email: string;
+  email?: string;
   name?: string;
   presenceStatus?: string;
   statusMessage?: string;
   lastSeenAt?: string;
   avatarUrl?: string;
+  discoveryMode?: 'name' | 'email_only' | 'hidden';
   /** True for AI / agent users (picortex, future agents). Surface as a badge. */
   isBot?: boolean;
-  canBrowseUserDirectory?: boolean;
 }
 
 export interface Participant {
@@ -140,7 +140,7 @@ export interface Message {
   editedAt?: string;
   /** Set when the message has been soft-deleted. */
   deletedAt?: string;
-  sender?: { id: string; name?: string; email: string };
+  sender?: { id: string; name?: string; email?: string };
   /** ID of the message this message is replying to (OpenChat-uxj).
    *  Server support is a follow-up ticket; field is passed through on send
    *  and stored locally on optimistic messages. */
@@ -150,7 +150,7 @@ export interface Message {
     id: string;
     content: string;
     senderId: string;
-    sender?: { id: string; name?: string; email: string };
+    sender?: { id: string; name?: string; email?: string };
   };
   /** Aggregated reactions, including optional semantic kind receipts. */
   reactions?: ReactionSummary[];
@@ -171,6 +171,15 @@ export interface Message {
   transcript?: string;
   /** Owner-approved automatic reply sent by personal Secretary mode. */
   viaSecretary?: boolean;
+}
+
+export interface DroppedMessageSend {
+  success: true;
+  dropped: true;
+}
+
+export function isDroppedMessageSend(value: Message | DroppedMessageSend): value is DroppedMessageSend {
+  return 'dropped' in value && value.dropped === true;
 }
 
 export type AgentIntentKind = 'ask' | 'offer';
@@ -200,7 +209,77 @@ export interface AgentMatch {
   updatedAt: string;
   conversationId?: string;
   alreadyResolved?: boolean;
+  matchType?: 'complementary' | 'reciprocal' | 'shared_goal' | null;
+  score?: number | null;
 }
+
+export type MatchingMode = 'fulfillment' | 'reciprocal' | 'shared_goal';
+export type ExperienceMode = 'enhanced' | 'simple';
+
+export interface StoryAudience {
+  userIds: string[];
+  conversationIds: string[];
+}
+
+export interface IntentDraft {
+  id: string;
+  ownerUserId: string;
+  goal: string | null;
+  seeks: string[];
+  brings: string[];
+  matchingMode: MatchingMode;
+  openToCollaborators: boolean;
+  details: string | null;
+  source: string;
+  provenance: Record<string, unknown> | null;
+  confidence: number | null;
+  state: 'pending' | 'dismissed' | 'activated';
+  activatedIntentId?: string | null;
+  activatedStoryId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OwnedStory {
+  id: string;
+  ownerUserId: string;
+  goal: string | null;
+  seeks: string[];
+  brings: string[];
+  matchingMode: MatchingMode;
+  openToCollaborators: boolean;
+  text: string | null;
+  humanVisible: boolean;
+  agentSearchEnabled: boolean;
+  /** True only when a separate, independently expiring quiet search was approved. */
+  explicitQuietSearch: boolean;
+  status: 'active' | 'paused' | 'withdrawn' | 'expired';
+  audience: StoryAudience;
+  storyExpiresAt: string | null;
+  searchExpiresAt: string | null;
+  intentId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FeedStory {
+  id: string;
+  author: { id: string; name: string | null };
+  text: string;
+  storyExpiresAt: string;
+  createdAt: string;
+}
+
+export interface SocialPreferences {
+  experienceMode: ExperienceMode;
+  networkPaused: boolean;
+  updatedAt: string | null;
+}
+
+export type SocialReviewItem =
+  | { id: string; kind: 'draft'; priority: 'action' | 'soon'; title: string; draft: Pick<IntentDraft, 'id' | 'goal' | 'seeks' | 'brings' | 'confidence' | 'createdAt'> }
+  | { id: string; kind: 'match'; priority: 'action' | 'soon'; title: string; match: AgentMatch }
+  | { id: string; kind: 'expiring_story'; priority: 'action' | 'soon'; title: string; storyId: string; dueAt?: string };
 
 export interface SecretaryAnswer {
   id: string;
@@ -231,7 +310,8 @@ export interface CurrentUser {
   userId: string;
   email: string;
   name?: string;
-  canBrowseUserDirectory?: boolean;
+  avatarUrl?: string;
+  discoveryMode?: 'name' | 'email_only' | 'hidden';
 }
 
 let memToken: string | null = null;
@@ -331,6 +411,17 @@ async function request<T>(
     throw new ApiError(res.status, `${res.status}: ${msg}`, text);
   }
   return (await res.json()) as T;
+}
+
+async function approvedPublication<T>(path: string, payload: object): Promise<T> {
+  const preview = await request<{ approvalGrant: string }>(path, {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, confirm: false }),
+  });
+  return request<T>(path, {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, confirm: true, approvalGrant: preview.approvalGrant }),
+  });
 }
 
 /**
@@ -468,6 +559,43 @@ export async function signInWithApple(
     }
     throw new Error(`Apple sign-in failed (${res.status}): ${msg}`);
   }
+  const body = await res.json();
+  const user: CurrentUser = {
+    userId: body.user.id,
+    email: body.user.email,
+    name: body.user.name,
+  };
+  await setSession(body.token, user);
+  return { user, token: body.token };
+}
+
+/**
+ * Finish the web-only IdeaFlow ID Authorization Code + PKCE flow. The server
+ * holds the confidential client secret, verifies the ID token, links the
+ * external issuer+subject pair, and returns an ordinary OpenChat session.
+ */
+export async function ideaflowExchange(
+  code: string,
+  codeVerifier: string,
+  nonce: string,
+): Promise<{ user: CurrentUser; token: string }> {
+  const res = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/exchange`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code, codeVerifier, nonce }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try {
+      const parsed = JSON.parse(text);
+      msg = parsed.error || parsed.message || text;
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(`IdeaFlow ID sign-in failed (${res.status}): ${msg}`);
+  }
+
   const body = await res.json();
   const user: CurrentUser = {
     userId: body.user.id,
@@ -692,7 +820,7 @@ export const api = {
       `/api/chat/conversations/${conversationId}/messages?before=${encodeURIComponent(before)}&limit=${limit}`
     ),
   sendMessage: (conversationId: string, content: string, attachments?: Attachment[], id?: string) =>
-    request<Message>(`/api/chat/conversations/${conversationId}/messages`, {
+    request<Message | DroppedMessageSend>(`/api/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
       // id: client-generated idempotency key shared with the socket path so a
       // WS-then-REST retry collapses to one row server-side (MERGE). OpenChat-60y.
@@ -700,7 +828,7 @@ export const api = {
     }),
 
   // ── Agent-network asks, offers, and quiet matches ───────────────────────
-  publishIntent: (params: { kind: AgentIntentKind; terms: string; details?: string; expiresAt?: string }) =>
+  publishIntent: (params: { kind: AgentIntentKind; terms: string; confirm: true; details?: string; expiresAt?: string }) =>
     request<{ intent: AgentIntent }>('/api/intents', {
       method: 'POST',
       body: JSON.stringify(params),
@@ -717,6 +845,73 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ decision }),
     })).match,
+  createIntentDraft: (params: {
+    goal?: string;
+    seeks?: string[];
+    brings?: string[];
+    matchingMode?: MatchingMode;
+    openToCollaborators?: boolean;
+    details?: string;
+    source?: string;
+    provenance?: Record<string, unknown>;
+    confidence?: number;
+  }) => request<{ draft: IntentDraft }>('/api/intent-drafts', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  }),
+  listIntentDrafts: async () =>
+    (await request<{ drafts: IntentDraft[] }>('/api/intent-drafts')).drafts,
+  updateIntentDraft: (id: string, params: Partial<Pick<IntentDraft,
+    'goal' | 'seeks' | 'brings' | 'matchingMode' | 'openToCollaborators' | 'details'
+  >> & { state?: 'dismissed' }) => request<{ draft: IntentDraft }>(
+    `/api/intent-drafts/${encodeURIComponent(id)}`,
+    { method: 'PATCH', body: JSON.stringify(params) },
+  ),
+  activateIntentDraft: (id: string, params: {
+    confirm: true;
+    quietSearch?: { enabled: boolean; expiresAt?: string; audience?: StoryAudience };
+    story?: { enabled: boolean; text: string; expiresAt?: string; audience: StoryAudience };
+    closeOnConnect?: boolean;
+  }) => approvedPublication<{ draft: IntentDraft; story?: OwnedStory | null; intent?: AgentIntent | null }>(
+    `/api/intent-drafts/${encodeURIComponent(id)}/activate`,
+    params,
+  ),
+  listStoryFeed: async () =>
+    (await request<{ stories: FeedStory[] }>('/api/stories/feed')).stories,
+  listMyStories: async () =>
+    (await request<{ stories: OwnedStory[] }>('/api/stories/mine')).stories,
+  createStory: (params: {
+    confirm: true;
+    kind?: AgentIntentKind;
+    goal?: string;
+    seeks?: string[];
+    brings?: string[];
+    matchingMode?: MatchingMode;
+    openToCollaborators?: boolean;
+    text: string;
+    audience: StoryAudience;
+    storyExpiresAt: string;
+    quietSearch?: { enabled: boolean; expiresAt?: string; audience?: StoryAudience };
+    closeOnConnect?: boolean;
+  }) => approvedPublication<{ story: OwnedStory; intent?: AgentIntent | null }>('/api/stories', params),
+  updateStory: (id: string, params: { status?: 'active' | 'paused' | 'withdrawn'; storyExpiresAt?: string }) =>
+    request<{ story: OwnedStory }>(`/api/stories/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(params),
+    }),
+  respondToStory: (id: string, message: string) =>
+    approvedPublication<{ conversationId: string; message: Message }>(
+      `/api/stories/${encodeURIComponent(id)}/respond`, { message },
+    ),
+  getSocialPreferences: () => request<SocialPreferences>('/api/social/preferences'),
+  updateSocialPreferences: (params: Partial<Pick<SocialPreferences, 'experienceMode' | 'networkPaused'>>) =>
+    request<SocialPreferences>('/api/social/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(params),
+    }),
+  getSocialReview: (cursor?: string) => request<{ items: SocialReviewItem[]; hasMore: boolean }>(
+    `/api/review${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+  ),
   /** Idempotently create or return the caller's private My Agent conversation. */
   ensureAssistant: () =>
     request<Conversation>('/api/assistant/ensure', { method: 'POST' }),
@@ -951,6 +1146,7 @@ export const api = {
     name?: string;
     statusMessage?: string;
     avatarUrl?: string;
+    discoveryMode?: 'name' | 'email_only' | 'hidden';
     onboardingComplete?: boolean;
   }) =>
     request<{
@@ -959,6 +1155,7 @@ export const api = {
       name?: string;
       statusMessage?: string;
       avatarUrl?: string;
+      discoveryMode?: 'name' | 'email_only' | 'hidden';
       onboardedAt?: string;
     }>('/api/auth/me', {
       method: 'PATCH',

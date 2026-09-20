@@ -19,7 +19,7 @@ import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useTheme } from '../contexts/ThemeContext';
-import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL } from '../api/client';
+import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, ideaflowExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
 
@@ -28,7 +28,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 // Quick-login test accounts. Only rendered when EXPO_PUBLIC_SHOW_TEST_LOGINS
 // is explicitly set to 'true'. Default is OFF so production builds — both EAS
-// (iOS TestFlight) AND the openchat-server's web bundles at /m/ and /d/ —
+// (iOS compatibility builds) and the server's canonical /app/ RN-web bundle —
 // never accidentally ship the Alice/Bob buttons. Dev/local users who want
 // them must set EXPO_PUBLIC_SHOW_TEST_LOGINS=true in their .env or shell.
 //
@@ -43,6 +43,31 @@ const TEST_ACCOUNTS: TestAccount[] = [
 const SHOW_TEST_LOGINS =
   (process.env.EXPO_PUBLIC_SHOW_TEST_LOGINS ?? 'false').toLowerCase() === 'true';
 
+const IDEAFLOW_WEB_STATE_KEY = 'openchat_ideaflow_web';
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const value of bytes) binary += String.fromCharCode(value);
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+function randomBase64Url(byteLength: number): string {
+  const bytes = new Uint8Array(byteLength);
+  globalThis.crypto.getRandomValues(bytes);
+  return bytesToBase64Url(bytes);
+}
+
+async function pkceChallenge(verifier: string): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(verifier),
+  );
+  return bytesToBase64Url(new Uint8Array(digest));
+}
+
 export function LoginScreen() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -55,6 +80,8 @@ export function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
+  const [ideaflowLoading, setIdeaflowLoading] = useState(false);
+  const [ideaflowEnabled, setIdeaflowEnabled] = useState(false);
 
   // Web Google sign-in uses a full-page REDIRECT, not the expo-auth-session
   // popup: Google's pages set Cross-Origin-Opener-Policy, which severs the
@@ -63,13 +90,77 @@ export function LoginScreen() {
   const isWeb = Platform.OS === 'web';
   const GOOGLE_WEB_STATE_KEY = 'openchat_google_web';
 
+  // The server-side flag is the rollout source of truth. This keeps the
+  // button hidden until a production client is registered and allows an
+  // immediate kill switch without rebuilding RN-web.
+  useEffect(() => {
+    if (!isWeb) return;
+    let cancelled = false;
+    fetch(`${OPENCHAT_URL}/api/auth/ideaflow/config`)
+      .then(response => response.ok ? response.json() : { enabled: false })
+      .then((body: { enabled?: boolean }) => {
+        if (!cancelled) setIdeaflowEnabled(body.enabled === true);
+      })
+      .catch(() => {
+        if (!cancelled) setIdeaflowEnabled(false);
+      });
+    return () => { cancelled = true; };
+  }, [isWeb]);
+
+  // Web: finish the IdeaFlow ID redirect. The callback route adds a provider
+  // marker because Google and OIDC both use standard `code` and `state` keys.
+  useEffect(() => {
+    if (!isWeb || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('provider') !== 'ideaflow') return;
+
+    const code = params.get('code');
+    const oauthError = params.get('error');
+    const returnedState = params.get('state');
+    const basePath = `/${window.location.pathname.split('/')[1] || ''}/`;
+    window.history.replaceState({}, '', basePath);
+
+    let stored: { state: string; nonce: string; codeVerifier: string } | null = null;
+    try {
+      const raw = window.sessionStorage.getItem(IDEAFLOW_WEB_STATE_KEY);
+      stored = raw ? JSON.parse(raw) : null;
+    } catch { stored = null; }
+    window.sessionStorage.removeItem(IDEAFLOW_WEB_STATE_KEY);
+
+    if (!stored || !returnedState || returnedState !== stored.state) {
+      Alert.alert('Ideaflow sign-in failed', 'Session expired or state mismatch — please try again.');
+      return;
+    }
+    if (oauthError || !code) {
+      Alert.alert(
+        'Ideaflow sign-in failed',
+        params.get('error_description') || oauthError || 'No authorization code was returned.',
+      );
+      return;
+    }
+
+    setIdeaflowLoading(true);
+    (async () => {
+      try {
+        await ideaflowExchange(code, stored!.codeVerifier, stored!.nonce);
+        await bootstrapIfAuthed();
+      } catch (err) {
+        Alert.alert('Ideaflow sign-in failed', err instanceof Error ? err.message : String(err));
+      } finally {
+        setIdeaflowLoading(false);
+      }
+    })();
+  }, [isWeb, bootstrapIfAuthed]);
+
   // Web: finish the redirect flow when we return from Google with ?code&state.
   useEffect(() => {
     if (!isWeb || typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
+    if (params.get('provider') === 'ideaflow') return;
     const code = params.get('code');
+    const oauthError = params.get('error');
     const returnedState = params.get('state');
-    if (!code) return;
+    if (!code && !oauthError) return;
 
     // Strip the OAuth params immediately so a refresh can't replay the code
     // (auth codes are single-use) and the URL stays clean.
@@ -88,10 +179,16 @@ export function LoginScreen() {
       return;
     }
 
+    if (oauthError) {
+      const description = params.get('error_description');
+      Alert.alert('Google sign-in failed', description || oauthError);
+      return;
+    }
+
     setGoogleLoading(true);
     (async () => {
       try {
-        await googleExchange(code, stored!.redirectUri);
+        await googleExchange(code!, stored!.redirectUri);
         await bootstrapIfAuthed();
       } catch (err) {
         Alert.alert('Google sign-in failed', err instanceof Error ? err.message : String(err));
@@ -120,7 +217,7 @@ export function LoginScreen() {
   // so iOS deep-links the callback back to the app correctly.
   //
   // The Web flow (GOOGLE_CLIENT_ID + code + secret + /google/exchange) is
-  // still used at chat.globalbr.ai and the RN-web build at /m on web.
+  // still used by the RN-web app at chat.globalbr.ai/app.
   const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest({
     iosClientId: GOOGLE_IOS_CLIENT_ID,
     androidClientId: GOOGLE_ANDROID_CLIENT_ID, // Android-type client (pkg + SHA-1); falls back to iOS until EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID is set
@@ -207,14 +304,14 @@ export function LoginScreen() {
     if (googleLoading || loading) return;
 
     // Web: full-page redirect via our server's /api/auth/google/url. The
-    // server holds the web client_id + secret and echoes our redirect_uri
-    // (https://chat.globalbr.ai/m/ or /d/, registered in the GCP OAuth client).
-    // On return, the useEffect above finishes the exchange. See openchat-n9a.
+    // server holds the web client_id + secret and echoes our redirect_uri.
+    // Google returns to the exactly registered /auth/google/callback endpoint;
+    // the server then preserves code/state in a same-origin redirect to /app/,
+    // where the useEffect above finishes the exchange. See openchat-n9a.
     if (isWeb && typeof window !== 'undefined') {
       setGoogleLoading(true);
       try {
-        const seg = window.location.pathname.split('/')[1] || '';
-        const redirectUri = `${window.location.origin}/${seg}/`;
+        const redirectUri = `${window.location.origin}/auth/google/callback`;
         const state = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
           ? crypto.randomUUID()
           : Math.random().toString(36).slice(2);
@@ -245,6 +342,36 @@ export function LoginScreen() {
     } catch (err) {
       Alert.alert('Google sign-in failed', err instanceof Error ? err.message : String(err));
       setGoogleLoading(false);
+    }
+  };
+
+  const handleIdeaflowSignIn = async () => {
+    if (!isWeb || typeof window === 'undefined' || ideaflowLoading || loading) return;
+    setIdeaflowLoading(true);
+    try {
+      const state = randomBase64Url(32);
+      const nonce = randomBase64Url(32);
+      const codeVerifier = randomBase64Url(48);
+      const codeChallenge = await pkceChallenge(codeVerifier);
+      const query = new URLSearchParams({
+        state,
+        nonce,
+        code_challenge: codeChallenge,
+      });
+      const response = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/url?${query}`);
+      if (!response.ok) throw new Error(`Could not start Ideaflow sign-in (${response.status})`);
+      const body = await response.json() as { url?: string };
+      if (!body.url) throw new Error('Ideaflow sign-in did not return an authorization URL');
+
+      window.sessionStorage.setItem(IDEAFLOW_WEB_STATE_KEY, JSON.stringify({
+        state,
+        nonce,
+        codeVerifier,
+      }));
+      window.location.href = body.url;
+    } catch (err) {
+      Alert.alert('Ideaflow sign-in failed', err instanceof Error ? err.message : String(err));
+      setIdeaflowLoading(false);
     }
   };
 
@@ -316,6 +443,27 @@ export function LoginScreen() {
               onPress={handleAppleSignIn}
             />
           )
+        )}
+
+        {isWeb && ideaflowEnabled && (
+          <TouchableOpacity
+            style={[
+              styles.ideaflowButton,
+              {
+                backgroundColor: c.primary,
+                opacity: (ideaflowLoading || loading || googleLoading) ? 0.6 : 1,
+              },
+            ]}
+            onPress={handleIdeaflowSignIn}
+            disabled={ideaflowLoading || loading || googleLoading}
+            accessibilityLabel="Continue with Ideaflow"
+          >
+            {ideaflowLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.ideaflowButtonText}>Continue with Ideaflow</Text>
+            )}
+          </TouchableOpacity>
         )}
 
         <TouchableOpacity
@@ -445,18 +593,18 @@ export function LoginScreen() {
             <View style={styles.qrWrap}>
               {/* Light QR on a fixed white background so it scans reliably
                   regardless of theme. Scanning takes you to the mobile web. */}
-              <QRCode value="https://chat.globalbr.ai/m/" size={120} backgroundColor="#ffffff" color="#000000" />
+              <QRCode value="https://chat.globalbr.ai/app/" size={120} backgroundColor="#ffffff" color="#000000" />
             </View>
             <View style={styles.shareTextBlock}>
               <Text style={[styles.shareTitle, { color: c.textPrimary }]}>Scan to open on any phone</Text>
               <TouchableOpacity
-                onPress={() => Linking.openURL('https://chat.globalbr.ai/m/')}
+                onPress={() => Linking.openURL('https://chat.globalbr.ai/app/')}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.shareLink, { color: c.primary }]}>chat.globalbr.ai/m</Text>
+                <Text style={[styles.shareLink, { color: c.primary }]}>chat.globalbr.ai/app</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => Share.share({ message: 'Try OpenChat: https://chat.globalbr.ai/m/' })}
+                onPress={() => Share.share({ message: 'Try OpenChat: https://chat.globalbr.ai/app/' })}
                 activeOpacity={0.7}
                 style={[styles.shareButton, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}
               >
@@ -498,6 +646,13 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  ideaflowButton: {
+    height: 50,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ideaflowButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   footer: { fontSize: 12, textAlign: 'center', marginTop: 8 },
   shareSection: { width: '100%', maxWidth: 520, alignSelf: 'center', marginTop: 32, alignItems: 'stretch', opacity: 0.88 },
   shareLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8, textAlign: 'center' },

@@ -15,25 +15,12 @@ sibling shims or Metro fails the native build. iPad landscape is enabled via
 wrapper around the RNW export — see `apps/desktop/README.md`; product code stays
 here in `src/`.
 
-## 🔁 Web ↔ Mobile parity (MANDATORY)
+## Canonical client surface
 
-This app lives in the OpenChat monorepo and must stay in sync with the
-web/server surfaces:
+The repository-root `AGENTS.md` owns the client-surface and deployment contract.
+Apply it here: this is the single product client; do not mirror new work into
+the frozen `apps/web` source.
 
-| Path | What it is | Surfaces |
-|------|-----------|----------|
-| `apps/mobile` | React Native / Expo app | native iOS (TestFlight) + RN-web at **`/m`** (mobile web) and **`/d`** (desktop web) |
-| `apps/desktop` | Tauri shell around the `apps/mobile` RN-web app export | native desktop shell |
-| `apps/server` / `apps/web` | Node/Express + Neo4j **server** and legacy Vite **web** client | `chat.globalbr.ai/api/*`, `chat.globalbr.ai/legacy` |
-
-**Rule: any user-facing chat change in `apps/mobile` or `apps/web` must be
-mirrored in the other client in the SAME work session** so native and web never
-drift — composer behavior, send/receive, auth flows, message rendering,
-presence, etc. The backend is shared (one server), so server changes cover both;
-client changes do not cross surfaces automatically.
-
-- The `apps/mobile` RN-web build powers `/m` and `/d`. `infra/deploy.sh` runs
-  the export and serves the output, so deploying the web app ships whatever is
-  committed in this monorepo.
 - **Platform-appropriate exceptions are fine** (document them): e.g. Enter-to-send is **web-only** (`Platform.OS === 'web'`). On a native touch keyboard the return key stays a newline and sending is the send button. No hardware-keyboard Enter handling needed.
-- Standing tracker: epic **openchat-3jq** ("keep web/mobile in sync").
+- Pure platform-native experiments are not the current product focus and must
+  not block or silently diverge from the Expo/React Native client.

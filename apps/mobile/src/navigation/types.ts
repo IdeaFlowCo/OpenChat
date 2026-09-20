@@ -7,11 +7,12 @@
  */
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import type { Thought } from '../api/client';
+import type { FeedStory, Thought } from '../api/client';
 
 // ── Bottom-tab navigator ─────────────────────────────────────────────────────
 export type TabParamList = {
   ChatsTab: undefined;
+  AsksTab: undefined;
   ThoughtsTab: undefined;
 };
 
@@ -23,7 +24,10 @@ export type RootStackParamList = {
   Chat: { conversationId: string };
   NewConversation: undefined;
   /** App-wide agent network overlay (asks, offers, and anonymous matches; OpenChat-a0e.5). */
-  AgentOverlay: undefined;
+  AgentOverlay: { prompt?: string } | undefined;
+  StoryComposer: { draftId?: string; initialText?: string } | undefined;
+  StoryViewer: { story: FeedStory };
+  SocialReview: undefined;
   GroupSettings: { conversationId: string };
   Settings: undefined;
   Search: undefined;
@@ -67,8 +71,19 @@ export type ThoughtsStackParamList = {
   AddEditThought: { thought?: Thought } | undefined;
 };
 
+export type AsksStackParamList = {
+  AsksList: undefined;
+  Chat: { conversationId: string };
+  AgentOverlay: { prompt?: string } | undefined;
+  StoryComposer: { draftId?: string; initialText?: string } | undefined;
+  StoryViewer: { story: FeedStory };
+  SocialReview: undefined;
+};
+
 export type NavProp<T extends keyof RootStackParamList> = NativeStackNavigationProp<RootStackParamList, T>;
 export type RouteProps<T extends keyof RootStackParamList> = RouteProp<RootStackParamList, T>;
 
 export type ThoughtsNavProp<T extends keyof ThoughtsStackParamList> = NativeStackNavigationProp<ThoughtsStackParamList, T>;
 export type ThoughtsRouteProps<T extends keyof ThoughtsStackParamList> = RouteProp<ThoughtsStackParamList, T>;
+export type AsksNavProp<T extends keyof AsksStackParamList> = NativeStackNavigationProp<AsksStackParamList, T>;
+export type AsksRouteProps<T extends keyof AsksStackParamList> = RouteProp<AsksStackParamList, T>;

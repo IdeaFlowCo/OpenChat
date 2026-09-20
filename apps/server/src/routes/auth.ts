@@ -7,6 +7,16 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { getDriver } from '../db.js';
 import { requireAuth, AuthUser } from '../middleware/auth.js';
 import { parseCorsOrigins } from '../config/cors.js';
+import {
+  buildIdeaflowAuthorizationUrl,
+  exchangeIdeaflowAuthorizationCode,
+  getIdeaflowOidcConfig,
+  IdeaflowIdentityClaims,
+} from '../services/ideaflowOidc.js';
+import {
+  isSafePublicDisplayName,
+  normalizePublicDisplayName,
+} from '../privacy/profilePrivacy.js';
 
 const router = Router();
 function getJwtSecret(): string {
@@ -191,7 +201,7 @@ export function createBridgeExchangeHandler(
         MERGE (u:User {email: $email})
         ON CREATE SET
           u.id = $id,
-          u.name = coalesce($name, $email),
+          u.name = $name,
           u.avatarUrl = $avatarUrl,
           u.signupProvider = 'social-bridge',
           u.createdAt = datetime($now),
@@ -203,7 +213,7 @@ export function createBridgeExchangeHandler(
         RETURN u { .id, .email, .name } AS user
       `, {
         email,
-        name: name?.trim() || null,
+        name: normalizePublicDisplayName(name),
         avatarUrl: avatarUrl || null,
         id: nanoid(),
         now,
@@ -242,6 +252,257 @@ export function createBridgeExchangeHandler(
 }
 
 router.post('/bridge-exchange', createBridgeExchangeHandler());
+
+const OAUTH_OPAQUE_VALUE = /^[A-Za-z0-9._~-]{16,256}$/;
+const PKCE_CHALLENGE = /^[A-Za-z0-9_-]{43,128}$/;
+const PKCE_VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/;
+
+/**
+ * GET /api/auth/ideaflow/config
+ *
+ * Public capability check used by the web login screen. Credentials and
+ * provider internals are never returned.
+ */
+router.get('/ideaflow/config', (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ enabled: getIdeaflowOidcConfig() !== null });
+});
+
+/**
+ * GET /api/auth/ideaflow/url
+ *
+ * Starts an OIDC Authorization Code + PKCE flow using browser-generated state,
+ * nonce, and code challenge. The redirect URI is server-owned and cannot be
+ * overridden by the caller.
+ */
+router.get('/ideaflow/url', async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const config = getIdeaflowOidcConfig();
+  if (!config) {
+    res.status(503).json({ error: 'IdeaFlow ID sign-in is not enabled' });
+    return;
+  }
+
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+  const nonce = typeof req.query.nonce === 'string' ? req.query.nonce : '';
+  const codeChallenge = typeof req.query.code_challenge === 'string'
+    ? req.query.code_challenge
+    : '';
+
+  if (!OAUTH_OPAQUE_VALUE.test(state) || !OAUTH_OPAQUE_VALUE.test(nonce)) {
+    res.status(400).json({ error: 'Valid state and nonce are required' });
+    return;
+  }
+  if (!PKCE_CHALLENGE.test(codeChallenge)) {
+    res.status(400).json({ error: 'A valid S256 code challenge is required' });
+    return;
+  }
+
+  try {
+    const url = await buildIdeaflowAuthorizationUrl(config, {
+      state,
+      nonce,
+      codeChallenge,
+    });
+    res.json({ url });
+  } catch (error) {
+    console.error('IdeaFlow ID authorization setup failed:', error);
+    res.status(502).json({ error: 'Could not reach IdeaFlow ID' });
+  }
+});
+
+type AuthDbSession = ReturnType<ReturnType<typeof getDriver>['session']>;
+
+interface LinkedOpenChatUser {
+  id: string;
+  email: string;
+  name: string;
+  avatarUrl?: string | null;
+}
+
+function recordsToUsers(result: { records: Array<{ get: (key: string) => unknown }> }): LinkedOpenChatUser[] {
+  return result.records.map(record => toJS(record.get('user')) as LinkedOpenChatUser);
+}
+
+/**
+ * Resolve the durable issuer+subject mapping first. A verified email may link
+ * an unmapped legacy OpenChat user only when that email identifies exactly one
+ * local account. Existing conflicting mappings are never overwritten.
+ */
+export async function linkIdeaflowIdentity(
+  session: AuthDbSession,
+  identity: IdeaflowIdentityClaims,
+): Promise<LinkedOpenChatUser> {
+  const identityKey = `${identity.issuer}\u001f${identity.subject}`;
+  const params = {
+    issuer: identity.issuer,
+    subject: identity.subject,
+    identityKey,
+    email: identity.email,
+    name: normalizePublicDisplayName(identity.name),
+    picture: identity.picture,
+    id: nanoid(),
+    now: new Date().toISOString(),
+  };
+
+  const mapped = recordsToUsers(await session.run(`
+    MATCH (u:User {ideaflowIdentityKey: $identityKey})
+    WHERE u.ideaflowIssuer = $issuer AND u.ideaflowSub = $subject
+    RETURN u { .id, .email, .name, .avatarUrl } AS user
+    LIMIT 2
+  `, params));
+  if (mapped.length > 1) {
+    throw new Error('IDEAFLOW_IDENTITY_COLLISION');
+  }
+  if (mapped.length === 1) {
+    const refreshed = recordsToUsers(await session.run(`
+      MATCH (u:User {id: $userId, ideaflowIdentityKey: $identityKey})
+      WHERE u.ideaflowIssuer = $issuer AND u.ideaflowSub = $subject
+      SET u.lastSeenAt = datetime($now),
+          u.presenceStatus = 'available',
+          u.ideaflowEmail = $email,
+          u.ideaflowEmailVerified = true,
+          u.avatarUrl = coalesce(u.avatarUrl, $picture)
+      RETURN u { .id, .email, .name, .avatarUrl } AS user
+    `, { ...params, userId: mapped[0].id }));
+    if (refreshed.length !== 1) throw new Error('IDEAFLOW_IDENTITY_COLLISION');
+    return refreshed[0];
+  }
+
+  const byEmail = recordsToUsers(await session.run(`
+    MATCH (u:User)
+    WHERE toLower(u.email) = $email
+    RETURN u { .id, .email, .name, .avatarUrl, .ideaflowIssuer, .ideaflowSub, .ideaflowIdentityKey } AS user
+    LIMIT 2
+  `, params));
+  if (byEmail.length > 1) {
+    throw new Error('IDEAFLOW_EMAIL_COLLISION');
+  }
+
+  if (byEmail.length === 1) {
+    const existing = byEmail[0] as LinkedOpenChatUser & {
+      ideaflowIssuer?: string | null;
+      ideaflowSub?: string | null;
+      ideaflowIdentityKey?: string | null;
+    };
+    if (
+      (existing.ideaflowIssuer && existing.ideaflowIssuer !== identity.issuer)
+      || (existing.ideaflowSub && existing.ideaflowSub !== identity.subject)
+      || (existing.ideaflowIdentityKey && existing.ideaflowIdentityKey !== identityKey)
+    ) {
+      throw new Error('IDEAFLOW_EMAIL_COLLISION');
+    }
+
+    const linked = recordsToUsers(await session.run(`
+      MATCH (u:User {id: $userId})
+      WHERE (u.ideaflowIssuer IS NULL OR u.ideaflowIssuer = $issuer)
+        AND (u.ideaflowSub IS NULL OR u.ideaflowSub = $subject)
+        AND (u.ideaflowIdentityKey IS NULL OR u.ideaflowIdentityKey = $identityKey)
+      SET u.ideaflowIssuer = $issuer,
+          u.ideaflowSub = $subject,
+          u.ideaflowIdentityKey = $identityKey,
+          u.ideaflowEmail = $email,
+          u.ideaflowEmailVerified = true,
+          u.lastSeenAt = datetime($now),
+          u.presenceStatus = 'available',
+          u.avatarUrl = coalesce(u.avatarUrl, $picture)
+      RETURN u { .id, .email, .name, .avatarUrl } AS user
+    `, { ...params, userId: existing.id }));
+    if (linked.length !== 1) throw new Error('IDEAFLOW_EMAIL_COLLISION');
+    return linked[0];
+  }
+
+  const created = recordsToUsers(await session.run(`
+    CREATE (u:User {
+      id: $id,
+      email: $email,
+      name: $name,
+      avatarUrl: $picture,
+      ideaflowIssuer: $issuer,
+      ideaflowSub: $subject,
+      ideaflowIdentityKey: $identityKey,
+      ideaflowEmail: $email,
+      ideaflowEmailVerified: true,
+      signupProvider: 'ideaflow-id',
+      createdAt: datetime($now),
+      lastSeenAt: datetime($now),
+      presenceStatus: 'available'
+    })
+    RETURN u { .id, .email, .name, .avatarUrl } AS user
+  `, params));
+  if (created.length !== 1) throw new Error('IDEAFLOW_IDENTITY_CREATE_FAILED');
+  return created[0];
+}
+
+/**
+ * POST /api/auth/ideaflow/exchange
+ * Body: { code, codeVerifier, nonce }
+ *
+ * Exchanges the one-time code server-side so the confidential client secret
+ * never reaches the browser, verifies the OIDC ID token, safely links the
+ * identity, and returns an ordinary OpenChat JWT. Existing JWTs are untouched.
+ */
+router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const config = getIdeaflowOidcConfig();
+  if (!config) {
+    res.status(503).json({ error: 'IdeaFlow ID sign-in is not enabled' });
+    return;
+  }
+
+  const { code, codeVerifier, nonce } = req.body ?? {};
+  if (typeof code !== 'string' || code.length < 8 || code.length > 4096) {
+    res.status(400).json({ error: 'A valid authorization code is required' });
+    return;
+  }
+  if (typeof codeVerifier !== 'string' || !PKCE_VERIFIER.test(codeVerifier)) {
+    res.status(400).json({ error: 'A valid PKCE code verifier is required' });
+    return;
+  }
+  if (typeof nonce !== 'string' || !OAUTH_OPAQUE_VALUE.test(nonce)) {
+    res.status(400).json({ error: 'A valid nonce is required' });
+    return;
+  }
+
+  let identity: IdeaflowIdentityClaims;
+  try {
+    identity = await exchangeIdeaflowAuthorizationCode(config, {
+      code,
+      codeVerifier,
+      nonce,
+    });
+  } catch (error) {
+    console.error('IdeaFlow ID token exchange failed:', error);
+    res.status(401).json({ error: 'IdeaFlow ID sign-in could not be verified' });
+    return;
+  }
+
+  const session = getDriver().session();
+  try {
+    const user = await linkIdeaflowIdentity(session, identity);
+    const token = jwt.sign(
+      { userId: user.id, email: user.email } as AuthUser,
+      getJwtSecret(),
+      { expiresIn: '7d' },
+    );
+    res.json({
+      token,
+      user,
+      expiresIn: 7 * 24 * 60 * 60,
+      provider: 'ideaflow-id',
+    });
+  } catch (error) {
+    const collision = error instanceof Error && error.message.includes('COLLISION');
+    console.error('IdeaFlow ID account linking failed:', error);
+    res.status(collision ? 409 : 500).json({
+      error: collision
+        ? 'This IdeaFlow ID cannot be linked automatically. Contact support.'
+        : 'Sign-in failed',
+    });
+  } finally {
+    await session.close();
+  }
+});
 
 // Helper to convert Neo4j types to JS
 function toJS(value: unknown): unknown {
@@ -295,7 +556,7 @@ router.post('/dev-login', async (req: Request, res: Response) => {
       MERGE (u:User {email: $email})
       ON CREATE SET
         u.id = $id,
-        u.name = coalesce($name, $email),
+        u.name = $name,
         u.createdAt = datetime($now),
         u.presenceStatus = 'available',
         u.lastSeenAt = datetime($now)
@@ -305,7 +566,7 @@ router.post('/dev-login', async (req: Request, res: Response) => {
       RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .isBot } AS user
     `, {
       email,
-      name: name || null,
+      name: normalizePublicDisplayName(name),
       id: nanoid(),
       now
     });
@@ -342,7 +603,8 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
   try {
     const result = await session.run(`
       MATCH (u:User {id: $userId})
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .lastSeenAt, .isBot, .canBrowseUserDirectory } AS user
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .lastSeenAt, .avatarUrl, .isBot,
+        discoveryMode: coalesce(u.discoveryMode, 'name') } AS user
     `, { userId });
 
     if (result.records.length === 0) {
@@ -398,7 +660,7 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
         ORDER BY m.createdAt ASC
         RETURN collect(m {
           .*,
-          sender: sender { .id, .name, .email, .isBot }
+          sender: sender { .id, .name, .avatarUrl, .isBot }
         }) AS messages
       }
       CALL {
@@ -411,7 +673,7 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
       CALL {
         WITH u
         OPTIONAL MATCH (u)-[:BLOCKED]->(blocked:User)
-        RETURN collect(blocked { .id, .name, .email }) AS blockedUsers
+        RETURN collect(blocked { .id, .name }) AS blockedUsers
       }
       CALL {
         WITH u
@@ -435,6 +697,65 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
         WITH sa ORDER BY sa.createdAt ASC
         RETURN collect(sa { .id, .question, .answer, .createdAt, .updatedAt }) AS secretaryAnswers
       }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:OWNS_INTENT_DRAFT]->(draft:AgentIntentDraft)
+        WITH draft ORDER BY draft.createdAt ASC
+        RETURN collect(draft {
+          .id, .ownerUserId, .goal, .seeks, .brings, .matchingMode,
+          .openToCollaborators, .details, .source, .provenanceJson, .confidence,
+          .state, .activatedIntentId, .activatedStoryId, .createdAt, .updatedAt
+        }) AS intentDrafts
+      }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:OWNS_STORY]->(story:OpenChatStory)
+        WITH story ORDER BY story.createdAt ASC
+        RETURN collect(story { .* }) AS stories
+      }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:OWNS_INTENT]->(intent:AgentIntent)
+        WITH intent ORDER BY intent.createdAt ASC
+        RETURN collect(intent { .* }) AS intents
+      }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:HAS_SOCIAL_PREFERENCE]->(pref:OpenChatSocialPreference)
+        RETURN head(collect(pref {
+          .experienceMode, .networkPaused, .createdAt, .updatedAt
+        })) AS socialPreferences
+      }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:OWNS_INTENT]->(own:AgentIntent)<-[:MATCHES]-(match:AgentMatch)-[:MATCHES]->(other:AgentIntent)
+        WHERE own <> other
+        WITH DISTINCT match, own, other,
+             CASE WHEN own.id < other.id THEN match.aResponse ELSE match.bResponse END AS ownResponse
+        WITH match, own, other, ownResponse,
+             CASE
+               WHEN match.status = 'connected' THEN 'connected'
+               WHEN match.status = 'closed' THEN 'closed'
+               WHEN ownResponse = 'approved' THEN 'awaiting_other'
+               ELSE 'pending'
+             END AS viewerStatus
+        RETURN collect(CASE WHEN match IS NULL THEN null ELSE {
+          id: match.id,
+          status: viewerStatus,
+          ownIntent: own { .id, .kind, .terms, .goal, .seeks, .brings, .matchingMode },
+          otherKind: other.kind,
+          otherTerms: other.terms,
+          otherGoal: other.goal,
+          otherSeeks: other.seeks,
+          otherBrings: other.brings,
+          otherMatchingMode: other.matchingMode,
+          matchType: match.matchType,
+          score: match.score,
+          createdAt: match.createdAt,
+          updatedAt: match.updatedAt,
+          conversationId: CASE WHEN match.status = 'connected' THEN match.conversationId ELSE null END
+        } END) AS agentMatches
+      }
       RETURN u {
         .id,
         .email,
@@ -452,7 +773,12 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
       thoughts,
       blockedUsers,
       agentKeys,
-      secretaryAnswers
+      secretaryAnswers,
+      intentDrafts,
+      stories,
+      intents,
+      socialPreferences,
+      agentMatches
     `, { userId, since });
 
     if (result.records.length === 0) {
@@ -468,6 +794,16 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
           try { msg.attachments = JSON.parse(msg.attachments); } catch { /* leave raw */ }
         }
         return msg;
+      });
+    const intentDrafts = ((toJS(record.get('intentDrafts')) as Record<string, unknown>[] | undefined) ?? [])
+      .filter(Boolean)
+      .map((draft) => {
+        const { provenanceJson, ...publicDraft } = draft;
+        let provenance: unknown = null;
+        if (typeof provenanceJson === 'string') {
+          try { provenance = JSON.parse(provenanceJson); } catch { provenance = null; }
+        }
+        return { ...publicDraft, provenance };
       });
 
     const exportedAt = new Date().toISOString();
@@ -486,6 +822,16 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
         enabled: (toJS(record.get('user')) as Record<string, unknown>)?.secretaryEnabled === true,
         answers: ((toJS(record.get('secretaryAnswers')) as unknown[] | undefined) ?? []).filter(Boolean),
       },
+      intentDrafts,
+      stories: ((toJS(record.get('stories')) as unknown[] | undefined) ?? []).filter(Boolean),
+      intents: ((toJS(record.get('intents')) as unknown[] | undefined) ?? []).filter(Boolean),
+      socialPreferences: (toJS(record.get('socialPreferences')) as Record<string, unknown> | null) ?? {
+        experienceMode: 'enhanced',
+        networkPaused: false,
+        createdAt: null,
+        updatedAt: null,
+      },
+      agentMatches: ((toJS(record.get('agentMatches')) as unknown[] | undefined) ?? []).filter(Boolean),
     });
   } catch (error) {
     console.error('Error exporting account:', error);
@@ -497,7 +843,8 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
 
 /**
  * PATCH /api/auth/me — Update current user's profile (OpenChat-tml + OpenChat-x2s)
- * Body: { name?: string, statusMessage?: string, avatarUrl?: string, onboardingComplete?: boolean }
+ * Body: { name?: string, statusMessage?: string, avatarUrl?: string,
+ *   discoveryMode?: 'name' | 'email_only' | 'hidden', onboardingComplete?: boolean }
  *
  * Persists name, statusMessage, avatarUrl, and/or marks onboarding complete
  * (sets `onboardedAt` to now on first call with onboardingComplete=true).
@@ -506,12 +853,12 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
  * without polling.
  */
 router.patch('/me', requireAuth, async (req: Request, res: Response) => {
-  const session = getDriver().session();
   const userId = req.user!.userId;
-  const { name, statusMessage, avatarUrl, onboardingComplete } = (req.body ?? {}) as {
+  const { name, statusMessage, avatarUrl, discoveryMode, onboardingComplete } = (req.body ?? {}) as {
     name?: string;
     statusMessage?: string;
     avatarUrl?: string;
+    discoveryMode?: string;
     onboardingComplete?: boolean;
   };
 
@@ -520,11 +867,22 @@ router.patch('/me', requireAuth, async (req: Request, res: Response) => {
     return;
   }
 
+  if (name !== undefined && !isSafePublicDisplayName(name)) {
+    res.status(400).json({ error: 'name must not contain an email address' });
+    return;
+  }
+
   if (avatarUrl !== undefined && typeof avatarUrl !== 'string') {
     res.status(400).json({ error: 'avatarUrl must be a string' });
     return;
   }
 
+  if (discoveryMode !== undefined && !['name', 'email_only', 'hidden'].includes(discoveryMode)) {
+    res.status(400).json({ error: 'discoveryMode must be name, email_only, or hidden' });
+    return;
+  }
+
+  const session = getDriver().session();
   try {
     const now = new Date().toISOString();
     const result = await session.run(`
@@ -532,14 +890,17 @@ router.patch('/me', requireAuth, async (req: Request, res: Response) => {
       SET u.name = CASE WHEN $name IS NOT NULL THEN $name ELSE u.name END,
           u.statusMessage = CASE WHEN $statusMessage IS NOT NULL THEN $statusMessage ELSE u.statusMessage END,
           u.avatarUrl = CASE WHEN $avatarUrl IS NOT NULL THEN $avatarUrl ELSE u.avatarUrl END,
+          u.discoveryMode = CASE WHEN $discoveryMode IS NOT NULL THEN $discoveryMode ELSE u.discoveryMode END,
           u.onboardedAt = CASE WHEN $onboardingComplete = true AND u.onboardedAt IS NULL THEN datetime($now) ELSE u.onboardedAt END,
           u.updatedAt = datetime($now)
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot, .onboardedAt } AS user
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot, .onboardedAt,
+        discoveryMode: coalesce(u.discoveryMode, 'name') } AS user
     `, {
       userId,
       name: name?.trim() ?? null,
       statusMessage: statusMessage ?? null,
       avatarUrl: avatarUrl ?? null,
+      discoveryMode: discoveryMode ?? null,
       onboardingComplete: onboardingComplete === true,
       now,
     });
@@ -791,9 +1152,9 @@ router.post('/google/exchange', async (req: Request, res: Response) => {
   const session = getDriver().session();
   try {
     const now = new Date().toISOString();
-    const displayName = userinfo.name
-      || [userinfo.given_name, userinfo.family_name].filter(Boolean).join(' ')
-      || userinfo.email;
+    const displayName = normalizePublicDisplayName(
+      userinfo.name || [userinfo.given_name, userinfo.family_name].filter(Boolean).join(' '),
+    );
 
     const result = await session.run(`
       MERGE (u:User {email: $email})
@@ -910,9 +1271,9 @@ router.post('/google/idtoken-exchange', async (req: Request, res: Response) => {
   const session = getDriver().session();
   try {
     const now = new Date().toISOString();
-    const displayName = payload.name
-      || [payload.given_name, payload.family_name].filter(Boolean).join(' ')
-      || payload.email;
+    const displayName = normalizePublicDisplayName(
+      payload.name || [payload.given_name, payload.family_name].filter(Boolean).join(' '),
+    );
 
     const result = await session.run(`
       MERGE (u:User {email: $email})
@@ -1014,6 +1375,46 @@ router.delete('/me', requireAuth, async (req: Request, res: Response) => {
         DETACH DELETE entry
       `, { userId });
 
+      // 2d. Remove every quiet match involving one of this user's intents,
+      // plus its idempotent proposal/status/context cards. The other user's
+      // intent remains intact; only the shared match object becomes invalid.
+      const matchResult = await tx.run(`
+        MATCH (u:User {id: $userId})-[:OWNS_INTENT]->(intent:AgentIntent)<-[:MATCHES]-(match:AgentMatch)
+        RETURN collect(DISTINCT match.id) AS matchIds
+      `, { userId });
+      const matchIds = (matchResult.records[0]?.get('matchIds') as string[] | undefined) ?? [];
+      if (matchIds.length > 0) {
+        await tx.run(`
+          MATCH (message:Message)
+          WHERE message.matchContextKey IN $matchIds
+             OR any(matchId IN $matchIds WHERE message.agentDeliveryKey CONTAINS ('"' + matchId + '"'))
+          DETACH DELETE message
+        `, { matchIds });
+        await tx.run(`
+          MATCH (match:AgentMatch) WHERE match.id IN $matchIds
+          DETACH DELETE match
+        `, { matchIds });
+      }
+
+      // 2e. Delete all account-owned social-layer records. Stories are
+      // removed before intents so their ACTIVATES edges cannot dangle.
+      await tx.run(`
+        MATCH (u:User {id: $userId})-[:OWNS_INTENT_DRAFT]->(draft:AgentIntentDraft)
+        DETACH DELETE draft
+      `, { userId });
+      await tx.run(`
+        MATCH (u:User {id: $userId})-[:OWNS_STORY]->(story:OpenChatStory)
+        DETACH DELETE story
+      `, { userId });
+      await tx.run(`
+        MATCH (u:User {id: $userId})-[:OWNS_INTENT]->(intent:AgentIntent)
+        DETACH DELETE intent
+      `, { userId });
+      await tx.run(`
+        MATCH (u:User {id: $userId})-[:HAS_SOCIAL_PREFERENCE]->(pref:OpenChatSocialPreference)
+        DETACH DELETE pref
+      `, { userId });
+
       // 3. Delete the User node (and all its relationships).
       await tx.run(`
         MATCH (u:User {id: $userId})
@@ -1096,10 +1497,10 @@ router.post('/apple/idtoken-exchange', async (req: Request, res: Response) => {
   // Derive a display name from the one-time fullName payload Apple sends on
   // first sign-in. On subsequent sign-ins fullName is empty — we preserve
   // whatever was stored on first sign-in via ON MATCH coalesce.
-  const displayName =
-    [fullName?.givenName, fullName?.familyName].filter(Boolean).join(' ').trim() ||
-    (email && !isPrivateRelay ? email : null) ||
-    'Apple User';
+  const displayName = normalizePublicDisplayName(
+    [fullName?.givenName, fullName?.familyName].filter(Boolean).join(' '),
+    'Apple User',
+  );
 
   const dbSession = getDriver().session();
   try {
