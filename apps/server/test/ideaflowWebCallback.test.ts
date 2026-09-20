@@ -5,7 +5,7 @@ import ideaflowWebCallbackRoutes, {
   buildIdeaflowWebCallbackRedirect,
 } from '../src/routes/ideaflowWebCallback.js';
 
-describe('IdeaFlow ID web callback redirect', () => {
+describe('Ideaflow ID web callback redirect', () => {
   let server: Server;
   let baseUrl: string;
 
@@ -59,6 +59,24 @@ describe('IdeaFlow ID web callback redirect', () => {
 
     expect(response.headers.get('location')).toBe(
       '/app/?provider=ideaflow&error=access_denied&error_description=Nope',
+    );
+  });
+
+  it('marks a "link."-prefixed state as the authenticated account-linking redirect', () => {
+    expect(buildIdeaflowWebCallbackRedirect({
+      code: 'one-time-code',
+      state: 'link.expected-state-1234567890',
+    })).toBe(
+      '/app/?provider=ideaflow-link&code=one-time-code&state=link.expected-state-1234567890',
+    );
+  });
+
+  it('never treats an ordinary state that merely contains "link" as the linking flow', () => {
+    expect(buildIdeaflowWebCallbackRedirect({
+      code: 'one-time-code',
+      state: 'not-a-link-prefix-1234567890',
+    })).toBe(
+      '/app/?provider=ideaflow&code=one-time-code&state=not-a-link-prefix-1234567890',
     );
   });
 });

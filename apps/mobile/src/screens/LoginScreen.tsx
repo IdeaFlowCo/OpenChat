@@ -22,6 +22,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, ideaflowExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
+import { randomBase64Url, pkceChallenge } from '../utils/pkce';
 
 // Required for the in-app browser to dismiss properly after the OAuth round-trip.
 WebBrowser.maybeCompleteAuthSession();
@@ -44,29 +45,6 @@ const SHOW_TEST_LOGINS =
   (process.env.EXPO_PUBLIC_SHOW_TEST_LOGINS ?? 'false').toLowerCase() === 'true';
 
 const IDEAFLOW_WEB_STATE_KEY = 'openchat_ideaflow_web';
-
-function bytesToBase64Url(bytes: Uint8Array): string {
-  let binary = '';
-  for (const value of bytes) binary += String.fromCharCode(value);
-  return btoa(binary)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-
-function randomBase64Url(byteLength: number): string {
-  const bytes = new Uint8Array(byteLength);
-  globalThis.crypto.getRandomValues(bytes);
-  return bytesToBase64Url(bytes);
-}
-
-async function pkceChallenge(verifier: string): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(verifier),
-  );
-  return bytesToBase64Url(new Uint8Array(digest));
-}
 
 export function LoginScreen() {
   const { scheme } = useTheme();
@@ -107,7 +85,7 @@ export function LoginScreen() {
     return () => { cancelled = true; };
   }, [isWeb]);
 
-  // Web: finish the IdeaFlow ID redirect. The callback route adds a provider
+  // Web: finish the Ideaflow ID redirect. The callback route adds a provider
   // marker because Google and OIDC both use standard `code` and `state` keys.
   useEffect(() => {
     if (!isWeb || typeof window === 'undefined') return;
@@ -156,7 +134,12 @@ export function LoginScreen() {
   useEffect(() => {
     if (!isWeb || typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get('provider') === 'ideaflow') return;
+    // 'ideaflow-link' is the authenticated account-linking redirect (handled
+    // in App.tsx, which stays mounted across the redirect unlike this
+    // unauthenticated-only screen) — skip it here too, or a brief pre-bootstrap
+    // render of this screen could consume and strip its query params first.
+    const provider = params.get('provider');
+    if (provider === 'ideaflow' || provider === 'ideaflow-link') return;
     const code = params.get('code');
     const oauthError = params.get('error');
     const returnedState = params.get('state');
