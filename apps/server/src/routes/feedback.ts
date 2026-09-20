@@ -16,9 +16,13 @@ import { resolveActor } from '../middleware/resolveActor.js';
 
 const router = Router();
 
+// WIT's Supabase project moved. The old `sthqnyjniclvnflfkyio` project is
+// PAUSED — requests to it fail at connect, which surfaced to users as
+// "Feedback service is down right now". `worldissuetracker.com/llms.txt` is the
+// authoritative source for this base if it ever moves again.
 const WIT_BASE =
   process.env.WIT_API_BASE ||
-  'https://sthqnyjniclvnflfkyio.supabase.co/functions/v1';
+  'https://qmzopiburflputowkuhu.supabase.co/functions/v1';
 const WIT_SITE = process.env.WIT_SITE_URL || 'https://worldissuetracker.com';
 // File feedback onto the OpenChat board/tracker by default. Previously omitted,
 // so every feedback issue was created ORPHAN (tracker_id null). Override via env.

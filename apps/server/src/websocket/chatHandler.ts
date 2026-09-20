@@ -516,7 +516,7 @@ async function broadcastPresenceToContacts(io: Server, userId: string, status: s
  * Fire-and-forget — logs but never throws to the caller.
  * OpenChat-0jy: added mentionedUserIds param.
  */
-async function fanoutPushForMessage(
+export async function fanoutPushForMessage(
   conversationId: string,
   senderId: string,
   message: unknown,
