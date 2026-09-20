@@ -61,13 +61,22 @@ export function startIdeaflowConfirm(
 }
 
 export type ConfirmAttempt =
-  | { ok: true; identity: IdeaflowIdentityClaims; targetUserId: string }
+  | { ok: true; identity: IdeaflowIdentityClaims; targetUserId: string; reservedAt: number }
   | { ok: false; reason: 'expired' | 'locked' };
 
+function removeReservation(targetUserId: string, reservedAt: number): void {
+  const failures = accountFailures.get(targetUserId);
+  if (!failures) return;
+  const at = failures.indexOf(reservedAt);
+  if (at >= 0) failures.splice(at, 1);
+  if (failures.length === 0) accountFailures.delete(targetUserId);
+}
+
 /**
- * Begin one password attempt. Counts the attempt up front (a concurrent burst
- * cannot exceed the cap), and refuses when the per-flow or per-account cap is
- * spent. The pending entry is only removed by success, the attempt cap, or TTL.
+ * Begin one password attempt. The attempt is charged to both the flow and the
+ * target account up front, so a burst of concurrent confirm ids cannot each get
+ * a fresh allowance while earlier guesses are still in flight. A wrong password
+ * simply keeps its charge; success or an unavailable verifier settles it.
  */
 export function beginIdeaflowConfirmAttempt(id: string, now = Date.now()): ConfirmAttempt {
   prune(now);
@@ -76,7 +85,8 @@ export function beginIdeaflowConfirmAttempt(id: string, now = Date.now()): Confi
     pending.delete(id);
     return { ok: false, reason: 'expired' };
   }
-  if ((accountFailures.get(entry.targetUserId)?.length ?? 0) >= IDEAFLOW_CONFIRM_ACCOUNT_MAX_FAILURES) {
+  const failures = accountFailures.get(entry.targetUserId) ?? [];
+  if (failures.length >= IDEAFLOW_CONFIRM_ACCOUNT_MAX_FAILURES) {
     return { ok: false, reason: 'locked' };
   }
   entry.attempts += 1;
@@ -84,20 +94,31 @@ export function beginIdeaflowConfirmAttempt(id: string, now = Date.now()): Confi
     pending.delete(id);
     return { ok: false, reason: 'locked' };
   }
-  return { ok: true, identity: entry.identity, targetUserId: entry.targetUserId };
-}
-
-export function recordIdeaflowConfirmFailure(id: string, now = Date.now()): void {
-  const entry = pending.get(id);
-  if (!entry) return;
-  const failures = accountFailures.get(entry.targetUserId) ?? [];
   failures.push(now);
   accountFailures.set(entry.targetUserId, failures);
-  if (entry.attempts >= IDEAFLOW_CONFIRM_MAX_ATTEMPTS) pending.delete(id);
+  return { ok: true, identity: entry.identity, targetUserId: entry.targetUserId, reservedAt: now };
+}
+
+/** A wrong (or unverifiable) password: the up-front charge stands. */
+export function recordIdeaflowConfirmFailure(id: string): void {
+  const entry = pending.get(id);
+  if (entry && entry.attempts >= IDEAFLOW_CONFIRM_MAX_ATTEMPTS) pending.delete(id);
+}
+
+/**
+ * The password oracle could not answer (outage, rate limit). That says nothing
+ * about the person's password, so give the attempt back instead of locking out.
+ */
+export function refundIdeaflowConfirmAttempt(id: string, attempt: { targetUserId: string; reservedAt: number }): void {
+  removeReservation(attempt.targetUserId, attempt.reservedAt);
+  const entry = pending.get(id);
+  if (entry && entry.attempts > 0) entry.attempts -= 1;
 }
 
 /** Single use: a confirmed (or abandoned) check can never be replayed. */
-export function finishIdeaflowConfirm(id: string): void {
+export function finishIdeaflowConfirm(id: string, outcome: 'confirmed' | 'abandoned' = 'abandoned'): void {
+  const entry = pending.get(id);
+  if (entry && outcome === 'confirmed') accountFailures.delete(entry.targetUserId);
   pending.delete(id);
 }
 

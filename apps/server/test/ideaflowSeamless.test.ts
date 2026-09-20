@@ -19,7 +19,8 @@ vi.mock('../src/services/ideaflowOidc.js', async (importOriginal) => {
     exchangeIdeaflowAuthorizationCode: mocks.exchangeAuthorizationCode,
   };
 });
-vi.mock('../src/services/noosPasswordCheck.js', () => ({
+vi.mock('../src/services/noosPasswordCheck.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/services/noosPasswordCheck.js')>()),
   verifyPasswordViaNoos: mocks.verifyPassword,
 }));
 
@@ -164,6 +165,16 @@ describe('Ideaflow seamless account resolution (OpenChat)', () => {
       expect((await res.json()).user.id).toBe('u1');
     });
 
+    it('keeps signing in an already-mapped privileged account (exact mapping is step one)', async () => {
+      mocks.users.push({
+        id: 'u-admin', email: 'boss@example.test', name: 'Boss', role: 'admin',
+        ideaflowIssuer: ISSUER, ideaflowSub: 'sub-new', ideaflowIdentityKey: KEY('sub-new'),
+      });
+      const res = await exchange();
+      expect(res.status).toBe(200);
+      expect((await res.json()).user.id).toBe('u-admin');
+    });
+
     it('does not create a second account while new-user creation is off', async () => {
       mocks.exchangeAuthorizationCode.mockResolvedValue(identity({ email: 'nobody@example.test' }));
       const res = await exchange();
@@ -261,12 +272,12 @@ describe('Ideaflow seamless account resolution (OpenChat)', () => {
     it('links and signs in only after the right password, once, keeping the same local user', async () => {
       mocks.users.push(passwordUser());
       const confirmId = await startConfirm();
-      mocks.verifyPassword.mockResolvedValueOnce({ userId: 'someone-else' });
+      mocks.verifyPassword.mockResolvedValueOnce({ status: 'ok', userId: 'someone-else' });
       const wrong = await confirm(confirmId);
       expect(wrong.status).toBe(401);
       expect(mocks.users[0].ideaflowIdentityKey).toBeUndefined();
 
-      mocks.verifyPassword.mockResolvedValueOnce({ userId: 'u-pass' });
+      mocks.verifyPassword.mockResolvedValueOnce({ status: 'ok', userId: 'u-pass' });
       const ok = await confirm(confirmId);
       expect(ok.status).toBe(200);
       const body = await ok.json();
@@ -276,14 +287,14 @@ describe('Ideaflow seamless account resolution (OpenChat)', () => {
       expect(mocks.users[0]).toMatchObject({ ideaflowIdentityKey: KEY('sub-new'), ideaflowLinkedVia: 'password' });
 
       // Replay of the used check is refused.
-      mocks.verifyPassword.mockResolvedValue({ userId: 'u-pass' });
+      mocks.verifyPassword.mockResolvedValue({ status: 'ok', userId: 'u-pass' });
       expect((await confirm(confirmId)).status).toBe(410);
     });
 
     it('answers wrong and unverifiable attempts identically and unknown ids as expired', async () => {
       mocks.users.push(passwordUser());
       const confirmId = await startConfirm();
-      mocks.verifyPassword.mockResolvedValue(null);
+      mocks.verifyPassword.mockResolvedValue({ status: 'invalid' });
       const wrong = await confirm(confirmId);
       expect(wrong.status).toBe(401);
       expect(await wrong.json()).toEqual({ error: 'That password did not match.', code: 'confirm_invalid' });
@@ -292,7 +303,7 @@ describe('Ideaflow seamless account resolution (OpenChat)', () => {
 
     it('caps attempts per check and per account', async () => {
       mocks.users.push(passwordUser());
-      mocks.verifyPassword.mockResolvedValue(null);
+      mocks.verifyPassword.mockResolvedValue({ status: 'invalid' });
       const first = await startConfirm();
       for (let i = 0; i < 5; i += 1) expect((await confirm(first)).status).toBe(401);
       // The fifth failure burns the check: it cannot be tried again.
@@ -305,9 +316,55 @@ describe('Ideaflow seamless account resolution (OpenChat)', () => {
       expect(mocks.verifyPassword).toHaveBeenCalledTimes(10);
     });
 
+    it('does not count an unavailable password service as a wrong password', async () => {
+      mocks.users.push(passwordUser());
+      const confirmId = await startConfirm();
+      mocks.verifyPassword.mockResolvedValue({ status: 'unavailable' });
+      for (let i = 0; i < 12; i += 1) {
+        const res = await confirm(confirmId);
+        expect(res.status).toBe(503);
+        expect((await res.json()).code).toBe('confirm_unavailable');
+      }
+      // Nothing was spent: the right password still works afterwards.
+      mocks.verifyPassword.mockResolvedValue({ status: 'ok', userId: 'u-pass' });
+      expect((await confirm(confirmId)).status).toBe(200);
+    });
+
+    it('fails closed without calling anything when production has no NOOS_URL', async () => {
+      mocks.users.push(passwordUser());
+      const confirmId = await startConfirm();
+      const env = { nodeEnv: process.env.NODE_ENV, noos: process.env.NOOS_URL };
+      process.env.NODE_ENV = 'production';
+      delete process.env.NOOS_URL;
+      try {
+        const res = await confirm(confirmId);
+        expect(res.status).toBe(503);
+        expect(mocks.verifyPassword).not.toHaveBeenCalled();
+      } finally {
+        if (env.nodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = env.nodeEnv;
+        if (env.noos === undefined) delete process.env.NOOS_URL; else process.env.NOOS_URL = env.noos;
+      }
+    });
+
+    it('charges concurrent guesses against the account up front', async () => {
+      mocks.users.push(passwordUser());
+      const ids = await Promise.all(Array.from({ length: 6 }, () => startConfirm()));
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      mocks.verifyPassword.mockImplementation(async () => { await gate; return { status: 'invalid' }; });
+      // Six parked checks each fire two guesses at once, before any verdict lands.
+      const inflight = ids.flatMap(id => [confirm(id), confirm(id)]);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      release();
+      const statuses = (await Promise.all(inflight)).map(r => r.status);
+      expect(statuses.filter(s => s === 401)).toHaveLength(10);
+      expect(statuses.filter(s => s === 429)).toHaveLength(2);
+      expect(mocks.verifyPassword).toHaveBeenCalledTimes(10);
+    });
+
     it('re-validates at confirm time: bound elsewhere meanwhile, or a second matching account appeared', async () => {
       mocks.users.push(passwordUser());
-      mocks.verifyPassword.mockResolvedValue({ userId: 'u-pass' });
+      mocks.verifyPassword.mockResolvedValue({ status: 'ok', userId: 'u-pass' });
       const first = await startConfirm();
       mocks.users[0].ideaflowIdentityKey = KEY('raced-subject');
       expect((await confirm(first)).status).toBe(401);
@@ -321,7 +378,7 @@ describe('Ideaflow seamless account resolution (OpenChat)', () => {
 
     it('cannot be completed for a target that became privileged', async () => {
       mocks.users.push(passwordUser());
-      mocks.verifyPassword.mockResolvedValue({ userId: 'u-pass' });
+      mocks.verifyPassword.mockResolvedValue({ status: 'ok', userId: 'u-pass' });
       const confirmId = await startConfirm();
       mocks.users[0].role = 'admin';
       expect((await confirm(confirmId)).status).toBe(401);

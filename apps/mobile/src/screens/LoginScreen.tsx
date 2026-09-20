@@ -471,6 +471,9 @@ export function LoginScreen() {
       const code = err instanceof IdeaflowSignInError ? err.code : undefined;
       if (code === 'confirm_invalid') {
         setConfirmError('That password did not match. Try again.');
+      } else if (code === 'confirm_unavailable') {
+        // The password service had no answer; the attempt was not counted.
+        setConfirmError('We could not check your password right now. Try again in a moment.');
       } else {
         // Expired, locked, or anything else ends this check; start over.
         setIdeaflowConfirmState(null);

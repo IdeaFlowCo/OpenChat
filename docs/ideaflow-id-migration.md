@@ -110,8 +110,12 @@ implemented by `resolveIdeaflowSignIn`:
      the identity is bound (`via: password`). At most 5 attempts per check and
      10 failures per account per 15 minutes, single use, 10-minute expiry,
      re-validated (still exactly one unmapped, unprivileged, password account)
-     right before binding. The password is judged by Noos's own login endpoint
-     (`NOOS_URL`), the only password verifier in the shared graph;
+     right before binding. Attempts are charged to the account up front, so
+     concurrent guesses cannot exceed the cap. The password is judged by Noos's
+     own login endpoint (`NOOS_URL`), the only password verifier in the shared
+     graph. `NOOS_URL` must be set in production and be https or loopback; if
+     Noos is down, rate limiting or unconfigured the check answers 503
+     `confirm_unavailable` and the attempt is **not** counted;
    - anything else (Apple/bridge/legacy accounts with no independent proof) →
      `link_required`; the person signs in another way and uses Settings →
      Connect (path 1).

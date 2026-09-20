@@ -27,9 +27,10 @@ import {
   beginIdeaflowConfirmAttempt,
   finishIdeaflowConfirm,
   recordIdeaflowConfirmFailure,
+  refundIdeaflowConfirmAttempt,
   startIdeaflowConfirm,
 } from '../services/ideaflowConfirmFlow.js';
-import { verifyPasswordViaNoos } from '../services/noosPasswordCheck.js';
+import { resolveNoosPasswordOracleUrl, verifyPasswordViaNoos } from '../services/noosPasswordCheck.js';
 import {
   isSafePublicDisplayName,
   normalizePublicDisplayName,
@@ -926,14 +927,27 @@ router.post('/ideaflow/confirm', async (req: Request, res: Response) => {
       return;
     }
 
-    const verified = await verifyPasswordViaNoos(target.email, password, NOOS_URL);
-    if (!verified || verified.userId !== target.id) {
+    const oracleUrl = resolveNoosPasswordOracleUrl(process.env.NOOS_URL);
+    const verified = oracleUrl
+      ? await verifyPasswordViaNoos(target.email, password, oracleUrl)
+      : { status: 'unavailable' as const };
+    if (verified.status === 'unavailable') {
+      // No verdict about the password: give the attempt back rather than lock
+      // the person out because the password service is down or rate limiting.
+      refundIdeaflowConfirmAttempt(confirmId, attempt);
+      res.status(503).json({
+        error: 'We could not check your password right now. Try again in a moment.',
+        code: 'confirm_unavailable',
+      });
+      return;
+    }
+    if (verified.status !== 'ok' || verified.userId !== target.id) {
       invalid();
       return;
     }
 
     const user = await bindIdeaflowIdentityToUser(session, target.id, identity, 'password');
-    finishIdeaflowConfirm(confirmId);
+    finishIdeaflowConfirm(confirmId, 'confirmed');
     const token = jwt.sign(
       { userId: user.id, email: user.email } as AuthUser,
       getJwtSecret(),
@@ -942,6 +956,7 @@ router.post('/ideaflow/confirm', async (req: Request, res: Response) => {
     res.json({ token, user, expiresIn: 7 * 24 * 60 * 60, provider: 'ideaflow-id' });
   } catch (error) {
     console.error('Ideaflow ID confirmation failed:', error);
+    refundIdeaflowConfirmAttempt(confirmId, attempt);
     finishIdeaflowConfirm(confirmId);
     sendIdeaflowSignInError(res, error);
   } finally {
