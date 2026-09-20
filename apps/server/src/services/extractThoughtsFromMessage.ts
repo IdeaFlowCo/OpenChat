@@ -109,8 +109,8 @@ export async function createThoughtsFromMessageTags(
     messageId: string;
     conversationId: string;
     content: string;
-    /** Optional Socket.IO server — emits 'thought:created' to the sender's
-     *  user room so the Thoughts tab auto-refreshes without polling. */
+    /** Optional Socket.IO server — emits to the sender's personal feed and
+     *  the source conversation's shared inline-tag feed. */
     io?: IOServer;
   }
 ): Promise<string[]> {
@@ -137,6 +137,7 @@ export async function createThoughtsFromMessageTags(
         text: $text,
         kind: $kind,
         tags: $tags,
+        captureMethod: 'inline-tag',
         status: 'none',
         createdAt: datetime($now),
         updatedAt: datetime($now)
@@ -150,23 +151,28 @@ export async function createThoughtsFromMessageTags(
     );
     console.log(`[thought-from-tag] created Thought ${id} (kind=${kind}, tags=${tagNames.join(', ')}) for user ${params.senderId} from message ${params.messageId}`);
 
-    // Emit to the sender's user room so the Thoughts tab can refresh
-    // without polling. Same room-naming pattern other emits use
-    // (chatHandler joins each user to `user:${userId}` on connect).
+    // The sender's personal Thoughts tab and every participant's chat-scoped
+    // view are separate surfaces, so use separate events/rooms. This avoids
+    // inserting another participant's Thought into anyone's personal feed.
     if (params.io) {
       try {
-        params.io.to(`user:${params.senderId}`).emit('thought:created', {
-          thought: {
-            id,
-            text,
-            kind,
-            tags: tagNames,
-            status: 'none',
-            createdAt: now,
-            updatedAt: now,
-            fromMessageId: params.messageId,
-            fromConversationId: params.conversationId,
-          },
+        const thought = {
+          id,
+          text,
+          kind,
+          tags: tagNames,
+          status: 'none',
+          createdAt: now,
+          updatedAt: now,
+          sourceMessageId: params.messageId,
+          sourceConversationId: params.conversationId,
+          authorId: params.senderId,
+          pinned: false,
+        };
+        params.io.to(`user:${params.senderId}`).emit('thought:created', { thought });
+        params.io.to(`conversation:${params.conversationId}`).emit('thought:shared', {
+          conversationId: params.conversationId,
+          thought,
         });
       } catch (e) {
         console.warn('[thought-from-tag] socket emit failed:', e);

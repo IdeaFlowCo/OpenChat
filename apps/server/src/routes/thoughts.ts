@@ -5,7 +5,10 @@
  * kind:   'fact' | 'decision' | 'commitment' | 'reminder' | 'observation'
  * status: 'none' | 'open' | 'closed'
  *
- * All routes require auth. Users only see/modify their own Thoughts.
+ * All routes require auth. Users only modify their own Thoughts. The
+ * conversation-scoped read also exposes inline-tag Thoughts to every current
+ * participant of the source conversation, matching the source message's
+ * visibility.
  */
 
 import { Router, Request, Response } from 'express';
@@ -154,8 +157,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
  * participant. Returns:
  *   pinned:   thoughts pinned to this conversation by ANY participant
  *             (pinning = sharing with the conversation, Plan B semantics)
- *   fromChat: the CALLER'S thoughts whose source message is in this
- *             conversation (hashtag captures + save-to-thoughts)
+ *   fromChat: the caller's private save-to-thoughts captures plus inline-tag
+ *             thoughts created by ANY participant in this conversation
  */
 router.get('/conversation/:conversationId', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
@@ -193,14 +196,23 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
 
     const fromChatResult = await session.run(
       `
-      MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought)-[:FROM_MESSAGE]->(m:Message)
-      WHERE m.conversationId = $conversationId
+      MATCH (t:Thought)-[:FROM_MESSAGE]->(m:Message {conversationId: $conversationId})
+      // Manual save-to-thoughts captures remain owner-only unless pinned.
+      // Inline-tag Thoughts follow source-message visibility. The tags check
+      // makes historical rows visible without a data migration; captureMethod
+      // is the explicit discriminator for new rows.
+      WHERE (t.userId = $userId
+             OR t.captureMethod = 'inline-tag'
+             OR size(coalesce(t.tags, [])) > 0)
         AND NOT (t)-[:PINNED_IN]->(:Conversation {id: $conversationId})
+      OPTIONAL MATCH (author:User {id: t.userId})
       RETURN t {
         .id, .text, .kind, .status, .createdAt, .updatedAt,
         tags: coalesce(t.tags, []),
         sourceMessageId: m.id,
         sourceConversationId: m.conversationId,
+        authorId: t.userId,
+        authorName: author.name,
         pinned: false
       } AS thought
       ORDER BY t.createdAt DESC
