@@ -94,6 +94,19 @@ const landingQrPath = path.join(__dirname, 'qr-chat-globalbrai.svg');
 app.get(['/', '/about'], (_req, res) => {
   res.sendFile(landingHtmlPath);
 });
+const faviconPath = path.join(__dirname, 'favicon.png');
+const appleTouchIconPath = path.join(__dirname, 'apple-touch-icon.png');
+
+app.get('/favicon.png', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(faviconPath);
+});
+
+app.get('/apple-touch-icon.png', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(appleTouchIconPath);
+});
+
 app.get('/about/icon.png', (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.sendFile(landingIconPath);

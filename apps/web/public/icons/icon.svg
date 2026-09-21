@@ -1,7 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#3b82f6"/>
-  <path d="M128 176c0-26.5 21.5-48 48-48h160c26.5 0 48 21.5 48 48v112c0 26.5-21.5 48-48 48H256l-72 56v-56h-8c-26.5 0-48-21.5-48-48V176z" fill="#ffffff"/>
-  <circle cx="208" cy="232" r="14" fill="#3b82f6"/>
-  <circle cx="256" cy="232" r="14" fill="#3b82f6"/>
-  <circle cx="304" cy="232" r="14" fill="#3b82f6"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+<title id="title">OpenChat / Open turn / light app icon</title><desc id="desc">1024 square review composition; rounded-square mask is illustrative. Production iOS master must be opaque and unmasked.</desc>
+<g transform="translate(0 0) scale(16)"><rect width="64" height="64"  fill="#faf6ef"/><g transform="translate(5.12 5.12) scale(0.84)"><g fill="none" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path stroke="#1c1917" d="M44 12H26C17 12 12 18 12 26V36C12 44 18 48 26 48H27V56L38 48H40C48 48 52 42 52 34"/><path stroke="#b3541e" d="M42 23H54"/></g></g></g>
 </svg>
