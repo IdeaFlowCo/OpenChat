@@ -178,7 +178,7 @@ export function NewConversationScreen() {
               ]}
               onPress={() => { setMode(m); setSelected([]); setGroupTitle(''); }}
             >
-              <Text style={{ color: active ? '#fff' : c.textPrimary, fontWeight: '600' }}>
+              <Text style={{ color: active ? c.onPrimary : c.textPrimary, fontWeight: '600' }}>
                 {m === 'direct' ? 'Direct Message' : 'Group'}
               </Text>
             </TouchableOpacity>
@@ -199,7 +199,7 @@ export function NewConversationScreen() {
         autoCapitalize="none"
         autoCorrect={false}
       />
-      <Text style={[styles.discoveryHint, { color: c.textMuted }]}>
+      <Text style={[styles.discoveryHint, { color: c.textMetadata }]}>
         {currentUser?.openUserDirectoryEnabled
           ? 'Everyone with directory visibility is shown. Email addresses stay private.'
           : 'Email addresses stay private in search results.'}
@@ -312,7 +312,7 @@ export function NewConversationScreen() {
                       : `OpenChat · ${item.id.slice(0, 6)}`}
                   </Text>
                   {!!item.sharedConversations && (
-                    <Text style={[styles.sharedSubtitle, { color: c.textMuted }]} numberOfLines={1}>
+                    <Text style={[styles.sharedSubtitle, { color: c.textMetadata }]} numberOfLines={1}>
                       {item.sharedConversations} shared conversation{item.sharedConversations === 1 ? '' : 's'}
                     </Text>
                   )}
@@ -322,7 +322,7 @@ export function NewConversationScreen() {
                     borderColor: checked ? c.primary : c.border,
                     backgroundColor: checked ? c.primary : 'transparent',
                   }]}>
-                    {checked && <Text style={{ color: '#fff', fontWeight: '700' }}>✓</Text>}
+                    {checked && <Text style={{ color: c.onPrimary, fontWeight: '700' }}>✓</Text>}
                   </View>
                 )}
               </TouchableOpacity>
@@ -345,7 +345,7 @@ export function NewConversationScreen() {
             disabled={!canCreateGroup || creating}
           >
             <Text style={{
-              color: canCreateGroup ? '#fff' : c.textMuted,
+              color: canCreateGroup ? c.onPrimary : c.textMuted,
               fontWeight: '600',
               fontSize: 16,
             }}>

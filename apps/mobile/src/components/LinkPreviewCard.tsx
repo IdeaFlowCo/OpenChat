@@ -26,13 +26,27 @@ export function LinkPreviewCard({ preview, isOwn, scheme }: Props) {
     });
   };
 
+  /**
+   * Own-bubble foreground tint. The own bubble is ink in light mode but PAPER
+   * in dark mode, so hardcoded white was unreadable in dark. Mirrors the
+   * `ownTint` helper in ChatScreen: derive every own-bubble colour from
+   * `c.bubbleOwnText`, the token that already means "text on the own bubble".
+   */
+  const ownTint = (opacity: number) => {
+    const hex = c.bubbleOwnText.replace('#', '');
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${opacity})`;
+  };
+
   const bgColor = isOwn
-    ? 'rgba(255,255,255,0.12)'
+    ? ownTint(0.12)
     : scheme === 'dark' ? c.surfaceElevated : '#F0F0F0';
-  const borderColor = isOwn ? 'rgba(255,255,255,0.2)' : c.border;
-  const titleColor = isOwn ? '#fff' : c.textPrimary;
-  const descColor = isOwn ? 'rgba(255,255,255,0.75)' : c.textSecondary;
-  const siteColor = isOwn ? 'rgba(255,255,255,0.55)' : c.textMuted;
+  const borderColor = isOwn ? ownTint(0.2) : c.border;
+  const titleColor = isOwn ? c.bubbleOwnText : c.textPrimary;
+  const descColor = isOwn ? ownTint(0.75) : c.textSecondary;
+  const siteColor = isOwn ? ownTint(0.55) : c.textMuted;
 
   return (
     <TouchableOpacity

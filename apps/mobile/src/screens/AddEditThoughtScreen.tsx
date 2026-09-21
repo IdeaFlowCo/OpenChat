@@ -118,7 +118,7 @@ export function AddEditThoughtScreen() {
             maxLength={4000}
             textAlignVertical="top"
           />
-          <Text style={[styles.charCount, { color: c.textMuted }]}>
+          <Text style={[styles.charCount, { color: c.textMetadata }]}>
             {text.length}/4000
           </Text>
         </View>
@@ -201,9 +201,9 @@ export function AddEditThoughtScreen() {
             disabled={saving}
           >
             {saving ? (
-              <ActivityIndicator color="#fff" size="small" />
+              <ActivityIndicator color={c.onPrimary} size="small" />
             ) : (
-              <Text style={styles.saveBtnText}>{isEdit ? 'Save changes' : 'Add thought'}</Text>
+              <Text style={[styles.saveBtnText, { color: c.onPrimary }]}>{isEdit ? 'Save changes' : 'Add thought'}</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -278,7 +278,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   saveBtnText: {
-    color: '#fff',
     fontSize: 15,
     fontWeight: '600',
   },

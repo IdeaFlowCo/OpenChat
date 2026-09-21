@@ -98,7 +98,7 @@ export function AddAgentKeyScreen() {
             Alert.alert('Copied', 'Key copied to clipboard.');
           }}
         >
-          <Text style={styles.btnText}>Copy key</Text>
+          <Text style={[styles.btnText, { color: c.onPrimary }]}>Copy key</Text>
         </TouchableOpacity>
 
         <Text style={[styles.curlLabel, { color: c.textSecondary }]}>Quick-start curl:</Text>
@@ -191,7 +191,7 @@ export function AddAgentKeyScreen() {
         disabled={submitting}
         activeOpacity={0.8}
       >
-        <Text style={styles.submitText}>{submitting ? 'Creating…' : 'Create key'}</Text>
+        <Text style={[styles.submitText, { color: c.onPrimary }]}>{submitting ? 'Creating…' : 'Create key'}</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
   },
-  submitText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  submitText: { fontSize: 16, fontWeight: '700' },
 
   // Confirmation screen
   confirmContainer: { padding: 24, alignItems: 'stretch' },
@@ -240,5 +240,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
-  btnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  btnText: { fontSize: 15, fontWeight: '600' },
 });

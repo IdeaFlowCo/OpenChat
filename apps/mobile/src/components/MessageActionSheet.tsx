@@ -314,7 +314,7 @@ export function MessageActionSheet({
                 onPress={handleReportOther}
                 activeOpacity={0.8}
               >
-                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Submit report</Text>
+                <Text style={{ color: c.onPrimary, fontWeight: '600', fontSize: 16 }}>Submit report</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.cancelRow, { borderColor: c.border }]} onPress={handleDismiss} activeOpacity={0.7}>
                 <Text style={[styles.cancelLabel, { color: c.textSecondary }]}>Cancel</Text>
@@ -361,7 +361,7 @@ export function MessageActionSheet({
                 disabled={!assistantQuestion.trim()}
                 activeOpacity={0.8}
               >
-                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Send to assistant</Text>
+                <Text style={{ color: c.onPrimary, fontWeight: '600', fontSize: 16 }}>Send to assistant</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.cancelRow, { borderColor: c.border }]} onPress={handleDismiss} activeOpacity={0.7}>
                 <Text style={[styles.cancelLabel, { color: c.textSecondary }]}>Cancel</Text>
@@ -463,7 +463,7 @@ export function MessageActionSheet({
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Pin to chat</Text>
-                  <Text style={{ fontSize: 12, color: c.textMuted, marginTop: 1 }}>
+                  <Text style={{ fontSize: 12, color: c.textMetadata, marginTop: 1 }}>
                     Saves to your Thoughts and pins it for everyone here
                   </Text>
                 </View>

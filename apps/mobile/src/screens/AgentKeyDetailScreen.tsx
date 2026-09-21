@@ -115,7 +115,7 @@ export function AgentKeyDetailScreen() {
   if (!key) {
     return (
       <View style={[styles.root, { backgroundColor: c.background, alignItems: 'center', justifyContent: 'center' }]}>
-        <Text style={{ color: c.textMuted }}>Loading…</Text>
+        <Text style={{ color: c.textMetadata }}>Loading…</Text>
       </View>
     );
   }

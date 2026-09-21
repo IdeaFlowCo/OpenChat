@@ -164,8 +164,8 @@ export function McpSetupCard({ apiKey }: Props) {
         }}
         activeOpacity={0.85}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><AppIcon name="copy" color="#ffffff" size={16} /><Text style={styles.heroBtnText}>Copy agent setup</Text></View>
-        <Text style={styles.heroBtnSub}>Works in ChatGPT, Claude, Gemini — any LLM</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><AppIcon name="copy" color={c.onPrimary} size={16} /><Text style={[styles.heroBtnText, { color: c.onPrimary }]}>Copy agent setup</Text></View>
+        <Text style={[styles.heroBtnSub, { color: c.onPrimary }]}>Works in ChatGPT, Claude, Gemini — any LLM</Text>
       </TouchableOpacity>
 
       {/* Always-visible link to the full guide. */}
@@ -175,7 +175,7 @@ export function McpSetupCard({ apiKey }: Props) {
         style={styles.guideLinkRow}
       >
         <Text style={[styles.guideLinkText, { color: c.primary }]}>📖  Read the setup guide</Text>
-        <Text style={[styles.guideLinkUrl, { color: c.textMuted }]} numberOfLines={1}>
+        <Text style={[styles.guideLinkUrl, { color: c.textMetadata }]} numberOfLines={1}>
           {guideUrl.replace(/^https?:\/\//, '')}
         </Text>
       </TouchableOpacity>
@@ -213,7 +213,7 @@ export function McpSetupCard({ apiKey }: Props) {
             activeOpacity={0.8}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}><AppIcon name="copy" color={c.primary} size={14} /><Text style={[styles.oneShotText, { color: c.primary }]}>Copy one-shot setup prompt (coding agents)</Text></View>
-            <Text style={[styles.oneShotSub, { color: c.textMuted }]}>Paste into Claude Code / Cursor / Codex — it installs the MCP server itself</Text>
+            <Text style={[styles.oneShotSub, { color: c.textMetadata }]}>Paste into Claude Code / Cursor / Codex — it installs the MCP server itself</Text>
           </TouchableOpacity>
 
           <Text style={[styles.snippetsHeader, { color: c.textSecondary }]}>Or paste a config snippet manually</Text>
@@ -246,7 +246,7 @@ export function McpSetupCard({ apiKey }: Props) {
           </View>
 
           {/* Hint */}
-          <Text style={[styles.hint, { color: c.textMuted }]}>{hintFor(active)}</Text>
+          <Text style={[styles.hint, { color: c.textMetadata }]}>{hintFor(active)}</Text>
 
           {/* Snippet */}
           <View style={[styles.codeBox, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
@@ -265,7 +265,7 @@ export function McpSetupCard({ apiKey }: Props) {
               }}
               activeOpacity={0.8}
             >
-              <Text style={styles.btnText}>Copy</Text>
+              <Text style={[styles.btnText, { color: c.onPrimary }]}>Copy</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: c.border }]}
@@ -299,8 +299,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 10,
   },
-  heroBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  heroBtnSub: { color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 },
+  heroBtnText: { fontSize: 15, fontWeight: '700' },
+  heroBtnSub: { fontSize: 12, marginTop: 2, opacity: 0.85 },
 
   // Always-visible guide link
   guideLinkRow: {
@@ -370,5 +370,5 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
   },
-  btnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  btnText: { fontSize: 14, fontWeight: '600' },
 });

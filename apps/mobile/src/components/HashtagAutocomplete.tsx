@@ -58,7 +58,7 @@ export function HashtagAutocomplete({ suggestions, selectedIndex, onSelect, sche
         <Text style={[styles.tag, { color: selected ? c.primary : c.textPrimary }]} numberOfLines={1}>
           #{item.tag}
         </Text>
-        <Text style={[styles.source, { color: c.textMuted }]} numberOfLines={1}>
+        <Text style={[styles.source, { color: c.textMetadata }]} numberOfLines={1}>
           {sourceLabel(item.source)}
         </Text>
       </TouchableOpacity>

@@ -74,7 +74,7 @@ export function KeyboardShortcutsScreen() {
           style={[styles.closeBtn, { backgroundColor: c.primary }]}
           accessibilityLabel="Close"
         >
-          <Text style={{ color: '#fff', fontWeight: '600' }}>Close</Text>
+          <Text style={{ color: c.onPrimary, fontWeight: '600' }}>Close</Text>
         </Pressable>
       </View>
     </View>

@@ -73,7 +73,7 @@ export function MentionAutocomplete({ query, participants, onSelect, scheme }: P
               >
                 {item.displayName}
               </Text>
-              <Text style={[styles.email, { color: c.textMuted }]} numberOfLines={1}>
+              <Text style={[styles.email, { color: c.textMetadata }]} numberOfLines={1}>
                 OpenChat · {item.userId.slice(0, 6)}
               </Text>
             </View>

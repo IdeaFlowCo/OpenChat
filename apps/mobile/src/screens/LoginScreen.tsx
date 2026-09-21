@@ -459,9 +459,9 @@ export function LoginScreen() {
             accessibilityLabel="Continue with Ideaflow"
           >
             {ideaflowLoading ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={c.onPrimary} />
             ) : (
-              <Text style={styles.ideaflowButtonText}>Continue with Ideaflow</Text>
+              <Text style={[styles.ideaflowButtonText, { color: c.onPrimary }]}>Continue with Ideaflow</Text>
             )}
           </TouchableOpacity>
         )}
@@ -535,9 +535,9 @@ export function LoginScreen() {
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={c.onPrimary} />
           ) : (
-            <Text style={styles.buttonText}>{mode === 'register' ? 'Create account' : 'Sign In'}</Text>
+            <Text style={[styles.buttonText, { color: c.onPrimary }]}>{mode === 'register' ? 'Create account' : 'Sign In'}</Text>
           )}
         </TouchableOpacity>
 
@@ -554,7 +554,7 @@ export function LoginScreen() {
         {SHOW_TEST_LOGINS && (
           <View style={styles.quickLogin}>
             <View style={[styles.divider, { backgroundColor: c.border }]} />
-            <Text style={[styles.quickLabel, { color: c.textMuted }]}>Quick login (testing)</Text>
+            <Text style={[styles.quickLabel, { color: c.textMetadata }]}>Quick login (testing)</Text>
             <View style={styles.quickRow}>
               {TEST_ACCOUNTS.map((acct) => (
                 <TouchableOpacity
@@ -571,14 +571,14 @@ export function LoginScreen() {
                   disabled={loading}
                 >
                   <Text style={[styles.quickButtonText, { color: c.textPrimary }]}>{acct.label}</Text>
-                  <Text style={[styles.quickButtonSub, { color: c.textMuted }]}>{acct.email}</Text>
+                  <Text style={[styles.quickButtonSub, { color: c.textMetadata }]}>{acct.email}</Text>
                 </TouchableOpacity>
               ))}
             </View>
           </View>
         )}
 
-        <Text style={[styles.footer, { color: c.textMuted }]}>
+        <Text style={[styles.footer, { color: c.textMetadata }]}>
           Uses your Noos credentials. Phone sign-in coming soon.
         </Text>
       </View>
@@ -588,7 +588,7 @@ export function LoginScreen() {
           immediately in their browser without installing. */}
       {Platform.OS !== 'web' && (
         <View style={styles.shareSection}>
-          <Text style={[styles.shareLabel, { color: c.textMuted }]}>SHARE OPENCHAT</Text>
+          <Text style={[styles.shareLabel, { color: c.textMetadata }]}>SHARE OPENCHAT</Text>
           <View style={[styles.shareCard, { backgroundColor: c.surface, borderColor: c.border }]}>
             <View style={styles.qrWrap}>
               {/* Light QR on a fixed white background so it scans reliably
@@ -645,14 +645,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 4,
   },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  buttonText: { fontSize: 16, fontWeight: '600' },
   ideaflowButton: {
     height: 50,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ideaflowButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  ideaflowButtonText: { fontSize: 16, fontWeight: '600' },
   footer: { fontSize: 12, textAlign: 'center', marginTop: 8 },
   shareSection: { width: '100%', maxWidth: 520, alignSelf: 'center', marginTop: 32, alignItems: 'stretch', opacity: 0.88 },
   shareLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8, textAlign: 'center' },

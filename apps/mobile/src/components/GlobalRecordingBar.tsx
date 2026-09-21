@@ -62,7 +62,7 @@ export function GlobalRecordingBar({ activeConversationId }: Props) {
             accessibilityLabel="Cancel voice message"
           >
             <AppIcon name="x" color={c.textMuted} size={16} />
-            <Text style={[styles.cancelText, { color: c.textMuted }]}>Cancel</Text>
+            <Text style={[styles.cancelText, { color: c.textMetadata }]}>Cancel</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => void stopAndSend()}
@@ -71,8 +71,8 @@ export function GlobalRecordingBar({ activeConversationId }: Props) {
             accessibilityRole="button"
             accessibilityLabel="Stop and send voice message"
           >
-            <AppIcon name="stop" color="#fff" size={13} />
-            <Text style={styles.sendText}>Send</Text>
+            <AppIcon name="stop" color={c.onPrimary} size={13} />
+            <Text style={[styles.sendText, { color: c.onPrimary }]}>Send</Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -128,7 +128,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendText: {
-    color: '#fff',
     fontSize: 13,
     fontWeight: '700',
   },

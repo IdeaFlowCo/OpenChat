@@ -200,7 +200,7 @@ export function ProfileEditScreen() {
               </View>
               <View style={styles.discoveryCopy}>
                 <Text style={[styles.discoveryTitle, { color: c.textPrimary }]}>{label}</Text>
-                <Text style={[styles.discoveryDetail, { color: c.textMuted }]}>{detail}</Text>
+                <Text style={[styles.discoveryDetail, { color: c.textMetadata }]}>{detail}</Text>
               </View>
             </TouchableOpacity>
           );
@@ -219,7 +219,7 @@ export function ProfileEditScreen() {
           returnKeyType="done"
           onSubmitEditing={handleSave}
         />
-        <Text style={[styles.hint, { color: c.textMuted }]}>
+        <Text style={[styles.hint, { color: c.textMetadata }]}>
           Shown below your name in conversations.
         </Text>
       </View>
@@ -231,9 +231,9 @@ export function ProfileEditScreen() {
         activeOpacity={0.8}
       >
         {saving ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={c.onPrimary} />
         ) : (
-          <Text style={styles.saveBtnText}>Save</Text>
+          <Text style={[styles.saveBtnText, { color: c.onPrimary }]}>Save</Text>
         )}
       </TouchableOpacity>
     </ScrollView>
@@ -320,7 +320,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   saveBtnText: {
-    color: '#fff',
     fontWeight: '700',
     fontSize: 16,
   },

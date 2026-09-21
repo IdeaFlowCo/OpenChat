@@ -70,7 +70,7 @@ export function MyQrCodeScreen() {
         />
       </View>
 
-      <Text style={[styles.urlLabel, { color: c.textMuted }]} numberOfLines={1} ellipsizeMode="middle">
+      <Text style={[styles.urlLabel, { color: c.textMetadata }]} numberOfLines={1} ellipsizeMode="middle">
         {webUrl}
       </Text>
 
@@ -79,7 +79,7 @@ export function MyQrCodeScreen() {
         onPress={handleShare}
         activeOpacity={0.8}
       >
-        <Text style={styles.shareBtnText}>Share</Text>
+        <Text style={[styles.shareBtnText, { color: c.onPrimary }]}>Share</Text>
       </TouchableOpacity>
     </View>
   );
@@ -120,7 +120,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   shareBtnText: {
-    color: '#ffffff',
     fontWeight: '700',
     fontSize: 16,
   },

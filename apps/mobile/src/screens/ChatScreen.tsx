@@ -36,8 +36,8 @@ import { useRecording } from '../contexts/RecordingContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { AiDisclosureBanner } from '../components/AiDisclosureBanner';
-import { BotBadge } from '../components/BotBadge';
 import { AppIcon } from '../components/AppIcon';
+import { ConversationHeaderContent } from '../components/ConversationHeaderContent';
 import { NewMessagesPill } from '../components/NewMessagesPill';
 import { ChatEmptyState } from '../components/ChatEmptyState';
 import type { NavProp, RouteProps } from '../navigation/types';
@@ -52,7 +52,6 @@ import { TransformButton } from '../components/TransformButton';
 import { NVCComposerModal } from '../components/NVCComposerModal';
 import { LinkPreviewCard } from '../components/LinkPreviewCard';
 import { AgentNetworkCard } from '../components/AgentNetworkCard';
-import { AgentOverlayButton } from '../components/AgentOverlayButton';
 import type { Participant } from '../api/client';
 import { ExportSheet } from '../components/ExportSheet';
 import { saveJsonDownload } from '../services/exportDownload';
@@ -62,7 +61,7 @@ import {
   HashtagSuggestion,
   invalidateHashtagSuggestions,
 } from '../services/hashtagSuggestions';
-import { serif } from '../theme/typography';
+import { buildConversationHeaderSubtitle } from '../utils/conversationHeader';
 import {
   ActiveHashtag,
   applyHashtagSuggestion,
@@ -512,6 +511,7 @@ export function ChatScreen({
 
   // Mute menu logic (OpenChat-aes)
   const isMuted = !!mutedConvs[conversationId];
+  const [conversationMenuVisible, setConversationMenuVisible] = useState(false);
   const [exportSheetVisible, setExportSheetVisible] = useState(false);
   const [exportBusyRange, setExportBusyRange] = useState<ExportRangeKey | null>(null);
 
@@ -538,152 +538,105 @@ export function ChatScreen({
     }
   }, [conversationId, exportBusyRange, isConnected, showToast]);
 
-  // "…" menu: mute controls + export (export moved out of the header per
-  // 2026-09-02 feedback — the download icon crowded the contact name).
-  // This callback is a header-effect dependency. Keep it stable so composer
-  // edits and the recorder's 100ms ticks do not rebuild the native header.
-  const showMuteMenu = useCallback(() => {
-    const muteOptions = isMuted
-      ? ['Unmute']
-      : ['Mute for 1 hour', 'Mute for 8 hours', 'Mute until tomorrow', 'Mute always'];
-    const options = [...muteOptions, 'Export conversation…', 'Cancel'];
-    const exportIndex = muteOptions.length;
-    const cancelIndex = options.length - 1;
+  const headerSubtitle = useMemo(() => buildConversationHeaderSubtitle({
+    directStatus: directPresenceText,
+    isGroup,
+    isSelfDM,
+    memberCount: conversation?.participants?.length || 0,
+    containsBot,
+    isMuted,
+  }), [conversation?.participants?.length, containsBot, directPresenceText, isGroup, isMuted, isSelfDM]);
+
+  const openConversationInfo = useCallback(() => {
+    if (isGroup) navigation.navigate('GroupSettings', { conversationId });
+    else if (isSelfDM) navigation.navigate('ProfileEdit');
+    else if (other?.id) navigation.navigate('ContactProfile', { userId: other.id });
+  }, [conversationId, isGroup, isSelfDM, navigation, other?.id]);
+
+  const openConversationThoughts = useCallback(() => {
+    setConversationMenuVisible(false);
+    navigation.navigate('ConversationThoughts', { conversationId, title: headerTitle });
+  }, [conversationId, headerTitle, navigation]);
+
+  const openAgentNetwork = useCallback(() => {
+    setConversationMenuVisible(false);
+    (onOpenAgent ?? (() => navigation.navigate('AgentOverlay')))();
+  }, [navigation, onOpenAgent]);
+
+  const showMuteOptions = useCallback(() => {
+    setConversationMenuVisible(false);
+    if (isMuted) {
+      void muteConv(conversationId, null);
+      return;
+    }
 
     if (Platform.OS === 'ios') {
+      const options = ['Mute for 1 hour', 'Mute for 8 hours', 'Mute until tomorrow', 'Mute always', 'Cancel'];
       ActionSheetIOS.showActionSheetWithOptions(
-        { options, cancelButtonIndex: cancelIndex },
-        async (idx) => {
-          if (idx === cancelIndex) return;
-          if (idx === exportIndex) {
-            setExportSheetVisible(true);
-            return;
-          }
-          if (isMuted) {
-            await muteConv(conversationId, null);
-          } else {
-            const now = new Date();
-            let until: Date | 'always';
-            if (idx === 0) {
-              until = new Date(now.getTime() + 60 * 60 * 1000);
-            } else if (idx === 1) {
-              until = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-            } else if (idx === 2) {
-              const tomorrow = new Date(now);
-              tomorrow.setDate(tomorrow.getDate() + 1);
-              tomorrow.setHours(9, 0, 0, 0);
-              until = tomorrow;
-            } else {
-              until = 'always';
-            }
-            await muteConv(conversationId, until);
-          }
+        { options, cancelButtonIndex: 4 },
+        (idx) => {
+          if (idx === 4) return;
+          const now = new Date();
+          let until: Date | 'always';
+          if (idx === 0) until = new Date(now.getTime() + 60 * 60 * 1000);
+          else if (idx === 1) until = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+          else if (idx === 2) {
+            const tomorrow = new Date(now);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            tomorrow.setHours(9, 0, 0, 0);
+            until = tomorrow;
+          } else until = 'always';
+          void muteConv(conversationId, until);
         }
       );
     } else {
-      // Android: use Alert with a simple "mute always / unmute" fallback
       Alert.alert(
-        isMuted ? 'Unmute conversation?' : 'Mute conversation?',
-        isMuted ? undefined : 'You will stop receiving notification banners for this chat.',
+        'Mute conversation?',
+        'You will stop receiving notification banners for this chat.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Export conversation…', onPress: () => setExportSheetVisible(true) },
-          {
-            text: isMuted ? 'Unmute' : 'Mute always',
-            onPress: () => void muteConv(conversationId, isMuted ? null : 'always'),
-          },
+          { text: 'Mute always', onPress: () => void muteConv(conversationId, 'always') },
         ]
       );
     }
-  }, [isMuted, muteConv, conversationId]);
+  }, [conversationId, isMuted, muteConv]);
+
+  const openExport = useCallback(() => {
+    setConversationMenuVisible(false);
+    setExportSheetVisible(true);
+  }, []);
+
+  const moreAction = (
+    <TouchableOpacity
+      onPress={() => setConversationMenuVisible(true)}
+      accessibilityRole="button"
+      accessibilityLabel="More conversation actions"
+      style={styles.headerMoreAction}
+    >
+      <AppIcon name="more" color={c.textSecondary} size={20} />
+    </TouchableOpacity>
+  );
 
   useLayoutEffect(() => {
     // Embedded in MasterDetailLayout — the parent owns the chrome.
     if (embedded) return;
     navigation.setOptions({
       headerTitle: () => (
-        <TouchableOpacity
-          onPress={() => {
-            if (isGroup) {
-              navigation.navigate('GroupSettings', { conversationId });
-            } else if (isSelfDM) {
-              // Self-DM header → open your own profile edit screen.
-              navigation.navigate('ProfileEdit');
-            } else if (other?.id) {
-              navigation.navigate('ContactProfile', { userId: other.id });
-            }
-          }}
-          disabled={!isGroup && !isSelfDM && !other?.id}
-          activeOpacity={0.7}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}
-        >
-          <Avatar
-            name={!isGroup ? (other?.name || other?.email) : headerTitle}
-            email={other?.email}
-            isBot={!isGroup ? other?.isBot : false}
-            avatarUrl={!isGroup ? other?.avatarUrl : undefined}
-            variant={isGroup ? 'group' : 'person'}
-            groupMembers={groupAvatarMembers}
-            size={28}
-          />
-          <View style={{ flexShrink: 1, flexGrow: 1, minWidth: 0 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={{ color: c.textPrimary, fontWeight: '600', fontSize: 19, fontFamily: serif, flexShrink: 1 }} numberOfLines={1}>
-                {headerTitle}
-              </Text>
-              {!isGroup && <BotBadge isBot={other?.isBot} compact />}
-              {isGroup && containsBot && <BotBadge isBot compact />}
-              {(isGroup || isSelfDM || other?.id) && (
-                <View style={{ marginLeft: 5 }}><AppIcon name="info" color={c.textMuted} size={13} strokeWidth={1.8} /></View>
-              )}
-            </View>
-            {!isGroup && other && (
-              <Text style={{ color: c.textSecondary, fontSize: 11 }} numberOfLines={1}>
-                {directPresenceText}
-              </Text>
-            )}
-            {isGroup && (
-              <Text style={{ color: c.textSecondary, fontSize: 11 }} numberOfLines={1}>
-                {(conversation?.participants?.length || 0)} members
-              </Text>
-            )}
-          </View>
-        </TouchableOpacity>
+        <ConversationHeaderContent
+          title={headerTitle}
+          subtitle={headerSubtitle}
+          avatarName={!isGroup ? (other?.name || other?.email || headerTitle) : headerTitle}
+          avatarEmail={other?.email}
+          avatarUrl={!isGroup ? other?.avatarUrl : undefined}
+          isBot={!isGroup ? other?.isBot : false}
+          variant={isGroup ? 'group' : 'person'}
+          groupMembers={groupAvatarMembers}
+          onPress={(isGroup || isSelfDM || other?.id) ? openConversationInfo : undefined}
+        />
       ),
-      headerRight: () => (
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          {enhanced && (
-            <AgentOverlayButton
-              color={c.primary}
-              onPress={() => navigation.navigate('AgentOverlay')}
-            />
-          )}
-          <TouchableOpacity
-            onPress={() =>
-              navigation.navigate('ConversationThoughts', {
-                conversationId,
-                title: headerTitle,
-              })
-            }
-            accessibilityLabel="Thoughts for this chat"
-            style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
-          >
-            <AppIcon name="thought" color={c.primary} size={20} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={showMuteMenu}
-            accessibilityLabel={isMuted ? 'Unmute conversation' : 'Mute conversation'}
-            style={{ minWidth: 44, minHeight: 44, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 }}
-          >
-            {isMuted && (
-              <AppIcon name="mute" color={c.textMuted} size={15} strokeWidth={1.8} />
-            )}
-            <AppIcon name="more" color={c.textSecondary} size={20} />
-          </TouchableOpacity>
-        </View>
-      ),
+      headerRight: () => moreAction,
     });
-  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, conversationId, conversation?.participants?.length, other, groupAvatarMembers, directPresenceText, c.primary, c.textPrimary, c.textSecondary, c.textMuted, containsBot, enhanced, isMuted, showMuteMenu]);
+  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, headerSubtitle, other, groupAvatarMembers, openConversationInfo, c.textSecondary]);
 
   // Ink & Paper: own bubbles are ink-on-paper (light) / paper-on-ink (dark),
   // so translucent overlays inside them derive from the bubble text color
@@ -1250,59 +1203,20 @@ export function ChatScreen({
     >
       {embedded && (
         <View style={[styles.embeddedHeader, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
-          <TouchableOpacity
-            onPress={() => {
-              if (isGroup) navigation.navigate('GroupSettings', { conversationId });
-              else if (isSelfDM) navigation.navigate('ProfileEdit');
-              else if (other?.id) navigation.navigate('ContactProfile', { userId: other.id });
-            }}
-            disabled={!isGroup && !isSelfDM && !other?.id}
-            style={styles.embeddedIdentity}
-            accessibilityLabel={`Conversation information for ${headerTitle}`}
-          >
-            <Avatar
-              name={!isGroup ? (other?.name || other?.email || headerTitle) : headerTitle}
-              email={other?.email}
-              isBot={!isGroup ? other?.isBot : false}
-              avatarUrl={!isGroup ? other?.avatarUrl : undefined}
-              variant={isGroup ? 'group' : 'person'}
-              groupMembers={groupAvatarMembers}
-              size={34}
-            />
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <View style={styles.embeddedTitleRow}>
-                <Text numberOfLines={1} style={[styles.embeddedTitle, { color: c.textPrimary }]}>{headerTitle || 'Chat'}</Text>
-                {!isGroup && <BotBadge isBot={other?.isBot} compact />}
-                {isGroup && containsBot && <BotBadge isBot compact />}
-              </View>
-              <Text numberOfLines={1} style={[styles.embeddedStatus, { color: c.textSecondary }]}>
-                {isGroup
-                  ? `${conversation?.participants?.length || 0} members`
-                  : isSelfDM
-                    ? 'Private notes and messages to yourself'
-                    : directPresenceText}
-              </Text>
-            </View>
-          </TouchableOpacity>
-          <View style={styles.embeddedActions}>
-            {enhanced && (
-              <AgentOverlayButton
-                color={c.primary}
-                onPress={onOpenAgent ?? (() => navigation.navigate('AgentOverlay'))}
-              />
-            )}
-            <TouchableOpacity
-              onPress={() => navigation.navigate('ConversationThoughts', { conversationId, title: headerTitle })}
-              accessibilityLabel="Thoughts for this chat"
-              style={styles.embeddedAction}
-            >
-              <AppIcon name="thought" color={c.primary} size={20} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={showMuteMenu} accessibilityLabel="Conversation menu" style={styles.embeddedAction}>
-              {isMuted && <AppIcon name="mute" color={c.textMuted} size={14} />}
-              <AppIcon name="more" color={c.textSecondary} size={20} />
-            </TouchableOpacity>
-          </View>
+          <ConversationHeaderContent
+            title={headerTitle}
+            subtitle={headerSubtitle}
+            avatarName={!isGroup ? (other?.name || other?.email || headerTitle) : headerTitle}
+            avatarEmail={other?.email}
+            avatarUrl={!isGroup ? other?.avatarUrl : undefined}
+            isBot={!isGroup ? other?.isBot : false}
+            variant={isGroup ? 'group' : 'person'}
+            groupMembers={groupAvatarMembers}
+            avatarSize={34}
+            minHeight={64}
+            onPress={(isGroup || isSelfDM || other?.id) ? openConversationInfo : undefined}
+            action={moreAction}
+          />
         </View>
       )}
       {showAiDisclosure && <AiDisclosureBanner />}
@@ -1316,6 +1230,57 @@ export function ChatScreen({
         onClose={() => !exportBusyRange && setExportSheetVisible(false)}
         onExport={handleConversationExport}
       />
+
+      <Modal
+        visible={conversationMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConversationMenuVisible(false)}
+      >
+        <View style={styles.conversationMenuBackdrop}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setConversationMenuVisible(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close conversation actions"
+          />
+          <View
+            style={[styles.conversationMenuSheet, { backgroundColor: c.surface, borderColor: c.border }]}
+            accessibilityRole="menu"
+            accessibilityLabel="Conversation actions"
+          >
+            <Text style={[styles.conversationMenuTitle, { color: c.textPrimary }]} numberOfLines={1}>
+              {headerTitle || 'Chat'}
+            </Text>
+            <TouchableOpacity onPress={openConversationThoughts} style={styles.conversationMenuRow} accessibilityRole="menuitem">
+              <AppIcon name="thought" color={c.primary} size={20} />
+              <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Thoughts for this chat</Text>
+            </TouchableOpacity>
+            {enhanced && (
+              <TouchableOpacity onPress={openAgentNetwork} style={styles.conversationMenuRow} accessibilityRole="menuitem">
+                <AppIcon name="bot" color={c.primary} size={20} />
+                <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Agent network</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={showMuteOptions} style={styles.conversationMenuRow} accessibilityRole="menuitem">
+              <AppIcon name="mute" color={c.textMetadata} size={19} strokeWidth={1.8} />
+              <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>{isMuted ? 'Unmute' : 'Mute'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={openExport} style={styles.conversationMenuRow} accessibilityRole="menuitem">
+              <AppIcon name="download" color={c.textMetadata} size={19} />
+              <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Export conversation</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setConversationMenuVisible(false)}
+              style={[styles.conversationMenuCancel, { borderTopColor: c.border }]}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.conversationMenuLabel, { color: c.textSecondary }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {loadingMessages && messages.length === 0 ? (
         <View style={styles.center}>
@@ -1358,7 +1323,7 @@ export function ChatScreen({
               return (
                 <View style={styles.dayWrap}>
                   <View style={[styles.dayLine, { backgroundColor: c.divider }]} />
-                  <Text style={[styles.dayLabel, { color: c.textMuted }]}>{item.label}</Text>
+                  <Text style={[styles.dayLabel, { color: c.textMetadata }]}>{item.label}</Text>
                   <View style={[styles.dayLine, { backgroundColor: c.divider }]} />
                 </View>
               );
@@ -1453,12 +1418,12 @@ export function ChatScreen({
                   )}
                   {/* Forwarded-from label (OpenChat-hhc) */}
                   {!!m.viaSecretary && !m.deletedAt && (
-                    <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.78) : c.textMuted }]}>
+                    <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.78) : c.textMetadata }]}>
                       ◇ Secretary auto-reply
                     </Text>
                   )}
                   {!!m.forwardedFromMessageId && (
-                    <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.7) : c.textMuted }]} numberOfLines={1}>
+                    <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.7) : c.textMetadata }]} numberOfLines={1}>
                       {'↪ Forwarded from '}{m.forwardedFromSenderName || 'Unknown'}
                     </Text>
                   )}
@@ -1487,7 +1452,7 @@ export function ChatScreen({
                             </Text>
                           )}
                           {!hasTranscript && !m.deletedAt && (
-                            <Text style={{ fontSize: 13, fontStyle: 'italic', color: isOwn ? ownTint(0.6) : c.textMuted, marginBottom: 4 }}>
+                            <Text style={{ fontSize: 13, fontStyle: 'italic', color: isOwn ? ownTint(0.6) : c.textMetadata, marginBottom: 4 }}>
                               Transcribing…
                             </Text>
                           )}
@@ -1523,7 +1488,7 @@ export function ChatScreen({
                   })}
                   {/* Deleted: muted italic tombstone (OpenChat-q9h) */}
                   {m.deletedAt
-                    ? <Text style={{ color: isOwn ? ownTint(0.55) : c.textMuted, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
+                    ? <Text style={{ color: isOwn ? ownTint(0.55) : c.textMetadata, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
                     : (!!m.content && (
                         isGroup
                           ? <Text style={{ fontSize: 16 }}>
@@ -1538,12 +1503,12 @@ export function ChatScreen({
                       ))
                   }
                   <View style={styles.bubbleFooter}>
-                    <Text style={{ color: isOwn ? ownTint(0.7) : c.textMuted, fontSize: 10 }}>
+                    <Text style={{ color: isOwn ? ownTint(0.7) : c.textMetadata, fontSize: 10 }}>
                       {failed ? 'Failed to send' : formatTime(m.createdAt)}
                     </Text>
                     {/* Edited tag (OpenChat-q9h) */}
                     {!!(m.editedAt && !m.deletedAt) && (
-                      <Text style={{ color: isOwn ? ownTint(0.6) : c.textMuted, fontSize: 10, marginLeft: 4, fontStyle: 'italic' }}>edited</Text>
+                      <Text style={{ color: isOwn ? ownTint(0.6) : c.textMetadata, fontSize: 10, marginLeft: 4, fontStyle: 'italic' }}>edited</Text>
                     )}
                     {/* Tick marks for own DM messages (OpenChat-0nj). Only shown
                         after the local-optimistic id is replaced by a real server id. */}
@@ -1720,7 +1685,7 @@ export function ChatScreen({
                 hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
                 accessibilityLabel="Cancel voice message"
               >
-                <Text style={{ color: c.textMuted, fontSize: 14, fontWeight: '500' }}>Cancel</Text>
+                <Text style={{ color: c.textMetadata, fontSize: 14, fontWeight: '500' }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => void finishRecording(false)}
@@ -1728,11 +1693,11 @@ export function ChatScreen({
                 hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
                 accessibilityLabel="Stop and send voice message"
               >
-                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>Send</Text>
+                <Text style={{ color: c.onPrimary, fontSize: 13, fontWeight: '600' }}>Send</Text>
               </TouchableOpacity>
             </>
           ) : (
-            <Text style={{ color: c.textMuted, fontSize: 12, marginLeft: 12 }}>
+            <Text style={{ color: c.textMetadata, fontSize: 12, marginLeft: 12 }}>
               {'← Slide to cancel · tap mic for hands-free'}
             </Text>
           )}
@@ -1743,7 +1708,7 @@ export function ChatScreen({
       {recordingCancelled && (
         <View style={[styles.recordingBar, { backgroundColor: c.surface, borderColor: c.border }]}>
           <AppIcon name="trash" color={c.textMuted} size={15} />
-          <Text style={{ color: c.textMuted, fontSize: 14, marginLeft: 8 }}>Recording cancelled</Text>
+          <Text style={{ color: c.textMetadata, fontSize: 14, marginLeft: 8 }}>Recording cancelled</Text>
         </View>
       )}
 
@@ -1820,7 +1785,7 @@ export function ChatScreen({
             accessibilityLabel="Hold to record voice message"
             accessibilityRole="button"
           >
-            <AppIcon name={isRecording ? 'stop' : 'mic'} color="#fff" size={19} />
+            <AppIcon name={isRecording ? 'stop' : 'mic'} color={isRecording ? '#fff' : c.onPrimary} size={19} />
           </View>
         )}
         {/* Send button: shown when there is text or a pending asset */}
@@ -1832,9 +1797,9 @@ export function ChatScreen({
             accessibilityLabel="Send message"
           >
             {(sending && uploadingAttachment) ? (
-              <ActivityIndicator size="small" color="#fff" />
+              <ActivityIndicator size="small" color={c.onPrimary} />
             ) : (
-              <Text style={{ color: '#fff', fontWeight: '600' }}>Send</Text>
+              <Text style={{ color: c.onPrimary, fontWeight: '600' }}>Send</Text>
             )}
           </TouchableOpacity>
         )}
@@ -1920,12 +1885,47 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  embeddedIdentity: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 56 },
-  embeddedTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 0 },
-  embeddedTitle: { fontFamily: serif, fontSize: 19, fontWeight: '600', flexShrink: 1 },
-  embeddedStatus: { fontSize: 11, marginTop: 2 },
-  embeddedActions: { flexDirection: 'row', alignItems: 'center' },
-  embeddedAction: { minWidth: 44, minHeight: 44, paddingHorizontal: 8, flexDirection: 'row', gap: 4, alignItems: 'center', justifyContent: 'center' },
+  headerMoreAction: {
+    width: 44,
+    minWidth: 44,
+    minHeight: 44,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  conversationMenuBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.32)',
+  },
+  conversationMenuSheet: {
+    margin: 12,
+    paddingTop: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  conversationMenuTitle: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  conversationMenuRow: {
+    minHeight: 48,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  conversationMenuCancel: {
+    minHeight: 48,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  conversationMenuLabel: { fontSize: 16, fontWeight: '500' },
   listWrap: { flex: 1, position: 'relative' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   row: { flexDirection: 'row', gap: 6 },

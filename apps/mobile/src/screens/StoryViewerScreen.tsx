@@ -68,7 +68,7 @@ export function StoryViewerScreen() {
               <Avatar name={authorName} size={46} />
             <View style={{ flex: 1 }}>
               <Text style={[styles.author, { color: c.textPrimary }]}>{authorName}</Text>
-              <Text style={[styles.expiry, { color: c.textMuted }]}>{remaining(story.storyExpiresAt)}</Text>
+              <Text style={[styles.expiry, { color: c.textMetadata }]}>{remaining(story.storyExpiresAt)}</Text>
             </View>
             <Text style={[styles.eyebrow, { color: c.primary }]}>STORY</Text>
           </View>
@@ -88,7 +88,7 @@ export function StoryViewerScreen() {
           />
           <View style={styles.actions}>
             <TouchableOpacity disabled={busy} onPress={() => void respond(reply)} style={[styles.primary, { backgroundColor: c.primary }, busy && styles.disabled]}>
-              {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Reply</Text>}
+              {busy ? <ActivityIndicator color={c.onPrimary} /> : <Text style={[styles.primaryText, { color: c.onPrimary }]}>Reply</Text>}
             </TouchableOpacity>
             <TouchableOpacity disabled={busy} onPress={() => void respond(`I may be able to help with this. Want to talk?`)} style={[styles.secondary, { borderColor: c.border }]}>
               <Text style={[styles.secondaryText, { color: c.primary }]}>I may be able to help</Text>
@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
   input: { minHeight: 82, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, marginTop: 12, textAlignVertical: 'top' },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   primary: { minHeight: 44, minWidth: 92, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
-  primaryText: { color: '#fff', fontWeight: '800' },
+  primaryText: { fontWeight: '800' },
   secondary: { minHeight: 44, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
   secondaryText: { fontWeight: '700' },
   agentAction: { minHeight: 46, alignItems: 'center', justifyContent: 'center', marginTop: 4 },

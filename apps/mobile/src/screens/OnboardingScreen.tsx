@@ -308,7 +308,7 @@ function WelcomeStep({ c, onNext }: WelcomeStepProps) {
         onPress={onNext}
         accessibilityLabel="Let's go"
       >
-        <Text style={styles.ctaButtonText}>{"Let's go →"}</Text>
+        <Text style={[styles.ctaButtonText, { color: c.onPrimary }]}>{"Let's go →"}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -346,7 +346,7 @@ function NameStep({ c, name, onChangeName, avatarUri, onPickAvatar, saving, onSk
         ) : (
           <View style={styles.avatarPlaceholder}>
             <Text style={[styles.avatarPlaceholderIcon, { color: c.textMuted }]}>+</Text>
-            <Text style={[styles.avatarPlaceholderLabel, { color: c.textMuted }]}>Photo</Text>
+            <Text style={[styles.avatarPlaceholderLabel, { color: c.textMetadata }]}>Photo</Text>
           </View>
         )}
       </TouchableOpacity>
@@ -386,9 +386,9 @@ function NameStep({ c, name, onChangeName, avatarUri, onPickAvatar, saving, onSk
           accessibilityLabel="Save and continue"
         >
           {saving ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={c.onPrimary} />
           ) : (
-            <Text style={styles.primaryBtnText}>Save &amp; continue</Text>
+            <Text style={[styles.primaryBtnText, { color: c.onPrimary }]}>Save &amp; continue</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -429,7 +429,7 @@ function NotificationsStep({ c, done, onMaybeLater, onTurnOn, onDone }: Notifica
             onPress={onTurnOn}
             accessibilityLabel="Turn on notifications"
           >
-            <Text style={styles.primaryBtnText}>Turn on</Text>
+            <Text style={[styles.primaryBtnText, { color: c.onPrimary }]}>Turn on</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -445,7 +445,7 @@ function NotificationsStep({ c, done, onMaybeLater, onTurnOn, onDone }: Notifica
         onPress={onDone}
         accessibilityLabel="Done"
       >
-        <Text style={styles.ctaButtonText}>{"Done →"}</Text>
+        <Text style={[styles.ctaButtonText, { color: c.onPrimary }]}>{"Done →"}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -600,7 +600,6 @@ const styles = StyleSheet.create({
     minHeight: 46,
   },
   primaryBtnText: {
-    color: '#fff',
     fontSize: 15,
     fontWeight: '600',
   },
@@ -614,7 +613,6 @@ const styles = StyleSheet.create({
     minWidth: 180,
   },
   ctaButtonText: {
-    color: '#fff',
     fontSize: 17,
     fontWeight: '700',
   },

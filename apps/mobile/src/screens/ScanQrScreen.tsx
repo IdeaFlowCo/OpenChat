@@ -114,7 +114,7 @@ export function ScanQrScreen() {
           onPress={requestPermission}
           activeOpacity={0.8}
         >
-          <Text style={styles.grantBtnText}>Allow Camera</Text>
+          <Text style={[styles.grantBtnText, { color: c.onPrimary }]}>Allow Camera</Text>
         </TouchableOpacity>
       </View>
     );
@@ -170,7 +170,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginHorizontal: 48,
   },
-  grantBtnText: { color: '#fff', fontWeight: '700', fontSize: 16, textAlign: 'center' },
+  grantBtnText: { fontWeight: '700', fontSize: 16, textAlign: 'center' },
 
   // Overlay layout
   overlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'column' },

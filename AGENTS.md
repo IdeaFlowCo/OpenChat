@@ -40,6 +40,31 @@ for history and migration reference. The backend (`apps/server`) is shared.
 redirect to `/app` while preserving the remaining path and query.
 - **Platform-appropriate exceptions are fine** (just document them): e.g. Enter-to-send is **web-only** — on a native touch keyboard the return key stays a newline and sending is the send button. No hardware-keyboard Enter handling is needed.
 
+## Theme tokens (`apps/mobile/src/theme/`)
+
+`palette.ts` holds the raw "Ink & Paper" values and **must stay free of
+`react-native` imports** — that is what lets `contrast.test.ts` assert WCAG
+ratios directly. `colors.ts` only resolves the scheme (`getColors`).
+
+Pick the token by role, not by how it looks:
+
+| Token | Use for |
+|---|---|
+| `onPrimary` | Any text/icon/spinner painted on `primary`. Never hardcode white — white fails on dark-mode sienna (3.15:1). |
+| `textMetadata` | Small text a user must read: timestamps, counts, status, labels, explanatory copy, empty states. |
+| `textMuted` | Decoration and disabled only — chevrons, dividers, `placeholderTextColor`. Deliberately below 4.5:1. |
+
+`contrast.test.ts` fails the build if these drift, so add new opaque pairs there
+rather than eyeballing them.
+
+Chat headers (compact native-stack, embedded/desktop) share
+`components/ConversationHeaderContent.tsx`: a shrinking identity column
+(`flex:1`/`minWidth:0`, one-line tail ellipsis) plus a fixed-width action
+column. Keep secondary actions in the More menu so the action column's width
+never changes with state, and keep state text in the subtitle
+(`utils/conversationHeader.ts`). Safe-area inset has exactly one owner —
+`useHeaderHeight()` already includes `insets.top`.
+
 ## 🚀 Deploy when done (STANDING RULE — Jacob, 2026-06-04)
 
 When you finish a chunk of work, **deploy both** without asking each time:

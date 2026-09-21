@@ -200,7 +200,7 @@ export function ThoughtsScreen() {
     const searching = query.trim().length > 0;
     return (
       <View style={styles.emptyContainer}>
-        <Text style={[styles.emptyText, { color: c.textMuted }]}>
+        <Text style={[styles.emptyText, { color: c.textMetadata }]}>
           {searching
             ? `No thoughts match "${query.trim()}".`
             : 'No thoughts yet. Tap + to add one.'}
@@ -278,7 +278,7 @@ export function ThoughtsScreen() {
         onPress={openAdd}
         activeOpacity={0.8}
       >
-        <AppIcon name="plus" color="#ffffff" size={26} strokeWidth={2.2} />
+        <AppIcon name="plus" color={c.onPrimary} size={26} strokeWidth={2.2} />
       </TouchableOpacity>
     </View>
   );
@@ -351,11 +351,5 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 4,
-  },
-  fabIcon: {
-    color: '#fff',
-    fontSize: 28,
-    lineHeight: 32,
-    fontWeight: '300',
   },
 });

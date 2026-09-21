@@ -204,7 +204,7 @@ export function PermissionsScreen() {
             <View style={{ flex: 1 }}>
               <Text style={[styles.title, { color: c.textPrimary }]}>{row.title}</Text>
               <Text style={[styles.reason, { color: c.textSecondary }]}>{row.reason}</Text>
-              <Text style={[styles.status, { color: status === 'granted' ? c.primary : c.textMuted }]}>
+              <Text style={[styles.status, { color: status === 'granted' ? c.primary : c.textMetadata }]}>
                 Status: {status ?? 'checking…'}
               </Text>
             </View>
@@ -220,7 +220,7 @@ export function PermissionsScreen() {
         );
       })}
 
-      <Text style={[styles.footer, { color: c.textMuted }]}>
+      <Text style={[styles.footer, { color: c.textMetadata }]}>
         iOS will only show the system permission prompt once per install. If you tapped "Don't Allow" earlier, use Open Settings to re-enable.
       </Text>
     </ScrollView>
