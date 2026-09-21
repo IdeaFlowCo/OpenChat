@@ -15,6 +15,7 @@ interface CurrentUserState {
   email: string;
   name?: string;
   canBrowseUserDirectory?: boolean;
+  openUserDirectoryEnabled?: boolean;
 }
 
 interface ChatContextValue {
@@ -464,6 +465,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           email: me.email,
           name: me.name,
           canBrowseUserDirectory: me.canBrowseUserDirectory === true,
+          openUserDirectoryEnabled: me.openUserDirectoryEnabled === true,
         };
         setCurrentUser(user);
         localStorage.setItem('openchat_user', JSON.stringify(user));

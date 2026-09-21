@@ -44,6 +44,7 @@ export interface User {
    */
   isBot?: boolean;
   canBrowseUserDirectory?: boolean;
+  openUserDirectoryEnabled?: boolean;
 }
 
 /** Image or audio attachment on a message (OpenChat-6bg / voice OpenChat-xxc). */
@@ -666,9 +667,16 @@ class ApiClient {
     return this.fetch(`/users/search?q=${encodeURIComponent(query)}`);
   }
 
-  async getContacts(search?: string): Promise<User[]> {
-    const path = search ? `/contacts?q=${encodeURIComponent(search)}` : '/contacts';
-    return this.fetch(path);
+  async getContacts(
+    search?: string,
+    pagination?: { limit?: number; offset?: number },
+  ): Promise<User[]> {
+    const qs = new URLSearchParams();
+    if (search) qs.set('q', search);
+    if (pagination?.limit) qs.set('limit', String(pagination.limit));
+    if (pagination?.offset) qs.set('offset', String(pagination.offset));
+    const suffix = qs.size > 0 ? `?${qs.toString()}` : '';
+    return this.fetch(`/contacts${suffix}`);
   }
 
   /**

@@ -326,6 +326,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         name: me.name,
         avatarUrl: me.avatarUrl,
         discoveryMode: me.discoveryMode ?? 'name',
+        openUserDirectoryEnabled: me.openUserDirectoryEnabled === true,
       };
       u = refreshed;
       await setSession(token, refreshed);

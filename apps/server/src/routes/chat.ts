@@ -19,6 +19,7 @@ import { CONVERSATIONS_QUERY, UNREAD_TOTAL_QUERY } from '../queries/chatUnread.j
 import { DirectConversationNotAllowedError, ensureDirectConversation } from '../services/directConversation.js';
 import { classifyContactDiscoveryQuery } from '../privacy/contactDiscovery.js';
 import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
+import { isOpenUserDirectoryEnabled } from '../config/features.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
 let _s3: S3Client | null = null;
@@ -1160,22 +1161,42 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
 });
 
 // GET /api/chat/contacts - Find a user for starting a conversation.
-// Empty/self queries return only the caller. Everyone is display-name
-// discoverable by default during beta, while profile-level discoveryMode can
-// restrict an account to exact-email lookup or hide it entirely. Email is
-// intentionally never projected in a discovery response.
+// With OPENCHAT_OPEN_USER_DIRECTORY enabled, an empty query returns the
+// paginated default-discoverable directory. Disabling the flag makes empty
+// queries return no results again. Explicit profile privacy, mutual blocks,
+// and exact-email-only accounts remain excluded from directory browsing.
+// Email is intentionally never projected in a discovery response.
 router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
 
   try {
-    const discovery = classifyContactDiscoveryQuery(req.query.q);
+    const discovery = classifyContactDiscoveryQuery(req.query.q, {
+      openUserDirectory: isOpenUserDirectoryEnabled(),
+    });
+    if (discovery.kind === 'empty' || discovery.kind === 'invalid') {
+      res.json([]);
+      return;
+    }
+
+    const rawLimit = parseInt(req.query.limit as string, 10);
+    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 50, 1), 100);
+    const rawOffset = parseInt(req.query.offset as string, 10);
+    const offset = Math.min(Math.max(Number.isFinite(rawOffset) ? rawOffset : 0, 0), 100_000);
 
     const query = `
         MATCH (actor:User {id: $userId})
         WITH actor
         MATCH (u:User)
-        WHERE ($selfOnly = true AND u.id = $userId)
+        WHERE ($directory = true AND (
+                 u.id = $userId
+                 OR (u.id <> $userId
+                     AND NOT (actor)-[:BLOCKED]->(u)
+                     AND NOT (u)-[:BLOCKED]->(actor)
+                     AND coalesce(u.discoveryMode, 'name') = 'name'
+                     AND NOT coalesce(u.name, '') CONTAINS '@')
+               ))
+           OR ($selfOnly = true AND u.id = $userId)
            OR (u.id = $userId AND (
                  ($email <> '' AND toLower(u.email) = $email)
                  OR ($name <> '' AND toLower(coalesce(u.name, '')) CONTAINS $name)
@@ -1198,16 +1219,20 @@ router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
           sharedConversations: CASE WHEN u.id = actor.id THEN 0
             ELSE COUNT { (u)-[:PARTICIPATES_IN]->(:Conversation)<-[:PARTICIPATES_IN]-(actor) } END
         } AS user
-        ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END, u.name
+        ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END,
+          toLower(coalesce(u.name, '')), u.id
+        SKIP $offset
         LIMIT $limit
       `;
 
     const result = await session.run(query, {
       userId,
+      directory: discovery.kind === 'directory',
       selfOnly: discovery.kind === 'self',
       email: discovery.kind === 'email' ? discovery.normalized : '',
       name: discovery.kind === 'name' ? discovery.normalized : '',
-      limit: neo4j.int(50),
+      offset: neo4j.int(offset),
+      limit: neo4j.int(limit),
       fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME,
     });
     const contacts = result.records.map(r => toJS(r.get('user')));

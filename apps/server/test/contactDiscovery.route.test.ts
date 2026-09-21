@@ -60,6 +60,10 @@ function discoveryResult(params: Record<string, unknown>) {
   const name = String(params.name ?? params.contactName ?? '').toLowerCase();
   const email = String(params.email ?? params.contactEmail ?? '').toLowerCase();
   const matches = users.filter(user => {
+    if (params.directory === true) {
+      if (user.id === actor.id) return true;
+      return (user.discoveryMode ?? 'name') === 'name' && !user.name.includes('@');
+    }
     if (params.selfOnly === true && user.id === actor.id) return true;
     if (user.id === actor.id || user.discoveryMode === 'hidden') return false;
     if (email && user.email.toLowerCase() === email) return true;
@@ -68,13 +72,26 @@ function discoveryResult(params: Record<string, unknown>) {
       && user.name.toLowerCase().includes(name);
   });
 
-  return { records: matches.map(user => ({ get: () => publicProjection(user) })) };
+  const toNumber = (value: unknown, fallback: number) => {
+    if (typeof value === 'object' && value && 'toNumber' in value) {
+      return (value as { toNumber: () => number }).toNumber();
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const offset = toNumber(params.offset, 0);
+  const limit = toNumber(params.limit, 50);
+  return {
+    records: matches.slice(offset, offset + limit)
+      .map(user => ({ get: () => publicProjection(user) })),
+  };
 }
 
 describe('privacy-conscious contact discovery routes', () => {
   let server: Server;
   let baseUrl: string;
   let authorization: string;
+  const originalDirectoryFlag = process.env.OPENCHAT_OPEN_USER_DIRECTORY;
 
   beforeAll(async () => {
     const app = express();
@@ -93,6 +110,7 @@ describe('privacy-conscious contact discovery routes', () => {
   });
 
   beforeEach(() => {
+    process.env.OPENCHAT_OPEN_USER_DIRECTORY = '1';
     mocks.run.mockReset();
     mocks.close.mockReset();
     mocks.run.mockImplementation(async (cypher: string, params: Record<string, unknown>) => {
@@ -105,20 +123,52 @@ describe('privacy-conscious contact discovery routes', () => {
     await new Promise<void>((resolve, reject) => {
       server.close(error => error ? reject(error) : resolve());
     });
+    if (originalDirectoryFlag === undefined) delete process.env.OPENCHAT_OPEN_USER_DIRECTORY;
+    else process.env.OPENCHAT_OPEN_USER_DIRECTORY = originalDirectoryFlag;
   });
 
-  it('returns only a privacy-safe self projection for an empty query', async () => {
+  it('returns the paginated visible directory for an empty query when the flag is on', async () => {
     const response = await fetch(`${baseUrl}/api/chat/contacts`, {
       headers: { Authorization: authorization },
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual([publicProjection(caller)]);
+    expect(await response.json()).toEqual([
+      publicProjection(caller),
+      publicProjection(nameDiscoverable),
+    ]);
     expect(mocks.run).toHaveBeenCalledWith(expect.stringContaining('u.id = $userId'), expect.objectContaining({
       userId: caller.id,
-      selfOnly: true,
+      directory: true,
+      selfOnly: false,
       email: '',
       name: '',
+      offset: expect.anything(),
+      limit: expect.anything(),
+    }));
+  });
+
+  it('returns no contacts for an empty query when the directory flag is off', async () => {
+    process.env.OPENCHAT_OPEN_USER_DIRECTORY = '0';
+
+    const response = await fetch(`${baseUrl}/api/chat/contacts`, {
+      headers: { Authorization: authorization },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([]);
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it('applies limit and offset to directory browsing', async () => {
+    const response = await fetch(`${baseUrl}/api/chat/contacts?limit=1&offset=1`, {
+      headers: { Authorization: authorization },
+    });
+
+    expect(await response.json()).toEqual([publicProjection(nameDiscoverable)]);
+    expect(mocks.run).toHaveBeenCalledWith(expect.stringContaining('SKIP $offset'), expect.objectContaining({
+      directory: true,
+      offset: expect.anything(),
       limit: expect.anything(),
     }));
   });

@@ -29,6 +29,7 @@ import { YouBadge } from '../components/YouBadge';
 import type { NavProp } from '../navigation/types';
 
 type Mode = 'direct' | 'group';
+const DIRECTORY_PAGE_SIZE = 50;
 
 function useDebounced<T>(value: T, delay = 250): T {
   const [v, setV] = useState(value);
@@ -49,6 +50,8 @@ export function NewConversationScreen() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [selected, setSelected] = useState<User[]>([]);
   const [groupTitle, setGroupTitle] = useState('');
   const [creating, setCreating] = useState(false);
@@ -58,19 +61,51 @@ export function NewConversationScreen() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    api.getContacts(debounced || undefined)
+    api.getContacts(debounced || undefined, { limit: DIRECTORY_PAGE_SIZE, offset: 0 })
       .then(rows => {
-        // Keep self in the list so you can DM yourself ("note to self").
-        // The server pins you first; we just don't strip you out anymore.
-        if (!cancelled) setResults(rows);
+        if (cancelled) return;
+        setResults(rows);
+        setHasMore(
+          debounced.trim().length === 0
+            && currentUser?.openUserDirectoryEnabled === true
+            && rows.length === DIRECTORY_PAGE_SIZE,
+        );
       })
       .catch(err => {
         console.warn('[NewConversation] search failed:', err);
-        if (!cancelled) setResults([]);
+        if (!cancelled) {
+          setResults([]);
+          setHasMore(false);
+        }
       })
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
-  }, [debounced, currentUser?.userId]);
+  }, [debounced, currentUser?.openUserDirectoryEnabled]);
+
+  const loadMore = () => {
+    if (
+      debounced.trim().length > 0
+      || currentUser?.openUserDirectoryEnabled !== true
+      || loading
+      || loadingMore
+      || !hasMore
+    ) return;
+
+    setLoadingMore(true);
+    api.getContacts(undefined, { limit: DIRECTORY_PAGE_SIZE, offset: results.length })
+      .then(rows => {
+        setResults(previous => {
+          const known = new Set(previous.map(user => user.id));
+          return [...previous, ...rows.filter(user => !known.has(user.id))];
+        });
+        setHasMore(rows.length === DIRECTORY_PAGE_SIZE);
+      })
+      .catch(err => {
+        console.warn('[NewConversation] directory page failed:', err);
+        setHasMore(false);
+      })
+      .finally(() => setLoadingMore(false));
+  };
 
   const isSelected = (id: string) => selected.some(u => u.id === id);
 
@@ -109,11 +144,19 @@ export function NewConversationScreen() {
   };
 
   const headerInstructions = useMemo(() => {
-    if (mode === 'direct') return 'Search by name to start chatting';
-    if (selected.length === 0) return 'Search for people to start a group';
+    if (mode === 'direct') {
+      return currentUser?.openUserDirectoryEnabled
+        ? 'Browse everyone or search by name'
+        : 'Search by name to start chatting';
+    }
+    if (selected.length === 0) {
+      return currentUser?.openUserDirectoryEnabled
+        ? 'Browse people to start a group'
+        : 'Search for people to start a group';
+    }
     if (selected.length === 1) return 'Pick one more — groups need at least 2 others';
     return `${selected.length} selected — tap Create when ready`;
-  }, [mode, selected.length]);
+  }, [currentUser?.openUserDirectoryEnabled, mode, selected.length]);
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
@@ -147,13 +190,17 @@ export function NewConversationScreen() {
         style={[styles.search, { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border }]}
         value={query}
         onChangeText={setQuery}
-        placeholder="Search by name or exact email"
+        placeholder={currentUser?.openUserDirectoryEnabled
+          ? 'Browse or search by name or exact email'
+          : 'Search by name or exact email'}
         placeholderTextColor={c.textMuted}
         autoCapitalize="none"
         autoCorrect={false}
       />
       <Text style={[styles.discoveryHint, { color: c.textMuted }]}>
-        Email addresses stay private in search results.
+        {currentUser?.openUserDirectoryEnabled
+          ? 'Everyone with directory visibility is shown. Email addresses stay private.'
+          : 'Email addresses stay private in search results.'}
       </Text>
 
       {mode === 'group' && (
@@ -203,10 +250,21 @@ export function NewConversationScreen() {
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingBottom: 24 }}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.35}
+          ListFooterComponent={loadingMore ? (
+            <View style={styles.loadingMore}>
+              <ActivityIndicator color={c.primary} />
+            </View>
+          ) : null}
           ListEmptyComponent={
             <View style={styles.center}>
               <Text style={{ color: c.textSecondary, marginTop: 24 }}>
-                {query ? `No people found for "${query}"` : 'Type a name or complete email address.'}
+                {query
+                  ? `No people found for "${query}"`
+                  : currentUser?.openUserDirectoryEnabled
+                    ? 'No people are available yet.'
+                    : 'Type a name or complete email address.'}
               </Text>
               {!query && Platform.OS !== 'web' && (
                 <TouchableOpacity
@@ -303,6 +361,7 @@ export function NewConversationScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, paddingHorizontal: 16, paddingTop: 12 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 32 },
+  loadingMore: { paddingVertical: 16, alignItems: 'center' },
   modeRow: { flexDirection: 'row', gap: 8 },
   modeBtn: {
     flex: 1,
