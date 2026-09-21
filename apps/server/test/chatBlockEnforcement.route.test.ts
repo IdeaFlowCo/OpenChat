@@ -48,14 +48,17 @@ describe('chat route block enforcement', () => {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   });
 
-  it('requires at least two other people for a group', async () => {
+  it('requires a name for a group with no other people', async () => {
     const response = await fetch(`${baseUrl}/api/chat/conversations`, {
       method: 'POST',
       headers: { Authorization: authorization, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'group', participantIds: ['other'] }),
+      body: JSON.stringify({ type: 'group', participantIds: [] }),
     });
 
     expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'A group name is required when creating a group without other participants',
+    });
     expect(mocks.run).not.toHaveBeenCalled();
   });
 
