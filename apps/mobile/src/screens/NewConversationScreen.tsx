@@ -2,7 +2,8 @@
  * Compose / new-conversation flow.
  *
  * Single screen with two modes (toggle): "Direct" (pick one contact, start
- * DM) and "Group" (pick 2+ contacts, optional title, create). Mirrors the
+ * DM) and "Group" (name a solo group or optionally pick contacts, create).
+ * Mirrors the
  * web ChatSidebar picker but adapted to a full-screen mobile presentation.
  */
 
@@ -55,6 +56,8 @@ export function NewConversationScreen() {
   const [selected, setSelected] = useState<User[]>([]);
   const [groupTitle, setGroupTitle] = useState('');
   const [creating, setCreating] = useState(false);
+  const trimmedGroupTitle = groupTitle.trim();
+  const canCreateGroup = selected.length > 0 || trimmedGroupTitle.length > 0;
 
   const debounced = useDebounced(query, 300);
 
@@ -128,12 +131,12 @@ export function NewConversationScreen() {
   };
 
   const handleCreateGroup = async () => {
-    if (selected.length < 2 || creating) return;
+    if (!canCreateGroup || creating) return;
     setCreating(true);
     try {
       const conv = await createConversation(
         selected.map(u => u.id),
-        { type: 'group', title: groupTitle.trim() || undefined }
+        { type: 'group', title: trimmedGroupTitle || undefined }
       );
       navigation.replace('Chat', { conversationId: conv.id });
     } catch (err) {
@@ -150,13 +153,12 @@ export function NewConversationScreen() {
         : 'Search by name to start chatting';
     }
     if (selected.length === 0) {
-      return currentUser?.openUserDirectoryEnabled
-        ? 'Browse people to start a group'
-        : 'Search for people to start a group';
+      return trimmedGroupTitle
+        ? 'Ready to create — add people now or later'
+        : 'Name your group — you can add people later';
     }
-    if (selected.length === 1) return 'Pick one more — groups need at least 2 others';
     return `${selected.length} selected — tap Create when ready`;
-  }, [currentUser?.openUserDirectoryEnabled, mode, selected.length]);
+  }, [currentUser?.openUserDirectoryEnabled, mode, selected.length, trimmedGroupTitle]);
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
@@ -209,7 +211,7 @@ export function NewConversationScreen() {
             style={[styles.search, { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border }]}
             value={groupTitle}
             onChangeText={setGroupTitle}
-            placeholder="Group name (optional)"
+            placeholder={selected.length === 0 ? 'Group name (required)' : 'Group name (optional)'}
             placeholderTextColor={c.textMuted}
           />
         </View>
@@ -335,21 +337,23 @@ export function NewConversationScreen() {
             style={[
               styles.createBtn,
               {
-                backgroundColor: selected.length >= 2 ? c.primary : c.surfaceElevated,
+                backgroundColor: canCreateGroup ? c.primary : c.surfaceElevated,
                 opacity: creating ? 0.6 : 1,
               },
             ]}
             onPress={handleCreateGroup}
-            disabled={selected.length < 2 || creating}
+            disabled={!canCreateGroup || creating}
           >
             <Text style={{
-              color: selected.length >= 2 ? '#fff' : c.textMuted,
+              color: canCreateGroup ? '#fff' : c.textMuted,
               fontWeight: '600',
               fontSize: 16,
             }}>
-              {creating ? 'Creating…' : selected.length < 2
-                ? `Pick ${2 - selected.length} more`
-                : `Create group (${selected.length})`}
+              {creating
+                ? 'Creating…'
+                : selected.length === 0
+                  ? 'Create group'
+                  : `Create group (${selected.length})`}
             </Text>
           </TouchableOpacity>
         </View>

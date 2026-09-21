@@ -164,7 +164,7 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
   const userId = req.user!.userId;
   const { participantIds, title, type = 'direct' } = req.body;
 
-  if (!participantIds || !Array.isArray(participantIds) || participantIds.length === 0
+  if (!Array.isArray(participantIds)
       || participantIds.some((id: unknown) => typeof id !== 'string')) {
     res.status(400).json({ error: 'participantIds required' });
     return;
@@ -174,6 +174,10 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
   // connections call this same helper, so human DMs cannot drift into a
   // second implementation.
   if (type === 'direct') {
+    if (participantIds.length === 0) {
+      res.status(400).json({ error: 'participantIds required' });
+      return;
+    }
     const otherIds = [...new Set(
       (participantIds as string[]).filter((id) => id !== userId),
     )];
@@ -208,8 +212,9 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
   const otherParticipantIds = [...new Set(
     (participantIds as string[]).filter((id) => id !== userId),
   )];
-  if (otherParticipantIds.length < 2) {
-    res.status(400).json({ error: 'Group conversations require at least three participants' });
+  const groupTitle = typeof title === 'string' && title.trim() ? title.trim() : null;
+  if (otherParticipantIds.length === 0 && !groupTitle) {
+    res.status(400).json({ error: 'A group name is required when creating a group without other participants' });
     return;
   }
 
@@ -219,21 +224,26 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
   const allParticipants = [userId, ...otherParticipantIds];
 
   try {
-    const participantCheck = await session.run(`
-      MATCH (actor:User {id: $userId})
-      UNWIND $participantIds AS participantId
-      OPTIONAL MATCH (target:User {id: participantId})
-      WITH actor, collect(target) AS targets
-      RETURN size(targets) = size($participantIds)
-        AND all(target IN targets WHERE
-          NOT EXISTS { MATCH (actor)-[:BLOCKED]->(target) }
-          AND NOT EXISTS { MATCH (target)-[:BLOCKED]->(actor) }
-        ) AS allowed
-    `, { userId, participantIds: otherParticipantIds });
+    // UNWIND [] returns no rows, so only run the availability check when the
+    // group starts with other members. A solo group still creates the owner
+    // relationship below and remains type=group for later additions.
+    if (otherParticipantIds.length > 0) {
+      const participantCheck = await session.run(`
+        MATCH (actor:User {id: $userId})
+        UNWIND $participantIds AS participantId
+        OPTIONAL MATCH (target:User {id: participantId})
+        WITH actor, collect(target) AS targets
+        RETURN size(targets) = size($participantIds)
+          AND all(target IN targets WHERE
+            NOT EXISTS { MATCH (actor)-[:BLOCKED]->(target) }
+            AND NOT EXISTS { MATCH (target)-[:BLOCKED]->(actor) }
+          ) AS allowed
+      `, { userId, participantIds: otherParticipantIds });
 
-    if (participantCheck.records[0]?.get('allowed') !== true) {
-      res.status(404).json({ error: 'Participant unavailable' });
-      return;
+      if (participantCheck.records[0]?.get('allowed') !== true) {
+        res.status(404).json({ error: 'Participant unavailable' });
+        return;
+      }
     }
 
     const result = await session.run(`
@@ -256,7 +266,7 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
       RETURN c { .*, participants: participants } AS conversation
     `, {
       id: conversationId,
-      title: title || null,
+      title: groupTitle,
       type,
       now,
       participants: allParticipants,
