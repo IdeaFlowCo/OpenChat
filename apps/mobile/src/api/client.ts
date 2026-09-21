@@ -81,6 +81,7 @@ export interface User {
   statusMessage?: string;
   lastSeenAt?: string;
   avatarUrl?: string;
+  onboardedAt?: string;
   discoveryMode?: 'name' | 'email_only' | 'hidden';
   /** True for AI / agent users (picortex, future agents). Surface as a badge. */
   isBot?: boolean;
@@ -1311,9 +1312,26 @@ export const api = {
     ),
 
   /**
-   * Get invite preview — any authed user. No participant PII.
+   * Pending intents
+   */
+  getEntryIntents: () =>
+    request<any[]>('/api/entry-intents'),
+
+  saveEntryIntent: (data: { clientIntentId: string; target: any; continuation: string }) =>
+    request<{ id: string }>('/api/entry-intents', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  completeEntryIntent: (id: string) =>
+    request<{ ok: boolean }>(`/api/entry-intents/${id}/complete`, { method: 'POST' }),
+
+  dismissEntryIntent: (id: string) =>
+    request<{ ok: boolean }>(`/api/entry-intents/${id}`, { method: 'DELETE' }),
+
+  /**
+   * Preview a group invite without auth.
    * GET /api/chat/invites/:token
-   * Returns { conversationId, conversationTitle, memberCount, expiresAt }.
    */
   getInvitePreview: (token: string) =>
     request<{
@@ -1322,6 +1340,35 @@ export const api = {
       memberCount: number;
       expiresAt: string;
     }>(`/api/chat/invites/${token}`),
+
+  /**
+   * Check invite status with auth.
+   * GET /api/chat/invites/:token/status
+   */
+  getInvitePreviewStatus: (token: string) =>
+    request<{
+      status: 'member' | 'joinable' | 'unavailable';
+      conversationId?: string;
+      reason?: string;
+      preview?: {
+        conversationId: string;
+        conversationTitle: string | null;
+        memberCount: number;
+        expiresAt: string;
+      };
+    }>(`/api/chat/invites/${token}/status`),
+
+  /**
+   * Public stranger-safe profile fetch.
+   * GET /api/chat/public-users/:userId
+   */
+  getPublicUser: (userId: string) =>
+    request<{
+      id: string;
+      name: string;
+      avatarUrl: string | null;
+      isBot: boolean;
+    }>(`/api/chat/public-users/${userId}`),
 
   /**
    * Accept/join via invite token. Idempotent if already a member.

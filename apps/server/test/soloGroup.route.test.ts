@@ -11,10 +11,20 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../src/db.js', () => ({
   getDriver: () => ({
-    session: () => ({ run: mocks.run, close: mocks.close }),
+    session: () => ({ 
+      run: mocks.run, 
+      close: mocks.close,
+      executeWrite: (cb: any) => cb({ run: mocks.run }),
+      executeRead: (cb: any) => cb({ run: mocks.run })
+    }),
   }),
   getDriverForRequest: () => ({
-    session: () => ({ run: mocks.run, close: mocks.close }),
+    session: () => ({ 
+      run: mocks.run, 
+      close: mocks.close,
+      executeWrite: (cb: any) => cb({ run: mocks.run }),
+      executeRead: (cb: any) => cb({ run: mocks.run })
+    }),
   }),
 }));
 
@@ -71,8 +81,10 @@ describe('solo-started group conversations', () => {
         records: [{ get: (key: string) => key === 'type' ? 'group' : 'owner' }],
       })
       .mockResolvedValueOnce({ records: [{ get: () => true }] })
-      .mockResolvedValueOnce({ records: [] })
-      .mockResolvedValueOnce({ records: [{ get: () => expandedConversation }] });
+      .mockResolvedValueOnce({ records: [] }) // acquireContextAclLocks (user)
+      .mockResolvedValueOnce({ records: [] }) // acquireContextAclLocks (conversation)
+      .mockResolvedValueOnce({ records: [] }) // merge relationship
+      .mockResolvedValueOnce({ records: [{ get: () => expandedConversation }] }); // loadConversation
 
     const createResponse = await fetch(`${baseUrl}/api/chat/conversations`, {
       method: 'POST',
@@ -98,8 +110,8 @@ describe('solo-started group conversations', () => {
 
     expect(addResponse.status).toBe(201);
     expect(await addResponse.json()).toEqual(expandedConversation);
-    expect(mocks.run).toHaveBeenCalledTimes(5);
-    expect(mocks.run.mock.calls[3][1]).toMatchObject({
+    expect(mocks.run).toHaveBeenCalledTimes(7);
+    expect(mocks.run.mock.calls[5][1]).toMatchObject({
       id: 'solo-group',
       targetId: 'new-member',
     });

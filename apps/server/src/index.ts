@@ -10,6 +10,7 @@ import { Server } from 'socket.io';
 import { marked } from 'marked';
 import { initDatabase, closeDatabase, getDriver } from './db.js';
 import authRoutes from './routes/auth.js';
+import entryIntentsRoutes from './routes/entryIntents.js';
 import chatRoutes from './routes/chat.js';
 import clientLogsRoutes from './routes/clientLogs.js';
 import pushRoutes from './routes/push.js';
@@ -39,6 +40,8 @@ import {
   normalizePublicDisplayName,
   sanitizeLegacyPublicDisplayNames,
 } from './privacy/profilePrivacy.js';
+import { resolveInvitePreview, InviteError } from './services/inviteEntry.js';
+import { resolvePublicPersonProjection } from './services/publicEntryProjection.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -135,34 +138,50 @@ app.get('/u/:userId', async (req, res, next) => {
   if (!userId || userId.length < 4 || userId.length > 32) return next();
   const session = getDriver().session();
   try {
-    const result = await session.run(
-      `MATCH (u:User {id: $userId})
-       WHERE coalesce(u.discoveryMode, 'name') <> 'hidden'
-       RETURN u { .id, .name, .avatarUrl, .isBot } AS user LIMIT 1`,
-      { userId }
-    );
-    if (result.records.length === 0) return next();
-    const user = result.records[0].get('user') as {
-      id: string; name?: string | null;
-      avatarUrl?: string | null; isBot?: boolean | null;
-    };
-    const displayName = normalizePublicDisplayName(user.name);
-    const initial = (displayName[0] || '?').toUpperCase();
-    const intentQs = `?intent=add-user&id=${encodeURIComponent(userId)}`;
+    const projection = await resolvePublicPersonProjection(session, userId);
+    
     const safe = (s: string) => s
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+      
+    if (!projection) {
+      const unavailableHtml = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#5664e2">
+<title>User unavailable</title>
+<style>
+  :root { --bg:#0a0c18; --text:#f4f6ff; --text-dim:#9aa0c5; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; text-align:center; padding:48px 24px; }
+</style>
+</head><body>
+  <h2>User unavailable</h2>
+  <p class="invite" style="color:var(--text-dim)">This user is not available or has hidden their profile.</p>
+  <a href="/app/" style="color:#7c80ff;text-decoration:none">Open OpenChat</a>
+</body></html>`;
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=60');
+      res.status(404).send(unavailableHtml);
+      return;
+    }
+
+    const { id, name, avatarUrl, isBot } = projection;
+    const initial = (name[0] || '?').toUpperCase();
+    const intentQs = `?intent=add-user&id=${encodeURIComponent(id)}`;
+    
     const html = `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#5664e2">
-<title>${safe(displayName)} on OpenChat</title>
-<meta name="description" content="${safe(displayName)} wants to add you on OpenChat.">
-<meta property="og:title" content="${safe(displayName)} on OpenChat">
-<meta property="og:description" content="${safe(displayName)} wants to add you on OpenChat. Tap to start a conversation.">
+<title>${safe(name)} on OpenChat</title>
+<meta name="description" content="${safe(name)} wants to add you on OpenChat.">
+<meta property="og:title" content="${safe(name)} on OpenChat">
+<meta property="og:description" content="${safe(name)} wants to add you on OpenChat. Tap to start a conversation.">
+<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=https://chat.globalbr.ai/u/${encodeURIComponent(id)}">
 <style>
   :root { --bg:#0a0c18; --surface:rgba(255,255,255,0.05); --border:rgba(255,255,255,0.10);
           --text:#f4f6ff; --text-dim:#9aa0c5; --accent:#7c80ff; --accent-bg:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%); }
@@ -193,17 +212,17 @@ app.get('/u/:userId', async (req, res, next) => {
 </style>
 </head><body>
 <div class="wrap">
-  ${user.avatarUrl
-    ? `<img class="avatar" style="object-fit:cover" src="${safe(user.avatarUrl)}" alt="${safe(displayName)}">`
+  ${avatarUrl
+    ? `<img class="avatar" style="object-fit:cover" src="${safe(avatarUrl)}" alt="${safe(name)}">`
     : `<div class="avatar">${safe(initial)}</div>`}
-  <h1 class="name">${safe(displayName)}${user.isBot ? ' <span style="font-size:13px;color:var(--text-dim)">· bot</span>' : ''}</h1>
+  <h1 class="name">${safe(name)}${isBot ? ' <span style="font-size:13px;color:var(--text-dim)">· bot</span>' : ''}</h1>
   <p class="invite">wants to connect on OpenChat — tap below to start.</p>
 
   <a class="cta cta-primary" href="/app/${intentQs}">Open OpenChat · sign in</a>
   <a class="cta cta-secondary" href="/app/${intentQs}">Open on the web</a>
   <a class="cta cta-secondary" href="https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932">Get the iOS app · App Store</a>
 
-  <p class="cta-tiny">Already have OpenChat? <a href="openchat://user/${encodeURIComponent(userId)}">Open the app directly</a></p>
+  <p class="cta-tiny">Already have OpenChat? <a href="openchat://user/${encodeURIComponent(id)}">Open the app directly</a></p>
 
   <div class="footer">
     <a href="/">chat.globalbr.ai</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
@@ -359,6 +378,7 @@ app.use(ideaflowWebCallbackRoutes);
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', contextRoutes);
+app.use('/api', entryIntentsRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/client-logs', clientLogsRoutes);
 app.use('/api/push', pushRoutes);
@@ -397,77 +417,115 @@ setupChatSocket(io);
 // Group invite deep-link: native clients may intercept /i/<token> as a
 // Universal Link. Browsers converge on /app/ with an explicit post-auth
 // intent so Google OAuth can return to the one registered callback URL.
-app.get('/i/:token', async (req, res) => {
+app.get('/i/:token', async (req, res, next) => {
   const token = req.params.token;
-  const targetUrl = `/app/?intent=invite&token=${encodeURIComponent(token)}`;
+  if (!token) return next();
   const session = getDriver().session();
   let groupTitle = 'OpenChat Group';
   let desc = 'Join this group on OpenChat';
+  
+  const safe = (s: string) => s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 
   try {
-    const result = await session.run(`
-      MATCH (c:Conversation)-[:HAS_INVITE]->(inv:GroupInvite {token: $token})
-      RETURN inv, c.title AS conversationTitle, c.id AS conversationId
-    `, { token });
-
-    if (result.records.length > 0) {
-      const rec = result.records[0];
-      const inv = rec.get('inv').properties;
-      const conversationId = rec.get('conversationId') as string;
-      const title = rec.get('conversationTitle') as string | null;
-
-      // Check expiry/uses/revocation roughly
-      const isRevoked = !!inv.revokedAt;
-      const expiresAt = new Date(inv.expiresAt);
-      const isExpired = expiresAt < new Date();
-      
-      let usesLeft = 1;
-      if (inv.usesLeft) {
-         usesLeft = typeof inv.usesLeft === 'object' && 'toNumber' in inv.usesLeft 
-           ? inv.usesLeft.toNumber() 
-           : inv.usesLeft;
-      }
-
-      if (!isRevoked && !isExpired && usesLeft > 0) {
-        if (title) groupTitle = title;
-        
-        // Fetch member count
-        const countResult = await session.run(`
-          MATCH (:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-          RETURN count(*) AS memberCount
-        `, { conversationId });
-        const count = countResult.records[0]?.get('memberCount')?.toNumber?.() ?? 0;
-        
-        desc = `Join ${groupTitle} with ${count} ${count === 1 ? 'member' : 'members'} on OpenChat`;
-      }
+    const preview = await resolveInvitePreview(session, token);
+    if (preview.conversationTitle) {
+      groupTitle = preview.conversationTitle;
     }
-  } catch (error) {
+    const count = preview.memberCount;
+    desc = `Join ${groupTitle} with ${count} ${count === 1 ? 'member' : 'members'} on OpenChat`;
+
+    const intentQs = `?intent=invite&token=${encodeURIComponent(token)}`;
+    const html = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#5664e2">
+<title>Join ${safe(groupTitle)}</title>
+<meta name="description" content="${safe(desc)}">
+<meta property="og:title" content="Join ${safe(groupTitle)} on OpenChat">
+<meta property="og:description" content="${safe(desc)}">
+<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=https://chat.globalbr.ai/i/${encodeURIComponent(token)}">
+<style>
+  :root { --bg:#0a0c18; --surface:rgba(255,255,255,0.05); --border:rgba(255,255,255,0.10);
+          --text:#f4f6ff; --text-dim:#9aa0c5; --accent:#7c80ff; --accent-bg:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%); }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased;
+              font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif; line-height:1.5; }
+  body::before { content:""; position:fixed; inset:0; z-index:-1;
+    background:
+      radial-gradient(700px 500px at 20% -10%,#2a2475 0%,transparent 60%),
+      radial-gradient(600px 500px at 80% 110%,#6230a8 0%,transparent 55%),
+      var(--bg); }
+  .wrap { max-width:480px; margin:0 auto; padding:48px 24px; text-align:center; }
+  .title { font-size:24px; font-weight:700; margin:0 0 4px; letter-spacing:-0.01em; }
+  .invite { color:var(--text-dim); font-size:15px; margin:0 0 32px; }
+  .cta { display:block; padding:14px 22px; margin:10px 0; border-radius:12px;
+         font-weight:600; font-size:15px; text-decoration:none; }
+  .cta-primary { background:var(--accent-bg); color:#fff;
+                 box-shadow:0 8px 20px rgba(124,128,255,0.4); }
+  .cta-secondary { background:var(--surface); color:var(--text); border:1px solid var(--border); }
+  .cta-tiny { font-size:13px; color:var(--text-dim); padding:8px; }
+  .cta-tiny a { color:var(--accent); text-decoration:underline; }
+  .footer { font-size:11px; color:var(--text-dim); margin-top:30px; }
+  .footer a { color:var(--text-dim); }
+</style>
+</head><body>
+<div class="wrap">
+  <h1 class="title">${safe(groupTitle)}</h1>
+  <p class="invite">${safe(desc)}</p>
+
+  <button class="cta cta-primary" onclick="copyInvite()" style="width:100%;border:none;cursor:pointer;">Copy Invite Link</button>
+  <a class="cta cta-secondary" href="/app/${intentQs}">Open on the web</a>
+  <a class="cta cta-secondary" href="https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932">Get the iOS app · App Store</a>
+
+  <p class="cta-tiny">Already have OpenChat? <a href="openchat://invite/${encodeURIComponent(token)}">Open the app directly</a></p>
+
+  <div class="footer">
+    <a href="/">chat.globalbr.ai</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
+  </div>
+</div>
+<script>
+  function copyInvite() {
+    navigator.clipboard.writeText('openchat://invite/${encodeURIComponent(token)}').then(function() {
+      alert('Invite link copied to clipboard! You can now paste it after installing the app.');
+    });
+  }
+</script>
+</body></html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.send(html);
+  } catch (error: any) {
+    if (error instanceof InviteError) {
+      const unavailableHtml = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#5664e2">
+<title>Invite unavailable</title>
+<style>
+  :root { --bg:#0a0c18; --text:#f4f6ff; --text-dim:#9aa0c5; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; text-align:center; padding:48px 24px; }
+</style>
+</head><body>
+  <h2>Invite unavailable</h2>
+  <p class="invite" style="color:var(--text-dim)">${safe(error.message)}</p>
+  <a href="/app/" style="color:#7c80ff;text-decoration:none">Open OpenChat</a>
+</body></html>`;
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=60');
+      res.status(error.status).send(unavailableHtml);
+      return;
+    }
     console.error('Error fetching invite for unfurl:', error);
+    next();
   } finally {
     await session.close();
   }
-
-  res.send(`
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Join ${groupTitle}</title>
-  <meta property="og:title" content="Join ${groupTitle} on OpenChat">
-  <meta property="og:description" content="${desc}">
-  <meta property="og:type" content="website">
-  <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="Join ${groupTitle} on OpenChat">
-  <meta name="twitter:description" content="${desc}">
-  <!-- Fallback redirect for browsers -->
-  <meta http-equiv="refresh" content="0;url=${targetUrl}">
-  <script>window.location.href = ${JSON.stringify(targetUrl)};</script>
-</head>
-<body>
-  Redirecting to OpenChat...
-</body>
-</html>
-  `);
 });
 
 // SPA fallback - serve the canonical responsive client for non-API routes.

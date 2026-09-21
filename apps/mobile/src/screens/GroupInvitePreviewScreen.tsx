@@ -21,6 +21,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { api } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
+import { useEntryContext } from '../contexts/EntryContext';
 import type { NavProp, RouteProps } from '../navigation/types';
 
 interface InvitePreview {
@@ -37,6 +38,7 @@ export function GroupInvitePreviewScreen() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const { conversations } = useChat();
+  const { clearEntry } = useEntryContext();
 
   const [preview, setPreview] = useState<InvitePreview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,14 +49,19 @@ export function GroupInvitePreviewScreen() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.getInvitePreview(token);
-      setPreview(data);
+      const data = await api.getInvitePreviewStatus(token);
+      if (data.status === 'member') {
+        navigation.replace('Chat', { conversationId: data.conversationId! });
+        await clearEntry();
+        return;
+      }
+      setPreview(data.preview!);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load invite');
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, navigation, clearEntry]);
 
   useEffect(() => {
     loadPreview();
@@ -66,6 +73,7 @@ export function GroupInvitePreviewScreen() {
     try {
       const result = await api.acceptInvite(token);
       const convId = result.conversationId;
+      await clearEntry();
       // Replace this screen with the Chat screen so Back goes to Conversations
       navigation.replace('Chat', { conversationId: convId });
     } catch (err) {
@@ -74,7 +82,8 @@ export function GroupInvitePreviewScreen() {
     }
   };
 
-  const handleClose = () => {
+  const handleClose = async () => {
+    await clearEntry();
     if (navigation.canGoBack()) {
       navigation.goBack();
     } else {

@@ -8,6 +8,8 @@ import { getDriver } from '../db.js';
 import { legacyEmailProjection } from '../privacy/legacyEmailCompat.js';
 import { requireAuth } from '../middleware/auth.js';
 import { resolveActor } from '../middleware/resolveActor.js';
+import { resolveInvitePreview, acceptInviteTransaction, InviteError } from '../services/inviteEntry.js';
+import { resolvePublicPersonProjection } from '../services/publicEntryProjection.js';
 import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline, broadcastMessageToParticipants, fanoutPushForMessage } from '../websocket/chatHandler.js';
 import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPreview.js';
 import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
@@ -2595,54 +2597,48 @@ router.get('/invites/:token', async (req: Request, res: Response) => {
   const token = req.params.token as string;
 
   try {
-    const result = await session.run(`
-      MATCH (c:Conversation)-[:HAS_INVITE]->(inv:GroupInvite {token: $token})
-      RETURN inv, c.id AS conversationId, c.title AS conversationTitle
-    `, { token });
-
-    if (result.records.length === 0) {
-      res.status(404).json({ error: 'Invite not found' });
+    const preview = await resolveInvitePreview(session, token);
+    res.json(preview);
+  } catch (error: any) {
+    if (error instanceof InviteError) {
+      res.status(error.status).json({ error: error.message });
       return;
     }
-
-    const rec = result.records[0];
-    const inv = toJS(rec.get('inv').properties) as Record<string, unknown>;
-    const conversationId = rec.get('conversationId') as string;
-    const conversationTitle = rec.get('conversationTitle') as string | null;
-
-    if (inv.revokedAt) {
-      res.status(410).json({ error: 'This invite has been revoked' });
-      return;
-    }
-    const usesLeft = typeof inv.usesLeft === 'object' && inv.usesLeft !== null && 'toNumber' in (inv.usesLeft as object)
-      ? (inv.usesLeft as { toNumber: () => number }).toNumber()
-      : (inv.usesLeft as number);
-    if (usesLeft <= 0) {
-      res.status(410).json({ error: 'This invite has reached its maximum uses' });
-      return;
-    }
-    const expiresAt = inv.expiresAt as string;
-    if (new Date(expiresAt) < new Date()) {
-      res.status(410).json({ error: 'This invite has expired' });
-      return;
-    }
-
-    // Get member count (no PII)
-    const countResult = await session.run(`
-      MATCH (:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-      RETURN count(*) AS memberCount
-    `, { conversationId });
-    const memberCount = countResult.records[0]?.get('memberCount')?.toNumber?.() ?? 0;
-
-    res.json({
-      conversationId,
-      conversationTitle,
-      memberCount,
-      expiresAt,
-    });
-  } catch (error) {
     console.error('Error fetching invite:', error);
     res.status(500).json({ error: 'Failed to fetch invite' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/invites/:token/status — authed user, check invite status
+router.get('/invites/:token/status', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const token = req.params.token as string;
+  const userId = req.user!.userId;
+
+  try {
+    // 1. Resolve membership first
+    const memberResult = await session.run(`
+      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)-[:HAS_INVITE]->(inv:GroupInvite {token: $token})
+      RETURN c.id AS conversationId
+    `, { userId, token });
+
+    if (memberResult.records.length > 0) {
+      res.json({ status: 'member', conversationId: memberResult.records[0].get('conversationId') });
+      return;
+    }
+
+    // 2. Resolve preview
+    const preview = await resolveInvitePreview(session, token);
+    res.json({ status: 'joinable', preview });
+  } catch (error: any) {
+    if (error instanceof InviteError) {
+      res.json({ status: 'unavailable', reason: error.message });
+      return;
+    }
+    console.error('Error fetching invite status:', error);
+    res.status(500).json({ error: 'Failed to fetch invite status' });
   } finally {
     await session.close();
   }
@@ -2655,66 +2651,12 @@ router.post('/invites/:token/accept', requireAuth, async (req: Request, res: Res
   const token = req.params.token as string;
 
   try {
-    const result = await session.run(`
-      MATCH (c:Conversation)-[:HAS_INVITE]->(inv:GroupInvite {token: $token})
-      RETURN inv, c.id AS conversationId
-    `, { token });
-
-    if (result.records.length === 0) {
-      res.status(404).json({ error: 'Invite not found' });
-      return;
-    }
-
-    const rec = result.records[0];
-    const inv = toJS(rec.get('inv').properties) as Record<string, unknown>;
-    const conversationId = rec.get('conversationId') as string;
-
-    if (inv.revokedAt) {
-      res.status(410).json({ error: 'This invite has been revoked' });
-      return;
-    }
-    const usesLeft = typeof inv.usesLeft === 'object' && inv.usesLeft !== null && 'toNumber' in (inv.usesLeft as object)
-      ? (inv.usesLeft as { toNumber: () => number }).toNumber()
-      : (inv.usesLeft as number);
-    if (usesLeft <= 0) {
-      res.status(410).json({ error: 'This invite has reached its maximum uses' });
-      return;
-    }
-    const expiresAt = inv.expiresAt as string;
-    if (new Date(expiresAt) < new Date()) {
-      res.status(410).json({ error: 'This invite has expired' });
-      return;
-    }
-
-    // Check if already a participant — idempotent
-    const alreadyIn = await session.run(`
-      MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-      RETURN c
-    `, { userId, conversationId });
-
-    const now = new Date().toISOString();
-
-    if (alreadyIn.records.length === 0) {
-      // Add the user (MERGE so it's safe if there's a race)
-      await session.run(`
-        MATCH (c:Conversation {id: $conversationId})
-        MATCH (u:User {id: $userId})
-        MERGE (u)-[rel:PARTICIPATES_IN]->(c)
-          ON CREATE SET rel.joinedAt = datetime($now), rel.role = 'member'
-        SET c.updatedAt = datetime($now)
-      `, { conversationId, userId, now });
-
-      // Decrement usesLeft on the invite
-      await session.run(`
-        MATCH (inv:GroupInvite {token: $token})
-        SET inv.usesLeft = inv.usesLeft - 1
-      `, { token });
-    }
+    const { conversationId, newlyJoined } = await acceptInviteTransaction(session, userId, token);
 
     // Load full conversation and emit participant:added
     const conversation = await loadConversation(session, conversationId);
     const io = req.app.get('io') as IOServer | undefined;
-    if (io && conversation && alreadyIn.records.length === 0) {
+    if (io && conversation && newlyJoined) {
       joinUserSocketsToConversation(io, userId, conversationId);
       const participants = (conversation.participants as Array<{ user?: { id?: string } }>) || [];
       const seen = new Set<string>();
@@ -2731,7 +2673,11 @@ router.post('/invites/:token/accept', requireAuth, async (req: Request, res: Res
     }
 
     res.json({ conversationId, conversation });
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof InviteError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
     console.error('Error accepting invite:', error);
     res.status(500).json({ error: 'Failed to accept invite' });
   } finally {
@@ -2776,6 +2722,25 @@ router.delete('/conversations/:id/invites/:token', requireAuth, async (req: Requ
   } catch (error) {
     console.error('Error revoking invite:', error);
     res.status(500).json({ error: 'Failed to revoke invite' });
+  } finally {
+    await session.close();
+  }
+});
+
+// GET /api/chat/public-users/:userId — public person projection
+router.get('/public-users/:userId', async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.params.userId as string;
+  try {
+    const projection = await resolvePublicPersonProjection(session, userId);
+    if (!projection) {
+      res.status(404).json({ error: 'User not found or hidden' });
+      return;
+    }
+    res.json(projection);
+  } catch (error) {
+    console.error('Error fetching public user projection:', error);
+    res.status(500).json({ error: 'Failed to fetch user' });
   } finally {
     await session.close();
   }
