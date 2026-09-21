@@ -2576,8 +2576,8 @@ router.get('/conversations/:id/invites', requireAuth, async (req: Request, res: 
   }
 });
 
-// GET /api/chat/invites/:token — any authed user, preview invite
-router.get('/invites/:token', requireAuth, async (req: Request, res: Response) => {
+// GET /api/chat/invites/:token — any user (public), preview invite
+router.get('/invites/:token', async (req: Request, res: Response) => {
   const session = getDriver().session();
   const token = req.params.token as string;
 
