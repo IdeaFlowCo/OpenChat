@@ -35,6 +35,7 @@ import { BotBadge } from './BotBadge';
 import {
   getDirectConversationParticipant,
   getDirectConversationTitle,
+  getUserDisplayName,
 } from '../utils/conversationDisplay';
 import { StoriesStrip } from './StoriesStrip';
 import type { FeedStory } from '../api/client';
@@ -62,8 +63,8 @@ function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
   }
   if (conv.title) return conv.title;
   const others = (conv.participants || [])
-    .filter(p => p.user.id !== me?.userId)
-    .map(p => p.user.name || p.user.email?.split('@')[0] || '?');
+    .filter(p => p?.user?.id !== me?.userId)
+    .map(p => getUserDisplayName(p?.user));
   if (others.length === 0) return 'Group';
   if (others.length <= 2) return others.join(', ');
   return `${others[0]}, ${others[1]} +${others.length - 2}`;
@@ -216,8 +217,8 @@ export function ConversationList({ activeId, onSelect, onStartChat, compact, onC
   const { enhanced } = useSocialExperience();
   const [refreshing, setRefreshing] = useState(false);
   const orderedConversations = useMemo(() => [...conversations].sort((a, b) => {
-    const aAssistant = a.participants?.some(participant => participant.user.id === 'assistant') ? 1 : 0;
-    const bAssistant = b.participants?.some(participant => participant.user.id === 'assistant') ? 1 : 0;
+    const aAssistant = a.participants?.some(participant => participant?.user?.id === 'assistant') ? 1 : 0;
+    const bAssistant = b.participants?.some(participant => participant?.user?.id === 'assistant') ? 1 : 0;
     return Number(bAssistant) - Number(aAssistant);
   }), [conversations]);
 

@@ -68,4 +68,11 @@ describe('self-conversation display helpers', () => {
     expect(getWebTitle(searchHit, me, 'Unknown')).toBe('Myself');
     expect(getWebParticipant(searchHit, me)).toEqual(selfParticipant.user);
   });
+
+  it('tolerates missing participant users without misidentifying a self-chat', () => {
+    const partial = { ...mobileSelfConversation, participants: [null, { user: null }, {}, selfParticipant] };
+    expect(isMobileSelfConversation(partial, me)).toBe(false);
+    expect(getMobileParticipant(partial, me)).toEqual(selfParticipant.user);
+    expect(getMobileTitle({ ...partial, participants: [null, {}] }, me, 'Unknown')).toBe('Unknown');
+  });
 });

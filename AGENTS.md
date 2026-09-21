@@ -2,6 +2,21 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
+## Build & Test
+
+Run project-wide checks from the monorepo root. The root `packageManager` pins
+npm so Turborepo can resolve workspace tasks consistently.
+
+```bash
+npm ci
+npm run lint
+npm run typecheck
+npm run build
+```
+
+Mobile render regressions also run in the server's Vitest suite:
+`npm run test --workspace=apps/server` (see `apps/server/test/groupOpen.mobile.test.ts`).
+
 ## Canonical client surface
 
 **MONOREPO (since 2026-06-04):** everything lives in this one repo, `IdeaFlowCo/OpenChat`:
@@ -140,3 +155,10 @@ bd close <id>         # Complete work
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.
