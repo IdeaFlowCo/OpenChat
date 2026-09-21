@@ -170,6 +170,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             ...conv,
             lastMessagePreview: message.content.slice(0, 100),
             lastMessageAt: message.createdAt,
+            lastMessage: message,
           };
           const idx = prev.findIndex(c => c.id === conversationId);
           if (idx >= 0) {
@@ -213,6 +214,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             ...conv,
             lastMessagePreview: message.content.slice(0, 100),
             lastMessageAt: message.createdAt,
+            lastMessage: message,
           };
         }
         return conv;
@@ -255,7 +257,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // Refresh the sidebar preview if this was the latest message.
     setConversations(prev => prev.map(conv => {
       if (conv.id !== message.conversationId) return conv;
-      return { ...conv, lastMessagePreview: (message.content || '').slice(0, 100) };
+      return {
+        ...conv,
+        lastMessagePreview: (message.content || '').slice(0, 100),
+        lastMessage: conv.lastMessage?.id === message.id
+          ? { ...conv.lastMessage, ...message }
+          : conv.lastMessage,
+      };
     }));
   }, []);
 

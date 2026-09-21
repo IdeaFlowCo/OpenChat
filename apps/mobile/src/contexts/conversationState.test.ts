@@ -45,6 +45,7 @@ describe('first inbound conversation state', () => {
       id: 'older',
       lastMessagePreview: 'the first inbound message',
       lastMessageAt: message.createdAt,
+      lastMessage: message,
     });
   });
 

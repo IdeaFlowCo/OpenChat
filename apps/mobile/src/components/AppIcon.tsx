@@ -18,6 +18,7 @@ export type AppIconName =
   | 'more'
   | 'mute'
   | 'pause'
+  | 'people'
   | 'pin'
   | 'play'
   | 'plus'
@@ -184,6 +185,14 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
           <Circle cx="9" cy="12.5" r="1" fill={color} />
           <Circle cx="15" cy="12.5" r="1" fill={color} />
           <Path d="M9.5 16h5" {...common} />
+        </>
+      )}
+      {name === 'people' && (
+        <>
+          <Circle cx="9" cy="8" r="3" {...common} />
+          <Circle cx="16.5" cy="9" r="2.5" {...common} />
+          <Path d="M3.5 19c.5-4 2.3-6 5.5-6s5 2 5.5 6" {...common} />
+          <Path d="M14 14c3.7-.8 6 1 6.5 4.5" {...common} />
         </>
       )}
       {name === 'edit' && (

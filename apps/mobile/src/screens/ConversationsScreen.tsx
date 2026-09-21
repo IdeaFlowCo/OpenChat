@@ -39,6 +39,7 @@ import {
   getDirectConversationTitle,
   getUserDisplayName,
 } from '../utils/conversationDisplay';
+import { getConversationPreview } from '../utils/conversationPresentation';
 
 function formatTime(iso: string | undefined): string {
   if (!iso) return '';
@@ -100,6 +101,13 @@ function ConvRow({
   const other = item.type === 'direct'
     ? getDirectConversationParticipant(item, currentUser)
     : null;
+  const groupMembers = item.type === 'group'
+    ? (item.participants || [])
+        .flatMap(participant => participant?.user?.id
+          && participant.user.id !== currentUser?.userId
+          ? [participant.user]
+          : [])
+    : [];
   const bgAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -134,6 +142,8 @@ function ConvRow({
           email={other?.email}
           isBot={isBot}
           presenceStatus={item.type === 'direct' ? presenceStatus : undefined}
+          variant={item.type === 'group' ? 'group' : 'person'}
+          groupMembers={groupMembers}
           size={48}
         />
         <View style={{ flex: 1 }}>
@@ -167,7 +177,7 @@ function ConvRow({
               ]}
               numberOfLines={1}
             >
-              {someoneTyping ? 'typing…' : (item.lastMessagePreview || (item.type === 'group' ? 'Group conversation' : ''))}
+              {someoneTyping ? 'typing…' : getConversationPreview(item, currentUser)}
             </Text>
             {unread > 0 && (
               <View style={[styles.unreadPill, { backgroundColor: primaryColor }]}>

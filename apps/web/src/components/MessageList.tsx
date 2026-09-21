@@ -33,6 +33,22 @@ const TYPING_AUTO_CLEAR_MS = 3000;
 // (REACTION_EMOJI) so web + mobile offer the same set. See openchat-bmp.1.
 const REACTION_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🙏'] as const;
 
+function SenderAvatar({ sender }: { sender?: { avatarUrl?: string; name?: string; email?: string } }) {
+  const label = sender?.name || sender?.email?.split('@')[0] || 'OpenChat member';
+  return (
+    <div
+      className="h-7 w-7 overflow-hidden rounded-full bg-gray-300 dark:bg-slate-700 text-[10px] font-semibold text-gray-600 dark:text-slate-300 flex items-center justify-center"
+      aria-label={`${label} avatar`}
+    >
+      {sender?.avatarUrl ? (
+        <img src={sender.avatarUrl} alt="" className="h-full w-full object-cover" />
+      ) : (
+        label.slice(0, 2).toUpperCase()
+      )}
+    </div>
+  );
+}
+
 export function MessageList() {
   const {
     messages,
@@ -187,6 +203,7 @@ export function MessageList() {
     .map(p => p.user.name || p.user.email?.split('@')[0] || '')
     .filter(Boolean);
   const isDirect = activeConv?.type === 'direct';
+  const isGroup = activeConv?.type === 'group';
   const otherParticipant = isDirect
     ? activeConv?.participants?.find(p => p.user.id !== currentUser?.userId)?.user
     : undefined;
@@ -294,6 +311,7 @@ export function MessageList() {
         const menuOpen = openMenuId === message.id;
         // Date separator before the first message of each day (bmp.8).
         const prev = mi > 0 ? messages[mi - 1] : null;
+        const next = mi < messages.length - 1 ? messages[mi + 1] : null;
         const showDateSeparator = !prev || dayKey(prev.createdAt) !== dayKey(message.createdAt);
         if (message.messageType === 'card') {
           return (
@@ -317,6 +335,14 @@ export function MessageList() {
         const sender = message.sender || (isOwn && currentUser
           ? { id: currentUser.userId, email: currentUser.email, name: currentUser.name || currentUser.email }
           : undefined);
+        const showSender = isGroup
+          && !isOwn
+          && (showDateSeparator || !prev || prev.senderId !== message.senderId);
+        const showSenderAvatar = isGroup
+          && !isOwn
+          && (!next
+            || next.senderId !== message.senderId
+            || dayKey(next.createdAt) !== dayKey(message.createdAt));
 
         // Resolve a display name for the quoted reply target. ReplyTo.sender
         // carries optional name/email, so resolve defensively rather than via
@@ -341,8 +367,13 @@ export function MessageList() {
             </div>
           )}
           <div
-            className={`group flex ${isOwn ? 'justify-end' : 'justify-start'}`}
+            className={`group flex items-end gap-1 ${isOwn ? 'justify-end' : 'justify-start'}`}
           >
+            {isGroup && !isOwn && (
+              <div className="w-7 shrink-0">
+                {showSenderAvatar && <SenderAvatar sender={sender} />}
+              </div>
+            )}
             <div className={`flex flex-col max-w-[75%] ${isOwn ? 'items-end' : 'items-start'}`}>
               <div className="relative flex items-end gap-1">
                 {/* Action trigger — left of own bubbles, right of others'. */}
@@ -366,8 +397,8 @@ export function MessageList() {
                       : 'bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 rounded-bl-md'
                   } ${isDeleted ? 'italic opacity-70' : ''}`}
                 >
-                  {sender && !isDeleted && (
-                    <div className={`text-xs font-medium mb-1 ${isOwn ? 'text-blue-100' : 'text-gray-500 dark:text-slate-400'}`}>
+                  {showSender && sender && !isDeleted && (
+                    <div className="text-xs font-medium mb-1 text-gray-500 dark:text-slate-400">
                       {userDisplayName(sender, currentUser)}
                     </div>
                   )}

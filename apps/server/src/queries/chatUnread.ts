@@ -13,7 +13,11 @@ export const CONVERSATIONS_QUERY = `
   ${visibleConversationPredicate}
   CALL {
     WITH c
-    OPTIONAL MATCH (c)<-[:IN_CONVERSATION]-(m:Message)
+    // Socket-created messages are keyed by conversationId and do not always
+    // carry an IN_CONVERSATION relationship, so use the canonical property.
+    OPTIONAL MATCH (m:Message)
+    USING INDEX m:Message(conversationId)
+    WHERE m.conversationId = c.id
     WITH m ORDER BY m.createdAt DESC
     RETURN collect(m)[0] AS lastMessage
   }
@@ -40,7 +44,7 @@ export const CONVERSATIONS_QUERY = `
   }
   RETURN c {
     .*,
-    lastMessage: lastMessage { .content, .senderId, .createdAt },
+    lastMessage: lastMessage { .id, .content, .senderId, .conversationId, .createdAt },
     participants: participants,
     containsBot: containsBot,
     // OpenChat-aes: per-user mute state on the PARTICIPATES_IN edge.
