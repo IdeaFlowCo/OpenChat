@@ -99,6 +99,8 @@ export interface Conversation {
   title?: string | null;
   type: 'direct' | 'group';
   participants?: Participant[];
+  /** Caller-specific unread total returned by GET /api/chat/conversations. */
+  unreadCount?: number;
   lastMessagePreview?: string;
   lastMessageAt?: string;
   updatedAt?: string;

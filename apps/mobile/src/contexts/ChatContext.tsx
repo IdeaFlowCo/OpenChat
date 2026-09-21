@@ -52,6 +52,12 @@ import {
   MatchEvent,
 } from '../api/socket';
 import { showInAppBanner } from '../components/InAppMessageBanner';
+import {
+  applyMessageToConversationList,
+  sortConversationsByRecent,
+  unreadCountsFromConversations,
+  upsertConversation,
+} from './conversationState';
 
 type Status = 'available' | 'away' | 'busy' | 'invisible';
 
@@ -149,14 +155,6 @@ export function useChat(): ChatContextValue {
   return v;
 }
 
-function sortByRecent(list: Conversation[]): Conversation[] {
-  return [...list].sort((a, b) => {
-    const aT = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
-    const bT = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
-    return bT - aT;
-  });
-}
-
 const MATCH_STATUS_ORDER: Record<AgentMatch['status'], number> = {
   pending: 0,
   awaiting_other: 1,
@@ -185,6 +183,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  // Keep the concrete socket in React state. isAuthed can render before an
+  // async connect() call has installed the singleton; depending only on auth
+  // made the listener effect return early and never retry on that timing.
+  const [chatSocket, setChatSocket] = useState<ReturnType<typeof getSocket>>(null);
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationsLoaded, setConversationsLoaded] = useState(false);
@@ -276,7 +278,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const refreshConversations = useCallback(async () => {
     try {
       const data = await api.getConversations();
-      setConversations(sortByRecent(data));
+      setConversations(sortConversationsByRecent(data));
+      setUnreadByConv(unreadCountsFromConversations(data));
       setConversationsLoaded(true);
     } catch (err) {
       console.warn('[ChatContext] refreshConversations failed:', err);
@@ -296,13 +299,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             lastMessagePreview: msg.content.slice(0, 100),
             lastMessageAt: msg.createdAt,
           };
-          const idx = prev.findIndex(c => c.id === conversationId);
-          if (idx >= 0) {
-            const next = [...prev];
-            next[idx] = { ...next[idx], ...nextConv };
-            return sortByRecent(next);
-          }
-          return sortByRecent([nextConv, ...prev]);
+          return upsertConversation(prev, nextConv);
         });
       })
       .catch(err => console.warn('[ChatContext] fetch missing conversation failed:', err))
@@ -336,7 +333,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setCurrentUser(u);
     setIsAuthed(true);
     try {
-      await connect();
+      const sock = await connect();
+      setChatSocket(sock);
     } catch (e) {
       console.warn('[ChatContext] socket connect failed during bootstrap:', e);
     }
@@ -367,7 +365,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Wire socket listeners exactly ONCE per authed session.
   useEffect(() => {
     if (!isAuthed) return;
-    const sock = getSocket();
+    const sock = chatSocket;
     if (!sock) return;
 
     const currentUserId = currentUser?.userId;
@@ -428,7 +426,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 newConvIds.add(msg.conversationId);
               }
             }
-            return sortByRecent(next);
+            return sortConversationsByRecent(next);
           });
 
           // Bump unread counters for non-active conversations where someone
@@ -476,18 +474,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
       // Update conversation row preview + re-sort.
       setConversations(prev => {
-        let found = false;
-        const next = prev.map(conv => {
-          if (conv.id === msg.conversationId) {
-            found = true;
-            return { ...conv, lastMessagePreview: msg.content.slice(0, 100), lastMessageAt: msg.createdAt };
-          }
-          return conv;
-        });
+        const { conversations: next, found } = applyMessageToConversationList(prev, msg);
         if (!found) {
           fetchMissingConversationForMessage(msg);
         }
-        return sortByRecent(next);
+        return next;
       });
       // Unread bump + in-app banner: only if msg is for a non-active conv and
       // not from us. The banner component itself further filters muted convs.
@@ -522,15 +513,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const onConversationCreated = (e: ConversationEvent) => {
       const conv = e.conversation;
       if (!conv?.id) return;
-      setConversations(prev => {
-        const idx = prev.findIndex(c => c.id === conv.id);
-        if (idx >= 0) {
-          const next = [...prev];
-          next[idx] = { ...next[idx], ...conv };
-          return sortByRecent(next);
-        }
-        return sortByRecent([conv, ...prev]);
-      });
+      setConversations(prev => upsertConversation(prev, conv));
     };
 
     const onConversationUpdated = (e: ConversationEvent) => {
@@ -716,7 +699,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sock.off('read:updated', onReadUpdated);
       sock.off('user:profile-updated', onProfileUpdated);
     };
-  }, [isAuthed, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage, refetchMatches]);
+  }, [isAuthed, chatSocket, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage, refetchMatches]);
 
   // setActiveConversation: clears unread, joins/leaves rooms, loads messages.
   const setActiveConversation = useCallback((id: string | null) => {
@@ -882,15 +865,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   ) => {
     const type: 'direct' | 'group' = opts?.type ?? (participantIds.length > 1 ? 'group' : 'direct');
     const conv = await api.createConversation(participantIds, opts?.title, type);
-    setConversations(prev => {
-      const idx = prev.findIndex(c => c.id === conv.id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = { ...next[idx], ...conv };
-        return sortByRecent(next);
-      }
-      return sortByRecent([conv, ...prev]);
-    });
+    setConversations(prev => upsertConversation(prev, conv));
     return conv;
   }, []);
 
@@ -1081,6 +1056,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     await clearSession();
     setIsAuthed(false);
     setCurrentUser(null);
+    setChatSocket(null);
     setConversations([]);
     setConversationsLoaded(false);
     setMessages([]);
