@@ -103,6 +103,8 @@ export interface Conversation {
   unreadCount?: number;
   lastMessagePreview?: string;
   lastMessageAt?: string;
+  /** Latest message summary returned by the conversation-list endpoint. */
+  lastMessage?: Partial<Message> & Pick<Message, 'senderId'>;
   updatedAt?: string;
   createdAt?: string;
 }
@@ -145,7 +147,7 @@ export interface Message {
   editedAt?: string;
   /** Set when the message has been soft-deleted. */
   deletedAt?: string;
-  sender?: { id: string; name?: string; email?: string };
+  sender?: { id: string; name?: string; email?: string; avatarUrl?: string; isBot?: boolean };
   /** ID of the message this message is replying to (OpenChat-uxj).
    *  Server support is a follow-up ticket; field is passed through on send
    *  and stored locally on optimistic messages. */

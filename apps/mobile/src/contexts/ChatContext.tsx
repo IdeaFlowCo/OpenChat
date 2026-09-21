@@ -58,6 +58,7 @@ import {
   unreadCountsFromConversations,
   upsertConversation,
 } from './conversationState';
+import { conversationLastMessage } from '../utils/conversationPresentation';
 
 type Status = 'available' | 'away' | 'busy' | 'invisible';
 
@@ -297,8 +298,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         setConversations(prev => {
           const nextConv = {
             ...conv,
-            lastMessagePreview: msg.content.slice(0, 100),
-            lastMessageAt: msg.createdAt,
+            ...conversationLastMessage(msg),
           };
           return upsertConversation(prev, nextConv);
         });
@@ -417,8 +417,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               if (idx >= 0) {
                 const updated = {
                   ...next[idx],
-                  lastMessagePreview: msg.content.slice(0, 100),
-                  lastMessageAt: msg.createdAt,
+                  ...conversationLastMessage(msg),
                 };
                 next[idx] = updated;
                 newConvIds.add(msg.conversationId);
@@ -801,7 +800,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       conversationId: id,
       senderId: currentUser?.userId || 'me',
       createdAt: new Date().toISOString(),
-      sender: currentUser ? { id: currentUser.userId, email: currentUser.email, name: currentUser.name } : undefined,
+      sender: currentUser ? {
+        id: currentUser.userId,
+        email: currentUser.email,
+        name: currentUser.name,
+        avatarUrl: currentUser.avatarUrl,
+      } : undefined,
       replyToId,
       attachments,
     };

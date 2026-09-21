@@ -8,6 +8,11 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { PresenceDot, PresenceStatus } from './PresenceDot';
 import { getColors } from '../theme/colors';
+import { AppIcon } from './AppIcon';
+
+export interface GroupAvatarMember {
+  avatarUrl?: string | null;
+}
 
 interface Props {
   name?: string;
@@ -18,6 +23,9 @@ interface Props {
   size?: number;
   /** If set, renders the photo instead of initials. (OpenChat-x2s) */
   avatarUrl?: string;
+  /** Group avatars cluster 2–4 member photos, or use a people glyph. */
+  variant?: 'person' | 'group';
+  groupMembers?: GroupAvatarMember[];
 }
 
 function initials(name?: string, email?: string): string {
@@ -27,12 +35,76 @@ function initials(name?: string, email?: string): string {
   return seed.slice(0, 2).toUpperCase();
 }
 
-export function Avatar({ name, email, isBot, presenceStatus, size = 44, avatarUrl }: Props) {
+function GroupGlyph({ size, color }: { size: number; color: string }) {
+  return <AppIcon name="people" color={color} size={size * 0.62} strokeWidth={1.8} />;
+}
+
+function GroupPhotoCluster({ urls, size, borderColor }: { urls: string[]; size: number; borderColor: string }) {
+  const count = Math.min(urls.length, 4);
+  const diameter = size * (count === 2 ? 0.7 : count === 3 ? 0.62 : 0.56);
+  const edge = size - diameter;
+  const positions = count === 2
+    ? [{ left: 0, top: 0 }, { left: edge, top: edge }]
+    : count === 3
+      ? [
+          { left: edge / 2, top: 0 },
+          { left: 0, top: edge },
+          { left: edge, top: edge },
+        ]
+      : [
+          { left: 0, top: 0 },
+          { left: edge, top: 0 },
+          { left: 0, top: edge },
+          { left: edge, top: edge },
+        ];
+
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      {urls.slice(0, count).map((url, index) => (
+        <Image
+          key={`${url}-${index}`}
+          source={{ uri: url }}
+          accessible={false}
+          style={{
+            position: 'absolute',
+            ...positions[index],
+            width: diameter,
+            height: diameter,
+            borderRadius: diameter / 2,
+            borderWidth: Math.max(1, Math.round(size * 0.035)),
+            borderColor,
+            zIndex: index + 1,
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+export function Avatar({
+  name,
+  email,
+  isBot,
+  presenceStatus,
+  size = 44,
+  avatarUrl,
+  variant = 'person',
+  groupMembers = [],
+}: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const dotSize = Math.max(8, Math.round(size / 4));
+  const groupPhotoUrls = groupMembers
+    .map(member => member.avatarUrl)
+    .filter((url): url is string => !!url)
+    .slice(0, 4);
+  const showGroupCluster = variant === 'group' && groupPhotoUrls.length >= 2;
   return (
-    <View style={{ width: size, height: size }}>
+    <View
+      style={{ width: size, height: size }}
+      accessible={variant === 'group'}
+      accessibilityLabel={variant === 'group' ? 'Group avatar' : undefined}
+    >
       <View
         style={[
           styles.bubble,
@@ -45,7 +117,11 @@ export function Avatar({ name, email, isBot, presenceStatus, size = 44, avatarUr
           },
         ]}
       >
-        {avatarUrl ? (
+        {showGroupCluster ? (
+          <GroupPhotoCluster urls={groupPhotoUrls} size={size} borderColor={c.background} />
+        ) : variant === 'group' ? (
+          <GroupGlyph size={size} color={c.textSecondary} />
+        ) : avatarUrl ? (
           <Image
             source={{ uri: avatarUrl }}
             style={{ width: size, height: size, borderRadius: size / 2 }}

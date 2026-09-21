@@ -1,4 +1,5 @@
 import type { Conversation, Message } from '../api/client';
+import { conversationLastMessage } from '../utils/conversationPresentation';
 
 export function sortConversationsByRecent(list: Conversation[]): Conversation[] {
   return [...list].sort((a, b) => {
@@ -43,8 +44,7 @@ export function applyMessageToConversationList(
     found = true;
     return {
       ...conversation,
-      lastMessagePreview: message.content.slice(0, 100),
-      lastMessageAt: message.createdAt,
+      ...conversationLastMessage(message),
     };
   });
   return { conversations: sortConversationsByRecent(conversations), found };

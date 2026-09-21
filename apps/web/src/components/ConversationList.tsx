@@ -2,10 +2,12 @@ import { useChat } from '../contexts/ChatContext';
 import { PresenceIndicator } from './PresenceIndicator';
 import { BotBadge } from './BotBadge';
 import { AppIcon } from './AppIcon';
+import { ConversationAvatar } from './ConversationAvatar';
 import { userDisplayName } from '../utils/userDisplay';
 import {
   getDirectConversationParticipant,
   getDirectConversationTitle,
+  getConversationPreview,
   isSelfDirectConversation,
 } from '../utils/conversationDisplay';
 
@@ -70,11 +72,12 @@ export function ConversationList() {
             }`}
           >
             <div className="flex items-center gap-3">
-              {/* Avatar placeholder */}
               <div className="relative">
-                <div className="w-10 h-10 rounded-full bg-gray-300 dark:bg-slate-700 flex items-center justify-center text-gray-600 dark:text-slate-300 font-medium">
-                  {getConversationTitle(conv).charAt(0).toUpperCase()}
-                </div>
+                <ConversationAvatar
+                  conversation={conv}
+                  currentUserId={currentUser?.userId}
+                  label={getConversationTitle(conv)}
+                />
                 {conv.type === 'direct' && (
                   <div className="absolute -bottom-0.5 -right-0.5">
                     <PresenceIndicator status={otherPresence?.status || fallbackStatus} size="sm" />
@@ -115,7 +118,7 @@ export function ConversationList() {
                   </p>
                 ) : conv.lastMessagePreview ? (
                   <p className={`text-sm truncate ${hasUnread ? 'text-gray-700 dark:text-slate-300 font-medium' : 'text-gray-500 dark:text-slate-400'}`}>
-                    {conv.lastMessagePreview}
+                    {getConversationPreview(conv, currentUser)}
                   </p>
                 ) : null}
               </div>

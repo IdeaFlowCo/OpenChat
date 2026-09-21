@@ -118,4 +118,10 @@ describe('first inbound message delivery contract', () => {
     );
     expect(CONVERSATIONS_QUERY).not.toMatch(/createdBy|openedAt|joined\/opened/i);
   });
+
+  it('loads the preview sender through the message conversationId property', () => {
+    expect(CONVERSATIONS_QUERY).toContain('WHERE m.conversationId = c.id');
+    expect(CONVERSATIONS_QUERY).toContain('.senderId');
+    expect(CONVERSATIONS_QUERY).not.toContain('OPTIONAL MATCH (c)<-[:IN_CONVERSATION]-(m:Message)');
+  });
 });

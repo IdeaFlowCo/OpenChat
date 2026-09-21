@@ -42,3 +42,21 @@ export function getDirectConversationTitle(
   const participant = getDirectConversationParticipant(conversation, currentUser);
   return participant?.name || participant?.email || fallback;
 }
+
+export function getConversationPreview(
+  conversation: Conversation,
+  currentUser: CurrentUserLike | null | undefined,
+): string {
+  const preview = conversation.lastMessagePreview ?? '';
+  if (!preview || conversation.type !== 'group') return preview;
+
+  const senderId = conversation.lastMessage?.senderId;
+  if (!senderId) return preview;
+  if (senderId === currentUser?.userId) return `You: ${preview}`;
+
+  const sender = conversation.participants
+    ?.map(participantUser)
+    .find(user => user.id === senderId);
+  const name = sender?.name || sender?.email?.split('@')[0] || 'OpenChat member';
+  return `${name}: ${preview}`;
+}

@@ -74,6 +74,7 @@ import {
   getUserDisplayName,
   isSelfDirectConversation,
 } from '../utils/conversationDisplay';
+import { shouldShowGroupSenderLabel } from '../utils/conversationPresentation';
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
 
@@ -185,7 +186,7 @@ interface RenderRow {
   isLastInRun?: boolean;
 }
 
-function buildRows(messages: Message[], myId: string | undefined): RenderRow[] {
+function buildRows(messages: Message[], myId: string | undefined, isGroup: boolean): RenderRow[] {
   const out: RenderRow[] = [];
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
@@ -195,7 +196,15 @@ function buildRows(messages: Message[], myId: string | undefined): RenderRow[] {
       out.push({ type: 'day', key: `day-${m.createdAt}`, label: dayLabel(m.createdAt) });
     }
     const isOwn = m.senderId === myId;
-    const showSender = !isOwn && (!prev || prev.senderId !== m.senderId);
+    const previousSenderId = prev && sameDay(prev.createdAt, m.createdAt)
+      ? prev.senderId
+      : undefined;
+    const showSender = shouldShowGroupSenderLabel(
+      isGroup,
+      isOwn,
+      m.senderId,
+      previousSenderId,
+    );
     // "Last in run" = there is no next message, or the next is a different
     // author, or there's a day break between them. We pin the avatar here so
     // consecutive bubbles from the same author don't repeat the avatar.
@@ -456,6 +465,16 @@ export function ChatScreen({
   const other = conversation && !isGroup
     ? getDirectConversationParticipant(conversation, currentUser)
     : null;
+  const groupAvatarMembers = useMemo(
+    () => isGroup
+      ? (conversation?.participants || [])
+          .flatMap(participant => participant?.user?.id
+            && participant.user.id !== currentUser?.userId
+            ? [participant.user]
+            : [])
+      : [],
+    [conversation?.participants, currentUser?.userId, isGroup],
+  );
   const directPresenceText = other
     ? presence.get(other.id)?.statusMessage || presence.get(other.id)?.status || other.presenceStatus || ''
     : '';
@@ -603,6 +622,8 @@ export function ChatScreen({
             email={other?.email}
             isBot={!isGroup ? other?.isBot : false}
             avatarUrl={!isGroup ? other?.avatarUrl : undefined}
+            variant={isGroup ? 'group' : 'person'}
+            groupMembers={groupAvatarMembers}
             size={28}
           />
           <View style={{ flexShrink: 1, flexGrow: 1, minWidth: 0 }}>
@@ -662,7 +683,7 @@ export function ChatScreen({
         </View>
       ),
     });
-  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, conversationId, conversation?.participants?.length, other, directPresenceText, c.primary, c.textPrimary, c.textSecondary, c.textMuted, containsBot, enhanced, isMuted, showMuteMenu]);
+  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, conversationId, conversation?.participants?.length, other, groupAvatarMembers, directPresenceText, c.primary, c.textPrimary, c.textSecondary, c.textMuted, containsBot, enhanced, isMuted, showMuteMenu]);
 
   // Ink & Paper: own bubbles are ink-on-paper (light) / paper-on-ink (dark),
   // so translucent overlays inside them derive from the bubble text color
@@ -676,7 +697,7 @@ export function ChatScreen({
   }, [c.bubbleOwnText]);
 
   const rows = useMemo(() => {
-    const built = buildRows(messages, currentUser?.userId);
+    const built = buildRows(messages, currentUser?.userId, isGroup);
     // Rebuild messageId → row index map for scroll-to-quoted.
     const map = new Map<string, number>();
     built.forEach((r, i) => {
@@ -684,7 +705,7 @@ export function ChatScreen({
     });
     messageIndexRef.current = map;
     return built;
-  }, [messages, currentUser?.userId]);
+  }, [messages, currentUser?.userId, isGroup]);
 
   // At-bottom-aware scroll. Rules:
   //   R7. Initial mount / conversation switch → jump to bottom, no animation.
@@ -1244,6 +1265,8 @@ export function ChatScreen({
               email={other?.email}
               isBot={!isGroup ? other?.isBot : false}
               avatarUrl={!isGroup ? other?.avatarUrl : undefined}
+              variant={isGroup ? 'group' : 'person'}
+              groupMembers={groupAvatarMembers}
               size={34}
             />
             <View style={{ flex: 1, minWidth: 0 }}>
@@ -1370,6 +1393,7 @@ export function ChatScreen({
                       <Avatar
                         name={getUserDisplayName(m.sender)}
                         email={m.sender?.email}
+                        avatarUrl={m.sender?.avatarUrl}
                         size={28}
                       />
                     )}

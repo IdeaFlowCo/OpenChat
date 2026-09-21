@@ -9,6 +9,7 @@ import { BotBadge } from '../components/BotBadge';
 import { ConversationHeaderMenu } from '../components/ConversationHeaderMenu';
 import { userDisplayName } from '../utils/userDisplay';
 import { AppIcon } from '../components/AppIcon';
+import { ConversationAvatar } from '../components/ConversationAvatar';
 import {
   getDirectConversationParticipant,
   getDirectConversationTitle,
@@ -92,33 +93,43 @@ export function ChatPage() {
                     else if (directParticipant) setProfilePanelOpen(true);
                   }}
                   disabled={!isGroup && !directParticipant}
-                  className={`flex-1 min-w-0 text-left ${isGroup || directParticipant ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 -mx-2 px-2 py-1 rounded' : 'cursor-default'}`}
+                  className={`flex flex-1 min-w-0 items-center gap-2 text-left ${isGroup || directParticipant ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 -mx-2 px-2 py-1 rounded' : 'cursor-default'}`}
                 >
-                  <h2 className="font-semibold truncate text-gray-900 dark:text-slate-100 flex items-center min-w-0">
-                    <span className="truncate">
-                      {activeConversation.type === 'direct'
-                        ? getDirectConversationTitle(activeConversation, currentUser, 'Chat')
-                        : activeConversation.title || 'Group Chat'}
-                    </span>
-                    {activeConversation.type === 'direct' && (
-                      <BotBadge
-                        user={directParticipant}
-                      />
-                    )}
-                    {activeConversation.type === 'group'
-                      && activeConversation.participants?.some(p => p.user.isBot) && (
-                      <BotBadge user={{ isBot: true }} compact />
-                    )}
-                  </h2>
-                  {activeConversation.participants && activeConversation.participants.length > 0 && (
-                    <p className="text-xs md:text-sm text-gray-500 dark:text-slate-400 truncate">
-                      {isGroup
-                        ? `${activeConversation.participants.length} members`
-                        : activeConversation.participants
-                            .map(p => userDisplayName(p.user, currentUser))
-                            .join(', ')}
-                    </p>
+                  {isGroup && (
+                    <ConversationAvatar
+                      conversation={activeConversation}
+                      currentUserId={currentUser?.userId}
+                      label={activeConversation.title || 'Group Chat'}
+                      size={36}
+                    />
                   )}
+                  <div className="min-w-0 flex-1">
+                    <h2 className="font-semibold truncate text-gray-900 dark:text-slate-100 flex items-center min-w-0">
+                      <span className="truncate">
+                        {activeConversation.type === 'direct'
+                          ? getDirectConversationTitle(activeConversation, currentUser, 'Chat')
+                          : activeConversation.title || 'Group Chat'}
+                      </span>
+                      {activeConversation.type === 'direct' && (
+                        <BotBadge
+                          user={directParticipant}
+                        />
+                      )}
+                      {activeConversation.type === 'group'
+                        && activeConversation.participants?.some(p => p.user.isBot) && (
+                        <BotBadge user={{ isBot: true }} compact />
+                      )}
+                    </h2>
+                    {activeConversation.participants && activeConversation.participants.length > 0 && (
+                      <p className="text-xs md:text-sm text-gray-500 dark:text-slate-400 truncate">
+                        {isGroup
+                          ? `${activeConversation.participants.length} members`
+                          : activeConversation.participants
+                              .map(p => userDisplayName(p.user, currentUser))
+                              .join(', ')}
+                      </p>
+                    )}
+                  </div>
                 </button>
               </div>
               <div className="flex items-center gap-2 shrink-0">
