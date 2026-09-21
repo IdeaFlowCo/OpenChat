@@ -583,37 +583,55 @@ export function LoginScreen() {
         </Text>
       </View>
 
-      {/* Share-the-app QR — only on native (web users don't need it).
-          Encodes the mobile web URL so the recipient can open OpenChat
-          immediately in their browser without installing. */}
-      {Platform.OS !== 'web' && (
-        <View style={styles.shareSection}>
-          <Text style={[styles.shareLabel, { color: c.textMetadata }]}>SHARE OPENCHAT</Text>
-          <View style={[styles.shareCard, { backgroundColor: c.surface, borderColor: c.border }]}>
-            <View style={styles.qrWrap}>
-              {/* Light QR on a fixed white background so it scans reliably
-                  regardless of theme. Scanning takes you to the mobile web. */}
-              <QRCode value="https://chat.globalbr.ai/app/" size={120} backgroundColor="#ffffff" color="#000000" />
+      {/* Get / Share OpenChat.
+          On web, offers the App Store link to iOS users who landed via a shared link.
+          On native, offers the QR code so someone else can scan it. */}
+      <View style={styles.shareSection}>
+        <Text style={[styles.shareLabel, { color: c.textMetadata }]}>GET THE APP</Text>
+        <View style={[styles.shareCard, { backgroundColor: c.surface, borderColor: c.border, flexDirection: 'column', gap: 0, padding: 0 }]}>
+          <TouchableOpacity
+            style={{ flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.divider }}
+            onPress={() => Linking.openURL('https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 16, fontWeight: '600', color: c.textPrimary }}>Get the iOS app · App Store</Text>
+              <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 4 }}>Install the native app on iPhone or iPad</Text>
             </View>
-            <View style={styles.shareTextBlock}>
-              <Text style={[styles.shareTitle, { color: c.textPrimary }]}>Scan to open on any phone</Text>
-              <TouchableOpacity
-                onPress={() => Linking.openURL('https://chat.globalbr.ai/app/')}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.shareLink, { color: c.primary }]}>chat.globalbr.ai/app</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => Share.share({ message: 'Try OpenChat: https://chat.globalbr.ai/app/' })}
-                activeOpacity={0.7}
-                style={[styles.shareButton, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}
-              >
-                <Text style={[styles.shareButtonText, { color: c.textPrimary }]}>Share link</Text>
-              </TouchableOpacity>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+
+          {Platform.OS !== 'web' ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 16 }}>
+              <View style={styles.qrWrap}>
+                <QRCode value="https://chat.globalbr.ai/app/" size={80} backgroundColor="#ffffff" color="#000000" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: c.textPrimary }}>Scan to open on any phone</Text>
+                <TouchableOpacity
+                  onPress={() => Share.share({ message: 'Try OpenChat: https://chat.globalbr.ai/app/' })}
+                  activeOpacity={0.7}
+                  style={[styles.shareButton, { backgroundColor: c.surfaceElevated, borderColor: c.border, marginTop: 12 }]}
+                >
+                  <Text style={[styles.shareButtonText, { color: c.textPrimary }]}>Share link</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          ) : (
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', padding: 16 }}
+              onPress={() => Linking.openURL('https://chat.globalbr.ai/app/')}
+              activeOpacity={0.7}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: c.textPrimary }}>Open in browser</Text>
+                <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 4 }}>Continue on the web version</Text>
+              </View>
+              <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            </TouchableOpacity>
+          )}
         </View>
-      )}
+      </View>
     </KeyboardAvoidingView>
   );
 }
