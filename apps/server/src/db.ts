@@ -76,6 +76,12 @@ export async function initDatabase(): Promise<void> {
       FOR (u:User) REQUIRE u.ideaflowIdentityKey IS UNIQUE
     `);
 
+    // Context Lane index
+    await session.run(`
+      CREATE INDEX thought_lane_conversation IF NOT EXISTS
+      FOR (t:Thought) ON (t.lane, t.conversationId)
+    `);
+
     // AgentKey constraints (OpenChat-7c9)
     await session.run(`
       CREATE CONSTRAINT agent_key_id IF NOT EXISTS

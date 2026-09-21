@@ -21,7 +21,7 @@ export type RootStackParamList = {
   Login: undefined;
   Onboarding: undefined;
   Conversations: undefined;
-  Chat: { conversationId: string };
+  Chat: { conversationId: string; lane?: 'chat' | 'context'; entryId?: string };
   NewConversation: undefined;
   /** App-wide agent network overlay (asks, offers, and anonymous matches; OpenChat-a0e.5). */
   AgentOverlay: { prompt?: string } | undefined;
@@ -73,7 +73,7 @@ export type ThoughtsStackParamList = {
 
 export type AsksStackParamList = {
   AsksList: undefined;
-  Chat: { conversationId: string };
+  Chat: { conversationId: string; lane?: 'chat' | 'context'; entryId?: string };
   AgentOverlay: { prompt?: string } | undefined;
   StoryComposer: { draftId?: string; initialText?: string } | undefined;
   StoryViewer: { story: FeedStory };

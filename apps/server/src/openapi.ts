@@ -243,6 +243,24 @@ const AccountExport = {
   },
 } as const;
 
+const ContextPostProjection = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    conversationId: { type: 'string' },
+    authorId: { type: 'string' },
+    text: { type: 'string' },
+    kind: { type: 'string' },
+    lane: { type: 'string', const: 'context' },
+    revision: { type: 'integer' },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+    replyToId: { type: 'string', nullable: true },
+    clientRequestId: { type: 'string' }
+  },
+  required: ['id', 'conversationId', 'authorId', 'text', 'kind', 'lane', 'revision', 'createdAt', 'updatedAt', 'clientRequestId']
+} as const;
+
 const ReactionSummary = {
   type: 'object',
   properties: {
@@ -402,6 +420,7 @@ export const openapiSpec = {
       SecretaryAnswer,
       SecretaryConfig,
       AccountExport,
+      ContextPostProjection,
       ReactionSummary,
       Webhook,
       WebhookDelivery,
@@ -412,6 +431,7 @@ export const openapiSpec = {
   },
   tags: [
     { name: 'Chat', description: 'Conversations and messages' },
+    { name: 'Chat Context Lane', description: 'Quiet back-channel posts for a conversation' },
     { name: 'Agent keys', description: 'Mint / manage `oc_` API keys' },
     { name: 'Agent network', description: 'Anonymous asks/offers and double-opt-in quiet matches' },
     { name: 'Agent social', description: 'Private capture, selected-audience Stories, preferences, and review' },
@@ -581,6 +601,47 @@ export const openapiSpec = {
     },
     '/api/review': {
       get: { operationId: 'getSocialReviewQueue', tags: ['Agent social'], summary: 'Get the bounded actionable review queue', description: 'Returns at most 50 pending drafts, unanswered matches, and searches/Stories expiring within 72 hours. It is a computed projection, not the raw inference backlog.', responses: { '200': ok({ type: 'object', properties: { items: { type: 'array', maxItems: 50, items: { type: 'object' } }, hasMore: { type: 'boolean' } }, required: ['items', 'hasMore'] }) } },
+    },
+    '/api/chat/conversations/{id}/context': {
+      get: {
+        operationId: 'listContextPosts',
+        tags: ['Chat Context Lane'],
+        summary: 'List Context lane posts in a conversation',
+        description: 'Requires OPENCHAT_CONTEXT_LANE_ENABLED. Bounded cursor pagination.',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'cursor', in: 'query', schema: { type: 'string', format: 'date-time' } },
+          { name: 'limit', in: 'query', schema: { type: 'integer' } },
+          { name: 'kind', in: 'query', schema: { type: 'string' } },
+          { name: 'search', in: 'query', schema: { type: 'string' } }
+        ],
+        responses: { '200': ok({ type: 'object', properties: { posts: { type: 'array', items: { $ref: '#/components/schemas/ContextPostProjection' } }, nextCursor: { type: 'string' } } }), '401': errResp('Unauthorized'), '403': errResp('Forbidden') }
+      },
+      post: {
+        operationId: 'createContextPost',
+        tags: ['Chat Context Lane'],
+        summary: 'Create a Context lane post',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: true, content: json({ type: 'object', properties: { text: { type: 'string' }, kind: { type: 'string' }, clientRequestId: { type: 'string' }, replyToId: { type: 'string' } }, required: ['text', 'clientRequestId'] }) },
+        responses: { '201': ok({ $ref: '#/components/schemas/ContextPostProjection' }, 'Created'), '401': errResp('Unauthorized'), '403': errResp('Forbidden'), '429': errResp('Rate limited') }
+      }
+    },
+    '/api/chat/conversations/{id}/context/{postId}': {
+      patch: {
+        operationId: 'updateContextPost',
+        tags: ['Chat Context Lane'],
+        summary: 'Update a Context lane post',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'postId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: true, content: json({ type: 'object', properties: { text: { type: 'string' }, expectedRevision: { type: 'integer' } }, required: ['text', 'expectedRevision'] }) },
+        responses: { '200': ok({ $ref: '#/components/schemas/ContextPostProjection' }), '401': errResp('Unauthorized'), '403': errResp('Forbidden'), '409': errResp('Revision mismatch') }
+      },
+      delete: {
+        operationId: 'deleteContextPost',
+        tags: ['Chat Context Lane'],
+        summary: 'Delete a Context lane post',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'postId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '204': { description: 'Deleted' }, '401': errResp('Unauthorized'), '403': errResp('Forbidden') }
+      }
     },
     '/api/chat/conversations': {
       get: {

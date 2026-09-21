@@ -826,7 +826,45 @@ async function requestJsonDownload(path: string, fallbackFilename: string): Prom
   };
 }
 
+export interface ContextPost {
+  id: string;
+  conversationId: string;
+  authorId: string;
+  text: string;
+  kind: string; // 'note' | 'ask' | 'offer'
+  lane: 'context';
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  replyToId?: string;
+  clientRequestId: string;
+  isDeleted?: boolean;
+}
+
+export interface ListContextPostsResponse {
+  posts: ContextPost[];
+  nextCursor?: string;
+}
+
 export const api = {
+  // ── Context Lane ──────────────────────────────────────────────────────────
+  listContextPosts: (conversationId: string, cursor?: string, limit?: number, kind?: string, search?: string) => {
+    const params = new URLSearchParams();
+    if (cursor) params.append('cursor', cursor);
+    if (limit) params.append('limit', limit.toString());
+    if (kind) params.append('kind', kind);
+    if (search) params.append('search', search);
+    const q = params.toString();
+    const url = `/api/chat/conversations/${conversationId}/context` + (q ? `?${q}` : '');
+    return request<ListContextPostsResponse>(url);
+  },
+  createContextPost: (conversationId: string, text: string, clientRequestId: string, kind?: string, replyToId?: string) =>
+    request<ContextPost>(`/api/chat/conversations/${conversationId}/context`, { method: 'POST', body: JSON.stringify({ text, kind, clientRequestId, replyToId }) }),
+  updateContextPost: (conversationId: string, postId: string, text: string, expectedRevision: number) =>
+    request<ContextPost>(`/api/chat/conversations/${conversationId}/context/${postId}`, { method: 'PATCH', body: JSON.stringify({ text, expectedRevision }) }),
+  deleteContextPost: (conversationId: string, postId: string) =>
+    request<void>(`/api/chat/conversations/${conversationId}/context/${postId}`, { method: 'DELETE' }),
+
   getMe: () => request<User>('/api/auth/me'),
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
   getConversation: (conversationId: string) =>

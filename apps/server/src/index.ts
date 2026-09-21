@@ -1,3 +1,4 @@
+import { isContextLaneEnabled } from './config/features.js';
 import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +16,7 @@ import pushRoutes from './routes/push.js';
 import legalRoutes from './routes/legal.js';
 import aiRoutes from './routes/ai.js';
 import thoughtsRoutes from './routes/thoughts.js';
+import contextRoutes from './routes/context.js';
 import agentKeysRoutes from './routes/agentKeys.js';
 import webhooksRoutes from './routes/webhooks.js';
 import feedbackRoutes from './routes/feedback.js';
@@ -83,7 +85,7 @@ app.use(express.json());
 
 // Health check
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), capabilities: { contextLane: isContextLaneEnabled() } });
 });
 
 // Project landing page (/, /about) and static brand assets. The application
@@ -356,6 +358,7 @@ app.use(ideaflowWebCallbackRoutes);
 
 // API routes
 app.use('/api/auth', authRoutes);
+app.use('/api/chat', contextRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/client-logs', clientLogsRoutes);
 app.use('/api/push', pushRoutes);

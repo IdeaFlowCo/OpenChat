@@ -19,6 +19,8 @@ import { validateToken } from './auth.js';
 interface CacheEntry {
   userId: string;
   keyId: string;
+  keyPrefix: string;
+  scopes: string[];
   expiresAt: number | null; // unix ms — null means no expiry
   cachedAt: number;         // unix ms
 }
@@ -26,14 +28,25 @@ interface CacheEntry {
 interface ResolvedAgentKey {
   userId: string;
   keyId: string;
+  scopes: string[];
 }
 
-// In-memory LRU-ish cache keyed by keyPrefix (first 12 chars of the full key).
+declare module 'express-serve-static-core' {
+  interface Request {
+    agentScopes?: string[];
+  }
+}
+
+// In-memory LRU-ish cache keyed by sha256 hash of the full credential.
 const KEY_CACHE = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 60_000;
 
 export function evictFromCache(keyPrefix: string): void {
-  KEY_CACHE.delete(keyPrefix);
+  for (const [hash, entry] of KEY_CACHE.entries()) {
+    if (entry.keyPrefix === keyPrefix) {
+      KEY_CACHE.delete(hash);
+    }
+  }
 }
 
 function getEncryptionKey(): Buffer | null {
@@ -61,21 +74,25 @@ export function decryptKey(keyCiphertext: string, keyIv: string): string | null 
   }
 }
 
+function hashCredential(fullKey: string): string {
+  return crypto.createHash('sha256').update(fullKey).digest('hex');
+}
+
 async function resolveAgentKey(fullKey: string): Promise<ResolvedAgentKey | null> {
   // keyPrefix = "oc_" + first 8 chars after "oc_" = first 11 chars total
-  // e.g. key = "oc_AbCdEfGh..." → prefix = "oc_AbCdEfGh" (11 chars)
   const keyPrefix = fullKey.slice(0, 11);
+  const keyHash = hashCredential(fullKey);
 
-  // Check in-memory cache first.
-  const cached = KEY_CACHE.get(keyPrefix);
+  // Check in-memory cache first using full credential hash.
+  const cached = KEY_CACHE.get(keyHash);
   if (cached) {
     const age = Date.now() - cached.cachedAt;
     if (age < CACHE_TTL_MS) {
       // Still valid — check expiry
       if (cached.expiresAt !== null && Date.now() > cached.expiresAt) return null;
-      return { userId: cached.userId, keyId: cached.keyId };
+      return { userId: cached.userId, keyId: cached.keyId, scopes: cached.scopes };
     }
-    KEY_CACHE.delete(keyPrefix);
+    KEY_CACHE.delete(keyHash);
   }
 
   const session = getDriver().session();
@@ -88,7 +105,8 @@ async function resolveAgentKey(fullKey: string): Promise<ResolvedAgentKey | null
               k.keyIv AS keyIv,
               k.id AS keyId,
               k.ownerUserId AS ownerUserId,
-              k.expiresAt AS expiresAt`,
+              k.expiresAt AS expiresAt,
+              k.scopes AS scopes`,
       { keyPrefix, now: new Date().toISOString() }
     );
 
@@ -100,22 +118,23 @@ async function resolveAgentKey(fullKey: string): Promise<ResolvedAgentKey | null
     const keyId = record.get('keyId') as string;
     const ownerUserId = record.get('ownerUserId') as string;
     const expiresAt = record.get('expiresAt') as string | null;
+    const scopesList = record.get('scopes') as string[] | null;
+    const scopes = scopesList || [];
 
     const plaintext = decryptKey(keyCiphertext, keyIv);
     if (!plaintext || plaintext !== fullKey) return null;
 
-    // Cache the result.
-    KEY_CACHE.set(keyPrefix, {
+    // Cache the result by hash.
+    KEY_CACHE.set(keyHash, {
       userId: ownerUserId,
       keyId,
+      keyPrefix,
+      scopes,
       expiresAt: expiresAt ? new Date(expiresAt).getTime() : null,
       cachedAt: Date.now(),
     });
 
-    // Update lastUsedAt asynchronously — don't block the request. Use a
-    // SEPARATE session: the main `session` is closed in the finally below, and
-    // a fire-and-forget query on a closing session throws "Queries cannot be
-    // run directly on a session with an open transaction".
+    // Update lastUsedAt asynchronously.
     const bgSession = getDriver().session();
     bgSession
       .run(
@@ -125,7 +144,7 @@ async function resolveAgentKey(fullKey: string): Promise<ResolvedAgentKey | null
       .catch(() => { /* best-effort */ })
       .finally(() => bgSession.close());
 
-    return { userId: ownerUserId, keyId };
+    return { userId: ownerUserId, keyId, scopes };
   } finally {
     await session.close();
   }
@@ -153,6 +172,7 @@ export async function resolveActor(
       return;
     }
     req.user = user;
+    req.agentScopes = undefined;
     next();
     return;
   }
@@ -172,6 +192,7 @@ export async function resolveActor(
     // Synthesise an AuthUser from the key's owner so route handlers work unchanged.
     req.user = { userId: resolved.userId, email: '' };
     req.agentKeyId = resolved.keyId;
+    req.agentScopes = resolved.scopes;
     next();
   } catch (err) {
     console.error('resolveActor error:', err);

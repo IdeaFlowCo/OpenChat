@@ -21,6 +21,7 @@ import { DirectConversationNotAllowedError, ensureDirectConversation } from '../
 import { classifyContactDiscoveryQuery } from '../privacy/contactDiscovery.js';
 import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
 import { isOpenUserDirectoryEnabled } from '../config/features.js';
+import { acquireContextAclLocks } from '../services/contextAccess.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
 let _s3: S3Client | null = null;
@@ -502,13 +503,16 @@ router.post('/conversations/:id/participants', requireAuth, async (req: Request,
 
     // Idempotent add: MERGE relationship; preserve role/joinedAt if already present
     const now = new Date().toISOString();
-    await session.run(`
-      MATCH (c:Conversation {id: $id})
-      MATCH (u:User {id: $targetId})
-      MERGE (u)-[rel:PARTICIPATES_IN]->(c)
-        ON CREATE SET rel.joinedAt = datetime($now), rel.role = 'member'
-      SET c.updatedAt = datetime($now)
-    `, { id, targetId, now });
+    await session.executeWrite(async (tx) => {
+      await acquireContextAclLocks(tx, { userIds: [targetId], conversationId: id });
+      return await tx.run(`
+        MATCH (c:Conversation {id: $id})
+        MATCH (u:User {id: $targetId})
+        MERGE (u)-[rel:PARTICIPATES_IN]->(c)
+          ON CREATE SET rel.joinedAt = datetime($now), rel.role = 'member'
+        SET c.updatedAt = datetime($now)
+      `, { id, targetId, now });
+    });
 
     const conversation = await loadConversation(session, id);
     const io = req.app.get('io') as IOServer | undefined;
@@ -592,11 +596,14 @@ router.delete('/conversations/:id/participants/:userId', requireAuth, async (req
     const before = await loadConversation(session, id);
     const beforeParticipants = (before?.participants as Array<{ user?: { id?: string } }>) || [];
 
-    await session.run(`
-      MATCH (u:User {id: $targetId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
-      DELETE rel
-      SET c.updatedAt = datetime($now)
-    `, { id, targetId, now: new Date().toISOString() });
+    await session.executeWrite(async (tx) => {
+      await acquireContextAclLocks(tx, { userIds: [targetId], conversationId: id });
+      return await tx.run(`
+        MATCH (u:User {id: $targetId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
+        DELETE rel
+        SET c.updatedAt = datetime($now)
+      `, { id, targetId, now: new Date().toISOString() });
+    });
 
     const after = await loadConversation(session, id);
 
@@ -1588,11 +1595,14 @@ router.post('/users/:id/block', requireAuth, async (req: Request, res: Response)
 
   try {
     const now = new Date().toISOString();
-    await session.run(`
-      MATCH (me:User {id: $myId}), (target:User {id: $targetId})
-      MERGE (me)-[r:BLOCKED]->(target)
-      ON CREATE SET r.createdAt = datetime($now)
-    `, { myId, targetId, now });
+    await session.executeWrite(async (tx) => {
+      await acquireContextAclLocks(tx, { userIds: [myId, targetId] });
+      return await tx.run(`
+        MATCH (me:User {id: $myId}), (target:User {id: $targetId})
+        MERGE (me)-[r:BLOCKED]->(target)
+        ON CREATE SET r.createdAt = datetime($now)
+      `, { myId, targetId, now });
+    });
     res.status(201).json({ blocked: true, targetId });
   } catch (error) {
     console.error('Error blocking user:', error);
@@ -1609,10 +1619,13 @@ router.delete('/users/:id/block', requireAuth, async (req: Request, res: Respons
   const targetId = req.params.id as string;
 
   try {
-    await session.run(`
-      MATCH (me:User {id: $myId})-[r:BLOCKED]->(target:User {id: $targetId})
-      DELETE r
-    `, { myId, targetId });
+    await session.executeWrite(async (tx) => {
+      await acquireContextAclLocks(tx, { userIds: [myId, targetId] });
+      return await tx.run(`
+        MATCH (me:User {id: $myId})-[r:BLOCKED]->(target:User {id: $targetId})
+        DELETE r
+      `, { myId, targetId });
+    });
     res.status(200).json({ blocked: false, targetId });
   } catch (error) {
     console.error('Error unblocking user:', error);

@@ -13,6 +13,7 @@
 export type ParsedOpenChatUrl =
   | { type: 'user'; userId: string }
   | { type: 'invite'; token: string }
+  | { type: 'context'; conversationId: string; entryId: string }
   | { type: 'unknown' };
 
 export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
@@ -35,6 +36,12 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
     if (token) return { type: 'invite', token };
   }
 
+  // openchat://context/<conversationId>/<entryId>
+  if (url.protocol === 'openchat:' && url.hostname === 'context') {
+    const parts = url.pathname.replace(/^\//, '').split('/');
+    if (parts.length >= 2) return { type: 'context', conversationId: parts[0], entryId: parts[1] };
+  }
+
   // https://chat.globalbr.ai/u/<userId>  (web fallback link)
   // https://chat.globalbr.ai/i/<token>   (group invite web link)
   if (
@@ -46,6 +53,9 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
 
     const inviteMatch = url.pathname.match(/^\/i\/(.+)$/);
     if (inviteMatch?.[1]) return { type: 'invite', token: inviteMatch[1] };
+
+    const contextMatch = url.pathname.match(/^\/app\/context\/([^\/]+)\/([^\/]+)$/);
+    if (contextMatch?.[1] && contextMatch?.[2]) return { type: 'context', conversationId: contextMatch[1], entryId: contextMatch[2] };
 
     // The responsive web client lives at /app/. Server-rendered public pages
     // carry their post-auth destination in the query so OAuth can always
