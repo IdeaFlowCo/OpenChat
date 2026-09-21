@@ -23,6 +23,7 @@ import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { api, Conversation, CurrentUser } from '../api/client';
+import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp, RouteProps } from '../navigation/types';
 import {
   getDirectConversationParticipant,
@@ -56,10 +57,11 @@ export function ForwardPickerScreen() {
       const title = getDisplayTitle(conv, currentUser).toLowerCase();
       if (title.includes(lower)) return true;
       // Also match on participant names/emails for DMs
-      return conv.participants?.some(p =>
-        (p.user.name || '').toLowerCase().includes(lower) ||
-        (p.user.email || '').toLowerCase().includes(lower)
-      );
+      return conv.participants?.some(p => {
+        const safeEmail = isPlaceholderEmail(p.user.email) ? '' : p.user.email;
+        return (p.user.name || '').toLowerCase().includes(lower) ||
+          (safeEmail || '').toLowerCase().includes(lower);
+      });
     });
   }, [conversations, query, currentUser]);
 
@@ -97,8 +99,9 @@ export function ForwardPickerScreen() {
     const other = conv.type === 'direct'
       ? getDirectConversationParticipant(conv, currentUser)
       : undefined;
-    const avatarName = other?.name || other?.email || title;
-    const avatarEmail = other?.email;
+    const safeEmail = isPlaceholderEmail(other?.email) ? '' : other?.email;
+    const avatarName = other?.name || safeEmail || title;
+    const avatarEmail = safeEmail || undefined;
 
     return (
       <TouchableOpacity

@@ -1,9 +1,11 @@
 import type { Conversation, CurrentUser, User } from '../api/client';
+import { isPlaceholderEmail } from './email';
 
 export const SELF_CONVERSATION_TITLE = 'Myself';
 
 export function getUserDisplayName(user?: Pick<User, 'name' | 'email'> | null): string {
-  return user?.name || user?.email?.split('@')[0] || 'OpenChat member';
+  const safeEmail = isPlaceholderEmail(user?.email) ? undefined : user?.email;
+  return user?.name || safeEmail?.split('@')[0] || 'OpenChat member';
 }
 
 type ConversationLike = Pick<Conversation, 'type'> & {
@@ -45,5 +47,6 @@ export function getDirectConversationTitle(
   if (isSelfDirectConversation(conversation, currentUser)) return SELF_CONVERSATION_TITLE;
   if (conversation.title) return conversation.title;
   const participant = getDirectConversationParticipant(conversation, currentUser);
-  return participant?.name || participant?.email || fallback;
+  const safeEmail = isPlaceholderEmail(participant?.email) ? undefined : participant?.email;
+  return participant?.name || safeEmail || fallback;
 }

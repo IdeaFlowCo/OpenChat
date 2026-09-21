@@ -36,6 +36,7 @@ import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
+import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp } from '../navigation/types';
 import {
   getDirectConversationParticipant,
@@ -198,7 +199,8 @@ export function SearchScreen() {
     }
     if (item.kind === 'msg') {
       const h = item.hit;
-      const senderName = h.sender?.name || h.sender?.email?.split('@')[0] || 'someone';
+      const safeSenderEmail = isPlaceholderEmail(h.sender?.email) ? '' : h.sender?.email;
+      const senderName = h.sender?.name || safeSenderEmail?.split('@')[0] || 'someone';
       const conversation = conversations.find(candidate => candidate.id === h.conversationId);
       const inLabel = conversation && isSelfDirectConversation(conversation, currentUser)
         ? getDirectConversationTitle(conversation, currentUser, 'Group chat')
@@ -210,8 +212,8 @@ export function SearchScreen() {
           activeOpacity={0.7}
         >
           <Avatar
-            name={h.sender?.name || h.sender?.email}
-            email={h.sender?.email}
+            name={h.sender?.name || safeSenderEmail || 'someone'}
+            email={safeSenderEmail || undefined}
             avatarUrl={h.sender?.avatarUrl}
             isBot={h.sender?.isBot}
             size={40}

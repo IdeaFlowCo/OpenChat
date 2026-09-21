@@ -9,6 +9,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { PresenceDot, PresenceStatus } from './PresenceDot';
 import { getColors } from '../theme/colors';
 import { AppIcon } from './AppIcon';
+import { isPlaceholderEmail } from '../utils/email';
 
 export interface GroupAvatarMember {
   avatarUrl?: string | null;
@@ -99,6 +100,7 @@ export function Avatar({
     .filter((url): url is string => !!url)
     .slice(0, 4);
   const showGroupCluster = variant === 'group' && groupPhotoUrls.length >= 2;
+  const cleanEmail = isPlaceholderEmail(email) ? undefined : email;
   return (
     <View
       style={{ width: size, height: size }}
@@ -137,7 +139,7 @@ export function Avatar({
                 fontSize: Math.round(size * 0.4),
               }}
             >
-              {initials(name, email)}
+              {initials(name, cleanEmail)}
             </Text>
           )
         )}

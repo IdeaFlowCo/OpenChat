@@ -48,6 +48,7 @@ import { ConversationList } from './ConversationList';
 import { AppIcon } from './AppIcon';
 import { AgentOverlayButton } from './AgentOverlayButton';
 import { ConnectionStatusLine } from './ConnectionStatusLine';
+import { isPlaceholderEmail } from '../utils/email';
 // The wide /app/ pane renders the same ChatScreen as the compact layout — with full
 // feature parity (voice / preview / transform / forwarding / reactions /
 // edit / delete / mentions / attachments / read receipts / pagination).
@@ -105,6 +106,8 @@ export function MasterDetailLayout() {
     currentUser, isConnected, activeConversationId, setActiveConversation,
     conversationsLoaded, refreshConversations, conversations,
   } = useChat();
+
+  const safeEmail = isPlaceholderEmail(currentUser?.email) ? '' : currentUser?.email;
 
   // Keep the latest list + active id in refs so the keydown handler (bound
   // once) can read current values for arrow-key navigation without
@@ -385,14 +388,14 @@ export function MasterDetailLayout() {
             <Pressable
               onPress={openSettings}
               accessibilityRole="button"
-              accessibilityLabel={`Account and settings${currentUser?.email ? `, ${currentUser.email}` : ''}`}
+              accessibilityLabel={`Account and settings${safeEmail ? `, ${safeEmail}` : ''}`}
               style={styles.accountButton}
             >
               <AppIcon name="settings" color={c.primary} size={19} strokeWidth={1.8} />
               <View style={styles.accountCopy}>
                 <Text style={[styles.accountTitle, { color: c.textPrimary }]}>Account & settings</Text>
-                {!!currentUser?.email && (
-                  <Text style={[styles.accountEmail, { color: c.textMetadata }]} numberOfLines={1}>{currentUser.email}</Text>
+                {!!safeEmail && (
+                  <Text style={[styles.accountEmail, { color: c.textMetadata }]} numberOfLines={1}>{safeEmail}</Text>
                 )}
               </View>
             </Pressable>
