@@ -137,11 +137,11 @@ export function SecretaryScreen() {
         >
           <Text style={[styles.question, { color: c.textPrimary }]}>{entry.question}</Text>
           <Text style={[styles.answer, { color: c.textSecondary }]}>{entry.answer}</Text>
-          <Text style={[styles.cardHint, { color: c.textMuted }]}>Tap to edit · hold to delete</Text>
+          <Text style={[styles.cardHint, { color: c.textMetadata }]}>Tap to edit · hold to delete</Text>
         </TouchableOpacity>
       ))}
       {config?.answers.length === 0 && (
-        <Text style={[styles.empty, { color: c.textMuted }]}>Add one repetitive question to try the mode.</Text>
+        <Text style={[styles.empty, { color: c.textMetadata }]}>Add one repetitive question to try the mode.</Text>
       )}
 
       <View style={[styles.form, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -176,7 +176,7 @@ export function SecretaryScreen() {
             disabled={!question.trim() || !answer.trim() || saving}
             style={[styles.primaryButton, { backgroundColor: c.primary, opacity: !question.trim() || !answer.trim() || saving ? 0.5 : 1 }]}
           >
-            {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>{editingId ? 'Save' : 'Add answer'}</Text>}
+            {saving ? <ActivityIndicator color={c.onPrimary} /> : <Text style={[styles.primaryButtonText, { color: c.onPrimary }]}>{editingId ? 'Save' : 'Add answer'}</Text>}
           </TouchableOpacity>
         </View>
       </View>
@@ -207,5 +207,5 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 6 },
   secondaryButton: { minHeight: 44, justifyContent: 'center', borderWidth: 1, borderRadius: 10, paddingHorizontal: 18 },
   primaryButton: { minHeight: 44, minWidth: 110, alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingHorizontal: 18 },
-  primaryButtonText: { color: '#fff', fontWeight: '700' },
+  primaryButtonText: { fontWeight: '700' },
 });

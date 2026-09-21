@@ -26,7 +26,7 @@ export function AiDisclosureBanner() {
         activeOpacity={0.7}
         accessibilityLabel="Acknowledge AI disclosure"
       >
-        <Text style={styles.btnText}>Got it</Text>
+        <Text style={[styles.btnText, { color: c.onPrimary }]}>Got it</Text>
       </TouchableOpacity>
     </View>
   );
@@ -49,5 +49,5 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
   },
-  btnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  btnText: { fontWeight: '600', fontSize: 13 },
 });

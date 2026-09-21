@@ -118,7 +118,7 @@ export function GroupInviteScreen() {
           style={[styles.btn, { backgroundColor: c.primary, marginTop: 16 }]}
           onPress={loadInvite}
         >
-          <Text style={styles.btnText}>Retry</Text>
+          <Text style={[styles.btnText, { color: c.onPrimary }]}>Retry</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.cancelBtn]}
@@ -148,11 +148,11 @@ export function GroupInviteScreen() {
             />
           </View>
 
-          <Text style={[styles.urlLabel, { color: c.textMuted }]} numberOfLines={2} ellipsizeMode="middle">
+          <Text style={[styles.urlLabel, { color: c.textMetadata }]} numberOfLines={2} ellipsizeMode="middle">
             {invite.url}
           </Text>
 
-          <Text style={[styles.meta, { color: c.textMuted }]}>
+          <Text style={[styles.meta, { color: c.textMetadata }]}>
             {invite.usesLeft} uses remaining
           </Text>
 
@@ -161,7 +161,7 @@ export function GroupInviteScreen() {
             onPress={handleCopy}
             activeOpacity={0.8}
           >
-            <Text style={styles.btnText}>{copied ? 'Copied!' : 'Copy link'}</Text>
+            <Text style={[styles.btnText, { color: c.onPrimary }]}>{copied ? 'Copied!' : 'Copy link'}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -225,7 +225,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   btnText: {
-    color: '#ffffff',
     fontWeight: '700',
     fontSize: 16,
   },

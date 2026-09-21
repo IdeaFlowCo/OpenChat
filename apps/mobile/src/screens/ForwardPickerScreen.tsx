@@ -149,7 +149,7 @@ export function ForwardPickerScreen() {
         contentContainerStyle={{ paddingVertical: 4 }}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={[styles.emptyText, { color: c.textMuted }]}>
+            <Text style={[styles.emptyText, { color: c.textMetadata }]}>
               {query ? 'No conversations match' : 'No conversations yet'}
             </Text>
           </View>

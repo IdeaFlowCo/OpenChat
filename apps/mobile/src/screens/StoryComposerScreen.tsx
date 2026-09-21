@@ -194,11 +194,11 @@ export function StoryComposerScreen() {
                     style={[styles.audienceRow, { borderBottomColor: c.border }]}
                   >
                     <View style={[styles.checkbox, { borderColor: checked ? c.primary : c.border, backgroundColor: checked ? c.primary : 'transparent' }]}>
-                      {checked && <Text style={styles.checkmark}>✓</Text>}
+                      {checked && <Text style={[styles.checkmark, { color: c.onPrimary }]}>✓</Text>}
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ color: c.textPrimary, fontWeight: '600' }}>{label}</Text>
-                      <Text style={{ color: c.textMuted, fontSize: 12 }}>{conversation.type === 'group' ? 'Group chat' : 'Direct chat'}</Text>
+                      <Text style={{ color: c.textMetadata, fontSize: 12 }}>{conversation.type === 'group' ? 'Group chat' : 'Direct chat'}</Text>
                     </View>
                   </TouchableOpacity>
                 );
@@ -259,7 +259,7 @@ export function StoryComposerScreen() {
             </View>
             {error && <Text accessibilityRole="alert" style={[styles.error, { color: c.danger }]}>{error}</Text>}
             <TouchableOpacity onPress={review} style={[styles.primary, { backgroundColor: c.primary }]}>
-              <Text style={styles.primaryText}>Review exact Story</Text>
+              <Text style={[styles.primaryText, { color: c.onPrimary }]}>Review exact Story</Text>
             </TouchableOpacity>
           </>
         ) : (
@@ -287,10 +287,10 @@ export function StoryComposerScreen() {
                 <Text style={[styles.fact, { color: c.textSecondary }]}>Identity stays hidden until both people approve.</Text>
               </View>
             )}
-            <Text style={[styles.privacy, { color: c.textMuted }]}>Only this text is shown to the selected people. Private agent context is not included.</Text>
+            <Text style={[styles.privacy, { color: c.textMetadata }]}>Only this text is shown to the selected people. Private agent context is not included.</Text>
             {error && <Text accessibilityRole="alert" style={[styles.error, { color: c.danger }]}>{error}</Text>}
             <TouchableOpacity disabled={busy} onPress={() => void publish()} style={[styles.primary, { backgroundColor: c.primary }, busy && { opacity: 0.55 }]}>
-              {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Approve and share</Text>}
+              {busy ? <ActivityIndicator color={c.onPrimary} /> : <Text style={[styles.primaryText, { color: c.onPrimary }]}>Approve and share</Text>}
             </TouchableOpacity>
             <TouchableOpacity disabled={busy} onPress={() => setPreviewing(false)} style={styles.editButton}>
               <Text style={{ color: c.primary, fontWeight: '700' }}>Edit</Text>
@@ -314,7 +314,7 @@ const styles = StyleSheet.create({
   audienceRow: { minHeight: 58, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   noAudience: { padding: 14, fontSize: 13, lineHeight: 19 },
   checkbox: { width: 22, height: 22, borderRadius: 7, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  checkmark: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  checkmark: { fontSize: 14, fontWeight: '800' },
   detailsCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, paddingHorizontal: 14 },
   lineInput: { minHeight: 50, borderBottomWidth: StyleSheet.hairlineWidth, fontSize: 14 },
   modeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
@@ -323,7 +323,7 @@ const styles = StyleSheet.create({
   expiryRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
   expiryChoice: { minHeight: 44, flex: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   primary: { minHeight: 50, marginTop: 18, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 },
-  primaryText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  primaryText: { fontWeight: '800', fontSize: 15 },
   error: { marginTop: 12, fontSize: 13, lineHeight: 19 },
   preview: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 20, padding: 20 },
   previewText: { fontFamily: serif, fontSize: 23, lineHeight: 32, marginTop: 12 },

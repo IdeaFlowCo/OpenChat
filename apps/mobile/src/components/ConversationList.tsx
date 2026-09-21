@@ -129,7 +129,7 @@ function ConversationRow({ item, isActive, onPress, compact }: RowProps) {
           />
           {unread > 0 && (
             <View style={[styles.compactUnread, { backgroundColor: c.primary, borderColor: c.surface }]}>
-              <Text style={styles.unreadPillText}>{unread > 9 ? '9+' : String(unread)}</Text>
+              <Text style={[styles.unreadPillText, { color: c.onPrimary }]}>{unread > 9 ? '9+' : String(unread)}</Text>
             </View>
           )}
         </View>
@@ -171,7 +171,7 @@ function ConversationRow({ item, isActive, onPress, compact }: RowProps) {
             </Text>
             {item.type === 'direct' && <BotBadge isBot={other?.isBot} compact />}
           </View>
-          <Text style={[styles.rowTime, { color: c.textMuted }]}>
+          <Text style={[styles.rowTime, { color: c.textMetadata }]}>
             {formatTime(item.lastMessageAt)}
           </Text>
         </View>
@@ -187,7 +187,7 @@ function ConversationRow({ item, isActive, onPress, compact }: RowProps) {
           </Text>
           {unread > 0 && (
             <View style={[styles.unreadPill, { backgroundColor: c.primary }]}>
-              <Text style={styles.unreadPillText}>{unread > 99 ? '99+' : String(unread)}</Text>
+              <Text style={[styles.unreadPillText, { color: c.onPrimary }]}>{unread > 99 ? '99+' : String(unread)}</Text>
             </View>
           )}
         </View>
@@ -270,7 +270,7 @@ export function ConversationList({ activeId, onSelect, onStartChat, compact, onC
                 onPress={onStartChat}
                 style={[styles.emptyBtn, { backgroundColor: c.primary }]}
               >
-                <Text style={{ color: '#fff', fontWeight: '600' }}>Start a chat</Text>
+                <Text style={{ color: c.onPrimary, fontWeight: '600' }}>Start a chat</Text>
               </Pressable>
             )}
           </View>
@@ -322,7 +322,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  unreadPillText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  unreadPillText: { fontSize: 12, fontWeight: '700' },
   compactRow: {
     alignItems: 'center',
     justifyContent: 'center',

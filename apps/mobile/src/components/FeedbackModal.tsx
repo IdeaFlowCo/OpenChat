@@ -102,7 +102,7 @@ export function FeedbackModal({ visible, sending, onSubmit, onCancel }: Props) {
               autoFocus
             />
             <Pressable onPress={() => void Linking.openURL('https://worldissuetracker.com')} hitSlop={8}>
-              <Text style={[styles.trackerLink, { color: c.textMuted }]}>Open issue tracker</Text>
+              <Text style={[styles.trackerLink, { color: c.textMetadata }]}>Open issue tracker</Text>
             </Pressable>
           </View>
         </View>

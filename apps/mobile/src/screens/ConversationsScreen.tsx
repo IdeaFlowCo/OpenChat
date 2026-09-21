@@ -87,14 +87,15 @@ interface ConvRowProps {
   dividerColor: string;
   textPrimary: string;
   textSecondary: string;
-  textMuted: string;
+  textMetadata: string;
+  onPrimary: string;
   onPress: () => void;
 }
 
 function ConvRow({
   item, currentUser, unread, isMuted, someoneTyping,
   presenceStatus, isBot, pulseIn,
-  primaryColor, dividerColor, textPrimary, textSecondary, textMuted,
+  primaryColor, dividerColor, textPrimary, textSecondary, textMetadata, onPrimary,
   onPress,
 }: ConvRowProps) {
   const title = getDisplayTitle(item, currentUser);
@@ -162,9 +163,9 @@ function ConvRow({
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               {isMuted && (
-                <AppIcon name="mute" color={textMuted} size={13} strokeWidth={1.8} />
+                <AppIcon name="mute" color={textMetadata} size={13} strokeWidth={1.8} />
               )}
-              <Text style={[styles.rowTime, { color: textMuted }]}>
+              <Text style={[styles.rowTime, { color: textMetadata }]}>
                 {formatTime(item.lastMessageAt)}
               </Text>
             </View>
@@ -181,7 +182,7 @@ function ConvRow({
             </Text>
             {unread > 0 && (
               <View style={[styles.unreadPill, { backgroundColor: primaryColor }]}>
-                <Text style={styles.unreadPillText}>{unread > 99 ? '99+' : String(unread)}</Text>
+                <Text style={[styles.unreadPillText, { color: onPrimary }]}>{unread > 99 ? '99+' : String(unread)}</Text>
               </View>
             )}
           </View>
@@ -198,7 +199,7 @@ export function ConversationsScreen() {
   const { enhanced } = useSocialExperience();
   const {
     currentUser, conversations, conversationsLoaded, refreshConversations,
-    isConnected, presence, unreadByConv, typingByConv, signOut, mutedConvs,
+    isConnected, presence, unreadByConv, typingByConv, mutedConvs,
     reconnectNewConvIds,
   } = useChat();
   const [refreshing, setRefreshing] = useState(false);
@@ -211,16 +212,17 @@ export function ConversationsScreen() {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerTitle: () => (
-        <View style={{ alignItems: 'center' }}>
-          <Text style={{ fontSize: 18, fontWeight: '600', color: c.textPrimary, fontFamily: serif }}>Chats</Text>
-          <ConnectionStatusLine
-            account={currentUser?.email}
-            connected={isConnected}
-            connectedColor={c.presenceAvailable}
-            disconnectedColor={c.presenceOffline}
-            textColor={c.textSecondary}
-            disconnectedLabel="reconnecting"
-          />
+        <View style={styles.headerTitleWrap}>
+          <Text numberOfLines={1} style={{ fontSize: 18, fontWeight: '600', color: c.textPrimary, fontFamily: serif }}>Chats</Text>
+          {!isConnected && (
+            <ConnectionStatusLine
+              connected={false}
+              connectedColor={c.presenceAvailable}
+              disconnectedColor={c.presenceOffline}
+              textColor={c.textMetadata}
+              disconnectedLabel="Reconnecting…"
+            />
+          )}
         </View>
       ),
       headerRight: () => (
@@ -262,7 +264,7 @@ export function ConversationsScreen() {
         </TouchableOpacity>
       ),
     });
-  }, [navigation, c.primary, c.danger, c.textPrimary, c.textSecondary, currentUser?.email, enhanced, isConnected, signOut]);
+  }, [navigation, c.primary, c.textMetadata, c.textPrimary, enhanced, isConnected]);
 
   useEffect(() => {
     if (!conversationsLoaded) refreshConversations();
@@ -311,7 +313,7 @@ export function ConversationsScreen() {
               onPress={() => navigation.navigate('NewConversation')}
               style={[styles.emptyBtn, { backgroundColor: c.primary }]}
             >
-              <Text style={{ color: '#fff', fontWeight: '600' }}>Start a chat</Text>
+              <Text style={{ color: c.onPrimary, fontWeight: '600' }}>Start a chat</Text>
             </TouchableOpacity>
           </View>
         }
@@ -341,7 +343,8 @@ export function ConversationsScreen() {
               dividerColor={c.divider}
               textPrimary={c.textPrimary}
               textSecondary={c.textSecondary}
-              textMuted={c.textMuted}
+              textMetadata={c.textMetadata}
+              onPrimary={c.onPrimary}
               onPress={() => navigation.navigate('Chat', { conversationId: item.id })}
             />
           );
@@ -361,6 +364,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  headerTitleWrap: { flex: 1, minWidth: 0, alignItems: 'center' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -383,7 +387,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  unreadPillText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  unreadPillText: { fontSize: 12, fontWeight: '700' },
   empty: { alignItems: 'center', paddingTop: 80 },
   emptyBtn: {
     marginTop: 16,

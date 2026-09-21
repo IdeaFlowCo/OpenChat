@@ -81,7 +81,7 @@ export function BlockedUsersScreen() {
     <View style={[styles.root, { backgroundColor: c.background }]}>
       {blocked.length === 0 ? (
         <View style={styles.center}>
-          <Text style={{ color: c.textMuted, fontSize: 15 }}>No blocked users</Text>
+          <Text style={{ color: c.textMetadata, fontSize: 15 }}>No blocked users</Text>
         </View>
       ) : (
         <FlatList

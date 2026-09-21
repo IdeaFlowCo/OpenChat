@@ -4,6 +4,8 @@
  */
 import { StyleSheet, Text, View } from 'react-native';
 import { AppIcon } from './AppIcon';
+import { useTheme } from '../contexts/ThemeContext';
+import { getColors } from '../theme/colors';
 
 interface Props {
   isBot?: boolean;
@@ -11,14 +13,20 @@ interface Props {
 }
 
 export function BotBadge({ isBot, compact }: Props) {
+  const { scheme } = useTheme();
+  const c = getColors(scheme);
   if (!isBot) return null;
   if (compact) {
-    return <View style={styles.compact} accessibilityLabel="AI agent"><AppIcon name="bot" color="#78716c" size={13} /></View>;
+    return (
+      <View style={styles.compact} accessible accessibilityLabel="AI participant">
+        <AppIcon name="bot" color={c.textMetadata} size={13} />
+      </View>
+    );
   }
   return (
-    <View style={styles.pill} accessibilityLabel="AI agent">
-      <AppIcon name="bot" color="#78716c" size={12} />
-      <Text style={styles.pillText}>AI</Text>
+    <View style={[styles.pill, { backgroundColor: c.surfaceElevated }]} accessible accessibilityLabel="AI participant">
+      <AppIcon name="bot" color={c.textMetadata} size={12} />
+      <Text style={[styles.pillText, { color: c.textMetadata }]}>AI</Text>
     </View>
   );
 }
@@ -30,9 +38,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
-    backgroundColor: 'rgba(168, 85, 247, 0.18)',
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 3,
   },
-  pillText: { fontSize: 10, fontWeight: '600', color: '#7e22ce' },
+  pillText: { fontSize: 10, fontWeight: '600' },
 });

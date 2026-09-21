@@ -167,7 +167,7 @@ export function NVCComposerModal({ visible, onSubmit, onCancel }: Props) {
             {FIELDS.map((f) => (
               <View key={f.key} style={{ marginBottom: 18 }}>
                 <Text style={[styles.label, { color: c.textSecondary }]}>{f.label.toUpperCase()}</Text>
-                <Text style={[styles.fieldHint, { color: c.textMuted }]}>{f.hint}</Text>
+                <Text style={[styles.fieldHint, { color: c.textMetadata }]}>{f.hint}</Text>
                 <TextInput
                   style={[
                     styles.input,

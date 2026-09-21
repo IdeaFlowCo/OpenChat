@@ -148,7 +148,7 @@ export function GroupInvitePreviewScreen() {
                 navigation.replace('Chat', { conversationId: preview!.conversationId });
               }}
             >
-              <Text style={styles.joinBtnText}>Open Chat</Text>
+              <Text style={[styles.joinBtnText, { color: c.onPrimary }]}>Open Chat</Text>
             </TouchableOpacity>
           </>
         ) : (
@@ -158,8 +158,8 @@ export function GroupInvitePreviewScreen() {
             disabled={joining}
           >
             {joining
-              ? <ActivityIndicator color="#ffffff" size="small" />
-              : <Text style={styles.joinBtnText}>Join</Text>
+              ? <ActivityIndicator color={c.onPrimary} size="small" />
+              : <Text style={[styles.joinBtnText, { color: c.onPrimary }]}>Join</Text>
             }
           </TouchableOpacity>
         )}
@@ -226,7 +226,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   joinBtnText: {
-    color: '#ffffff',
     fontSize: 17,
     fontWeight: '700',
   },

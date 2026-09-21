@@ -100,10 +100,7 @@ const Tab = createBottomTabNavigator<TabParamList>();
 
 // ── Chats stack — all pre-existing chat screens ──────────────────────────────
 
-function ChatsNavigator({ currentUser, c }: {
-  currentUser: { email?: string } | null;
-  c: ReturnType<typeof getColors>;
-}) {
+function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
   return (
     <ChatsStack.Navigator
       screenOptions={{
@@ -116,7 +113,7 @@ function ChatsNavigator({ currentUser, c }: {
       <ChatsStack.Screen
         name="Conversations"
         component={HomeScreen}
-        options={{ title: `Chats${currentUser?.email ? ` · ${currentUser.email}` : ''}` }}
+        options={{ title: 'Chats' }}
       />
       <ChatsStack.Screen
         name="Chat"
@@ -483,7 +480,7 @@ function AuthedTabs({
           ),
         }}
       >
-        {() => <ChatsNavigator currentUser={currentUser} c={c} />}
+        {() => <ChatsNavigator c={c} />}
       </Tab.Screen>
       {enhanced && (
         <Tab.Screen

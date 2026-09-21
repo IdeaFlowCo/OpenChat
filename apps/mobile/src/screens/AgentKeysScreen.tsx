@@ -68,7 +68,7 @@ function KeyRow({
           )}
         </View>
         <Text style={[styles.keyPrefix, { color: c.textSecondary }]}>{prefix}</Text>
-        <Text style={[styles.meta, { color: c.textMuted }]}>
+        <Text style={[styles.meta, { color: c.textMetadata }]}>
           {item.lastUsedAt ? `Last used ${timeAgo(item.lastUsedAt)}` : 'Never used'}
           {item.expiresAt ? ` · Expires ${timeAgo(item.expiresAt)}` : ''}
           {item.scopes?.length ? ` · ${item.scopes.join(', ')}` : ''}
@@ -157,7 +157,7 @@ export function AgentKeysScreen() {
         onPress={() => navigation.navigate('AddAgentKey')}
         activeOpacity={0.85}
       >
-        <AppIcon name="plus" color="#ffffff" size={26} strokeWidth={2.2} />
+        <AppIcon name="plus" color={c.onPrimary} size={26} strokeWidth={2.2} />
       </TouchableOpacity>
     </View>
   );
@@ -208,5 +208,4 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
   },
-  fabText: { color: '#fff', fontSize: 28, fontWeight: '300', lineHeight: 34 },
 });

@@ -118,8 +118,8 @@ export function AsksScreen() {
           <Text style={[styles.subtitle, { color: c.textSecondary }]}>Most things stay private. You choose what agents may search and what people may see.</Text>
         </View>
         <TouchableOpacity accessibilityLabel="Tell My Agent something" onPress={() => navigation.navigate('AgentOverlay')} style={[styles.agentButton, { backgroundColor: c.primary }]}>
-          <AppIcon name="sparkle" color="#fff" size={18} />
-          <Text style={styles.agentButtonText}>Tell My Agent</Text>
+          <AppIcon name="sparkle" color={c.onPrimary} size={18} />
+          <Text style={[styles.agentButtonText, { color: c.onPrimary }]}>Tell My Agent</Text>
         </TouchableOpacity>
       </View>
       <View style={styles.toolbar}>
@@ -147,8 +147,8 @@ export function AsksScreen() {
           renderItem={({ item }) => item.kind === 'draft' ? (
             <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
               <View style={styles.cardHeading}>
-                <Text style={[styles.state, { color: c.textMuted }]}>PRIVATE DRAFT</Text>
-                <Text style={[styles.date, { color: c.textMuted }]}>{new Date(item.draft.updatedAt).toLocaleDateString()}</Text>
+                <Text style={[styles.state, { color: c.textMetadata }]}>PRIVATE DRAFT</Text>
+                <Text style={[styles.date, { color: c.textMetadata }]}>{new Date(item.draft.updatedAt).toLocaleDateString()}</Text>
               </View>
               <Text style={[styles.cardTitle, { color: c.textPrimary }]}>{draftTitle(item.draft)}</Text>
               {item.draft.seeks.length > 0 && <Text style={[styles.detail, { color: c.textSecondary }]}>Looking for · {item.draft.seeks.join(', ')}</Text>}
@@ -161,19 +161,19 @@ export function AsksScreen() {
               </View>
               <View style={styles.actions}>
                 <TouchableOpacity accessibilityLabel="Search quietly with all eligible agents in your OpenChat network for 30 days; identity stays hidden until both people approve" disabled={busyId === item.draft.id} onPress={() => void searchQuietly(item.draft)} style={[styles.primarySmall, { backgroundColor: c.primary }]}>
-                  {busyId === item.draft.id ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.primarySmallText}>Search quietly</Text>}
+                  {busyId === item.draft.id ? <ActivityIndicator size="small" color={c.onPrimary} /> : <Text style={[styles.primarySmallText, { color: c.onPrimary }]}>Search quietly</Text>}
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => navigation.navigate('StoryComposer', { draftId: item.draft.id })} style={[styles.outlineSmall, { borderColor: c.border }]}><Text style={{ color: c.primary, fontWeight: '700' }}>Share…</Text></TouchableOpacity>
-                <TouchableOpacity disabled={busyId === item.draft.id} onPress={() => void dismiss(item.draft)} style={styles.linkSmall}><Text style={{ color: c.textMuted, fontWeight: '600' }}>Keep private</Text></TouchableOpacity>
+                <TouchableOpacity disabled={busyId === item.draft.id} onPress={() => void dismiss(item.draft)} style={styles.linkSmall}><Text style={{ color: c.textMetadata, fontWeight: '600' }}>Keep private</Text></TouchableOpacity>
               </View>
             </View>
           ) : (
             <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
               <View style={styles.cardHeading}>
-                <Text style={[styles.state, { color: isStoryExpired(item.story) ? c.textMuted : c.primary }]}>
+                <Text style={[styles.state, { color: isStoryExpired(item.story) ? c.textMetadata : c.primary }]}>
                   {item.story.humanVisible ? 'STORY' : 'QUIET SEARCH'} · {isStoryExpired(item.story) ? 'EXPIRED' : item.story.status.toUpperCase()}
                 </Text>
-                <Text style={[styles.date, { color: c.textMuted }]}>{inventoryExpiry(item.story)}</Text>
+                <Text style={[styles.date, { color: c.textMetadata }]}>{inventoryExpiry(item.story)}</Text>
               </View>
               <Text style={[styles.cardTitle, { color: c.textPrimary }]}>{item.story.humanVisible ? item.story.text : (item.story.goal || item.story.seeks[0] || item.story.brings[0] || 'Agent-only search')}</Text>
               {item.story.humanVisible ? (
@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
   title: { fontFamily: serif, fontSize: 27, fontWeight: '600', marginTop: 4 },
   subtitle: { fontSize: 13, lineHeight: 19, marginTop: 5, maxWidth: 560 },
   agentButton: { minHeight: 46, borderRadius: 14, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 7 },
-  agentButtonText: { color: '#fff', fontWeight: '800' },
+  agentButtonText: { fontWeight: '800' },
   toolbar: { width: '100%', maxWidth: 820, alignSelf: 'center', paddingHorizontal: 18, paddingBottom: 8, flexDirection: 'row', gap: 8 },
   secondaryButton: { minHeight: 42, paddingHorizontal: 13, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6 },
   list: { width: '100%', maxWidth: 820, alignSelf: 'center', padding: 18, paddingTop: 4, paddingBottom: 80, gap: 10 },
@@ -224,7 +224,7 @@ const styles = StyleSheet.create({
   consentTitle: { fontSize: 12, fontWeight: '800' },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 14 },
   primarySmall: { minHeight: 42, minWidth: 116, paddingHorizontal: 13, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  primarySmallText: { color: '#fff', fontWeight: '800' },
+  primarySmallText: { fontWeight: '800' },
   outlineSmall: { minHeight: 42, paddingHorizontal: 13, borderWidth: StyleSheet.hairlineWidth, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   linkSmall: { minHeight: 42, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
   error: { position: 'absolute', left: 18, right: 18, bottom: 12, padding: 10, fontSize: 13 },

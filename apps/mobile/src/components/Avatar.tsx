@@ -102,8 +102,8 @@ export function Avatar({
   return (
     <View
       style={{ width: size, height: size }}
-      accessible={variant === 'group'}
-      accessibilityLabel={variant === 'group' ? 'Group avatar' : undefined}
+      accessible={variant === 'group' || !!isBot}
+      accessibilityLabel={variant === 'group' ? 'Group avatar' : isBot ? 'AI participant avatar' : undefined}
     >
       <View
         style={[
@@ -112,7 +112,7 @@ export function Avatar({
             width: size,
             height: size,
             borderRadius: size / 2,
-            backgroundColor: isBot ? 'rgba(168, 85, 247, 0.18)' : c.surfaceElevated,
+            backgroundColor: c.surfaceElevated,
             overflow: 'hidden',
           },
         ]}
@@ -127,15 +127,19 @@ export function Avatar({
             style={{ width: size, height: size, borderRadius: size / 2 }}
           />
         ) : (
-          <Text
-            style={{
-              color: isBot ? '#7e22ce' : c.textSecondary,
-              fontWeight: '600',
-              fontSize: Math.round(size * 0.4),
-            }}
-          >
-            {isBot ? '🤖' : initials(name, email)}
-          </Text>
+          isBot ? (
+            <AppIcon name="bot" color={c.textMetadata} size={Math.round(size * 0.52)} />
+          ) : (
+            <Text
+              style={{
+                color: c.textSecondary,
+                fontWeight: '600',
+                fontSize: Math.round(size * 0.4),
+              }}
+            >
+              {initials(name, email)}
+            </Text>
+          )
         )}
       </View>
       {presenceStatus && (

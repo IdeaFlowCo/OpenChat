@@ -141,7 +141,7 @@ export function ConversationThoughtsScreen() {
 
       <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>Pinned</Text>
       {pinned.length === 0 && !loading && (
-        <Text style={[styles.emptyText, { color: c.textMuted }]}>
+        <Text style={[styles.emptyText, { color: c.textMetadata }]}>
           Nothing pinned yet. Long-press a message and choose “Save & pin to
           chat”, or pin one of your thoughts below.
         </Text>
@@ -168,7 +168,7 @@ export function ConversationThoughtsScreen() {
         From this chat
       </Text>
       {fromChat.length === 0 && !loading && (
-        <Text style={[styles.emptyText, { color: c.textMuted }]}>
+        <Text style={[styles.emptyText, { color: c.textMetadata }]}>
           Shared tags from this chat land here — use #fact, #idea, #todo… in a
           message, or long-press a message → “Save to Thoughts” for a private capture.
         </Text>

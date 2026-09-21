@@ -210,7 +210,7 @@ export function GroupSettingsScreen() {
                 ]}
               >
                 <Text style={{
-                  color: titleDirty && !savingTitle ? '#fff' : c.textSecondary,
+                  color: titleDirty && !savingTitle ? c.onPrimary : c.textSecondary,
                   fontWeight: '600',
                 }}>
                   {savingTitle ? 'Saving…' : 'Save name'}
@@ -218,7 +218,7 @@ export function GroupSettingsScreen() {
               </TouchableOpacity>
             )}
             {!isOwner && (
-              <Text style={[styles.hint, { color: c.textMuted }]}>Only the owner can rename the group.</Text>
+              <Text style={[styles.hint, { color: c.textMetadata }]}>Only the owner can rename the group.</Text>
             )}
             <Text style={[styles.section, { color: c.textSecondary, marginTop: 24 }]}>
               MEMBERS · {participants.length}
@@ -242,7 +242,7 @@ export function GroupSettingsScreen() {
                 <View style={styles.rowTop}>
                   <Text style={[styles.memberName, { color: c.textPrimary }]} numberOfLines={1}>
                     {p.user.name || p.user.email}
-                    {isMe && <Text style={{ color: c.textMuted, fontWeight: '400' }}>  (you)</Text>}
+                    {isMe && <Text style={{ color: c.textMetadata, fontWeight: '400' }}>  (you)</Text>}
                   </Text>
                   <BotBadge isBot={p.user.isBot} compact />
                 </View>
@@ -299,7 +299,7 @@ export function GroupSettingsScreen() {
                       autoCapitalize="none"
                       autoCorrect={false}
                     />
-                    <Text style={{ color: c.textMuted, fontSize: 12, marginTop: 6 }}>
+                    <Text style={{ color: c.textMetadata, fontSize: 12, marginTop: 6 }}>
                       Email addresses stay private, or use the private QR / invite link above.
                     </Text>
                     {addResults.slice(0, 10).map(u => (

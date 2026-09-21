@@ -124,7 +124,7 @@ export function PushSoftAsk({ isAuthed }: Props) {
             onPress={handleTurnOn}
             accessibilityLabel="Turn on notifications"
           >
-            <Text style={{ color: '#fff', fontWeight: '600' }}>Turn on</Text>
+            <Text style={{ color: c.onPrimary, fontWeight: '600' }}>Turn on</Text>
           </TouchableOpacity>
         </View>
       </View>

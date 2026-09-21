@@ -302,11 +302,11 @@ export function SettingsScreen() {
         activeOpacity={0.85}
       >
         {mintingSetup ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={c.onPrimary} />
         ) : (
           <>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><AppIcon name="copy" color={c.textPrimary} size={16} /><Text style={styles.copySetupTitle}>Copy agent setup</Text></View>
-            <Text style={styles.copySetupSub}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><AppIcon name="copy" color={c.onPrimary} size={16} /><Text style={[styles.copySetupTitle, { color: c.onPrimary }]}>Copy agent setup</Text></View>
+            <Text style={[styles.copySetupSub, { color: c.onPrimary, opacity: 0.88 }]}>
               Mints a key + copies a paste-anywhere setup for ChatGPT, Claude, any LLM
             </Text>
           </>
@@ -326,13 +326,13 @@ export function SettingsScreen() {
         activeOpacity={0.88}
       >
         <View style={{ flex: 1 }}>
-          <Text style={styles.agentHeroEyebrow}>OPENCHAT FOR AGENTS</Text>
-          <Text style={styles.agentHeroTitle}>Plug in Claude, Cursor, Codex</Text>
-          <Text style={styles.agentHeroSubtitle}>
+          <Text style={[styles.agentHeroEyebrow, { color: c.onPrimary, opacity: 0.85 }]}>OPENCHAT FOR AGENTS</Text>
+          <Text style={[styles.agentHeroTitle, { color: c.onPrimary }]}>Plug in Claude, Cursor, Codex</Text>
+          <Text style={[styles.agentHeroSubtitle, { color: c.onPrimary, opacity: 0.92 }]}>
             Bi-directional MCP access · paste-into-Claude-Code prompt · 30-second setup
           </Text>
         </View>
-        <Text style={styles.agentHeroArrow}>→</Text>
+        <Text style={[styles.agentHeroArrow, { color: c.onPrimary }]}>→</Text>
       </TouchableOpacity>
 
       {currentUser && (
@@ -414,13 +414,13 @@ export function SettingsScreen() {
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Pause quiet searches</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>Paused searches do not reactivate automatically</Text>
             </View>
-            <Text style={{ color: socialPreferences.networkPaused ? c.danger : c.textMuted, fontWeight: '700' }}>
+            <Text style={{ color: socialPreferences.networkPaused ? c.danger : c.textMetadata, fontWeight: '700' }}>
               {socialPreferences.networkPaused ? 'Paused' : 'Active'}
             </Text>
           </TouchableOpacity>
         </View>
 
-        <Text style={[styles.subsectionLabel, { color: c.textMuted }]}>LAYOUT ON THIS DEVICE</Text>
+        <Text style={[styles.subsectionLabel, { color: c.textMetadata }]}>LAYOUT ON THIS DEVICE</Text>
         <View style={styles.layoutChoices}>
           {([
             ['auto', 'Automatic'],
@@ -576,7 +576,7 @@ export function SettingsScreen() {
             )}
             {(notifStatus === 'unknown' || notifStatus === undefined) && (
               <View style={[styles.optionRow, styles.notifRow]}>
-                <Text style={[styles.optionLabel, { color: c.textMuted, flex: 1 }]}>Checking…</Text>
+                <Text style={[styles.optionLabel, { color: c.textMetadata, flex: 1 }]}>Checking…</Text>
               </View>
             )}
             {/* Unified permissions panel: notifications + mic + camera + photos
@@ -838,7 +838,7 @@ export function SettingsScreen() {
         </TouchableOpacity>
       </View>
 
-      <Text style={[styles.versionFooter, { color: c.textMuted }]}>
+      <Text style={[styles.versionFooter, { color: c.textMetadata }]}>
         OpenChat mobile · v{Constants.expoConfig?.version ?? '?'}
         {Platform.OS !== 'web' && ` (${Constants.expoConfig?.ios?.buildNumber ?? Constants.expoConfig?.android?.versionCode ?? '?'})`}
       </Text>
@@ -922,9 +922,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 3,
   },
-  copySetupTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  copySetupTitle: { fontSize: 16, fontWeight: '700' },
   copySetupSub: {
-    color: 'rgba(255,255,255,0.88)',
     fontSize: 12,
     marginTop: 3,
     textAlign: 'center',
@@ -947,24 +946,21 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   agentHeroEyebrow: {
-    color: 'rgba(255,255,255,0.85)',
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1.2,
     marginBottom: 4,
   },
   agentHeroTitle: {
-    color: '#fff',
     fontSize: 17,
     fontWeight: '700',
     marginBottom: 3,
   },
   agentHeroSubtitle: {
-    color: 'rgba(255,255,255,0.92)',
     fontSize: 12,
     lineHeight: 17,
   },
-  agentHeroArrow: { color: '#fff', fontSize: 22, fontWeight: '300' },
+  agentHeroArrow: { fontSize: 22, fontWeight: '300' },
 
   section: { marginBottom: 24 },
   sectionLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },

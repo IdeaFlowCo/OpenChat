@@ -135,7 +135,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={[styles.threadTitle, { color: c.textPrimary }]}>My Agent</Text>
-            <Text style={[styles.threadSubtitle, { color: c.textMuted }]}>Private conversation</Text>
+            <Text style={[styles.threadSubtitle, { color: c.textMetadata }]}>Private conversation</Text>
           </View>
           <TouchableOpacity onPress={() => navigation.navigate('SocialReview')} accessibilityLabel="Open Review" style={styles.threadHeaderButton}>
             <AppIcon name="sparkle" color={c.primary} size={18} />
@@ -189,7 +189,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
             style={[styles.threadInput, { color: c.textPrimary, backgroundColor: c.background, borderColor: c.border }]}
           />
           <TouchableOpacity disabled={!prompt.trim() || busy || !agentConversationId} onPress={() => void sendInPanel()} accessibilityLabel="Send privately to My Agent" style={[styles.threadSend, { backgroundColor: c.primary }, (!prompt.trim() || busy || !agentConversationId) && styles.disabled]}>
-            {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.sendText}>Send</Text>}
+            {busy ? <ActivityIndicator size="small" color={c.onPrimary} /> : <Text style={[styles.sendText, { color: c.onPrimary }]}>Send</Text>}
           </TouchableOpacity>
         </View>
         {error && <Text accessibilityRole="alert" style={[styles.threadError, { color: c.danger, backgroundColor: c.background }]}>{error}</Text>}
@@ -228,14 +228,14 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
             style={[styles.input, { color: c.textPrimary }]}
           />
           <View style={styles.composerFooter}>
-            <Text style={[styles.privateNote, { color: c.textMuted }]}>Only you and My Agent can see this message.</Text>
+            <Text style={[styles.privateNote, { color: c.textMetadata }]}>Only you and My Agent can see this message.</Text>
             <TouchableOpacity disabled={!prompt.trim() || busy} onPress={() => void openConversation(prompt.trim())} accessibilityLabel="Send privately to My Agent" style={[styles.send, { backgroundColor: c.primary }, (!prompt.trim() || busy) && styles.disabled]}>
-              {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.sendText}>Send</Text>}
+              {busy ? <ActivityIndicator size="small" color={c.onPrimary} /> : <Text style={[styles.sendText, { color: c.onPrimary }]}>Send</Text>}
             </TouchableOpacity>
           </View>
         </View>
 
-        <Text style={[styles.suggestionLabel, { color: c.textMuted }]}>TRY SAYING</Text>
+        <Text style={[styles.suggestionLabel, { color: c.textMetadata }]}>TRY SAYING</Text>
         <View style={styles.suggestions}>
           {EXAMPLES.map(example => (
             <TouchableOpacity key={example} onPress={() => setPrompt(example)} style={[styles.suggestion, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -294,7 +294,7 @@ const styles = StyleSheet.create({
   composerFooter: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
   privateNote: { flex: 1, fontSize: 11, lineHeight: 16 },
   send: { minWidth: 80, minHeight: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
-  sendText: { color: '#fff', fontWeight: '800' },
+  sendText: { fontWeight: '800' },
   disabled: { opacity: 0.45 },
   suggestionLabel: { ...capsLabel, marginTop: 24, marginBottom: 8 },
   suggestions: { gap: 7 },

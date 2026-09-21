@@ -202,7 +202,7 @@ export function TransformButton({ text, disabled, onTransformed, onError, onNvcC
               style={[styles.sheetRow, { borderTopColor: c.divider }]}
               onPress={() => setModalVisible(false)}
             >
-              <Text style={[styles.sheetRowText, { color: c.textMuted }]}>Cancel</Text>
+              <Text style={[styles.sheetRowText, { color: c.textMetadata }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -235,7 +235,7 @@ export function TransformButton({ text, disabled, onTransformed, onError, onNvcC
               style={[styles.sheetRow, { borderTopColor: c.divider }]}
               onPress={() => setLangModalVisible(false)}
             >
-              <Text style={[styles.sheetRowText, { color: c.textMuted }]}>Cancel</Text>
+              <Text style={[styles.sheetRowText, { color: c.textMetadata }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>

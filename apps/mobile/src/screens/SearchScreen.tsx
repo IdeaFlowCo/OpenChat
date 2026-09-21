@@ -185,7 +185,7 @@ export function SearchScreen() {
             <View style={styles.rowTop}>
               <Text style={[styles.rowTitle, { color: c.textPrimary }]} numberOfLines={1}>{title}</Text>
               {!isGroup && <BotBadge isBot={other?.isBot} compact />}
-              <Text style={[styles.rowTime, { color: c.textMuted }]}>{relativeTime(h.lastMessageAt)}</Text>
+              <Text style={[styles.rowTime, { color: c.textMetadata }]}>{relativeTime(h.lastMessageAt)}</Text>
             </View>
             {h.lastMessagePreview && (
               <Text style={[styles.rowPreview, { color: c.textSecondary }]} numberOfLines={1}>
@@ -222,12 +222,12 @@ export function SearchScreen() {
                 {senderName}
               </Text>
               <BotBadge isBot={h.sender?.isBot} compact />
-              <Text style={[styles.rowTime, { color: c.textMuted }]}>{relativeTime(h.createdAt)}</Text>
+              <Text style={[styles.rowTime, { color: c.textMetadata }]}>{relativeTime(h.createdAt)}</Text>
             </View>
             <Text style={[styles.rowPreview, { color: c.textPrimary }]} numberOfLines={2}>
               {h.content}
             </Text>
-            <Text style={[styles.msgIn, { color: c.textMuted }]} numberOfLines={1}>
+            <Text style={[styles.msgIn, { color: c.textMetadata }]} numberOfLines={1}>
               in {inLabel}
             </Text>
           </View>

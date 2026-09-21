@@ -302,19 +302,8 @@ export function MasterDetailLayout() {
           )}
         </Pressable>
         {collapsed ? (
-          // Compact (icon-only) header: just the expand toggle + a new-chat
-          // button. Everything else is hidden — clicking the toggle restores
-          // the full header.
           <View style={[styles.sidebarHeaderCompact, { borderColor: c.border }]}>
             <IconButton
-              onPress={toggleCollapsed}
-              title="Expand sidebar"
-              accessibilityLabel="Expand sidebar"
-              hoverBg={c.surfaceElevated}
-            >
-              <AppIcon name="chevron-right" color={c.primary} size={19} />
-            </IconButton>
-            <IconButton
               onPress={openNew}
               title="New conversation (⌘N)"
               accessibilityLabel="New conversation"
@@ -322,55 +311,43 @@ export function MasterDetailLayout() {
             >
               <AppIcon name="plus" color={c.primary} size={20} />
             </IconButton>
-            {enhanced && <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />}
           </View>
         ) : (
-          <View style={[styles.sidebarHeader, { borderColor: c.border }]}>
-            <IconButton
-              onPress={toggleCollapsed}
-              title="Collapse sidebar"
-              accessibilityLabel="Collapse sidebar"
-              hoverBg={c.surfaceElevated}
-            >
-              <AppIcon name="chevron-left" color={c.primary} size={19} />
-            </IconButton>
-            <IconButton
-              onPress={openSettings}
-              title="Settings (⌘,)"
-              accessibilityLabel="Settings"
-              hoverBg={c.surfaceElevated}
-            >
-              <AppIcon name="settings" color={c.primary} size={19} strokeWidth={1.8} />
-            </IconButton>
-            <View style={{ flex: 1, alignItems: 'center' }}>
+          <>
+            <View style={[styles.sidebarHeader, { borderColor: c.border }]}>
+              <View style={styles.sidebarTitle}>
               <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary }}>Chats</Text>
-              <ConnectionStatusLine
-                account={currentUser?.email}
-                connected={isConnected}
-                connectedColor={c.presenceAvailable}
-                disconnectedColor={c.presenceOffline}
-                textColor={c.textSecondary}
-                disconnectedLabel="connecting…"
-              />
+                {!isConnected && (
+                  <ConnectionStatusLine
+                    connected={false}
+                    connectedColor={c.presenceAvailable}
+                    disconnectedColor={c.presenceOffline}
+                    textColor={c.textMetadata}
+                    disconnectedLabel="Reconnecting…"
+                  />
+                )}
+              </View>
+              <IconButton
+                onPress={openNew}
+                title="New conversation (⌘N)"
+                accessibilityLabel="New conversation"
+                hoverBg={c.surfaceElevated}
+              >
+                <AppIcon name="plus" color={c.primary} size={20} />
+              </IconButton>
             </View>
-            <IconButton
+            <Pressable
               onPress={openSearch}
-              title="Search (⌘K)"
-              accessibilityLabel="Search"
-              hoverBg={c.surfaceElevated}
+              accessibilityRole="button"
+              accessibilityLabel="Search conversations"
+              // @ts-ignore — web tooltip.
+              title="Search conversations (⌘K)"
+              style={[styles.searchButton, { backgroundColor: c.surfaceElevated }]}
             >
-              <AppIcon name="search" color={c.primary} size={19} />
-            </IconButton>
-            {enhanced && <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />}
-            <IconButton
-              onPress={openNew}
-              title="New conversation (⌘N)"
-              accessibilityLabel="New conversation"
-              hoverBg={c.surfaceElevated}
-            >
-              <AppIcon name="plus" color={c.primary} size={20} />
-            </IconButton>
-          </View>
+              <AppIcon name="search" color={c.textMetadata} size={18} />
+              <Text style={[styles.searchLabel, { color: c.textMetadata }]}>Search conversations…</Text>
+            </Pressable>
+          </>
         )}
         <View style={{ flex: 1 }}>
           <ConversationList
@@ -383,6 +360,53 @@ export function MasterDetailLayout() {
             onOpenReview={() => navigation.navigate('SocialReview')}
           />
         </View>
+        {collapsed ? (
+          <View style={[styles.sidebarFooterCompact, { borderColor: c.border }]}>
+            <IconButton
+              onPress={openSettings}
+              title="Settings (⌘,)"
+              accessibilityLabel="Account and settings"
+              hoverBg={c.surfaceElevated}
+            >
+              <AppIcon name="settings" color={c.primary} size={19} strokeWidth={1.8} />
+            </IconButton>
+            {enhanced && <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />}
+            <IconButton
+              onPress={toggleCollapsed}
+              title="Expand sidebar"
+              accessibilityLabel="Expand sidebar"
+              hoverBg={c.surfaceElevated}
+            >
+              <AppIcon name="chevron-right" color={c.primary} size={19} />
+            </IconButton>
+          </View>
+        ) : (
+          <View style={[styles.sidebarFooter, { borderColor: c.border }]}>
+            <Pressable
+              onPress={openSettings}
+              accessibilityRole="button"
+              accessibilityLabel={`Account and settings${currentUser?.email ? `, ${currentUser.email}` : ''}`}
+              style={styles.accountButton}
+            >
+              <AppIcon name="settings" color={c.primary} size={19} strokeWidth={1.8} />
+              <View style={styles.accountCopy}>
+                <Text style={[styles.accountTitle, { color: c.textPrimary }]}>Account & settings</Text>
+                {!!currentUser?.email && (
+                  <Text style={[styles.accountEmail, { color: c.textMetadata }]} numberOfLines={1}>{currentUser.email}</Text>
+                )}
+              </View>
+            </Pressable>
+            {enhanced && <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />}
+            <IconButton
+              onPress={toggleCollapsed}
+              title="Collapse sidebar"
+              accessibilityLabel="Collapse sidebar"
+              hoverBg={c.surfaceElevated}
+            >
+              <AppIcon name="chevron-left" color={c.primary} size={19} />
+            </IconButton>
+          </View>
+        )}
       </Animated.View>
 
       <View style={[styles.detail, { backgroundColor: c.background }]}>
@@ -432,8 +456,9 @@ const styles = StyleSheet.create({
   sidebarHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 10,
+    paddingLeft: 16,
+    paddingRight: 8,
+    paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 8,
   },
@@ -445,8 +470,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   iconBtn: {
-    minWidth: 36,
-    minHeight: 36,
+    minWidth: 44,
+    minHeight: 44,
     paddingHorizontal: 8,
     paddingVertical: 6,
     borderRadius: 10,
@@ -455,6 +480,46 @@ const styles = StyleSheet.create({
     // @ts-ignore — web-only: show a pointer so these read as clickable.
     cursor: 'pointer',
   },
+  sidebarTitle: { flex: 1, minWidth: 0, alignItems: 'flex-start' },
+  searchButton: {
+    minHeight: 44,
+    marginHorizontal: 12,
+    marginVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    // @ts-ignore — web-only pointer affordance.
+    cursor: 'pointer',
+  },
+  searchLabel: { flex: 1, minWidth: 0, fontSize: 14 },
+  sidebarFooter: {
+    minHeight: 60,
+    paddingLeft: 12,
+    paddingRight: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sidebarFooterCompact: {
+    paddingVertical: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+  },
+  accountButton: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    // @ts-ignore — web-only pointer affordance.
+    cursor: 'pointer',
+  },
+  accountCopy: { flex: 1, minWidth: 0 },
+  accountTitle: { fontSize: 13, fontWeight: '600' },
+  accountEmail: { fontSize: 11, lineHeight: 15 },
   // Back-to-home bar at the top of the sidebar (OpenChat-601.1)
   homeBar: {
     flexDirection: 'row',

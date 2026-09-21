@@ -88,7 +88,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
           pill is hidden for 'observation' (the catch-all default) to keep
           cards quiet — only meaningful types show. */}
       <View style={styles.cardHeader}>
-        <Text style={[styles.time, { color: c.textMuted }]}>
+        <Text style={[styles.time, { color: c.textMetadata }]}>
           {formatRelativeTime(item.createdAt)}
         </Text>
         <View style={styles.headerSpacer} />
@@ -136,7 +136,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
 
       {/* Provenance / attribution */}
       {!!subtitle && (
-        <Text style={[styles.subtitle, { color: c.textMuted }]} numberOfLines={1}>
+        <Text style={[styles.subtitle, { color: c.textMetadata }]} numberOfLines={1}>
           {subtitle}
         </Text>
       )}

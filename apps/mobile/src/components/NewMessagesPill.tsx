@@ -29,8 +29,8 @@ export function NewMessagesPill({ count, onPress }: Props) {
       accessibilityLabel={`${label}, tap to scroll to latest`}
       accessibilityRole="button"
     >
-      <Text style={styles.arrow}>↓</Text>
-      <Text style={styles.text}>{label}</Text>
+      <Text style={[styles.arrow, { color: c.onPrimary }]}>↓</Text>
+      <Text style={[styles.text, { color: c.onPrimary }]}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -53,6 +53,6 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 4,
   },
-  arrow: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  text: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  arrow: { fontSize: 14, fontWeight: '700' },
+  text: { fontSize: 13, fontWeight: '600' },
 });

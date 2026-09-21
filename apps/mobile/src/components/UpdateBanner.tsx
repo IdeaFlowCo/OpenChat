@@ -64,15 +64,15 @@ export function UpdateBanner() {
 
   return (
     <View style={[styles.bar, { backgroundColor: c.primary }]}>
-      <Text style={styles.text} numberOfLines={1}>
+      <Text style={[styles.text, { color: c.onPrimary }]} numberOfLines={1}>
         {reloading ? 'Updating…' : 'A new version is ready.'}
       </Text>
       <View style={styles.actions}>
         <TouchableOpacity onPress={apply} disabled={reloading} activeOpacity={0.8}>
-          <Text style={styles.action}>Restart to update</Text>
+          <Text style={[styles.action, { color: c.onPrimary }]}>Restart to update</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setDismissed(true)} hitSlop={8} activeOpacity={0.6}>
-          <AppIcon name="x" color="#ffffff" size={14} />
+          <AppIcon name="x" color={c.onPrimary} size={14} />
         </TouchableOpacity>
       </View>
     </View>
@@ -88,8 +88,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     gap: 12,
   },
-  text: { color: '#fff', fontSize: 13, fontWeight: '600', flexShrink: 1 },
+  text: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  action: { color: '#fff', fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
-  dismiss: { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '700' },
+  action: { fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
 });

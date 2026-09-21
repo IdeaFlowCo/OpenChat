@@ -65,7 +65,7 @@ export function StoriesStrip({ compact, onCreate, onOpenStory, onOpenReview }: S
       <View style={styles.headingRow}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[styles.heading, { color: c.textPrimary }]}>Stories</Text>
-          <Text style={[styles.subheading, { color: c.textMuted }]}>People share; agents filter.</Text>
+          <Text style={[styles.subheading, { color: c.textMetadata }]}>People share; agents filter.</Text>
         </View>
         <TouchableOpacity
           onPress={() => void setStoriesCollapsed(!storiesCollapsed)}
@@ -133,7 +133,7 @@ export function StoriesStrip({ compact, onCreate, onOpenStory, onOpenReview }: S
                   <Avatar name={story.author.name || 'A friend'} size={48} />
                 </View>
                 <Text numberOfLines={1} style={[styles.tileLabel, { color: c.textPrimary }]}>{story.author.name || 'A friend'}</Text>
-                <Text style={[styles.expiry, { color: c.textMuted }]}>{timeLeft(story.storyExpiresAt)}</Text>
+                <Text style={[styles.expiry, { color: c.textMetadata }]}>{timeLeft(story.storyExpiresAt)}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>

@@ -110,7 +110,7 @@ export function SocialReviewScreen() {
             const id = item.id;
             return (
               <View style={[styles.card, { borderColor: item.priority === 'action' ? c.primary : c.border, backgroundColor: c.surface }]}>
-                <Text style={[styles.label, { color: item.priority === 'action' ? c.primary : c.textMuted }]}>{itemLabel(item)}</Text>
+                <Text style={[styles.label, { color: item.priority === 'action' ? c.primary : c.textMetadata }]}>{itemLabel(item)}</Text>
                 <Text style={[styles.cardTitle, { color: c.textPrimary }]}>{itemTitle(item)}</Text>
                 {item.kind === 'match' && <Text style={[styles.detail, { color: c.textSecondary }]}>Matched with your {item.match.ownIntent.kind}: {item.match.ownIntent.terms}</Text>}
                 {item.kind === 'draft' && item.draft.seeks.length > 0 && <Text style={[styles.detail, { color: c.textSecondary }]}>Looking for · {item.draft.seeks.join(', ')}</Text>}
@@ -126,18 +126,18 @@ export function SocialReviewScreen() {
                 <View style={styles.actions}>
                   {item.kind === 'match' && (
                     <>
-                      <TouchableOpacity disabled={busy === id} onPress={() => void act(item, 'approve')} style={[styles.primary, { backgroundColor: c.primary }]}><Text style={styles.primaryText}>Approve intro</Text></TouchableOpacity>
+                      <TouchableOpacity disabled={busy === id} onPress={() => void act(item, 'approve')} style={[styles.primary, { backgroundColor: c.primary }]}><Text style={[styles.primaryText, { color: c.onPrimary }]}>Approve intro</Text></TouchableOpacity>
                       <TouchableOpacity disabled={busy === id} onPress={() => void act(item, 'decline')} style={[styles.secondary, { borderColor: c.border }]}><Text style={{ color: c.textSecondary, fontWeight: '700' }}>Pass</Text></TouchableOpacity>
                     </>
                   )}
                   {item.kind === 'draft' && (
                     <>
-                      <TouchableOpacity accessibilityLabel="Search quietly with all eligible agents in your OpenChat network for 30 days; identity stays hidden until both people approve" disabled={busy === id} onPress={() => void act(item, 'search')} style={[styles.primary, { backgroundColor: c.primary }]}><Text style={styles.primaryText}>Search quietly</Text></TouchableOpacity>
+                      <TouchableOpacity accessibilityLabel="Search quietly with all eligible agents in your OpenChat network for 30 days; identity stays hidden until both people approve" disabled={busy === id} onPress={() => void act(item, 'search')} style={[styles.primary, { backgroundColor: c.primary }]}><Text style={[styles.primaryText, { color: c.onPrimary }]}>Search quietly</Text></TouchableOpacity>
                       <TouchableOpacity onPress={() => navigation.navigate('StoryComposer', { draftId: item.draft.id })} style={[styles.secondary, { borderColor: c.border }]}><Text style={{ color: c.primary, fontWeight: '700' }}>Share…</Text></TouchableOpacity>
-                      <TouchableOpacity disabled={busy === id} onPress={() => void act(item, 'private')} style={styles.link}><Text style={{ color: c.textMuted, fontWeight: '600' }}>Keep private</Text></TouchableOpacity>
+                      <TouchableOpacity disabled={busy === id} onPress={() => void act(item, 'private')} style={styles.link}><Text style={{ color: c.textMetadata, fontWeight: '600' }}>Keep private</Text></TouchableOpacity>
                     </>
                   )}
-                  {item.kind === 'expiring_story' && <TouchableOpacity disabled={busy === id} onPress={() => void act(item, 'extend')} style={[styles.primary, { backgroundColor: c.primary }]}><Text style={styles.primaryText}>Add 24 hours</Text></TouchableOpacity>}
+                  {item.kind === 'expiring_story' && <TouchableOpacity disabled={busy === id} onPress={() => void act(item, 'extend')} style={[styles.primary, { backgroundColor: c.primary }]}><Text style={[styles.primaryText, { color: c.onPrimary }]}>Add 24 hours</Text></TouchableOpacity>}
                   {busy === id && <ActivityIndicator color={c.primary} />}
                 </View>
               </View>
@@ -169,7 +169,7 @@ const styles = StyleSheet.create({
   consentTitle: { fontSize: 12, fontWeight: '800' },
   actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 14 },
   primary: { minHeight: 42, borderRadius: 11, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
-  primaryText: { color: '#fff', fontWeight: '800' },
+  primaryText: { fontWeight: '800' },
   secondary: { minHeight: 42, borderRadius: 11, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
   link: { minHeight: 42, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
   error: { position: 'absolute', left: 18, right: 18, bottom: 10, fontSize: 13, padding: 10 },

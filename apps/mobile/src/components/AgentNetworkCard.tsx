@@ -278,13 +278,13 @@ export function AgentNetworkCard({ message, onOpenConversation, onShareDraft }: 
           {!resolved ? (
             <View style={styles.draftActions}>
               <TouchableOpacity disabled={busyDraftAction !== null} onPress={() => void activateQuiet()} style={[styles.primaryButton, { backgroundColor: c.primary }, busyDraftAction && styles.disabled]} accessibilityLabel={`Search quietly with ${payload.suggestedActivation.audienceLabel} until ${new Date(payload.suggestedActivation.quietSearch.expiresAt).toLocaleDateString()}; identity stays hidden until both approve`}>
-                {busyDraftAction === 'quiet' ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.primaryButtonText}>Search quietly</Text>}
+                {busyDraftAction === 'quiet' ? <ActivityIndicator size="small" color={c.onPrimary} /> : <Text style={[styles.primaryButtonText, { color: c.onPrimary }]}>Search quietly</Text>}
               </TouchableOpacity>
               <TouchableOpacity disabled={!onShareDraft || busyDraftAction !== null} onPress={() => onShareDraft?.(payload.draft.id, title)} style={[styles.secondaryButton, { backgroundColor: c.surface, borderColor: c.border }]}>
                 <Text style={[styles.secondaryButtonText, { color: c.primary }]}>Share with people…</Text>
               </TouchableOpacity>
               <TouchableOpacity disabled={busyDraftAction !== null} onPress={() => void keepPrivate()} style={styles.keepPrivateButton}>
-                {busyDraftAction === 'private' ? <ActivityIndicator size="small" color={c.textMuted} /> : <Text style={{ color: c.textMuted, fontWeight: '700' }}>Keep private</Text>}
+                {busyDraftAction === 'private' ? <ActivityIndicator size="small" color={c.textMetadata} /> : <Text style={{ color: c.textMetadata, fontWeight: '700' }}>Keep private</Text>}
               </TouchableOpacity>
             </View>
           ) : <Text style={[styles.stateText, { color: c.textSecondary }]}>{resolution === 'activated' ? 'Approved for quiet search' : 'Kept private'}</Text>}
@@ -312,13 +312,13 @@ export function AgentNetworkCard({ message, onOpenConversation, onShareDraft }: 
         <View style={shellStyle} accessibilityLabel={sharedGoal ? 'Your agents found a shared goal' : reciprocal ? 'Your agents found a reciprocal match' : 'Your agents matched an ask and an offer'}>
           <Text style={[styles.title, { color: c.textPrimary }]}>{sharedGoal ? 'Your agents found a shared goal' : reciprocal ? 'Your agents found a reciprocal match' : 'Your agents matched an ask and an offer'}</Text>
           <View style={styles.termBlock}>
-            <Text style={[styles.label, { color: c.textMuted }]}>{sharedGoal ? 'ONE SIDE' : reciprocal ? 'ONE SIDE' : 'ASK'}</Text>
+            <Text style={[styles.label, { color: c.textMetadata }]}>{sharedGoal ? 'ONE SIDE' : reciprocal ? 'ONE SIDE' : 'ASK'}</Text>
             <Text style={[styles.terms, { color: c.textPrimary }]}>{payload.askTerms}</Text>
           </View>
           <View
             style={[styles.dividedTermBlock, { borderTopColor: c.border }]}
           >
-            <Text style={[styles.label, { color: c.textMuted }]}>{sharedGoal ? 'SHARED DIRECTION' : reciprocal ? 'COMPLEMENTARY SIDE' : 'OFFER'}</Text>
+            <Text style={[styles.label, { color: c.textMetadata }]}>{sharedGoal ? 'SHARED DIRECTION' : reciprocal ? 'COMPLEMENTARY SIDE' : 'OFFER'}</Text>
             <Text style={[styles.terms, { color: c.textPrimary }]}>{payload.offerTerms}</Text>
           </View>
         </View>
@@ -336,11 +336,11 @@ export function AgentNetworkCard({ message, onOpenConversation, onShareDraft }: 
   return (
     <View style={styles.centered}>
       <View style={shellStyle} accessibilityLabel="Anonymous match proposal">
-        <Text style={[styles.eyebrow, { color: c.textMuted }]}>{sharedGoal ? 'SHARED GOAL' : reciprocal ? 'RECIPROCAL MATCH' : 'QUIET MATCH'}</Text>
+        <Text style={[styles.eyebrow, { color: c.textMetadata }]}>{sharedGoal ? 'SHARED GOAL' : reciprocal ? 'RECIPROCAL MATCH' : 'QUIET MATCH'}</Text>
         <Text style={[styles.title, { color: c.textPrimary }]}>{sharedGoal ? 'You may want to collaborate' : reciprocal ? 'You may complement each other' : 'A possible match'}</Text>
 
         <View style={[styles.anonymousTerms, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <Text style={[styles.label, { color: c.textMuted }]}>{sharedGoal ? 'ANONYMOUS SHARED DIRECTION' : reciprocal ? 'ANONYMOUS COMPLEMENT' : `ANONYMOUS ${payload.otherKind.toUpperCase()}`}</Text>
+          <Text style={[styles.label, { color: c.textMetadata }]}>{sharedGoal ? 'ANONYMOUS SHARED DIRECTION' : reciprocal ? 'ANONYMOUS COMPLEMENT' : `ANONYMOUS ${payload.otherKind.toUpperCase()}`}</Text>
           <Text style={[styles.terms, { color: c.textPrimary }]}>{payload.otherTerms}</Text>
         </View>
 
@@ -359,8 +359,8 @@ export function AgentNetworkCard({ message, onOpenConversation, onShareDraft }: 
               style={[styles.primaryButton, { backgroundColor: c.primary }, busyDecision && styles.disabled]}
             >
               {busyDecision === 'approve'
-                ? <ActivityIndicator size="small" color="#fff" />
-                : <Text style={styles.primaryButtonText}>Approve</Text>}
+                ? <ActivityIndicator size="small" color={c.onPrimary} />
+                : <Text style={[styles.primaryButtonText, { color: c.onPrimary }]}>Approve</Text>}
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => void respond(payload, 'decline')}
@@ -390,7 +390,7 @@ export function AgentNetworkCard({ message, onOpenConversation, onShareDraft }: 
           </View>
         )}
         {isUnavailable && (
-          <Text style={[styles.unavailable, { color: c.textMuted }]}>This match is no longer available.</Text>
+          <Text style={[styles.unavailable, { color: c.textMetadata }]}>This match is no longer available.</Text>
         )}
         {error && <Text accessibilityRole="alert" style={[styles.error, { color: c.danger }]}>{error}</Text>}
       </View>
@@ -421,7 +421,7 @@ const styles = StyleSheet.create({
   terms: { marginTop: 4, fontSize: 14, lineHeight: 20 },
   actions: { marginTop: 16, flexDirection: 'row', gap: 8 },
   primaryButton: { minWidth: 94, minHeight: 42, paddingHorizontal: 16, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  primaryButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  primaryButtonText: { fontSize: 14, fontWeight: '700' },
   secondaryButton: { minWidth: 94, minHeight: 42, paddingHorizontal: 16, borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   secondaryButtonText: { fontSize: 14, fontWeight: '700' },
   disabled: { opacity: 0.55 },
