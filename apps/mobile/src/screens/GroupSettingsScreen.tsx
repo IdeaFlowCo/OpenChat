@@ -21,6 +21,7 @@ import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
+import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp, RouteProps } from '../navigation/types';
 
 export function GroupSettingsScreen() {
@@ -115,8 +116,9 @@ export function GroupSettingsScreen() {
   };
 
   const onRemove = (target: User) => {
+    const safeEmail = isPlaceholderEmail(target.email) ? '' : target.email;
     Alert.alert(
-      `Remove ${target.name || target.email}?`,
+      `Remove ${target.name || safeEmail || 'Unknown'}?`,
       'They will lose access to this conversation.',
       [
         { text: 'Cancel', style: 'cancel' },
@@ -229,11 +231,12 @@ export function GroupSettingsScreen() {
           const isMe = p.user.id === currentUser?.userId;
           const live = presence.get(p.user.id);
           const canRemove = isOwner && !isMe;
+          const safeEmail = isPlaceholderEmail(p.user.email) ? '' : p.user.email;
           return (
             <View style={[styles.memberRow, { borderColor: c.divider }]}>
               <Avatar
                 name={p.user.name}
-                email={p.user.email}
+                email={safeEmail || undefined}
                 isBot={p.user.isBot}
                 presenceStatus={live?.status || p.user.presenceStatus}
                 size={40}
@@ -241,14 +244,20 @@ export function GroupSettingsScreen() {
               <View style={{ flex: 1 }}>
                 <View style={styles.rowTop}>
                   <Text style={[styles.memberName, { color: c.textPrimary }]} numberOfLines={1}>
-                    {p.user.name || p.user.email}
+                    {p.user.name || safeEmail || 'Unknown'}
                     {isMe && <Text style={{ color: c.textMetadata, fontWeight: '400' }}>  (you)</Text>}
                   </Text>
                   <BotBadge isBot={p.user.isBot} compact />
                 </View>
-                <Text style={[styles.memberEmail, { color: c.textSecondary }]} numberOfLines={1}>
-                  {p.user.email}{p.role === 'owner' ? '  · owner' : ''}
-                </Text>
+                {safeEmail ? (
+                  <Text style={[styles.memberEmail, { color: c.textSecondary }]} numberOfLines={1}>
+                    {safeEmail}{p.role === 'owner' ? '  · owner' : ''}
+                  </Text>
+                ) : p.role === 'owner' ? (
+                  <Text style={[styles.memberEmail, { color: c.textSecondary }]} numberOfLines={1}>
+                    owner
+                  </Text>
+                ) : null}
               </View>
               {canRemove && (
                 <TouchableOpacity

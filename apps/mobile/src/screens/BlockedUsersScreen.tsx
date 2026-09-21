@@ -20,6 +20,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { api, User } from '../api/client';
 import { Avatar } from '../components/Avatar';
+import { isPlaceholderEmail } from '../utils/email';
 
 export function BlockedUsersScreen() {
   const { scheme } = useTheme();
@@ -44,7 +45,8 @@ export function BlockedUsersScreen() {
   useEffect(() => { void load(); }, [load]);
 
   const handleUnblock = useCallback((user: User) => {
-    const name = user.name || user.email;
+    const safeEmail = isPlaceholderEmail(user.email) ? '' : user.email;
+    const name = user.name || safeEmail || 'Unknown';
     Alert.alert(
       `Unblock ${name}?`,
       `They will be able to send you messages again.`,
@@ -88,38 +90,41 @@ export function BlockedUsersScreen() {
           data={blocked}
           keyExtractor={u => u.id}
           contentContainerStyle={{ padding: 16, gap: 8 }}
-          renderItem={({ item }) => (
-            <View
-              style={[
-                styles.row,
-                { backgroundColor: c.surface, borderColor: c.border },
-              ]}
-            >
-              <Avatar name={item.name || item.email} email={item.email} size={38} />
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={[styles.name, { color: c.textPrimary }]} numberOfLines={1}>
-                  {item.name || item.email}
-                </Text>
-                {item.name && (
-                  <Text style={[styles.email, { color: c.textSecondary }]} numberOfLines={1}>
-                    {item.email}
-                  </Text>
-                )}
-              </View>
-              <TouchableOpacity
-                style={[styles.unblockBtn, { borderColor: c.primary }]}
-                onPress={() => handleUnblock(item)}
-                disabled={unblocking === item.id}
-                activeOpacity={0.7}
+          renderItem={({ item }) => {
+            const safeEmail = isPlaceholderEmail(item.email) ? '' : item.email;
+            return (
+              <View
+                style={[
+                  styles.row,
+                  { backgroundColor: c.surface, borderColor: c.border },
+                ]}
               >
-                {unblocking === item.id ? (
-                  <ActivityIndicator size="small" color={c.primary} />
-                ) : (
-                  <Text style={{ color: c.primary, fontWeight: '600', fontSize: 14 }}>Unblock</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
+                <Avatar name={item.name || safeEmail || undefined} email={safeEmail || undefined} size={38} />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={[styles.name, { color: c.textPrimary }]} numberOfLines={1}>
+                    {item.name || safeEmail || 'Unknown'}
+                  </Text>
+                  {item.name && safeEmail && (
+                    <Text style={[styles.email, { color: c.textSecondary }]} numberOfLines={1}>
+                      {safeEmail}
+                    </Text>
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={[styles.unblockBtn, { borderColor: c.primary }]}
+                  onPress={() => handleUnblock(item)}
+                  disabled={unblocking === item.id}
+                  activeOpacity={0.7}
+                >
+                  {unblocking === item.id ? (
+                    <ActivityIndicator size="small" color={c.primary} />
+                  ) : (
+                    <Text style={{ color: c.primary, fontWeight: '600', fontSize: 14 }}>Unblock</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            );
+          }}
         />
       )}
     </View>

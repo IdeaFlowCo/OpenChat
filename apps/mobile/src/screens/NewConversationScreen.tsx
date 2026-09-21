@@ -27,6 +27,7 @@ import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { YouBadge } from '../components/YouBadge';
+import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp } from '../navigation/types';
 
 type Mode = 'direct' | 'group';
@@ -219,18 +220,22 @@ export function NewConversationScreen() {
 
       {mode === 'group' && selected.length > 0 && (
         <View style={styles.pillsRow}>
-          {selected.map(u => (
-            <TouchableOpacity
-              key={u.id}
-              style={[styles.pill, { backgroundColor: c.primaryMuted, borderColor: c.primary }]}
-              onPress={() => setSelected(prev => prev.filter(x => x.id !== u.id))}
-              accessibilityLabel={`Remove ${u.name || u.email}`}
-            >
-              <Text style={{ color: c.primary, fontSize: 12, fontWeight: '600' }}>
-                {u.name || u.email}  ×
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {selected.map(u => {
+            const safeEmail = isPlaceholderEmail(u.email) ? '' : u.email;
+            const displayName = u.name || safeEmail || 'Unknown';
+            return (
+              <TouchableOpacity
+                key={u.id}
+                style={[styles.pill, { backgroundColor: c.primaryMuted, borderColor: c.primary }]}
+                onPress={() => setSelected(prev => prev.filter(x => x.id !== u.id))}
+                accessibilityLabel={`Remove ${displayName}`}
+              >
+                <Text style={{ color: c.primary, fontSize: 12, fontWeight: '600' }}>
+                  {displayName}  ×
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       )}
 

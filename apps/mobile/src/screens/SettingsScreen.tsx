@@ -28,6 +28,7 @@ import { ExportSheet } from '../components/ExportSheet';
 import { FeedbackModal } from '../components/FeedbackModal';
 import { saveJsonDownload } from '../services/exportDownload';
 import { AppIcon } from '../components/AppIcon';
+import { isPlaceholderEmail } from '../utils/email';
 
 const OPTIONS: { value: ThemePref; label: string; hint: string }[] = [
   { value: 'system', label: 'System', hint: 'Follow your phone' },
@@ -341,7 +342,10 @@ export function SettingsScreen() {
           <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
             {/* Edit profile (OpenChat-tml) */}
             <TouchableOpacity
-              style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+              style={[
+                styles.optionRow,
+                !isPlaceholderEmail(currentUser.email) && { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }
+              ]}
               onPress={() => navigation.navigate('ProfileEdit')}
               activeOpacity={0.7}
             >
@@ -353,9 +357,11 @@ export function SettingsScreen() {
               </View>
               <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
             </TouchableOpacity>
-            <View style={[styles.optionRow]}>
-              <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>{currentUser.email}</Text>
-            </View>
+            {!isPlaceholderEmail(currentUser.email) && (
+              <View style={[styles.optionRow]}>
+                <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>{currentUser.email}</Text>
+              </View>
+            )}
           </View>
         </View>
       )}

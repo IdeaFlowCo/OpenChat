@@ -16,6 +16,7 @@ import { api } from '../api/client';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
+import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp, RouteProps } from '../navigation/types';
 
 function relativeLastSeen(iso: string | undefined): string {
@@ -55,8 +56,9 @@ export function ContactProfileScreen() {
 
   const handleBlock = useCallback(() => {
     if (!user) return;
+    const safeEmail = isPlaceholderEmail(user.email) ? '' : user.email;
     Alert.alert(
-      `Block ${user.name || user.email}?`,
+      `Block ${user.name || safeEmail || 'Unknown'}?`,
       "You won't receive messages from them anymore. You can unblock from Settings.",
       [
         { text: 'Cancel', style: 'cancel' },
@@ -115,7 +117,8 @@ export function ContactProfileScreen() {
     );
   }
 
-  const displayName = user.name || user.email || 'Unknown';
+  const safeEmail = isPlaceholderEmail(user.email) ? '' : user.email;
+  const displayName = user.name || safeEmail || 'Unknown';
   const presenceLine =
     (pres?.statusMessage) ||
     (pres?.status === 'online' ? 'Online' : null) ||
@@ -126,14 +129,14 @@ export function ContactProfileScreen() {
     <ScrollView style={[styles.root, { backgroundColor: c.background }]} contentContainerStyle={styles.content}>
       {/* Avatar + identity block */}
       <View style={styles.identity}>
-        <Avatar name={displayName} email={user.email} isBot={user.isBot} avatarUrl={user.avatarUrl} size={108} />
+        <Avatar name={displayName} email={safeEmail || undefined} isBot={user.isBot} avatarUrl={user.avatarUrl} size={108} />
         <View style={[styles.identityText]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             <Text style={[styles.name, { color: c.textPrimary }]} numberOfLines={1}>{displayName}</Text>
             <BotBadge isBot={user.isBot} />
           </View>
-          {!!user.email && user.email !== displayName && (
-            <Text style={[styles.email, { color: c.textSecondary }]} numberOfLines={1}>{user.email}</Text>
+          {!!safeEmail && safeEmail !== displayName && (
+            <Text style={[styles.email, { color: c.textSecondary }]} numberOfLines={1}>{safeEmail}</Text>
           )}
           {!!presenceLine && (
             <Text style={[styles.presence, { color: c.textSecondary }]}>{presenceLine}</Text>

@@ -41,6 +41,7 @@ import { Avatar } from '../components/Avatar';
 import { AiDisclosureBanner } from '../components/AiDisclosureBanner';
 import { AppIcon } from '../components/AppIcon';
 import { ConversationHeaderContent } from '../components/ConversationHeaderContent';
+import { isPlaceholderEmail } from '../utils/email';
 import { NewMessagesPill } from '../components/NewMessagesPill';
 import { ChatEmptyState } from '../components/ChatEmptyState';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -627,13 +628,14 @@ export function ChatScreen({
   useLayoutEffect(() => {
     // Embedded in MasterDetailLayout — the parent owns the chrome.
     if (embedded) return;
+    const safeOtherEmail = isPlaceholderEmail(other?.email) ? '' : other?.email;
     navigation.setOptions({
       headerTitle: () => (
         <ConversationHeaderContent
           title={headerTitle}
           subtitle={headerSubtitle}
-          avatarName={!isGroup ? (other?.name || other?.email || headerTitle) : headerTitle}
-          avatarEmail={other?.email}
+          avatarName={!isGroup ? (other?.name || safeOtherEmail || headerTitle) : headerTitle}
+          avatarEmail={safeOtherEmail || undefined}
           avatarUrl={!isGroup ? other?.avatarUrl : undefined}
           isBot={!isGroup ? other?.isBot : false}
           variant={isGroup ? 'group' : 'person'}
@@ -1437,24 +1439,27 @@ export function ChatScreen({
       style={[styles.root, { backgroundColor: c.background }]}
       keyboardVerticalOffset={kbOffset}
     >
-      {embedded && (
-        <View style={[styles.embeddedHeader, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
-          <ConversationHeaderContent
-            title={headerTitle}
-            subtitle={headerSubtitle}
-            avatarName={!isGroup ? (other?.name || other?.email || headerTitle) : headerTitle}
-            avatarEmail={other?.email}
-            avatarUrl={!isGroup ? other?.avatarUrl : undefined}
-            isBot={!isGroup ? other?.isBot : false}
-            variant={isGroup ? 'group' : 'person'}
-            groupMembers={groupAvatarMembers}
-            avatarSize={34}
-            minHeight={64}
-            onPress={(isGroup || isSelfDM || other?.id) ? openConversationInfo : undefined}
-            action={moreAction}
-          />
-        </View>
-      )}
+      {embedded && (() => {
+        const safeOtherEmail = isPlaceholderEmail(other?.email) ? '' : other?.email;
+        return (
+          <View style={[styles.embeddedHeader, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+            <ConversationHeaderContent
+              title={headerTitle}
+              subtitle={headerSubtitle}
+              avatarName={!isGroup ? (other?.name || safeOtherEmail || headerTitle) : headerTitle}
+              avatarEmail={safeOtherEmail || undefined}
+              avatarUrl={!isGroup ? other?.avatarUrl : undefined}
+              isBot={!isGroup ? other?.isBot : false}
+              variant={isGroup ? 'group' : 'person'}
+              groupMembers={groupAvatarMembers}
+              avatarSize={34}
+              minHeight={64}
+              onPress={(isGroup || isSelfDM || other?.id) ? openConversationInfo : undefined}
+              action={moreAction}
+            />
+          </View>
+        );
+      })()}
       <ConversationLaneSwitch activeLane={activeConversationLane} onChange={setActiveConversationLane} />
       {showAiDisclosure && <AiDisclosureBanner />}
 
