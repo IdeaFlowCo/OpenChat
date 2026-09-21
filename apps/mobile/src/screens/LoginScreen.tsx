@@ -19,9 +19,11 @@ import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useTheme } from '../contexts/ThemeContext';
-import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, ideaflowExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL } from '../api/client';
+import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, ideaflowExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL, api } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
+import { getPendingIntent } from '../services/deepLinks';
+import { parseOpenChatUrl } from '../utils/parseOpenChatUrl';
 
 // Required for the in-app browser to dismiss properly after the OAuth round-trip.
 WebBrowser.maybeCompleteAuthSession();
@@ -82,6 +84,37 @@ export function LoginScreen() {
   const [appleLoading, setAppleLoading] = useState(false);
   const [ideaflowLoading, setIdeaflowLoading] = useState(false);
   const [ideaflowEnabled, setIdeaflowEnabled] = useState(false);
+  const [invitePreview, setInvitePreview] = useState<{ conversationTitle: string | null; memberCount: number; token: string } | null>(null);
+
+  useEffect(() => {
+    async function loadIntent() {
+      let token: string | null = null;
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const parsed = parseOpenChatUrl(window.location.href);
+        if (parsed.type === 'invite') token = parsed.token;
+      }
+      if (!token) {
+        const pending = await getPendingIntent();
+        if (pending?.intent.type === 'invite') {
+          token = pending.intent.token;
+        }
+      }
+      
+      if (token) {
+        try {
+          const preview = await api.getInvitePreview(token);
+          setInvitePreview({
+            conversationTitle: preview.conversationTitle,
+            memberCount: preview.memberCount,
+            token,
+          });
+        } catch (e) {
+          // Ignore error, just don't show preview
+        }
+      }
+    }
+    loadIntent();
+  }, []);
 
   // Web Google sign-in uses a full-page REDIRECT, not the expo-auth-session
   // popup: Google's pages set Cross-Origin-Opener-Policy, which severs the
@@ -422,10 +455,29 @@ export function LoginScreen() {
       style={[styles.root, { backgroundColor: c.background }]}
     >
       <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <Text style={[styles.title, { color: c.textPrimary }]}>OpenChat</Text>
-        <Text style={[styles.subtitle, { color: c.textSecondary }]}>
-          Real-time messaging powered by the Global Brain
-        </Text>
+        {invitePreview ? (
+          <>
+            <Text style={[styles.title, { color: c.textPrimary }]}>Join {invitePreview.conversationTitle || 'Group'}</Text>
+            <Text style={[styles.subtitle, { color: c.textSecondary, marginBottom: 4 }]}>
+              {invitePreview.memberCount} {invitePreview.memberCount === 1 ? 'member' : 'members'}
+            </Text>
+            {Platform.OS === 'ios' && (
+              <TouchableOpacity
+                onPress={() => Linking.openURL('https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932')}
+                style={{ marginBottom: 12, alignItems: 'center' }}
+              >
+                <Text style={{ color: c.primary, fontSize: 13, fontWeight: '500' }}>Get the iPhone App</Text>
+              </TouchableOpacity>
+            )}
+          </>
+        ) : (
+          <>
+            <Text style={[styles.title, { color: c.textPrimary }]}>OpenChat</Text>
+            <Text style={[styles.subtitle, { color: c.textSecondary }]}>
+              Real-time messaging powered by the Global Brain
+            </Text>
+          </>
+        )}
 
         {/* Sign in with Apple — iOS only. Apple requires SIWA to be at least as prominent
             as any other social login, so it goes ABOVE Google. (OpenChat-c08) */}

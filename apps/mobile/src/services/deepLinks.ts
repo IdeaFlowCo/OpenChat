@@ -98,7 +98,7 @@ async function stashPending(parsed: ParsedOpenChatUrl): Promise<void> {
   }
 }
 
-async function readPending(): Promise<PendingIntent | null> {
+export async function getPendingIntent(): Promise<PendingIntent | null> {
   try {
     const raw = await AsyncStorage.getItem(PENDING_INTENT_KEY);
     if (!raw) return null;
@@ -127,7 +127,7 @@ async function clearPending(): Promise<void> {
  * Returns true if we resumed.
  */
 export async function resumePendingIntent(): Promise<boolean> {
-  const pending = await readPending();
+  const pending = await getPendingIntent();
   if (!pending) return false;
   const ok = navigateForIntent(pending.intent);
   if (ok) await clearPending();

@@ -381,8 +381,77 @@ setupChatSocket(io);
 // Group invite deep-link: native clients may intercept /i/<token> as a
 // Universal Link. Browsers converge on /app/ with an explicit post-auth
 // intent so Google OAuth can return to the one registered callback URL.
-app.get('/i/:token', (req, res) => {
-  res.redirect(308, `/app/?intent=invite&token=${encodeURIComponent(req.params.token)}`);
+app.get('/i/:token', async (req, res) => {
+  const token = req.params.token;
+  const targetUrl = `/app/?intent=invite&token=${encodeURIComponent(token)}`;
+  const session = getDriver().session();
+  let groupTitle = 'OpenChat Group';
+  let desc = 'Join this group on OpenChat';
+
+  try {
+    const result = await session.run(`
+      MATCH (c:Conversation)-[:HAS_INVITE]->(inv:GroupInvite {token: $token})
+      RETURN inv, c.title AS conversationTitle, c.id AS conversationId
+    `, { token });
+
+    if (result.records.length > 0) {
+      const rec = result.records[0];
+      const inv = rec.get('inv').properties;
+      const conversationId = rec.get('conversationId') as string;
+      const title = rec.get('conversationTitle') as string | null;
+
+      // Check expiry/uses/revocation roughly
+      const isRevoked = !!inv.revokedAt;
+      const expiresAt = new Date(inv.expiresAt);
+      const isExpired = expiresAt < new Date();
+      
+      let usesLeft = 1;
+      if (inv.usesLeft) {
+         usesLeft = typeof inv.usesLeft === 'object' && 'toNumber' in inv.usesLeft 
+           ? inv.usesLeft.toNumber() 
+           : inv.usesLeft;
+      }
+
+      if (!isRevoked && !isExpired && usesLeft > 0) {
+        if (title) groupTitle = title;
+        
+        // Fetch member count
+        const countResult = await session.run(`
+          MATCH (:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+          RETURN count(*) AS memberCount
+        `, { conversationId });
+        const count = countResult.records[0]?.get('memberCount')?.toNumber?.() ?? 0;
+        
+        desc = `Join ${groupTitle} with ${count} ${count === 1 ? 'member' : 'members'} on OpenChat`;
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching invite for unfurl:', error);
+  } finally {
+    await session.close();
+  }
+
+  res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Join ${groupTitle}</title>
+  <meta property="og:title" content="Join ${groupTitle} on OpenChat">
+  <meta property="og:description" content="${desc}">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Join ${groupTitle} on OpenChat">
+  <meta name="twitter:description" content="${desc}">
+  <!-- Fallback redirect for browsers -->
+  <meta http-equiv="refresh" content="0;url=${targetUrl}">
+  <script>window.location.href = ${JSON.stringify(targetUrl)};</script>
+</head>
+<body>
+  Redirecting to OpenChat...
+</body>
+</html>
+  `);
 });
 
 // SPA fallback - serve the canonical responsive client for non-API routes.
