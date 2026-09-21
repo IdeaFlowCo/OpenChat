@@ -100,7 +100,7 @@ export function ThoughtsScreen() {
   useEffect(() => {
     const sock = getSocket();
     if (!sock) return;
-    const handler = (payload: { thought: Thought }) => {
+    const onCreated = (payload: { thought: Thought }) => {
       if (!payload?.thought) return;
       // While a search is active the list is filtered server-side; don't
       // blindly prepend a new thought that may not match the query.
@@ -111,8 +111,18 @@ export function ThoughtsScreen() {
         return [payload.thought, ...prev];
       });
     };
-    sock.on('thought:created', handler);
-    return () => { sock.off('thought:created', handler); };
+
+    const onUpdated = (payload: { thought: Thought }) => {
+      if (!payload?.thought) return;
+      setThoughts((prev) => prev.map((t) => (t.id === payload.thought.id ? { ...t, ...payload.thought } : t)));
+    };
+
+    sock.on('thought:created', onCreated);
+    sock.on('thought:updated', onUpdated);
+    return () => {
+      sock.off('thought:created', onCreated);
+      sock.off('thought:updated', onUpdated);
+    };
   }, []);
 
   const handleDelete = useCallback(async (id: string) => {

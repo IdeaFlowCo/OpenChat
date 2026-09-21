@@ -649,6 +649,19 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     const thought = toJS(result.records[0].get('thought'));
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`user:${userId}`).emit("thought:updated", { thought });
+      // also notify conversations where it is pinned or shared
+      try {
+        const convs = await session.run(`MATCH (t:Thought {id: $id})-[:PINNED_TO|SHARED_IN]->(c:Conversation) RETURN DISTINCT c.id AS cid`, { id });
+        for (const rec of convs.records) {
+          io.to(`conversation:${rec.get("cid")}`).emit("thought:updated", { thought });
+        }
+      } catch (e) { /* ignore */ }
+    }
+
     res.json(thought);
   } catch (err) {
     console.error('PATCH /api/thoughts/:id error:', err);
