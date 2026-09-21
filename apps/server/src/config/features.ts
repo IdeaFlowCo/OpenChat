@@ -9,3 +9,12 @@ export function isOpenUserDirectoryEnabled(env: NodeJS.ProcessEnv = process.env)
   const configured = env.OPENCHAT_OPEN_USER_DIRECTORY?.trim().toLowerCase();
   return configured === undefined || !FALSE_VALUES.has(configured);
 }
+
+/**
+ * Feature flag for the Context Lane v1 implementation.
+ * Defaults to false as requested by the plan.
+ */
+export function isContextLaneEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const configured = env.OPENCHAT_CONTEXT_LANE?.trim().toLowerCase();
+  return configured !== undefined && !FALSE_VALUES.has(configured);
+}

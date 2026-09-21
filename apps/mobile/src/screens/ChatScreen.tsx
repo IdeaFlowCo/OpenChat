@@ -31,6 +31,9 @@ import { MessageActionSheet, ReplyToData } from '../components/MessageActionShee
 import { ReactionsBar } from '../components/ReactionsBar';
 import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
+import { ConversationLaneSwitch } from '../components/ConversationLaneSwitch';
+import { ContextLane } from '../components/ContextLane';
+import { ContextComposer } from '../components/ContextComposer';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
 import { useRecording } from '../contexts/RecordingContext';
 import { getColors } from '../theme/colors';
@@ -262,6 +265,7 @@ export function ChatScreen({
     ?? (routeRaw.name === 'Chat'
         ? ((routeRaw.params as { conversationId?: string } | undefined)?.conversationId ?? '')
         : '');
+  const laneProp = routeRaw.name === 'Chat' ? ((routeRaw.params as any)?.lane as 'chat' | 'context' | undefined) : undefined;
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const { enhanced } = useSocialExperience();
@@ -280,6 +284,7 @@ export function ChatScreen({
     presence, typingByConv, reportTyping,
     aiDisclosureAcceptedAt, mutedConvs, muteConv, blockUser,
     readByOthers, onlineUsers, markConversationRead,
+    activeConversationLane, setActiveConversationLane,
   } = useChat();
 
   const conversation = useMemo<Conversation | undefined>(
@@ -439,9 +444,10 @@ export function ChatScreen({
   // for messages arriving in the conversation the user is already viewing.
   useEffect(() => {
     setActiveConversation(conversationId);
+    if (laneProp) setActiveConversationLane(laneProp);
     setActiveConversationForNotifications(conversationId);
     // Mark as read when the user opens the conversation (OpenChat-0nj).
-    markConversationRead(conversationId);
+    if (!laneProp || laneProp === 'chat') markConversationRead(conversationId);
     // Reset scroll bookkeeping whenever the conversation changes — opening
     // a fresh thread should start "at bottom" with no unread badge, regardless
     // of where we were in the previous thread.
@@ -454,7 +460,7 @@ export function ChatScreen({
       setActiveConversation(null);
       setActiveConversationForNotifications(null);
     };
-  }, [conversationId, setActiveConversation, markConversationRead]);
+  }, [conversationId, setActiveConversation, markConversationRead, laneProp, setActiveConversationLane]);
 
   const isGroup = conversation?.type === 'group';
   // Resolve self-DMs deliberately: there is no "other" participant, so the
@@ -720,7 +726,9 @@ export function ChatScreen({
     const previous = receivedMessagesRef.current;
     receivedMessagesRef.current = { conversationId, latestId: latest?.id, loading: loadingMessages };
     if (latest && (previous?.conversationId !== conversationId || previous.latestId !== latest.id)) {
-      markConversationRead(conversationId);
+      if (activeConversationLane === 'chat') {
+        markConversationRead(conversationId);
+      }
     }
     if (!previous || previous.conversationId !== conversationId
       || loadingMessages || previous.loading || !latest
@@ -729,7 +737,7 @@ export function ChatScreen({
     // append. The former newest message must still exist in this thread.
     if (previous.latestId && !messages.some(message => message.id === previous.latestId)) return;
     if (latest.senderId && latest.senderId !== currentUser?.userId) hapticReceive();
-  }, [messages, loadingMessages, currentUser?.userId, conversationId, markConversationRead]);
+  }, [messages, loadingMessages, currentUser?.userId, conversationId, markConversationRead, activeConversationLane]);
 
   // When loadingOlderMessages transitions false→false (completed), flag the
   // next messages update as a prepend so the scroll/unread effect ignores it (OpenChat-vjc).
@@ -1447,6 +1455,7 @@ export function ChatScreen({
           />
         </View>
       )}
+      <ConversationLaneSwitch activeLane={activeConversationLane} onChange={setActiveConversationLane} />
       {showAiDisclosure && <AiDisclosureBanner />}
 
       <ExportSheet
@@ -1510,7 +1519,14 @@ export function ChatScreen({
         </View>
       </Modal>
 
-      {loadingMessages && messages.length === 0 ? (
+      {activeConversationLane === 'context' ? (
+        <View style={{ flex: 1 }}>
+          <ContextLane conversationId={conversationId} />
+          <ContextComposer conversationId={conversationId} />
+        </View>
+      ) : (
+        <>
+        {loadingMessages && messages.length === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator color={c.primary} />
         </View>
@@ -1890,7 +1906,9 @@ export function ChatScreen({
           setTimeout(() => textInputRef.current?.focus(), 80);
         }}
       />
-    </KeyboardAvoidingView>
+      </>
+      )}
+      </KeyboardAvoidingView>
   );
 }
 

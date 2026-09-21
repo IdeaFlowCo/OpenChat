@@ -82,7 +82,10 @@ interface ChatContextValue {
 
   // Active conversation (open thread)
   activeConversationId: string | null;
-  setActiveConversation: (id: string | null) => void;
+  activeConversationLane: 'chat' | 'context';
+  setActiveConversationLane: (lane: 'chat' | 'context') => void;
+  isChatVisible: (id: string) => boolean;
+  setActiveConversation: (id: string | null, opts?: { lane?: 'chat' | 'context' }) => void;
   messages: Message[]; // for the active conversation
   loadingMessages: boolean;
   loadOlderMessages: (conversationId: string) => Promise<void>;
@@ -193,6 +196,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [conversationsLoaded, setConversationsLoaded] = useState(false);
 
   const [activeConversationId, setActiveConversationIdState] = useState<string | null>(null);
+  const [activeConversationLane, setActiveConversationLane] = useState<'chat' | 'context'>('chat');
+  const activeConversationLaneRef = useRef<'chat' | 'context'>('chat');
+  useEffect(() => {
+    activeConversationLaneRef.current = activeConversationLane;
+  }, [activeConversationLane]);
+
+  const isChatVisible = useCallback((id: string) => {
+    return activeConversationId === id && activeConversationLane === 'chat';
+  }, [activeConversationId, activeConversationLane]);
   // Keep a ref so socket handlers (which close over a stale value) can read the
   // current active conversation without re-subscribing on every change.
   const activeConvIdRef = useRef<string | null>(null);
@@ -435,7 +447,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           setUnreadByConv(prev => {
             const next = new Map(prev);
             for (const msg of missed) {
-              if (msg.conversationId !== activeId2 && msg.senderId !== currentUserId) {
+              if ((msg.conversationId !== activeId2 || activeConversationLaneRef.current !== 'chat') && msg.senderId !== currentUserId) {
                 next.set(msg.conversationId, (next.get(msg.conversationId) ?? 0) + 1);
               }
             }
@@ -482,7 +494,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       });
       // Unread bump + in-app banner: only if msg is for a non-active conv and
       // not from us. The banner component itself further filters muted convs.
-      if (msg.conversationId !== activeConvIdRef.current && msg.senderId !== currentUser?.userId) {
+      if ((msg.conversationId !== activeConvIdRef.current || activeConversationLaneRef.current !== 'chat') && msg.senderId !== currentUser?.userId) {
         setUnreadByConv(prev => {
           const next = new Map(prev);
           next.set(msg.conversationId, (next.get(msg.conversationId) ?? 0) + 1);
@@ -702,23 +714,28 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [isAuthed, chatSocket, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage, refetchMatches]);
 
   // setActiveConversation: clears unread, joins/leaves rooms, loads messages.
-  const setActiveConversation = useCallback((id: string | null) => {
+  const setActiveConversation = useCallback((id: string | null, opts?: { lane?: 'chat' | 'context' }) => {
     // A late response must not finish a newer load, including A → back → A.
     const generation = ++messageLoadGenerationRef.current;
     const prev = activeConvIdRef.current;
     if (prev && prev !== id) leaveConversation(prev);
 
+    const nextLane = opts?.lane || 'chat';
     activeConvIdRef.current = id;
     setActiveConversationIdState(id);
+    setActiveConversationLane(nextLane);
+    activeConversationLaneRef.current = nextLane;
 
     if (id) {
       joinConversation(id);
-      setUnreadByConv(curr => {
-        if (!curr.has(id)) return curr;
-        const next = new Map(curr);
-        next.delete(id);
-        return next;
-      });
+      if (nextLane === 'chat') {
+        setUnreadByConv(curr => {
+          if (!curr.has(id)) return curr;
+          const next = new Map(curr);
+          next.delete(id);
+          return next;
+        });
+      }
       setLoadingMessages(true);
       setHasMoreMessages(false);
       api.getMessages(id)
@@ -1097,7 +1114,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     currentUser, isAuthed, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
-    activeConversationId, setActiveConversation, messages, loadingMessages,
+    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, setActiveConversation, messages, loadingMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     sendMessage, sendMessageToConversation,
     editMessage, deleteMessage,
@@ -1115,7 +1132,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     currentUser, isAuthed, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
-    activeConversationId, setActiveConversation, messages, loadingMessages,
+    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, setActiveConversation, messages, loadingMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     sendMessage, sendMessageToConversation,
     editMessage, deleteMessage,

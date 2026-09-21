@@ -25,6 +25,26 @@ export interface OpenChatConfig {
   apiKey?: string;
 }
 
+export interface ContextPost {
+  id: string;
+  conversationId: string;
+  authorId: string;
+  text: string;
+  kind: string; // 'note' | 'ask' | 'offer'
+  lane: 'context';
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  replyToId?: string;
+  clientRequestId: string;
+  isDeleted?: boolean;
+}
+
+export interface ListContextPostsResponse {
+  posts: ContextPost[];
+  nextCursor?: string;
+}
+
 export interface ConversationSummary {
   id: string;
   title?: string | null;
@@ -276,6 +296,16 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       title?: string;
       type?: 'direct' | 'group';
     }) => request<ConversationSummary>('POST', '/api/chat/conversations', { body }),
+
+    // ---- context lane ----
+    listContextPosts: (conversationId: string, limit?: number, cursor?: string, kind?: string, search?: string) =>
+      request<ListContextPostsResponse>('GET', `/api/chat/conversations/${encodeURIComponent(conversationId)}/context`, { query: { limit, cursor, kind, search } }),
+    createContextPost: (conversationId: string, text: string, clientRequestId: string, kind?: string, replyToId?: string) =>
+      request<ContextPost>('POST', `/api/chat/conversations/${encodeURIComponent(conversationId)}/context`, { body: { text, clientRequestId, kind, replyToId } }),
+    updateContextPost: (conversationId: string, postId: string, text: string, expectedRevision: number) =>
+      request<ContextPost>('PATCH', `/api/chat/conversations/${encodeURIComponent(conversationId)}/context/${encodeURIComponent(postId)}`, { body: { text, expectedRevision } }),
+    deleteContextPost: (conversationId: string, postId: string) =>
+      request<void>('DELETE', `/api/chat/conversations/${encodeURIComponent(conversationId)}/context/${encodeURIComponent(postId)}`),
 
     // ---- messages ----
     getMessages: (conversationId: string, limit?: number) =>

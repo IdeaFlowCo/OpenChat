@@ -219,6 +219,76 @@ export function buildServer(
     }
   );
 
+  // ---- oc_list_context_posts ----
+  server.registerTool(
+    'oc_list_context_posts',
+    {
+      title: 'List Context lane posts',
+      description: 'List Context lane posts (quiet notes/asks/offers) in a conversation. Bounded by a cursor. Requires the OPENCHAT_CONTEXT_LANE flag and explicit user delegation.',
+      inputSchema: {
+        conversationId: z.string().describe('The conversation ID'),
+        limit: z.number().min(1).max(100).optional().describe('Number of posts to return (default 50)'),
+        cursor: z.string().optional().describe('Pagination cursor from a previous response'),
+      },
+    },
+    async ({ conversationId, limit, cursor }) => {
+      try {
+        requireApiKey(api, 'Listing context posts');
+        const res = await api.listContextPosts(conversationId, limit, cursor);
+        return textResult(JSON.stringify(res, null, 2));
+      } catch (e) {
+        return errorResult(e);
+      }
+    }
+  );
+
+  // ---- oc_create_context_post ----
+  server.registerTool(
+    'oc_create_context_post',
+    {
+      title: 'Create a Context lane post',
+      description: 'Publish a quiet post to the Context lane of a conversation. Notifies no humans. Good for sharing intermediate agent state or structured asks/offers.',
+      inputSchema: {
+        conversationId: z.string().describe('The conversation ID'),
+        text: z.string().describe('The post content'),
+        kind: z.enum(['note', 'ask', 'offer']).optional().describe('Type of post, defaults to note'),
+        clientRequestId: z.string().optional().describe('Idempotency key. If omitted, one is generated automatically.'),
+      },
+    },
+    async ({ conversationId, text, kind, clientRequestId }) => {
+      try {
+        requireApiKey(api, 'Creating context post');
+        const id = clientRequestId || 'mcp_' + Date.now() + Math.random().toString(36).slice(2);
+        const res = await api.createContextPost(conversationId, text, id, kind);
+        return textResult(JSON.stringify(res, null, 2));
+      } catch (e) {
+        return errorResult(e);
+      }
+    }
+  );
+
+  // ---- oc_delete_context_post ----
+  server.registerTool(
+    'oc_delete_context_post',
+    {
+      title: 'Delete a Context lane post',
+      description: 'Delete a Context lane post you created (or if your user is the group owner).',
+      inputSchema: {
+        conversationId: z.string().describe('The conversation ID'),
+        postId: z.string().describe('The Context post ID'),
+      },
+    },
+    async ({ conversationId, postId }) => {
+      try {
+        requireApiKey(api, 'Deleting context post');
+        await api.deleteContextPost(conversationId, postId);
+        return textResult(`Deleted context post ${postId} in ${conversationId}`);
+      } catch (e) {
+        return errorResult(e);
+      }
+    }
+  );
+
   // ---- oc_get_messages ----
   server.registerTool(
     'oc_get_messages',

@@ -145,6 +145,7 @@ router.get('/tags/suggestions', requireAuth, async (req: Request, res: Response)
       CALL {
         WITH caller
         MATCH (caller)-[:HAS_THOUGHT]->(t:Thought)
+        WHERE t.lane IS NULL OR t.lane <> 'context'
         UNWIND coalesce(t.tags, []) AS rawTag
         WITH toLower(rawTag) AS tag, t
         WHERE tag STARTS WITH $prefix AND tag <> ''
@@ -157,7 +158,7 @@ router.get('/tags/suggestions', requireAuth, async (req: Request, res: Response)
         MATCH (author:User)-[:PARTICIPATES_IN]->(conversation)
         WHERE author.id <> caller.id
         MATCH (author)-[:HAS_THOUGHT]->(t:Thought)-[:FROM_MESSAGE]->(m:Message)
-        WHERE m.conversationId = $conversationId
+        WHERE (t.lane IS NULL OR t.lane <> 'context') AND m.conversationId = $conversationId
         UNWIND coalesce(t.tags, []) AS rawTag
         WITH toLower(rawTag) AS tag, t
         WHERE tag STARTS WITH $prefix AND tag <> ''
@@ -213,7 +214,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   // Search (?q=) — matches Thought text OR any of its tags (case-insensitive).
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : null;
 
-  const conds: string[] = [];
+  const conds: string[] = ['(t.lane IS NULL OR t.lane <> \'context\')'];
   if (before) conds.push('t.createdAt < datetime($before)');
   if (q)
     conds.push(
@@ -367,6 +368,7 @@ router.post('/:id/pin', requireAuth, async (req: Request, res: Response) => {
     const result = await session.run(
       `
       MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought {id: $id})
+      WHERE t.lane IS NULL OR t.lane <> 'context'
       MATCH (u)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
       MERGE (t)-[p:PINNED_IN]->(c)
       ON CREATE SET p.pinnedBy = $userId, p.pinnedAt = datetime($now)
@@ -413,7 +415,7 @@ router.delete('/:id/pin/:conversationId', requireAuth, async (req: Request, res:
     const result = await session.run(
       `
       MATCH (t:Thought {id: $id})-[p:PINNED_IN]->(c:Conversation {id: $conversationId})
-      WHERE t.userId = $userId OR p.pinnedBy = $userId
+      WHERE (t.userId = $userId OR p.pinnedBy = $userId) AND (t.lane IS NULL OR t.lane <> 'context')
       DELETE p
       RETURN count(p) AS removed
       `,
@@ -627,6 +629,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     const result = await session.run(
       `
       MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought {id: $id})
+      WHERE t.lane IS NULL OR t.lane <> 'context'
       SET t.text      = CASE WHEN $text   IS NOT NULL THEN $text   ELSE t.text   END,
           t.kind      = CASE WHEN $kind   IS NOT NULL THEN $kind   ELSE t.kind   END,
           t.status    = CASE WHEN $status IS NOT NULL THEN $status ELSE t.status END,
@@ -684,6 +687,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     const result = await session.run(
       `
       MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought {id: $id})
+      WHERE t.lane IS NULL OR t.lane <> 'context'
       DETACH DELETE t
       RETURN count(t) AS deleted
       `,

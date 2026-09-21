@@ -21,6 +21,7 @@ import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { evictFromCache } from '../middleware/resolveActor.js';
+import { acquireContextAclLocks } from '../services/contextAccess.js';
 
 const router = Router();
 
@@ -282,20 +283,27 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       params['scopes'] = scopes;
     }
 
-    const result = await session.run(
-      `MATCH (u:User {id: $userId})-[:OWNS_KEY]->(k:AgentKey {id: $id})
-       WHERE k.revokedAt IS NULL
-       SET ${setClauses.join(', ')}
-       RETURN k { .id, .name, .keyPrefix, .scopes, .createdAt, .expiresAt, .lastUsedAt, .revokedAt } AS key`,
-      params
-    );
+    const result = await session.executeWrite(async (tx) => {
+      await acquireContextAclLocks(tx, { userIds: [userId], agentKeyId: String(id) });
+      return await tx.run(
+        `MATCH (u:User {id: $userId})-[:OWNS_KEY]->(k:AgentKey {id: $id})
+         WHERE k.revokedAt IS NULL
+         SET ${setClauses.join(', ')}
+         RETURN k { .id, .name, .keyPrefix, .scopes, .createdAt, .expiresAt, .lastUsedAt, .revokedAt } AS key`,
+        params
+      );
+    });
 
     if (result.records.length === 0) {
       res.status(404).json({ error: 'Key not found or already revoked' });
       return;
     }
 
-    res.json(result.records[0].get('key'));
+    const keyData = result.records[0].get('key');
+    if (scopes !== undefined) {
+      evictFromCache(keyData.keyPrefix);
+    }
+    res.json(keyData);
   } finally {
     await session.close();
   }
@@ -309,18 +317,21 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
 
   try {
-    const result = await session.run(
-      `MATCH (u:User {id: $userId})-[:OWNS_KEY]->(k:AgentKey {id: $id})
-       WHERE k.revokedAt IS NULL
-       SET k.revokedAt = $now
-       WITH k
-       OPTIONAL MATCH (w:Webhook {createdByKeyId: k.id})
-       WHERE w.deactivatedAt IS NULL
-       WITH k, collect(w) AS webhooks
-       FOREACH (webhook IN webhooks | SET webhook.deactivatedAt = $now)
-       RETURN k.keyPrefix AS keyPrefix`,
-      { userId, id, now: new Date().toISOString() }
-    );
+    const result = await session.executeWrite(async (tx) => {
+      await acquireContextAclLocks(tx, { userIds: [userId], agentKeyId: String(id) });
+      return await tx.run(
+        `MATCH (u:User {id: $userId})-[:OWNS_KEY]->(k:AgentKey {id: $id})
+         WHERE k.revokedAt IS NULL
+         SET k.revokedAt = $now
+         WITH k
+         OPTIONAL MATCH (w:Webhook {createdByKeyId: k.id})
+         WHERE w.deactivatedAt IS NULL
+         WITH k, collect(w) AS webhooks
+         FOREACH (webhook IN webhooks | SET webhook.deactivatedAt = $now)
+         RETURN k.keyPrefix AS keyPrefix`,
+        { userId, id, now: new Date().toISOString() }
+      );
+    });
 
     if (result.records.length === 0) {
       res.status(404).json({ error: 'Key not found or already revoked' });

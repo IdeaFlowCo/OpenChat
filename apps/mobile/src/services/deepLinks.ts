@@ -74,6 +74,10 @@ function navigateForIntent(parsed: ParsedOpenChatUrl): boolean {
         navigationRef.navigate('ContactProfile', { userId: parsed.userId });
         return true;
 
+      case 'context':
+        navigationRef.navigate('Chat', { conversationId: parsed.conversationId, lane: 'context', entryId: parsed.entryId });
+        return true;
+
       case 'unknown':
         return false;
     }

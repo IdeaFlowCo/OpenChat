@@ -671,9 +671,18 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
       CALL {
         WITH u
         OPTIONAL MATCH (u)-[:HAS_THOUGHT]->(t:Thought)
-        WHERE $since IS NULL OR t.createdAt >= datetime($since)
+        WHERE ($since IS NULL OR t.createdAt >= datetime($since))
+          AND (t.lane IS NULL OR t.lane <> 'context')
         WITH t ORDER BY t.createdAt ASC
         RETURN collect(t { .id, .text, .kind, .status, .createdAt, .updatedAt }) AS thoughts
+      }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:HAS_THOUGHT]->(cp:Thought)
+        WHERE ($since IS NULL OR cp.createdAt >= datetime($since))
+          AND cp.lane = 'context'
+        WITH cp ORDER BY cp.createdAt ASC
+        RETURN collect(cp { .id, .text, .kind, .status, .createdAt, .updatedAt, .conversationId, .lane, .revision }) AS contextPosts
       }
       CALL {
         WITH u
@@ -1368,7 +1377,17 @@ router.delete('/me', requireAuth, async (req: Request, res: Response) => {
         DETACH DELETE t
       `, { userId });
 
-      // 2b. Delete Thought nodes owned by this user (OpenChat-zi1).
+      // 2b. Delete ContextResponses pointing to this user's Context posts, their own responses, then delete Thoughts.
+      await tx.run(`
+        MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(th:Thought)<-[:RESPONDS_TO]-(r:ContextResponse)
+        DETACH DELETE r
+      `, { userId });
+
+      await tx.run(`
+        MATCH (r:ContextResponse {authorId: $userId})
+        DETACH DELETE r
+      `, { userId });
+
       await tx.run(`
         MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(th:Thought)
         DETACH DELETE th
