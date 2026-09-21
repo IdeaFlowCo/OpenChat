@@ -252,8 +252,10 @@ describe('privacy-conscious contact discovery routes', () => {
     const conversationQuery = cypher.find(query => query.includes('participants: participants'));
     const contactQuery = cypher.find(query => query.includes('contactName'));
 
-    expect(messageQuery).toContain('sender: sender { .id, .name, .avatarUrl, .isBot }');
-    expect(conversationQuery).toContain('participant { .id, .name, .avatarUrl, .isBot }');
+    // The trailing entry is the legacy placeholder email (openchat-dwk), so match
+    // the avatarUrl run rather than the closing brace.
+    expect(messageQuery).toContain('sender: sender { .id, .name, .avatarUrl, .isBot,');
+    expect(conversationQuery).toContain('participant { .id, .name, .avatarUrl, .isBot,');
     expect(contactQuery).toContain('.avatarUrl');
   });
 

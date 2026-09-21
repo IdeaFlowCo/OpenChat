@@ -40,6 +40,7 @@ import { AppIcon } from '../components/AppIcon';
 import { ConversationHeaderContent } from '../components/ConversationHeaderContent';
 import { NewMessagesPill } from '../components/NewMessagesPill';
 import { ChatEmptyState } from '../components/ChatEmptyState';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import type { NavProp, RouteProps } from '../navigation/types';
 import { setActiveConversationForNotifications } from '../services/notifications';
 import { hapticSend, hapticReceive } from '../services/haptics';
@@ -1195,6 +1196,233 @@ export function ChatScreen({
     return 'sent';
   }, [isGroup, other, readByOthers, onlineUsers, conversationId]);
 
+  // One row = one server-supplied message. Extracted from the FlatList so each
+  // row can sit inside its own ErrorBoundary: a malformed message then renders a
+  // placeholder instead of taking down the whole app (openchat-dwk).
+  const renderMessageRow = (item: RenderRow) => {
+    if (item.type === 'day') {
+      return (
+        <View style={styles.dayWrap}>
+          <View style={[styles.dayLine, { backgroundColor: c.divider }]} />
+          <Text style={[styles.dayLabel, { color: c.textMetadata }]}>{item.label}</Text>
+          <View style={[styles.dayLine, { backgroundColor: c.divider }]} />
+        </View>
+      );
+    }
+    const m = item.message!;
+    if (m.messageType === 'card') {
+      return (
+        <AgentNetworkCard
+          message={m}
+          onOpenConversation={(matchedConversationId) => {
+            navigation.navigate('Chat', { conversationId: matchedConversationId });
+          }}
+          onShareDraft={(draftId, initialText) => {
+            navigation.navigate('StoryComposer', { draftId, initialText });
+          }}
+        />
+      );
+    }
+    const isOwn = !!item.isOwn;
+    const failed = !!m._failed;
+    // WhatsApp-style identification for group chats: colored sender
+    // name on the first message of a run, small avatar on the LAST
+    // message of a run. We still reserve the avatar slot on the
+    // non-last messages so the bubbles stay vertically aligned.
+    const showGroupAvatar = isGroup && !isOwn;
+    const senderColor = colorForUserId(m.senderId, scheme);
+    return (
+      <View style={[styles.row, { justifyContent: isOwn ? 'flex-end' : 'flex-start', alignItems: 'flex-end' }]}>
+        {showGroupAvatar && (
+          <View style={styles.avatarSlot}>
+            {item.isLastInRun && (
+              <Avatar
+                name={getUserDisplayName(m.sender)}
+                email={m.sender?.email}
+                avatarUrl={m.sender?.avatarUrl}
+                size={28}
+              />
+            )}
+          </View>
+        )}
+        {/* Column wrapper so ReactionsBar renders below the bubble */}
+        <View style={{ flexDirection: 'column', maxWidth: '78%', alignItems: isOwn ? 'flex-end' : 'flex-start' }}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
+          delayLongPress={350}
+          style={[
+            styles.bubble,
+            {
+              backgroundColor: failed ? c.dangerMuted : (isOwn ? c.bubbleOwn : c.bubbleOther),
+              borderTopRightRadius: isOwn ? 4 : 16,
+              borderTopLeftRadius: isOwn ? 16 : 4,
+              borderColor: failed ? c.danger : (isOwn ? 'transparent' : c.border),
+              borderWidth: failed ? 1 : (isOwn ? 0 : StyleSheet.hairlineWidth),
+            },
+            // Reply-message accent stripe (OpenChat-imt): a 3px colored
+            // bar on the bubble's leading edge gives at-a-glance
+            // distinction that this message is a reply. Stripe sits on
+            // the LEFT for other-people's messages and the RIGHT for
+            // own messages, matching the bubble's tail orientation.
+            m.replyToId && !failed && (isOwn
+              ? { borderRightWidth: 3, borderRightColor: ownTint(0.55) }
+              : { borderLeftWidth: 3, borderLeftColor: c.primary }),
+          ]}
+        >
+          {/* Reply quote header — shown if this message is a reply (OpenChat-uxj) */}
+          {m.replyToId && (
+            <TouchableOpacity
+              onPress={() => m.replyToId && scrollToMessage(m.replyToId)}
+              activeOpacity={0.7}
+              style={[
+                styles.replyHeader,
+                {
+                  borderLeftColor: isOwn ? ownTint(0.6) : c.primary,
+                  backgroundColor: isOwn ? ownTint(0.15) : c.surfaceElevated,
+                },
+              ]}
+            >
+              <Text
+                style={[styles.replyHeaderAuthor, { color: isOwn ? ownTint(0.85) : colorForUserId(m.replyTo?.senderId, scheme) }]}
+                numberOfLines={1}
+              >
+                {getUserDisplayName(m.replyTo?.sender)}
+              </Text>
+              <Text
+                style={[styles.replyHeaderContent, { color: isOwn ? ownTint(0.7) : c.textSecondary }]}
+                numberOfLines={2}
+              >
+                {m.replyTo?.content || '…'}
+              </Text>
+            </TouchableOpacity>
+          )}
+          {/* Forwarded-from label (OpenChat-hhc) */}
+          {!!m.viaSecretary && !m.deletedAt && (
+            <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.78) : c.textMetadata }]}>
+              ◇ Secretary auto-reply
+            </Text>
+          )}
+          {!!m.forwardedFromMessageId && (
+            <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.7) : c.textMetadata }]} numberOfLines={1}>
+              {'↪ Forwarded from '}{m.forwardedFromSenderName || 'Unknown'}
+            </Text>
+          )}
+          {item.showSender && (
+            <Text style={[
+              styles.sender,
+              { color: isGroup ? senderColor : c.textSecondary },
+            ]}>
+              {getUserDisplayName(m.sender)}
+            </Text>
+          )}
+          {/* Attachments: audio (OpenChat-xxc) or image (OpenChat-6bg) */}
+          {m.attachments?.map((att, i) => {
+            // ── Audio attachment ────────────────────────────────────
+            // Voice notes are first-class text (2026-09-02): the
+            // transcript IS the message; audio collapses to a compact
+            // play row under it. Until the transcript arrives (socket
+            // 'message:transcript'), show the full player + shimmer.
+            if (att.type === 'audio') {
+              const hasTranscript = !m.deletedAt && !!m.transcript;
+              return (
+                <View key={i}>
+                  {hasTranscript && (
+                    <Text style={{ fontSize: 16, color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, marginBottom: 6 }}>
+                      {m.transcript}
+                    </Text>
+                  )}
+                  {!hasTranscript && !m.deletedAt && (
+                    <Text style={{ fontSize: 13, fontStyle: 'italic', color: isOwn ? ownTint(0.6) : c.textMetadata, marginBottom: 4 }}>
+                      Transcribing…
+                    </Text>
+                  )}
+                  <VoiceMessageBubble
+                    messageId={m.id}
+                    url={att.url}
+                    durationMs={att.durationMs ?? 0}
+                    isOwn={isOwn}
+                    compact={hasTranscript}
+                  />
+                </View>
+              );
+            }
+            // ── Image attachment ────────────────────────────────────
+            const aspectRatio = att.width && att.height ? att.width / att.height : 1;
+            return (
+              <TouchableOpacity
+                key={i}
+                onPress={() => setFullscreenImage(att.url)}
+                activeOpacity={0.85}
+                style={{ marginBottom: m.content ? 6 : 0 }}
+              >
+                <Image
+                  source={{ uri: att.url }}
+                  style={[
+                    styles.attachmentImage,
+                    { aspectRatio: Math.min(Math.max(aspectRatio, 0.5), 2) },
+                  ]}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+            );
+          })}
+          {/* Deleted: muted italic tombstone (OpenChat-q9h) */}
+          {m.deletedAt
+            ? <Text style={{ color: isOwn ? ownTint(0.55) : c.textMetadata, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
+            : (!!m.content && (
+                isGroup
+                  ? <Text style={{ fontSize: 16 }}>
+                      {renderContentWithMentions(
+                        m.content,
+                        mentionableParticipants,
+                        isOwn ? c.bubbleOwnText : c.bubbleOtherText,
+                        scheme
+                      )}
+                    </Text>
+                  : <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 16 }}>{m.content}</Text>
+              ))
+          }
+          <View style={styles.bubbleFooter}>
+            <Text style={{ color: isOwn ? ownTint(0.7) : c.textMetadata, fontSize: 10 }}>
+              {failed ? 'Failed to send' : formatTime(m.createdAt)}
+            </Text>
+            {/* Edited tag (OpenChat-q9h) */}
+            {!!(m.editedAt && !m.deletedAt) && (
+              <Text style={{ color: isOwn ? ownTint(0.6) : c.textMetadata, fontSize: 10, marginLeft: 4, fontStyle: 'italic' }}>edited</Text>
+            )}
+            {/* Tick marks for own DM messages (OpenChat-0nj). Only shown
+                after the local-optimistic id is replaced by a real server id. */}
+            {isOwn && !isGroup && !failed && !m.id.startsWith('local-') && (() => {
+              const tick = getTickState(m);
+              if (tick === 'read') {
+                return <Text style={{ color: scheme === 'dark' ? '#b3541e' : '#e08b5c', fontSize: 10, marginLeft: 3 }}>✓✓</Text>;
+              }
+              if (tick === 'delivered') {
+                return <Text style={{ color: ownTint(0.6), fontSize: 10, marginLeft: 3 }}>✓✓</Text>;
+              }
+              return <Text style={{ color: ownTint(0.5), fontSize: 10, marginLeft: 3 }}>✓</Text>;
+            })()}
+          </View>
+        </TouchableOpacity>
+        {/* Reactions bar below bubble (OpenChat-7bd) */}
+        {!!(m.reactions && m.reactions.length > 0) && (
+          <ReactionsBar reactions={m.reactions!} isOwn={isOwn} onToggle={(emoji) => void handleReact(m.id, emoji)} />
+        )}
+        {/* Link preview cards below bubble (OpenChat-hq2) */}
+        {!!(m.linkPreviews && m.linkPreviews.length > 0) && !m.deletedAt && m.linkPreviews.map((preview) => (
+          <LinkPreviewCard
+            key={preview.url}
+            preview={preview}
+            isOwn={isOwn}
+            scheme={scheme}
+          />
+        ))}
+        </View>{/* end column wrapper */}
+      </View>
+    );
+  };
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -1318,229 +1546,20 @@ export function ChatScreen({
               <ChatEmptyState conversation={conversation} currentUser={currentUser} />
             ) : null
           }
-          renderItem={({ item }) => {
-            if (item.type === 'day') {
-              return (
+          renderItem={({ item }) => (
+            <ErrorBoundary
+              scope="chat-message"
+              resetKey={item.key}
+              render={() => renderMessageRow(item)}
+              fallback={() => (
                 <View style={styles.dayWrap}>
-                  <View style={[styles.dayLine, { backgroundColor: c.divider }]} />
-                  <Text style={[styles.dayLabel, { color: c.textMetadata }]}>{item.label}</Text>
-                  <View style={[styles.dayLine, { backgroundColor: c.divider }]} />
+                  <Text style={[styles.dayLabel, { color: c.textMetadata }]}>
+                    Message unavailable
+                  </Text>
                 </View>
-              );
-            }
-            const m = item.message!;
-            if (m.messageType === 'card') {
-              return (
-                <AgentNetworkCard
-                  message={m}
-                  onOpenConversation={(matchedConversationId) => {
-                    navigation.navigate('Chat', { conversationId: matchedConversationId });
-                  }}
-                  onShareDraft={(draftId, initialText) => {
-                    navigation.navigate('StoryComposer', { draftId, initialText });
-                  }}
-                />
-              );
-            }
-            const isOwn = !!item.isOwn;
-            const failed = !!m._failed;
-            // WhatsApp-style identification for group chats: colored sender
-            // name on the first message of a run, small avatar on the LAST
-            // message of a run. We still reserve the avatar slot on the
-            // non-last messages so the bubbles stay vertically aligned.
-            const showGroupAvatar = isGroup && !isOwn;
-            const senderColor = colorForUserId(m.senderId, scheme);
-            return (
-              <View style={[styles.row, { justifyContent: isOwn ? 'flex-end' : 'flex-start', alignItems: 'flex-end' }]}>
-                {showGroupAvatar && (
-                  <View style={styles.avatarSlot}>
-                    {item.isLastInRun && (
-                      <Avatar
-                        name={getUserDisplayName(m.sender)}
-                        email={m.sender?.email}
-                        avatarUrl={m.sender?.avatarUrl}
-                        size={28}
-                      />
-                    )}
-                  </View>
-                )}
-                {/* Column wrapper so ReactionsBar renders below the bubble */}
-                <View style={{ flexDirection: 'column', maxWidth: '78%', alignItems: isOwn ? 'flex-end' : 'flex-start' }}>
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
-                  delayLongPress={350}
-                  style={[
-                    styles.bubble,
-                    {
-                      backgroundColor: failed ? c.dangerMuted : (isOwn ? c.bubbleOwn : c.bubbleOther),
-                      borderTopRightRadius: isOwn ? 4 : 16,
-                      borderTopLeftRadius: isOwn ? 16 : 4,
-                      borderColor: failed ? c.danger : (isOwn ? 'transparent' : c.border),
-                      borderWidth: failed ? 1 : (isOwn ? 0 : StyleSheet.hairlineWidth),
-                    },
-                    // Reply-message accent stripe (OpenChat-imt): a 3px colored
-                    // bar on the bubble's leading edge gives at-a-glance
-                    // distinction that this message is a reply. Stripe sits on
-                    // the LEFT for other-people's messages and the RIGHT for
-                    // own messages, matching the bubble's tail orientation.
-                    m.replyToId && !failed && (isOwn
-                      ? { borderRightWidth: 3, borderRightColor: ownTint(0.55) }
-                      : { borderLeftWidth: 3, borderLeftColor: c.primary }),
-                  ]}
-                >
-                  {/* Reply quote header — shown if this message is a reply (OpenChat-uxj) */}
-                  {m.replyToId && (
-                    <TouchableOpacity
-                      onPress={() => m.replyToId && scrollToMessage(m.replyToId)}
-                      activeOpacity={0.7}
-                      style={[
-                        styles.replyHeader,
-                        {
-                          borderLeftColor: isOwn ? ownTint(0.6) : c.primary,
-                          backgroundColor: isOwn ? ownTint(0.15) : c.surfaceElevated,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[styles.replyHeaderAuthor, { color: isOwn ? ownTint(0.85) : colorForUserId(m.replyTo?.senderId, scheme) }]}
-                        numberOfLines={1}
-                      >
-                        {getUserDisplayName(m.replyTo?.sender)}
-                      </Text>
-                      <Text
-                        style={[styles.replyHeaderContent, { color: isOwn ? ownTint(0.7) : c.textSecondary }]}
-                        numberOfLines={2}
-                      >
-                        {m.replyTo?.content || '…'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                  {/* Forwarded-from label (OpenChat-hhc) */}
-                  {!!m.viaSecretary && !m.deletedAt && (
-                    <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.78) : c.textMetadata }]}>
-                      ◇ Secretary auto-reply
-                    </Text>
-                  )}
-                  {!!m.forwardedFromMessageId && (
-                    <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.7) : c.textMetadata }]} numberOfLines={1}>
-                      {'↪ Forwarded from '}{m.forwardedFromSenderName || 'Unknown'}
-                    </Text>
-                  )}
-                  {item.showSender && (
-                    <Text style={[
-                      styles.sender,
-                      { color: isGroup ? senderColor : c.textSecondary },
-                    ]}>
-                      {getUserDisplayName(m.sender)}
-                    </Text>
-                  )}
-                  {/* Attachments: audio (OpenChat-xxc) or image (OpenChat-6bg) */}
-                  {m.attachments?.map((att, i) => {
-                    // ── Audio attachment ────────────────────────────────────
-                    // Voice notes are first-class text (2026-09-02): the
-                    // transcript IS the message; audio collapses to a compact
-                    // play row under it. Until the transcript arrives (socket
-                    // 'message:transcript'), show the full player + shimmer.
-                    if (att.type === 'audio') {
-                      const hasTranscript = !m.deletedAt && !!m.transcript;
-                      return (
-                        <View key={i}>
-                          {hasTranscript && (
-                            <Text style={{ fontSize: 16, color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, marginBottom: 6 }}>
-                              {m.transcript}
-                            </Text>
-                          )}
-                          {!hasTranscript && !m.deletedAt && (
-                            <Text style={{ fontSize: 13, fontStyle: 'italic', color: isOwn ? ownTint(0.6) : c.textMetadata, marginBottom: 4 }}>
-                              Transcribing…
-                            </Text>
-                          )}
-                          <VoiceMessageBubble
-                            messageId={m.id}
-                            url={att.url}
-                            durationMs={att.durationMs ?? 0}
-                            isOwn={isOwn}
-                            compact={hasTranscript}
-                          />
-                        </View>
-                      );
-                    }
-                    // ── Image attachment ────────────────────────────────────
-                    const aspectRatio = att.width && att.height ? att.width / att.height : 1;
-                    return (
-                      <TouchableOpacity
-                        key={i}
-                        onPress={() => setFullscreenImage(att.url)}
-                        activeOpacity={0.85}
-                        style={{ marginBottom: m.content ? 6 : 0 }}
-                      >
-                        <Image
-                          source={{ uri: att.url }}
-                          style={[
-                            styles.attachmentImage,
-                            { aspectRatio: Math.min(Math.max(aspectRatio, 0.5), 2) },
-                          ]}
-                          resizeMode="cover"
-                        />
-                      </TouchableOpacity>
-                    );
-                  })}
-                  {/* Deleted: muted italic tombstone (OpenChat-q9h) */}
-                  {m.deletedAt
-                    ? <Text style={{ color: isOwn ? ownTint(0.55) : c.textMetadata, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
-                    : (!!m.content && (
-                        isGroup
-                          ? <Text style={{ fontSize: 16 }}>
-                              {renderContentWithMentions(
-                                m.content,
-                                mentionableParticipants,
-                                isOwn ? c.bubbleOwnText : c.bubbleOtherText,
-                                scheme
-                              )}
-                            </Text>
-                          : <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 16 }}>{m.content}</Text>
-                      ))
-                  }
-                  <View style={styles.bubbleFooter}>
-                    <Text style={{ color: isOwn ? ownTint(0.7) : c.textMetadata, fontSize: 10 }}>
-                      {failed ? 'Failed to send' : formatTime(m.createdAt)}
-                    </Text>
-                    {/* Edited tag (OpenChat-q9h) */}
-                    {!!(m.editedAt && !m.deletedAt) && (
-                      <Text style={{ color: isOwn ? ownTint(0.6) : c.textMetadata, fontSize: 10, marginLeft: 4, fontStyle: 'italic' }}>edited</Text>
-                    )}
-                    {/* Tick marks for own DM messages (OpenChat-0nj). Only shown
-                        after the local-optimistic id is replaced by a real server id. */}
-                    {isOwn && !isGroup && !failed && !m.id.startsWith('local-') && (() => {
-                      const tick = getTickState(m);
-                      if (tick === 'read') {
-                        return <Text style={{ color: scheme === 'dark' ? '#b3541e' : '#e08b5c', fontSize: 10, marginLeft: 3 }}>✓✓</Text>;
-                      }
-                      if (tick === 'delivered') {
-                        return <Text style={{ color: ownTint(0.6), fontSize: 10, marginLeft: 3 }}>✓✓</Text>;
-                      }
-                      return <Text style={{ color: ownTint(0.5), fontSize: 10, marginLeft: 3 }}>✓</Text>;
-                    })()}
-                  </View>
-                </TouchableOpacity>
-                {/* Reactions bar below bubble (OpenChat-7bd) */}
-                {!!(m.reactions && m.reactions.length > 0) && (
-                  <ReactionsBar reactions={m.reactions!} isOwn={isOwn} onToggle={(emoji) => void handleReact(m.id, emoji)} />
-                )}
-                {/* Link preview cards below bubble (OpenChat-hq2) */}
-                {!!(m.linkPreviews && m.linkPreviews.length > 0) && !m.deletedAt && m.linkPreviews.map((preview) => (
-                  <LinkPreviewCard
-                    key={preview.url}
-                    preview={preview}
-                    isOwn={isOwn}
-                    scheme={scheme}
-                  />
-                ))}
-                </View>{/* end column wrapper */}
-              </View>
-            );
-          }}
+              )}
+            />
+          )}
         />
         {unreadCount > 0 && !isAtBottom && (
           <NewMessagesPill count={unreadCount} onPress={handlePillPress} />

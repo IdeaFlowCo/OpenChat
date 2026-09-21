@@ -1,6 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
+import { legacyEmailProjection } from '../privacy/legacyEmailCompat.js';
 import { validateToken, AuthUser } from '../middleware/auth.js';
 import { sendPushToUser } from '../services/push.js';
 import { processLinkPreviews } from '../services/linkPreview.js';
@@ -302,7 +303,7 @@ export function setupChatSocket(io: Server): void {
           REMOVE m._created
           WITH c, m, sender, wasCreated
           MATCH (p:User)-[:PARTICIPATES_IN]->(c)
-          RETURN m { .*, sender: sender { .id, .name, .avatarUrl } } AS message,
+          RETURN m { .*, sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} } } AS message,
                  collect(DISTINCT p.id) AS participantIds,
                  wasCreated
         `, {

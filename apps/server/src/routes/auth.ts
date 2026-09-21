@@ -5,6 +5,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { OAuth2Client, TokenPayload } from 'google-auth-library';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { getDriver } from '../db.js';
+import { legacyEmailProjection } from '../privacy/legacyEmailCompat.js';
 import { requireAuth, AuthUser } from '../middleware/auth.js';
 import { parseCorsOrigins } from '../config/cors.js';
 import {
@@ -664,7 +665,7 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
         ORDER BY m.createdAt ASC
         RETURN collect(m {
           .*,
-          sender: sender { .id, .name, .avatarUrl, .isBot }
+          sender: sender { .id, .name, .avatarUrl, .isBot, ${legacyEmailProjection('sender')} }
         }) AS messages
       }
       CALL {

@@ -1,3 +1,5 @@
+import { legacyEmailProjection } from '../privacy/legacyEmailCompat.js';
+
 const visibleConversationPredicate = `
   WHERE NOT (
     c.type = 'direct'
@@ -24,7 +26,7 @@ export const CONVERSATIONS_QUERY = `
   CALL {
     WITH c
     MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-    RETURN collect({user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
+    RETURN collect({user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot, ${legacyEmailProjection('participant')}}, role: rel.role}) AS participants
   }
   CALL {
     WITH c

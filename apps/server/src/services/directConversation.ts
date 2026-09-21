@@ -1,6 +1,7 @@
 import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
+import { legacyEmailProjection } from '../privacy/legacyEmailCompat.js';
 import { joinUserSocketsToConversation } from '../websocket/chatHandler.js';
 
 export interface DirectConversationResult {
@@ -113,7 +114,7 @@ export async function ensureDirectConversation(
       ON CREATE SET rel.joinedAt = datetime($now),
                     rel.role = CASE WHEN participantId = $userId THEN 'owner' ELSE 'member' END
       WITH c, created,
-           collect({user: user {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
+           collect({user: user {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot, ${legacyEmailProjection('user')}}, role: rel.role}) AS participants
       RETURN c { .*, participants: participants } AS conversation, created
       `,
       {
