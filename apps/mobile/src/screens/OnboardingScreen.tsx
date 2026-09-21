@@ -41,6 +41,7 @@ import { getColors } from '../theme/colors';
 import { markOnboardingComplete } from '../services/onboarding';
 import { registerForPushNotificationsAsync } from '../services/notifications';
 import { api } from '../api/client';
+import { useEntryContext } from '../contexts/EntryContext';
 import type { RootStackParamList } from '../navigation/types';
 
 // ── AsyncStorage key shared with PushSoftAsk so we never double-prompt ────────
@@ -63,10 +64,13 @@ export function OnboardingScreen({ navigation }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const { currentUser, updateProfile } = useChat();
+  const { entryIntent } = useEntryContext();
+
+  const isInvited = !!entryIntent;
 
   // ── step state ───────────────────────────────────────────────────────────
-  const [step, setStep] = useState(0);
-  const slideAnim = useRef(new Animated.Value(0)).current;
+  const [step, setStep] = useState(isInvited ? 1 : 0);
+  const slideAnim = useRef(new Animated.Value(isInvited ? -SCREEN_W : 0)).current;
 
   // ── step 1 state ─────────────────────────────────────────────────────────
   const [name, setName] = useState(currentUser?.name ?? '');
@@ -108,7 +112,7 @@ export function OnboardingScreen({ navigation }: Props) {
     } catch {
       /* non-fatal */
     }
-    navigation.replace('Conversations');
+    navigation.replace('Main');
   }, [navigation]);
 
   // ── avatar pick (step 1) ──────────────────────────────────────────────────
@@ -196,8 +200,12 @@ export function OnboardingScreen({ navigation }: Props) {
     } finally {
       setSavingProfile(false);
     }
-    goToStep(2);
-  }, [avatarUri, avatarMime, avatarSize, name, updateProfile, goToStep]);
+    if (isInvited) {
+      finish();
+    } else {
+      goToStep(2);
+    }
+  }, [avatarUri, avatarMime, avatarSize, name, updateProfile, goToStep, isInvited, finish]);
 
   // ── notifications (step 2) ────────────────────────────────────────────────
 
@@ -233,7 +241,7 @@ export function OnboardingScreen({ navigation }: Props) {
             avatarUri={avatarUri}
             onPickAvatar={pickAvatar}
             saving={savingProfile}
-            onSkip={() => goToStep(2)}
+            onSkip={() => isInvited ? finish() : goToStep(2)}
             onSave={saveProfile}
           />
         );

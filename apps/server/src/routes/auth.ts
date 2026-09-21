@@ -605,7 +605,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
   try {
     const result = await session.run(`
       MATCH (u:User {id: $userId})
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .lastSeenAt, .avatarUrl, .isBot,
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .lastSeenAt, .avatarUrl, .isBot, .onboardedAt,
         discoveryMode: coalesce(u.discoveryMode, 'name') } AS user
     `, { userId });
 
@@ -770,6 +770,11 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
           conversationId: CASE WHEN match.status = 'connected' THEN match.conversationId ELSE null END
         } END) AS agentMatches
       }
+      CALL {
+        WITH u
+        OPTIONAL MATCH (u)-[:HAS_PENDING_ENTRY]->(pe:PendingEntry)
+        RETURN collect(pe { .id, .targetKind, .continuation, .status, .createdAt, .expiresAt }) AS pendingEntries
+      }
       RETURN u {
         .id,
         .email,
@@ -792,7 +797,8 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
       stories,
       intents,
       socialPreferences,
-      agentMatches
+      agentMatches,
+      pendingEntries
     `, { userId, since });
 
     if (result.records.length === 0) {
@@ -846,6 +852,7 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
         updatedAt: null,
       },
       agentMatches: ((toJS(record.get('agentMatches')) as unknown[] | undefined) ?? []).filter(Boolean),
+      pendingEntries: ((toJS(record.get('pendingEntries')) as unknown[] | undefined) ?? []).filter(Boolean),
     });
   } catch (error) {
     console.error('Error exporting account:', error);
@@ -1437,6 +1444,12 @@ router.delete('/me', requireAuth, async (req: Request, res: Response) => {
       await tx.run(`
         MATCH (u:User {id: $userId})-[:HAS_SOCIAL_PREFERENCE]->(pref:OpenChatSocialPreference)
         DETACH DELETE pref
+      `, { userId });
+
+      // 2f. Delete PendingEntry nodes
+      await tx.run(`
+        MATCH (u:User {id: $userId})-[:HAS_PENDING_ENTRY]->(pe:PendingEntry)
+        DETACH DELETE pe
       `, { userId });
 
       // 3. Delete the User node (and all its relationships).

@@ -36,9 +36,12 @@ import { hasCompletedOnboarding } from './src/services/onboarding';
 // Deep-link router (OpenChat-84u.1) — handles openchat:// scheme + Universal
 // Links to chat.globalbr.ai/{i,u}/<id>. Stashes the intent if unauthed so
 // post-OAuth replay lands the user on the right screen.
-import { installDeepLinkHandling, resumePendingIntent } from './src/services/deepLinks';
+import { EntryProvider } from './src/contexts/EntryContext';
+import { installDeepLinkHandling } from './src/services/deepLinks';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
+
+import { PersonEntryScreen } from './src/screens/PersonEntryScreen';
 
 // Init crash reporting FIRST so even early-boot errors reach Sentry (OpenChat-7um).
 // No-op if EXPO_PUBLIC_SENTRY_DSN is unset.
@@ -199,6 +202,11 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         name="GroupInvitePreview"
         component={GroupInvitePreviewScreen}
         options={{ title: 'Join Group', presentation: 'modal' }}
+      />
+      <ChatsStack.Screen
+        name="PersonEntry"
+        component={PersonEntryScreen}
+        options={{ title: 'Add Contact', presentation: 'modal' }}
       />
       {/* Forward picker (OpenChat-hhc) */}
       <ChatsStack.Screen
@@ -526,6 +534,8 @@ type RootAuthStack = {
 };
 const RootStack = createNativeStackNavigator<RootAuthStack>();
 
+import { EntryRouter } from './src/navigation/EntryRouter';
+
 function Shell() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -568,17 +578,6 @@ function Shell() {
     return dispose;
   }, []);
 
-  // Resume any pending deep-link intent the moment the user becomes
-  // authenticated AND onboarded. Covers the canonical use case: unsigned-in
-  // user taps a share/invite link, lands on Login, OAuth → here.
-  useEffect(() => {
-    if (!isAuthed) return;
-    if (onboardingChecked && !onboardingDone) return;
-    // Small delay so navigation has a chance to settle.
-    const t = setTimeout(() => { void resumePendingIntent(); }, 300);
-    return () => clearTimeout(t);
-  }, [isAuthed, onboardingChecked, onboardingDone]);
-
   const baseNav = scheme === 'dark' ? DarkTheme : DefaultTheme;
   const navTheme = {
     ...baseNav,
@@ -600,6 +599,7 @@ function Shell() {
       />
       <OfflineBanner />
       <PushSoftAsk isAuthed={isAuthed && onboardingDone} />
+      <EntryRouter />
       {/* In-app banner for messages arriving in a DIFFERENT conversation.
           Matches iMessage/WhatsApp/Signal pattern — when you're in app but
           not viewing the recipient chat, a small card slides down at the

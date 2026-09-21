@@ -102,6 +102,17 @@ export async function initDatabase(): Promise<void> {
       FOR (u:User) ON (u.phoneNumberHash)
     `);
 
+    // Pending entries (OpenChat-invite-onboarding)
+    await session.run(`
+      CREATE CONSTRAINT pending_entry_id IF NOT EXISTS
+      FOR (pe:PendingEntry) REQUIRE pe.id IS UNIQUE
+    `);
+
+    await session.run(`
+      CREATE INDEX pending_entry_expires_at IF NOT EXISTS
+      FOR (pe:PendingEntry) ON (pe.expiresAt)
+    `);
+
     console.log('Database constraints and indexes initialized');
   } finally {
     await session.close();

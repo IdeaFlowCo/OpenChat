@@ -20,6 +20,7 @@ export type TabParamList = {
 export type RootStackParamList = {
   Login: undefined;
   Onboarding: undefined;
+  Main: undefined;
   Conversations: undefined;
   Chat: { conversationId: string; lane?: 'chat' | 'context'; entryId?: string };
   NewConversation: undefined;
@@ -41,6 +42,7 @@ export type RootStackParamList = {
   GroupInvite: { conversationId: string };
   /** Group invite preview — shown after scanning a QR or opening an invite link (OpenChat-240). */
   GroupInvitePreview: { token: string };
+  PersonEntry: { userId: string };
   /** Forward picker — select conversation to forward a message into (OpenChat-hhc). */
   ForwardPicker: { messageId: string };
   /** Contact profile — opened by tapping the DM header. */
