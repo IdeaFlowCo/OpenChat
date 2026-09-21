@@ -2,13 +2,18 @@ import type { Conversation, CurrentUser, User } from '../api/client';
 
 export const SELF_CONVERSATION_TITLE = 'Myself';
 
+export function getUserDisplayName(user?: Pick<User, 'name' | 'email'> | null): string {
+  return user?.name || user?.email?.split('@')[0] || 'OpenChat member';
+}
+
 type ConversationLike = Pick<Conversation, 'type'> & {
   title?: string | null;
-  participants?: Array<User | { user: User }>;
+  participants?: Array<User | { user?: User | null } | null>;
 };
 
-function participantUser(participant: User | { user: User }): User {
-  return 'user' in participant ? participant.user : participant;
+function participantUser(participant: User | { user?: User | null } | null): User | undefined {
+  if (!participant) return undefined;
+  return 'id' in participant ? participant : participant.user ?? undefined;
 }
 
 export function isSelfDirectConversation(
@@ -19,7 +24,7 @@ export function isSelfDirectConversation(
   return conversation.type === 'direct'
     && !!currentUser
     && participants.length > 0
-    && participants.every(participant => participantUser(participant).id === currentUser.userId);
+    && participants.every(participant => participantUser(participant)?.id === currentUser.userId);
 }
 
 export function getDirectConversationParticipant(
@@ -27,8 +32,9 @@ export function getDirectConversationParticipant(
   currentUser: CurrentUser | null
 ): User | undefined {
   const participants = conversation.participants ?? [];
-  return participants.map(participantUser).find(user => user.id !== currentUser?.userId)
-    ?? participants.map(participantUser).find(user => user.id === currentUser?.userId);
+  const users = participants.map(participantUser).filter((user): user is User => !!user?.id);
+  return users.find(user => user.id !== currentUser?.userId)
+    ?? users.find(user => user.id === currentUser?.userId);
 }
 
 export function getDirectConversationTitle(

@@ -13,6 +13,7 @@ import { getColors } from '../theme/colors';
 import type { Conversation, CurrentUser } from '../api/client';
 import {
   getDirectConversationParticipant,
+  getUserDisplayName,
   isSelfDirectConversation,
   SELF_CONVERSATION_TITLE,
 } from '../utils/conversationDisplay';
@@ -37,8 +38,8 @@ export function ChatEmptyState({ conversation, currentUser }: Props) {
   const avatarName = isGroup
     ? (conversation.title ||
         (conversation.participants || [])
-          .filter(p => p.user.id !== currentUser?.userId)
-          .map(p => p.user.name || p.user.email?.split('@')[0] || '?')
+          .filter(p => p?.user?.id !== currentUser?.userId)
+          .map(p => getUserDisplayName(p?.user))
           .slice(0, 2)
           .join(', '))
     : (other?.name || other?.email);

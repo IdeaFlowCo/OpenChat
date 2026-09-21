@@ -1,0 +1,26 @@
+name: Mobile chat regressions
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  group-open:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Mobile typecheck
+        run: npx tsc --noEmit -p apps/mobile/tsconfig.json
+      - name: Group opening and message loading
+        working-directory: apps/server
+        run: npx vitest run test/groupOpen.mobile.test.ts test/chatLoading.mobile.test.ts test/conversationDisplay.test.ts

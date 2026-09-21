@@ -71,6 +71,7 @@ import {
 import {
   getDirectConversationParticipant,
   getDirectConversationTitle,
+  getUserDisplayName,
   isSelfDirectConversation,
 } from '../utils/conversationDisplay';
 
@@ -120,7 +121,8 @@ function renderContentWithMentions(
   // Build a name → userId map for quick lookup.
   const nameMap = new Map<string, string | null>();
   for (const p of participants) {
-    const displayName = p.user.name || 'OpenChat member';
+    if (!p?.user?.id) continue;
+    const displayName = getUserDisplayName(p.user);
     const key = displayName.toLowerCase();
     nameMap.set(key, nameMap.has(key) ? null : p.user.id);
   }
@@ -263,7 +265,7 @@ export function ChatScreen({
   const headerHeight = useHeaderHeight();
   const kbOffset = embedded ? 0 : Platform.OS === 'ios' ? headerHeight : 0;
   const {
-    currentUser, conversations, messages, loadingMessages, isConnected,
+    currentUser, conversations, messages: activeMessages, loadingMessages, isConnected,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     setActiveConversation, sendMessage, editMessage, deleteMessage, toggleReaction,
     presence, typingByConv, reportTyping,
@@ -274,6 +276,12 @@ export function ChatScreen({
   const conversation = useMemo<Conversation | undefined>(
     () => conversations.find(cv => cv.id === conversationId),
     [conversations, conversationId]
+  );
+  // ChatProvider's shared buffer can still hold the previous thread during
+  // navigation. Never mount its media or trigger native feedback in this one.
+  const messages = useMemo(
+    () => activeMessages.filter(message => message.conversationId === conversationId),
+    [activeMessages, conversationId]
   );
 
   const [text, setText] = useState('');
@@ -448,12 +456,15 @@ export function ChatScreen({
   const other = conversation && !isGroup
     ? getDirectConversationParticipant(conversation, currentUser)
     : null;
+  const directPresenceText = other
+    ? presence.get(other.id)?.statusMessage || presence.get(other.id)?.status || other.presenceStatus || ''
+    : '';
 
   // Participants eligible for @-mention — all except self (OpenChat-0jy).
   const mentionableParticipants = useMemo(() => {
     if (!isGroup) return [];
     return (conversation?.participants || []).filter(
-      p => p.user.id !== currentUser?.userId
+      p => !!p?.user?.id && p.user.id !== currentUser?.userId
     );
   }, [isGroup, conversation?.participants, currentUser?.userId]);
   const headerTitle = useMemo(() => {
@@ -467,8 +478,8 @@ export function ChatScreen({
     }
     if (conversation.title) return conversation.title;
     const others = (conversation.participants || [])
-      .filter(p => p.user.id !== currentUser?.userId)
-      .map(p => p.user.name || p.user.email?.split('@')[0] || '?');
+      .filter(p => p?.user?.id !== currentUser?.userId)
+      .map(p => getUserDisplayName(p?.user));
     if (others.length === 0) return 'Group';
     if (others.length <= 2) return others.join(', ');
     return `${others[0]} +${others.length - 1}`;
@@ -476,7 +487,7 @@ export function ChatScreen({
 
   // Does this conversation include any bot participant? (OpenChat-ds3)
   const containsBot = useMemo(
-    () => conversation?.participants?.some(p => p.user.isBot) ?? false,
+    () => conversation?.participants?.some(p => p?.user?.isBot) ?? false,
     [conversation]
   );
 
@@ -510,7 +521,9 @@ export function ChatScreen({
 
   // "…" menu: mute controls + export (export moved out of the header per
   // 2026-09-02 feedback — the download icon crowded the contact name).
-  const showMuteMenu = () => {
+  // This callback is a header-effect dependency. Keep it stable so composer
+  // edits and the recorder's 100ms ticks do not rebuild the native header.
+  const showMuteMenu = useCallback(() => {
     const muteOptions = isMuted
       ? ['Unmute']
       : ['Mute for 1 hour', 'Mute for 8 hours', 'Mute until tomorrow', 'Mute always'];
@@ -563,7 +576,7 @@ export function ChatScreen({
         ]
       );
     }
-  };
+  }, [isMuted, muteConv, conversationId]);
 
   useLayoutEffect(() => {
     // Embedded in MasterDetailLayout — the parent owns the chrome.
@@ -605,7 +618,7 @@ export function ChatScreen({
             </View>
             {!isGroup && other && (
               <Text style={{ color: c.textSecondary, fontSize: 11 }} numberOfLines={1}>
-                {(presence.get(other.id)?.statusMessage) || presence.get(other.id)?.status || other.presenceStatus || ''}
+                {directPresenceText}
               </Text>
             )}
             {isGroup && (
@@ -649,7 +662,7 @@ export function ChatScreen({
         </View>
       ),
     });
-  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, conversationId, conversation?.participants?.length, other, presence, c.primary, c.textPrimary, c.textSecondary, c.textMuted, containsBot, enhanced, isMuted, showMuteMenu]);
+  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, conversationId, conversation?.participants?.length, other, directPresenceText, c.primary, c.textPrimary, c.textSecondary, c.textMuted, containsBot, enhanced, isMuted, showMuteMenu]);
 
   // Ink & Paper: own bubbles are ink-on-paper (light) / paper-on-ink (dark),
   // so translucent overlays inside them derive from the bubble text color
@@ -720,23 +733,28 @@ export function ChatScreen({
     setUnreadCount(c => c + grew);
   }, [messages, currentUser?.userId]);
 
-  // Haptic feedback on incoming messages (OpenChat-o8m).
-  // Fires when a new message arrives in this (active) conversation from
-  // someone other than the current user. Also marks the conversation as
-  // read so the other party's tick can advance to "read" (OpenChat-0nj).
-  const prevLenForHapticRef = useRef(0);
+  // Only an appended live message warrants native receive feedback. Opening
+  // a group hydrates history; pagination and edits are not incoming messages.
+  const receivedMessagesRef = useRef<{
+    conversationId: string;
+    latestId: string | undefined;
+    loading: boolean;
+  } | null>(null);
   useEffect(() => {
-    const len = messages.length;
-    if (len > prevLenForHapticRef.current) {
-      const latest = messages[len - 1];
-      if (latest && latest.senderId !== currentUser?.userId) {
-        hapticReceive();
-      }
-      // Mark read whenever new messages arrive while we're in the thread.
+    const latest = messages[messages.length - 1];
+    const previous = receivedMessagesRef.current;
+    receivedMessagesRef.current = { conversationId, latestId: latest?.id, loading: loadingMessages };
+    if (latest && (previous?.conversationId !== conversationId || previous.latestId !== latest.id)) {
       markConversationRead(conversationId);
     }
-    prevLenForHapticRef.current = len;
-  }, [messages, currentUser?.userId, conversationId, markConversationRead]);
+    if (!previous || previous.conversationId !== conversationId
+      || loadingMessages || previous.loading || !latest
+      || latest.id === previous.latestId) return;
+    // A replacement history page or removal of the last message is not an
+    // append. The former newest message must still exist in this thread.
+    if (previous.latestId && !messages.some(message => message.id === previous.latestId)) return;
+    if (latest.senderId && latest.senderId !== currentUser?.userId) hapticReceive();
+  }, [messages, loadingMessages, currentUser?.userId, conversationId, markConversationRead]);
 
   // When loadingOlderMessages transitions false→false (completed), flag the
   // next messages update as a prepend so the scroll/unread effect ignores it (OpenChat-vjc).
@@ -1178,9 +1196,7 @@ export function ChatScreen({
     if (otherTypers.length === 0) return '';
     if (!conversation) return 'typing…';
     const names = otherTypers
-      .map(uid => conversation.participants?.find(p => p.user.id === uid)?.user)
-      .filter(Boolean)
-      .map(u => (u!.name || u!.email?.split('@')[0] || '?'));
+      .map(uid => getUserDisplayName(conversation.participants?.find(p => p?.user?.id === uid)?.user));
     if (names.length === 1) return `${names[0]} is typing…`;
     if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
     return `${names.length} people are typing…`;
@@ -1241,7 +1257,7 @@ export function ChatScreen({
                   ? `${conversation?.participants?.length || 0} members`
                   : isSelfDM
                     ? 'Private notes and messages to yourself'
-                    : (other && (presence.get(other.id)?.statusMessage || presence.get(other.id)?.status || other.presenceStatus)) || ''}
+                    : directPresenceText}
               </Text>
             </View>
           </TouchableOpacity>
@@ -1352,7 +1368,7 @@ export function ChatScreen({
                   <View style={styles.avatarSlot}>
                     {item.isLastInRun && (
                       <Avatar
-                        name={m.sender?.name}
+                        name={getUserDisplayName(m.sender)}
                         email={m.sender?.email}
                         size={28}
                       />
@@ -1363,7 +1379,7 @@ export function ChatScreen({
                 <View style={{ flexDirection: 'column', maxWidth: '78%', alignItems: isOwn ? 'flex-end' : 'flex-start' }}>
                 <TouchableOpacity
                   activeOpacity={0.85}
-                  onLongPress={() => handleLongPress(m, isOwn, m.sender?.name || m.sender?.email || '')}
+                  onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
                   delayLongPress={350}
                   style={[
                     styles.bubble,
@@ -1401,7 +1417,7 @@ export function ChatScreen({
                         style={[styles.replyHeaderAuthor, { color: isOwn ? ownTint(0.85) : colorForUserId(m.replyTo?.senderId, scheme) }]}
                         numberOfLines={1}
                       >
-                        {m.replyTo?.sender?.name || m.replyTo?.sender?.email || 'Reply'}
+                        {getUserDisplayName(m.replyTo?.sender)}
                       </Text>
                       <Text
                         style={[styles.replyHeaderContent, { color: isOwn ? ownTint(0.7) : c.textSecondary }]}
@@ -1422,12 +1438,12 @@ export function ChatScreen({
                       {'↪ Forwarded from '}{m.forwardedFromSenderName || 'Unknown'}
                     </Text>
                   )}
-                  {item.showSender && m.sender && (
+                  {item.showSender && (
                     <Text style={[
                       styles.sender,
                       { color: isGroup ? senderColor : c.textSecondary },
                     ]}>
-                      {m.sender.name || m.sender.email}
+                      {getUserDisplayName(m.sender)}
                     </Text>
                   )}
                   {/* Attachments: audio (OpenChat-xxc) or image (OpenChat-6bg) */}

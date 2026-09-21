@@ -201,6 +201,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const messageLoadGenerationRef = useRef(0);
   // Pagination state (OpenChat-vjc)
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
@@ -610,11 +611,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const onProfileUpdated = (e: { userId: string; name?: string; statusMessage?: string }) => {
       // Update participant info in every conversation that has this user.
       setConversations(prev => prev.map(conv => {
-        if (!conv.participants?.some(p => p.user.id === e.userId)) return conv;
+        if (!conv.participants?.some(p => p?.user?.id === e.userId)) return conv;
         return {
           ...conv,
           participants: conv.participants.map(p =>
-            p.user.id === e.userId
+            p?.user?.id === e.userId
               ? { ...p, user: { ...p.user, name: e.name ?? p.user.name, statusMessage: e.statusMessage ?? p.user.statusMessage } }
               : p
           ),
@@ -703,6 +704,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // setActiveConversation: clears unread, joins/leaves rooms, loads messages.
   const setActiveConversation = useCallback((id: string | null) => {
+    // A late response must not finish a newer load, including A → back → A.
+    const generation = ++messageLoadGenerationRef.current;
     const prev = activeConvIdRef.current;
     if (prev && prev !== id) leaveConversation(prev);
 
@@ -721,7 +724,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setHasMoreMessages(false);
       api.getMessages(id)
         .then(({ messages: msgs, hasMore }) => {
-          if (activeConvIdRef.current === id) {
+          if (activeConvIdRef.current === id && messageLoadGenerationRef.current === generation) {
             setMessages(msgs);
             setHasMoreMessages(hasMore);
             // Advance sync cursor to the most recent message in this conversation.
@@ -734,9 +737,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           }
         })
         .catch(err => console.warn('[ChatContext] loadMessages failed:', err))
-        .finally(() => setLoadingMessages(false));
+        .finally(() => {
+          if (messageLoadGenerationRef.current === generation) setLoadingMessages(false);
+        });
     } else {
       setMessages([]);
+      setLoadingMessages(false);
       setHasMoreMessages(false);
     }
   }, []);
@@ -938,7 +944,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // Remove any direct conversation with the blocked user from the list.
     setConversations(prev => prev.filter(conv => {
       if (conv.type !== 'direct') return true;
-      return !conv.participants?.some(p => p.user.id === userId);
+      return !conv.participants?.some(p => p?.user?.id === userId);
     }));
   }, []);
 
@@ -1037,11 +1043,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // Also update the user's own participant entry in conversations.
     if (currentUser) {
       setConversations(prev => prev.map(conv => {
-        if (!conv.participants?.some(p => p.user.id === currentUser.userId)) return conv;
+        if (!conv.participants?.some(p => p?.user?.id === currentUser.userId)) return conv;
         return {
           ...conv,
           participants: conv.participants.map(p =>
-            p.user.id === currentUser.userId
+            p?.user?.id === currentUser.userId
               ? { ...p, user: { ...p.user, name: updated.name ?? p.user.name, statusMessage: updated.statusMessage ?? p.user.statusMessage, avatarUrl: updated.avatarUrl ?? p.user.avatarUrl, discoveryMode: updated.discoveryMode ?? p.user.discoveryMode } }
               : p
           ),
