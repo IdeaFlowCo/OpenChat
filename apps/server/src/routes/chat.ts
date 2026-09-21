@@ -5,6 +5,7 @@ import neo4j from 'neo4j-driver';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getDriver } from '../db.js';
+import { legacyEmailProjection } from '../privacy/legacyEmailCompat.js';
 import { requireAuth } from '../middleware/auth.js';
 import { resolveActor } from '../middleware/resolveActor.js';
 import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline, broadcastMessageToParticipants, fanoutPushForMessage } from '../websocket/chatHandler.js';
@@ -262,7 +263,7 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
         joinedAt: datetime($now),
         role: CASE WHEN pid = $userId THEN 'owner' ELSE 'member' END
       }]->(c)
-      WITH c, collect({user: u {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
+      WITH c, collect({user: u {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot, ${legacyEmailProjection('u')}}, role: rel.role}) AS participants
       RETURN c { .*, participants: participants } AS conversation
     `, {
       id: conversationId,
@@ -316,7 +317,7 @@ async function loadConversation(
     OPTIONAL MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
     WITH c, collect(
       CASE WHEN participant IS NULL THEN NULL
-      ELSE {user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}
+      ELSE {user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot, ${legacyEmailProjection('participant')}}, role: rel.role}
       END
     ) AS rawParticipants
     WITH c, [p IN rawParticipants WHERE p IS NOT NULL] AS participants
@@ -640,7 +641,7 @@ router.get('/conversations/:id', resolveActor, async (req: Request, res: Respons
     const result = await session.run(`
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $id})
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-      RETURN c, collect({user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot}, role: rel.role}) AS participants
+      RETURN c, collect({user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot, ${legacyEmailProjection('participant')}}, role: rel.role}) AS participants
     `, { userId, id });
 
     if (result.records.length === 0) {
@@ -683,7 +684,7 @@ router.get('/conversations/:id/export', requireAuth, async (req: Request, res: R
         WITH c
         MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
         RETURN collect({
-          user: participant { .id, .name, .avatarUrl, .isBot },
+          user: participant { .id, .name, .avatarUrl, .isBot, ${legacyEmailProjection('participant')} },
           role: rel.role,
           joinedAt: rel.joinedAt
         }) AS participants
@@ -703,7 +704,7 @@ router.get('/conversations/:id/export', requireAuth, async (req: Request, res: R
         }) AS rawReactions
         RETURN collect(m {
           .*,
-          sender: sender { .id, .name, .avatarUrl, .isBot },
+          sender: sender { .id, .name, .avatarUrl, .isBot, ${legacyEmailProjection('sender')} },
           reactions: [r IN rawReactions WHERE r.emoji IS NOT NULL]
         }) AS messages
       }
@@ -789,7 +790,7 @@ router.get('/conversations/:id/messages', resolveActor, async (req: Request, res
               id: reply.id,
               content: left(reply.content, 200),
               senderId: reply.senderId,
-              sender: { id: replySender.id, name: replySender.name },
+              sender: { id: replySender.id, name: replySender.name, ${legacyEmailProjection('replySender')} },
               messageType: reply.messageType
             }
           END AS replyTo
@@ -808,7 +809,7 @@ router.get('/conversations/:id/messages', resolveActor, async (req: Request, res
           RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors, kind: kind, href: href }) AS reactions
         }
         ${replyHydrate}
-        RETURN m { .*, sender: sender { .id, .name, .avatarUrl }, reactions: reactions, replyTo: replyTo } AS message
+        RETURN m { .*, sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} }, reactions: reactions, replyTo: replyTo } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
       `
@@ -823,7 +824,7 @@ router.get('/conversations/:id/messages', resolveActor, async (req: Request, res
           RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors, kind: kind, href: href }) AS reactions
         }
         ${replyHydrate}
-        RETURN m { .*, sender: sender { .id, .name, .avatarUrl }, reactions: reactions, replyTo: replyTo } AS message
+        RETURN m { .*, sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} }, reactions: reactions, replyTo: replyTo } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
       `;
@@ -1056,7 +1057,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       MATCH (p:User)-[:PARTICIPATES_IN]->(c)
       RETURN m {
         .*,
-        sender: sender { .id, .name, .avatarUrl },
+        sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} },
         replyTo: CASE
           WHEN reply IS NULL THEN NULL
           ELSE {
@@ -1329,7 +1330,7 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
         MATCH (sender:User {id: m.senderId})
         RETURN m {
           .id, .content, .conversationId, .senderId, .createdAt,
-          sender: sender { .id, .name, .avatarUrl, .isBot }
+          sender: sender { .id, .name, .avatarUrl, .isBot, ${legacyEmailProjection('sender')} }
         } AS message
         ORDER BY m.createdAt DESC
         LIMIT $limit
@@ -1393,7 +1394,7 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
         MATCH (c:Conversation {id: m.conversationId})
         RETURN m {
           .id, .content, .conversationId, .senderId, .createdAt,
-          sender: sender { .id, .name, .avatarUrl, .isBot },
+          sender: sender { .id, .name, .avatarUrl, .isBot, ${legacyEmailProjection('sender')} },
           conversationTitle: c.title,
           conversationType: c.type
         } AS message
@@ -1408,7 +1409,7 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
         CALL {
           WITH c
           MATCH (participant:User)-[:PARTICIPATES_IN]->(c)
-          RETURN collect(participant { .id, .name, .avatarUrl, .isBot })[0..3] AS participants
+          RETURN collect(participant { .id, .name, .avatarUrl, .isBot, ${legacyEmailProjection('participant')} })[0..3] AS participants
         }
         RETURN c {
           .id, .title, .type, .lastMessageAt, .lastMessagePreview,
@@ -1674,7 +1675,7 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
         .id, .content, .attachments, .conversationId,
         .forwardedFromMessageId, .forwardedFromSenderId, .forwardedFromSenderName
       } AS msg,
-      originalSender { .id, .name } AS sender
+      originalSender { .id, .name, ${legacyEmailProjection('originalSender')} } AS sender
     `, { sourceMessageId, userId });
 
     if (sourceResult.records.length === 0) {
@@ -1753,7 +1754,7 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
           c.lastMessagePreview = left($preview, 100)
       WITH c, m, forwarder
       MATCH (p:User)-[:PARTICIPATES_IN]->(c)
-      RETURN m { .*, sender: forwarder { .id, .name, .avatarUrl } } AS message,
+      RETURN m { .*, sender: forwarder { .id, .name, .avatarUrl, ${legacyEmailProjection('forwarder')} } } AS message,
              collect(DISTINCT p.id) AS participantIds
     `, {
       id: messageId,
@@ -2019,7 +2020,7 @@ router.patch('/messages/:id', resolveActor, async (req: Request, res: Response) 
       MATCH (m:Message {id: $messageId})
       MATCH (sender:User {id: m.senderId})
       SET m.content = $content, m.editedAt = datetime($now)
-      RETURN m { .*, sender: sender { .id, .name, .avatarUrl } } AS message
+      RETURN m { .*, sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} } } AS message
     `, { messageId, content: content.trim(), now });
 
     const message = toJS(result.records[0].get('message'));
@@ -2066,7 +2067,7 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
       SET m.content = 'Message deleted',
           m.deletedAt = datetime($now),
           m.attachments = null
-      RETURN m { .*, sender: sender { .id, .name, .avatarUrl } } AS message
+      RETURN m { .*, sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} } } AS message
     `, { messageId, now });
 
     const message = toJS(result.records[0].get('message'));
@@ -2408,7 +2409,7 @@ router.get('/messages/since', resolveActor, async (req: Request, res: Response) 
         WHERE emoji IS NOT NULL
         RETURN collect({ emoji: emoji, count: cnt, byMe: $userId IN reactors, kind: kind, href: href }) AS reactions
       }
-      RETURN m { .*, sender: sender { .id, .name, .avatarUrl }, reactions: reactions } AS message
+      RETURN m { .*, sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} }, reactions: reactions } AS message
       ORDER BY m.createdAt ASC
       LIMIT $cap
     `, {

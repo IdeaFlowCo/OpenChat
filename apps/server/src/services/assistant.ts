@@ -22,6 +22,7 @@ import type AnthropicType from '@anthropic-ai/sdk';
 import { nanoid } from 'nanoid';
 import neo4j from 'neo4j-driver';
 import { getDriver } from '../db.js';
+import { legacyEmailProjection } from '../privacy/legacyEmailCompat.js';
 import { broadcastMessageToParticipants } from '../websocket/chatHandler.js';
 import { processLinkPreviews } from '../services/linkPreview.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from './embeddings.js';
@@ -183,7 +184,7 @@ export async function persistMessage(
       )
       WITH c, m, sender, created
       MATCH (p:User)-[:PARTICIPATES_IN]->(c)
-      RETURN m { .*, sender: sender { .id, .name, .avatarUrl } } AS message,
+      RETURN m { .*, sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} } } AS message,
              collect(DISTINCT p.id) AS participantIds,
              created
       `,

@@ -23,6 +23,7 @@ import { ChatProvider, useChat } from './src/contexts/ChatContext';
 import { RecordingProvider } from './src/contexts/RecordingContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import { SocialExperienceProvider, useSocialExperience } from './src/contexts/SocialExperienceContext';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { UpdateBanner } from './src/components/UpdateBanner';
 import {
   configureNotificationHandlers,
@@ -680,7 +681,12 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <ShellWithBackground />
+        {/* Inside ThemeProvider so the fallback is themed; outside everything
+            else so a throw in ChatProvider/navigation/any screen degrades to a
+            recoverable screen instead of terminating the app (openchat-dwk). */}
+        <ErrorBoundary scope="app-root">
+          <ShellWithBackground />
+        </ErrorBoundary>
       </ThemeProvider>
     </SafeAreaProvider>
   );
