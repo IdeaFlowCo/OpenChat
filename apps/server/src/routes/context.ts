@@ -21,8 +21,7 @@ function requireFeatureFlag(req: Request, res: Response, next: Function) {
 }
 
 // All context routes use the feature flag and actor resolution
-router.use(requireFeatureFlag);
-router.use(resolveActor);
+router.use('/conversations/:conversationId/context', requireFeatureFlag, resolveActor);
 
 router.get('/conversations/:conversationId/context', async (req: Request, res: Response) => {
   const userId = req.user!.userId;
