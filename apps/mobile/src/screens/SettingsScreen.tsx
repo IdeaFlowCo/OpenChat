@@ -17,9 +17,10 @@ import Constants from 'expo-constants';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme, ThemePref } from '../contexts/ThemeContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useChat } from '../contexts/ChatContext';
 import { useSocialExperience, type LayoutPreference } from '../contexts/SocialExperienceContext';
-import { api, ExportRangeKey, OPENCHAT_URL } from '../api/client';
+import { api, clearSession, ExportRangeKey, OPENCHAT_URL } from '../api/client';
 import { buildAgentSetupBlob } from '../utils/agentSetupBlob';
 import { getColors } from '../theme/colors';
 import type { NavProp } from '../navigation/types';
@@ -280,10 +281,35 @@ export function SettingsScreen() {
     : Updates.isEmbeddedLaunch
       ? 'Bundled JS (no OTA applied)'
       : `OTA bundle ${Updates.updateId ? Updates.updateId.slice(0, 8) : 'active'}`;
+  const buildDate = (Constants.expoConfig?.extra as { buildDate?: string } | undefined)?.buildDate;
   const provenanceSummary =
     Platform.OS === 'web'
-      ? `Web · v${appVersion}`
-      : `v${appVersion} (build ${buildNumber}) · channel ${updateChannel}`;
+      ? `Web · v${appVersion}${buildDate ? ` · ${buildDate}` : ''}`
+      : `v${appVersion} (build ${buildNumber})${buildDate ? ` · ${buildDate}` : ''} · channel ${updateChannel}`;
+
+  const handleClearLocalData = () => {
+    Alert.alert(
+      'Clear Local Data',
+      'This will clear cached messages, local settings, and credentials from this device, and return you to the login screen. Your account and messages on the server are safe.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear & Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await AsyncStorage.clear();
+              await clearSession();
+              signOut();
+            } catch (err) {
+              console.warn('Failed to clear storage:', err);
+              signOut();
+            }
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <ScrollView
@@ -821,6 +847,21 @@ export function SettingsScreen() {
             <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
           </TouchableOpacity>
 
+          {/* Clear local data & cache */}
+          <TouchableOpacity
+            style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+            onPress={handleClearLocalData}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Clear local data &amp; cache</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                Clears device sandbox storage and cached session without deleting your server account
+              </Text>
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+
           {/* Delete account (OpenChat-nhy) */}
           <TouchableOpacity
             style={styles.optionRow}
@@ -847,6 +888,7 @@ export function SettingsScreen() {
       <Text style={[styles.versionFooter, { color: c.textMetadata }]}>
         OpenChat mobile · v{Constants.expoConfig?.version ?? '?'}
         {Platform.OS !== 'web' && ` (${Constants.expoConfig?.ios?.buildNumber ?? Constants.expoConfig?.android?.versionCode ?? '?'})`}
+        {buildDate ? ` · Built ${buildDate}` : ''}
       </Text>
 
       <ExportSheet

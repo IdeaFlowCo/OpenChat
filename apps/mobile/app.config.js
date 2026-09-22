@@ -55,7 +55,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.jacobcole.openchat',
-      buildNumber: '1',
+      buildNumber: '2001',
       // NOTE — associatedDomains intentionally commented out for now.
       // Adding it requires enabling the 'Associated Domains' capability on
       // the App ID via the Apple Developer Portal (or ASC API). Without
@@ -109,6 +109,7 @@ module.exports = {
       eas: {
         projectId: 'fc828863-4fa4-4b62-97f6-8c00ce1dffe3',
       },
+      buildDate: '2026-09-22',
     },
 
     // baseUrl ONLY set during web exports (when IS_WEB_BUILD=1). Native
