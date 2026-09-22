@@ -12,7 +12,7 @@
  */
 
 import * as ImagePicker from 'expo-image-picker';
-import { uploadAsync, FileSystemUploadType } from 'expo-file-system/legacy';
+import { uploadAsync, getInfoAsync, FileSystemUploadType } from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { api, Attachment } from '../api/client';
 
@@ -89,23 +89,35 @@ export async function pickImage(): Promise<PickedAsset | null> {
  * Returns an Attachment descriptor ready to embed in a message.
  */
 export async function uploadImage(asset: PickedAsset): Promise<Attachment> {
+  let sizeBytes = asset.fileSize;
+  let webBlob: Blob | undefined;
+
+  // Resolve true file size to ensure the presigned URL signature perfectly
+  // matches the payload we upload. expo-image-picker can omit fileSize on iOS.
+  if (Platform.OS === 'web') {
+    const res = await fetch(asset.uri);
+    webBlob = await res.blob();
+    sizeBytes = webBlob.size;
+  } else if (!sizeBytes) {
+    const fileInfo = await getInfoAsync(asset.uri);
+    if (fileInfo.exists && 'size' in fileInfo && typeof fileInfo.size === 'number') {
+      sizeBytes = fileInfo.size;
+    }
+  }
+
   // 1. Get presigned PUT URL from the server
   const { putUrl, getUrl } = await api.presignAttachment({
     filename: asset.fileName,
     mimeType: asset.mimeType,
-    sizeBytes: asset.fileSize || 1, // fallback: server cap will still protect
+    sizeBytes: sizeBytes || 1,
   });
 
   // 2. Upload to the presigned URL
-  if (Platform.OS === 'web') {
-    // On web expo-image-picker returns a blob URL or data URL.
-    // Fetch it as a blob and PUT.
-    const res = await fetch(asset.uri);
-    const blob = await res.blob();
+  if (Platform.OS === 'web' && webBlob) {
     const putRes = await fetch(putUrl, {
       method: 'PUT',
       headers: { 'Content-Type': asset.mimeType },
-      body: blob,
+      body: webBlob,
     });
     if (!putRes.ok) {
       throw new Error(`Upload failed: ${putRes.status}`);
@@ -149,7 +161,6 @@ export async function uploadAudio(
   let sizeBytes = 1;
   if (Platform.OS !== 'web') {
     try {
-      const { getInfoAsync } = await import('expo-file-system/legacy');
       const info = await getInfoAsync(localUri);
       if (info.exists && 'size' in info && typeof info.size === 'number') {
         sizeBytes = info.size;
