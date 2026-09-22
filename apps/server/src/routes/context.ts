@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { getDriver } from '../db.js';
 import { resolveActor } from '../middleware/resolveActor.js';
 import { isContextLaneEnabled } from '../config/features.js';
@@ -12,7 +12,7 @@ import {
 
 const router = Router();
 
-function requireFeatureFlag(req: Request, res: Response, next: Function) {
+function requireFeatureFlag(req: Request, res: Response, next: NextFunction) {
   if (!isContextLaneEnabled()) {
     res.status(404).json({ error: 'Context Lane feature is not enabled' });
     return;
