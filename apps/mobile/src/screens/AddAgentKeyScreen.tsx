@@ -8,6 +8,8 @@
 import { useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -76,10 +78,15 @@ export function AddAgentKeyScreen() {
     const curlSnippet = `curl -H "Authorization: Bearer ${created.key}" \\\n  ${OPENCHAT_URL}/api/chat/conversations`;
 
     return (
-      <ScrollView
-        style={{ flex: 1, backgroundColor: c.background }}
-        contentContainerStyle={styles.confirmContainer}
+      <KeyboardAvoidingView 
+        style={{ flex: 1, backgroundColor: c.background }} 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.confirmContainer}
+          keyboardDismissMode="interactive"
+        >
         <Text style={[styles.confirmTitle, { color: c.textPrimary }]}>Key created!</Text>
         <Text style={[styles.confirmHint, { color: c.textSecondary }]}>
           Copy your key now. You can view it again from Agent Keys in Settings.
@@ -128,15 +135,21 @@ export function AddAgentKeyScreen() {
           <Text style={[styles.btnText, { color: c.primary }]}>Done</Text>
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoidingView>
     );
   }
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: c.background }}
-      contentContainerStyle={styles.container}
-      keyboardShouldPersistTaps="handled"
+    <KeyboardAvoidingView 
+      style={{ flex: 1, backgroundColor: c.background }} 
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+      >
       {/* Name */}
       <Text style={[styles.label, { color: c.textSecondary }]}>KEY NAME *</Text>
       <TextInput
@@ -194,6 +207,7 @@ export function AddAgentKeyScreen() {
         <Text style={[styles.submitText, { color: c.onPrimary }]}>{submitting ? 'Creating…' : 'Create key'}</Text>
       </TouchableOpacity>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

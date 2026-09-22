@@ -199,7 +199,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
 
   return (
     <KeyboardAvoidingView style={[styles.root, { backgroundColor: c.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
         {embedded && onClose && (
           <TouchableOpacity onPress={onClose} accessibilityLabel="Close My Agent" style={styles.closeButton}>
             <AppIcon name="x" color={c.textSecondary} size={20} />

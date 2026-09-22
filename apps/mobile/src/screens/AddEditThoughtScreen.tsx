@@ -104,6 +104,7 @@ export function AddEditThoughtScreen() {
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
       >
         {/* Text input */}
         <View style={[styles.inputContainer, { backgroundColor: c.surface, borderColor: c.border }]}>
