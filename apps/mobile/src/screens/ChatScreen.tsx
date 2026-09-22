@@ -1546,6 +1546,8 @@ export function ChatScreen({
           ref={listRef}
           data={rows}
           keyExtractor={r => r.key}
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 12, gap: 8 }}
           onScroll={handleScroll}
           // Throttle scroll events to ~60fps; high enough to catch the

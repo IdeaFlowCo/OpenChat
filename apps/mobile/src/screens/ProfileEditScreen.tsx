@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
@@ -146,11 +147,15 @@ export function ProfileEditScreen() {
   }, [avatarChanged, avatarMime, avatarSize, avatarUri, currentUser?.avatarUrl, discoveryChanged, discoveryMode, name, profileStatusText, profileStatusEmoji, updateProfile, navigation]);
 
   return (
-    <ScrollView
-      style={{ backgroundColor: c.background }}
-      contentContainerStyle={styles.root}
-      keyboardShouldPersistTaps="handled"
+    <KeyboardAvoidingView 
+      style={{ flex: 1, backgroundColor: c.background }} 
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <ScrollView
+        contentContainerStyle={styles.root}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+      >
       <View style={styles.avatarRow}>
         <Avatar
           name={name}
@@ -251,14 +256,15 @@ export function ProfileEditScreen() {
         )}
       </TouchableOpacity>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
-    flex: 1,
     paddingHorizontal: 16,
     paddingTop: 24,
+    paddingBottom: 40,
   },
   section: {
     marginBottom: 24,

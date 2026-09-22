@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  KeyboardAvoidingView,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -171,11 +173,15 @@ export function GroupSettingsScreen() {
   const participants = conversation.participants || [];
 
   return (
-    <View style={[styles.root, { backgroundColor: c.background }]}>
+    <KeyboardAvoidingView 
+      style={[styles.root, { backgroundColor: c.background }]} 
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <FlatList
         data={participants}
         keyExtractor={p => p.user.id}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         ListHeaderComponent={
           <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
             <Text style={[styles.section, { color: c.textSecondary }]}>GROUP NAME</Text>
@@ -348,7 +354,7 @@ export function GroupSettingsScreen() {
           </View>
         }
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

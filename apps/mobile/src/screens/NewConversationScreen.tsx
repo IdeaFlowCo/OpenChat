@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  KeyboardAvoidingView,
   Platform,
   StyleSheet,
   Text,
@@ -162,7 +163,10 @@ export function NewConversationScreen() {
   }, [currentUser?.openUserDirectoryEnabled, mode, selected.length, trimmedGroupTitle]);
 
   return (
-    <View style={[styles.root, { backgroundColor: c.background }]}>
+    <KeyboardAvoidingView 
+      style={[styles.root, { backgroundColor: c.background }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       {/* Mode toggle */}
       <View style={styles.modeRow}>
         {(['direct', 'group'] as Mode[]).map(m => {
@@ -254,7 +258,7 @@ export function NewConversationScreen() {
           // keyboardShouldPersistTaps lets you tap a result without first
           // dismissing. paddingBottom keeps the last row clear of the keyboard.
           automaticallyAdjustKeyboardInsets={Platform.OS === 'ios' ? true : undefined}
-          keyboardDismissMode="on-drag"
+          keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingBottom: 24 }}
           onEndReached={loadMore}
@@ -363,7 +367,7 @@ export function NewConversationScreen() {
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

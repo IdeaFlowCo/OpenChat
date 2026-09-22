@@ -11,6 +11,8 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  KeyboardAvoidingView,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -125,7 +127,10 @@ export function ForwardPickerScreen() {
   }, [c, currentUser, handleSelect]);
 
   return (
-    <View style={[styles.root, { backgroundColor: c.background }]}>
+    <KeyboardAvoidingView 
+      style={[styles.root, { backgroundColor: c.background }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       {/* Search bar */}
       <View style={[styles.searchWrap, { backgroundColor: c.surface, borderColor: c.border }]}>
         <TextInput
@@ -149,6 +154,8 @@ export function ForwardPickerScreen() {
         data={filtered}
         keyExtractor={conv => conv.id}
         renderItem={renderItem}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingVertical: 4 }}
         ListEmptyComponent={
           <View style={styles.empty}>
@@ -158,7 +165,7 @@ export function ForwardPickerScreen() {
           </View>
         }
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
