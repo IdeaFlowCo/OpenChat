@@ -110,7 +110,7 @@ interface ChatContextValue {
   blockUser: (userId: string) => Promise<void>;
 
   // Presence & typing
-  presence: Map<string, { status: string; statusMessage?: string }>;
+  presence: Map<string, { status: string; statusMessage?: string; profileStatus?: { text?: string | null; emoji?: string | null } | null }>;
   typingByConv: Map<string, Set<string>>;
   reportTyping: (conversationId: string, isTyping: boolean) => void;
 
@@ -139,7 +139,7 @@ interface ChatContextValue {
   markConversationRead: (conversationId: string) => void;
 
   // Profile editing (OpenChat-tml)
-  updateProfile: (fields: { name?: string; statusMessage?: string; avatarUrl?: string; discoveryMode?: 'name' | 'email_only' | 'hidden' }) => Promise<void>;
+  updateProfile: (fields: { name?: string; statusMessage?: string; avatarUrl?: string; discoveryMode?: 'name' | 'email_only' | 'hidden'; profileStatus?: { text?: string | null; emoji?: string | null } | null }) => Promise<void>;
 
   // Reconnect catch-up (OpenChat-qz0)
   // convIds that received new messages during a recent reconnect catch-up.
@@ -219,7 +219,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
 
-  const [presence, setPresence] = useState<Map<string, { status: string; statusMessage?: string }>>(new Map());
+  const [presence, setPresence] = useState<Map<string, { status: string; statusMessage?: string; profileStatus?: { text?: string | null; emoji?: string | null } | null }>>(new Map());
   const [typingByConv, setTypingByConv] = useState<Map<string, Set<string>>>(new Map());
   const [unreadByConv, setUnreadByConv] = useState<Map<string, number>>(new Map());
   const [matches, setMatches] = useState<Map<string, AgentMatch>>(new Map());
@@ -619,7 +619,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     };
 
     // user:profile-updated — someone in a shared conv updated their name/status (OpenChat-tml)
-    const onProfileUpdated = (e: { userId: string; name?: string; statusMessage?: string }) => {
+    const onProfileUpdated = (e: { userId: string; name?: string; statusMessage?: string; profileStatus?: { text?: string | null; emoji?: string | null } | null }) => {
       // Update participant info in every conversation that has this user.
       setConversations(prev => prev.map(conv => {
         if (!conv.participants?.some(p => p?.user?.id === e.userId)) return conv;
@@ -627,7 +627,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           ...conv,
           participants: conv.participants.map(p =>
             p?.user?.id === e.userId
-              ? { ...p, user: { ...p.user, name: e.name ?? p.user.name, statusMessage: e.statusMessage ?? p.user.statusMessage } }
+              ? { ...p, user: { ...p.user, name: e.name ?? p.user.name, statusMessage: e.statusMessage ?? p.user.statusMessage, profileStatus: e.profileStatus !== undefined ? e.profileStatus : p.user.profileStatus } }
               : p
           ),
         };
@@ -1049,7 +1049,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Update own profile (OpenChat-tml).
-  const updateProfile = useCallback(async (fields: { name?: string; statusMessage?: string; avatarUrl?: string; discoveryMode?: 'name' | 'email_only' | 'hidden' }) => {
+  const updateProfile = useCallback(async (fields: { name?: string; statusMessage?: string; avatarUrl?: string; discoveryMode?: 'name' | 'email_only' | 'hidden'; profileStatus?: { text?: string | null; emoji?: string | null } | null }) => {
     const updated = await api.updateProfile(fields);
     // Optimistically patch currentUser in memory so the UI sees the change immediately.
     setCurrentUser(prev => {
@@ -1069,7 +1069,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           ...conv,
           participants: conv.participants.map(p =>
             p?.user?.id === currentUser.userId
-              ? { ...p, user: { ...p.user, name: updated.name ?? p.user.name, statusMessage: updated.statusMessage ?? p.user.statusMessage, avatarUrl: updated.avatarUrl ?? p.user.avatarUrl, discoveryMode: updated.discoveryMode ?? p.user.discoveryMode } }
+              ? { ...p, user: { ...p.user, name: updated.name ?? p.user.name, statusMessage: updated.statusMessage ?? p.user.statusMessage, avatarUrl: updated.avatarUrl ?? p.user.avatarUrl, discoveryMode: updated.discoveryMode ?? p.user.discoveryMode, profileStatus: updated.profileStatus !== undefined ? updated.profileStatus : p.user.profileStatus } }
               : p
           ),
         };

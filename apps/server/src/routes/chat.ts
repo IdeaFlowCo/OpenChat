@@ -266,7 +266,7 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
         joinedAt: datetime($now),
         role: CASE WHEN pid = $userId THEN 'owner' ELSE 'member' END
       }]->(c)
-      WITH c, collect({user: u {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot, ${legacyEmailProjection('u')}}, role: rel.role}) AS participants
+      WITH c, collect({user: u {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END, .lastSeenAt, .isBot, ${legacyEmailProjection('u')}}, role: rel.role}) AS participants
       RETURN c { .*, participants: participants } AS conversation
     `, {
       id: conversationId,
@@ -320,7 +320,7 @@ async function loadConversation(
     OPTIONAL MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
     WITH c, collect(
       CASE WHEN participant IS NULL THEN NULL
-      ELSE {user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot, ${legacyEmailProjection('participant')}}, role: rel.role}
+      ELSE {user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, profileStatus: CASE WHEN participant.profileStatusText IS NOT NULL OR participant.profileStatusEmoji IS NOT NULL THEN { text: participant.profileStatusText, emoji: participant.profileStatusEmoji, updatedAt: participant.profileStatusUpdatedAt } ELSE null END, .lastSeenAt, .isBot, ${legacyEmailProjection('participant')}}, role: rel.role}
       END
     ) AS rawParticipants
     WITH c, [p IN rawParticipants WHERE p IS NOT NULL] AS participants
@@ -650,7 +650,7 @@ router.get('/conversations/:id', resolveActor, async (req: Request, res: Respons
     const result = await session.run(`
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $id})
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-      RETURN c, collect({user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot, ${legacyEmailProjection('participant')}}, role: rel.role}) AS participants
+      RETURN c, collect({user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, profileStatus: CASE WHEN participant.profileStatusText IS NOT NULL OR participant.profileStatusEmoji IS NOT NULL THEN { text: participant.profileStatusText, emoji: participant.profileStatusEmoji, updatedAt: participant.profileStatusUpdatedAt } ELSE null END, .lastSeenAt, .isBot, ${legacyEmailProjection('participant')}}, role: rel.role}) AS participants
     `, { userId, id });
 
     if (result.records.length === 0) {
@@ -1235,7 +1235,7 @@ router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
         RETURN u { .id,
           name: CASE WHEN u.name IS NULL OR trim(u.name) = '' OR u.name CONTAINS '@'
             THEN $fallbackName ELSE u.name END,
-          .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot,
+          .avatarUrl, .presenceStatus, .statusMessage, profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END, .lastSeenAt, .isBot,
           sharedConversations: CASE WHEN u.id = actor.id THEN 0
             ELSE COUNT { (u)-[:PARTICIPATES_IN]->(:Conversation)<-[:PARTICIPATES_IN]-(actor) } END
         } AS user
@@ -1451,7 +1451,7 @@ router.get('/search', resolveActor, async (req: Request, res: Response) => {
         RETURN u { .id,
           name: CASE WHEN u.name IS NULL OR trim(u.name) = '' OR u.name CONTAINS '@'
             THEN $fallbackName ELSE u.name END,
-          .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot,
+          .avatarUrl, .presenceStatus, .statusMessage, profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END, .lastSeenAt, .isBot,
           sharedConversations: CASE WHEN u.id = actor.id THEN 0
             ELSE COUNT { (u)-[:PARTICIPATES_IN]->(:Conversation)<-[:PARTICIPATES_IN]-(actor) } END
         } AS user
@@ -1526,7 +1526,7 @@ router.get('/users/by-email/:email', requireAuth, async (req: Request, res: Resp
       RETURN u { .id,
         name: CASE WHEN u.name IS NULL OR trim(u.name) = '' OR u.name CONTAINS '@'
           THEN $fallbackName ELSE u.name END,
-        .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot } AS user
+        .avatarUrl, .presenceStatus, .statusMessage, profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END, .lastSeenAt, .isBot } AS user
       LIMIT 1
     `, {
       userId: req.user!.userId,

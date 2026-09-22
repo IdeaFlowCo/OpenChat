@@ -42,8 +42,11 @@ export function ProfileEditScreen() {
   const [name, setName] = useState<string>(
     selfParticipant?.user.name ?? currentUser?.name ?? ''
   );
-  const [statusMessage, setStatusMessage] = useState<string>(
-    selfParticipant?.user.statusMessage ?? ''
+  const [profileStatusText, setProfileStatusText] = useState<string>(
+    selfParticipant?.user.profileStatus?.text ?? ''
+  );
+  const [profileStatusEmoji, setProfileStatusEmoji] = useState<string>(
+    selfParticipant?.user.profileStatus?.emoji ?? ''
   );
   const [discoveryMode, setDiscoveryMode] = useState<'name' | 'email_only' | 'hidden' | undefined>(
     currentUser?.discoveryMode
@@ -130,7 +133,7 @@ export function ProfileEditScreen() {
       }
       await updateProfile({
         name: trimmedName,
-        statusMessage: statusMessage.trim() || undefined,
+        profileStatus: profileStatusText.trim() || profileStatusEmoji.trim() ? { text: profileStatusText.trim() || null, emoji: profileStatusEmoji.trim() || null } : null,
         avatarUrl,
         ...(discoveryChanged && discoveryMode ? { discoveryMode } : {}),
       });
@@ -140,7 +143,7 @@ export function ProfileEditScreen() {
     } finally {
       setSaving(false);
     }
-  }, [avatarChanged, avatarMime, avatarSize, avatarUri, currentUser?.avatarUrl, discoveryChanged, discoveryMode, name, statusMessage, updateProfile, navigation]);
+  }, [avatarChanged, avatarMime, avatarSize, avatarUri, currentUser?.avatarUrl, discoveryChanged, discoveryMode, name, profileStatusText, profileStatusEmoji, updateProfile, navigation]);
 
   return (
     <ScrollView
@@ -209,16 +212,27 @@ export function ProfileEditScreen() {
 
       <View style={styles.section}>
         <Text style={[styles.label, { color: c.textSecondary }]}>STATUS MESSAGE</Text>
-        <TextInput
-          style={[styles.input, { backgroundColor: c.surface, borderColor: c.border, color: c.textPrimary }]}
-          value={statusMessage}
-          onChangeText={setStatusMessage}
-          placeholder="What's on your mind?"
-          placeholderTextColor={c.textMuted}
-          maxLength={120}
-          returnKeyType="done"
-          onSubmitEditing={handleSave}
-        />
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <TextInput
+            style={[styles.input, { backgroundColor: c.surface, borderColor: c.border, color: c.textPrimary, width: 64, textAlign: 'center', fontSize: 24 }]}
+            value={profileStatusEmoji}
+            onChangeText={setProfileStatusEmoji}
+            placeholder="😀"
+            placeholderTextColor={c.textMuted}
+            maxLength={10}
+            returnKeyType="next"
+          />
+          <TextInput
+            style={[styles.input, { backgroundColor: c.surface, borderColor: c.border, color: c.textPrimary, flex: 1 }]}
+            value={profileStatusText}
+            onChangeText={setProfileStatusText}
+            placeholder="What's on your mind?"
+            placeholderTextColor={c.textMuted}
+            maxLength={80}
+            returnKeyType="done"
+            onSubmitEditing={handleSave}
+          />
+        </View>
         <Text style={[styles.hint, { color: c.textMetadata }]}>
           Shown below your name in conversations.
         </Text>
