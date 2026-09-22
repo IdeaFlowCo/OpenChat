@@ -135,8 +135,14 @@ export function ContactProfileScreen() {
             <Text style={[styles.name, { color: c.textPrimary }]} numberOfLines={1}>{displayName}</Text>
             <BotBadge isBot={user.isBot} />
           </View>
+          {(user.profileStatus?.emoji || user.profileStatus?.text) && (
+            <Text style={{ color: c.textPrimary, fontSize: 15, fontStyle: 'italic', marginTop: 4, textAlign: 'center', maxWidth: 280 }} numberOfLines={2}>
+              {`${user.profileStatus.emoji ? user.profileStatus.emoji + ' ' : ''}${user.profileStatus.text || ''}`.trim()}
+            </Text>
+          )}
           {!!safeEmail && safeEmail !== displayName && (
             <Text style={[styles.email, { color: c.textSecondary }]} numberOfLines={1}>{safeEmail}</Text>
+
           )}
           {!!presenceLine && (
             <Text style={[styles.presence, { color: c.textSecondary }]}>{presenceLine}</Text>

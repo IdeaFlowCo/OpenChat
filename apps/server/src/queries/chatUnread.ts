@@ -26,7 +26,7 @@ export const CONVERSATIONS_QUERY = `
   CALL {
     WITH c
     MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-    RETURN collect({user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, .lastSeenAt, .isBot, ${legacyEmailProjection('participant')}}, role: rel.role}) AS participants
+    RETURN collect({user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, profileStatus: CASE WHEN participant.profileStatusText IS NOT NULL OR participant.profileStatusEmoji IS NOT NULL THEN { text: participant.profileStatusText, emoji: participant.profileStatusEmoji, updatedAt: participant.profileStatusUpdatedAt } ELSE null END, .lastSeenAt, .isBot, ${legacyEmailProjection('participant')}}, role: rel.role}) AS participants
   }
   CALL {
     WITH c

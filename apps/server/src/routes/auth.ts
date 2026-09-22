@@ -565,7 +565,7 @@ router.post('/dev-login', async (req: Request, res: Response) => {
       ON MATCH SET
         u.lastSeenAt = datetime($now),
         u.presenceStatus = 'available'
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .isBot } AS user
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END, .isBot } AS user
     `, {
       email,
       name: normalizePublicDisplayName(name),
@@ -606,7 +606,8 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
     const result = await session.run(`
       MATCH (u:User {id: $userId})
       RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .lastSeenAt, .avatarUrl, .isBot, .onboardedAt,
-        discoveryMode: coalesce(u.discoveryMode, 'name') } AS user
+        discoveryMode: coalesce(u.discoveryMode, 'name'),
+        profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END } AS user
     `, { userId });
 
     if (result.records.length === 0) {
@@ -875,12 +876,13 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
  */
 router.patch('/me', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
-  const { name, statusMessage, avatarUrl, discoveryMode, onboardingComplete } = (req.body ?? {}) as {
+  const { name, statusMessage, avatarUrl, discoveryMode, onboardingComplete, profileStatus } = (req.body ?? {}) as {
     name?: string;
     statusMessage?: string;
     avatarUrl?: string;
     discoveryMode?: string;
     onboardingComplete?: boolean;
+    profileStatus?: { text?: string | null; emoji?: string | null } | null;
   };
 
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
@@ -903,6 +905,31 @@ router.patch('/me', requireAuth, async (req: Request, res: Response) => {
     return;
   }
 
+  if (profileStatus !== undefined) {
+    if (profileStatus !== null && typeof profileStatus !== 'object') {
+      res.status(400).json({ error: 'profileStatus must be an object or null' });
+      return;
+    }
+    if (profileStatus !== null) {
+      if (profileStatus.text !== undefined && profileStatus.text !== null && typeof profileStatus.text !== 'string') {
+        res.status(400).json({ error: 'profileStatus.text must be a string' });
+        return;
+      }
+      if (profileStatus.text !== undefined && profileStatus.text !== null && profileStatus.text.length > 80) {
+        res.status(400).json({ error: 'profileStatus.text must be at most 80 characters' });
+        return;
+      }
+      if (profileStatus.emoji !== undefined && profileStatus.emoji !== null && typeof profileStatus.emoji !== 'string') {
+        res.status(400).json({ error: 'profileStatus.emoji must be a string' });
+        return;
+      }
+      if (profileStatus.emoji !== undefined && profileStatus.emoji !== null && profileStatus.emoji.length > 10) {
+        res.status(400).json({ error: 'profileStatus.emoji must be at most 10 characters' });
+        return;
+      }
+    }
+  }
+
   const session = getDriver().session();
   try {
     const now = new Date().toISOString();
@@ -913,9 +940,22 @@ router.patch('/me', requireAuth, async (req: Request, res: Response) => {
           u.avatarUrl = CASE WHEN $avatarUrl IS NOT NULL THEN $avatarUrl ELSE u.avatarUrl END,
           u.discoveryMode = CASE WHEN $discoveryMode IS NOT NULL THEN $discoveryMode ELSE u.discoveryMode END,
           u.onboardedAt = CASE WHEN $onboardingComplete = true AND u.onboardedAt IS NULL THEN datetime($now) ELSE u.onboardedAt END,
+          u.profileStatusText = CASE
+            WHEN $clearProfileStatus = true THEN null
+            WHEN $setProfileStatusText = true THEN $profileStatusText
+            ELSE u.profileStatusText END,
+          u.profileStatusEmoji = CASE
+            WHEN $clearProfileStatus = true THEN null
+            WHEN $setProfileStatusEmoji = true THEN $profileStatusEmoji
+            ELSE u.profileStatusEmoji END,
+          u.profileStatusUpdatedAt = CASE
+            WHEN $clearProfileStatus = true THEN null
+            WHEN $setProfileStatusText = true OR $setProfileStatusEmoji = true THEN $now
+            ELSE u.profileStatusUpdatedAt END,
           u.updatedAt = datetime($now)
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot, .onboardedAt,
-        discoveryMode: coalesce(u.discoveryMode, 'name') } AS user
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END, .avatarUrl, .isBot, .onboardedAt,
+        discoveryMode: coalesce(u.discoveryMode, 'name'),
+        profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END } AS user
     `, {
       userId,
       name: name?.trim() ?? null,
@@ -923,6 +963,11 @@ router.patch('/me', requireAuth, async (req: Request, res: Response) => {
       avatarUrl: avatarUrl ?? null,
       discoveryMode: discoveryMode ?? null,
       onboardingComplete: onboardingComplete === true,
+      clearProfileStatus: profileStatus === null,
+      setProfileStatusText: profileStatus !== undefined && profileStatus !== null && profileStatus.text !== undefined,
+      profileStatusText: profileStatus && profileStatus.text !== undefined ? (profileStatus.text || null) : null,
+      setProfileStatusEmoji: profileStatus !== undefined && profileStatus !== null && profileStatus.emoji !== undefined,
+      profileStatusEmoji: profileStatus && profileStatus.emoji !== undefined ? (profileStatus.emoji || null) : null,
       now,
     });
 
@@ -949,6 +994,7 @@ router.patch('/me', requireAuth, async (req: Request, res: Response) => {
           userId,
           name: user.name,
           statusMessage: user.statusMessage,
+          profileStatus: user.profileStatus,
         });
       }
     }
@@ -957,6 +1003,87 @@ router.patch('/me', requireAuth, async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error updating profile:', error);
     res.status(500).json({ error: 'Failed to update profile' });
+  } finally {
+    await session.close();
+  }
+});
+
+/**
+ * PUT /api/auth/me/status — Update own profile status (Presence system v1)
+ * Body: { text?: string | null, emoji?: string | null }
+ */
+router.put('/me/status', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { text, emoji } = (req.body ?? {}) as { text?: string | null; emoji?: string | null };
+
+  if (text !== undefined && text !== null && typeof text !== 'string') {
+    res.status(400).json({ error: 'text must be a string' });
+    return;
+  }
+  if (text !== undefined && text !== null && text.length > 80) {
+    res.status(400).json({ error: 'text must be at most 80 characters' });
+    return;
+  }
+  if (emoji !== undefined && emoji !== null && typeof emoji !== 'string') {
+    res.status(400).json({ error: 'emoji must be a string' });
+    return;
+  }
+  if (emoji !== undefined && emoji !== null && emoji.length > 10) {
+    res.status(400).json({ error: 'emoji must be at most 10 characters' });
+    return;
+  }
+
+  const session = getDriver().session();
+  try {
+    const now = new Date().toISOString();
+    const result = await session.run(`
+      MATCH (u:User {id: $userId})
+      SET u.profileStatusText = CASE WHEN $setProfileStatusText = true THEN $profileStatusText ELSE u.profileStatusText END,
+          u.profileStatusEmoji = CASE WHEN $setProfileStatusEmoji = true THEN $profileStatusEmoji ELSE u.profileStatusEmoji END,
+          u.profileStatusUpdatedAt = CASE WHEN $setProfileStatusText = true OR $setProfileStatusEmoji = true THEN $now ELSE u.profileStatusUpdatedAt END,
+          u.updatedAt = datetime($now)
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END, .avatarUrl, .isBot, .onboardedAt,
+        discoveryMode: coalesce(u.discoveryMode, 'name'),
+        profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END } AS user
+    `, {
+      userId,
+      setProfileStatusText: text !== undefined,
+      profileStatusText: text || null,
+      setProfileStatusEmoji: emoji !== undefined,
+      profileStatusEmoji: emoji || null,
+      now,
+    });
+
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const user = toJS(result.records[0].get('user')) as Record<string, unknown>;
+
+    // Broadcast to anyone who shares a conversation with this user
+    const io = req.app.get('io') as unknown as import('socket.io').Server | undefined;
+    if (io) {
+      const convResult = await session.run(`
+        MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
+        RETURN DISTINCT c.id AS conversationId
+      `, { userId });
+
+      for (const r of convResult.records) {
+        const convId = r.get('conversationId') as string;
+        io.to(`conversation:${convId}`).emit('user:profile-updated', {
+          userId,
+          name: user.name,
+          statusMessage: user.statusMessage,
+          profileStatus: user.profileStatus,
+        });
+      }
+    }
+
+    res.json(user);
+  } catch (error) {
+    console.error('Error updating profile status:', error);
+    res.status(500).json({ error: 'Failed to update profile status' });
   } finally {
     await session.close();
   }
@@ -1195,7 +1322,7 @@ router.post('/google/exchange', async (req: Request, res: Response) => {
         u.googleSub = coalesce(u.googleSub, $sub),
         u.googleEmailVerified = coalesce(u.googleEmailVerified, $emailVerified),
         u.avatarUrl = coalesce(u.avatarUrl, $picture)
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot } AS user
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END, .avatarUrl, .isBot } AS user
     `, {
       email: userinfo.email,
       name: displayName,
@@ -1314,7 +1441,7 @@ router.post('/google/idtoken-exchange', async (req: Request, res: Response) => {
         u.googleSub = coalesce(u.googleSub, $sub),
         u.googleEmailVerified = coalesce(u.googleEmailVerified, $emailVerified),
         u.avatarUrl = coalesce(u.avatarUrl, $picture)
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot } AS user
+      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END, .avatarUrl, .isBot } AS user
     `, {
       email: payload.email,
       name: displayName,
@@ -1562,7 +1689,7 @@ router.post('/apple/idtoken-exchange', async (req: Request, res: Response) => {
           u.presenceStatus = 'available',
           u.appleSub = coalesce(u.appleSub, $appleSub),
           u.name = CASE WHEN u.name IS NULL OR u.name = '' THEN $name ELSE u.name END
-        RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot } AS user
+        RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END, .avatarUrl, .isBot } AS user
       `
       : `
         MERGE (u:User {appleSub: $appleSub})
@@ -1579,7 +1706,7 @@ router.post('/apple/idtoken-exchange', async (req: Request, res: Response) => {
           u.presenceStatus = 'available',
           u.email = coalesce(u.email, $email),
           u.name = CASE WHEN u.name IS NULL OR u.name = '' THEN $name ELSE u.name END
-        RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, .avatarUrl, .isBot } AS user
+        RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END, .avatarUrl, .isBot } AS user
       `;
 
     const result = await dbSession.run(mergeQuery, {

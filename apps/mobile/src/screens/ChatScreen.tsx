@@ -483,7 +483,9 @@ export function ChatScreen({
     [conversation?.participants, currentUser?.userId, isGroup],
   );
   const directPresenceText = other
-    ? presence.get(other.id)?.statusMessage || presence.get(other.id)?.status || other.presenceStatus || ''
+    ? (other.profileStatus 
+        ? `${other.profileStatus.emoji ? other.profileStatus.emoji + ' ' : ''}${other.profileStatus.text || ''}`.trim() || presence.get(other.id)?.statusMessage || presence.get(other.id)?.status || other.presenceStatus || ''
+        : presence.get(other.id)?.statusMessage || presence.get(other.id)?.status || other.presenceStatus || '')
     : '';
 
   // Participants eligible for @-mention — all except self (OpenChat-0jy).

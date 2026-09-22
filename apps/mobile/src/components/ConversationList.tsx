@@ -170,6 +170,11 @@ function ConversationRow({ item, isActive, onPress, compact }: RowProps) {
               {title}
             </Text>
             {item.type === 'direct' && <BotBadge isBot={other?.isBot} compact />}
+            {item.type === 'direct' && (other?.profileStatus?.emoji || other?.profileStatus?.text) && (
+              <Text style={{ color: c.textMetadata, fontSize: 13, flexShrink: 1, marginLeft: 6 }} numberOfLines={1}>
+                {`${other.profileStatus.emoji ? other.profileStatus.emoji + ' ' : ''}${other.profileStatus.text || ''}`.trim()}
+              </Text>
+            )}
           </View>
           <Text style={[styles.rowTime, { color: c.textMetadata }]}>
             {formatTime(item.lastMessageAt)}

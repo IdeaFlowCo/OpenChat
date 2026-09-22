@@ -79,6 +79,7 @@ export interface User {
   name?: string;
   presenceStatus?: string;
   statusMessage?: string;
+  profileStatus?: { text?: string | null; emoji?: string | null; updatedAt?: string } | null;
   lastSeenAt?: string;
   avatarUrl?: string;
   onboardedAt?: string;
@@ -1208,6 +1209,7 @@ export const api = {
   updateProfile: (fields: {
     name?: string;
     statusMessage?: string;
+  profileStatus?: { text?: string | null; emoji?: string | null; updatedAt?: string } | null;
     avatarUrl?: string;
     discoveryMode?: 'name' | 'email_only' | 'hidden';
     onboardingComplete?: boolean;
@@ -1217,6 +1219,7 @@ export const api = {
       email: string;
       name?: string;
       statusMessage?: string;
+  profileStatus?: { text?: string | null; emoji?: string | null; updatedAt?: string } | null;
       avatarUrl?: string;
       discoveryMode?: 'name' | 'email_only' | 'hidden';
       onboardedAt?: string;

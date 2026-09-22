@@ -446,6 +446,10 @@ export const openapiSpec = {
     '/health': {
       get: { operationId: 'healthCheck', tags: ['Meta'], summary: 'Health check', security: [], responses: { '200': ok({ type: 'object' }) } },
     },
+    '/api/auth/me/status': {
+      put: { operationId: 'updateProfileStatus', tags: ['Account'], summary: 'Update own profile status', requestBody: { required: true, content: json({ type: 'object', properties: { text: { type: 'string' }, emoji: { type: 'string' } } }) }, responses: { '200': ok({ type: 'object' }) } },
+    },
+
     '/api/auth/me': {
       get: { operationId: 'getMe', tags: ['Account'], summary: 'Get the authenticated user (or agent-key owner)', responses: { '200': ok({ type: 'object' }), '401': errResp('Unauthorized') } },
       delete: { operationId: 'deleteAccount', tags: ['Account'], summary: 'Delete the authenticated account and owned data', description: 'Atomically redacts authored messages; deletes account-owned drafts, Stories, intents, preferences, and match objects involving those intents; preserves unrelated users\' intent records; then deletes the user.', responses: { '204': { description: 'Deleted' }, '401': errResp('Unauthorized') } },
