@@ -199,8 +199,9 @@ export function setupChatSocket(io: Server): void {
       content: string;
       messageType?: string;
       id?: string;
+      replyToId?: string;
     }, callback) => {
-      const { conversationId, content, messageType = 'text' } = data;
+      const { conversationId, content, messageType = 'text', replyToId } = data;
 
       if (!content || !conversationId) {
         callback?.({ error: 'conversationId and content required' });
@@ -228,6 +229,22 @@ export function setupChatSocket(io: Server): void {
         if (authorization === 'blocked') {
           callback?.({ success: true, dropped: true });
           return;
+        }
+
+        // Validate replyToId points to a message in THIS conversation
+        // (OpenChat-uxj). Cross-conversation replies are rejected — they'd
+        // leak content from a chat the recipients aren't part of. Mirrors the
+        // REST route's check; this socket path is the PRIMARY send path.
+        if (replyToId) {
+          const replyCheck = await session.run(
+            `MATCH (m:Message {id: $replyToId})-[:IN_CONVERSATION]->(c:Conversation {id: $conversationId})
+             RETURN m.id AS id`,
+            { replyToId, conversationId }
+          );
+          if (replyCheck.records.length === 0) {
+            callback?.({ error: 'replyToId does not point to a message in this conversation' });
+            return;
+          }
         }
 
         // Idempotency: the client supplies a stable message id used by BOTH the
@@ -292,6 +309,7 @@ export function setupChatSocket(io: Server): void {
             m.conversationId = $conversationId,
             m.messageType = $messageType,
             m.mentions = $mentions,
+            m.replyToId = $replyToId,
             m.createdAt = datetime($now),
             m._created = true
           MERGE (m)-[:IN_CONVERSATION]->(c)
@@ -302,8 +320,25 @@ export function setupChatSocket(io: Server): void {
           WITH c, m, sender, coalesce(m._created, false) AS wasCreated
           REMOVE m._created
           WITH c, m, sender, wasCreated
+          // OpenChat-uxj: hydrate the reply target so clients can render the
+          // quote bubble without an extra fetch, exactly as the REST route does.
+          OPTIONAL MATCH (reply:Message {id: m.replyToId})
+          OPTIONAL MATCH (replySender:User)-[:SENT]->(reply)
           MATCH (p:User)-[:PARTICIPATES_IN]->(c)
-          RETURN m { .*, sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} } } AS message,
+          RETURN m {
+            .*,
+            sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} },
+            replyTo: CASE
+              WHEN reply IS NULL THEN NULL
+              ELSE {
+                id: reply.id,
+                content: left(reply.content, 200),
+                senderId: reply.senderId,
+                senderName: replySender.name,
+                messageType: reply.messageType
+              }
+            END
+          } AS message,
                  collect(DISTINCT p.id) AS participantIds,
                  wasCreated
         `, {
@@ -313,6 +348,7 @@ export function setupChatSocket(io: Server): void {
           conversationId,
           messageType,
           mentions: mentionedUserIds,
+          replyToId: replyToId ?? null,
           now
         });
 
@@ -343,6 +379,8 @@ export function setupChatSocket(io: Server): void {
             messageId,
             conversationId,
             content,
+            // Reply-tagging: a hashtag on a reply tags the PARENT message.
+            replyToId: replyToId ?? null,
             io,
           })
             .catch((err) => console.warn('[thought-from-tag] socket create failed:', err))

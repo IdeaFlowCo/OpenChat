@@ -308,11 +308,11 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
       `
       MATCH (t:Thought)-[:FROM_MESSAGE]->(m:Message {conversationId: $conversationId})
       // Manual save-to-thoughts captures remain owner-only unless pinned.
-      // Inline-tag Thoughts follow source-message visibility. The tags check
-      // makes historical rows visible without a data migration; captureMethod
-      // is the explicit discriminator for new rows.
+      // Inline-tag and reply-tag Thoughts follow source-message visibility.
+      // The tags check makes historical rows visible without a data migration;
+      // captureMethod is the explicit discriminator for new rows.
       WHERE (t.userId = $userId
-             OR t.captureMethod = 'inline-tag'
+             OR t.captureMethod IN ['inline-tag', 'reply-tag']
              OR size(coalesce(t.tags, [])) > 0)
         AND NOT (t)-[:PINNED_IN]->(:Conversation {id: $conversationId})
       OPTIONAL MATCH (author:User {id: t.userId})

@@ -107,12 +107,21 @@ export function ConversationThoughtsScreen() {
       setPinned((prev) => prev.map((t) => (t.id === p.thought.id ? { ...t, ...p.thought } : t)));
       setFromChat((prev) => prev.map((t) => (t.id === p.thought.id ? { ...t, ...p.thought } : t)));
     };
+    // A reply-tag Thought is withdrawn by deleting the reply that carried the
+    // hashtag; the server emits this so the sidebar drops it live.
+    const onUnshared = (p: { conversationId: string; thoughtId: string }) => {
+      if (p?.conversationId !== conversationId || !p.thoughtId) return;
+      setFromChat((prev) => prev.filter((t) => t.id !== p.thoughtId));
+      setPinned((prev) => prev.filter((t) => t.id !== p.thoughtId));
+    };
     sock.on('thought:shared', onShared);
+    sock.on('thought:unshared', onUnshared);
     sock.on('thought:pinned', onPinned);
     sock.on('thought:unpinned', onUnpinned);
     sock.on('thought:updated', onUpdated);
     return () => {
       sock.off('thought:shared', onShared);
+      sock.off('thought:unshared', onUnshared);
       sock.off('thought:pinned', onPinned);
       sock.off('thought:unpinned', onUnpinned);
       sock.off('thought:updated', onUpdated);

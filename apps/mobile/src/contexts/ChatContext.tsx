@@ -834,7 +834,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // If there are attachments, always use REST (socket path doesn't carry them).
     if (hasAttachments) {
       try {
-        const real = await api.sendMessage(id, content, attachments, clientId);
+        const real = await api.sendMessage(id, content, attachments, clientId, replyToId);
         if (isDroppedMessageSend(real)) return;
         updateActiveMessages(prev => {
           const filtered = prev.filter(m => m.id !== optimistic.id);
@@ -860,7 +860,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       // Socket path failed (incl. the new 10s ack timeout) — try REST fallback.
       try {
-        const real = await api.sendMessage(id, content, undefined, clientId);
+        const real = await api.sendMessage(id, content, undefined, clientId, replyToId);
         if (isDroppedMessageSend(real)) return;
         updateActiveMessages(prev => {
           const filtered = prev.filter(m => m.id !== optimistic.id);
