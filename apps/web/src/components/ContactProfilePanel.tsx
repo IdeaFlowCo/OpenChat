@@ -4,6 +4,7 @@ import { api, User } from '../api';
 import { useChat } from '../contexts/ChatContext';
 import { PresenceIndicator } from './PresenceIndicator';
 import { BotBadge } from './BotBadge';
+import { isPlaceholderEmail } from '../utils/userDisplay';
 
 interface Props {
   open: boolean;
@@ -23,7 +24,8 @@ export function ContactProfilePanel({ open, onClose, user }: Props) {
   if (!open) return null;
 
   const pres = presence.get(user.id);
-  const displayName = user.name || user.email || 'Unknown';
+  const isPlaceholder = isPlaceholderEmail(user.email);
+  const displayName = user.name || (!isPlaceholder ? user.email : '') || 'OpenChat member';
   const presenceLine =
     pres?.statusMessage ||
     (pres?.status === 'available' ? 'Available' : null) ||
@@ -85,7 +87,7 @@ export function ContactProfilePanel({ open, onClose, user }: Props) {
             <h2 className="text-xl font-bold text-gray-900 dark:text-slate-100">{displayName}</h2>
             <BotBadge user={user} />
           </div>
-          {user.email && user.email !== displayName && (
+          {user.email && user.email !== displayName && !isPlaceholder && (
             <p className="text-sm text-gray-500 dark:text-slate-400">{user.email}</p>
           )}
           {presenceLine && <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">{presenceLine}</p>}

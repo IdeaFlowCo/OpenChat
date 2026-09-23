@@ -12,6 +12,7 @@ import { AppIcon } from './AppIcon';
 import type { CurrentUserLike } from '../utils/userDisplay';
 import {
   currentUserAsContact,
+  isPlaceholderEmail,
   isSelfSearch,
   isSelfUser,
   rankSelfFirst,
@@ -69,7 +70,8 @@ function getServiceUrls(env: AppEnvironment) {
 
 // Generate user initials
 function getInitials(user: { name?: string; email: string }): string {
-  const name = user.name || user.email.split('@')[0] || '?';
+  const emailClean = isPlaceholderEmail(user.email) ? '' : user.email;
+  const name = user.name || emailClean.split('@')[0] || '?';
   const parts = name.trim().split(/\s+/);
   if (parts.length >= 2) {
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
@@ -700,7 +702,9 @@ export function ChatSidebar() {
                           )}
                           <BotBadge user={contact} />
                         </div>
-                        <div className="text-sm text-gray-500 dark:text-slate-400 truncate">{contact.email}</div>
+                        {!isPlaceholderEmail(contact.email) && (
+                          <div className="text-sm text-gray-500 dark:text-slate-400 truncate">{contact.email}</div>
+                        )}
                         {contactPresence?.statusMessage && (
                           <div className="text-xs text-gray-400 dark:text-slate-500 truncate">
                             {contactPresence.statusMessage}
@@ -905,7 +909,9 @@ function SearchResultsPanel({ query, results, isLoading, currentUser, loadedConv
                     )}
                     <BotBadge user={c} />
                   </div>
-                  <div className="text-sm text-gray-500 dark:text-slate-400 truncate">{c.email}</div>
+                  {!isPlaceholderEmail(c.email) && (
+                    <div className="text-sm text-gray-500 dark:text-slate-400 truncate">{c.email}</div>
+                  )}
                 </div>
               </div>
             </div>

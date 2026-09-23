@@ -10,8 +10,17 @@ export function isSelfUser(user: Pick<User, 'id'> | null | undefined, currentUse
   return !!user && !!currentUser && user.id === currentUser.userId;
 }
 
+export const LEGACY_PLACEHOLDER_EMAIL_DOMAIN = 'users.openchat.invalid';
+
+export function isPlaceholderEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return email.toLowerCase().endsWith(`@${LEGACY_PLACEHOLDER_EMAIL_DOMAIN}`);
+}
+
 export function userBaseName(user: Pick<User, 'name' | 'email'> | CurrentUserLike): string {
-  return user.name || user.email;
+  if (user.name) return user.name;
+  if (user.email && !isPlaceholderEmail(user.email)) return user.email;
+  return 'OpenChat member';
 }
 
 export function userDisplayName(
