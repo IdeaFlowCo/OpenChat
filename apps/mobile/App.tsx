@@ -636,11 +636,13 @@ function ShellWithBackground() {
     <View style={[styles.root, { backgroundColor: c.background }]}>
       <UpdateBanner />
       <ChatProvider>
-        <SocialExperienceProvider>
-          <RecordingBridge>
-            <Shell />
-          </RecordingBridge>
-        </SocialExperienceProvider>
+        <EntryProvider>
+          <SocialExperienceProvider>
+            <RecordingBridge>
+              <Shell />
+            </RecordingBridge>
+          </SocialExperienceProvider>
+        </EntryProvider>
       </ChatProvider>
     </View>
   );
