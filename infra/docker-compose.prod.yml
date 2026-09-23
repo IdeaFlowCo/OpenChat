@@ -27,6 +27,8 @@ services:
       - CORS_ORIGIN=${CORS_ORIGIN:-https://chat.globalbr.ai,https://social.globalbr.ai}
       # Friends-only beta directory; set to 0 to restore query-required discovery.
       - OPENCHAT_OPEN_USER_DIRECTORY=${OPENCHAT_OPEN_USER_DIRECTORY:-1}
+      # Context Lane companion view (Phase A); defaults to 1.
+      - OPENCHAT_CONTEXT_LANE=${OPENCHAT_CONTEXT_LANE:-1}
       # Web Push (OpenChat-3fw). Generate keys via `npx web-push generate-vapid-keys`.
       # docker-compose only forwards env vars explicitly listed here; without
       # this, the push service silently no-ops (graceful, but invisible).

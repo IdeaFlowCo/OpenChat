@@ -743,7 +743,7 @@ const WIT_SITE = process.env.WIT_SITE_URL || 'https://worldissuetracker.com';
 const WIT_TRACKER_SLUG = process.env.WIT_FEEDBACK_TRACKER_SLUG || 'openchat'; // file on the OpenChat board, not orphan
 const FEEDBACK_MAX_MESSAGE = 5000; // match POST /api/feedback
 const FEEDBACK_MAX_CONTEXT = 1000;
-const FEEDBACK_RATE_LIMIT = 5; // max submissions per user per window
+const FEEDBACK_RATE_LIMIT = 50; // max submissions per user per window (raised from 5)
 const FEEDBACK_WINDOW_MS = 60 * 60_000; // 1 hour
 const feedbackRate = new Map<string, number[]>();
 

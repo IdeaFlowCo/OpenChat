@@ -1,5 +1,6 @@
 import { api, ContextPost } from '../api/client';
 import { clearSession } from '../api/client';
+import { logError } from './clientLogger';
 
 export interface ContextLaneState {
   posts: ContextPost[];
@@ -65,6 +66,7 @@ class ContextLaneManager {
       if (e.status === 401 || e.status === 403) {
         this.clear(conversationId);
       }
+      logError('Failed to load initial context lane', e, { conversationId });
       this.setState(conversationId, { isLoading: false, isError: true });
     }
   }
@@ -86,6 +88,7 @@ class ContextLaneManager {
       if (e.status === 401 || e.status === 403) {
         this.clear(conversationId);
       }
+      logError('Failed to load more context posts', e, { conversationId });
       this.setState(conversationId, { isLoading: false, isError: true });
     }
   }

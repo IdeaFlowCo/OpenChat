@@ -16,5 +16,5 @@ export function isOpenUserDirectoryEnabled(env: NodeJS.ProcessEnv = process.env)
  */
 export function isContextLaneEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const configured = env.OPENCHAT_CONTEXT_LANE?.trim().toLowerCase();
-  return configured !== undefined && !FALSE_VALUES.has(configured);
+  return configured === undefined || !FALSE_VALUES.has(configured);
 }
