@@ -1146,6 +1146,8 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         messageId: message.id as string,
         conversationId: conversationId as string,
         content: messageContent,
+        // Reply-tagging: a hashtag on a reply tags the PARENT message.
+        replyToId: (replyToId as string | undefined) ?? null,
         io,
       })
         .catch((err) => console.warn('[thought-from-tag] background create failed:', err))
@@ -2087,9 +2089,37 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
 
     const message = toJS(result.records[0].get('message'));
 
+    // Reply-tag withdrawal: a reply-tag Thought hangs off the PARENT message,
+    // so deleting the parent is not how you untag it — deleting the REPLY that
+    // carried the hashtag is. `viaMessageId` is that reply, so drop any Thought
+    // this message produced by reply-tagging. Inline-tag Thoughts are left
+    // alone: their source message is soft-deleted, not the tagging act.
+    const removed = await session.run(
+      `
+      MATCH (t:Thought {viaMessageId: $messageId, captureMethod: 'reply-tag'})
+      WITH t, t.id AS thoughtId, t.userId AS ownerId
+      DETACH DELETE t
+      RETURN thoughtId, ownerId
+      `,
+      { messageId }
+    );
+    const removedThoughts = removed.records.map((r) => ({
+      id: r.get('thoughtId') as string,
+      ownerId: r.get('ownerId') as string,
+    }));
+
     const io = req.app.get('io') as IOServer | undefined;
     const participantIds = await loadParticipantIds(session, conversationId);
     emitMessageUpdated(io, conversationId, participantIds, message);
+    if (io) {
+      for (const t of removedThoughts) {
+        io.to(`conversation:${conversationId}`).emit('thought:unshared', {
+          conversationId,
+          thoughtId: t.id,
+        });
+        io.to(`user:${t.ownerId}`).emit('thought:deleted', { thoughtId: t.id });
+      }
+    }
 
     res.json(message);
   } catch (error) {

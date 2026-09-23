@@ -877,12 +877,19 @@ export const api = {
     request<{ messages: Message[]; hasMore: boolean }>(
       `/api/chat/conversations/${conversationId}/messages?before=${encodeURIComponent(before)}&limit=${limit}`
     ),
-  sendMessage: (conversationId: string, content: string, attachments?: Attachment[], id?: string) =>
+  sendMessage: (conversationId: string, content: string, attachments?: Attachment[], id?: string, replyToId?: string) =>
     request<Message | DroppedMessageSend>(`/api/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
       // id: client-generated idempotency key shared with the socket path so a
       // WS-then-REST retry collapses to one row server-side (MERGE). OpenChat-60y.
-      body: JSON.stringify({ content, ...(attachments?.length ? { attachments } : {}), ...(id ? { id } : {}) }),
+      // replyToId: without it this fallback silently dropped a reply's parent
+      // link whenever the socket send failed. See scout report 2.3.
+      body: JSON.stringify({
+        content,
+        ...(attachments?.length ? { attachments } : {}),
+        ...(id ? { id } : {}),
+        ...(replyToId ? { replyToId } : {}),
+      }),
     }),
 
   // ── Agent-network asks, offers, and quiet matches ───────────────────────

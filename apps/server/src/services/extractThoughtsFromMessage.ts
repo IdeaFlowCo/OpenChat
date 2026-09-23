@@ -50,7 +50,10 @@ const TAG_TO_KIND: Record<string, 'fact' | 'decision' | 'commitment' | 'reminder
   note: 'observation',
 };
 
-const TAG_RE = /#([a-zA-Z]+)/g;
+// Unicode letters/digits plus '_' and '-', matching NoteStream Vision's tag
+// grammar. The old /#([a-zA-Z]+)/ truncated "#q4-goals" to "q" and dropped
+// every non-ASCII tag.
+const TAG_RE = /#([\p{L}\p{N}_-]+)/gu;
 
 export interface ExtractedTag {
   /** The literal tag text the user typed, e.g. "#Fact" — preserved for UI. */
@@ -109,6 +112,12 @@ export async function createThoughtsFromMessageTags(
     messageId: string;
     conversationId: string;
     content: string;
+    /** The message being replied to, when this message is a threaded reply.
+     *  Tagging a reply is an act of tagging the PARENT — "#hiring" on Bob's
+     *  message is about Bob's message, not about the one-word reply carrying
+     *  the tag. When set, the Thought hangs off the parent and records this
+     *  message as the reply that caused it. */
+    replyToId?: string | null;
     /** Optional Socket.IO server — emits to the sender's personal feed and
      *  the source conversation's shared inline-tag feed. */
     io?: IOServer;
@@ -117,12 +126,36 @@ export async function createThoughtsFromMessageTags(
   const tags = extractTagsFromMessage(params.content);
   if (tags.length === 0) return [];
 
+  // Reply-tagging: the Thought is ABOUT the parent, so it links to the parent
+  // and takes the parent's text. A missing/unreadable parent falls back to the
+  // ordinary inline-tag shape rather than dropping the Thought.
+  const isReplyTag = !!params.replyToId;
+  let targetMessageId = params.messageId;
+  let parentContent: string | null = null;
+  if (isReplyTag) {
+    try {
+      const parent = await session.run(
+        'MATCH (m:Message {id: $replyToId}) RETURN m.content AS content',
+        { replyToId: params.replyToId }
+      );
+      if (parent.records.length > 0) {
+        targetMessageId = params.replyToId!;
+        parentContent = (parent.records[0].get('content') as string | null) ?? '';
+      }
+    } catch (err) {
+      console.warn('[thought-from-tag] reply parent lookup failed:', err);
+    }
+  }
+  const captureMethod = targetMessageId === params.messageId ? 'inline-tag' : 'reply-tag';
+
   console.log(`[thought-from-tag] extracted ${tags.length} tag(s) from message ${params.messageId}:`, tags.map((t) => t.raw).join(', '));
   try {
     // Keep the FULL message text incl. the hashtags (per Jacob 2026-06-04):
     // the tags stay visible in the Thought, and are also elevated into the
     // `tags` metadata below. Don't strip.
-    const text = params.content.trim();
+    const text = captureMethod === 'reply-tag'
+      ? ((parentContent ?? '').trim() || params.content.trim())
+      : params.content.trim();
     const id = nanoid();
     const now = new Date().toISOString();
     const kind = tags[0].kind;
@@ -130,14 +163,15 @@ export async function createThoughtsFromMessageTags(
     await session.run(
       `
       MATCH (u:User {id: $senderId})
-      OPTIONAL MATCH (m:Message {id: $messageId})
+      OPTIONAL MATCH (m:Message {id: $targetMessageId})
       CREATE (t:Thought {
         id: $id,
         userId: $senderId,
         text: $text,
         kind: $kind,
         tags: $tags,
-        captureMethod: 'inline-tag',
+        captureMethod: $captureMethod,
+        viaMessageId: $viaMessageId,
         status: 'none',
         createdAt: datetime($now),
         updatedAt: datetime($now)
@@ -147,9 +181,20 @@ export async function createThoughtsFromMessageTags(
         CREATE (t)-[:FROM_MESSAGE]->(msg)
       )
       `,
-      { id, senderId: params.senderId, messageId: params.messageId, text, kind, tags: tagNames, now }
+      {
+        id,
+        senderId: params.senderId,
+        targetMessageId,
+        text,
+        kind,
+        tags: tagNames,
+        captureMethod,
+        // Only meaningful for 'reply-tag': the reply that carried the hashtag.
+        viaMessageId: captureMethod === 'reply-tag' ? params.messageId : null,
+        now,
+      }
     );
-    console.log(`[thought-from-tag] created Thought ${id} (kind=${kind}, tags=${tagNames.join(', ')}) for user ${params.senderId} from message ${params.messageId}`);
+    console.log(`[thought-from-tag] created Thought ${id} (kind=${kind}, tags=${tagNames.join(', ')}, capture=${captureMethod}) for user ${params.senderId} from message ${targetMessageId}`);
 
     // The sender's personal Thoughts tab and every participant's chat-scoped
     // view are separate surfaces, so use separate events/rooms. This avoids
@@ -164,8 +209,10 @@ export async function createThoughtsFromMessageTags(
           status: 'none',
           createdAt: now,
           updatedAt: now,
-          sourceMessageId: params.messageId,
+          sourceMessageId: targetMessageId,
           sourceConversationId: params.conversationId,
+          captureMethod,
+          viaMessageId: captureMethod === 'reply-tag' ? params.messageId : null,
           authorId: params.senderId,
           pinned: false,
         };

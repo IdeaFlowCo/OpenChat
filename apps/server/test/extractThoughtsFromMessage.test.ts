@@ -39,7 +39,11 @@ describe('createThoughtsFromMessageTags', () => {
     expect(ids).toHaveLength(1);
 
     const [query, params] = run.mock.calls[0] as [string, Record<string, unknown>];
-    expect(query).toContain("captureMethod: 'inline-tag'");
+    // captureMethod is now a parameter, since a reply's tags capture the parent.
+    expect(query).toContain('captureMethod: $captureMethod');
+    expect(params.captureMethod).toBe('inline-tag');
+    expect(params.viaMessageId).toBeNull();
+    expect(params.targetMessageId).toBe('msg-1');
     expect(params.tags).toEqual(['fact', 'decision']);
     expect(params.kind).toBe('fact'); // first tag's kind is primary
     expect(params.text).toBe('#fact #decision we ship Friday');
