@@ -66,6 +66,7 @@ interface ChatContextValue {
   // Identity / session
   currentUser: CurrentUser | null;
   isAuthed: boolean;
+  authInitialized: boolean;
   isConnected: boolean;
 
   // Conversations
@@ -186,6 +187,7 @@ function withNewestMatch(current: Map<string, AgentMatch>, incoming: AgentMatch)
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
+  const [authInitialized, setAuthInitialized] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   // Keep the concrete socket in React state. isAuthed can render before an
   // async connect() call has installed the singleton; depending only on auth
@@ -325,6 +327,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const token = await getToken();
     if (!token) {
       setIsAuthed(false);
+      setAuthInitialized(true);
       return false;
     }
     let u = await getUser();
@@ -372,6 +375,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // Load mute map from AsyncStorage (OpenChat-aes). Non-fatal.
     const muted = await loadMutedConvs();
     setMutedConvs(muted);
+    setAuthInitialized(true);
     return true;
   }, [refreshConversations, refetchMatches]);
 
@@ -1111,7 +1115,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [signOut]);
 
   const value = useMemo<ChatContextValue>(() => ({
-    currentUser, isAuthed, isConnected,
+    currentUser, isAuthed, authInitialized, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, setActiveConversation, messages, loadingMessages,
@@ -1129,7 +1133,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     reconnectNewConvIds,
     signOut, bootstrapIfAuthed,
   }), [
-    currentUser, isAuthed, isConnected,
+    currentUser, isAuthed, authInitialized, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, setActiveConversation, messages, loadingMessages,

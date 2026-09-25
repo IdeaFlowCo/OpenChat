@@ -354,10 +354,10 @@
 
   <section class="hero">
     <img src="/about/icon.png" alt="" class="icon" loading="eager">
-    <div class="badge"><span class="badge-dot"></span>Live · App Store + Web · 35+ builds shipped</div>
+    <div class="badge"><span class="badge-dot"></span>Live · iOS + Mac + Web · 35+ builds shipped</div>
     <h1>Messaging built<br>for you and your agents.</h1>
     <p class="lede">
-      Real-time chat with iMessage-grade polish — read receipts, reactions, voice notes, link previews — and an MCP server that lets Claude, Cursor, or any agent CLI read and send messages as you.
+      OpenChat is an open-source messenger for people and their AI agents. Chat in real time with iMessage-grade polish — read receipts, reactions, voice notes, link previews — and, if you want, connect Claude, Cursor, or any agent CLI to read and send messages as you.
     </p>
     <div class="hero-cta-row">
       <a class="btn-primary" id="hero-open" href="/app/">Open OpenChat →</a>
@@ -375,7 +375,7 @@
   <section id="install">
     <h2 class="section-eyebrow">Get OpenChat</h2>
     <h3 class="section-title">Wherever you live online.</h3>
-    <p class="section-sub">Same conversations across iOS, Android, and the web. Same account, same agent keys.</p>
+    <p class="section-sub">Same conversations across iOS, Android, Mac, and the web — sign in once and they stay in sync live. Same account, same agent keys.</p>
     <div class="platforms">
 
       <a class="platform" data-platform="ios" href="https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932" target="_blank" rel="noopener">
@@ -399,14 +399,28 @@
         <span class="platform-cta">Open</span>
       </a>
 
-      <a class="platform" data-platform="desktop" href="/app/">
+      <a class="platform" data-platform="mac" id="mac-download" href="https://github.com/IdeaFlowCo/OpenChat/releases/latest/download/OpenChat-macOS-arm64.dmg">
         <div class="platform-icon" style="background:linear-gradient(135deg,#b46cff 0%,#7c41cc 100%);box-shadow:0 6px 16px rgba(180,108,255,0.4);">⬇</div>
-        <div class="platform-name">Desktop · install as app</div>
-        <div class="platform-sub">Standalone window · OS notifications · works offline</div>
-        <span class="platform-cta">Open &amp; install</span>
+        <div class="platform-name">Mac · desktop app</div>
+        <div class="platform-sub">Apple silicon (M1 or later) · preview build</div>
+        <span class="platform-cta">Download for Mac</span>
+      </a>
+
+      <a class="platform" data-platform="desktop" href="/app/">
+        <div class="platform-icon" style="background:linear-gradient(135deg,#f2a65f 0%,#c1783a 100%);box-shadow:0 6px 16px rgba(242,166,95,0.4);">W</div>
+        <div class="platform-name">Desktop browser</div>
+        <div class="platform-sub">No install — Windows, Linux, or any Mac</div>
+        <span class="platform-cta">Open</span>
       </a>
 
     </div>
+
+    <p id="mac-install-note" style="max-width:640px;margin:22px auto 0;font-size:13px;line-height:1.6;color:var(--text-dim);text-align:center;">
+      <strong style="color:var(--text);">Installing the Mac app:</strong> open the .dmg and drag OpenChat into Applications.
+      The preview build isn't notarized by Apple yet, so the first launch is blocked — open
+      <em>System Settings → Privacy &amp; Security</em>, click <em>Open Anyway</em> next to OpenChat, then confirm.
+      After that it opens normally.
+    </p>
 
     <!-- Shareable QR — encodes https://chat.globalbr.ai/ for IRL sharing (OpenChat-84u). -->
     <div style="margin:36px auto 0;max-width:560px;display:flex;gap:18px;align-items:center;padding:18px 22px;background:var(--surface);border:1px solid var(--border);border-radius:14px;">
@@ -567,7 +581,8 @@
     var isIOS = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && 'ontouchend' in document);
     var isAndroid = /Android/i.test(ua);
     var isMobile = isIOS || isAndroid || (window.matchMedia && window.matchMedia('(max-width: 899px)').matches);
-    var platform = isIOS ? 'ios' : isAndroid ? 'android' : 'desktop';
+    var isMac = !isIOS && /Macintosh|Mac OS X/i.test(ua);
+    var platform = isIOS ? 'ios' : isAndroid ? 'android' : isMac ? 'mac' : 'desktop';
 
     // 1) Instant-use web app target.
     var webTarget = '/app/';
@@ -580,6 +595,7 @@
     var hints = {
       ios:     { text: 'On iPhone? ',            label: 'Get it on the App Store →', href: 'https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932' },
       android: { text: 'On Android? ',           label: 'Download the app →',        href: '#install' },
+      mac:     { text: 'On a Mac? ',             label: 'Download the desktop app →', href: 'https://github.com/IdeaFlowCo/OpenChat/releases/latest/download/OpenChat-macOS-arm64.dmg' },
       desktop: { text: 'Prefer a desktop layout? ', label: 'Open responsive web app →', href: '/app/' }
     };
     var hint = hints[platform];

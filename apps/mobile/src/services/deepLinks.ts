@@ -1,6 +1,6 @@
 import { Linking, Platform } from 'react-native';
 import { parseOpenChatUrl } from '../utils/parseOpenChatUrl';
-import { createEntryIntent, saveEntryIntent, EntryTarget } from './entryIntents';
+import { createEntryIntent, notifyEntryIntentCaptured, saveEntryIntent, EntryTarget } from './entryIntents';
 import { navigationRef } from './notifications';
 import { getToken } from '../api/client';
 
@@ -31,12 +31,15 @@ export function installDeepLinkHandling(): () => void {
       target = { kind: 'group', token: parsed.token };
     } else if (parsed.type === 'user') {
       target = { kind: 'person', userId: parsed.userId };
+    } else if (parsed.type === 'card') {
+      target = { kind: 'card', token: parsed.token };
     }
 
     if (target) {
       const continuation = Platform.OS === 'web' ? 'web' : 'native';
       const intent = createEntryIntent(target, continuation);
       await saveEntryIntent(intent);
+      notifyEntryIntentCaptured();
     }
   }
 

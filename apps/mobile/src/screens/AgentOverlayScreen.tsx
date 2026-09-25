@@ -75,7 +75,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
       setThreadMessages(result.messages);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load My Agent.');
+      setError(err instanceof Error ? err.message : 'Could not load OpenChat Agent.');
     } finally {
       setLoadingThread(false);
     }
@@ -100,7 +100,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
       if (onOpenConversation) onOpenConversation(conversation.id);
       else navigation.replace('Chat', { conversationId: conversation.id });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not reach My Agent.');
+      setError(err instanceof Error ? err.message : 'Could not reach OpenChat Agent.');
     } finally {
       setBusy(false);
     }
@@ -118,7 +118,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
       setPrompt('');
       setTimeout(() => { void refreshThread(); }, 800);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not message My Agent.');
+      setError(err instanceof Error ? err.message : 'Could not message OpenChat Agent.');
     } finally {
       setBusy(false);
     }
@@ -134,14 +134,14 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
             <AppIcon name="sparkle" color={c.primary} size={18} />
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={[styles.threadTitle, { color: c.textPrimary }]}>My Agent</Text>
+            <Text style={[styles.threadTitle, { color: c.textPrimary }]}>OpenChat Agent</Text>
             <Text style={[styles.threadSubtitle, { color: c.textMetadata }]}>Private conversation</Text>
           </View>
           <TouchableOpacity onPress={() => navigation.navigate('SocialReview')} accessibilityLabel="Open Review" style={styles.threadHeaderButton}>
             <AppIcon name="sparkle" color={c.primary} size={18} />
           </TouchableOpacity>
           {onClose && (
-            <TouchableOpacity onPress={onClose} accessibilityLabel="Close My Agent" style={styles.threadHeaderButton}>
+            <TouchableOpacity onPress={onClose} accessibilityLabel="Close OpenChat Agent" style={styles.threadHeaderButton}>
               <AppIcon name="x" color={c.textSecondary} size={20} />
             </TouchableOpacity>
           )}
@@ -168,12 +168,12 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
               const own = item.senderId === currentUser?.userId;
               return (
                 <View style={[styles.threadBubble, own ? styles.threadBubbleOwn : styles.threadBubbleAgent, { backgroundColor: own ? c.primaryMuted : c.surface, borderColor: c.border }]}>
-                  {!own && <Text style={[styles.threadSender, { color: c.primary }]}>My Agent</Text>}
+                  {!own && <Text style={[styles.threadSender, { color: c.primary }]}>OpenChat Agent</Text>}
                   <Text style={[styles.threadText, { color: c.textPrimary }]}>{item.content}</Text>
                 </View>
               );
             }}
-            ListEmptyComponent={<Text style={[styles.threadEmpty, { color: c.textSecondary }]}>Tell My Agent what you’re looking for, offering, or thinking about. It stays private until you approve a next step.</Text>}
+            ListEmptyComponent={<Text style={[styles.threadEmpty, { color: c.textSecondary }]}>Tell OpenChat Agent what you’re looking for, offering, or thinking about. It stays private until you approve a next step.</Text>}
           />
         )}
         <View
@@ -183,12 +183,12 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
             value={prompt}
             onChangeText={setPrompt}
             multiline
-            placeholder="Message My Agent privately…"
+            placeholder="Message OpenChat Agent privately…"
             placeholderTextColor={c.textMuted}
-            accessibilityLabel="Message My Agent"
+            accessibilityLabel="Message OpenChat Agent"
             style={[styles.threadInput, { color: c.textPrimary, backgroundColor: c.background, borderColor: c.border }]}
           />
-          <TouchableOpacity disabled={!prompt.trim() || busy || !agentConversationId} onPress={() => void sendInPanel()} accessibilityLabel="Send privately to My Agent" style={[styles.threadSend, { backgroundColor: c.primary }, (!prompt.trim() || busy || !agentConversationId) && styles.disabled]}>
+          <TouchableOpacity disabled={!prompt.trim() || busy || !agentConversationId} onPress={() => void sendInPanel()} accessibilityLabel="Send privately to OpenChat Agent" style={[styles.threadSend, { backgroundColor: c.primary }, (!prompt.trim() || busy || !agentConversationId) && styles.disabled]}>
             {busy ? <ActivityIndicator size="small" color={c.onPrimary} /> : <Text style={[styles.sendText, { color: c.onPrimary }]}>Send</Text>}
           </TouchableOpacity>
         </View>
@@ -201,7 +201,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
     <KeyboardAvoidingView style={[styles.root, { backgroundColor: c.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
         {embedded && onClose && (
-          <TouchableOpacity onPress={onClose} accessibilityLabel="Close My Agent" style={styles.closeButton}>
+          <TouchableOpacity onPress={onClose} accessibilityLabel="Close OpenChat Agent" style={styles.closeButton}>
             <AppIcon name="x" color={c.textSecondary} size={20} />
           </TouchableOpacity>
         )}
@@ -211,7 +211,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[styles.eyebrow, { color: c.primary }]}>PRIVATE BY DEFAULT</Text>
-            <Text style={[styles.title, { color: c.textPrimary }]}>Tell My Agent anything</Text>
+            <Text style={[styles.title, { color: c.textPrimary }]}>Tell OpenChat Agent anything</Text>
           </View>
         </View>
         <Text style={[styles.intro, { color: c.textSecondary }]}>Your message starts as a private conversation. If it sounds like an ask, offer, or shared goal, your agent will prepare a card and ask before searching or sharing.</Text>
@@ -224,12 +224,12 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
             onChangeText={setPrompt}
             placeholder="What are you looking for, offering, or thinking about?"
             placeholderTextColor={c.textMuted}
-            accessibilityLabel="Message My Agent"
+            accessibilityLabel="Message OpenChat Agent"
             style={[styles.input, { color: c.textPrimary }]}
           />
           <View style={styles.composerFooter}>
-            <Text style={[styles.privateNote, { color: c.textMetadata }]}>Only you and My Agent can see this message.</Text>
-            <TouchableOpacity disabled={!prompt.trim() || busy} onPress={() => void openConversation(prompt.trim())} accessibilityLabel="Send privately to My Agent" style={[styles.send, { backgroundColor: c.primary }, (!prompt.trim() || busy) && styles.disabled]}>
+            <Text style={[styles.privateNote, { color: c.textMetadata }]}>Only you and OpenChat Agent can see this message.</Text>
+            <TouchableOpacity disabled={!prompt.trim() || busy} onPress={() => void openConversation(prompt.trim())} accessibilityLabel="Send privately to OpenChat Agent" style={[styles.send, { backgroundColor: c.primary }, (!prompt.trim() || busy) && styles.disabled]}>
               {busy ? <ActivityIndicator size="small" color={c.onPrimary} /> : <Text style={[styles.sendText, { color: c.onPrimary }]}>Send</Text>}
             </TouchableOpacity>
           </View>
@@ -255,7 +255,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
         </View>
 
         <TouchableOpacity disabled={busy} onPress={() => void openConversation()} style={styles.fullChatButton}>
-          <Text style={{ color: c.primary, fontWeight: '700' }}>Open the full My Agent conversation</Text>
+          <Text style={{ color: c.primary, fontWeight: '700' }}>Open the full OpenChat Agent conversation</Text>
         </TouchableOpacity>
         {error && <Text accessibilityRole="alert" style={[styles.error, { color: c.danger }]}>{error}</Text>}
       </ScrollView>

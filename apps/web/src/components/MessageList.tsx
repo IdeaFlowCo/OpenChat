@@ -68,7 +68,7 @@ export function MessageList() {
     loadConversations,
     setActiveConversation,
   } = useChat();
-  // "Ask my agent" in-flight message id (openchat-ug6).
+  // "Ask OpenChat Agent" in-flight message id (openchat-ug6).
   const [askingAgentId, setAskingAgentId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -247,7 +247,7 @@ export function MessageList() {
     }
   };
 
-  // "Ask my agent" (openchat-ug6): forward the message to the user's Assistant
+  // "Ask OpenChat Agent" (openchat-ug6): forward the message to the user's Assistant
   // and navigate to the Assistant DM. The server agent is building
   // /api/assistant/forward in parallel; we code to the agreed contract and it
   // lines up at integration.
@@ -582,7 +582,7 @@ export function MessageList() {
                         disabled={askingAgentId === message.id}
                         className="block w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-50"
                       >
-                        🤖 {askingAgentId === message.id ? 'Asking…' : 'Ask my agent'}
+                        🤖 {askingAgentId === message.id ? 'Asking…' : 'Ask OpenChat Agent'}
                       </button>
                       {isOwn && (
                         <>

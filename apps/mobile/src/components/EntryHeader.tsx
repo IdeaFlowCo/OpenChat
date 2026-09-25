@@ -36,6 +36,12 @@ export function EntryHeader() {
             title: res.name,
             subtitle: 'wants to connect on OpenChat',
           });
+        } else if (entryIntent.target.kind === 'card') {
+          const res = await api.getPublicCard(entryIntent.target.token);
+          setPreviewData({
+            title: `Add ${res.name}`,
+            subtitle: res.headline || 'Sign in to add them on OpenChat',
+          });
         }
       } catch (err: any) {
         setError(err.message || 'Unavailable');

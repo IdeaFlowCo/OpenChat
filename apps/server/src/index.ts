@@ -25,6 +25,7 @@ import assistantRoutes from './routes/assistant.js';
 import secretaryRoutes from './routes/secretary.js';
 import agentNetworkRoutes from './routes/agentNetwork.js';
 import agentSocialLayerRoutes from './routes/agentSocialLayer.js';
+import addMeCardRoutes from './routes/addMeCard.js';
 import { ensureAssistantUser } from './services/assistant.js';
 import { ensureGroupbrainBotUser } from './services/groupbrainBot.js';
 import { ensureWebhookIndex } from './services/webhookDispatch.js';
@@ -42,6 +43,8 @@ import {
 } from './privacy/profilePrivacy.js';
 import { resolveInvitePreview, InviteError } from './services/inviteEntry.js';
 import { resolvePublicPersonProjection } from './services/publicEntryProjection.js';
+import { resolveCardToken } from './services/addMeCard.js';
+import { renderCardPage, renderCardUnavailablePage } from './services/addMeCardPage.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -239,6 +242,30 @@ app.get('/u/:userId', async (req, res, next) => {
   }
 });
 
+// AddMe card (OpenChat-whxy.2): the page a stranger lands on after scanning
+// someone's "My card" QR. Tokenised and revocable, so the URL never carries
+// the internal user id; only fields the owner opted into are rendered. With
+// Universal Links (/c/* in the AASA) installed-app users open CardEntry in
+// the app instead. no-store so a reset link stops rendering immediately.
+app.get('/c/:token', async (req, res, next) => {
+  const session = getDriver().session();
+  try {
+    const resolved = await resolveCardToken(session, req.params.token as string);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    if (!resolved) {
+      res.status(404).send(renderCardUnavailablePage());
+      return;
+    }
+    res.send(renderCardPage(resolved.card, req.params.token as string));
+  } catch (err) {
+    console.error('/c/:token render error:', err);
+    next();
+  } finally {
+    await session.close();
+  }
+});
+
 // Apple App Site Association (OpenChat-84u.1). Enables Universal Links so
 // tapping https://chat.globalbr.ai/i/<token> or .../u/<id> in Messages /
 // Mail / Safari opens the native OpenChat app when installed, instead of
@@ -391,6 +418,7 @@ app.use('/api/assistant', assistantRoutes);
 app.use('/api/secretary', secretaryRoutes);
 app.use('/api', agentNetworkRoutes);
 app.use('/api', agentSocialLayerRoutes);
+app.use('/api/card', addMeCardRoutes);
 
 // API reference (openchat-8md.1) — public spec + Redoc docs page.
 app.get('/api/openapi.json', (_req, res) => res.json(openapiSpec));

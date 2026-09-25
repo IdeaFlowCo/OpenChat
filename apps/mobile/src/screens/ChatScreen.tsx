@@ -13,6 +13,7 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -247,7 +248,7 @@ interface ChatScreenProps {
   conversationId?: string;
   /** When true, skip navigation.setOptions (parent owns the chrome). */
   embedded?: boolean;
-  /** Wide-layout hook that opens My Agent without replacing the chat pane. */
+  /** Wide-layout hook that opens OpenChat Agent without replacing the chat pane. */
   onOpenAgent?: () => void;
 }
 
@@ -500,7 +501,7 @@ export function ChatScreen({
     if (!isGroup) {
       if (!isSelfDM && !conversation.title
         && other?.isBot && (other.id === 'assistant' || other.name === 'Assistant')) {
-        return 'My Agent';
+        return 'OpenChat Agent';
       }
       return getDirectConversationTitle(conversation, currentUser, 'Chat');
     }
