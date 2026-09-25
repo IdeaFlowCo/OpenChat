@@ -113,6 +113,12 @@ export async function initDatabase(): Promise<void> {
       FOR (pe:PendingEntry) ON (pe.expiresAt)
     `);
 
+    // AddMe cards (OpenChat-whxy.2): public lookups are by token.
+    await session.run(`
+      CREATE CONSTRAINT addme_card_token IF NOT EXISTS
+      FOR (card:AddMeCard) REQUIRE card.token IS UNIQUE
+    `);
+
     console.log('Database constraints and indexes initialized');
   } finally {
     await session.close();

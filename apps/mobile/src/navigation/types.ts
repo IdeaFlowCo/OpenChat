@@ -32,7 +32,8 @@ export type RootStackParamList = {
   GroupSettings: { conversationId: string };
   Settings: undefined;
   Search: undefined;
-  MyQrCode: undefined;
+  /** The owner's AddMe card: large QR, field consent, preview-as-stranger. */
+  MyCard: undefined;
   ScanQr: undefined;
   /** Blocked users management screen (OpenChat-46p). */
   BlockedUsers: undefined;
@@ -43,6 +44,8 @@ export type RootStackParamList = {
   /** Group invite preview — shown after scanning a QR or opening an invite link (OpenChat-240). */
   GroupInvitePreview: { token: string };
   PersonEntry: { userId: string };
+  /** A scanned/opened AddMe card (/c/:token) with the add-as-contact action. */
+  CardEntry: { token: string };
   /** Forward picker — select conversation to forward a message into (OpenChat-hhc). */
   ForwardPicker: { messageId: string };
   /** Contact profile — opened by tapping the DM header. */

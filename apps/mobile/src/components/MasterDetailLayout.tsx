@@ -171,6 +171,7 @@ export function MasterDetailLayout() {
   const openSearch = useCallback(() => navigation.navigate('Search'), [navigation]);
   const openNew = useCallback(() => navigation.navigate('NewConversation'), [navigation]);
   const openSettings = useCallback(() => navigation.navigate('Settings'), [navigation]);
+  const openMyCard = useCallback(() => navigation.navigate('MyCard'), [navigation]);
   const openAgentOverlay = useCallback(() => setAgentPanelOpen(true), []);
   const openShortcuts = useCallback(() => navigation.navigate('KeyboardShortcuts'), [navigation]);
   const openGroupSettings = useCallback(
@@ -373,6 +374,14 @@ export function MasterDetailLayout() {
             >
               <AppIcon name="settings" color={c.primary} size={19} strokeWidth={1.8} />
             </IconButton>
+            <IconButton
+              onPress={openMyCard}
+              title="My card"
+              accessibilityLabel="My card"
+              hoverBg={c.surfaceElevated}
+            >
+              <AppIcon name="qr" color={c.primary} size={19} strokeWidth={1.8} />
+            </IconButton>
             {enhanced && <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />}
             <IconButton
               onPress={toggleCollapsed}
@@ -399,6 +408,14 @@ export function MasterDetailLayout() {
                 )}
               </View>
             </Pressable>
+            <IconButton
+              onPress={openMyCard}
+              title="My card"
+              accessibilityLabel="My card"
+              hoverBg={c.surfaceElevated}
+            >
+              <AppIcon name="qr" color={c.primary} size={19} strokeWidth={1.8} />
+            </IconButton>
             {enhanced && <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />}
             <IconButton
               onPress={toggleCollapsed}

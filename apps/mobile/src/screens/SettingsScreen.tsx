@@ -639,13 +639,13 @@ export function SettingsScreen() {
               styles.optionRow,
               { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth },
             ]}
-            onPress={() => navigation.navigate('MyQrCode')}
+            onPress={() => navigation.navigate('MyCard')}
             activeOpacity={0.7}
           >
             <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>My QR code</Text>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>My card</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>
-                Let others add you by scanning
+                Show your QR so people can add you
               </Text>
             </View>
             <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>

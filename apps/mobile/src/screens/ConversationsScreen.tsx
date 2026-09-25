@@ -254,14 +254,24 @@ export function ConversationsScreen() {
         // all header icons sit on one visual line (2026-09-02 feedback: the
         // tinted pill made the left icon look misaligned, and the radiating
         // gear read as a "sun" — now a sliders glyph).
-        <TouchableOpacity
-          onPress={() => navigation.navigate('Settings')}
-          accessibilityLabel="Settings"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={styles.headerAction}
-        >
-          <AppIcon name="settings" color={c.primary} size={20} strokeWidth={1.8} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row' }}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Settings')}
+            accessibilityLabel="Settings"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.headerAction}
+          >
+            <AppIcon name="settings" color={c.primary} size={20} strokeWidth={1.8} />
+          </TouchableOpacity>
+          {/* One tap to the AddMe QR — the thing shown at events. */}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('MyCard')}
+            accessibilityLabel="My card"
+            style={styles.headerAction}
+          >
+            <AppIcon name="qr" color={c.primary} size={20} strokeWidth={1.8} />
+          </TouchableOpacity>
+        </View>
       ),
     });
   }, [navigation, c.primary, c.textMetadata, c.textPrimary, enhanced, isConnected]);

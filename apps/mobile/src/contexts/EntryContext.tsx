@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { getActiveEntryIntent, clearEntryIntents, EntryIntent, saveEntryIntent } from '../services/entryIntents';
+import { getActiveEntryIntent, clearEntryIntents, EntryIntent, onEntryIntentCaptured, saveEntryIntent } from '../services/entryIntents';
 import { useChat } from './ChatContext';
 import { api } from '../api/client';
 
@@ -92,6 +92,10 @@ export function EntryProvider({ children }: { children: ReactNode }) {
     init();
     return () => { active = false; };
   }, [currentUser?.userId, isAuthed]);
+
+  useEffect(() => onEntryIntentCaptured(() => {
+    void getActiveEntryIntent(currentUser?.userId).then(setEntryIntent);
+  }), [currentUser?.userId]);
 
   const clearEntry = async () => {
     if (entryIntent?.serverId && isAuthed) {

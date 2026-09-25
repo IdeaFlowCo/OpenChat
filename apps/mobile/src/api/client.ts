@@ -848,6 +848,34 @@ export interface ListContextPostsResponse {
   nextCursor?: string;
 }
 
+/** AddMe card as a stranger sees it; never carries a user id. */
+export interface StrangerCard {
+  name: string;
+  isBot: boolean;
+  headline: string | null;
+  avatarUrl: string | null;
+  status: { text: string | null; emoji: string | null } | null;
+  link: string | null;
+}
+
+export interface AddMeCardSettings {
+  showAvatar: boolean;
+  showStatus: boolean;
+  headline: string | null;
+  link: string | null;
+}
+
+export interface MyAddMeCard {
+  token: string;
+  settings: AddMeCardSettings;
+  preview: StrangerCard;
+}
+
+/** Public URL for a card token: what the QR encodes. */
+export function addMeCardUrl(token: string): string {
+  return `${OPENCHAT_URL}/c/${token}`;
+}
+
 export const api = {
   // ── Context Lane ──────────────────────────────────────────────────────────
   listContextPosts: (conversationId: string, cursor?: string, limit?: number, kind?: string, search?: string) => {
@@ -1379,6 +1407,30 @@ export const api = {
       avatarUrl: string | null;
       isBot: boolean;
     }>(`/api/chat/public-users/${userId}`),
+
+  // ── AddMe card (OpenChat-whxy.2) ─────────────────────────────────────────
+  /** The caller's own card (token + opt-in settings + stranger preview). */
+  getMyCard: () => request<MyAddMeCard>('/api/card/me'),
+
+  updateMyCard: (patch: Partial<AddMeCardSettings>) =>
+    request<MyAddMeCard>('/api/card/me', { method: 'PATCH', body: JSON.stringify(patch) }),
+
+  /** Revoke the current card link/QR and mint a new one. */
+  rotateMyCard: () => request<MyAddMeCard>('/api/card/me/rotate', { method: 'POST' }),
+
+  /**
+   * Exactly what a stranger sees for a card token. Sent without auth so the
+   * owner's "preview as stranger" is the real public response.
+   */
+  getPublicCard: (token: string) =>
+    request<StrangerCard>(`/api/card/${encodeURIComponent(token)}`, { auth: false }),
+
+  /** Add a card's owner as a contact (opens or reuses the direct chat). */
+  addFromCard: (token: string) =>
+    request<{ conversationId: string; created: boolean }>(
+      `/api/card/${encodeURIComponent(token)}/add`,
+      { method: 'POST' }
+    ),
 
   /**
    * Accept/join via invite token. Idempotent if already a member.

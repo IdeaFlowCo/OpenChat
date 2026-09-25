@@ -1,6 +1,6 @@
 /**
  * ProfileEditScreen — lets the user update their display name and status
- * message. Presented as a modal (same pattern as MyQrCodeScreen).
+ * message. Presented as a modal (same pattern as MyCardScreen).
  *
  * OpenChat-tml
  */
@@ -169,6 +169,14 @@ export function ProfileEditScreen() {
           activeOpacity={0.7}
         >
           <Text style={{ color: c.primary, fontWeight: '600' }}>Choose photo</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.photoBtn, { borderColor: c.border }]}
+          onPress={() => navigation.navigate('MyCard')}
+          activeOpacity={0.7}
+          accessibilityLabel="Show my card"
+        >
+          <Text style={{ color: c.primary, fontWeight: '600' }}>My card · QR</Text>
         </TouchableOpacity>
       </View>
       <View style={styles.section}>
