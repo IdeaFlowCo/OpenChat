@@ -26,7 +26,7 @@ Mobile render regressions also run in the server's Vitest suite:
 | `apps/server` | Node/Express + Socket.io + Neo4j **server** (shared backend) | `chat.globalbr.ai/api/*` |
 | `apps/web` | Frozen legacy Vite client source | migration reference only; not built or served |
 | `apps/mobile` | React Native / Expo product client | native iOS (TestFlight) + responsive RN-web at **`/app`** |
-| `apps/desktop` | Tauri desktop wrapper around the `apps/mobile` RN-web export | native desktop shell |
+| `apps/desktop` | Tauri window around the live `/app` client (same origin/auth/socket; see its README) | macOS `.dmg` via GitHub Releases |
 | `apps/mcp-server` | MCP REST→tools bridge (Claude-side connector) | run locally / connect to Claude |
 | `infra/` | `deploy.sh`, `docker-compose.prod.yml`, `Dockerfile` | GCP prod deploy |
 
