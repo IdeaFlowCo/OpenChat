@@ -23,6 +23,20 @@ export function AddMeCardView({ card }: { card: StrangerCard }) {
         <Text style={[styles.headline, { color: c.textPrimary }]}>{card.headline}</Text>
       ) : null}
       {status ? <Text style={[styles.status, { color: c.textMetadata }]}>{status}</Text> : null}
+      {card.linkedIn ? (
+        <TouchableOpacity onPress={() => void Linking.openURL(card.linkedIn!)} accessibilityRole="link">
+          <Text style={[styles.link, { color: c.primary }]} numberOfLines={1}>
+            {card.linkedIn.replace(/^https?:\/\//, '')}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+      {card.x ? (
+        <TouchableOpacity onPress={() => void Linking.openURL(card.x!)} accessibilityRole="link">
+          <Text style={[styles.link, { color: c.primary }]} numberOfLines={1}>
+            {card.x.replace(/^https?:\/\//, '')}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
       {card.link ? (
         <TouchableOpacity onPress={() => void Linking.openURL(card.link!)} accessibilityRole="link">
           <Text style={[styles.link, { color: c.primary }]} numberOfLines={1}>

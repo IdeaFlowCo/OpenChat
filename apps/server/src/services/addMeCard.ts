@@ -34,15 +34,29 @@ export const CARD_LINK_MAX = 200;
 export type CardSettings = {
   showAvatar: boolean;
   showStatus: boolean;
+  showHeadline: boolean;
   headline: string | null;
+  showLinkedIn: boolean;
+  linkedIn: string | null;
+  showX: boolean;
+  x: string | null;
+  showLink: boolean;
+
   link: string | null;
 };
 
 /** Minimum by default: only the display name is visible. */
 export const DEFAULT_CARD_SETTINGS: CardSettings = {
-  showAvatar: false,
+  showAvatar: true,
   showStatus: false,
+  showHeadline: true,
   headline: null,
+  showLinkedIn: true,
+  linkedIn: null,
+  showX: true,
+  x: null,
+  showLink: false,
+
   link: null,
 };
 
@@ -66,6 +80,9 @@ export type StrangerCard = {
   headline: string | null;
   avatarUrl: string | null;
   status: { text: string | null; emoji: string | null } | null;
+  linkedIn: string | null;
+  x: string | null;
+
   link: string | null;
 };
 
@@ -83,18 +100,23 @@ export function projectCardForStranger(owner: CardOwnerRecord, settings: CardSet
   const statusText = nonEmpty(owner.profileStatusText);
   const statusEmoji = nonEmpty(owner.profileStatusEmoji);
   const headline = nonEmpty(settings.headline);
+  const linkedIn = nonEmpty(settings.linkedIn);
+  const x = nonEmpty(settings.x);
+
   const link = nonEmpty(settings.link);
   return {
     name: normalizePublicDisplayName(owner.name),
     isBot: owner.isBot === true,
-    // Headline and link are card-only fields: typing them is the opt-in, but
-    // they must never smuggle an email address onto a public page.
-    headline: headline && !headline.includes('@') ? headline : null,
+    headline: settings.showHeadline && headline && !headline.includes('@') ? headline : null,
+
     avatarUrl: settings.showAvatar ? nonEmpty(owner.avatarUrl) : null,
     status: settings.showStatus && (statusText || statusEmoji)
       ? { text: statusText, emoji: statusEmoji }
       : null,
-    link: link && isSafeCardLink(link) ? link : null,
+    linkedIn: settings.showLinkedIn && linkedIn && isSafeCardLink(linkedIn) ? linkedIn : null,
+    x: settings.showX && x && isSafeCardLink(x) ? x : null,
+    link: settings.showLink && link && isSafeCardLink(link) ? link : null,
+
   };
 }
 
@@ -118,11 +140,27 @@ export function parseCardSettingsPatch(body: unknown): CardSettingsPatchResult {
   const input = body as Record<string, unknown>;
   const patch: Partial<CardSettings> = {};
 
-  for (const key of ['showAvatar', 'showStatus'] as const) {
+  for (const key of ['showAvatar', 'showStatus', 'showHeadline', 'showLinkedIn', 'showX', 'showLink'] as const) {
+
     if (input[key] === undefined) continue;
     if (typeof input[key] !== 'boolean') return { ok: false, error: `${key} must be a boolean` };
     patch[key] = input[key] as boolean;
   }
+
+  for (const field of ['linkedIn', 'x'] as const) {
+    if (input[field] !== undefined) {
+      if (input[field] !== null && typeof input[field] !== 'string') {
+        return { ok: false, error: `${field} must be a string or null` };
+      }
+      let url = nonEmpty(input[field]);
+      if (url && !/^https?:\/\//i.test(url)) url = `https://${url}`;
+      if (url && !isSafeCardLink(url)) {
+        return { ok: false, error: `${field} must be a valid http(s) URL` };
+      }
+      patch[field] = url;
+    }
+  }
+
 
   if (input.headline !== undefined) {
     if (input.headline !== null && typeof input.headline !== 'string') {
@@ -155,9 +193,16 @@ export function parseCardSettingsPatch(body: unknown): CardSettingsPatchResult {
 
 function settingsFromNode(props: Record<string, unknown>): CardSettings {
   return {
-    showAvatar: props.showAvatar === true,
+    showAvatar: props.showAvatar !== false, // Defaults to true if missing
     showStatus: props.showStatus === true,
+    showHeadline: props.showHeadline !== false,
     headline: typeof props.headline === 'string' ? props.headline : null,
+    showLinkedIn: props.showLinkedIn !== false,
+    linkedIn: typeof props.linkedIn === 'string' ? props.linkedIn : null,
+    showX: props.showX !== false,
+    x: typeof props.x === 'string' ? props.x : null,
+    showLink: props.showLink === true,
+
     link: typeof props.link === 'string' ? props.link : null,
   };
 }
@@ -201,7 +246,8 @@ export async function getOrCreateOwnCard(session: Session, userId: string): Prom
       MATCH (u:User {id: $userId})
       CREATE (u)-[:HAS_ADDME_CARD]->(:AddMeCard {
         token: $token, createdAt: datetime(),
-        showAvatar: false, showStatus: false
+        showAvatar: true, showStatus: false, showHeadline: true, showLinkedIn: true, showX: true, showLink: false
+
       })
     `, { userId, token });
     return {
@@ -224,7 +270,10 @@ export async function updateOwnCardSettings(
   await session.run(`
     MATCH (:User {id: $userId})-[:HAS_ADDME_CARD]->(card:AddMeCard {token: $token})
     SET card.showAvatar = $showAvatar, card.showStatus = $showStatus,
-        card.headline = $headline, card.link = $link, card.updatedAt = datetime()
+        card.showHeadline = $showHeadline, card.showLinkedIn = $showLinkedIn,
+        card.showX = $showX, card.showLink = $showLink,
+        card.headline = $headline, card.linkedIn = $linkedIn, card.x = $x, card.link = $link, card.updatedAt = datetime()
+
   `, { userId, token: current.token, ...next });
   return getOrCreateOwnCard(session, userId);
 }
@@ -244,7 +293,8 @@ export async function rotateOwnCardToken(session: Session, userId: string): Prom
     WITH u, count(old) AS revoked
     CREATE (u)-[:HAS_ADDME_CARD]->(:AddMeCard {
       token: $token, createdAt: datetime(),
-      showAvatar: $showAvatar, showStatus: $showStatus, headline: $headline, link: $link
+      showAvatar: $showAvatar, showStatus: $showStatus, showHeadline: $showHeadline, showLinkedIn: $showLinkedIn, showX: $showX, showLink: $showLink, headline: $headline, linkedIn: $linkedIn, x: $x, link: $link
+
     })
   `, { userId, token, ...current.settings }));
   return getOrCreateOwnCard(session, userId);
