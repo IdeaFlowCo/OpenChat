@@ -82,6 +82,8 @@ export function renderCardPage(card: StrangerCard, token: string): string {
     <h1 class="name">${name}${card.isBot ? ' <span style="font-size:13px;color:var(--text-dim)">· bot</span>' : ''}</h1>
     ${card.headline ? `<p class="headline">${escapeHtml(card.headline)}</p>` : ''}
     ${status ? `<p class="status">${escapeHtml(status)}</p>` : ''}
+    ${card.linkedIn ? `<a class="link" href="${escapeHtml(card.linkedIn)}" rel="noopener nofollow ugc" target="_blank">${escapeHtml(card.linkedIn.replace(/^https?:\/\//, ''))}</a><br>` : ''}
+    ${card.x ? `<a class="link" href="${escapeHtml(card.x)}" rel="noopener nofollow ugc" target="_blank">${escapeHtml(card.x.replace(/^https?:\/\//, ''))}</a><br>` : ''}
     ${card.link ? `<a class="link" href="${escapeHtml(card.link)}" rel="noopener nofollow ugc" target="_blank">${escapeHtml(card.link.replace(/^https?:\/\//, ''))}</a>` : ''}
   </div>
 

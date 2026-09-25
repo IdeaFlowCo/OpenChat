@@ -855,13 +855,21 @@ export interface StrangerCard {
   headline: string | null;
   avatarUrl: string | null;
   status: { text: string | null; emoji: string | null } | null;
+  linkedIn: string | null;
+  x: string | null;
   link: string | null;
 }
 
 export interface AddMeCardSettings {
   showAvatar: boolean;
   showStatus: boolean;
+  showHeadline: boolean;
   headline: string | null;
+  showLinkedIn: boolean;
+  linkedIn: string | null;
+  showX: boolean;
+  x: string | null;
+  showLink: boolean;
   link: string | null;
 }
 

@@ -73,7 +73,7 @@ describe('AddMe card routes', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
     const body = await response.json();
-    expect(body).toEqual({ name: 'Jacob Cole', isBot: false, headline: null, avatarUrl: null, status: null, link: null });
+    expect(body).toEqual({ name: 'Jacob Cole', isBot: false, headline: null, avatarUrl: null, status: null, linkedIn: null, x: null, link: null });
     expect(JSON.stringify(body)).not.toContain('owner-id-secret');
   });
 

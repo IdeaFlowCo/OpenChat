@@ -1,20 +1,3 @@
-/**
- * MyCardScreen — the owner's AddMe card (OpenChat-whxy.2). Replaces the June
- * MyQrCodeScreen, whose QR encoded /u/<userId> and so leaked the internal id.
- *
- * The QR encodes https://chat.globalbr.ai/c/<token>: a random, revocable
- * token. Scanners with the app land in CardEntryScreen via Universal Links;
- * everyone else gets the server-rendered /c/<token> card with an install /
- * web path that carries the add intent through sign-in.
- *
- * Consent: the card shows the display name only until the owner opts fields
- * in below. "Preview as stranger" fetches the real unauthenticated public
- * response, so what it shows is exactly what a scanner sees.
- *
- * The QR is always black on white (even in dark mode) and sized to the
- * screen so it scans at arm's length at an event.
- */
-
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -46,7 +29,6 @@ function confirmReset(onConfirm: () => void) {
   const title = 'Reset card link?';
   const message = 'Your current QR code and link will stop working. Anyone who already added you stays connected.';
   if (Platform.OS === 'web') {
-    // RN-web's Alert.alert ignores buttons, so it cannot confirm anything.
     if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${message}`)) onConfirm();
     return;
   }
@@ -65,6 +47,8 @@ export function MyCardScreen() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [headline, setHeadline] = useState('');
+  const [linkedIn, setLinkedIn] = useState('');
+  const [x, setX] = useState('');
   const [link, setLink] = useState('');
   const [strangerView, setStrangerView] = useState<StrangerCard | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -72,6 +56,8 @@ export function MyCardScreen() {
   const applyCard = useCallback((next: MyAddMeCard) => {
     setCard(next);
     setHeadline(next.settings.headline ?? '');
+    setLinkedIn(next.settings.linkedIn ?? '');
+    setX(next.settings.x ?? '');
     setLink(next.settings.link ?? '');
   }, []);
 
@@ -98,9 +84,35 @@ export function MyCardScreen() {
   const saveTextFields = () => {
     if (!card) return;
     const patch: Partial<AddMeCardSettings> = {};
-    if (headline.trim() !== (card.settings.headline ?? '')) patch.headline = headline;
-    if (link.trim() !== (card.settings.link ?? '')) patch.link = link;
+    if (headline.trim() !== (card.settings.headline ?? '')) patch.headline = headline.trim() || null;
+    if (linkedIn.trim() !== (card.settings.linkedIn ?? '')) patch.linkedIn = linkedIn.trim() || null;
+    if (x.trim() !== (card.settings.x ?? '')) patch.x = x.trim() || null;
+    if (link.trim() !== (card.settings.link ?? '')) patch.link = link.trim() || null;
     if (Object.keys(patch).length > 0) void save(patch);
+  };
+
+  const applyPreset = (preset: 'minimal' | 'business' | 'open') => {
+    const patch: Partial<AddMeCardSettings> = {};
+    if (preset === 'minimal') {
+      patch.showAvatar = true;
+      patch.showHeadline = false;
+      patch.showLinkedIn = false;
+      patch.showX = false;
+      patch.showLink = false;
+    } else if (preset === 'business') {
+      patch.showAvatar = true;
+      patch.showHeadline = true;
+      patch.showLinkedIn = true;
+      patch.showX = true;
+      patch.showLink = false;
+    } else if (preset === 'open') {
+      patch.showAvatar = true;
+      patch.showHeadline = true;
+      patch.showLinkedIn = true;
+      patch.showX = true;
+      patch.showLink = true;
+    }
+    void save(patch);
   };
 
   const togglePreview = async () => {
@@ -123,9 +135,7 @@ export function MyCardScreen() {
     const url = addMeCardUrl(card.token);
     try {
       await Share.share({ message: `Add me on OpenChat: ${url}`, url, title: 'Add me on OpenChat' });
-    } catch {
-      // User cancelled — no action needed.
-    }
+    } catch {}
   };
 
   const handleReset = () => confirmReset(async () => {
@@ -144,9 +154,7 @@ export function MyCardScreen() {
   if (!card) {
     return (
       <View style={[styles.center, { backgroundColor: c.background }]}>
-        {error
-          ? <Text style={{ color: c.textSecondary }}>{error}</Text>
-          : <ActivityIndicator color={c.primary} size="large" />}
+        {error ? <Text style={{ color: c.textSecondary }}>{error}</Text> : <ActivityIndicator color={c.primary} size="large" />}
       </View>
     );
   }
@@ -176,21 +184,24 @@ export function MyCardScreen() {
       )}
 
       <View style={styles.actions}>
-        <TouchableOpacity
-          style={[styles.actionBtn, { backgroundColor: c.primary }]}
-          onPress={handleShare}
-          accessibilityRole="button"
-        >
+        <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary }]} onPress={handleShare} accessibilityRole="button">
           <Text style={[styles.actionText, { color: c.onPrimary }]}>Share link</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionBtn, { borderColor: c.border, borderWidth: 1 }]}
-          onPress={togglePreview}
-          accessibilityRole="button"
-        >
-          <Text style={[styles.actionText, { color: c.textPrimary }]}>
-            {previewing ? 'Show QR' : 'Preview as stranger'}
-          </Text>
+        <TouchableOpacity style={[styles.actionBtn, { borderColor: c.border, borderWidth: 1 }]} onPress={togglePreview} accessibilityRole="button">
+          <Text style={[styles.actionText, { color: c.textPrimary }]}>{previewing ? 'Show QR' : 'Preview as stranger'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>PRESETS</Text>
+      <View style={styles.presetRow}>
+        <TouchableOpacity style={[styles.presetBtn, { backgroundColor: c.surface, borderColor: c.border }]} onPress={() => applyPreset('minimal')}>
+          <Text style={[styles.presetText, { color: c.textPrimary }]}>Minimal</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.presetBtn, { backgroundColor: c.surface, borderColor: c.border }]} onPress={() => applyPreset('business')}>
+          <Text style={[styles.presetText, { color: c.textPrimary }]}>Business Card</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.presetBtn, { backgroundColor: c.surface, borderColor: c.border }]} onPress={() => applyPreset('open')}>
+          <Text style={[styles.presetText, { color: c.textPrimary }]}>Open</Text>
         </TouchableOpacity>
       </View>
 
@@ -205,59 +216,41 @@ export function MyCardScreen() {
         <View style={[styles.row, { borderBottomColor: c.divider }]}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.label, { color: c.textPrimary }]}>Photo</Text>
-            <Text style={[styles.hint, { color: c.textMetadata }]}>Your profile photo, if you have one</Text>
+            <Text style={[styles.hint, { color: c.textMetadata }]}>Your profile photo</Text>
           </View>
-          <Switch
-            value={card.settings.showAvatar}
-            onValueChange={(v) => void save({ showAvatar: v })}
-            disabled={saving}
-            trackColor={{ false: c.border, true: c.primary }}
-            accessibilityLabel="Show photo on card"
-          />
+          <Switch value={card.settings.showAvatar} onValueChange={(v) => void save({ showAvatar: v })} disabled={saving} trackColor={{ false: c.border, true: c.primary }} />
         </View>
-        <View style={[styles.row, { borderBottomColor: c.divider }]}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.label, { color: c.textPrimary }]}>Status</Text>
-            <Text style={[styles.hint, { color: c.textMetadata }]}>Your current profile status</Text>
-          </View>
-          <Switch
-            value={card.settings.showStatus}
-            onValueChange={(v) => void save({ showStatus: v })}
-            disabled={saving}
-            trackColor={{ false: c.border, true: c.primary }}
-            accessibilityLabel="Show status on card"
-          />
-        </View>
+        
         <View style={[styles.fieldRow, { borderBottomColor: c.divider }]}>
-          <Text style={[styles.label, { color: c.textPrimary }]}>Headline</Text>
-          <TextInput
-            value={headline}
-            onChangeText={setHeadline}
-            onBlur={saveTextFields}
-            onSubmitEditing={saveTextFields}
-            placeholder="Optional · e.g. Founder at Ideaflow"
-            placeholderTextColor={c.textMuted}
-            maxLength={80}
-            returnKeyType="done"
-            style={[styles.input, { color: c.textPrimary, borderColor: c.border }]}
-          />
+          <View style={styles.fieldHeader}>
+            <Text style={[styles.label, { color: c.textPrimary }]}>Headline</Text>
+            <Switch value={card.settings.showHeadline} onValueChange={(v) => void save({ showHeadline: v })} disabled={saving} trackColor={{ false: c.border, true: c.primary }} />
+          </View>
+          <TextInput value={headline} onChangeText={setHeadline} onBlur={saveTextFields} onSubmitEditing={saveTextFields} placeholder="Optional · e.g. Founder at Ideaflow" placeholderTextColor={c.textMuted} maxLength={80} returnKeyType="done" style={[styles.input, { color: c.textPrimary, borderColor: c.border, opacity: card.settings.showHeadline ? 1 : 0.5 }]} editable={card.settings.showHeadline} />
         </View>
+
+        <View style={[styles.fieldRow, { borderBottomColor: c.divider }]}>
+          <View style={styles.fieldHeader}>
+            <Text style={[styles.label, { color: c.textPrimary }]}>LinkedIn</Text>
+            <Switch value={card.settings.showLinkedIn} onValueChange={(v) => void save({ showLinkedIn: v })} disabled={saving} trackColor={{ false: c.border, true: c.primary }} />
+          </View>
+          <TextInput value={linkedIn} onChangeText={setLinkedIn} onBlur={saveTextFields} onSubmitEditing={saveTextFields} placeholder="Optional · e.g. linkedin.com/in/you" placeholderTextColor={c.textMuted} autoCapitalize="none" autoCorrect={false} keyboardType="url" maxLength={200} returnKeyType="done" style={[styles.input, { color: c.textPrimary, borderColor: c.border, opacity: card.settings.showLinkedIn ? 1 : 0.5 }]} editable={card.settings.showLinkedIn} />
+        </View>
+
+        <View style={[styles.fieldRow, { borderBottomColor: c.divider }]}>
+          <View style={styles.fieldHeader}>
+            <Text style={[styles.label, { color: c.textPrimary }]}>X / Twitter</Text>
+            <Switch value={card.settings.showX} onValueChange={(v) => void save({ showX: v })} disabled={saving} trackColor={{ false: c.border, true: c.primary }} />
+          </View>
+          <TextInput value={x} onChangeText={setX} onBlur={saveTextFields} onSubmitEditing={saveTextFields} placeholder="Optional · e.g. x.com/you" placeholderTextColor={c.textMuted} autoCapitalize="none" autoCorrect={false} keyboardType="url" maxLength={200} returnKeyType="done" style={[styles.input, { color: c.textPrimary, borderColor: c.border, opacity: card.settings.showX ? 1 : 0.5 }]} editable={card.settings.showX} />
+        </View>
+
         <View style={[styles.fieldRow, { borderBottomWidth: 0 }]}>
-          <Text style={[styles.label, { color: c.textPrimary }]}>Link</Text>
-          <TextInput
-            value={link}
-            onChangeText={setLink}
-            onBlur={saveTextFields}
-            onSubmitEditing={saveTextFields}
-            placeholder="Optional · e.g. linkedin.com/in/you"
-            placeholderTextColor={c.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            maxLength={200}
-            returnKeyType="done"
-            style={[styles.input, { color: c.textPrimary, borderColor: c.border }]}
-          />
+          <View style={styles.fieldHeader}>
+            <Text style={[styles.label, { color: c.textPrimary }]}>Other Link</Text>
+            <Switch value={card.settings.showLink} onValueChange={(v) => void save({ showLink: v })} disabled={saving} trackColor={{ false: c.border, true: c.primary }} />
+          </View>
+          <TextInput value={link} onChangeText={setLink} onBlur={saveTextFields} onSubmitEditing={saveTextFields} placeholder="Optional · e.g. yoursite.com" placeholderTextColor={c.textMuted} autoCapitalize="none" autoCorrect={false} keyboardType="url" maxLength={200} returnKeyType="done" style={[styles.input, { color: c.textPrimary, borderColor: c.border, opacity: card.settings.showLink ? 1 : 0.5 }]} editable={card.settings.showLink} />
         </View>
       </View>
       <Text style={[styles.footnote, { color: c.textMetadata }]}>
@@ -279,14 +272,7 @@ export function MyCardScreen() {
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   content: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 24, paddingBottom: 48 },
-  qrPanel: {
-    // Fixed white panel with generous padding = the QR quiet zone. High
-    // contrast in every theme is the point; do not theme this.
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    padding: 24,
-    alignItems: 'center',
-  },
+  qrPanel: { backgroundColor: '#ffffff', borderRadius: 20, padding: 24, alignItems: 'center' },
   qrName: { color: '#000000', fontSize: 20, fontWeight: '700', marginTop: 16, maxWidth: 320 },
   qrHint: { color: '#3a3a3c', fontSize: 14, marginTop: 2 },
   previewWrap: { width: '100%', alignItems: 'center', gap: 12 },
@@ -294,22 +280,17 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', gap: 12, marginTop: 20, width: '100%', maxWidth: 420 },
   actionBtn: { flex: 1, paddingVertical: 13, borderRadius: 12, alignItems: 'center' },
   actionText: { fontWeight: '700', fontSize: 15 },
-  sectionLabel: {
-    alignSelf: 'stretch', maxWidth: 420, width: '100%', marginLeft: 'auto', marginRight: 'auto',
-    fontSize: 12, fontWeight: '600', letterSpacing: 0.5, marginTop: 32, marginBottom: 8,
-  },
+  sectionLabel: { alignSelf: 'stretch', maxWidth: 420, width: '100%', marginLeft: 'auto', marginRight: 'auto', fontSize: 12, fontWeight: '600', letterSpacing: 0.5, marginTop: 32, marginBottom: 8 },
+  presetRow: { flexDirection: 'row', gap: 8, width: '100%', maxWidth: 420, marginBottom: 8 },
+  presetBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center' },
+  presetText: { fontSize: 13, fontWeight: '600' },
   section: { width: '100%', maxWidth: 420, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth },
-  row: {
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
+  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   fieldRow: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  fieldHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   label: { fontSize: 16, fontWeight: '500' },
   hint: { fontSize: 13, marginTop: 2 },
-  input: {
-    marginTop: 8, fontSize: 15, paddingHorizontal: 12, paddingVertical: 10,
-    borderRadius: 8, borderWidth: StyleSheet.hairlineWidth,
-  },
+  input: { fontSize: 15, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth },
   footnote: { fontSize: 13, marginTop: 8, maxWidth: 420, width: '100%' },
   error: { fontSize: 14, marginTop: 16, textAlign: 'center' },
   reset: { marginTop: 32, alignItems: 'center', paddingVertical: 8 },
