@@ -494,7 +494,7 @@ export function MessageActionSheet({
                 activeOpacity={0.7}
               >
                 <View style={styles.actionIconBox}><AppIcon name="chat" color={c.textPrimary} size={20} /></View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Ask my agent about this…</Text>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Ask OpenChat Agent about this…</Text>
               </TouchableOpacity>
             )}
 

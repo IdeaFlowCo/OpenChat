@@ -204,7 +204,7 @@ export function StoryComposerScreen() {
                 );
               })}
               {shareableConversations.length === 0 && (
-                <Text style={[styles.noAudience, { color: c.textSecondary }]}>Start a chat with someone before sharing a Story. For an agent-only search, tell My Agent instead.</Text>
+                <Text style={[styles.noAudience, { color: c.textSecondary }]}>Start a chat with someone before sharing a Story. For an agent-only search, tell OpenChat Agent instead.</Text>
               )}
             </View>
 

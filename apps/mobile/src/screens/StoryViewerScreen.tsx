@@ -95,7 +95,7 @@ export function StoryViewerScreen() {
             </TouchableOpacity>
           </View>
           <TouchableOpacity onPress={() => navigation.navigate('AgentOverlay', { prompt: agentPrompt })} style={styles.agentAction}>
-            <Text style={{ color: c.primary, fontWeight: '700' }}>Ask My Agent about this</Text>
+            <Text style={{ color: c.primary, fontWeight: '700' }}>Ask OpenChat Agent about this</Text>
           </TouchableOpacity>
           {error && <Text accessibilityRole="alert" style={[styles.error, { color: c.danger }]}>{error}</Text>}
         </View>
