@@ -1,97 +1,56 @@
-# OpenChat Monorepo Migration Plan (openchat-3jq.5)
+# OpenChat Migration Inventory & Assessment
 
-> Historical migration plan. The migration is complete; the repository-root
-> [`AGENTS.md`](../AGENTS.md) owns the current client-surface contract, and
-> [`collapse-m-d.md`](./collapse-m-d.md) owns the current web-route resolution.
+## Goal: One Codebase via `react-native-web`
 
-**Status:** Historical plan; migration completed. Authored 2026-06-04.
-**Goal:** One workspace where server, web client, the Expo app, shared API client, shared types, and deploy/EAS scripts are versioned together — so a protocol change lands in one PR instead of drifting across two repos.
+As established, `react-native-web` is the target direction for OpenChat. The `apps/mobile` directory is already an Expo/React Native application that builds for iOS and outputs a web bundle.
 
-## 1. Current state (the problem)
+The `apps/web` application is **frozen and no longer served**, replaced by the `react-native-web` build of `apps/mobile` served at `/app`.
 
-Two independent git repos:
+This document assesses the work required to fully port the remaining features from `apps/web` into the unified `apps/mobile` codebase and deprecate `apps/web` completely.
 
-| Repo | Contains | Deploys to |
-|---|---|---|
-| `~/code/OpenChat` | npm workspaces `server` + `client` (Vite web), plus `client-mobile` / `client-mobile-desktop` RN-web export dirs for `/m` and `/d`, Dockerfile, `deploy.sh` | `chat.globalbr.ai` (backend + web) |
-| `~/code/openchat-mobile` | Expo SDK 54 / RN 0.81 native app (`App.tsx`, `src/`, `ios/`), `eas.json`, `scripts/local-build.sh` | TestFlight (iOS) + web exports mounted at `/m`, `/d` |
+### 1. API Client (`api.ts` vs `api/client.ts`)
+- **Status:** Diverged.
+- **apps/web (`src/api.ts`):** 1,293 lines. Defines a unified `ApiClient` class with ~65 async methods.
+- **apps/mobile (`src/api/client.ts`):** 1,573 lines. Defines exported API methods directly, using a custom wrapper (`request`).
+- **Migration Path:** `apps/mobile` is the canonical client. The `apps/web` `ApiClient` class should be abandoned. Any missing API methods in `apps/mobile` (if any exist) must be ported.
+- **Risk:** Low.
 
-**Drift hot-spots (verified):**
-- **API client duplicated:** `OpenChat/client/src/api.ts` ↔ `openchat-mobile/src/api/client.ts`. Endpoints, auth/refresh logic, and socket wiring are re-implemented in both.
-- **Types duplicated:** message/conversation/user shapes are hand-redeclared on web, mobile, and server (Neo4j projections).
-- **No shared protocol source:** the `text`→`content` alias, self-DM rules, agent-key scopes all had to be edited per-surface (this session hit exactly that).
-- The `/m` and `/d` web builds already come from the `openchat-mobile` RN-web export — so the `client-mobile*` dirs in `OpenChat` are partly redundant (overlaps openchat-3jq.4).
+### 2. Auth Handling
+- **Status:** Diverged.
+- **apps/web:** Uses `localStorage` and `sessionStorage` directly (`utils/authSession.ts`).
+- **apps/mobile:** Uses Expo SecureStore with AsyncStorage fallback, handling device keychain encryption appropriately (`SECURE_TOKEN_KEY`).
+- **Migration Path:** Rely entirely on the Expo `SecureStore` (with web polyfill built-in via `expo-secure-store`) in `apps/mobile`. `apps/web` auth code is strictly legacy DOM-dependent.
+- **Risk:** Low. Web auth flow is already handled by `apps/mobile/src/screens/LoginScreen.tsx`.
 
-## 2. Target layout
+### 3. Socket / Realtime (`hooks/useChatSocket.ts` vs `api/socket.ts`)
+- **Status:** Diverged.
+- **apps/web:** Uses a custom `useChatSocket` React hook (294 lines) wrapping `socket.io-client`.
+- **apps/mobile:** Uses a decoupled functional API module `api/socket.ts` (130 lines) relying on `socket.io-client`.
+- **Migration Path:** Retain `apps/mobile/src/api/socket.ts` which uses an event-driven architecture that functions decoupled from React's render loop, necessary for background messaging on mobile.
+- **Risk:** Low. The `apps/mobile` socket layer handles disconnects and reconnects better for mobile lifecycles.
 
-Single repo `openchat/` using **npm workspaces + Turborepo** (npm workspaces already in use; add Turbo for task caching/orchestration):
+### 4. Message Rendering (`MessageContent`, `VoiceMessageBubble`, etc.)
+- **Status:** Fully Duplicated.
+- **apps/web:** Implements rendering via React + TailwindCSS + plain HTML (`<div>`, `<span>`).
+- **apps/mobile:** Implements rendering via React Native (`<View>`, `<Text>`) using a custom token theme system.
+- **Migration Path:** The `apps/web` components must be completely abandoned. `react-native-web` correctly translates `<View>` and `<Text>` to DOM elements. `apps/mobile`'s theme token system must remain the single source of truth.
+- **Risk:** Medium. Moving any missing complex web layouts to Flexbox-only RN layouts requires care, but the core layout of `apps/mobile` already functions correctly via `/app`.
 
-```
-openchat/
-├── apps/
-│   ├── server/        # was OpenChat/server  (Express + Socket.io + Neo4j)
-│   ├── web/           # was OpenChat/client  (Vite SPA)
-│   └── mobile/        # was openchat-mobile   (Expo app; emits native + /m,/d web)
-├── packages/
-│   ├── api-client/    # ONE typed REST+socket client, consumed by web + mobile
-│   ├── types/         # shared Conversation/Message/User/AgentKey/scopes
-│   └── protocol/      # route paths, field aliases (content|text), event names
-├── infra/
-│   ├── Dockerfile, docker-compose.prod.yml, deploy.sh
-│   └── eas.json, scripts/local-build.sh, publish-to-testers.py
-├── package.json       # workspaces: ["apps/*","packages/*"]
-├── turbo.json
-└── .github/workflows/ # CI: lint/typecheck/build/test; EAS build+submit (3jq.2)
-```
+### 5. Conversation State (`ChatContext.tsx`)
+- **Status:** Diverged.
+- **apps/web (`contexts/ChatContext.tsx`):** 1,008 lines.
+- **apps/mobile (`contexts/ChatContext.tsx` & `contexts/conversationState.ts`):** 1,155 + 51 lines. Uses different pagination shapes (e.g., `{ messages, hasMore }` vs raw arrays).
+- **Migration Path:** `apps/mobile` `ChatContext` is the survivor. It handles native pagination and infinite scroll effectively.
+- **Risk:** Low.
 
-## 3. Migration order (incremental, each step independently shippable)
+## Conclusion
 
-**Phase 0 — Pre-flight (coordination gate).**
-- All in-flight branches across both repos merged to their mains (esp. the `dock-operation` agent's chat.ts/socket work). Migration MUST start from a clean, merged main on both repos or history-join gets ugly.
-- Freeze new feature branches for the migration window (short — it's mechanical).
+The path to a single codebase via `react-native-web` is highly viable and largely complete structurally. `apps/mobile` already functions as the singular product client for both native and web (`/app`), while `apps/desktop` acts as a thin shell around it. 
 
-**Phase 1 — Create the monorepo shell, preserve history.**
-- New repo (or reuse `OpenChat`) with `apps/` + `packages/`.
-- Bring both repos in with **history preserved** via `git subtree add --prefix=apps/mobile <openchat-mobile remote>` (and move existing `server`/`client` → `apps/server`/`apps/web` with `git mv`). Subtree (not submodule) so it's one working tree.
-- Root `package.json` workspaces `["apps/*","packages/*"]` + `turbo.json`. `npm install` once at root.
+**Rough Size of Remaining Work:** Small. It is primarily an audit to ensure no edge-case web features were left behind in the frozen `apps/web` before completely removing the `apps/web` directory.
 
-**Phase 2 — Extract `packages/types` + `packages/protocol`.**
-- Move the canonical message/conversation/user/agent-key types into `packages/types`; re-export from server/web/mobile, deleting the duplicates one surface at a time (typecheck after each).
-- `packages/protocol`: route constants, the `content|text` alias, socket event names. Server + clients import these instead of string literals.
+**Main Risks:** Feature parity gaps (e.g. keyboard shortcuts, specific DOM-only drag-and-drop affordances) from `apps/web` that haven't been re-implemented in React Native for the `/app` bundle.
 
-**Phase 3 — Unify the API client into `packages/api-client`.**
-- Diff `client/src/api.ts` vs `mobile/src/api/client.ts`; build one client parameterized by platform bits (storage, fetch, socket impl) injected by each app. Mobile keeps `expo-secure-store`; web keeps localStorage — via a small adapter interface.
-- Swap web + mobile to consume `@openchat/api-client`. Delete both originals.
-
-**Phase 4 — Collapse `/m` and `/d`** (folds in openchat-3jq.4): single responsive RN-web export from `apps/mobile`; drop `client-mobile*` from the old layout.
-
-**Phase 5 — Infra + CI.**
-- `deploy.sh`/Docker build `apps/server` + `apps/web`. `eas.json`/`local-build.sh` run from `apps/mobile` (keep the TMPDIR + Node self-heal from openchat-u0k).
-- GitHub Actions: turbo `lint`/`typecheck`/`build`/`test` on PR; EAS build+submit workflow (openchat-3jq.2).
-
-## 4. Risks & mitigations
-- **History join messiness** → use `git subtree` (preserves history, single tree); tag both repos pre-migration for rollback.
-- **EAS expects app at repo root** → Expo supports monorepos, but `eas.json`, `metro.config.js` (watchFolders → repo root + symlink resolution), and `.xcode.env` need monorepo-aware paths. Budget a throwaway EAS build to validate before cutover.
-- **Two deploy targets, one repo** → path-filtered CI so a web-only change doesn't trigger an iOS build.
-- **Beads** lives in `OpenChat/.beads` — keep it at the monorepo root; reconcile the `openchat-`/`OpenChat-` prefix split (openchat-yci) during the move.
-- **Other agents** mid-edit → Phase 0 gate is mandatory; announce a short freeze.
-
-## 5. Effort
-A few focused sessions: shell+history (one session), types+protocol (one), api-client unify (one, the meatiest), /m,/d collapse + infra/CI (one). Sequence them; each leaves both apps building. Bottleneck is review + the EAS monorepo validation build, not agent time.
-
-## 6. Decisions
-
-1. **Repo (DECIDED 2026-06-04):** Ultimately **reuse the `OpenChat` repo** as the monorepo home — but **stage the migration safely**: build + validate the combined layout in a **fresh scratch repo / staging branch** first (subtree-import both repos, get both apps building + an EAS validation build green), then migrate that into `OpenChat` once it's clearly safe. Don't mutate the live repo in place until the staged version is proven. (Jacob: "as long as we're careful… ultimately reuse the repo; to be safe, create a separate repo and migrate it in unless we're clear.")
-2. Turborepo vs plain workspaces — _open_ (recommend Turborepo for task caching + path-filtered CI).
-3. Cutover freeze window — _open_ (still recommended; short, mechanical).
-
-## 7. Validated findings from the staging build (2026-06-04)
-
-Built `~/code/openchat-mono` (apps/{server,web,mobile} + npm workspaces, copies not subtree). Root `npm install` + `apps/server` build + `apps/web` build + `apps/mobile` `tsc --noEmit` all PASS. Real-migration must handle:
-
-1. **React 18 (web) vs React 19 (mobile) in one workspace — the headline risk.** npm hoists React 19 + `@types/react@19` to root; web's hoisted deps (`react-router-dom`, `react-hot-toast`) then resolve types to React 19 → `TS2786 ... JSX component` / `bigint not assignable to ReactNode`. `typeRoots` did NOT fix it. Staging band-aid: web `tsconfig.json` `baseUrl` + `paths` pinning `react`/`react-dom` (+ `/*`) to `./node_modules/@types/react(-dom)`. **Durable fix:** align both apps on React 19, or per-app React resolution isolation (nohoist / per-app `paths`). Vite runtime was unaffected — TS only.
-2. **Server build relative path:** `apps/server` build did `cp ../docs/connect-your-bot.md` (sibling `docs/` in old layout → missing under `apps/server/`). Decide: keep a monorepo-root `docs/` and point the build at it, or move the doc into the server app.
-3. **Metro/EAS not monorepo-aware:** mobile `metro.config.js` is the minimal `getDefaultConfig(__dirname)`. A real EAS/Metro build needs `watchFolders` → repo root + symlink resolution. **Validate with a throwaway EAS build before cutover.** (tsc passed, but Metro/EAS were not exercised in staging.)
-4. **Shared-code duplication confirmed** (as predicted): `web/src/api.ts` ↔ `mobile/src/api/client.ts` are independent reimplementations; message/conversation/user types hand-redeclared across server/web/mobile → Phase 2/3 `packages/{types,protocol,api-client}`.
-
-Staging repo commit: `2b3c20b` (local only, not pushed). Source repos unmodified.
+**Next Steps:**
+1. Audit the `apps/web` directory against `apps/mobile` to ensure no critical features are missing.
+2. Delete the `apps/web` directory entirely to remove confusion and prevent accidental updates to dead code.

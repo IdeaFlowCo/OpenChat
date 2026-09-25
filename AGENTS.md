@@ -21,14 +21,14 @@ Mobile render regressions also run in the server's Vitest suite:
 
 **MONOREPO (since 2026-06-04):** everything lives in this one repo, `IdeaFlowCo/OpenChat`:
 
-| Path | What it is | Surfaces |
-|------|-----------|----------|
-| `apps/server` | Node/Express + Socket.io + Neo4j **server** (shared backend) | `chat.globalbr.ai/api/*` |
-| `apps/web` | Frozen legacy Vite client source | migration reference only; not built or served |
-| `apps/mobile` | React Native / Expo product client | native iOS (TestFlight) + responsive RN-web at **`/app`** |
-| `apps/desktop` | Tauri window around the live `/app` client (same origin/auth/socket; see its README) | macOS `.dmg` via GitHub Releases |
-| `apps/mcp-server` | MCP REST→tools bridge (Claude-side connector) | run locally / connect to Claude |
-| `infra/` | `deploy.sh`, `docker-compose.prod.yml`, `Dockerfile` | GCP prod deploy |
+| Path | What it is | Framework | Ships to | Status / Activity |
+|------|-----------|-----------|----------|-------------------|
+| `apps/mobile` | Single product client | React Native 0.81.5 + Expo (`react-native-web`) | Native iOS (TestFlight) + Responsive web (`/app`) | **CANONICAL** (High: 63 commits in 60d) |
+| `apps/web` | Frozen legacy client | React + Vite (no RN) | Nowhere (migration reference only) | **LEGACY** (Low: 14 cross-cutting commits in 60d) |
+| `apps/desktop` | Tauri window around the live `/app` client (same origin/auth/socket; see its README) | Tauri + Rust | macOS `.dmg` via GitHub Releases | **CANONICAL** (active in main) |
+| `apps/server` | Shared backend | Node.js / Express + Socket.IO + Neo4j | GCP Prod (`chat.globalbr.ai/api/*`) | **CANONICAL** (Moderate: 52 commits in 60d) |
+| `apps/mcp-server` | Agent tools bridge | TypeScript (Node) | Claude local / connector | **CANONICAL** (Low: 8 commits in 60d) |
+| `infra/` | Production deployment | Docker / bash scripts | GCP Prod (Instance `noos`) | **CANONICAL** |
 
 (The old separate `tmad4000/openchat-mobile` repo is **frozen/archived** — its history is in `apps/mobile`.)
 
