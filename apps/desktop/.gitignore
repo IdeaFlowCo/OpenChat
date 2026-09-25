@@ -1,0 +1,4 @@
+# Worktree-local Rust toolchain (RUSTUP_HOME/CARGO_HOME) and Cargo output
+.toolchain/
+src-tauri/target/
+src-tauri/gen/

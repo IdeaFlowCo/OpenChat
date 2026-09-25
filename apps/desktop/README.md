@@ -1,76 +1,70 @@
 # OpenChat Desktop
 
-A thin desktop shell around the OpenChat **react-native-web** build (from
-`apps/mobile`). It ships the exact same responsive UI as the browser build —
-wide windows get the master-detail split view, narrow windows collapse to the
-phone layout — inside a native window frame.
+A native Tauri window around the **live** OpenChat client at
+`https://chat.globalbr.ai/app/` — the same react-native-web build of
+`apps/mobile` that browsers get. There is no desktop UI codebase and no bundled
+copy of the client.
 
-This is a **wrapper only**. There is no separate desktop UI codebase; all
-product code lives in `apps/mobile/src`. API + socket usage is identical to the
-mobile/browser build (it talks to the same `chat.globalbr.ai` backend).
+## Why it loads the live URL instead of bundling the export
 
-> Do not confuse this with `apps/web` (the frozen legacy Vite source). This
-> wrapper bundles the same RNW product client served in browsers.
+Loading `/app/` from its real origin is what makes desktop share state with
+mobile and web:
 
-## The shippable deliverable
+- **Same origin, same auth.** A bundled build runs from `tauri://localhost`,
+  which is not in the server's CORS allowlist (`apps/server/src/index.ts`) and
+  breaks the redirect sign-in flows, whose callback URIs are derived from
+  `window.location.origin`. Loaded from `chat.globalbr.ai`, every existing login
+  path works unchanged, with no server change.
+- **Same socket, same data.** The client connects to the same Socket.io server,
+  so messages sync live across desktop, web, and the iOS app.
+- **Always current.** Every `/app` deploy updates the desktop app too; no
+  desktop rebuild is needed for client changes.
 
-The **primary deliverable is the responsive RNW web build itself** — it runs in
-any browser and is what `chat.globalbr.ai` serves at `/app`. Build it with:
+The trade-off is that desktop needs network access to start, which a chat client
+needs anyway.
 
-```bash
-cd apps/mobile
-npm run export:web:app       # -> dist-web-app (browser assets under /app/)
-npm run export:web:shell     # -> dist-web-shell (relative/root shell assets)
-```
+`src-tauri/src/main.rs` builds the window and hands `window.open` targets
+(`Linking.openURL` on RN-web — for example the Settings links to the landing
+page) to the system browser, since the webview has no tabs.
 
-Open `dist-web-shell/index.html` through any static server to see the desktop
-split-view. Resize the window across ~900px to watch it collapse to the phone
-layout and back.
+## Build (macOS arm64)
 
-## Building the native app (Tauri)
-
-Tauri is chosen over Electron for a ~10x smaller binary (system WebView instead
-of a bundled Chromium). The config here (`src-tauri/tauri.conf.json`) is a
-standard Tauri v2 setup — no custom Rust beyond the boilerplate entry point.
-
-**Prerequisites** (one-time, not installed in CI by default):
-
-- Rust toolchain — `curl https://sh.rustup.rs -sSf | sh`
-- Platform WebView deps — macOS: nothing extra; Linux: `webkit2gtk`; Windows:
-  WebView2 (preinstalled on Win 11).
-- App icons in `src-tauri/icons/` — generate from `apps/mobile/assets/icon.png`
-  with `npx @tauri-apps/cli icon ../mobile/assets/icon.png`. (Not committed;
-  Tauri requires them at build time.)
-
-**Build:**
+Rust is not installed on the build hosts by default. A worktree-local toolchain
+keeps it self-contained (`.toolchain/` is gitignored):
 
 ```bash
 cd apps/desktop
-npm install
-npm run build:web   # exports apps/mobile -> ../mobile/dist-web-shell
-npm run build:tauri # tauri build -> native installer in src-tauri/target/release/bundle
-# or: npm run dev    # starts Expo web on port 8081, then opens the Tauri dev window
+export RUSTUP_HOME=$PWD/.toolchain/rustup CARGO_HOME=$PWD/.toolchain/cargo
+export PATH=$CARGO_HOME/bin:$PATH
+curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal   # once
+
+CI=true npx -y @tauri-apps/cli@2.11.2 build
+# -> src-tauri/target/release/bundle/macos/OpenChat.app
+# -> src-tauri/target/release/bundle/dmg/OpenChat_<version>_aarch64.dmg
 ```
 
-The root `npm run build` intentionally filters out `openchat-desktop`; this
-wrapper needs the Rust/Tauri toolchain and should be built explicitly from
-`apps/desktop`.
+`CI=true` makes the DMG step skip its Finder AppleScript styling pass, which
+times out on a headless host. The DMG still has the Applications drop link.
 
-`tauri.conf.json`'s `frontendDist` points at `../../mobile/dist-web-shell`, and
-`beforeBuildCommand` re-runs the web export so `npm run build:tauri` is one step.
-For local development, `beforeDevCommand` starts the mobile web server that
-`devUrl` loads.
+The bundle is ad-hoc signed (`bundle.macOS.signingIdentity: "-"`), not
+Developer ID signed or notarized. Users must allow the first launch once:
+**System Settings → Privacy & Security → Open Anyway**. Removing that step needs
+an Apple Developer ID Application certificate plus notarization.
 
-## Electron alternative (follow-up)
+The icons in `src-tauri/icons/` are generated from `apps/mobile/assets/icon.png`
+(`npx @tauri-apps/cli@2.11.2 icon ../mobile/assets/icon.png -o src-tauri/icons`).
 
-If a Tauri toolchain isn't viable (e.g. a build host without Rust), an Electron
-wrapper is a drop-in alternative and is left as a documented follow-up:
+The root `npm run build` deliberately skips `openchat-desktop`; build it
+explicitly from here.
 
-1. `npm i -D electron electron-builder` in a sibling `apps/desktop-electron`.
-2. A ~20-line `main.js` that `BrowserWindow.loadFile('dist-web-shell/index.html')`
-   with `width: 1100, height: 760, minWidth: 380`.
-3. `electron-builder` config pointing `files` at the same `dist-web-shell` export.
+## Distribution
 
-Electron produces a larger binary (~150MB vs ~10MB) but needs no Rust and works
-on any Node host. The responsive RNW build is identical either way — the shell
-is interchangeable.
+The landing page links to
+`https://github.com/IdeaFlowCo/OpenChat/releases/latest/download/OpenChat-macOS-arm64.dmg`.
+To ship a new build, attach the DMG to a GitHub release under exactly that asset
+name:
+
+```bash
+cp src-tauri/target/release/bundle/dmg/OpenChat_*_aarch64.dmg OpenChat-macOS-arm64.dmg
+gh release create desktop-v<version> OpenChat-macOS-arm64.dmg --title "OpenChat for Mac <version>"
+```
