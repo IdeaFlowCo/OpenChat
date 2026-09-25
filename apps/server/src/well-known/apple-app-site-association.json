@@ -6,11 +6,13 @@
         "appID": "JESMXK96LG.com.jacobcole.openchat",
         "paths": [
           "/i/*",
-          "/u/*"
+          "/u/*",
+          "/c/*"
         ],
         "components": [
           { "/": "/i/*", "comment": "Group invite deep links" },
-          { "/": "/u/*", "comment": "Per-user add deep links" }
+          { "/": "/u/*", "comment": "Per-user add deep links" },
+          { "/": "/c/*", "comment": "AddMe card deep links" }
         ]
       }
     ]

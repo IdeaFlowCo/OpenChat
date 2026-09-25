@@ -3,7 +3,8 @@
  *
  * Parses the scanned URL with parseOpenChatUrl():
  *   - openchat://user/<id>   → calls createConversation + navigates to Chat
- *   - openchat://invite/<t>  → toast "Group invites not supported yet"
+ *   - openchat://invite/<t>  → GroupInvitePreview
+ *   - .../c/<token>          → CardEntry (AddMe card)
  *   - anything else          → Alert "Not a valid OpenChat code"
  *
  * Web: expo-camera does not provide reliable barcode scanning on web, so this
@@ -63,6 +64,13 @@ export function ScanQrScreen() {
         } finally {
           setProcessing(false);
         }
+        return;
+      }
+
+      if (parsed.type === 'card') {
+        // AddMe card: show the card first so adding is a deliberate tap.
+        navigation.replace('CardEntry', { token: parsed.token });
+        setProcessing(false);
         return;
       }
 

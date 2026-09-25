@@ -15,6 +15,8 @@ export function EntryRouter() {
         navigationRef.navigate('GroupInvitePreview', { token: entryIntent.target.token });
       } else if (entryIntent.target.kind === 'person') {
         navigationRef.navigate('PersonEntry', { userId: entryIntent.target.userId });
+      } else if (entryIntent.target.kind === 'card') {
+        navigationRef.navigate('CardEntry', { token: entryIntent.target.token });
       }
     };
 

@@ -22,6 +22,7 @@ export type AppIconName =
   | 'pin'
   | 'play'
   | 'plus'
+  | 'qr'
   | 'reply'
   | 'search'
   | 'settings'
@@ -240,6 +241,15 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
         <>
           <Path d="M7.5 5h2.2v14H7.5z" fill={color} stroke="none" />
           <Path d="M14.3 5h2.2v14h-2.2z" fill={color} stroke="none" />
+        </>
+      )}
+      {name === 'qr' && (
+        /* Three finder squares + data dots: reads as "QR / my card". */
+        <>
+          <Path d="M4 4h6v6H4z" {...common} />
+          <Path d="M14 4h6v6h-6z" {...common} />
+          <Path d="M4 14h6v6H4z" {...common} />
+          <Path d="M14 14h2.5v2.5H14zM17.5 17.5H20V20h-2.5zM14 17.5h2.5V20H14zM17.5 14H20v2.5h-2.5z" fill={color} stroke="none" />
         </>
       )}
       {name === 'x' && (

@@ -4,15 +4,19 @@
  * Supported shapes:
  *   openchat://user/<userId>?v=1    → { type: 'user', userId }
  *   openchat://invite/<token>       → { type: 'invite', token }
+ *   openchat://card/<token>         → { type: 'card', token }   (AddMe card)
+ *   https://chat.globalbr.ai/c/<t>  → { type: 'card', token }
  *   https://chat.globalbr.ai/u/<id> → { type: 'user', userId }   (web fallback)
  *   https://chat.globalbr.ai/app/?intent=add-user&id=<id>
  *   https://chat.globalbr.ai/app/?intent=invite&token=<token>
+ *   https://chat.globalbr.ai/app/?intent=card&token=<token>
  *   anything else                   → { type: 'unknown' }
  */
 
 export type ParsedOpenChatUrl =
   | { type: 'user'; userId: string }
   | { type: 'invite'; token: string }
+  | { type: 'card'; token: string }
   | { type: 'context'; conversationId: string; entryId: string }
   | { type: 'unknown' };
 
@@ -36,6 +40,12 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
     if (token) return { type: 'invite', token };
   }
 
+  // openchat://card/<token>
+  if (url.protocol === 'openchat:' && url.hostname === 'card') {
+    const token = url.pathname.replace(/^\//, '');
+    if (token) return { type: 'card', token };
+  }
+
   // openchat://context/<conversationId>/<entryId>
   if (url.protocol === 'openchat:' && url.hostname === 'context') {
     const parts = url.pathname.replace(/^\//, '').split('/');
@@ -54,6 +64,9 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
     const inviteMatch = url.pathname.match(/^\/i\/(.+)$/);
     if (inviteMatch?.[1]) return { type: 'invite', token: inviteMatch[1] };
 
+    const cardMatch = url.pathname.match(/^\/c\/([^/]+)\/?$/);
+    if (cardMatch?.[1]) return { type: 'card', token: cardMatch[1] };
+
     const contextMatch = url.pathname.match(/^\/app\/context\/([^\/]+)\/([^\/]+)$/);
     if (contextMatch?.[1] && contextMatch?.[2]) return { type: 'context', conversationId: contextMatch[1], entryId: contextMatch[2] };
 
@@ -66,6 +79,7 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
       const token = url.searchParams.get('token');
       if (intent === 'add-user' && id) return { type: 'user', userId: id };
       if (intent === 'invite' && token) return { type: 'invite', token };
+      if (intent === 'card' && token) return { type: 'card', token };
     }
   }
 

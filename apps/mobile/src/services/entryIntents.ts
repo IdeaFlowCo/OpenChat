@@ -94,6 +94,20 @@ export function createEntryIntent(target: EntryTarget, continuation: 'web' | 'in
   };
 }
 
+// Deep links are captured asynchronously, often after EntryProvider has
+// already read storage on mount; listeners let it pick the new intent up
+// without a reload (e.g. to show the entry header on the sign-in screen).
+const capturedListeners = new Set<() => void>();
+
+export function onEntryIntentCaptured(listener: () => void): () => void {
+  capturedListeners.add(listener);
+  return () => { capturedListeners.delete(listener); };
+}
+
+export function notifyEntryIntentCaptured(): void {
+  capturedListeners.forEach((listener) => listener());
+}
+
 export async function clearEntryIntents(): Promise<void> {
   await AsyncStorage.removeItem(STORAGE_KEY);
 }

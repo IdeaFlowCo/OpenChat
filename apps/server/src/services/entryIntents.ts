@@ -3,7 +3,18 @@ import { nanoid } from 'nanoid';
 
 export type EntryTarget =
   | { kind: 'group'; token: string }
-  | { kind: 'person'; userId: string };
+  | { kind: 'person'; userId: string }
+  | { kind: 'card'; token: string };
+
+function targetValue(target: EntryTarget): string {
+  return target.kind === 'person' ? target.userId : target.token;
+}
+
+function targetFromStored(kind: string, value: string): EntryTarget {
+  if (kind === 'group') return { kind: 'group', token: value };
+  if (kind === 'card') return { kind: 'card', token: value };
+  return { kind: 'person', userId: value };
+}
 
 export type PendingEntry = {
   id: string;
@@ -36,7 +47,7 @@ export async function savePendingEntry(
                  pe.continuation = $continuation, pe.status = 'pending',
                  pe.expiresAt = datetime($expiresAt)
   `, {
-    userId, clientIntentId, id, targetKind: target.kind, targetValue: target.kind === 'group' ? (target as any).token : (target as any).userId,
+    userId, clientIntentId, id, targetKind: target.kind, targetValue: targetValue(target),
     continuation, now: now.toISOString(), expiresAt
   });
 
@@ -56,7 +67,7 @@ export async function listPendingEntries(session: Session, userId: string): Prom
     return {
       id: e.id,
       clientIntentId: e.clientIntentId,
-      target: e.targetKind === 'group' ? { kind: 'group', token: e.targetValue } : { kind: 'person', userId: e.targetValue },
+      target: targetFromStored(e.targetKind, e.targetValue),
       continuation: e.continuation,
       status: e.status,
       createdAt: e.createdAt,

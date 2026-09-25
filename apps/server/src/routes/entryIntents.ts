@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { savePendingEntry, listPendingEntries, completePendingEntry, dismissPendingEntry } from '../services/entryIntents.js';
 import { resolveInvitePreview } from '../services/inviteEntry.js';
 import { resolvePublicPersonProjection } from '../services/publicEntryProjection.js';
+import { isWellFormedCardToken, resolveCardToken } from '../services/addMeCard.js';
 
 const router = Router();
 
@@ -14,6 +15,10 @@ router.post('/entry-intents', requireAuth, async (req: Request, res: Response) =
 
   if (!clientIntentId || !target || !continuation) {
     res.status(400).json({ error: 'Missing required fields' });
+    return;
+  }
+  if (target.kind === 'card' && !isWellFormedCardToken(target.token)) {
+    res.status(400).json({ error: 'Invalid card token' });
     return;
   }
 
@@ -44,6 +49,10 @@ router.get('/entry-intents', requireAuth, async (req: Request, res: Response) =>
           preview = await resolveInvitePreview(session, e.target.token);
         } else if (e.target.kind === 'person') {
           preview = await resolvePublicPersonProjection(session, e.target.userId);
+          if (!preview) available = false;
+        } else if (e.target.kind === 'card') {
+          // Stranger projection only; never the owner's id.
+          preview = (await resolveCardToken(session, e.target.token))?.card ?? null;
           if (!preview) available = false;
         }
       } catch (err) {

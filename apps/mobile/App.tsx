@@ -42,6 +42,7 @@ import { LoginScreen } from './src/screens/LoginScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 
 import { PersonEntryScreen } from './src/screens/PersonEntryScreen';
+import { CardEntryScreen } from './src/screens/CardEntryScreen';
 
 // Init crash reporting FIRST so even early-boot errors reach Sentry (OpenChat-7um).
 // No-op if EXPO_PUBLIC_SENTRY_DSN is unset.
@@ -65,7 +66,7 @@ import { AgentOverlayScreen } from './src/screens/AgentOverlayScreen';
 import { GroupSettingsScreen } from './src/screens/GroupSettingsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { SearchScreen } from './src/screens/SearchScreen';
-import { MyQrCodeScreen } from './src/screens/MyQrCodeScreen';
+import { MyCardScreen } from './src/screens/MyCardScreen';
 import { ScanQrScreen } from './src/screens/ScanQrScreen';
 import { BlockedUsersScreen } from './src/screens/BlockedUsersScreen';
 import { ProfileEditScreen } from './src/screens/ProfileEditScreen';
@@ -173,9 +174,9 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         }}
       />
       <ChatsStack.Screen
-        name="MyQrCode"
-        component={MyQrCodeScreen}
-        options={{ title: 'My QR Code', presentation: 'modal' }}
+        name="MyCard"
+        component={MyCardScreen}
+        options={{ title: 'My card', presentation: 'modal' }}
       />
       <ChatsStack.Screen
         name="ScanQr"
@@ -206,6 +207,11 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen
         name="PersonEntry"
         component={PersonEntryScreen}
+        options={{ title: 'Add Contact', presentation: 'modal' }}
+      />
+      <ChatsStack.Screen
+        name="CardEntry"
+        component={CardEntryScreen}
         options={{ title: 'Add Contact', presentation: 'modal' }}
       />
       {/* Forward picker (OpenChat-hhc) */}
