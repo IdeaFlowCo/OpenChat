@@ -41,6 +41,7 @@ export type CardSettings = {
   showX: boolean;
   x: string | null;
   showLink: boolean;
+
   link: string | null;
 };
 
@@ -55,6 +56,7 @@ export const DEFAULT_CARD_SETTINGS: CardSettings = {
   showX: true,
   x: null,
   showLink: false,
+
   link: null,
 };
 
@@ -80,6 +82,7 @@ export type StrangerCard = {
   status: { text: string | null; emoji: string | null } | null;
   linkedIn: string | null;
   x: string | null;
+
   link: string | null;
 };
 
@@ -99,11 +102,13 @@ export function projectCardForStranger(owner: CardOwnerRecord, settings: CardSet
   const headline = nonEmpty(settings.headline);
   const linkedIn = nonEmpty(settings.linkedIn);
   const x = nonEmpty(settings.x);
+
   const link = nonEmpty(settings.link);
   return {
     name: normalizePublicDisplayName(owner.name),
     isBot: owner.isBot === true,
     headline: settings.showHeadline && headline && !headline.includes('@') ? headline : null,
+
     avatarUrl: settings.showAvatar ? nonEmpty(owner.avatarUrl) : null,
     status: settings.showStatus && (statusText || statusEmoji)
       ? { text: statusText, emoji: statusEmoji }
@@ -111,6 +116,7 @@ export function projectCardForStranger(owner: CardOwnerRecord, settings: CardSet
     linkedIn: settings.showLinkedIn && linkedIn && isSafeCardLink(linkedIn) ? linkedIn : null,
     x: settings.showX && x && isSafeCardLink(x) ? x : null,
     link: settings.showLink && link && isSafeCardLink(link) ? link : null,
+
   };
 }
 
@@ -135,6 +141,7 @@ export function parseCardSettingsPatch(body: unknown): CardSettingsPatchResult {
   const patch: Partial<CardSettings> = {};
 
   for (const key of ['showAvatar', 'showStatus', 'showHeadline', 'showLinkedIn', 'showX', 'showLink'] as const) {
+
     if (input[key] === undefined) continue;
     if (typeof input[key] !== 'boolean') return { ok: false, error: `${key} must be a boolean` };
     patch[key] = input[key] as boolean;
@@ -153,6 +160,7 @@ export function parseCardSettingsPatch(body: unknown): CardSettingsPatchResult {
       patch[field] = url;
     }
   }
+
 
   if (input.headline !== undefined) {
     if (input.headline !== null && typeof input.headline !== 'string') {
@@ -194,6 +202,7 @@ function settingsFromNode(props: Record<string, unknown>): CardSettings {
     showX: props.showX !== false,
     x: typeof props.x === 'string' ? props.x : null,
     showLink: props.showLink === true,
+
     link: typeof props.link === 'string' ? props.link : null,
   };
 }
@@ -238,6 +247,7 @@ export async function getOrCreateOwnCard(session: Session, userId: string): Prom
       CREATE (u)-[:HAS_ADDME_CARD]->(:AddMeCard {
         token: $token, createdAt: datetime(),
         showAvatar: true, showStatus: false, showHeadline: true, showLinkedIn: true, showX: true, showLink: false
+
       })
     `, { userId, token });
     return {
@@ -263,6 +273,7 @@ export async function updateOwnCardSettings(
         card.showHeadline = $showHeadline, card.showLinkedIn = $showLinkedIn,
         card.showX = $showX, card.showLink = $showLink,
         card.headline = $headline, card.linkedIn = $linkedIn, card.x = $x, card.link = $link, card.updatedAt = datetime()
+
   `, { userId, token: current.token, ...next });
   return getOrCreateOwnCard(session, userId);
 }
@@ -283,6 +294,7 @@ export async function rotateOwnCardToken(session: Session, userId: string): Prom
     CREATE (u)-[:HAS_ADDME_CARD]->(:AddMeCard {
       token: $token, createdAt: datetime(),
       showAvatar: $showAvatar, showStatus: $showStatus, showHeadline: $showHeadline, showLinkedIn: $showLinkedIn, showX: $showX, showLink: $showLink, headline: $headline, linkedIn: $linkedIn, x: $x, link: $link
+
     })
   `, { userId, token, ...current.settings }));
   return getOrCreateOwnCard(session, userId);

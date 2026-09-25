@@ -2,11 +2,10 @@
   "name": "openchat-desktop",
   "version": "0.1.23",
   "private": true,
-  "description": "Tauri desktop wrapper around the OpenChat react-native-web build.",
+  "description": "Tauri desktop shell around the live OpenChat /app client.",
   "scripts": {
-    "build:web": "npm --prefix ../mobile run export:web:shell",
     "dev": "tauri dev",
-    "build:tauri": "tauri build"
+    "build:tauri": "CI=true tauri build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.11.2"
