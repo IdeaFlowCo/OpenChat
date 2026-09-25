@@ -405,7 +405,7 @@ export function SettingsScreen() {
             <Text style={[styles.radioMark, { color: c.primary }]}>{socialPreferences.experienceMode === 'enhanced' ? '●' : '○'}</Text>
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Chat + coordination</Text>
-              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Stories, My Agent review, asks, and quiet matching</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Stories, OpenChat Agent review, asks, and quiet matching</Text>
             </View>
           </TouchableOpacity>
           <TouchableOpacity

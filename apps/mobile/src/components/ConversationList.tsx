@@ -57,7 +57,7 @@ function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
     const other = getDirectConversationParticipant(conv, me);
     if (!conv.title && other?.isBot
       && (other.id === 'assistant' || other.name === 'Assistant')) {
-      return 'My Agent';
+      return 'OpenChat Agent';
     }
     return getDirectConversationTitle(conv, me, 'Unknown');
   }

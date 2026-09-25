@@ -539,7 +539,7 @@ import { EntryRouter } from './src/navigation/EntryRouter';
 function Shell() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  const { isAuthed, bootstrapIfAuthed, currentUser } = useChat();
+  const { isAuthed, authInitialized, bootstrapIfAuthed, currentUser } = useChat();
 
   // Onboarding gate (OpenChat-x2s): null = not yet checked, true/false = result.
   const [onboardingChecked, setOnboardingChecked] = useState<boolean | null>(null);
@@ -577,6 +577,10 @@ function Shell() {
     const dispose = installDeepLinkHandling();
     return dispose;
   }, []);
+
+  if (!authInitialized) {
+    return <View style={{ flex: 1, backgroundColor: c.background }} />;
+  }
 
   const baseNav = scheme === 'dark' ? DarkTheme : DefaultTheme;
   const navTheme = {

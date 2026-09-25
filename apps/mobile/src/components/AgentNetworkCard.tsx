@@ -258,7 +258,7 @@ export function AgentNetworkCard({ message, onOpenConversation, onShareDraft }: 
     };
     return (
       <View style={styles.centered}>
-        <View style={shellStyle} accessibilityLabel="Private intention draft from My Agent">
+        <View style={shellStyle} accessibilityLabel="Private intention draft from OpenChat Agent">
           <Text style={[styles.eyebrow, { color: c.primary }]}>PRIVATE DRAFT</Text>
           <Text style={[styles.title, { color: c.textPrimary }]}>{title}</Text>
           {payload.draft.seeks.length > 0 && <Text style={[styles.terms, { color: c.textSecondary }]}>Looking for · {payload.draft.seeks.join(', ')}</Text>}

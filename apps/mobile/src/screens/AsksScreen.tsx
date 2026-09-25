@@ -117,9 +117,9 @@ export function AsksScreen() {
           <Text style={[styles.title, { color: c.textPrimary }]}>Asks, offers & goals</Text>
           <Text style={[styles.subtitle, { color: c.textSecondary }]}>Most things stay private. You choose what agents may search and what people may see.</Text>
         </View>
-        <TouchableOpacity accessibilityLabel="Tell My Agent something" onPress={() => navigation.navigate('AgentOverlay')} style={[styles.agentButton, { backgroundColor: c.primary }]}>
+        <TouchableOpacity accessibilityLabel="Tell OpenChat Agent something" onPress={() => navigation.navigate('AgentOverlay')} style={[styles.agentButton, { backgroundColor: c.primary }]}>
           <AppIcon name="sparkle" color={c.onPrimary} size={18} />
-          <Text style={[styles.agentButtonText, { color: c.onPrimary }]}>Tell My Agent</Text>
+          <Text style={[styles.agentButtonText, { color: c.onPrimary }]}>Tell OpenChat Agent</Text>
         </TouchableOpacity>
       </View>
       <View style={styles.toolbar}>
@@ -141,7 +141,7 @@ export function AsksScreen() {
           ListEmptyComponent={
             <View style={[styles.empty, { backgroundColor: c.surface, borderColor: c.border }]}>
               <Text style={[styles.emptyTitle, { color: c.textPrimary }]}>Start with ordinary language</Text>
-              <Text style={[styles.emptyText, { color: c.textSecondary }]}>Tell My Agent “I’m looking for a technical cofounder” or “I have an extra ticket.” It stays private until you approve a next step.</Text>
+              <Text style={[styles.emptyText, { color: c.textSecondary }]}>Tell OpenChat Agent “I’m looking for a technical cofounder” or “I have an extra ticket.” It stays private until you approve a next step.</Text>
             </View>
           }
           renderItem={({ item }) => item.kind === 'draft' ? (
