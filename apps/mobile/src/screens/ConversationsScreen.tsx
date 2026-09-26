@@ -33,6 +33,7 @@ import { AgentOverlayButton } from '../components/AgentOverlayButton';
 import { ConnectionStatusLine } from '../components/ConnectionStatusLine';
 import { StoriesStrip } from '../components/StoriesStrip';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
+import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp } from '../navigation/types';
 import {
   getDirectConversationParticipant,
@@ -54,11 +55,6 @@ function formatTime(iso: string | undefined): string {
 
 function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
   if (conv.type === 'direct') {
-    const other = getDirectConversationParticipant(conv, me);
-    if (!conv.title && other?.isBot
-      && (other.id === 'assistant' || other.name === 'Assistant')) {
-      return 'OpenChat Agent';
-    }
     return getDirectConversationTitle(conv, me, 'Unknown');
   }
   if (conv.title) return conv.title;
@@ -227,12 +223,6 @@ export function ConversationsScreen() {
       ),
       headerRight: () => (
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          {enhanced && (
-            <AgentOverlayButton
-              color={c.primary}
-              onPress={() => navigation.navigate('AgentOverlay')}
-            />
-          )}
           <TouchableOpacity
             onPress={() => navigation.navigate('Search')}
             accessibilityLabel="Search"
@@ -249,32 +239,27 @@ export function ConversationsScreen() {
           </TouchableOpacity>
         </View>
       ),
-      headerLeft: () => (
-        // Same bare 44x44 icon-button treatment as the right-side actions so
-        // all header icons sit on one visual line (2026-09-02 feedback: the
-        // tinted pill made the left icon look misaligned, and the radiating
-        // gear read as a "sun" — now a sliders glyph).
-        <View style={{ flexDirection: 'row' }}>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Settings')}
-            accessibilityLabel="Settings"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            style={styles.headerAction}
-          >
-            <AppIcon name="settings" color={c.primary} size={20} strokeWidth={1.8} />
-          </TouchableOpacity>
-          {/* One tap to the AddMe QR — the thing shown at events. */}
+      headerLeft: () => {
+        const safeEmail = isPlaceholderEmail(currentUser?.email) ? '' : (currentUser?.email ?? '');
+        return (
           <TouchableOpacity
             onPress={() => navigation.navigate('MyCard')}
-            accessibilityLabel="My card"
-            style={styles.headerAction}
+            accessibilityLabel="Profile"
+            accessibilityRole="button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.headerAvatarAction}
           >
-            <AppIcon name="qr" color={c.primary} size={20} strokeWidth={1.8} />
+            <Avatar
+              name={currentUser?.name || safeEmail || 'Profile'}
+              email={safeEmail || undefined}
+              avatarUrl={currentUser?.avatarUrl ?? undefined}
+              size={32}
+            />
           </TouchableOpacity>
-        </View>
-      ),
+        );
+      },
     });
-  }, [navigation, c.primary, c.textMetadata, c.textPrimary, enhanced, isConnected]);
+  }, [navigation, c.primary, c.textMetadata, c.textPrimary, isConnected, currentUser]);
 
   useEffect(() => {
     if (!conversationsLoaded) refreshConversations();
@@ -371,6 +356,13 @@ const styles = StyleSheet.create({
     minWidth: 44,
     minHeight: 44,
     paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerAvatarAction: {
+    minWidth: 44,
+    minHeight: 44,
+    paddingHorizontal: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },

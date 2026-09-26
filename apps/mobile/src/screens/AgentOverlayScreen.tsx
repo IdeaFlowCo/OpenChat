@@ -214,7 +214,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
             <Text style={[styles.title, { color: c.textPrimary }]}>Tell OpenChat Agent anything</Text>
           </View>
         </View>
-        <Text style={[styles.intro, { color: c.textSecondary }]}>Your message starts as a private conversation. If it sounds like an ask, offer, or shared goal, your agent will prepare a card and ask before searching or sharing.</Text>
+        <Text style={[styles.intro, { color: c.textSecondary }]}>Your message starts as a private conversation. If it sounds like an ask, offer, or shared goal, OpenChat Agent will prepare a card and ask before searching or sharing.</Text>
 
         <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
           <TextInput

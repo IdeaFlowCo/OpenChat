@@ -82,7 +82,7 @@ export function StoriesStrip({ compact, onCreate, onOpenStory, onOpenReview }: S
         <>
           {!storiesIntroDismissed && (
             <View style={[styles.intro, { backgroundColor: c.primaryMuted, borderColor: c.border }]}>
-              <Text style={[styles.introText, { color: c.textSecondary }]}>You never have to watch them all. Your agent filters matching opportunities into Review.</Text>
+              <Text style={[styles.introText, { color: c.textSecondary }]}>You never have to watch them all. OpenChat Agent filters matching opportunities into Review.</Text>
               <TouchableOpacity
                 onPress={() => void dismissStoriesIntro()}
                 accessibilityLabel="Dismiss Stories explanation"

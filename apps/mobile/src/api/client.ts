@@ -1013,7 +1013,7 @@ export const api = {
   getSocialReview: (cursor?: string) => request<{ items: SocialReviewItem[]; hasMore: boolean }>(
     `/api/review${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
   ),
-  /** Idempotently create or return the caller's private My Agent conversation. */
+  /** Idempotently create or return the caller's private OpenChat Agent conversation. */
   ensureAssistant: () =>
     request<Conversation>('/api/assistant/ensure', { method: 'POST' }),
 

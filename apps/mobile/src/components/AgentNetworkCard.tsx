@@ -218,7 +218,7 @@ export function AgentNetworkCard({ message, onOpenConversation, onShareDraft }: 
     return (
       <View style={styles.centered} accessibilityRole="text">
         <View style={[styles.compactShell, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
-          <Text style={[styles.compactText, { color: c.textSecondary }]}>Update from your agent</Text>
+          <Text style={[styles.compactText, { color: c.textSecondary }]}>Update from OpenChat Agent</Text>
         </View>
       </View>
     );

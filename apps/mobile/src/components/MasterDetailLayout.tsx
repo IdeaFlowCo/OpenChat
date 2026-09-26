@@ -36,7 +36,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Animated, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Linking, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { OPENCHAT_URL } from '../api/client';
@@ -44,6 +44,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
 import { getColors } from '../theme/colors';
+import { Avatar } from './Avatar';
 import { ConversationList } from './ConversationList';
 import { AppIcon } from './AppIcon';
 import { AgentOverlayButton } from './AgentOverlayButton';
@@ -271,10 +272,6 @@ export function MasterDetailLayout() {
     return () => document.removeEventListener('keydown', onKey);
   }, [openSearch, openNew, openSettings, openShortcuts, navigation, activeConversationId, agentPanelOpen, setActiveConversation]);
 
-  useEffect(() => {
-    if (!enhanced) setAgentPanelOpen(false);
-  }, [enhanced]);
-
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
       <Animated.View
@@ -307,6 +304,21 @@ export function MasterDetailLayout() {
         </Pressable>
         {collapsed ? (
           <View style={[styles.sidebarHeaderCompact, { borderColor: c.border }]}>
+            <TouchableOpacity
+              onPress={openMyCard}
+              accessibilityRole="button"
+              accessibilityLabel="Profile"
+              // @ts-ignore
+              title="Profile"
+              style={styles.avatarButtonCompact}
+            >
+              <Avatar
+                name={currentUser?.name || safeEmail || 'Profile'}
+                email={safeEmail || undefined}
+                avatarUrl={currentUser?.avatarUrl ?? undefined}
+                size={32}
+              />
+            </TouchableOpacity>
             <IconButton
               onPress={openNew}
               title="New conversation (⌘N)"
@@ -319,8 +331,23 @@ export function MasterDetailLayout() {
         ) : (
           <>
             <View style={[styles.sidebarHeader, { borderColor: c.border }]}>
+              <TouchableOpacity
+                onPress={openMyCard}
+                accessibilityRole="button"
+                accessibilityLabel="Profile"
+                // @ts-ignore
+                title="Profile"
+                style={styles.avatarButton}
+              >
+                <Avatar
+                  name={currentUser?.name || safeEmail || 'Profile'}
+                  email={safeEmail || undefined}
+                  avatarUrl={currentUser?.avatarUrl ?? undefined}
+                  size={32}
+                />
+              </TouchableOpacity>
               <View style={styles.sidebarTitle}>
-              <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary }}>Chats</Text>
+                <Text style={{ fontSize: 17, fontWeight: '700', color: c.textPrimary }}>Chats</Text>
                 {!isConnected && (
                   <ConnectionStatusLine
                     connected={false}
@@ -366,23 +393,7 @@ export function MasterDetailLayout() {
         </View>
         {collapsed ? (
           <View style={[styles.sidebarFooterCompact, { borderColor: c.border }]}>
-            <IconButton
-              onPress={openSettings}
-              title="Settings (⌘,)"
-              accessibilityLabel="Account and settings"
-              hoverBg={c.surfaceElevated}
-            >
-              <AppIcon name="settings" color={c.primary} size={19} strokeWidth={1.8} />
-            </IconButton>
-            <IconButton
-              onPress={openMyCard}
-              title="My card"
-              accessibilityLabel="My card"
-              hoverBg={c.surfaceElevated}
-            >
-              <AppIcon name="qr" color={c.primary} size={19} strokeWidth={1.8} />
-            </IconButton>
-            {enhanced && <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />}
+            <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />
             <IconButton
               onPress={toggleCollapsed}
               title="Expand sidebar"
@@ -393,30 +404,8 @@ export function MasterDetailLayout() {
             </IconButton>
           </View>
         ) : (
-          <View style={[styles.sidebarFooter, { borderColor: c.border }]}>
-            <Pressable
-              onPress={openSettings}
-              accessibilityRole="button"
-              accessibilityLabel={`Account and settings${safeEmail ? `, ${safeEmail}` : ''}`}
-              style={styles.accountButton}
-            >
-              <AppIcon name="settings" color={c.primary} size={19} strokeWidth={1.8} />
-              <View style={styles.accountCopy}>
-                <Text style={[styles.accountTitle, { color: c.textPrimary }]}>Account & settings</Text>
-                {!!safeEmail && (
-                  <Text style={[styles.accountEmail, { color: c.textMetadata }]} numberOfLines={1}>{safeEmail}</Text>
-                )}
-              </View>
-            </Pressable>
-            <IconButton
-              onPress={openMyCard}
-              title="My card"
-              accessibilityLabel="My card"
-              hoverBg={c.surfaceElevated}
-            >
-              <AppIcon name="qr" color={c.primary} size={19} strokeWidth={1.8} />
-            </IconButton>
-            {enhanced && <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />}
+          <View style={[styles.sidebarFooter, { borderColor: c.border, justifyContent: 'space-between' }]}>
+            <AgentOverlayButton color={c.primary} onPress={openAgentOverlay} size={19} />
             <IconButton
               onPress={toggleCollapsed}
               title="Collapse sidebar"
@@ -448,7 +437,7 @@ export function MasterDetailLayout() {
           </View>
         )}
       </View>
-      {enhanced && agentPanelOpen && (
+      {agentPanelOpen && (
         <View
           style={[styles.agentPanel, { backgroundColor: c.background, borderLeftColor: c.border }]}
         >
@@ -526,6 +515,15 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
+  },
+  avatarButton: {
+    // @ts-ignore — web-only pointer affordance.
+    cursor: 'pointer',
+  },
+  avatarButtonCompact: {
+    marginBottom: 4,
+    // @ts-ignore — web-only pointer affordance.
+    cursor: 'pointer',
   },
   accountButton: {
     flex: 1,

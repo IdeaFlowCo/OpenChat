@@ -54,11 +54,6 @@ function formatTime(iso: string | undefined): string {
 
 function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
   if (conv.type === 'direct') {
-    const other = getDirectConversationParticipant(conv, me);
-    if (!conv.title && other?.isBot
-      && (other.id === 'assistant' || other.name === 'Assistant')) {
-      return 'OpenChat Agent';
-    }
     return getDirectConversationTitle(conv, me, 'Unknown');
   }
   if (conv.title) return conv.title;

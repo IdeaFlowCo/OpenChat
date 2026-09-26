@@ -4,6 +4,7 @@ export type AppIconName =
   | 'attach'
   | 'block'
   | 'bot'
+  | 'camera'
   | 'chat'
   | 'chevron-left'
   | 'chevron-right'
@@ -127,6 +128,15 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
           {/* Push-pin: head + body + point */}
           <Path d="M9 4h6M10 4l-.5 6L6.8 12a1 1 0 0 0 .7 1.7h9a1 1 0 0 0 .7-1.7L14.5 10 14 4" {...common} />
           <Line x1="12" y1="13.7" x2="12" y2="20" {...common} />
+        </>
+      )}
+      {name === 'camera' && (
+        <>
+          <Path
+            d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"
+            {...common}
+          />
+          <Circle cx="12" cy="13" r="4" {...common} />
         </>
       )}
       {name === 'chat' && (

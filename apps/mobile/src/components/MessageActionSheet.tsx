@@ -334,7 +334,7 @@ export function MessageActionSheet({
           <Pressable onPress={() => { /* stop propagation */ }}>
             <View style={sheetStyle}>
               <View style={styles.handle} />
-              <Text style={[styles.title, { color: c.textPrimary }]}>Ask your assistant about this</Text>
+              <Text style={[styles.title, { color: c.textPrimary }]}>Ask OpenChat Agent about this</Text>
               <View style={[styles.preview, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
                 <Text style={[styles.previewSender, { color: c.textSecondary }]} numberOfLines={1}>
                   {senderName}
@@ -361,7 +361,7 @@ export function MessageActionSheet({
                 disabled={!assistantQuestion.trim()}
                 activeOpacity={0.8}
               >
-                <Text style={{ color: c.onPrimary, fontWeight: '600', fontSize: 16 }}>Send to assistant</Text>
+                <Text style={{ color: c.onPrimary, fontWeight: '600', fontSize: 16 }}>Send to OpenChat Agent</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.cancelRow, { borderColor: c.border }]} onPress={handleDismiss} activeOpacity={0.7}>
                 <Text style={[styles.cancelLabel, { color: c.textSecondary }]}>Cancel</Text>
@@ -481,7 +481,7 @@ export function MessageActionSheet({
                 activeOpacity={0.7}
               >
                 <View style={styles.actionIconBox}><AppIcon name="bot" color={c.textPrimary} size={20} /></View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Forward to Assistant</Text>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Forward to OpenChat Agent</Text>
               </TouchableOpacity>
             )}
 

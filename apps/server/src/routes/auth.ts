@@ -19,10 +19,21 @@ import {
   normalizePublicDisplayName,
 } from '../privacy/profilePrivacy.js';
 import { isOpenUserDirectoryEnabled } from '../config/features.js';
+import type { Server as IOServer } from 'socket.io';
+import { ensureAssistantConversation } from '../services/assistant.js';
 
 const router = Router();
 function getJwtSecret(): string {
   return process.env.JWT_SECRET || 'dev-secret-change-me';
+}
+
+async function ensureAssistantAtSignIn(req: Request, userId: string): Promise<void> {
+  try {
+    const io = req.app.get('io') as IOServer | undefined;
+    await ensureAssistantConversation(userId, io);
+  } catch (err) {
+    console.warn(`[auth] Failed to ensure assistant conversation for user ${userId}:`, err);
+  }
 }
 const NOOS_URL = process.env.NOOS_URL || 'http://localhost:52743';
 const LOCALHOST_AUTH_BASE = 'http://localhost:5173';
@@ -482,6 +493,7 @@ router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
   const session = getDriver().session();
   try {
     const user = await linkIdeaflowIdentity(session, identity);
+    await ensureAssistantAtSignIn(req, user.id);
     const token = jwt.sign(
       { userId: user.id, email: user.email } as AuthUser,
       getJwtSecret(),
@@ -574,6 +586,8 @@ router.post('/dev-login', async (req: Request, res: Response) => {
     });
 
     const user = toJS(result.records[0].get('user')) as { id: string; email: string; name: string };
+
+    await ensureAssistantAtSignIn(req, user.id);
 
     // Generate JWT (same format as Noos)
     const token = jwt.sign(
@@ -1337,6 +1351,8 @@ router.post('/google/exchange', async (req: Request, res: Response) => {
       id: string; email: string; name: string;
     };
 
+    await ensureAssistantAtSignIn(req, user.id);
+
     const token = jwt.sign(
       { userId: user.id, email: user.email } as AuthUser,
       getJwtSecret(),
@@ -1455,6 +1471,8 @@ router.post('/google/idtoken-exchange', async (req: Request, res: Response) => {
     const user = toJS(result.records[0].get('user')) as {
       id: string; email: string; name: string;
     };
+
+    await ensureAssistantAtSignIn(req, user.id);
 
     const token = jwt.sign(
       { userId: user.id, email: user.email } as AuthUser,
@@ -1725,6 +1743,8 @@ router.post('/apple/idtoken-exchange', async (req: Request, res: Response) => {
     const user = toJS(result.records[0].get('user')) as {
       id: string; email: string; name: string;
     };
+
+    await ensureAssistantAtSignIn(req, user.id);
 
     const token = jwt.sign(
       { userId: user.id, email: user.email } as AuthUser,

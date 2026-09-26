@@ -14,7 +14,9 @@ import {
   View,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
+import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
+import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import {
   addMeCardUrl,
@@ -24,6 +26,10 @@ import {
   type StrangerCard,
 } from '../api/client';
 import { AddMeCardView } from '../components/AddMeCardView';
+import { Avatar } from '../components/Avatar';
+import { AppIcon } from '../components/AppIcon';
+import { isPlaceholderEmail } from '../utils/email';
+import type { NavProp } from '../navigation/types';
 
 function confirmReset(onConfirm: () => void) {
   const title = 'Reset card link?';
@@ -40,19 +46,36 @@ function confirmReset(onConfirm: () => void) {
 }
 
 export function MyCardScreen() {
+  const navigation = useNavigation<NavProp<'MyCard'>>();
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const { width } = useWindowDimensions();
+  const { currentUser, refreshConversations } = useChat();
 
   const [card, setCard] = useState<MyAddMeCard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [openingAgent, setOpeningAgent] = useState(false);
   const [headline, setHeadline] = useState('');
   const [linkedIn, setLinkedIn] = useState('');
   const [x, setX] = useState('');
   const [link, setLink] = useState('');
   const [strangerView, setStrangerView] = useState<StrangerCard | null>(null);
   const [previewing, setPreviewing] = useState(false);
+
+  const handleOpenAgent = async () => {
+    if (openingAgent) return;
+    setOpeningAgent(true);
+    try {
+      const conv = await api.ensureAssistant();
+      await refreshConversations();
+      navigation.navigate('Chat', { conversationId: conv.id });
+    } catch (err) {
+      Alert.alert('Could not open OpenChat Agent', err instanceof Error ? err.message : 'Please try again.');
+    } finally {
+      setOpeningAgent(false);
+    }
+  };
 
   const applyCard = useCallback((next: MyAddMeCard) => {
     setCard(next);
@@ -169,6 +192,36 @@ export function MyCardScreen() {
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
     >
+      {/* Header row: photo, name, headline. Tap opens Edit profile as a sheet. */}
+      <TouchableOpacity
+        style={[styles.headerCard, { backgroundColor: c.surface, borderColor: c.border }]}
+        onPress={() => navigation.navigate('ProfileEdit')}
+        accessibilityRole="button"
+        accessibilityLabel="Edit profile"
+        activeOpacity={0.7}
+      >
+        <Avatar
+          name={card.preview.name || currentUser?.name || 'Profile'}
+          email={isPlaceholderEmail(currentUser?.email) ? undefined : currentUser?.email}
+          avatarUrl={currentUser?.avatarUrl ?? undefined}
+          size={52}
+        />
+        <View style={styles.headerInfo}>
+          <Text style={[styles.headerName, { color: c.textPrimary }]} numberOfLines={1}>
+            {card.preview.name || currentUser?.name || 'Your Profile'}
+          </Text>
+          {!!(card.settings.headline || (currentUser as any)?.statusMessage) && (
+            <Text style={[styles.headerHeadline, { color: c.textSecondary }]} numberOfLines={1}>
+              {card.settings.headline || (currentUser as any)?.statusMessage}
+            </Text>
+          )}
+          <Text style={[styles.headerEditHint, { color: c.primary }]}>
+            Edit profile ›
+          </Text>
+        </View>
+        <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
+      </TouchableOpacity>
+
       {previewing ? (
         <View style={styles.previewWrap}>
           <Text style={[styles.sub, { color: c.textMetadata }]}>
@@ -182,6 +235,19 @@ export function MyCardScreen() {
           <Text style={styles.qrName} numberOfLines={1}>{card.preview.name}</Text>
           <Text style={styles.qrHint}>Scan to add me on OpenChat</Text>
         </View>
+      )}
+
+      {Platform.OS !== 'web' && (
+        <TouchableOpacity
+          style={[styles.scanCodeBtn, { backgroundColor: c.primary }]}
+          onPress={() => navigation.navigate('ScanQr')}
+          accessibilityRole="button"
+          accessibilityLabel="Scan a code"
+          activeOpacity={0.8}
+        >
+          <AppIcon name="camera" color={c.onPrimary} size={20} />
+          <Text style={[styles.scanCodeBtnText, { color: c.onPrimary }]}>Scan a code</Text>
+        </TouchableOpacity>
       )}
 
       <View style={styles.actions}>
@@ -258,6 +324,62 @@ export function MyCardScreen() {
         Never shown on your card: email, phone number, or account id.
       </Text>
 
+      <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>PROFILE & SETTINGS</Text>
+      <View style={[styles.menuSection, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <TouchableOpacity
+          style={[styles.menuRow, { borderBottomColor: c.divider }]}
+          onPress={() => navigation.navigate('ProfileEdit')}
+          accessibilityRole="button"
+          activeOpacity={0.7}
+        >
+          <View style={styles.menuIconWrap}>
+            <AppIcon name="edit" color={c.primary} size={20} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.menuLabel, { color: c.textPrimary }]}>Edit profile</Text>
+            <Text style={[styles.menuHint, { color: c.textMetadata }]}>Name, photo, status, and directory settings</Text>
+          </View>
+          <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.menuRow, { borderBottomColor: c.divider }]}
+          onPress={handleOpenAgent}
+          disabled={openingAgent}
+          accessibilityRole="button"
+          activeOpacity={0.7}
+        >
+          <View style={styles.menuIconWrap}>
+            <AppIcon name="bot" color={c.primary} size={20} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.menuLabel, { color: c.textPrimary }]}>OpenChat Agent</Text>
+            <Text style={[styles.menuHint, { color: c.textMetadata }]}>Private conversation, asks, and agent coordination</Text>
+          </View>
+          {openingAgent ? (
+            <ActivityIndicator size="small" color={c.primary} />
+          ) : (
+            <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.menuRow, { borderBottomWidth: 0 }]}
+          onPress={() => navigation.navigate('Settings')}
+          accessibilityRole="button"
+          activeOpacity={0.7}
+        >
+          <View style={styles.menuIconWrap}>
+            <AppIcon name="settings" color={c.primary} size={20} strokeWidth={1.8} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.menuLabel, { color: c.textPrimary }]}>Settings</Text>
+            <Text style={[styles.menuHint, { color: c.textMetadata }]}>Preferences, notifications, and account</Text>
+          </View>
+          <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
+        </TouchableOpacity>
+      </View>
+
       {error ? <Text style={[styles.error, { color: c.danger }]}>{error}</Text> : null}
 
       <TouchableOpacity onPress={handleReset} disabled={saving} style={styles.reset} accessibilityRole="button">
@@ -273,6 +395,34 @@ export function MyCardScreen() {
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   content: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 24, paddingBottom: 48 },
+  headerCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: 20,
+  },
+  headerInfo: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  headerName: {
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  headerHeadline: {
+    fontSize: 13,
+  },
+  headerEditHint: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 2,
+  },
   qrPanel: {
     // Fixed white panel with generous padding = the QR quiet zone. High
     // contrast in every theme is the point; do not theme this.
@@ -283,9 +433,24 @@ const styles = StyleSheet.create({
   },
   qrName: { color: '#000000', fontSize: 20, fontWeight: '700', marginTop: 16, maxWidth: 320 },
   qrHint: { color: '#3a3a3c', fontSize: 14, marginTop: 2 },
+  scanCodeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    width: '100%',
+    maxWidth: 420,
+    marginTop: 14,
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  scanCodeBtnText: {
+    fontWeight: '700',
+    fontSize: 16,
+  },
   previewWrap: { width: '100%', alignItems: 'center', gap: 12 },
   sub: { fontSize: 14, textAlign: 'center' },
-  actions: { flexDirection: 'row', gap: 12, marginTop: 20, width: '100%', maxWidth: 420 },
+  actions: { flexDirection: 'row', gap: 12, marginTop: 12, width: '100%', maxWidth: 420 },
   actionBtn: { flex: 1, paddingVertical: 13, borderRadius: 12, alignItems: 'center' },
   actionText: { fontWeight: '700', fontSize: 15 },
   sectionLabel: { alignSelf: 'stretch', maxWidth: 420, width: '100%', marginLeft: 'auto', marginRight: 'auto', fontSize: 12, fontWeight: '600', letterSpacing: 0.5, marginTop: 32, marginBottom: 8 },
@@ -300,6 +465,34 @@ const styles = StyleSheet.create({
   hint: { fontSize: 13, marginTop: 2 },
   input: { fontSize: 15, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth },
   footnote: { fontSize: 13, marginTop: 8, maxWidth: 420, width: '100%' },
+  menuSection: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+  },
+  menuIconWrap: {
+    width: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  menuHint: {
+    fontSize: 12,
+    marginTop: 2,
+  },
   error: { fontSize: 14, marginTop: 16, textAlign: 'center' },
   reset: { marginTop: 32, alignItems: 'center', paddingVertical: 8 },
 });
