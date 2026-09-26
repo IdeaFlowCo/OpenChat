@@ -28,6 +28,7 @@ import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { YouBadge } from '../components/YouBadge';
+import { AppIcon } from '../components/AppIcon';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp } from '../navigation/types';
 
@@ -167,6 +168,22 @@ export function NewConversationScreen() {
       style={[styles.root, { backgroundColor: c.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      {Platform.OS !== 'web' && (
+        <TouchableOpacity
+          style={[styles.scanTopRow, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}
+          onPress={() => navigation.navigate('ScanQr')}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Scan a code"
+        >
+          <View style={styles.scanTopContent}>
+            <AppIcon name="camera" color={c.primary} size={20} />
+            <Text style={[styles.scanTopLabel, { color: c.textPrimary }]}>Scan a code</Text>
+          </View>
+          <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
+        </TouchableOpacity>
+      )}
+
       {/* Mode toggle */}
       <View style={styles.modeRow}>
         {(['direct', 'group'] as Mode[]).map(m => {
@@ -277,17 +294,6 @@ export function NewConversationScreen() {
                     ? 'No people are available yet.'
                     : 'Type a name or complete email address.'}
               </Text>
-              {!query && Platform.OS !== 'web' && (
-                <TouchableOpacity
-                  style={[styles.scanBtn, { borderColor: c.primary }]}
-                  onPress={() => navigation.navigate('ScanQr')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={{ color: c.primary, fontWeight: '600', fontSize: 15 }}>
-                    Scan QR code
-                  </Text>
-                </TouchableOpacity>
-              )}
             </View>
           }
           renderItem={({ item }) => {
@@ -432,12 +438,23 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
   },
-  scanBtn: {
-    marginTop: 16,
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
+  scanTopRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: 12,
+  },
+  scanTopContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  scanTopLabel: {
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

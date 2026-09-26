@@ -2,6 +2,7 @@ import type { Conversation, CurrentUser, User } from '../api/client';
 import { isPlaceholderEmail } from './email';
 
 export const SELF_CONVERSATION_TITLE = 'Myself';
+export const AGENT_DISPLAY_NAME = 'OpenChat Agent';
 
 export function getUserDisplayName(user?: Pick<User, 'name' | 'email'> | null): string {
   const safeEmail = isPlaceholderEmail(user?.email) ? undefined : user?.email;
@@ -47,6 +48,9 @@ export function getDirectConversationTitle(
   if (isSelfDirectConversation(conversation, currentUser)) return SELF_CONVERSATION_TITLE;
   if (conversation.title) return conversation.title;
   const participant = getDirectConversationParticipant(conversation, currentUser);
+  if (participant?.isBot && (participant.id === 'assistant' || participant.name === 'Assistant')) {
+    return AGENT_DISPLAY_NAME;
+  }
   const safeEmail = isPlaceholderEmail(participant?.email) ? undefined : participant?.email;
   return participant?.name || safeEmail || fallback;
 }

@@ -1123,7 +1123,7 @@ export function ChatScreen({
       } catch (err) {
         console.warn('[ChatScreen] forward-to-assistant failed:', err);
         Alert.alert(
-          'Could not reach your assistant',
+          'Could not reach OpenChat Agent',
           err instanceof Error ? err.message : 'Please try again.'
         );
       }
@@ -1502,12 +1502,10 @@ export function ChatScreen({
               <AppIcon name="thought" color={c.primary} size={20} />
               <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Thoughts for this chat</Text>
             </TouchableOpacity>
-            {enhanced && (
-              <TouchableOpacity onPress={openAgentNetwork} style={styles.conversationMenuRow} accessibilityRole="menuitem">
-                <AppIcon name="bot" color={c.primary} size={20} />
-                <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Agent network</Text>
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity onPress={openAgentNetwork} style={styles.conversationMenuRow} accessibilityRole="menuitem">
+              <AppIcon name="bot" color={c.primary} size={20} />
+              <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>OpenChat Agent</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={showMuteOptions} style={styles.conversationMenuRow} accessibilityRole="menuitem">
               <AppIcon name="mute" color={c.textMetadata} size={19} strokeWidth={1.8} />
               <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>{isMuted ? 'Unmute' : 'Mute'}</Text>

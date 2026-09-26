@@ -24,7 +24,7 @@ export type RootStackParamList = {
   Conversations: undefined;
   Chat: { conversationId: string; lane?: 'chat' | 'context'; entryId?: string };
   NewConversation: undefined;
-  /** App-wide agent network overlay (asks, offers, and anonymous matches; OpenChat-a0e.5). */
+  /** OpenChat Agent overlay (asks, offers, and anonymous matches; OpenChat-a0e.5). */
   AgentOverlay: { prompt?: string } | undefined;
   StoryComposer: { draftId?: string; initialText?: string } | undefined;
   StoryViewer: { story: FeedStory };
@@ -32,7 +32,7 @@ export type RootStackParamList = {
   GroupSettings: { conversationId: string };
   Settings: undefined;
   Search: undefined;
-  /** The owner's AddMe card: large QR, field consent, preview-as-stranger. */
+  /** The owner's Profile: card QR, scan a code, Edit profile, OpenChat Agent, Settings. */
   MyCard: undefined;
   ScanQr: undefined;
   /** Blocked users management screen (OpenChat-46p). */

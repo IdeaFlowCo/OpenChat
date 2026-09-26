@@ -133,7 +133,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen
         name="AgentOverlay"
         component={AgentOverlayScreen}
-        options={{ title: 'Your Agent', presentation: 'modal' }}
+        options={{ title: 'OpenChat Agent', presentation: 'modal' }}
       />
       <ChatsStack.Screen
         name="StoryComposer"
@@ -176,7 +176,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen
         name="MyCard"
         component={MyCardScreen}
-        options={{ title: 'My card', presentation: 'modal' }}
+        options={{ title: 'Profile', presentation: 'modal' }}
       />
       <ChatsStack.Screen
         name="ScanQr"
@@ -282,7 +282,7 @@ function AsksNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       }}
     >
       <AsksStack.Screen name="AsksList" component={AsksScreen} options={{ title: 'Asks' }} />
-      <AsksStack.Screen name="AgentOverlay" component={AgentOverlayScreen} options={{ title: 'My Agent', presentation: 'modal' }} />
+      <AsksStack.Screen name="AgentOverlay" component={AgentOverlayScreen} options={{ title: 'OpenChat Agent', presentation: 'modal' }} />
       <AsksStack.Screen name="StoryComposer" component={StoryComposerScreen} options={{ title: 'Share a Story', presentation: 'modal' }} />
       <AsksStack.Screen name="StoryViewer" component={StoryViewerScreen} options={({ route }) => ({ title: route.params.story.author.name || 'Story' })} />
       <AsksStack.Screen name="SocialReview" component={SocialReviewScreen} options={{ title: 'Review' }} />

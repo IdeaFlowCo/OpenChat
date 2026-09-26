@@ -17,7 +17,7 @@ export function AgentOverlayButton({ color, onPress, size = 20 }: AgentOverlayBu
     <TouchableOpacity
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={hasPending ? `Agent network, ${pendingMatchCount} pending` : 'Agent network'}
+      accessibilityLabel={hasPending ? `OpenChat Agent, ${pendingMatchCount} pending` : 'OpenChat Agent'}
       style={styles.button}
     >
       <AppIcon name="bot" color={color} size={size} />

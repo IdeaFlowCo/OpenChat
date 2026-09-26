@@ -430,7 +430,7 @@ export function SettingsScreen() {
             >
               <View style={{ flex: 1 }}>
                 <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Show Stories rail</Text>
-                <Text style={[styles.optionHint, { color: c.textSecondary }]}>Your agent still filters matching opportunities into Review when it is collapsed</Text>
+                <Text style={[styles.optionHint, { color: c.textSecondary }]}>OpenChat Agent still filters matching opportunities into Review when it is collapsed</Text>
               </View>
               <Text style={{ color: c.primary, fontWeight: '700' }}>{storiesCollapsed ? 'Off' : 'On'}</Text>
             </TouchableOpacity>

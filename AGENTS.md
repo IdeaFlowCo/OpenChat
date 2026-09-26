@@ -40,6 +40,16 @@ for history and migration reference. The backend (`apps/server`) is shared.
 redirect to `/app` while preserving the remaining path and query.
 - **Platform-appropriate exceptions are fine** (just document them): e.g. Enter-to-send is **web-only** — on a native touch keyboard the return key stays a newline and sending is the send button. No hardware-keyboard Enter handling is needed.
 
+## Client IA & Front-Door Definition of Done
+
+See `docs/surface-map.md` for the canonical surface map of all client screens and doors.
+
+**The Front-Door Test (Definition of Done for UI features):**
+*From the Chats screen, every feature must be reachable in at most two taps, every tap must have a visible word (not only an accessibility label or icon glyph), and the word must be the one a user would search for.*
+- Every new screen or feature adds a row to `docs/surface-map.md` in the same PR.
+- Doors hang from user nouns (Me, People, Chats, Asks, Thoughts, Settings), never from feature builders or PR lineages.
+- `enhanced` mode may gate coordination features (Asks, Stories, Review, quiet matching), but must never gate a noun (Profile/Me, People, OpenChat Agent, scanning).
+
 ## Theme tokens (`apps/mobile/src/theme/`)
 
 `palette.ts` holds the raw "Ink & Paper" values and **must stay free of

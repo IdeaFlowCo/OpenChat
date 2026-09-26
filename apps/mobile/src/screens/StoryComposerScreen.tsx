@@ -161,7 +161,7 @@ export function StoryComposerScreen() {
         <View style={styles.headingBlock}>
           <Text style={[styles.eyebrow, { color: c.primary }]}>SHARE WITH PEOPLE</Text>
           <Text style={[styles.title, { color: c.textPrimary }]}>What should your friends know?</Text>
-          <Text style={[styles.lede, { color: c.textSecondary }]}>Write it naturally. Your agent can also search quietly without making the search visible to people.</Text>
+          <Text style={[styles.lede, { color: c.textSecondary }]}>Write it naturally. OpenChat Agent can also search quietly without making the search visible to people.</Text>
         </View>
 
         {!previewing ? (
