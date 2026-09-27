@@ -171,20 +171,22 @@ export function AsksScreen() {
             <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
               <View style={styles.cardHeading}>
                 <Text style={[styles.state, { color: isStoryExpired(item.story) ? c.textMetadata : c.primary }]}>
-                  {item.story.humanVisible ? 'STORY' : 'QUIET SEARCH'} · {isStoryExpired(item.story) ? 'EXPIRED' : item.story.status.toUpperCase()}
+                  {item.story.humanVisible ? 'STORY' : 'AGENTS ONLY'} · {isStoryExpired(item.story) ? 'EXPIRED' : item.story.status.toUpperCase()}
                 </Text>
                 <Text style={[styles.date, { color: c.textMetadata }]}>{inventoryExpiry(item.story)}</Text>
               </View>
               <Text style={[styles.cardTitle, { color: c.textPrimary }]}>{item.story.humanVisible ? item.story.text : (item.story.goal || item.story.seeks[0] || item.story.brings[0] || 'Agent-only search')}</Text>
               {item.story.humanVisible ? (
                 <Text style={[styles.detail, { color: c.textSecondary }]}>
-                  {item.story.audience.conversationIds.length} selected chat{item.story.audience.conversationIds.length === 1 ? '' : 's'}{item.story.explicitQuietSearch ? ' · separate quiet search approved' : ''}
+                  {item.story.audience.conversationIds.length} selected chat{item.story.audience.conversationIds.length === 1 ? '' : 's'} · {item.story.explicitQuietSearch ? 'Stories and agents' : 'Stories only'}
                 </Text>
               ) : (
                 <>
                   {item.story.seeks.length > 0 && <Text style={[styles.detail, { color: c.textSecondary }]}>Looking for · {item.story.seeks.join(', ')}</Text>}
                   {item.story.brings.length > 0 && <Text style={[styles.detail, { color: c.textSecondary }]}>Can bring · {item.story.brings.join(', ')}</Text>}
-                  <Text style={[styles.detail, { color: c.textSecondary }]}>Visible to agents only; no human Story was posted.</Text>
+                  <Text style={[styles.detail, { color: c.textSecondary }]}>
+                    {item.story.audience?.conversationIds?.length ? `${item.story.audience.conversationIds.length} selected chat${item.story.audience.conversationIds.length === 1 ? '' : 's'} · ` : ''}Visible to agents only; no human Story was posted.
+                  </Text>
                 </>
               )}
               <TouchableOpacity disabled={busyId === item.story.id} onPress={() => void pauseStory(item.story)} style={[styles.outlineSmall, { borderColor: c.border, marginTop: 12, alignSelf: 'flex-start' }]}>

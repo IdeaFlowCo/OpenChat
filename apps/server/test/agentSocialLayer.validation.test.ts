@@ -8,6 +8,13 @@ describe('agent-social consent boundary', () => {
     }, {} as never)).rejects.toThrow('Explicit approval is required');
   });
 
+  it('rejects draft activation when both quietSearch and story are disabled', async () => {
+    await expect(activateIntentDraft('owner', 'draft', {
+      quietSearch: { enabled: false },
+      story: { enabled: false },
+    }, { confirmed: true })).rejects.toThrow('Enable quietSearch, story, or both');
+  });
+
   it('rejects Story publication before touching persistence without shared confirmation', async () => {
     await expect(createStory('owner', {
       text: 'Extra ticket',
