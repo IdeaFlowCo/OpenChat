@@ -628,6 +628,21 @@ export function ChatScreen({
     </TouchableOpacity>
   );
 
+  const headerActions = (
+    <View style={styles.headerActionsRow}>
+      <TouchableOpacity
+        onPress={openConversationThoughts}
+        accessibilityRole="button"
+        accessibilityLabel="Thoughts for this chat"
+        style={styles.headerThoughtsButton}
+      >
+        <AppIcon name="thought" color={c.primary} size={18} />
+        <Text style={[styles.headerThoughtsText, { color: c.primary }]}>Thoughts</Text>
+      </TouchableOpacity>
+      {moreAction}
+    </View>
+  );
+
   useLayoutEffect(() => {
     // Embedded in MasterDetailLayout — the parent owns the chrome.
     if (embedded) return;
@@ -646,9 +661,9 @@ export function ChatScreen({
           onPress={(isGroup || isSelfDM || other?.id) ? openConversationInfo : undefined}
         />
       ),
-      headerRight: () => moreAction,
+      headerRight: () => headerActions,
     });
-  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, headerSubtitle, other, groupAvatarMembers, openConversationInfo, c.textSecondary]);
+  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, headerSubtitle, other, groupAvatarMembers, openConversationInfo, openConversationThoughts, c.primary, c.textSecondary]);
 
   // Ink & Paper: own bubbles are ink-on-paper (light) / paper-on-ink (dark),
   // so translucent overlays inside them derive from the bubble text color
@@ -1458,7 +1473,7 @@ export function ChatScreen({
               avatarSize={34}
               minHeight={64}
               onPress={(isGroup || isSelfDM || other?.id) ? openConversationInfo : undefined}
-              action={moreAction}
+              action={headerActions}
             />
           </View>
         );
@@ -1929,6 +1944,24 @@ const styles = StyleSheet.create({
     paddingRight: 8,
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  headerActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  headerThoughtsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    minHeight: 36,
+  },
+  headerThoughtsText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   headerMoreAction: {
     width: 44,

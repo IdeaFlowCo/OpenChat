@@ -28,6 +28,7 @@ import { getColors } from '../theme/colors';
 import { fetchThoughts, createThought, updateThought, deleteThought, Thought } from '../services/thoughts';
 import { getSocket } from '../api/socket';
 import { ThoughtCard } from '../components/ThoughtCard';
+import { ThoughtsSearchBar } from '../components/ThoughtsSearchBar';
 import type { ThoughtsNavProp } from '../navigation/types';
 import { AppIcon } from '../components/AppIcon';
 
@@ -233,22 +234,11 @@ export function ThoughtsScreen() {
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
       {/* Search bar — mirrors the SearchScreen pattern for consistency. */}
-      <View style={[styles.searchWrap, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <TextInput
-          style={[
-            styles.searchInput,
-            { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border },
-          ]}
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Search thoughts and tags"
-          placeholderTextColor={c.textMuted}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-          clearButtonMode="while-editing"
-        />
-      </View>
+      <ThoughtsSearchBar
+        value={query}
+        onChangeText={setQuery}
+        placeholder="Search thoughts and tags"
+      />
 
       <FlatList
         data={thoughts}

@@ -1533,8 +1533,14 @@ export const api = {
     }),
 
   /** Chat-scoped thoughts: pinned to + captured from one conversation. */
-  getConversationThoughts: (conversationId: string) =>
-    request<ConversationThoughts>(`/api/thoughts/conversation/${encodeURIComponent(conversationId)}`),
+  getConversationThoughts: (conversationId: string, opts?: { q?: string }) => {
+    const qs = new URLSearchParams();
+    if (opts?.q) qs.set('q', opts.q);
+    const q = qs.toString();
+    return request<ConversationThoughts>(
+      `/api/thoughts/conversation/${encodeURIComponent(conversationId)}${q ? `?${q}` : ''}`
+    );
+  },
 
   /** Ranked hashtag suggestions for the message composer. */
   getHashtagSuggestions: (conversationId: string, q = '', limit = 8) => {

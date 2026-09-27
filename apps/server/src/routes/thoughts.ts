@@ -213,12 +213,17 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   const before = typeof req.query.before === 'string' ? req.query.before : null;
   // Search (?q=) — matches Thought text OR any of its tags (case-insensitive).
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : null;
+  const conversationId = typeof req.query.conversationId === 'string' ? req.query.conversationId.trim() : null;
 
-  const conds: string[] = ['(t.lane IS NULL OR t.lane <> \'context\')'];
+  const conds: string[] = ['(t.lane IS NULL OR t.lane <>\'context\')'];
   if (before) conds.push('t.createdAt < datetime($before)');
   if (q)
     conds.push(
       '(toLower(t.text) CONTAINS toLower($q) OR any(tag IN coalesce(t.tags, []) WHERE toLower(tag) CONTAINS toLower($q)))'
+    );
+  if (conversationId)
+    conds.push(
+      '(EXISTS { MATCH (t)-[:FROM_MESSAGE]->(:Message {conversationId: $conversationId}) } OR EXISTS { MATCH (t)-[:PINNED_IN]->(:Conversation {id: $conversationId}) })'
     );
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
 
@@ -245,7 +250,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       // Neo4j's LIMIT clause requires a true integer; JS Number(50) gets
       // serialized as 50.0 and Neo4j rejects it. Wrap via neo4j.int().
       // Same pattern as server/src/routes/chat.ts:796.
-      { userId, before: before ?? undefined, q: q ?? undefined, limit: neo4j.int(limit) }
+      { userId, before: before ?? undefined, q: q ?? undefined, conversationId: conversationId ?? undefined, limit: neo4j.int(limit) }
     );
 
     const thoughts = mergeDuplicateThoughtsFromSameMessage(
@@ -273,6 +278,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 router.get('/conversation/:conversationId', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const { conversationId } = req.params;
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : null;
 
   const session = getDriver().session();
   try {
@@ -285,9 +291,18 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
       return;
     }
 
+    const pinnedConds = ["(t.lane IS NULL OR t.lane <> 'context')"];
+    if (q) {
+      pinnedConds.push(
+        '(toLower(t.text) CONTAINS toLower($q) OR any(tag IN coalesce(t.tags, []) WHERE toLower(tag) CONTAINS toLower($q)))'
+      );
+    }
+    const pinnedWhere = pinnedConds.length ? `WHERE ${pinnedConds.join(' AND ')}` : '';
+
     const pinnedResult = await session.run(
       `
       MATCH (t:Thought)-[p:PINNED_IN]->(c:Conversation {id: $conversationId})
+      ${pinnedWhere}
       OPTIONAL MATCH (author:User {id: t.userId})
       RETURN t {
         .id, .text, .kind, .status, .createdAt, .updatedAt,
@@ -301,20 +316,27 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
       ORDER BY p.pinnedAt DESC
       LIMIT 100
       `,
-      { conversationId }
+      { conversationId, q: q ?? undefined }
     );
+
+    const fromChatConds = [
+      "(t.lane IS NULL OR t.lane <> 'context')",
+      `(t.userId = $userId
+             OR t.captureMethod IN ['inline-tag', 'reply-tag']
+             OR size(coalesce(t.tags, [])) > 0)`,
+      `NOT (t)-[:PINNED_IN]->(:Conversation {id: $conversationId})`,
+    ];
+    if (q) {
+      fromChatConds.push(
+        '(toLower(t.text) CONTAINS toLower($q) OR any(tag IN coalesce(t.tags, []) WHERE toLower(tag) CONTAINS toLower($q)))'
+      );
+    }
+    const fromChatWhere = fromChatConds.length ? `WHERE ${fromChatConds.join(' AND ')}` : '';
 
     const fromChatResult = await session.run(
       `
       MATCH (t:Thought)-[:FROM_MESSAGE]->(m:Message {conversationId: $conversationId})
-      // Manual save-to-thoughts captures remain owner-only unless pinned.
-      // Inline-tag and reply-tag Thoughts follow source-message visibility.
-      // The tags check makes historical rows visible without a data migration;
-      // captureMethod is the explicit discriminator for new rows.
-      WHERE (t.userId = $userId
-             OR t.captureMethod IN ['inline-tag', 'reply-tag']
-             OR size(coalesce(t.tags, [])) > 0)
-        AND NOT (t)-[:PINNED_IN]->(:Conversation {id: $conversationId})
+      ${fromChatWhere}
       OPTIONAL MATCH (author:User {id: t.userId})
       RETURN t {
         .id, .text, .kind, .status, .createdAt, .updatedAt,
@@ -328,7 +350,7 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
       ORDER BY t.createdAt DESC
       LIMIT 100
       `,
-      { userId, conversationId }
+      { userId, conversationId, q: q ?? undefined }
     );
 
     res.json({
