@@ -24,7 +24,8 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | `StoryComposer` | Asks | **Share a Story** | Asks screen › "Share a Story"; Stories rail "+" button | 2 | Publish 24h stories and requests to network. |
 | `StoryViewer` | Asks | **Story** (Header: Author name) | Stories rail avatar tap | 1 | View network story, reply directly, or ask OpenChat Agent about it. |
 | `SocialReview` | Asks | **Review** | Asks screen › "Review" card; AgentOverlay Review card | 2 | Review and approve/decline quiet match opportunities. |
-| `Thoughts` | Thoughts | **Thoughts** | Bottom tab "Thoughts"; in-chat menu "Thoughts for this chat" | 1 | Private notes, ideas, and semantic search. |
+| `Thoughts` | Thoughts | **Thoughts** | Bottom tab "Thoughts" | 1 | Private notes, ideas, and semantic search. |
+| `ConversationThoughts` | Thoughts | **Thoughts** | 1. In-chat header "Thoughts" button<br>2. In-chat overflow menu › "Thoughts for this chat" | 2 | Chat-scoped thoughts: search, inline compose, pinned notes, and captured notes from this conversation. |
 | `Settings` | Settings | **Settings** | 1. Profile › "Settings" row<br>2. Desktop shortcut (⌘,) | 2 | Account, experience mode, agent keys, theme, notifications, and legal info. |
 | `Search` | Search | **Search** | Chats header magnifying glass; desktop shortcut (⌘K) | 1 | Search conversations and messages. |
 | `BlockedUsers` | Settings | **Blocked users** | Settings › Legal & Account › Blocked users | 3 | Manage blocked contacts. |

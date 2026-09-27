@@ -1,19 +1,22 @@
 /**
  * ConversationThoughtsScreen — chat-scoped Thoughts view.
  *
- * Opened from a chat's header (thought-bubble icon). Shows two sections:
+ * Opened from a chat's header or overflow menu. Shows two sections:
  *   Pinned          — thoughts pinned to this conversation by any participant
  *                     (pinning shares the thought with the whole chat)
  *   From this chat  — all participants' shared #hashtag captures plus the
  *                     caller's private "Save to Thoughts" captures
  *
- * Pin toggles: own thoughts can be pinned/unpinned; another participant's
- * pinned thought can't be modified here. Long-press deletes own thoughts.
- * Live updates via 'thought:shared' / 'thought:pinned' /
- * 'thought:unpinned' / 'thought:updated' socket events.
+ * Parity with ThoughtsScreen:
+ *   - Debounced server-side search (?q=) across text and tags
+ *   - Clear affordance restoring the full chat-scoped list
+ *   - Two-way empty states (no results for this search vs no thoughts yet)
+ *   - Tag-chip filtering (tap #tag -> filters search)
+ *   - Live socket updates (thought:created, thought:shared, thought:pinned, etc.)
+ *   - Inline composer & index-card editor
  */
 
-import { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
   Alert,
   RefreshControl,
@@ -24,7 +27,7 @@ import {
   TextInput,
   TouchableOpacity,
 } from 'react-native';
-import { useRoute } from '@react-navigation/native';
+import { useFocusEffect, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
@@ -39,12 +42,13 @@ import {
 } from '../services/thoughts';
 import { getSocket } from '../api/socket';
 import { ThoughtCard } from '../components/ThoughtCard';
+import { ThoughtsSearchBar } from '../components/ThoughtsSearchBar';
 import { AppIcon } from '../components/AppIcon';
 import type { RouteProps } from '../navigation/types';
 
 export function ConversationThoughtsScreen() {
   const route = useRoute<RouteProps<'ConversationThoughts'>>();
-  const { conversationId } = route.params;
+  const { conversationId, title } = route.params;
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const { currentUser } = useChat();
@@ -55,31 +59,104 @@ export function ConversationThoughtsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
 
-  const load = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-    setError(null);
-    try {
-      const data = await fetchConversationThoughts(conversationId);
-      setPinned(data.pinned);
-      setFromChat(data.fromChat);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const activeQueryRef = useRef('');
+  const queryRef = useRef('');
+  queryRef.current = query;
+
+  const load = useCallback(
+    async (isRefresh = false, q = '') => {
+      if (isRefresh) setRefreshing(true);
+      else setLoading(true);
+      setError(null);
+      try {
+        const trimmed = q.trim();
+        const data = await fetchConversationThoughts(
+          conversationId,
+          trimmed ? { q: trimmed } : undefined
+        );
+        if (mountedRef.current) {
+          activeQueryRef.current = trimmed;
+          setPinned(data.pinned);
+          setFromChat(data.fromChat);
+        }
+      } catch (e) {
+        if (mountedRef.current) setError(e instanceof Error ? e.message : 'Failed to load');
+      } finally {
+        if (mountedRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [conversationId]
+  );
+
+  // Reload when the screen comes into focus, honoring query
+  useFocusEffect(
+    useCallback(() => {
+      load(false, queryRef.current);
+    }, [load])
+  );
+
+  // Debounced search: refetch with `q` ~250ms after typing stops (mirrors ThoughtsScreen)
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
     }
-  }, [conversationId]);
+    const timer = setTimeout(() => {
+      load(false, query);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query, load]);
 
-  useEffect(() => { void load(); }, [load]);
+  // Tag chip tap filters the search query
+  const handleTagPress = useCallback((tag: string) => {
+    setQuery(tag.replace(/^#/, ''));
+  }, []);
 
-  // Live tag/pin updates from participants in this conversation.
+  // Live tag/pin/creation updates from participants in this conversation
   useEffect(() => {
     const sock = getSocket();
     if (!sock) return;
+
+    const matchesQuery = (t: Thought) => {
+      if (!activeQueryRef.current) return true;
+      const q = activeQueryRef.current.toLowerCase();
+      return (
+        t.text.toLowerCase().includes(q) ||
+        t.tags?.some((tag) => tag.toLowerCase().includes(q))
+      );
+    };
+
+    const onCreated = (payload: { thought: Thought }) => {
+      if (!payload?.thought) return;
+      const t = payload.thought;
+      // Must be relevant to this conversation
+      if (t.sourceConversationId !== conversationId && !t.pinned) return;
+      if (!matchesQuery(t)) return;
+
+      if (t.pinned) {
+        setPinned((prev) => (prev.some((x) => x.id === t.id) ? prev : [{ ...t, pinned: true }, ...prev]));
+      } else {
+        setFromChat((prev) => (prev.some((x) => x.id === t.id) ? prev : [t, ...prev]));
+      }
+    };
+
     const onShared = (p: { conversationId: string; thought: Thought }) => {
       if (p?.conversationId !== conversationId || !p.thought) return;
+      if (!matchesQuery(p.thought)) return;
       setFromChat((prev) => {
         if (prev.some((t) => t.id === p.thought.id)) {
           return prev.map((t) => (t.id === p.thought.id ? p.thought : t));
@@ -87,8 +164,10 @@ export function ConversationThoughtsScreen() {
         return [p.thought, ...prev];
       });
     };
+
     const onPinned = (p: { conversationId: string; thought: Thought }) => {
       if (p?.conversationId !== conversationId || !p.thought) return;
+      if (!matchesQuery(p.thought)) return;
       setPinned((prev) => {
         if (prev.some((t) => t.id === p.thought.id)) {
           return prev.map((t) => (t.id === p.thought.id ? p.thought : t));
@@ -97,29 +176,33 @@ export function ConversationThoughtsScreen() {
       });
       setFromChat((prev) => prev.filter((t) => t.id !== p.thought.id));
     };
+
     const onUnpinned = (p: { conversationId: string; thoughtId: string }) => {
       if (p?.conversationId !== conversationId) return;
       setPinned((prev) => prev.filter((t) => t.id !== p.thoughtId));
-      void load(true);
+      void load(true, queryRef.current);
     };
+
     const onUpdated = (p: { thought: Thought }) => {
       if (!p?.thought) return;
       setPinned((prev) => prev.map((t) => (t.id === p.thought.id ? { ...t, ...p.thought } : t)));
       setFromChat((prev) => prev.map((t) => (t.id === p.thought.id ? { ...t, ...p.thought } : t)));
     };
-    // A reply-tag Thought is withdrawn by deleting the reply that carried the
-    // hashtag; the server emits this so the sidebar drops it live.
+
     const onUnshared = (p: { conversationId: string; thoughtId: string }) => {
       if (p?.conversationId !== conversationId || !p.thoughtId) return;
       setFromChat((prev) => prev.filter((t) => t.id !== p.thoughtId));
       setPinned((prev) => prev.filter((t) => t.id !== p.thoughtId));
     };
+
+    sock.on('thought:created', onCreated);
     sock.on('thought:shared', onShared);
     sock.on('thought:unshared', onUnshared);
     sock.on('thought:pinned', onPinned);
     sock.on('thought:unpinned', onUnpinned);
     sock.on('thought:updated', onUpdated);
     return () => {
+      sock.off('thought:created', onCreated);
       sock.off('thought:shared', onShared);
       sock.off('thought:unshared', onUnshared);
       sock.off('thought:pinned', onPinned);
@@ -128,18 +211,21 @@ export function ConversationThoughtsScreen() {
     };
   }, [conversationId, load]);
 
-  const handleTogglePin = useCallback(async (t: Thought, isPinned: boolean) => {
-    try {
-      if (isPinned) {
-        await unpinThought(t.id, conversationId);
-      } else {
-        await pinThought(t.id, conversationId);
+  const handleTogglePin = useCallback(
+    async (t: Thought, isPinned: boolean) => {
+      try {
+        if (isPinned) {
+          await unpinThought(t.id, conversationId);
+        } else {
+          await pinThought(t.id, conversationId);
+        }
+        await load(true, queryRef.current);
+      } catch (e) {
+        Alert.alert('Error', e instanceof Error ? e.message : 'Pin change failed');
       }
-      await load(true);
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Pin change failed');
-    }
-  }, [conversationId, load]);
+    },
+    [conversationId, load]
+  );
 
   const handleDelete = useCallback(async (id: string) => {
     try {
@@ -189,6 +275,9 @@ export function ConversationThoughtsScreen() {
     const text = editDraft.trim();
     setEditingId(null);
     if (!id || !text) return;
+    const orig = [...pinned, ...fromChat].find((t) => t.id === id);
+    if (orig && orig.text === text) return;
+
     try {
       const updated = await updateThought(id, { text });
       setPinned((prev) => prev.map((t) => (t.id === id ? { ...t, ...updated } : t)));
@@ -196,10 +285,20 @@ export function ConversationThoughtsScreen() {
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save edit');
     }
-  }, [editingId, editDraft]);
+  }, [editingId, editDraft, pinned, fromChat]);
 
-  const renderEditorCard = (value: string, onChange: (t: string) => void, onBlur: () => void, placeholder?: string) => (
-    <View style={[styles.editorCard, { backgroundColor: c.surface, borderColor: c.border, borderLeftColor: c.primary }]}>
+  const renderEditorCard = (
+    value: string,
+    onChange: (t: string) => void,
+    onBlur: () => void,
+    placeholder?: string
+  ) => (
+    <View
+      style={[
+        styles.editorCard,
+        { backgroundColor: c.surface, borderColor: c.border, borderLeftColor: c.primary },
+      ]}
+    >
       <TextInput
         style={[styles.editorInput, { color: c.textPrimary }]}
         value={value}
@@ -213,66 +312,129 @@ export function ConversationThoughtsScreen() {
     </View>
   );
 
+  const isSearching = query.trim().length > 0;
+  const totalCount = pinned.length + fromChat.length;
+
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
+      {/* Search bar — parity with ThoughtsScreen */}
+      <ThoughtsSearchBar
+        value={query}
+        onChangeText={setQuery}
+        placeholder="Search thoughts in this chat"
+      />
+
+      {/* Scope header — confirms the chat scope explicitly */}
+      <View style={[styles.scopeHeader, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
+        <AppIcon name="thought" color={c.primary} size={15} />
+        <Text style={[styles.scopeHeaderText, { color: c.textMetadata }]} numberOfLines={1}>
+          Chat Thoughts · <Text style={{ color: c.textPrimary, fontWeight: '600' }}>{title || 'This conversation'}</Text>
+        </Text>
+      </View>
+
       <ScrollView
         style={styles.root}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={c.primary} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => load(true, queryRef.current)}
+            tintColor={c.primary}
+          />
         }
       >
-        {error && (
-          <Text style={[styles.error, { color: c.danger }]}>{error}</Text>
+        {error && <Text style={[styles.error, { color: c.danger }]}>{error}</Text>}
+
+        {/* Global empty state when searching and no results in either section */}
+        {isSearching && totalCount === 0 && !loading && (
+          <View style={styles.emptyContainer}>
+            <Text style={[styles.emptyText, { color: c.textMetadata, textAlign: 'center' }]}>
+              No thoughts match &ldquo;{query.trim()}&rdquo; in this chat.
+            </Text>
+            <TouchableOpacity
+              onPress={() => setQuery('')}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              style={[
+                styles.clearSearchBtn,
+                { backgroundColor: c.surfaceElevated, borderColor: c.border },
+              ]}
+            >
+              <Text style={{ color: c.primary, fontWeight: '600', fontSize: 14 }}>Clear search</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
-        <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>Pinned</Text>
-        {creating && renderEditorCard(newDraft, setNewDraft, () => void commitNew(), 'New pinned thought…')}
-        {pinned.length === 0 && !loading && !creating && (
-          <Text style={[styles.emptyText, { color: c.textMetadata }]}>
-            Nothing pinned yet. Long-press a message and choose “Save & pin to
-            chat”, or tap + to add one.
-          </Text>
-        )}
-        {pinned.map((t) =>
-          t.id === editingId ? (
-            renderEditorCard(editDraft, setEditDraft, () => void commitEdit())
-          ) : (
-            <ThoughtCard
-              key={t.id}
-              item={{ ...t, pinned: true }}
-              subtitle={mine(t) ? 'pinned by you' : `by ${t.authorName || 'a participant'}`}
-              onPress={mine(t) ? () => startEdit(t) : undefined}
-              onDelete={mine(t) ? () => handleDelete(t.id) : undefined}
-              onTogglePin={mine(t) || t.pinnedBy === myId ? () => handleTogglePin(t, true) : undefined}
-            />
-          )
+        {/* Pinned section — show when not searching or when there are pinned matches */}
+        {(!isSearching || pinned.length > 0) && (
+          <>
+            <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>
+              {isSearching ? `Pinned matches (${pinned.length})` : 'Pinned'}
+            </Text>
+            {creating &&
+              renderEditorCard(
+                newDraft,
+                setNewDraft,
+                () => void commitNew(),
+                'New pinned thought…'
+              )}
+            {pinned.length === 0 && !loading && !creating && !isSearching && (
+              <Text style={[styles.emptyText, { color: c.textMetadata }]}>
+                Nothing pinned yet. Long-press a message and choose “Save & pin to chat”, or tap + to add one.
+              </Text>
+            )}
+            {pinned.map((t) =>
+              t.id === editingId ? (
+                renderEditorCard(editDraft, setEditDraft, () => void commitEdit())
+              ) : (
+                <ThoughtCard
+                  key={t.id}
+                  item={{ ...t, pinned: true }}
+                  subtitle={mine(t) ? 'pinned by you' : `by ${t.authorName || 'a participant'}`}
+                  onPress={mine(t) ? () => startEdit(t) : undefined}
+                  onDelete={mine(t) ? () => handleDelete(t.id) : undefined}
+                  onTogglePin={mine(t) || t.pinnedBy === myId ? () => handleTogglePin(t, true) : undefined}
+                  onTagPress={handleTagPress}
+                />
+              )
+            )}
+          </>
         )}
 
-        <Text style={[styles.sectionTitle, { color: c.textSecondary, marginTop: 18 }]}>
-          From this chat
-        </Text>
-        {fromChat.length === 0 && !loading && (
-          <Text style={[styles.emptyText, { color: c.textMetadata }]}>
-            Shared tags from this chat land here — use #fact, #idea, #todo… in a
-            message, or long-press a message → “Save to Thoughts” for a private capture.
-          </Text>
-        )}
-        {fromChat.map((t) =>
-          t.id === editingId ? (
-            renderEditorCard(editDraft, setEditDraft, () => void commitEdit())
-          ) : (
-            <ThoughtCard
-              key={t.id}
-              item={{ ...t, pinned: false }}
-              subtitle={mine(t) ? undefined : `by ${t.authorName || 'a participant'}`}
-              onPress={mine(t) ? () => startEdit(t) : undefined}
-              onDelete={mine(t) ? () => handleDelete(t.id) : undefined}
-              onTogglePin={mine(t) ? () => handleTogglePin(t, false) : undefined}
-            />
-          )
+        {/* From this chat section — show when not searching or when there are chat matches */}
+        {(!isSearching || fromChat.length > 0) && (
+          <>
+            <Text
+              style={[
+                styles.sectionTitle,
+                { color: c.textSecondary, marginTop: !isSearching || pinned.length > 0 ? 18 : 0 },
+              ]}
+            >
+              {isSearching ? `From this chat (${fromChat.length})` : 'From this chat'}
+            </Text>
+            {fromChat.length === 0 && !loading && !isSearching && (
+              <Text style={[styles.emptyText, { color: c.textMetadata }]}>
+                Shared tags from this chat land here — use #fact, #idea, #todo… in a message, or long-press a message → “Save to Thoughts” for a private capture.
+              </Text>
+            )}
+            {fromChat.map((t) =>
+              t.id === editingId ? (
+                renderEditorCard(editDraft, setEditDraft, () => void commitEdit())
+              ) : (
+                <ThoughtCard
+                  key={t.id}
+                  item={{ ...t, pinned: false }}
+                  subtitle={mine(t) ? undefined : `by ${t.authorName || 'a participant'}`}
+                  onPress={mine(t) ? () => startEdit(t) : undefined}
+                  onDelete={mine(t) ? () => handleDelete(t.id) : undefined}
+                  onTogglePin={mine(t) ? () => handleTogglePin(t, false) : undefined}
+                  onTagPress={handleTagPress}
+                />
+              )
+            )}
+          </>
         )}
       </ScrollView>
 
@@ -281,6 +443,8 @@ export function ConversationThoughtsScreen() {
         style={[styles.fab, { backgroundColor: c.primary }]}
         onPress={openAdd}
         activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="New thought in this chat"
       >
         <AppIcon name="plus" color={c.onPrimary} size={26} strokeWidth={2.2} />
       </TouchableOpacity>
@@ -290,6 +454,17 @@ export function ConversationThoughtsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  scopeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  scopeHeaderText: {
+    fontSize: 12,
+  },
   content: { padding: 12, paddingBottom: 88 },
   sectionTitle: {
     fontSize: 13,
@@ -302,6 +477,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 12,
+  },
+  emptyContainer: {
+    paddingVertical: 36,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  clearSearchBtn: {
+    marginTop: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   error: {
     fontSize: 14,

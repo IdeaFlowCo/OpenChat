@@ -23,8 +23,11 @@ export async function createThought(params: {
 }
 
 /** Chat-scoped thoughts: pinned + captured-from-this-chat. */
-export async function fetchConversationThoughts(conversationId: string): Promise<ConversationThoughts> {
-  return api.getConversationThoughts(conversationId);
+export async function fetchConversationThoughts(
+  conversationId: string,
+  opts?: { q?: string }
+): Promise<ConversationThoughts> {
+  return api.getConversationThoughts(conversationId, opts);
 }
 
 export async function pinThought(id: string, conversationId: string): Promise<Thought> {
