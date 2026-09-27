@@ -971,7 +971,7 @@ export const api = {
   activateIntentDraft: (id: string, params: {
     confirm: true;
     quietSearch?: { enabled: boolean; expiresAt?: string; audience?: StoryAudience };
-    story?: { enabled: boolean; text: string; expiresAt?: string; audience: StoryAudience };
+    story?: { enabled: boolean; text?: string; expiresAt?: string; audience?: StoryAudience };
     closeOnConnect?: boolean;
   }) => approvedPublication<{ draft: IntentDraft; story?: OwnedStory | null; intent?: AgentIntent | null }>(
     `/api/intent-drafts/${encodeURIComponent(id)}/activate`,

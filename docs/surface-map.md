@@ -21,7 +21,7 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | `ContactProfile` | People | **Contact Info** (Participant name) | In-chat header tap; group participant list tap | 2 | View other user's public card, presence, and chat actions. |
 | `AgentOverlay` | OpenChat Agent | **OpenChat Agent** | 1. Profile › "OpenChat Agent" row<br>2. In-chat overflow menu › "OpenChat Agent"<br>3. Asks tab › "Tell OpenChat Agent"<br>4. Story viewer › "Ask OpenChat Agent"<br>5. Desktop sidebar footer robot button | 2 | Dedicated agent interface. Also reachable directly as a pinned chat row in Chats. |
 | `AsksList` | Asks | **Asks** | Bottom tab "Asks" (enhanced experience mode) | 1 | Peer coordination, asks, offers, and match opportunities. Gated on enhanced mode. |
-| `StoryComposer` | Asks | **Share a Story** | Asks screen › "Share a Story"; Stories rail "+" button | 2 | Publish 24h stories and requests to network. |
+| `StoryComposer` | Asks | **Share a Story** | Asks screen › "Share a Story"; Stories rail "+" button | 2 | Publish 24h stories, requests, and agent-only quiet searches to network. |
 | `StoryViewer` | Asks | **Story** (Header: Author name) | Stories rail avatar tap | 1 | View network story, reply directly, or ask OpenChat Agent about it. |
 | `SocialReview` | Asks | **Review** | Asks screen › "Review" card; AgentOverlay Review card | 2 | Review and approve/decline quiet match opportunities. |
 | `Thoughts` | Thoughts | **Thoughts** | Bottom tab "Thoughts" | 1 | Private notes, ideas, and semantic search. |

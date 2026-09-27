@@ -149,6 +149,22 @@ describe('agent-social routes', () => {
     }, { confirmed: true, io: undefined });
   });
 
+  it('accepts agent-only activation with quietSearch enabled and story disabled', async () => {
+    mocks.activateIntentDraft.mockResolvedValue({ draft: { id: 'draft' }, story: { id: 'story' }, intent: { id: 'intent' } });
+    const activation = {
+      quietSearch: { enabled: true, expiresAt: '2099-10-02T00:00:00.000Z' },
+      story: { enabled: false },
+      closeOnConnect: true,
+    };
+    const response = await approvedPost(baseUrl, '/api/intent-drafts/draft/activate', activation);
+    expect(response.status).toBe(201);
+    expect(mocks.activateIntentDraft).toHaveBeenCalledWith('social-user', 'draft', {
+      quietSearch: activation.quietSearch,
+      story: { enabled: false, text: '', audience: { userIds: [], conversationIds: [] } },
+      closeOnConnect: true,
+    }, { confirmed: true, io: undefined });
+  });
+
   it('requires payload-bound single-use approval for activation and Story publication', async () => {
     const headers = { Authorization: bearer(), 'Content-Type': 'application/json' };
     const storyPreview = await fetch(`${baseUrl}/api/stories`, {

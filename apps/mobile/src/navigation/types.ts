@@ -26,7 +26,7 @@ export type RootStackParamList = {
   NewConversation: undefined;
   /** OpenChat Agent overlay (asks, offers, and anonymous matches; OpenChat-a0e.5). */
   AgentOverlay: { prompt?: string } | undefined;
-  StoryComposer: { draftId?: string; initialText?: string } | undefined;
+  StoryComposer: { draftId?: string; initialText?: string; destination?: 'agents_only' | 'both' | 'stories_only' } | undefined;
   StoryViewer: { story: FeedStory };
   SocialReview: undefined;
   GroupSettings: { conversationId: string };
@@ -80,7 +80,7 @@ export type AsksStackParamList = {
   AsksList: undefined;
   Chat: { conversationId: string; lane?: 'chat' | 'context'; entryId?: string };
   AgentOverlay: { prompt?: string } | undefined;
-  StoryComposer: { draftId?: string; initialText?: string } | undefined;
+  StoryComposer: { draftId?: string; initialText?: string; destination?: 'agents_only' | 'both' | 'stories_only' } | undefined;
   StoryViewer: { story: FeedStory };
   SocialReview: undefined;
 };
