@@ -42,6 +42,7 @@ import {
   sanitizeLegacyPublicDisplayNames,
 } from './privacy/profilePrivacy.js';
 import { resolveInvitePreview, InviteError } from './services/inviteEntry.js';
+import { renderInviteActions } from './services/inviteLanding.js';
 import { resolvePublicPersonProjection } from './services/publicEntryProjection.js';
 import { resolveCardToken } from './services/addMeCard.js';
 import { renderCardPage, renderCardUnavailablePage } from './services/addMeCardPage.js';
@@ -466,7 +467,7 @@ app.get('/i/:token', async (req, res, next) => {
     const count = preview.memberCount;
     desc = `Join ${groupTitle} with ${count} ${count === 1 ? 'member' : 'members'} on OpenChat`;
 
-    const intentQs = `?intent=invite&token=${encodeURIComponent(token)}`;
+    const encodedToken = encodeURIComponent(token).replace(/'/g, '%27');
     const html = `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -476,7 +477,7 @@ app.get('/i/:token', async (req, res, next) => {
 <meta name="description" content="${safe(desc)}">
 <meta property="og:title" content="Join ${safe(groupTitle)} on OpenChat">
 <meta property="og:description" content="${safe(desc)}">
-<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=https://chat.globalbr.ai/i/${encodeURIComponent(token)}">
+<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=https://chat.globalbr.ai/i/${encodedToken}">
 <style>
   :root { --bg:#0a0c18; --surface:rgba(255,255,255,0.05); --border:rgba(255,255,255,0.10);
           --text:#f4f6ff; --text-dim:#9aa0c5; --accent:#7c80ff; --accent-bg:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%); }
@@ -497,7 +498,8 @@ app.get('/i/:token', async (req, res, next) => {
                  box-shadow:0 8px 20px rgba(124,128,255,0.4); }
   .cta-secondary { background:var(--surface); color:var(--text); border:1px solid var(--border); }
   .cta-tiny { font-size:13px; color:var(--text-dim); padding:8px; }
-  .cta-tiny a { color:var(--accent); text-decoration:underline; }
+  .cta-tiny button { padding:0; border:0; background:none; color:var(--accent);
+                     font:inherit; text-decoration:underline; cursor:pointer; }
   .footer { font-size:11px; color:var(--text-dim); margin-top:30px; }
   .footer a { color:var(--text-dim); }
 </style>
@@ -506,11 +508,7 @@ app.get('/i/:token', async (req, res, next) => {
   <h1 class="title">${safe(groupTitle)}</h1>
   <p class="invite">${safe(desc)}</p>
 
-  <button class="cta cta-primary" onclick="copyInvite()" style="width:100%;border:none;cursor:pointer;">Copy Invite Link</button>
-  <a class="cta cta-secondary" href="/app/${intentQs}">Open on the web</a>
-  <a class="cta cta-secondary" href="https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932">Get the iOS app · App Store</a>
-
-  <p class="cta-tiny">Already have OpenChat? <a href="openchat://invite/${encodeURIComponent(token)}">Open the app directly</a></p>
+  ${renderInviteActions(token)}
 
   <div class="footer">
     <a href="/">chat.globalbr.ai</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
@@ -518,8 +516,14 @@ app.get('/i/:token', async (req, res, next) => {
 </div>
 <script>
   function copyInvite() {
-    navigator.clipboard.writeText('openchat://invite/${encodeURIComponent(token)}').then(function() {
-      alert('Invite link copied to clipboard! You can now paste it after installing the app.');
+    if (!navigator.clipboard?.writeText) {
+      alert('Copy unavailable here. Return to this page after installing OpenChat.');
+      return;
+    }
+    navigator.clipboard.writeText('openchat://invite/${encodedToken}').then(function() {
+      alert('Invite link copied. Paste it at sign-in after installing OpenChat.');
+    }).catch(function() {
+      alert('Copy unavailable here. Return to this page after installing OpenChat.');
     });
   }
 </script>
