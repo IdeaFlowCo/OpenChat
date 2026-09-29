@@ -10,6 +10,7 @@ import {
   updateOwnCardSettings,
 } from '../services/addMeCard.js';
 import { DirectConversationNotAllowedError, ensureDirectConversation } from '../services/directConversation.js';
+import { changeFriend, FriendError, getFriendStatus } from '../services/friends.js';
 
 /**
  * AddMe card API, mounted at /api/card. The owner-facing routes live under
@@ -135,6 +136,31 @@ router.post('/:token/add', requireAuth, async (req: Request, res: Response) => {
     console.error('Error adding contact from AddMe card:', error);
     res.status(500).json({ error: 'Failed to add contact' });
   }
+});
+
+// New clients use an explicit relationship action; /add stays a legacy DM API.
+router.get('/:token/friend-status', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  try {
+    const resolved = await resolveCardToken(session, req.params.token as string);
+    if (!resolved) { res.status(404).json({ error: 'Card not found' }); return; }
+    res.json(await getFriendStatus(req.user!.userId, resolved.ownerId, true));
+  } catch (error) {
+    if (error instanceof FriendError) res.status(error.status).json({ error: error.message });
+    else { console.error('Error loading card friend status:', error); res.status(500).json({ error: 'Failed to load friend status' }); }
+  } finally { await session.close(); }
+});
+
+router.post('/:token/friend-request', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  try {
+    const resolved = await resolveCardToken(session, req.params.token as string);
+    if (!resolved) { res.status(404).json({ error: 'Card not found' }); return; }
+    res.json(await changeFriend(req.user!.userId, resolved.ownerId, 'request', 'card', true, req.params.token as string));
+  } catch (error) {
+    if (error instanceof FriendError) res.status(error.status).json({ error: error.message });
+    else { console.error('Error requesting friend from card:', error); res.status(500).json({ error: 'Failed to request friend' }); }
+  } finally { await session.close(); }
 });
 
 export default router;

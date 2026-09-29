@@ -16,6 +16,7 @@ import { api } from '../api/client';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
+import { FriendControls } from '../components/FriendControls';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp, RouteProps } from '../navigation/types';
 
@@ -40,7 +41,7 @@ export function ContactProfileScreen() {
   const { userId } = route.params;
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  const { conversations, presence, refreshConversations } = useChat();
+  const { conversations, presence, refreshConversations, createConversation } = useChat();
 
   // Pull the most recent user object from any conversation participant.
   // This stays fresh because ChatContext re-renders on participant updates.
@@ -149,6 +150,11 @@ export function ContactProfileScreen() {
           )}
         </View>
       </View>
+
+      {!user.isBot && <FriendControls userId={userId} onMessage={async () => {
+        const conversation = await createConversation([userId], { type: 'direct' });
+        navigation.navigate('Chat', { conversationId: conversation.id });
+      }} />}
 
       {/* Actions */}
       {!user.isBot && (

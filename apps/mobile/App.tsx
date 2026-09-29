@@ -43,6 +43,7 @@ import { OnboardingScreen } from './src/screens/OnboardingScreen';
 
 import { PersonEntryScreen } from './src/screens/PersonEntryScreen';
 import { CardEntryScreen } from './src/screens/CardEntryScreen';
+import { FriendsScreen } from './src/screens/FriendsScreen';
 
 // Init crash reporting FIRST so even early-boot errors reach Sentry (OpenChat-7um).
 // No-op if EXPO_PUBLIC_SENTRY_DSN is unset.
@@ -214,8 +215,9 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen
         name="CardEntry"
         component={CardEntryScreen}
-        options={{ title: 'Add Contact', presentation: 'modal' }}
+        options={{ title: 'Add friend', presentation: 'modal' }}
       />
+      <ChatsStack.Screen name="Friends" component={FriendsScreen} options={{ title: 'People' }} />
       {/* Forward picker (OpenChat-hhc) */}
       <ChatsStack.Screen
         name="ForwardPicker"

@@ -39,8 +39,8 @@ export function EntryHeader() {
         } else if (entryIntent.target.kind === 'card') {
           const res = await api.getPublicCard(entryIntent.target.token);
           setPreviewData({
-            title: `Add ${res.name}`,
-            subtitle: res.headline || 'Sign in to add them on OpenChat',
+            title: `Add ${res.name} as a friend`,
+            subtitle: res.headline || 'Sign in to send a friend request',
           });
         }
       } catch (err: any) {
