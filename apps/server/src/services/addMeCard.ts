@@ -288,6 +288,8 @@ export async function rotateOwnCardToken(session: Session, userId: string): Prom
   const token = generateCardToken();
   await session.executeWrite(tx => tx.run(`
     MATCH (u:User {id: $userId})-[:HAS_ADDME_CARD]->(old:AddMeCard)
+    SET u.contextAclRevision = coalesce(u.contextAclRevision, 0) + 1
+    WITH u, old
     WHERE old.revokedAt IS NULL
     SET old.revokedAt = datetime()
     WITH u, count(old) AS revoked

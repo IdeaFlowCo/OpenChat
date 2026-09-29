@@ -68,15 +68,17 @@ describe('DELETE /api/auth/me social-layer cleanup', () => {
     const intentDelete = queries.findIndex((query, index) => index > matchDelete
       && query.includes('OWNS_INTENT]->(intent:AgentIntent)') && query.includes('DETACH DELETE intent'));
     const preferenceDelete = indexOf('HAS_SOCIAL_PREFERENCE');
+    const friendDelete = indexOf('MATCH (connection:OpenChatConnection)');
     const userDelete = indexOf('DETACH DELETE u');
 
-    expect([matchLookup, deliveryDelete, matchDelete, draftDelete, storyDelete, intentDelete, preferenceDelete, userDelete])
+    expect([matchLookup, deliveryDelete, matchDelete, draftDelete, storyDelete, intentDelete, preferenceDelete, friendDelete, userDelete])
       .not.toContain(-1);
     expect(matchLookup).toBeLessThan(deliveryDelete);
     expect(deliveryDelete).toBeLessThan(matchDelete);
     expect(matchDelete).toBeLessThan(intentDelete);
     expect(storyDelete).toBeLessThan(intentDelete);
     expect(intentDelete).toBeLessThan(userDelete);
+    expect(friendDelete).toBeLessThan(userDelete);
     expect(queries[matchLookup]).toContain('User {id: $userId}');
     expect(queries[intentDelete]).toContain('User {id: $userId}');
     expect(queries[intentDelete]).not.toContain('other');

@@ -1629,7 +1629,12 @@ router.post('/users/:id/block', requireAuth, async (req: Request, res: Response)
         MATCH (me:User {id: $myId}), (target:User {id: $targetId})
         MERGE (me)-[r:BLOCKED]->(target)
         ON CREATE SET r.createdAt = datetime($now)
-      `, { myId, targetId, now });
+        WITH me, target
+        OPTIONAL MATCH (connection:OpenChatConnection {pairKey: $pairKey})
+        FOREACH (_ IN CASE WHEN connection IS NULL THEN [] ELSE [1] END |
+          SET connection.state = 'removed', connection.updatedAt = datetime($now),
+              connection.requestedBy = null, connection.requestedTo = null)
+      `, { myId, targetId, now, pairKey: JSON.stringify([myId, targetId].sort()) });
     });
     res.status(201).json({ blocked: true, targetId });
   } catch (error) {

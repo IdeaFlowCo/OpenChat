@@ -229,6 +229,7 @@ const AccountExport = {
     messages: { type: 'array', items: { $ref: '#/components/schemas/Message' } },
     thoughts: { type: 'array', items: { type: 'object' } },
     blockedUsers: { type: 'array', items: { type: 'object' } },
+    friendConnections: { type: 'array', items: { type: 'object' } },
     agentKeys: {
       type: 'array',
       description: 'Non-secret agent key metadata owned by the exported account; plaintext keys are never included.',
@@ -436,6 +437,7 @@ export const openapiSpec = {
   },
   tags: [
     { name: 'Chat', description: 'Conversations and messages' },
+    { name: 'Friends', description: 'Mutual existing-user friend requests, independent of direct messages' },
     { name: 'Chat Context Lane', description: 'Quiet back-channel posts for a conversation' },
     { name: 'Agent keys', description: 'Mint / manage `oc_` API keys' },
     { name: 'Agent network', description: 'Anonymous asks/offers and double-opt-in quiet matches' },
@@ -448,6 +450,22 @@ export const openapiSpec = {
     { name: 'Meta', description: 'Health, spec' },
   ],
   paths: {
+    '/api/friends': {
+      get: { operationId: 'listFriends', tags: ['Friends'], summary: 'List accepted, incoming, and outgoing connections', responses: { '200': ok({ type: 'object', properties: { friends: { type: 'array', items: { type: 'object' } }, incoming: { type: 'array', items: { type: 'object' } }, outgoing: { type: 'array', items: { type: 'object' } } } }), '401': errResp('Unauthorized') } },
+    },
+    '/api/friends/users/{id}': {
+      get: { operationId: 'getFriendStatus', tags: ['Friends'], summary: 'Get relationship state for an accessible person', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }), '404': errResp('Person unavailable') } },
+    },
+    ...Object.fromEntries((['request', 'accept', 'decline', 'cancel', 'remove'] as const).map(action => [
+      `/api/friends/users/{id}/${action}`,
+      { post: { operationId: `${action}Friend`, tags: ['Friends'], summary: `${action} a friend connection`, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }), '404': errResp('Person unavailable'), '409': errResp('Invalid relationship transition'), '429': errResp('Request cooldown') } } },
+    ])),
+    '/api/card/{token}/friend-status': {
+      get: { operationId: 'getCardFriendStatus', tags: ['Friends'], summary: 'Read relationship for a valid AddMe card', parameters: [{ name: 'token', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }), '404': errResp('Card unavailable') } },
+    },
+    '/api/card/{token}/friend-request': {
+      post: { operationId: 'requestCardFriend', tags: ['Friends'], summary: 'Request friendship through a valid AddMe card', parameters: [{ name: 'token', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': ok({ type: 'object' }), '404': errResp('Card unavailable'), '429': errResp('Request cooldown') } },
+    },
     '/health': {
       get: { operationId: 'healthCheck', tags: ['Meta'], summary: 'Health check', security: [], responses: { '200': ok({ type: 'object' }) } },
     },
@@ -464,7 +482,7 @@ export const openapiSpec = {
         operationId: 'exportAccount',
         tags: ['Account'],
         summary: 'Download an account data export',
-        description: 'Requires a user JWT. The JSON bundle includes profile, conversations, range-filtered messages and thoughts, blocked users, and non-secret agent key metadata. Omit range to export the last day.',
+        description: 'Requires a user JWT. The JSON bundle includes profile, conversations, range-filtered messages and thoughts, blocked users, friend connections, and non-secret agent key metadata. Omit range to export the last day.',
         parameters: [
           { name: 'range', in: 'query', required: false, schema: { type: 'string', default: 'last_day', enum: ['last_hour', 'last_day', 'last_week', 'last_month', 'all_time'] }, description: 'Optional export window; defaults to last_day.' },
         ],
