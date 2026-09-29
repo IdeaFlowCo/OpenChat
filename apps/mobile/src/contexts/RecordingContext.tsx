@@ -21,6 +21,7 @@ import type { Attachment } from '../api/client';
 import { uploadAudio } from '../services/attachments';
 import {
   cancelRecording,
+  MicrophoneJustEnabledError,
   startRecording,
   stopRecording,
 } from '../services/audioRecorder';
@@ -219,6 +220,7 @@ export function RecordingProvider({
         durationMs,
         wallMs,
       });
+      showNotice('That recording was too short to send. Hold the mic, or tap it to record hands-free.');
       finishingRef.current = false;
       return false;
     }
@@ -342,19 +344,28 @@ export function RecordingProvider({
         }
       }
     } catch (err) {
-      logError('[voice] startRecording failed', err, { conversationId });
+      stateRef.current = initialState;
       setState(initialState);
+      pendingReleaseRef.current = null;
+      if (err instanceof MicrophoneJustEnabledError) {
+        // The permission prompt ended the press that asked to record.
+        logInfo('[voice] microphone permission granted', { conversationId });
+        showNotice('Microphone is on. Press the mic again to record.');
+        return;
+      }
+      logError('[voice] startRecording failed', err, { conversationId });
       const denied = err instanceof Error && /permission/i.test(err.message);
+      const reason = err instanceof Error && err.message ? ` (${err.message.slice(0, 120)})` : '';
       Alert.alert(
         denied ? 'Microphone access needed' : 'Recording failed',
         denied
           ? 'Enable microphone access in Settings to send voice messages.'
-          : 'Could not start recording. Please try again.'
+          : `Could not start recording${reason}. Nothing was sent — please try again.`
       );
     } finally {
       startingRef.current = false;
     }
-  }, [finishing]);
+  }, [finishing, showNotice]);
 
   const beginPress = useCallback(async (
     conversationId: string,

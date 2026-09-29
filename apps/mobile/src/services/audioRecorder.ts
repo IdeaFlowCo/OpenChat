@@ -42,15 +42,21 @@ const RECORDING_OPTIONS: RecordingOptions = {
 };
 
 /**
- * Request microphone permission if needed, then start recording.
- * Throws if permission is denied.
+ * Thrown when the press that asked to record is the one that GRANTED the
+ * microphone permission. The system prompt interrupts the press-and-hold and
+ * leaves the app inactive, so a recording started from that same press either
+ * fails to start or is cut off at once. Callers ask for a fresh press instead.
  */
-export async function startRecording(): Promise<Recording> {
-  const { status } = await Audio.requestPermissionsAsync();
-  if (status !== 'granted') {
-    throw new Error('Microphone permission denied');
+export class MicrophoneJustEnabledError extends Error {
+  constructor() {
+    super('Microphone permission was just granted');
+    this.name = 'MicrophoneJustEnabledError';
   }
+}
 
+const START_RETRY_DELAY_MS = 300;
+
+async function prepareRecording(): Promise<Recording> {
   // Allow recording to work when the device is in silent mode (iOS).
   await Audio.setAudioModeAsync({
     allowsRecordingIOS: true,
@@ -59,21 +65,37 @@ export async function startRecording(): Promise<Recording> {
     // audio entitlement ships, while Android can keep recording immediately.
     staysActiveInBackground: true,
   });
+  const { recording } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
+  return recording;
+}
+
+/**
+ * Request microphone permission if needed, then start recording.
+ * Throws if permission is denied, and MicrophoneJustEnabledError if this call
+ * is the one that granted it.
+ */
+export async function startRecording(): Promise<Recording> {
+  const existing = await Audio.getPermissionsAsync();
+  if (existing.status !== 'granted') {
+    const { status } = await Audio.requestPermissionsAsync();
+    if (status !== 'granted') {
+      throw new Error('Microphone permission denied');
+    }
+    throw new MicrophoneJustEnabledError();
+  }
 
   try {
-    const { recording } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
-    return recording;
+    return await prepareRecording();
   } catch (err) {
-    // "Only one Recording object can be prepared at a given time" — a prior
-    // recording was left prepared (app backgrounded mid-recording, edit flow,
-    // etc). expo-av cleans its singleton up as part of throwing, so one
-    // immediate retry succeeds — without this the FIRST mic press after a
-    // wedge always failed and the second worked (OpenChat 2026-09-02 iPad).
-    if (err instanceof Error && /only one recording/i.test(err.message)) {
-      const { recording } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
-      return recording;
-    }
-    throw err;
+    // The first attempt can fail transiently: "Only one Recording object can
+    // be prepared at a given time" when a prior recording was left prepared
+    // (app backgrounded mid-recording, edit flow; expo-av cleans its singleton
+    // up as part of throwing — OpenChat 2026-09-02 iPad), or the audio session
+    // not activating because another app or a call had it a moment ago. One
+    // retry after a short pause clears both; a second failure is real.
+    const immediate = err instanceof Error && /only one recording/i.test(err.message);
+    if (!immediate) await new Promise((resolve) => setTimeout(resolve, START_RETRY_DELAY_MS));
+    return prepareRecording();
   }
 }
 

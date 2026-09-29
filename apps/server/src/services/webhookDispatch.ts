@@ -51,6 +51,8 @@ export interface NormalizedMessagePayload {
     senderId: string | null;
     senderName: string | null;
     content: string;
+    /** Voice-note transcript; voice notes carry empty `content`. */
+    transcript: string | null;
     messageType: string;
     cardKind: string | null;
     cardPayload: string | null;
@@ -84,6 +86,7 @@ export function buildMessagePayload(
       senderId: (message.senderId as string | undefined) ?? (sender?.id as string | undefined) ?? null,
       senderName: (sender?.name as string | undefined) ?? null,
       content: typeof message.content === 'string' ? message.content : '',
+      transcript: typeof message.transcript === 'string' ? message.transcript : null,
       messageType: typeof message.messageType === 'string' ? message.messageType : 'text',
       cardKind: typeof message.cardKind === 'string' ? message.cardKind : null,
       cardPayload: typeof message.cardPayload === 'string' ? message.cardPayload : null,

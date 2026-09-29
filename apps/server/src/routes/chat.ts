@@ -1119,9 +1119,13 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         console.warn('[push] REST fanout error:', err)
       );
     }
+    // A voice note has no text until it is transcribed, so everything that
+    // hands the message to an agent as text (webhooks, Assistant, Secretary)
+    // waits for the transcript below instead of firing on empty content.
+    const isVoiceOnly = hasAudio && !messageContent;
     // Outbound webhooks (openchat bot-channel): push the message to any external
     // subscriber (e.g. groupbrain). Fire-and-forget, no-ops when no subscription.
-    if (wasCreated) dispatchMessageEvent(message, participantIds);
+    if (wasCreated && !isVoiceOnly) dispatchMessageEvent(message, participantIds);
     // Async link preview fetch — non-blocking (OpenChat-hq2)
     if (io) {
       processLinkPreviews(io, message.id as string, conversationId as string, messageContent);
@@ -1129,9 +1133,27 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // Voice transcription — non-blocking, best-effort (openchat-4jn). Whisper
     // transcribes any audio attachment and emits message:transcript.
     if (hasAttachments) {
-      void maybeTranscribeMessage(io, message.id as string, conversationId as string, attachments, userId).catch(
-        () => { /* best-effort */ }
-      );
+      void maybeTranscribeMessage(io, message.id as string, conversationId as string, attachments, userId)
+        .catch((err) => {
+          console.warn('[transcribe] failed:', err);
+          return null;
+        })
+        .then((transcript) => {
+          if (!isVoiceOnly) return;
+          // Agents still hear about a voice note that could not be
+          // transcribed, so the Assistant can say so instead of going silent.
+          if (wasCreated) dispatchMessageEvent({ ...message, transcript }, participantIds);
+          maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io });
+          if (transcript) {
+            maybeTriggerSecretary({
+              senderId: userId,
+              conversationId: conversationId as string,
+              sourceMessageId: message.id as string,
+              content: transcript,
+              io,
+            });
+          }
+        });
     }
 
     // Hashtag → Thought extraction (OpenChat-thoughts-from-tags). Best-
@@ -1164,14 +1186,16 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // In-app Assistant bot (openchat-bfn.3): if this conversation contains the
     // bot, fire an assistant turn asynchronously. No-ops when the sender is the
     // bot itself (loop guard inside maybeTriggerAssistant).
-    maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io });
-    maybeTriggerSecretary({
-      senderId: userId,
-      conversationId: conversationId as string,
-      sourceMessageId: message.id as string,
-      content: messageContent,
-      io,
-    });
+    if (!isVoiceOnly) {
+      maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io });
+      maybeTriggerSecretary({
+        senderId: userId,
+        conversationId: conversationId as string,
+        sourceMessageId: message.id as string,
+        content: messageContent,
+        io,
+      });
+    }
 
     res.status(201).json(message);
   } catch (error) {

@@ -14,6 +14,10 @@
  * for capture too.
  *
  * Best-effort + async — never blocks the send; no-ops gracefully with no keys.
+ *
+ * A voice note is stored with EMPTY `content`; the transcript is its only
+ * text. Anything that reads a message as text for an agent (assistant context,
+ * outbound webhooks) must therefore wait for / fall back to `transcript`.
  */
 import type { Server as IOServer } from 'socket.io';
 import { getDriver } from '../db.js';
@@ -119,6 +123,9 @@ export async function transcribeAudio(url: string, mimeType: string): Promise<st
 /**
  * If the message has an audio attachment, transcribe it (async, best-effort),
  * persist `transcript`, and emit `message:transcript` to the conversation room.
+ *
+ * Resolves to the transcript text, or null when there is no audio attachment
+ * or it could not be transcribed, so callers can hand the text to agents.
  */
 export async function maybeTranscribeMessage(
   io: IOServer | undefined,
@@ -126,16 +133,19 @@ export async function maybeTranscribeMessage(
   conversationId: string,
   attachments: unknown,
   senderId?: string
-): Promise<void> {
-  if (!Array.isArray(attachments)) return;
+): Promise<string | null> {
+  if (!Array.isArray(attachments)) return null;
   const audio = (attachments as Attachmentish[]).find(
     (a) =>
       a && typeof a.mimeType === 'string' && a.mimeType.startsWith('audio/') && typeof a.url === 'string'
   );
-  if (!audio) return;
+  if (!audio) return null;
 
   const raw = await transcribeAudio(audio.url as string, audio.mimeType as string);
-  if (!raw) return;
+  if (!raw) {
+    console.warn('[transcribe] no transcript produced', JSON.stringify({ messageId, conversationId }));
+    return null;
+  }
 
   // Spoken "hashtag community house" → "#CommunityHouse" so voice notes are
   // first-class for tag capture; the normalized text is what we display too.
@@ -178,4 +188,5 @@ export async function maybeTranscribeMessage(
   } finally {
     await s.close();
   }
+  return text;
 }
