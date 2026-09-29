@@ -232,10 +232,10 @@ export function ConversationsScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => navigation.navigate('NewConversation')}
-            accessibilityLabel="New conversation"
+            accessibilityLabel="People"
             style={styles.headerAction}
           >
-            <AppIcon name="plus" color={c.primary} size={21} />
+            <Text style={{ color: c.primary, fontSize: 15, fontWeight: '600' }}>People</Text>
           </TouchableOpacity>
         </View>
       ),

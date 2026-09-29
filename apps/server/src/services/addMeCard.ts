@@ -121,7 +121,10 @@ export function projectCardForStranger(owner: CardOwnerRecord, settings: CardSet
 }
 
 export function isSafeCardLink(value: string): boolean {
-  if (value.length > CARD_LINK_MAX) return false;
+  if (value.length > CARD_LINK_MAX || [...value].some(char => {
+    const code = char.charCodeAt(0);
+    return code <= 32 || code === 127;
+  })) return false;
   try {
     const url = new URL(value);
     return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password;

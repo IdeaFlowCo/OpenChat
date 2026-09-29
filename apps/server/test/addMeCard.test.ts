@@ -8,6 +8,7 @@ import {
   type CardOwnerRecord,
 } from '../src/services/addMeCard.js';
 import { renderCardPage } from '../src/services/addMeCardPage.js';
+import { renderCardVcard } from '../src/services/addMeCardVcard.js';
 
 // An owner record with every private field the graph might hand back.
 const owner: CardOwnerRecord = {
@@ -86,6 +87,13 @@ describe('AddMe card consent projection', () => {
     expect(card.link).toBeNull();
   });
 
+  it('rejects control characters in owner-published links', () => {
+    expect(parseCardSettingsPatch({ link: 'https://example.com/\r\nTEL:123' }).ok).toBe(false);
+    expect(projectCardForStranger(owner, {
+      ...DEFAULT_CARD_SETTINGS, showLink: true, link: 'https://example.com/\nTEL:123',
+    }).link).toBeNull();
+  });
+
   it('treats blank card-only fields as not shared', () => {
     const card = projectCardForStranger(owner, { ...DEFAULT_CARD_SETTINGS, headline: '   ', link: '' });
     expect(card.headline).toBeNull();
@@ -143,5 +151,35 @@ describe('AddMe card page', () => {
     expect(html).not.toContain('At the conference');
     expect(html).not.toContain('user-internal-id-123');
     expect(html).toContain('/app/?intent=card&token=');
+    expect(html).toContain('/contact.vcf">Save contact</a>');
+  });
+});
+
+describe('AddMe vCard', () => {
+  it('has a useful minimum card with UTF-8 text and CRLF lines', () => {
+    const card = projectCardForStranger({ name: '山田 太郎 ✨', email: 'hidden@example.test' }, DEFAULT_CARD_SETTINGS);
+    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx');
+    expect(vcard).toBe('BEGIN:VCARD\r\nVERSION:3.0\r\nN:;山田 太郎 ✨;;;\r\nFN:山田 太郎 ✨\r\nURL:https://chat.globalbr.ai/c/AbCdEfGhIjKlMnOpQrStUvWx\r\nEND:VCARD\r\n');
+    expect(vcard).not.toContain('hidden@example.test');
+  });
+
+  it('escapes malicious line breaks, slashes, commas, and semicolons', () => {
+    const card = projectCardForStranger(
+      { name: 'Jo\\hn, Doe;\r\nTEL:+12345' },
+      { ...DEFAULT_CARD_SETTINGS, headline: 'Hello\nTEL:+99999' },
+    );
+    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx');
+    expect(vcard).toContain('FN:Jo\\\\hn\\, Doe\\;\\nTEL:+12345\r\n');
+    expect(vcard).toContain('NOTE:Hello\\nTEL:+99999\r\n');
+    expect(vcard).not.toMatch(/\r\n(?:TEL|EMAIL):/);
+  });
+
+  it('folds long Unicode values by UTF-8 bytes without splitting a character', () => {
+    const card = projectCardForStranger({ name: '山'.repeat(40) }, DEFAULT_CARD_SETTINGS);
+    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx');
+    for (const line of vcard.trimEnd().split('\r\n')) {
+      expect(Buffer.byteLength(line, 'utf8')).toBeLessThanOrEqual(75);
+    }
+    expect(vcard.replace(/\r\n /g, '')).toContain(`FN:${'山'.repeat(40)}\r\n`);
   });
 });

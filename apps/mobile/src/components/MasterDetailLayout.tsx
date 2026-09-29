@@ -321,11 +321,11 @@ export function MasterDetailLayout() {
             </TouchableOpacity>
             <IconButton
               onPress={openNew}
-              title="New conversation (⌘N)"
-              accessibilityLabel="New conversation"
+              title="People (⌘N)"
+              accessibilityLabel="People"
               hoverBg={c.surfaceElevated}
             >
-              <AppIcon name="plus" color={c.primary} size={20} />
+              <Text style={{ color: c.primary, fontSize: 11, fontWeight: '700' }}>People</Text>
             </IconButton>
           </View>
         ) : (
@@ -360,11 +360,11 @@ export function MasterDetailLayout() {
               </View>
               <IconButton
                 onPress={openNew}
-                title="New conversation (⌘N)"
-                accessibilityLabel="New conversation"
+                title="People (⌘N)"
+                accessibilityLabel="People"
                 hoverBg={c.surfaceElevated}
               >
-                <AppIcon name="plus" color={c.primary} size={20} />
+                <Text style={{ color: c.primary, fontSize: 14, fontWeight: '600' }}>People</Text>
               </IconButton>
             </View>
             <Pressable

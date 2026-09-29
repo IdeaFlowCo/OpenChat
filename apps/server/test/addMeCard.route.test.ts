@@ -29,12 +29,12 @@ import cardRoutes from '../src/routes/addMeCard.js';
 
 const TOKEN = 'AbCdEfGhIjKlMnOpQrStUvWx';
 
-function cardRecord(ownerId: string, cardProps: Record<string, unknown>) {
+function cardRecord(ownerId: string, cardProps: Record<string, unknown>, ownerName = 'Jacob Cole') {
   return {
     records: [{
       get: (key: string) => {
         if (key === 'ownerId') return ownerId;
-        if (key === 'owner') return { name: 'Jacob Cole', avatarUrl: 'https://cdn.example.com/a.png', profileStatusText: 'Here' };
+        if (key === 'owner') return { name: ownerName, email: 'private@example.test', phone: '+15555550123', avatarUrl: 'https://cdn.example.com/a.png', profileStatusText: 'Here' };
         if (key === 'card') return { properties: { token: TOKEN, ...cardProps } };
         return null;
       },
@@ -82,6 +82,50 @@ describe('AddMe card routes', () => {
     expect((await fetch(`${baseUrl}/api/card/${TOKEN}`)).status).toBe(404);
     expect((await fetch(`${baseUrl}/api/card/not-a-token`)).status).toBe(404);
     expect(mocks.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('exports only active, published card fields without login or caching', async () => {
+    mocks.run.mockResolvedValueOnce(cardRecord('owner-id-secret', {
+      showAvatar: false, showStatus: false, showHeadline: true,
+      headline: 'Founder', showLinkedIn: true, linkedIn: 'https://example.com/me',
+      showLink: false, link: 'https://private.example.test',
+    }));
+    const response = await fetch(`${baseUrl}/api/card/${TOKEN}/contact.vcf`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('content-type')).toContain('text/vcard');
+    expect(response.headers.get('content-disposition')).toContain('attachment');
+    const body = await response.text();
+    expect(body).toContain('FN:Jacob Cole\r\n');
+    expect(body).toContain('NOTE:Founder\r\n');
+    expect(body).toContain('URL:https://example.com/me\r\n');
+    expect(body).toContain(`URL:https://chat.globalbr.ai/c/${TOKEN}\r\n`);
+    for (const secret of ['private@example.test', '+15555550123', 'owner-id-secret', 'private.example.test']) {
+      expect(body).not.toContain(secret);
+    }
+  });
+
+  it('rejects revoked and malformed vCard tokens', async () => {
+    mocks.run.mockResolvedValueOnce({ records: [] });
+    const revoked = await fetch(`${baseUrl}/api/card/${TOKEN}/contact.vcf`);
+    expect(revoked.status).toBe(404);
+    expect(revoked.headers.get('cache-control')).toBe('no-store');
+    expect((await fetch(`${baseUrl}/api/card/invalid/contact.vcf`)).status).toBe(404);
+    expect(mocks.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('reflects field withdrawal and rotation on the next download', async () => {
+    mocks.run
+      .mockResolvedValueOnce(cardRecord('owner-id', { showLink: true, link: 'https://example.com/public' }))
+      .mockResolvedValueOnce(cardRecord('owner-id', { showLink: false, link: 'https://example.com/public' }))
+      .mockResolvedValueOnce({ records: [] });
+    const first = await fetch(`${baseUrl}/api/card/${TOKEN}/contact.vcf`);
+    expect(await first.text()).toContain('URL:https://example.com/public');
+    const withdrawn = await fetch(`${baseUrl}/api/card/${TOKEN}/contact.vcf`);
+    expect(await withdrawn.text()).not.toContain('example.com/public');
+    const revoked = await fetch(`${baseUrl}/api/card/${TOKEN}/contact.vcf`);
+    expect(revoked.status).toBe(404);
+    expect(revoked.headers.get('cache-control')).toBe('no-store');
   });
 
   it('adds the owner as a contact through the direct-conversation path', async () => {

@@ -85,6 +85,8 @@ module.exports = {
 
     android: {
       package: 'com.jacobcole.openchat',
+      // W1 only reads a user-selected contact; it never edits the address book.
+      blockedPermissions: ['android.permission.WRITE_CONTACTS'],
       adaptiveIcon: {
         backgroundColor: '#faf6ef',
         foregroundImage: './assets/android-icon-foreground.png',
@@ -115,6 +117,7 @@ module.exports = {
       'expo-web-browser',
       'expo-camera',
       'expo-image-picker',
+      ['expo-contacts', { contactsPermission: 'Choose one person to invite to OpenChat. Contacts stay on this device and are not uploaded.' }],
       'expo-apple-authentication',
       ['expo-notifications', { color: '#b3541e' }],
       [

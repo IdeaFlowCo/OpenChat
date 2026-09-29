@@ -4,7 +4,6 @@ import {
   Alert,
   Platform,
   ScrollView,
-  Share,
   StyleSheet,
   Switch,
   Text,
@@ -14,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
+import * as Clipboard from 'expo-clipboard';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
@@ -30,6 +30,7 @@ import { Avatar } from '../components/Avatar';
 import { AppIcon } from '../components/AppIcon';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp } from '../navigation/types';
+import { currentCardUrl, shareCard, shareCardOnWhatsApp } from '../utils/cardSharing';
 
 function confirmReset(onConfirm: () => void) {
   const title = 'Reset card link?';
@@ -156,10 +157,21 @@ export function MyCardScreen() {
 
   const handleShare = async () => {
     if (!card) return;
-    const url = addMeCardUrl(card.token);
     try {
-      await Share.share({ message: `Add me on OpenChat: ${url}`, url, title: 'Add me on OpenChat' });
-    } catch {}
+      await shareCard(await currentCardUrl());
+    } catch {
+      try {
+        await Clipboard.setStringAsync(await currentCardUrl());
+        setError('Sharing is unavailable here. Your card link was copied.');
+      } catch { setError('Could not share your card link. Try again.'); }
+    }
+  };
+
+  const handleWhatsApp = async () => {
+    if (!card) return;
+    try {
+      await shareCardOnWhatsApp(await currentCardUrl());
+    } catch { setError('Could not open WhatsApp. Try Share link instead.'); }
   };
 
   const handleReset = () => confirmReset(async () => {
@@ -252,12 +264,15 @@ export function MyCardScreen() {
 
       <View style={styles.actions}>
         <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary }]} onPress={handleShare} accessibilityRole="button">
-          <Text style={[styles.actionText, { color: c.onPrimary }]}>Share link</Text>
+          <Text style={[styles.actionText, { color: c.onPrimary }]}>Share card link</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.actionBtn, { borderColor: c.border, borderWidth: 1 }]} onPress={togglePreview} accessibilityRole="button">
           <Text style={[styles.actionText, { color: c.textPrimary }]}>{previewing ? 'Show QR' : 'Preview as stranger'}</Text>
         </TouchableOpacity>
       </View>
+      <TouchableOpacity style={[styles.scanCodeBtn, { backgroundColor: c.surface, borderColor: c.border, borderWidth: 1 }]} onPress={handleWhatsApp} accessibilityRole="button">
+        <Text style={[styles.scanCodeBtnText, { color: c.textPrimary }]}>Open in WhatsApp</Text>
+      </TouchableOpacity>
 
       <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>PRESETS</Text>
       <View style={styles.presetRow}>
