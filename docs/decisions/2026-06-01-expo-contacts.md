@@ -1,5 +1,10 @@
 # Decision: defer expo-contacts integration until phone-number sign-in lands
 
+> **2026-09-29 scope update:** W1 permits an explicit, local, single-contact picker
+> to preview an invitation and open the OS/provider share UI. It does not match
+> identifiers, upload an address book, or claim phone-based discovery. The
+> discovery decision below remains deferred.
+
 > **Ticket:** OpenChat-ap3
 > **Date:** 2026-06-01
 > **Status:** Recommendation written; awaiting Jacob sign-off then close

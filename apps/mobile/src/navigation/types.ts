@@ -24,6 +24,7 @@ export type RootStackParamList = {
   Conversations: undefined;
   Chat: { conversationId: string; lane?: 'chat' | 'context'; entryId?: string };
   NewConversation: undefined;
+  InvitePerson: undefined;
   Friends: { section?: 'friends' | 'requests' } | undefined;
   /** OpenChat Agent overlay (asks, offers, and anonymous matches; OpenChat-a0e.5). */
   AgentOverlay: { prompt?: string } | undefined;

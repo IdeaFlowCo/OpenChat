@@ -63,6 +63,7 @@ import { KeyboardShortcutsScreen } from './src/screens/KeyboardShortcutsScreen';
 import { PermissionsScreen } from './src/screens/PermissionsScreen';
 import { SecretaryScreen } from './src/screens/SecretaryScreen';
 import { NewConversationScreen } from './src/screens/NewConversationScreen';
+import { InvitePersonScreen } from './src/screens/InvitePersonScreen';
 import { AgentOverlayScreen } from './src/screens/AgentOverlayScreen';
 import { GroupSettingsScreen } from './src/screens/GroupSettingsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
@@ -132,6 +133,11 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         name="NewConversation"
         component={NewConversationScreen}
         options={{ title: 'New Chat', presentation: 'modal' }}
+      />
+      <ChatsStack.Screen
+        name="InvitePerson"
+        component={InvitePersonScreen}
+        options={{ title: 'Invite a person', presentation: 'modal' }}
       />
       <ChatsStack.Screen
         name="AgentOverlay"

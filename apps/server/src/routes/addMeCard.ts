@@ -10,6 +10,7 @@ import {
   updateOwnCardSettings,
 } from '../services/addMeCard.js';
 import { DirectConversationNotAllowedError, ensureDirectConversation } from '../services/directConversation.js';
+import { renderCardVcard } from '../services/addMeCardVcard.js';
 import { changeFriend, FriendError, getFriendStatus } from '../services/friends.js';
 
 /**
@@ -17,6 +18,30 @@ import { changeFriend, FriendError, getFriendStatus } from '../services/friends.
  * /me; the token routes are the stranger-facing surface.
  */
 const router = Router();
+
+// No-login export. Resolve the active token on every request, using the same
+// consent projection as the public page and JSON route. Never cache a card
+// across rotation or field changes.
+router.get('/:token/contact.vcf', async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  const session = getDriver().session();
+  try {
+    const resolved = await resolveCardToken(session, req.params.token as string);
+    if (!resolved) {
+      res.status(404).json({ error: 'Card not found' });
+      return;
+    }
+    res.setHeader('Content-Type', 'text/vcard; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="openchat-contact.vcf"');
+    res.send(renderCardVcard(resolved.card, req.params.token as string));
+  } catch (error) {
+    console.error('Error exporting AddMe card:', error);
+    res.status(500).json({ error: 'Failed to export card' });
+  } finally {
+    await session.close();
+  }
+});
 
 // GET /api/card/me — the caller's card, created with minimum fields on first use.
 router.get('/me', requireAuth, async (req: Request, res: Response) => {

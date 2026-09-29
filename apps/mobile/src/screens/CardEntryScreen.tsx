@@ -4,7 +4,7 @@
  * Renders the stranger projection and an explicit friend request action.
  */
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
@@ -13,6 +13,7 @@ import { getColors } from '../theme/colors';
 import { api, ApiError, type FriendStatus, type StrangerCard } from '../api/client';
 import { AddMeCardView } from '../components/AddMeCardView';
 import type { NavProp, RouteProps } from '../navigation/types';
+import { OPENCHAT_URL } from '../api/client';
 
 export function CardEntryScreen() {
   const navigation = useNavigation<NavProp<'CardEntry'>>();
@@ -124,6 +125,19 @@ export function CardEntryScreen() {
       {card && isOwnCard ? (
         <Text style={[styles.note, { color: c.textMetadata }]}>This is your card — this is what others see.</Text>
       ) : null}
+
+      {card && (
+        <TouchableOpacity
+          style={styles.secondary}
+          onPress={() => {
+            void Linking.openURL(`${OPENCHAT_URL}/api/card/${encodeURIComponent(token)}/contact.vcf`)
+              .catch(() => setError('Could not open this contact file.'));
+          }}
+          accessibilityRole="button"
+        >
+          <Text style={{ color: c.primary, fontWeight: '600' }}>Save contact</Text>
+        </TouchableOpacity>
+      )}
 
       <TouchableOpacity style={styles.secondary} onPress={handleClose}>
         <Text style={{ color: c.textSecondary, fontWeight: '600' }}>{card && !isOwnCard ? 'Not now' : 'Close'}</Text>

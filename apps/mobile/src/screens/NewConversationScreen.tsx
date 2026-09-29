@@ -168,6 +168,14 @@ export function NewConversationScreen() {
       style={[styles.root, { backgroundColor: c.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <TouchableOpacity
+        style={[styles.scanTopRow, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}
+        onPress={() => navigation.navigate('InvitePerson')}
+        accessibilityRole="button"
+      >
+        <Text style={[styles.scanTopLabel, { color: c.textPrimary }]}>Invite a person</Text>
+        <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
+      </TouchableOpacity>
       {Platform.OS !== 'web' && (
         <TouchableOpacity
           style={[styles.scanTopRow, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}

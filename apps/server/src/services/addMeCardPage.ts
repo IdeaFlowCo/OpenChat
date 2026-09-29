@@ -88,6 +88,7 @@ export function renderCardPage(card: StrangerCard, token: string): string {
   </div>
 
   <a class="cta cta-primary" href="/app/${intentQs}">Request to be friends with ${name}</a>
+  <a class="cta cta-secondary" href="/api/card/${encodedToken}/contact.vcf">Save contact</a>
   <a class="cta cta-secondary" href="${APP_STORE_URL}">Get the iOS app · App Store</a>
 
   <p class="cta-tiny">Already have OpenChat? <a href="openchat://card/${encodedToken}">Open in the app</a></p>

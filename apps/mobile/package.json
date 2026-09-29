@@ -14,6 +14,7 @@
     "expo-av": "~16.0.8",
     "expo-camera": "~17.0.10",
     "expo-clipboard": "~8.0.8",
+    "expo-contacts": "15.0.11",
     "expo-crypto": "~15.0.9",
     "expo-device": "~8.0.10",
     "expo-file-system": "~19.0.22",

@@ -25,7 +25,7 @@ export const generateCardToken = customAlphabet(
 );
 
 export function isWellFormedCardToken(token: unknown): token is string {
-  return typeof token === 'string' && CARD_TOKEN_PATTERN.test(token);
+  return typeof token === 'string' && token.length === 24 && CARD_TOKEN_PATTERN.test(token);
 }
 
 export const CARD_HEADLINE_MAX = 80;
@@ -121,7 +121,10 @@ export function projectCardForStranger(owner: CardOwnerRecord, settings: CardSet
 }
 
 export function isSafeCardLink(value: string): boolean {
-  if (value.length > CARD_LINK_MAX) return false;
+  if (value.length > CARD_LINK_MAX || [...value].some(char => {
+    const code = char.charCodeAt(0);
+    return code <= 32 || code === 127;
+  })) return false;
   try {
     const url = new URL(value);
     return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password;
