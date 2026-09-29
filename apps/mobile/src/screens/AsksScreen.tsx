@@ -6,6 +6,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { api, type IntentDraft, type OwnedStory } from '../api/client';
@@ -40,6 +41,10 @@ function isStoryExpired(story: OwnedStory): boolean {
 export function AsksScreen() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
+  // Phones stack the agent button under the copy; beside it, the title was
+  // squeezed into a narrow column (three lines on an iPhone SE).
+  const { width } = useWindowDimensions();
+  const stackHero = width < 600;
   const navigation = useNavigation<AsksNavProp<'AsksList'>>();
   const [drafts, setDrafts] = useState<IntentDraft[]>([]);
   const [stories, setStories] = useState<OwnedStory[]>([]);
@@ -111,8 +116,8 @@ export function AsksScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
-      <View style={styles.hero}>
-        <View style={{ flex: 1 }}>
+      <View style={[styles.hero, stackHero && styles.heroStacked]}>
+        <View style={stackHero ? null : styles.heroCopy}>
           <Text style={[styles.eyebrow, { color: c.primary }]}>YOUR PRIVATE INVENTORY</Text>
           <Text style={[styles.title, { color: c.textPrimary }]}>Asks, offers & goals</Text>
           <Text style={[styles.subtitle, { color: c.textSecondary }]}>Most things stay private. You choose what agents may search and what people may see.</Text>
@@ -204,6 +209,8 @@ export function AsksScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   hero: { width: '100%', maxWidth: 820, alignSelf: 'center', padding: 18, paddingBottom: 10, flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
+  heroStacked: { flexDirection: 'column' },
+  heroCopy: { flex: 1 },
   eyebrow: { ...capsLabel },
   title: { fontFamily: serif, fontSize: 27, fontWeight: '600', marginTop: 4 },
   subtitle: { fontSize: 13, lineHeight: 19, marginTop: 5, maxWidth: 560 },

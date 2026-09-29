@@ -26,7 +26,7 @@ import {
 } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { useHeaderHeight } from '@react-navigation/elements';
+import { useHeaderHeight, type HeaderOptions } from '@react-navigation/elements';
 import { Attachment, Conversation, ExportRangeKey, Message, api } from '../api/client';
 import { MessageActionSheet, ReplyToData } from '../components/MessageActionSheet';
 import { ReactionsBar } from '../components/ReactionsBar';
@@ -80,6 +80,16 @@ import {
   isSelfDirectConversation,
 } from '../utils/conversationDisplay';
 import { shouldShowGroupSenderLabel } from '../utils/conversationPresentation';
+
+// react-navigation's web header caps a left-aligned title's width assuming a
+// ~52pt headerRight and never lets it shrink, so a long chat name ran under the
+// wider Thoughts + More actions. Let the title shrink and keep the actions at
+// their natural width so ConversationHeaderContent can ellipsize (web only;
+// the native header lays these out itself).
+const WEB_HEADER_LAYOUT: Pick<HeaderOptions, 'headerTitleContainerStyle' | 'headerRightContainerStyle'> = {
+  headerTitleContainerStyle: { flexShrink: 1, minWidth: 0 },
+  headerRightContainerStyle: { flexBasis: 'auto', flexShrink: 0 },
+};
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
 
@@ -662,6 +672,7 @@ export function ChatScreen({
         />
       ),
       headerRight: () => headerActions,
+      ...(Platform.OS === 'web' ? WEB_HEADER_LAYOUT : null),
     });
   }, [embedded, navigation, isGroup, isSelfDM, headerTitle, headerSubtitle, other, groupAvatarMembers, openConversationInfo, openConversationThoughts, c.primary, c.textSecondary]);
 
@@ -1784,13 +1795,20 @@ export function ChatScreen({
         )}
         <TextInput
           ref={textInputRef}
-          style={[styles.input, { backgroundColor: 'transparent', color: c.textPrimary, borderBottomColor: c.border }]}
+          style={[
+            styles.input,
+            { backgroundColor: 'transparent', color: c.textPrimary, borderBottomColor: c.border },
+            Platform.OS === 'web' && styles.inputWeb,
+          ]}
           value={text}
           onChangeText={handleTextChange}
           placeholder="Write…"
           placeholderTextColor={c.textMuted}
           multiline
-          {...(Platform.OS === 'web' ? { onKeyDown: handleComposerWebKeyDown } : {})}
+          // Web: a textarea defaults to two rows, which left the placeholder
+          // floating above the attach/send row. Start at one row (inputWeb
+          // grows it with the text).
+          {...(Platform.OS === 'web' ? { onKeyDown: handleComposerWebKeyDown, rows: 1 } : {})}
           onSelectionChange={(event) => {
             const cursor = event.nativeEvent.selection.end;
             setActiveHashtag(findActiveHashtag(text, cursor));
@@ -2052,6 +2070,9 @@ const styles = StyleSheet.create({
     minHeight: 40,
     maxHeight: 120,
   },
+  // Grow the one-row textarea with its content up to maxHeight, as the native
+  // multiline input does (browsers without field-sizing keep one scrolling row).
+  inputWeb: { fieldSizing: 'content' } as object,
   send: {
     paddingHorizontal: 16,
     paddingVertical: 10,

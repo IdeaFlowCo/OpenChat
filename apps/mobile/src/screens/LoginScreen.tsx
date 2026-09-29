@@ -10,8 +10,10 @@ import {
   KeyboardAvoidingView,
   Linking,
   Platform,
+  ScrollView,
   Share,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import * as Google from 'expo-auth-session/providers/google';
 // AuthSession previously used for makeRedirectUri — removed; Google.useAuthRequest
@@ -76,6 +78,7 @@ async function pkceChallenge(verifier: string): Promise<string> {
 export function LoginScreen() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
+  const insets = useSafeAreaInsets();
   const { bootstrapIfAuthed } = useChat();
   const { entryIntent, refreshEntryIntent } = useEntryContext();
   const [email, setEmail] = useState('');
@@ -444,234 +447,248 @@ export function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.root, { backgroundColor: c.background }]}
     >
-      <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-        {entryIntent ? (
-          <EntryHeader />
-        ) : (
-          <>
-            <Text style={[styles.title, { color: c.textPrimary }]}>OpenChat</Text>
-            <Text style={[styles.subtitle, { color: c.textSecondary }]}>
-              Real-time messaging powered by the Global Brain
-            </Text>
-            {!isWeb && (
-              <TouchableOpacity onPress={handlePasteInvite} style={{ marginBottom: 16 }}>
-                <Text style={{ color: c.primary, fontWeight: '600' }}>Paste Invite Link</Text>
-              </TouchableOpacity>
-            )}
-          </>
-        )}
-
-        {/* Sign in with Apple — iOS only. Apple requires SIWA to be at least as prominent
-            as any other social login, so it goes ABOVE Google. (OpenChat-c08) */}
-        {Platform.OS === 'ios' && (
-          appleLoading ? (
-            <View style={styles.appleButtonPlaceholder}>
-              <ActivityIndicator color="#fff" />
-            </View>
-          ) : (
-            <AppleAuthentication.AppleAuthenticationButton
-              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-              cornerRadius={10}
-              style={styles.appleButton}
-              onPress={handleAppleSignIn}
-            />
-          )
-        )}
-
-        {isWeb && ideaflowEnabled && (
-          <TouchableOpacity
-            style={[
-              styles.ideaflowButton,
-              {
-                backgroundColor: c.primary,
-                opacity: (ideaflowLoading || loading || googleLoading) ? 0.6 : 1,
-              },
-            ]}
-            onPress={handleIdeaflowSignIn}
-            disabled={ideaflowLoading || loading || googleLoading}
-            accessibilityLabel="Continue with Ideaflow"
-          >
-            {ideaflowLoading ? (
-              <ActivityIndicator color={c.onPrimary} />
-            ) : (
-              <Text style={[styles.ideaflowButtonText, { color: c.onPrimary }]}>Continue with Ideaflow</Text>
-            )}
-          </TouchableOpacity>
-        )}
-
-        <TouchableOpacity
-          style={[
-            styles.googleButton,
-            { borderColor: c.border, opacity: (googleLoading || loading || (!isWeb && !googleRequest)) ? 0.6 : 1 },
-          ]}
-          onPress={handleGoogleSignIn}
-          disabled={googleLoading || loading || (!isWeb && !googleRequest)}
-          accessibilityLabel="Continue with Google"
-        >
-          {googleLoading ? (
-            <ActivityIndicator color="#1f1f1f" />
+      {/* Scrolls when the card + share section outgrow the screen (small
+          phones, register mode, quick-login rows); centered otherwise. The
+          safe-area insets keep the title clear of the status bar / island. */}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: 24 + insets.top, paddingBottom: 24 + insets.bottom },
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          {entryIntent ? (
+            <EntryHeader />
           ) : (
             <>
-              <View style={styles.googleGlyph}>
-                <Text style={styles.googleGlyphText}>G</Text>
-              </View>
-              <Text style={styles.googleButtonText}>Continue with Google</Text>
+              <Text style={[styles.title, { color: c.textPrimary }]}>OpenChat</Text>
+              <Text style={[styles.subtitle, { color: c.textSecondary }]}>
+                Real-time messaging powered by the Global Brain
+              </Text>
+              {!isWeb && (
+                <TouchableOpacity onPress={handlePasteInvite} style={{ marginBottom: 16, alignSelf: 'center' }}>
+                  <Text style={{ color: c.primary, fontWeight: '600' }}>Paste Invite Link</Text>
+                </TouchableOpacity>
+              )}
             </>
           )}
-        </TouchableOpacity>
 
-        <View style={styles.orRow}>
-          <View style={[styles.orLine, { backgroundColor: c.border }]} />
-          <Text style={[styles.orLabel, { color: c.textMuted }]}>or</Text>
-          <View style={[styles.orLine, { backgroundColor: c.border }]} />
-        </View>
-
-        {mode === 'register' && (
-          <TextInput
-            style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
-            value={name}
-            onChangeText={setName}
-            placeholder="Your name"
-            placeholderTextColor={c.textMuted}
-            autoCapitalize="words"
-            autoComplete="name"
-            editable={!loading}
-          />
-        )}
-        <TextInput
-          style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
-          value={email}
-          onChangeText={setEmail}
-          placeholder="Email"
-          placeholderTextColor={c.textMuted}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoComplete="email"
-          editable={!loading}
-        />
-        <TextInput
-          style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
-          value={password}
-          onChangeText={setPassword}
-          placeholder="Password"
-          placeholderTextColor={c.textMuted}
-          secureTextEntry
-          autoCapitalize="none"
-          autoCorrect={false}
-          editable={!loading}
-        />
-
-        <TouchableOpacity
-          style={[styles.button, { backgroundColor: c.primary, opacity: loading ? 0.6 : 1 }]}
-          onPress={handleSubmit}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color={c.onPrimary} />
-          ) : (
-            <Text style={[styles.buttonText, { color: c.onPrimary }]}>{mode === 'register' ? 'Create account' : 'Sign In'}</Text>
+          {/* Sign in with Apple — iOS only. Apple requires SIWA to be at least as prominent
+              as any other social login, so it goes ABOVE Google. (OpenChat-c08) */}
+          {Platform.OS === 'ios' && (
+            appleLoading ? (
+              <View style={styles.appleButtonPlaceholder}>
+                <ActivityIndicator color="#fff" />
+              </View>
+            ) : (
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                cornerRadius={12}
+                style={styles.appleButton}
+                onPress={handleAppleSignIn}
+              />
+            )
           )}
-        </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={() => setMode(mode === 'register' ? 'signin' : 'register')}
-          disabled={loading}
-          style={{ marginTop: 14, alignSelf: 'center' }}
-        >
-          <Text style={{ color: c.primary, fontSize: 14, fontWeight: '600' }}>
-            {mode === 'register' ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
-          </Text>
-        </TouchableOpacity>
+          {isWeb && ideaflowEnabled && (
+            <TouchableOpacity
+              style={[
+                styles.ideaflowButton,
+                {
+                  backgroundColor: c.primary,
+                  opacity: (ideaflowLoading || loading || googleLoading) ? 0.6 : 1,
+                },
+              ]}
+              onPress={handleIdeaflowSignIn}
+              disabled={ideaflowLoading || loading || googleLoading}
+              accessibilityLabel="Continue with Ideaflow"
+            >
+              {ideaflowLoading ? (
+                <ActivityIndicator color={c.onPrimary} />
+              ) : (
+                <Text style={[styles.ideaflowButtonText, { color: c.onPrimary }]}>Continue with Ideaflow</Text>
+              )}
+            </TouchableOpacity>
+          )}
 
-        {SHOW_TEST_LOGINS && (
-          <View style={styles.quickLogin}>
-            <View style={[styles.divider, { backgroundColor: c.border }]} />
-            <Text style={[styles.quickLabel, { color: c.textMetadata }]}>Quick login (testing)</Text>
-            <View style={styles.quickRow}>
-              {TEST_ACCOUNTS.map((acct) => (
-                <TouchableOpacity
-                  key={acct.email}
-                  style={[
-                    styles.quickButton,
-                    {
-                      backgroundColor: c.surfaceElevated,
-                      borderColor: c.border,
-                      opacity: loading ? 0.6 : 1,
-                    },
-                  ]}
-                  onPress={() => handleQuickLogin(acct)}
-                  disabled={loading}
-                >
-                  <Text style={[styles.quickButtonText, { color: c.textPrimary }]}>{acct.label}</Text>
-                  <Text style={[styles.quickButtonSub, { color: c.textMetadata }]}>{acct.email}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        )}
-
-        <Text style={[styles.footer, { color: c.textMetadata }]}>
-          Uses your Noos credentials. Phone sign-in coming soon.
-        </Text>
-      </View>
-
-      {/* Get / Share OpenChat.
-          On web, offers the App Store link to iOS users who landed via a shared link.
-          On native, offers the QR code so someone else can scan it. */}
-      <View style={styles.shareSection}>
-        <Text style={[styles.shareLabel, { color: c.textMetadata }]}>GET THE APP</Text>
-        <View style={[styles.shareCard, { backgroundColor: c.surface, borderColor: c.border, flexDirection: 'column', gap: 0, padding: 0 }]}>
           <TouchableOpacity
-            style={{ flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.divider }}
-            onPress={() => Linking.openURL('https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932')}
-            activeOpacity={0.7}
+            style={[
+              styles.googleButton,
+              { borderColor: c.border, opacity: (googleLoading || loading || (!isWeb && !googleRequest)) ? 0.6 : 1 },
+            ]}
+            onPress={handleGoogleSignIn}
+            disabled={googleLoading || loading || (!isWeb && !googleRequest)}
+            accessibilityLabel="Continue with Google"
           >
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 16, fontWeight: '600', color: c.textPrimary }}>Get the iOS app · App Store</Text>
-              <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 4 }}>Install the native app on iPhone or iPad</Text>
-            </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            {googleLoading ? (
+              <ActivityIndicator color="#1f1f1f" />
+            ) : (
+              <>
+                <View style={styles.googleGlyph}>
+                  <Text style={styles.googleGlyphText}>G</Text>
+                </View>
+                <Text style={styles.googleButtonText}>Continue with Google</Text>
+              </>
+            )}
           </TouchableOpacity>
 
-          {Platform.OS !== 'web' ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 16 }}>
-              <View style={styles.qrWrap}>
-                <QRCode value="https://chat.globalbr.ai/app/" size={80} backgroundColor="#ffffff" color="#000000" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', color: c.textPrimary }}>Scan to open on any phone</Text>
-                <TouchableOpacity
-                  onPress={() => Share.share({ message: 'Try OpenChat: https://chat.globalbr.ai/app/' })}
-                  activeOpacity={0.7}
-                  style={[styles.shareButton, { backgroundColor: c.surfaceElevated, borderColor: c.border, marginTop: 12 }]}
-                >
-                  <Text style={[styles.shareButtonText, { color: c.textPrimary }]}>Share link</Text>
-                </TouchableOpacity>
+          <View style={styles.orRow}>
+            <View style={[styles.orLine, { backgroundColor: c.border }]} />
+            <Text style={[styles.orLabel, { color: c.textMuted }]}>or</Text>
+            <View style={[styles.orLine, { backgroundColor: c.border }]} />
+          </View>
+
+          {mode === 'register' && (
+            <TextInput
+              style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
+              value={name}
+              onChangeText={setName}
+              placeholder="Your name"
+              placeholderTextColor={c.textMuted}
+              autoCapitalize="words"
+              autoComplete="name"
+              editable={!loading}
+            />
+          )}
+          <TextInput
+            style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="Email"
+            placeholderTextColor={c.textMuted}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="email"
+            editable={!loading}
+          />
+          <TextInput
+            style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Password"
+            placeholderTextColor={c.textMuted}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!loading}
+          />
+
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: c.primary, opacity: loading ? 0.6 : 1 }]}
+            onPress={handleSubmit}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color={c.onPrimary} />
+            ) : (
+              <Text style={[styles.buttonText, { color: c.onPrimary }]}>{mode === 'register' ? 'Create account' : 'Sign In'}</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => setMode(mode === 'register' ? 'signin' : 'register')}
+            disabled={loading}
+            style={{ marginTop: 14, alignSelf: 'center' }}
+          >
+            <Text style={{ color: c.primary, fontSize: 14, fontWeight: '600' }}>
+              {mode === 'register' ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
+            </Text>
+          </TouchableOpacity>
+
+          {SHOW_TEST_LOGINS && (
+            <View style={styles.quickLogin}>
+              <View style={[styles.divider, { backgroundColor: c.border }]} />
+              <Text style={[styles.quickLabel, { color: c.textMetadata }]}>Quick login (testing)</Text>
+              <View style={styles.quickRow}>
+                {TEST_ACCOUNTS.map((acct) => (
+                  <TouchableOpacity
+                    key={acct.email}
+                    style={[
+                      styles.quickButton,
+                      {
+                        backgroundColor: c.surfaceElevated,
+                        borderColor: c.border,
+                        opacity: loading ? 0.6 : 1,
+                      },
+                    ]}
+                    onPress={() => handleQuickLogin(acct)}
+                    disabled={loading}
+                  >
+                    <Text style={[styles.quickButtonText, { color: c.textPrimary }]}>{acct.label}</Text>
+                    <Text style={[styles.quickButtonSub, { color: c.textMetadata }]}>{acct.email}</Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             </View>
-          ) : (
+          )}
+
+          <Text style={[styles.footer, { color: c.textMetadata }]}>
+            Uses your Noos credentials. Phone sign-in coming soon.
+          </Text>
+        </View>
+
+        {/* Get / Share OpenChat.
+            On web, offers the App Store link to iOS users who landed via a shared link.
+            On native, offers the QR code so someone else can scan it. */}
+        <View style={styles.shareSection}>
+          <Text style={[styles.shareLabel, { color: c.textMetadata }]}>GET THE APP</Text>
+          <View style={[styles.shareCard, { backgroundColor: c.surface, borderColor: c.border, flexDirection: 'column', gap: 0, padding: 0 }]}>
             <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', padding: 16 }}
-              onPress={() => Linking.openURL('https://chat.globalbr.ai/app/')}
+              style={{ flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.divider }}
+              onPress={() => Linking.openURL('https://apps.apple.com/us/app/openchat-agentic-chat/id6774991932')}
               activeOpacity={0.7}
             >
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', color: c.textPrimary }}>Open in browser</Text>
-                <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 4 }}>Continue on the web version</Text>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: c.textPrimary }}>Get the iOS app · App Store</Text>
+                <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 4 }}>Install the native app on iPhone or iPad</Text>
               </View>
               <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
             </TouchableOpacity>
-          )}
+
+            {Platform.OS !== 'web' ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 16 }}>
+                <View style={styles.qrWrap}>
+                  <QRCode value="https://chat.globalbr.ai/app/" size={80} backgroundColor="#ffffff" color="#000000" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: c.textPrimary }}>Scan to open on any phone</Text>
+                  <TouchableOpacity
+                    onPress={() => Share.share({ message: 'Try OpenChat: https://chat.globalbr.ai/app/' })}
+                    activeOpacity={0.7}
+                    style={[styles.shareButton, { backgroundColor: c.surfaceElevated, borderColor: c.border, marginTop: 12 }]}
+                  >
+                    <Text style={[styles.shareButtonText, { color: c.textPrimary }]}>Share link</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', padding: 16 }}
+                onPress={() => Linking.openURL('https://chat.globalbr.ai/app/')}
+                activeOpacity={0.7}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: c.textPrimary }}>Open in browser</Text>
+                  <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 4 }}>Continue on the web version</Text>
+                </View>
+                <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, padding: 24, justifyContent: 'center', alignItems: 'stretch' },
+  root: { flex: 1 },
+  scroll: { flex: 1 },
+  scrollContent: { flexGrow: 1, paddingHorizontal: 24, justifyContent: 'center', alignItems: 'stretch' },
   card: {
     width: '100%',
     maxWidth: 520,
@@ -700,7 +717,7 @@ const styles = StyleSheet.create({
   buttonText: { fontSize: 16, fontWeight: '600' },
   ideaflowButton: {
     height: 50,
-    borderRadius: 10,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -755,7 +772,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     gap: 10,
     height: 50,
