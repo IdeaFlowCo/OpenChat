@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   run: vi.fn(),
   close: vi.fn(async () => {}),
   ensureDirectConversation: vi.fn(),
+  changeFriend: vi.fn(),
+  getFriendStatus: vi.fn(),
 }));
 
 vi.mock('../src/db.js', () => ({
@@ -23,6 +25,11 @@ vi.mock('../src/db.js', () => ({
 vi.mock('../src/services/directConversation.js', () => ({
   DirectConversationNotAllowedError: class extends Error {},
   ensureDirectConversation: mocks.ensureDirectConversation,
+}));
+vi.mock('../src/services/friends.js', () => ({
+  FriendError: class extends Error {},
+  changeFriend: mocks.changeFriend,
+  getFriendStatus: mocks.getFriendStatus,
 }));
 
 import cardRoutes from '../src/routes/addMeCard.js';
@@ -60,6 +67,8 @@ describe('AddMe card routes', () => {
   beforeEach(() => {
     mocks.run.mockReset();
     mocks.ensureDirectConversation.mockReset();
+    mocks.changeFriend.mockReset();
+    mocks.getFriendStatus.mockReset();
   });
 
   afterAll(async () => {
@@ -139,6 +148,16 @@ describe('AddMe card routes', () => {
     expect(response.status).toBe(201);
     expect(await response.json()).toEqual({ conversationId: 'conv-1', created: true });
     expect(mocks.ensureDirectConversation).toHaveBeenCalledWith('scanner', 'owner-id', undefined);
+  });
+
+  it('keeps legacy add as a DM while new card actions use the friend service', async () => {
+    mocks.run.mockResolvedValueOnce(cardRecord('owner-id', {}));
+    mocks.changeFriend.mockResolvedValueOnce({ userId: 'owner-id', state: 'outgoing', updatedAt: 'now' });
+    const response = await fetch(`${baseUrl}/api/card/${TOKEN}/friend-request`, { method: 'POST', headers: { authorization } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ state: 'outgoing' });
+    expect(mocks.changeFriend).toHaveBeenCalledWith('scanner', 'owner-id', 'request', 'card', true, TOKEN);
+    expect(mocks.ensureDirectConversation).not.toHaveBeenCalled();
   });
 
   it('refuses to add yourself and requires sign-in', async () => {

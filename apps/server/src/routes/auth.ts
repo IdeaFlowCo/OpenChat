@@ -706,6 +706,12 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
       }
       CALL {
         WITH u
+        OPTIONAL MATCH (connection:OpenChatConnection)
+        WHERE connection.firstId = u.id OR connection.secondId = u.id
+        RETURN collect(connection { .firstId, .secondId, .state, .requestedBy, .requestedTo, .source, .createdAt, .updatedAt }) AS friendConnections
+      }
+      CALL {
+        WITH u
         OPTIONAL MATCH (u)-[:OWNS_KEY]->(ak)
         RETURN collect(ak {
           .id,
@@ -806,6 +812,7 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
       messages,
       thoughts,
       blockedUsers,
+      friendConnections,
       agentKeys,
       secretaryAnswers,
       intentDrafts,
@@ -852,6 +859,7 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
       messages,
       thoughts: (toJS(record.get('thoughts')) as unknown[]).filter(Boolean),
       blockedUsers: (toJS(record.get('blockedUsers')) as unknown[]).filter(Boolean),
+      friendConnections: ((toJS(record.get('friendConnections')) as unknown[] | undefined) ?? []).filter(Boolean),
       agentKeys: (toJS(record.get('agentKeys')) as unknown[]).filter(Boolean),
       secretary: {
         enabled: (toJS(record.get('user')) as Record<string, unknown>)?.secretaryEnabled === true,
@@ -1598,6 +1606,11 @@ router.delete('/me', requireAuth, async (req: Request, res: Response) => {
       `, { userId });
 
       // 3. Delete the User node (and all its relationships).
+      await tx.run(`
+        MATCH (connection:OpenChatConnection)
+        WHERE connection.firstId = $userId OR connection.secondId = $userId
+        DELETE connection
+      `, { userId });
       await tx.run(`
         MATCH (u:User {id: $userId})
         DETACH DELETE u

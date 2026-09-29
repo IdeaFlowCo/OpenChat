@@ -348,6 +348,15 @@ export function NewConversationScreen() {
                     {checked && <Text style={{ color: c.onPrimary, fontWeight: '700' }}>✓</Text>}
                   </View>
                 )}
+                {mode === 'direct' && !item.isBot && item.id !== currentUser?.userId && (
+                  <TouchableOpacity
+                    onPress={(event) => { event.stopPropagation(); navigation.navigate('PersonEntry', { userId: item.id }); }}
+                    style={{ paddingHorizontal: 8, paddingVertical: 10 }}
+                    accessibilityRole="button"
+                  >
+                    <Text style={{ color: c.primary, fontWeight: '700' }}>Add friend</Text>
+                  </TouchableOpacity>
+                )}
               </TouchableOpacity>
             );
           }}

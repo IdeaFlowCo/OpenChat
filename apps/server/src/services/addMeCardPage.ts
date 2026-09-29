@@ -87,7 +87,7 @@ export function renderCardPage(card: StrangerCard, token: string): string {
     ${card.link ? `<a class="link" href="${escapeHtml(card.link)}" rel="noopener nofollow ugc" target="_blank">${escapeHtml(card.link.replace(/^https?:\/\//, ''))}</a>` : ''}
   </div>
 
-  <a class="cta cta-primary" href="/app/${intentQs}">Add ${name} on OpenChat</a>
+  <a class="cta cta-primary" href="/app/${intentQs}">Request to be friends with ${name}</a>
   <a class="cta cta-secondary" href="/api/card/${encodedToken}/contact.vcf">Save contact</a>
   <a class="cta cta-secondary" href="${APP_STORE_URL}">Get the iOS app · App Store</a>
 

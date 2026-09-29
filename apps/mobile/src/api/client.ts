@@ -860,6 +860,11 @@ export interface StrangerCard {
   link: string | null;
 }
 
+export type FriendState = 'none' | 'incoming' | 'outgoing' | 'friends';
+export interface FriendStatus { userId: string; state: FriendState; updatedAt: string | null }
+export interface FriendRow extends FriendStatus { user: Pick<User, 'id' | 'name' | 'avatarUrl'> }
+export interface FriendLists { friends: FriendRow[]; incoming: FriendRow[]; outgoing: FriendRow[] }
+
 export interface AddMeCardSettings {
   showAvatar: boolean;
   showStatus: boolean;
@@ -1439,6 +1444,16 @@ export const api = {
       `/api/card/${encodeURIComponent(token)}/add`,
       { method: 'POST' }
     ),
+
+  getCardFriendStatus: (token: string) =>
+    request<FriendStatus>(`/api/card/${encodeURIComponent(token)}/friend-status`),
+  requestCardFriend: (token: string) =>
+    request<FriendStatus>(`/api/card/${encodeURIComponent(token)}/friend-request`, { method: 'POST' }),
+  listFriends: () => request<FriendLists>('/api/friends'),
+  getFriendStatus: (userId: string) =>
+    request<FriendStatus>(`/api/friends/users/${encodeURIComponent(userId)}`),
+  changeFriend: (userId: string, action: 'request' | 'accept' | 'decline' | 'cancel' | 'remove') =>
+    request<FriendStatus>(`/api/friends/users/${encodeURIComponent(userId)}/${action}`, { method: 'POST' }),
 
   /**
    * Accept/join via invite token. Idempotent if already a member.

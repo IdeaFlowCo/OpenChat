@@ -256,7 +256,7 @@ export function MyCardScreen() {
         <View style={styles.qrPanel} accessibilityLabel="My card QR code">
           <QRCode value={url} size={qrSize} color="#000000" backgroundColor="#ffffff" ecl="M" />
           <Text style={styles.qrName} numberOfLines={1}>{card.preview.name}</Text>
-          <Text style={styles.qrHint}>Scan to add me on OpenChat</Text>
+          <Text style={styles.qrHint}>Scan to send me a friend request</Text>
         </View>
       )}
 

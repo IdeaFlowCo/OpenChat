@@ -9,7 +9,7 @@
  * a reconnect catch-up briefly pulse with a highlight background.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -21,8 +21,8 @@ import {
   View,
 } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
-import { useNavigation } from '@react-navigation/native';
-import { Conversation, CurrentUser } from '../api/client';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { api, Conversation, CurrentUser } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { serif } from '../theme/typography';
@@ -199,6 +199,12 @@ export function ConversationsScreen() {
     reconnectNewConvIds,
   } = useChat();
   const [refreshing, setRefreshing] = useState(false);
+  const [friendRequestCount, setFriendRequestCount] = useState(0);
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    api.listFriends().then(lists => { if (active) setFriendRequestCount(lists.incoming.length); }).catch(() => {});
+    return () => { active = false; };
+  }, []));
   const orderedConversations = useMemo(() => [...conversations].sort((a, b) => {
     const aAssistant = a.participants?.some(participant => participant?.user?.id === 'assistant') ? 1 : 0;
     const bAssistant = b.participants?.some(participant => participant?.user?.id === 'assistant') ? 1 : 0;
@@ -279,11 +285,18 @@ export function ConversationsScreen() {
         data={orderedConversations}
         keyExtractor={item => item.id}
         ListHeaderComponent={
+          <View>
+          <View style={[styles.peopleDoors, { borderBottomColor: c.divider }]}>
+            <TouchableOpacity onPress={() => navigation.navigate('Friends', { section: 'friends' })} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>Friends</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('Friends', { section: 'requests' })} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>{friendRequestCount ? `Requests (${friendRequestCount})` : 'Requests'}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('NewConversation')} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>Find people</Text></TouchableOpacity>
+          </View>
           <StoriesStrip
             onCreate={() => navigation.navigate('StoryComposer')}
             onOpenStory={(story) => navigation.navigate('StoryViewer', { story })}
             onOpenReview={() => navigation.navigate('SocialReview')}
           />
+          </View>
         }
         refreshControl={
           <RefreshControl
@@ -367,6 +380,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitleWrap: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
+  peopleDoors: { flexDirection: 'row', flexWrap: 'wrap', borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 16 },
+  peopleDoor: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, marginRight: 8 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

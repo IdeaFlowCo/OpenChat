@@ -152,6 +152,7 @@ describe('AddMe card page', () => {
     expect(html).not.toContain('At the conference');
     expect(html).not.toContain('user-internal-id-123');
     expect(html).toContain('/app/?intent=card&token=');
+    expect(html).toContain('Request to be friends with &lt;script&gt;x&lt;/script&gt;');
     expect(html).toContain('/contact.vcf">Save contact</a>');
   });
 });
