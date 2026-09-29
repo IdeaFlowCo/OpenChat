@@ -31,6 +31,7 @@ import { AppIcon } from '../components/AppIcon';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp } from '../navigation/types';
 import { currentCardUrl, shareCard, shareCardOnWhatsApp } from '../utils/cardSharing';
+import { useFocusedAccountGuard } from '../hooks/useFocusedAccountGuard';
 
 function confirmReset(onConfirm: () => void) {
   const title = 'Reset card link?';
@@ -52,6 +53,7 @@ export function MyCardScreen() {
   const c = getColors(scheme);
   const { width } = useWindowDimensions();
   const { currentUser, refreshConversations } = useChat();
+  const guardAction = useFocusedAccountGuard(currentUser?.userId);
 
   const [card, setCard] = useState<MyAddMeCard | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -157,21 +159,30 @@ export function MyCardScreen() {
 
   const handleShare = async () => {
     if (!card) return;
+    const isCurrent = guardAction();
+    if (!isCurrent()) return;
     try {
-      await shareCard(await currentCardUrl());
+      const url = await currentCardUrl();
+      if (isCurrent()) await shareCard(url);
     } catch {
+      if (!isCurrent()) return;
       try {
-        await Clipboard.setStringAsync(await currentCardUrl());
-        setError('Sharing is unavailable here. Your card link was copied.');
-      } catch { setError('Could not share your card link. Try again.'); }
+        const url = await currentCardUrl();
+        if (!isCurrent()) return;
+        await Clipboard.setStringAsync(url);
+        if (isCurrent()) setError('Sharing is unavailable here. Your card link was copied.');
+      } catch { if (isCurrent()) setError('Could not share your card link. Try again.'); }
     }
   };
 
   const handleWhatsApp = async () => {
     if (!card) return;
+    const isCurrent = guardAction();
+    if (!isCurrent()) return;
     try {
-      await shareCardOnWhatsApp(await currentCardUrl());
-    } catch { setError('Could not open WhatsApp. Try Share link instead.'); }
+      const url = await currentCardUrl();
+      if (isCurrent()) await shareCardOnWhatsApp(url);
+    } catch { if (isCurrent()) setError('Could not open WhatsApp. Try Share link instead.'); }
   };
 
   const handleReset = () => confirmReset(async () => {

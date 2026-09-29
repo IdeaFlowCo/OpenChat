@@ -22,11 +22,11 @@ const router = Router();
 // consent projection as the public page and JSON route. Never cache a card
 // across rotation or field changes.
 router.get('/:token/contact.vcf', async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   const session = getDriver().session();
   try {
     const resolved = await resolveCardToken(session, req.params.token as string);
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
     if (!resolved) {
       res.status(404).json({ error: 'Card not found' });
       return;

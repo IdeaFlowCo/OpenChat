@@ -1,7 +1,7 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, AppState, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useChat } from '../contexts/ChatContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
@@ -10,14 +10,14 @@ import { AddMeCardView } from '../components/AddMeCardView';
 import { cardInviteMessage, shareCard, shareCardOnWhatsApp } from '../utils/cardSharing';
 import { allowMoreContacts, chooseOneContact, getContactAccess, type ContactAccess } from '../utils/deviceContactInvite';
 import type { NavProp } from '../navigation/types';
+import { useFocusedAccountGuard } from '../hooks/useFocusedAccountGuard';
 
 export function InvitePersonScreen() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const { currentUser } = useChat();
   const navigation = useNavigation<NavProp<'InvitePerson'>>();
-  const accountRef = useRef(currentUser?.userId);
-  accountRef.current = currentUser?.userId;
+  const guardAction = useFocusedAccountGuard(currentUser?.userId);
   const [access, setAccess] = useState<ContactAccess>('not_requested');
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [card, setCard] = useState<MyAddMeCard | null>(null);
@@ -32,70 +32,88 @@ export function InvitePersonScreen() {
     setSelectedName(null);
     setCard(null);
     setError(null);
+    setBusy(false);
+    setCopied(false);
     if (currentUser) {
       api.getMyCard()
         .then(next => { if (active) setCard(next); })
         .catch(() => { if (active) setError('Could not load your card link.'); });
     }
-    getContactAccess()
-      .then(next => { if (active) setAccess(next); })
-      .catch(() => { if (active) setAccess('unavailable'); });
-    return () => { active = false; setSelectedName(null); };
+    const refreshAccess = () => {
+      setSelectedName(null);
+      getContactAccess()
+        .then(next => { if (active) setAccess(next); })
+        .catch(() => { if (active) setAccess('unavailable'); });
+    };
+    refreshAccess();
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') refreshAccess();
+    });
+    return () => { active = false; subscription.remove(); setSelectedName(null); };
   }, [currentUser?.userId]));
 
   const choose = async () => {
-    const accountId = accountRef.current;
+    const isCurrent = guardAction();
+    if (!isCurrent()) return;
     setBusy(true);
     setError(null);
     try {
       const next = await getContactAccess(access === 'not_requested');
-      if (accountRef.current !== accountId) return;
+      if (!isCurrent()) return;
       setAccess(next);
       if (next === 'all' || next === 'limited') {
         const name = await chooseOneContact();
-        if (accountRef.current === accountId) setSelectedName(name);
+        if (isCurrent()) setSelectedName(name);
       }
     } catch {
-      setAccess('unavailable');
-      setError('Contacts are unavailable in this app build. You can still share your link.');
+      if (isCurrent()) {
+        setAccess('unavailable');
+        setError('Contacts are unavailable in this app build. You can still share your link.');
+      }
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   };
 
   const more = async () => {
+    const isCurrent = guardAction();
+    if (!isCurrent()) return;
     setBusy(true);
+    setError(null);
     try {
-      setAccess(await allowMoreContacts());
+      const next = await allowMoreContacts();
+      if (!isCurrent()) return;
+      setAccess(next);
       setSelectedName(null);
     } catch {
-      setError('Could not open the contact access picker. Try again or share your link.');
+      if (isCurrent()) setError('Could not open the contact access picker. Try again or share your link.');
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   };
 
   const handoff = async (channel: 'share' | 'whatsapp' | 'copy') => {
-    const accountId = accountRef.current;
+    const isCurrent = guardAction();
+    if (!isCurrent()) return;
     setBusy(true);
     setError(null);
     try {
       // The preview may have been open during token rotation on another device.
       const latestCard = await api.getMyCard();
-      if (accountRef.current !== accountId) return;
+      if (!isCurrent()) return;
       setCard(latestCard);
       const latestUrl = addMeCardUrl(latestCard.token);
+      setSelectedName(null);
       if (channel === 'share') await shareCard(latestUrl);
       else if (channel === 'whatsapp') await shareCardOnWhatsApp(latestUrl);
       else {
         await Clipboard.setStringAsync(latestUrl);
-        setCopied(true);
+        if (isCurrent()) setCopied(true);
       }
-      setSelectedName(null);
     } catch {
-      setError('Could not open sharing. Try Copy link instead.');
+      if (isCurrent()) setError('Could not open sharing. Try Copy link instead.');
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   };
 

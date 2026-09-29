@@ -94,7 +94,8 @@ describe('AddMe card routes', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('content-type')).toContain('text/vcard');
-    expect(response.headers.get('content-disposition')).toContain('attachment');
+    expect(response.headers.get('content-disposition')).toBe('attachment; filename="openchat-contact.vcf"');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     const body = await response.text();
     expect(body).toContain('FN:Jacob Cole\r\n');
     expect(body).toContain('NOTE:Founder\r\n');
@@ -111,6 +112,7 @@ describe('AddMe card routes', () => {
     expect(revoked.status).toBe(404);
     expect(revoked.headers.get('cache-control')).toBe('no-store');
     expect((await fetch(`${baseUrl}/api/card/invalid/contact.vcf`)).status).toBe(404);
+    expect((await fetch(`${baseUrl}/api/card/${TOKEN}%0A/contact.vcf`)).status).toBe(404);
     expect(mocks.run).toHaveBeenCalledTimes(1);
   });
 
@@ -123,7 +125,9 @@ describe('AddMe card routes', () => {
     expect(await first.text()).toContain('URL:https://example.com/public');
     const withdrawn = await fetch(`${baseUrl}/api/card/${TOKEN}/contact.vcf`);
     expect(await withdrawn.text()).not.toContain('example.com/public');
-    const revoked = await fetch(`${baseUrl}/api/card/${TOKEN}/contact.vcf`);
+    const revoked = await fetch(`${baseUrl}/api/card/${TOKEN}/contact.vcf`, {
+      headers: { 'If-None-Match': first.headers.get('etag')! },
+    });
     expect(revoked.status).toBe(404);
     expect(revoked.headers.get('cache-control')).toBe('no-store');
   });

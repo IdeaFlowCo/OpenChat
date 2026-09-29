@@ -136,6 +136,7 @@ describe('AddMe card token', () => {
     for (const token of tokens) expect(isWellFormedCardToken(token)).toBe(true);
     expect(isWellFormedCardToken('short')).toBe(false);
     expect(isWellFormedCardToken('a'.repeat(23) + '/')).toBe(false);
+    expect(isWellFormedCardToken('a'.repeat(24) + '\n')).toBe(false);
     expect(isWellFormedCardToken(undefined)).toBe(false);
   });
 });
@@ -156,6 +157,11 @@ describe('AddMe card page', () => {
 });
 
 describe('AddMe vCard', () => {
+  it.each([null, '', '\u0000\u0001', 'private@example.test'])('uses a neutral minimum name for %j', name => {
+    const card = projectCardForStranger({ name }, DEFAULT_CARD_SETTINGS);
+    expect(renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx')).toContain('FN:OpenChat member\r\n');
+  });
+
   it('has a useful minimum card with UTF-8 text and CRLF lines', () => {
     const card = projectCardForStranger({ name: '山田 太郎 ✨', email: 'hidden@example.test' }, DEFAULT_CARD_SETTINGS);
     const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx');
@@ -175,11 +181,36 @@ describe('AddMe vCard', () => {
   });
 
   it('folds long Unicode values by UTF-8 bytes without splitting a character', () => {
-    const card = projectCardForStranger({ name: '山'.repeat(40) }, DEFAULT_CARD_SETTINGS);
+    const name = '山😀e\u0301'.repeat(40);
+    const card = projectCardForStranger({ name }, DEFAULT_CARD_SETTINGS);
     const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx');
     for (const line of vcard.trimEnd().split('\r\n')) {
       expect(Buffer.byteLength(line, 'utf8')).toBeLessThanOrEqual(75);
     }
-    expect(vcard.replace(/\r\n /g, '')).toContain(`FN:${'山'.repeat(40)}\r\n`);
+    expect(vcard.replace(/\r\n /g, '')).toContain(`FN:${name}\r\n`);
+    expect(Buffer.from(vcard).toString('utf8')).toBe(vcard);
+  });
+
+  it.each(['\r\n', '\r', '\n', '\u0085', '\u2028', '\u2029'])('escapes line separator %j before an injected property', separator => {
+    const card = projectCardForStranger({ name: `Name${separator}TEL:123` }, {
+      ...DEFAULT_CARD_SETTINGS, headline: `Hello${separator}END:VCARD`,
+    });
+    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx');
+    const properties = vcard.replace(/\r\n /g, '').trimEnd().split(/\r\n|[\r\n\u0085\u2028\u2029]/);
+    expect(properties.map(line => line.split(':')[0])).toEqual(['BEGIN', 'VERSION', 'N', 'FN', 'NOTE', 'URL', 'END']);
+    expect(properties).toContain('FN:Name\\nTEL:123');
+    expect(properties).toContain('NOTE:Hello\\nEND:VCARD');
+  });
+
+  it('keeps every disabled field and private owner property out of the export', () => {
+    const card = projectCardForStranger({ ...owner, importedContacts: ['private contact'], relationships: ['private edge'] }, {
+      ...DEFAULT_CARD_SETTINGS, showHeadline: false, headline: 'private headline',
+      showLinkedIn: false, linkedIn: 'https://example.com/private-linkedin',
+      showX: false, x: 'https://example.com/private-x',
+      showLink: false, link: 'https://example.com/private-link',
+    });
+    expect(renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx')).toBe(
+      'BEGIN:VCARD\r\nVERSION:3.0\r\nN:;Jacob Cole;;;\r\nFN:Jacob Cole\r\nURL:https://chat.globalbr.ai/c/AbCdEfGhIjKlMnOpQrStUvWx\r\nEND:VCARD\r\n',
+    );
   });
 });

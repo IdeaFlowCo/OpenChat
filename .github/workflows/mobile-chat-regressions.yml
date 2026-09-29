@@ -21,6 +21,11 @@ jobs:
       - run: npm ci
       - name: Mobile typecheck
         run: npx tsc --noEmit -p apps/mobile/tsconfig.json
-      - name: Group opening and message loading
+      - name: Mobile permission and share utilities
+        run: npm run test --workspace=apps/mobile
+      - name: Group opening, message loading, and contact card privacy
         working-directory: apps/server
-        run: npx vitest run test/groupOpen.mobile.test.ts test/chatLoading.mobile.test.ts test/conversationDisplay.test.ts
+        run: >-
+          npx vitest run test/groupOpen.mobile.test.ts test/chatLoading.mobile.test.ts
+          test/conversationDisplay.test.ts test/contactInvite.mobile.test.ts
+          test/addMeCard.test.ts test/addMeCard.route.test.ts

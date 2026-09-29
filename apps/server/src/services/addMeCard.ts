@@ -25,7 +25,7 @@ export const generateCardToken = customAlphabet(
 );
 
 export function isWellFormedCardToken(token: unknown): token is string {
-  return typeof token === 'string' && CARD_TOKEN_PATTERN.test(token);
+  return typeof token === 'string' && token.length === 24 && CARD_TOKEN_PATTERN.test(token);
 }
 
 export const CARD_HEADLINE_MAX = 80;
