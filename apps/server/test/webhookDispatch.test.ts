@@ -103,6 +103,7 @@ describe('buildMessagePayload', () => {
         senderId: 'u1',
         senderName: 'Alice',
         content: 'hello world',
+        transcript: null,
         messageType: 'text',
         cardKind: null,
         cardPayload: null,
@@ -124,6 +125,16 @@ describe('buildMessagePayload', () => {
     expect(p.message.senderName).toBeNull();
     expect(p.message.messageType).toBe('text');
     expect(p.message.content).toBe('');
+  });
+
+  it('carries a voice note transcript, since a voice note has empty content', () => {
+    const p = buildMessagePayload(MESSAGE_CREATED_EVENT, {
+      ...SAMPLE_MESSAGE,
+      content: '',
+      transcript: 'what is on my calendar',
+    });
+    expect(p.message.content).toBe('');
+    expect(p.message.transcript).toBe('what is on my calendar');
   });
 });
 

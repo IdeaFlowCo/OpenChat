@@ -7,6 +7,12 @@
  * Per the global rule: visible but NOT intrusive — a banner, never a blocking
  * modal, always dismissible, never blocks usage.
  *
+ * It can appear on a fresh store install: the store binary embeds the bundle
+ * it was built with, and any OTA update published since is pending on first
+ * launch. Mounted above the navigator, so like OfflineBanner it pads by
+ * `insets.top` — without that its text sat under the status bar / Dynamic
+ * Island and read as a stray fragment in the top bar.
+ *
  * No-ops safely in dev / Expo Go / when updates are disabled.
  *
  * Native binary updates (new TestFlight/App Store build that OTA can't deliver)
@@ -17,6 +23,7 @@
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as Updates from 'expo-updates';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { AppIcon } from './AppIcon';
@@ -24,6 +31,7 @@ import { AppIcon } from './AppIcon';
 export function UpdateBanner() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
+  const insets = useSafeAreaInsets();
 
   // expo-updates' hook: isUpdatePending becomes true once a new bundle has been
   // downloaded and is ready to apply on the next reload.
@@ -63,7 +71,7 @@ export function UpdateBanner() {
   };
 
   return (
-    <View style={[styles.bar, { backgroundColor: c.primary }]}>
+    <View style={[styles.bar, { backgroundColor: c.primary, paddingTop: insets.top + 8 }]}>
       <Text style={[styles.text, { color: c.onPrimary }]} numberOfLines={1}>
         {reloading ? 'Updating…' : 'A new version is ready.'}
       </Text>
@@ -85,7 +93,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingBottom: 8,
     gap: 12,
   },
   text: { fontSize: 13, fontWeight: '600', flexShrink: 1 },

@@ -51,6 +51,7 @@ import {
   type SocialPreferences,
 } from './agentSocialLayer.js';
 import { consumePublicationApproval, issuePublicationApproval } from './publicationApproval.js';
+import { assistantTextForMessage } from './assistantContext.js';
 
 export const ASSISTANT_USER_ID = 'assistant';
 export const ASSISTANT_NAME = 'Assistant';
@@ -1311,7 +1312,8 @@ async function loadConversationContext(
       MATCH (m:Message {conversationId: $conversationId})
       WHERE m.deletedAt IS NULL
       OPTIONAL MATCH (sender:User {id: m.senderId})
-      RETURN m.content AS content, m.senderId AS senderId, sender.name AS senderName
+      RETURN m.content AS content, m.transcript AS transcript, m.attachments AS attachments,
+             m.senderId AS senderId, sender.name AS senderName
       ORDER BY m.createdAt DESC
       LIMIT $limit
       `,
@@ -1319,7 +1321,13 @@ async function loadConversationContext(
     );
     const rows = result.records
       .map((r) => ({
-        content: (r.get('content') as string) ?? '',
+        // Voice notes and photos have empty content; read them as their
+        // transcript / a placeholder so they are not invisible here.
+        content: assistantTextForMessage({
+          content: r.get('content') as string | null,
+          transcript: r.get('transcript') as string | null,
+          attachments: r.get('attachments'),
+        }),
         senderId: r.get('senderId') as string,
         senderName: (r.get('senderName') as string | null) ?? 'User',
       }))
@@ -1356,6 +1364,7 @@ Guidelines:
 - Mutual approval creates or reuses a normal DM between the two humans with a neutral context card. It never sends an opener on either person's behalf; tell the user they choose whether and what to write.
 - Sending to OTHER people requires confirmation: the first send_message / send_message_to_person call returns { needsConfirmation: true, ... } instead of sending. When you get that, DO NOT retry blindly — tell the user exactly what you'll send and to whom, wait for their explicit yes, then call the SAME tool again with the SAME content and confirm:true. If they decline or change the wording, do not send. Messages to the user's own Assistant DM go through immediately with no confirmation.
 - If the user wants to report a bug, give feedback, or request a feature about OpenChat (the app), use submit_feedback — it files a tracked issue for the OpenChat team. Confirm what you'll send, then share the resulting link. This is how feedback reaches us, so offer it when the user seems stuck or frustrated with the app.
+- A message starting with "[Voice message]" is the transcript of a voice note the user recorded; answer it like any typed message. If it says no transcript is available, tell the user you could not make out the voice message and ask them to resend it or type it.
 - Your final response (plain text, no tool call) is delivered to the user as a chat message.`;
 
 /**

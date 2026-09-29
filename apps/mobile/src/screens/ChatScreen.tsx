@@ -288,7 +288,19 @@ export function ChatScreen({
   // (~47px on iPhone 14), causing KAV to overestimate keyboard intrusion and
   // leave an empty gap below the composer when the keyboard opens.
   const headerHeight = useHeaderHeight();
-  const kbOffset = embedded ? 0 : Platform.OS === 'ios' ? headerHeight : 0;
+  // The header is not the only thing above this screen: UpdateBanner and
+  // OfflineBanner mount above the navigator and push it down, and the header
+  // height alone then under-counts by the banner's height — the keyboard
+  // covered that much of the composer. Measure where the screen really starts
+  // and fall back to the header height until the first measurement lands.
+  const rootRef = useRef<View>(null);
+  const [measuredTop, setMeasuredTop] = useState<number | null>(null);
+  const measureTop = useCallback(() => {
+    rootRef.current?.measureInWindow((_x, y) => {
+      if (Number.isFinite(y) && y >= 0) setMeasuredTop(y);
+    });
+  }, []);
+  const kbOffset = embedded ? 0 : Platform.OS === 'ios' ? (measuredTop ?? headerHeight) : 0;
   const {
     currentUser, conversations, messages: activeMessages, loadingMessages, isConnected,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
@@ -811,6 +823,9 @@ export function ChatScreen({
   // stay pinned there after the layout settles. (If they were reading
   // history, leave them alone.)
   useEffect(() => {
+    // A banner can appear or leave without resizing this screen's width, so
+    // re-measure as the keyboard starts to open rather than only on layout.
+    const willShowSub = Keyboard.addListener('keyboardWillShow', measureTop);
     const showSub = Keyboard.addListener('keyboardDidShow', () => {
       if (isAtBottomRef.current) {
         // Defer past the layout animation so contentSize reflects the new
@@ -823,10 +838,11 @@ export function ChatScreen({
       setHashtagDismissed(true);
     });
     return () => {
+      willShowSub.remove();
       showSub.remove();
       hideSub.remove();
     };
-  }, []);
+  }, [measureTop]);
 
   const handleTextChange = (next: string) => {
     setText(next);
@@ -1463,6 +1479,7 @@ export function ChatScreen({
   };
 
   return (
+    <View ref={rootRef} style={styles.root} onLayout={measureTop} collapsable={false}>
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.root, { backgroundColor: c.background }]}
@@ -1950,6 +1967,7 @@ export function ChatScreen({
       </>
       )}
       </KeyboardAvoidingView>
+    </View>
   );
 }
 

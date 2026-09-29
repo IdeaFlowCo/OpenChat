@@ -317,6 +317,11 @@ const WebhookDelivery = {
         senderId: { type: 'string', nullable: true },
         senderName: { type: 'string', nullable: true },
         content: { type: 'string' },
+        transcript: {
+          type: 'string',
+          nullable: true,
+          description: 'Voice-note transcript. A voice note has empty content and is delivered once transcription has finished; null if it could not be transcribed.',
+        },
         messageType: { type: 'string', example: 'text' },
         cardKind: { type: 'string', nullable: true },
         cardPayload: { type: 'string', nullable: true, description: 'JSON-encoded card data.' },
