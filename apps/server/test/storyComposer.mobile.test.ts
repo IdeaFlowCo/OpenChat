@@ -36,6 +36,7 @@ vi.mock('react-native', async () => {
   return {
     Platform: { OS: 'ios', select: (values: any) => values.ios ?? values.default },
     StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
+    useWindowDimensions: () => ({ width: 390, height: 844, scale: 3, fontScale: 1 }),
     ActivityIndicator: 'ActivityIndicator',
     KeyboardAvoidingView: ({ children }: any) => React.createElement('KeyboardAvoidingView', null, children),
     ScrollView: ({ children }: any) => React.createElement('ScrollView', null, children),

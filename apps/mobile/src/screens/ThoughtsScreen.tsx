@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     fontSize: 16,
   },
-  list: { padding: 12, paddingBottom: 88 },
+  list: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 88 },
   // Same index-card look as ThoughtCard, in edit mode.
   editorCard: {
     borderTopLeftRadius: 2,

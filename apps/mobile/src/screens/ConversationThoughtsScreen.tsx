@@ -465,7 +465,7 @@ const styles = StyleSheet.create({
   scopeHeaderText: {
     fontSize: 12,
   },
-  content: { padding: 12, paddingBottom: 88 },
+  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 88 },
   sectionTitle: {
     fontSize: 13,
     fontWeight: '600',

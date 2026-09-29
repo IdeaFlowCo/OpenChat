@@ -13,8 +13,8 @@
  */
 
 import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, StatusBar, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Platform, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -118,7 +118,9 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen
         name="Conversations"
         component={HomeScreen}
-        options={{ title: 'Chats' }}
+        // Centered like iOS; on web the default left alignment pushed "Chats"
+        // against the profile avatar.
+        options={{ title: 'Chats', headerTitleAlign: 'center' }}
       />
       <ChatsStack.Screen
         name="Chat"
@@ -345,6 +347,20 @@ function ThoughtsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
 
 const TAB_INDICATOR_HEIGHT = 3;
 
+// Stacked (icon above label) tab geometry. react-navigation sizes the default
+// bar for a bare 28pt icon (49pt + bottom inset) and wraps the icon in a fixed
+// 28pt box, but TabIcon's pill is 36pt tall and overflows that box by 4pt on
+// each side. With the item's own 5pt padding and the label, the content needs
+// ~58pt: at 49pt the labels were clipped on home-button phones (iPhone SE) and
+// the -8 accent bar drew above the tab bar, over the screen content.
+const STACKED_TAB_BAR_PADDING_TOP = 4;
+const STACKED_TAB_BAR_CONTENT_HEIGHT = 60;
+// Offset that pins the accent bar to the tab bar's top edge: bar padding +
+// item padding (5) - pill overflow (4). Side-by-side (desktop) items center
+// the pill in a 49pt bar, where -8 already lands on the top edge.
+const STACKED_TAB_INDICATOR_TOP = -(STACKED_TAB_BAR_PADDING_TOP + 5 - 4);
+const BESIDE_TAB_INDICATOR_TOP = -8;
+
 interface NestedNavigationState {
   index?: number;
   routes: Array<{
@@ -363,7 +379,7 @@ function focusedChatId(state: NestedNavigationState): string | null {
   return route.name === 'Chat' ? route.params?.conversationId ?? null : null;
 }
 
-function TabIcon({ label, icon, focused, color, c }: {
+function TabIcon({ label, icon, focused, color, c, stacked }: {
   /** Emoji fallback — used only when `icon` is not provided. */
   label?: string;
   /** Line-icon name; preferred over emoji so tabs render identically across
@@ -372,6 +388,8 @@ function TabIcon({ label, icon, focused, color, c }: {
   focused: boolean;
   color: string;
   c: ReturnType<typeof getColors>;
+  /** Label renders below the icon (phones in portrait). */
+  stacked: boolean;
 }) {
   return (
     <View
@@ -393,7 +411,7 @@ function TabIcon({ label, icon, focused, color, c }: {
           pointerEvents="none"
           style={{
             position: 'absolute',
-            top: -8,
+            top: stacked ? STACKED_TAB_INDICATOR_TOP : BESIDE_TAB_INDICATOR_TOP,
             left: 0,
             right: 0,
             height: TAB_INDICATOR_HEIGHT,
@@ -456,6 +474,14 @@ function AuthedTabs({
   c: ReturnType<typeof getColors>;
 }) {
   const { enhanced } = useSocialExperience();
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  // Mirrors react-navigation's default label position: below the icon on
+  // portrait phones, beside it on tablets/desktop and in landscape.
+  const stacked = width < 768 && width <= height;
+  // The pill's bottom half already clears the home indicator, so borrow a
+  // little of the inset instead of stacking the full 34pt below the labels.
+  const stackedBottomPadding = Math.max(insets.bottom - 8, 0);
   return (
     <Tab.Navigator
       tabBar={(props) => (
@@ -468,7 +494,14 @@ function AuthedTabs({
       )}
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { backgroundColor: c.surface, borderTopColor: c.border },
+        tabBarStyle: [
+          { backgroundColor: c.surface, borderTopColor: c.border },
+          stacked && {
+            height: STACKED_TAB_BAR_CONTENT_HEIGHT + stackedBottomPadding,
+            paddingTop: STACKED_TAB_BAR_PADDING_TOP,
+            paddingBottom: stackedBottomPadding,
+          },
+        ],
         // OpenChat-65r: use the brand cobalt (c.primary = #3b82f6) for the
         // active tint — both icon + label inherit it. Inactive uses
         // textSecondary (one step bolder than the old textMuted) so the
@@ -491,7 +524,7 @@ function AuthedTabs({
             <TabLabel text="Chats" focused={focused} color={color} />
           ),
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon icon="chat" focused={focused} color={color} c={c} />
+            <TabIcon icon="chat" focused={focused} color={color} c={c} stacked={stacked} />
           ),
         }}
       >
@@ -505,7 +538,7 @@ function AuthedTabs({
               <TabLabel text="Asks" focused={focused} color={color} />
             ),
             tabBarIcon: ({ focused, color }) => (
-              <TabIcon icon="sparkle" focused={focused} color={color} c={c} />
+              <TabIcon icon="sparkle" focused={focused} color={color} c={c} stacked={stacked} />
             ),
           }}
         >
@@ -519,7 +552,7 @@ function AuthedTabs({
             <TabLabel text="Thoughts" focused={focused} color={color} />
           ),
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon icon="thought" focused={focused} color={color} c={c} />
+            <TabIcon icon="thought" focused={focused} color={color} c={c} stacked={stacked} />
           ),
         }}
       >
