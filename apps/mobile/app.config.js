@@ -56,16 +56,9 @@ module.exports = {
       supportsTablet: true,
       bundleIdentifier: 'com.jacobcole.openchat',
       buildNumber: '2001',
-      // NOTE — associatedDomains intentionally commented out for now.
-      // Adding it requires enabling the 'Associated Domains' capability on
-      // the App ID via the Apple Developer Portal (or ASC API). Without
-      // that, EAS Build fails generating the provisioning profile (saw on
-      // build 40, 2026-06-01). Universal Links are tracked in OpenChat-84u.2
-      // for proper provisioning + re-enable. The openchat:// URL scheme +
-      // AASA file + web window.location parsing already cover the deep-
-      // link UX without Apple-side capability work.
-      //
-      // associatedDomains: ['applinks:chat.globalbr.ai'],
+      // The AASA on chat.globalbr.ai covers group invites, people, and cards.
+      // Apple also requires the App ID capability and a regenerated profile.
+      associatedDomains: ['applinks:chat.globalbr.ai'],
       entitlements: {
         'com.apple.developer.applesignin': ['Default'],
       },
