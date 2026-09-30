@@ -26,6 +26,7 @@
     "expo-status-bar": "~3.0.0",
     "expo-updates": "~29.0.20",
     "expo-web-browser": "~15.0.11",
+    "jsqr": "1.4.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
@@ -39,7 +40,9 @@
     "tslib": "^2.8.1"
   },
   "devDependencies": {
+    "@types/qrcode": "1.5.5",
     "@types/react": "~19.1.0",
+    "@types/react-dom": "19.1.9",
     "typescript": "~5.9.2"
   },
   "scripts": {
