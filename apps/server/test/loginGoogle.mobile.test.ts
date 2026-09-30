@@ -7,6 +7,11 @@ const mocks = vi.hoisted(() => ({
   authConfig: null as null | { redirectUri?: string; extraParams?: { prompt?: string } },
   prompt: vi.fn(),
   alert: vi.fn(),
+  constants: {
+    expoConfig: { version: '1.0.1', ios: { buildNumber: '2002' } },
+    platform: { ios: { buildNumber: '2001' } } as { ios?: { buildNumber: string | null } } | undefined,
+  },
+  updates: { isEnabled: false, isEmbeddedLaunch: true, updateId: null as string | null },
 }));
 
 vi.mock('react-native', () => ({
@@ -33,9 +38,9 @@ vi.mock('expo-apple-authentication', () => ({
   AppleAuthenticationButtonStyle: { BLACK: 'black' },
 }));
 vi.mock('expo-constants', () => ({
-  default: { expoConfig: { version: '1.0.1', ios: { buildNumber: '2000' } }, iosConfig: { buildNumber: '2001' } },
+  default: mocks.constants,
 }));
-vi.mock('expo-updates', () => ({ isEnabled: false, isEmbeddedLaunch: true, updateId: null }));
+vi.mock('expo-updates', () => mocks.updates);
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ bootstrapIfAuthed: vi.fn() }) }));
 vi.mock('../../mobile/src/contexts/EntryContext', () => ({ useEntryContext: () => ({ entryIntent: null, refreshEntryIntent: vi.fn() }) }));
@@ -66,6 +71,10 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.requestReady = false;
   mocks.authConfig = null;
+  mocks.constants.platform = { ios: { buildNumber: '2001' } };
+  mocks.updates.isEnabled = false;
+  mocks.updates.isEmbeddedLaunch = true;
+  mocks.updates.updateId = null;
   mocks.prompt.mockResolvedValue({ type: 'dismiss' });
 });
 afterEach(async () => {
@@ -95,6 +104,22 @@ describe('iPhone pre-login Google control', () => {
   it('shows the installed binary build on the login screen', async () => {
     await render();
     expect(screen!.root.findByProps({ accessibilityLabel: 'OpenChat version v1.0.1 (2001)' })).toBeDefined();
+  });
+
+  it('shows the installed build and update ID when the OTA manifest declares a different build', async () => {
+    mocks.updates.isEnabled = true;
+    mocks.updates.isEmbeddedLaunch = false;
+    mocks.updates.updateId = 'abcd1234-5678-9012-3456-789012345678';
+    await render();
+    const label = screen!.root.findByProps({ accessibilityLabel: 'OpenChat version v1.0.1 (2001) · update abcd1234' });
+    expect(label.props.children).toBe('v1.0.1 (2001) · update abcd1234');
+  });
+
+  it.each([undefined, {}, { ios: { buildNumber: null } }])('falls back to the manifest when installed build metadata is unavailable: %j', async platform => {
+    mocks.constants.platform = platform;
+    await render();
+    const label = screen!.root.findByProps({ accessibilityLabel: 'OpenChat version v1.0.1 (2002)' });
+    expect(label.props.children).toBe('v1.0.1 (2002)');
   });
 
   it('shows progress while Google opens and restores the button after dismissal', async () => {

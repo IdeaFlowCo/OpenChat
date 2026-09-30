@@ -82,7 +82,7 @@ export function LoginScreen() {
   const insets = useSafeAreaInsets();
   const appVersion = Constants.expoConfig?.version;
   const buildNumber = Platform.OS === 'ios'
-    ? Constants.iosConfig?.buildNumber ?? Constants.expoConfig?.ios?.buildNumber
+    ? Constants.platform?.ios?.buildNumber ?? Constants.expoConfig?.ios?.buildNumber
     : Platform.OS === 'android'
       ? Constants.expoConfig?.android?.versionCode
       : undefined;
