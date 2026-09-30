@@ -31,6 +31,7 @@ import { ThoughtCard } from '../components/ThoughtCard';
 import { ThoughtsSearchBar } from '../components/ThoughtsSearchBar';
 import type { ThoughtsNavProp } from '../navigation/types';
 import { AppIcon } from '../components/AppIcon';
+import { streamFetchErrorMessage } from './streamFetchError';
 
 // ── ThoughtsScreen ────────────────────────────────────────────────────────────
 
@@ -66,7 +67,7 @@ export function ThoughtsScreen() {
         setThoughts(data);
       }
     } catch (e) {
-      if (mountedRef.current) setError(e instanceof Error ? e.message : 'Failed to load');
+      if (mountedRef.current) setError(streamFetchErrorMessage(e, 'Failed to load Stream'));
     } finally {
       if (mountedRef.current) {
         setLoading(false);

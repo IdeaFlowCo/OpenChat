@@ -45,6 +45,7 @@ import { ThoughtCard } from '../components/ThoughtCard';
 import { ThoughtsSearchBar } from '../components/ThoughtsSearchBar';
 import { AppIcon } from '../components/AppIcon';
 import type { RouteProps } from '../navigation/types';
+import { streamFetchErrorMessage } from './streamFetchError';
 
 export function ConversationThoughtsScreen() {
   const route = useRoute<RouteProps<'ConversationThoughts'>>();
@@ -90,7 +91,7 @@ export function ConversationThoughtsScreen() {
           setFromChat(data.fromChat);
         }
       } catch (e) {
-        if (mountedRef.current) setError(e instanceof Error ? e.message : 'Failed to load');
+        if (mountedRef.current) setError(streamFetchErrorMessage(e, "Failed to load this chat's Stream"));
       } finally {
         if (mountedRef.current) {
           setLoading(false);
