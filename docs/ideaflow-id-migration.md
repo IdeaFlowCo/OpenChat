@@ -54,7 +54,7 @@ provider's server-only registration procedure:
 | --- | --- |
 | client name | `OpenChat Web` |
 | client URI | `https://chat.ideaflow.app` |
-| redirect URIs | `https://chat.ideaflow.app/auth/ideaflow/callback` and `https://chat.globalbr.ai/auth/ideaflow/callback` |
+| redirect URIs | Both OpenChat hosts; see the [domain rollout](./chat-domain-rollout.md) for the exact registrations |
 | post-logout redirect URIs | none during additive migration |
 | scopes | `openid profile email` |
 | token endpoint auth | `client_secret_basic` |
@@ -84,7 +84,7 @@ IDEAFLOW_ID_ENABLED=false
 IDEAFLOW_ID_ISSUER=https://id.ideaflow.app/api/auth
 IDEAFLOW_ID_CLIENT_ID=<registered client id>
 IDEAFLOW_ID_CLIENT_SECRET=<registered client secret>
-IDEAFLOW_ID_REDIRECT_URI=https://chat.ideaflow.app/auth/ideaflow/callback
+IDEAFLOW_ID_REDIRECT_URI=<registered callback for the primary OpenChat host>
 ```
 
 `IDEAFLOW_ID_ENABLED` is a server-side kill switch. The integration remains

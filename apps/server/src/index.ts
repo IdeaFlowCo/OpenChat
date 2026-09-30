@@ -125,8 +125,8 @@ app.get('/about/icon.png', (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.sendFile(landingIconPath);
 });
-// Shareable QR for chat.ideaflow.app (OpenChat-84u). Static SVG generated
-// once at build time; cache long since the URL it encodes never changes.
+// Shareable QR for chat.ideaflow.app (OpenChat-84u). The checked-in SVG is
+// stable between deployments, so cache it for one day.
 app.get('/about/qr.svg', (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.setHeader('Content-Type', 'image/svg+xml');
@@ -135,8 +135,8 @@ app.get('/about/qr.svg', (_req, res) => {
 
 // Per-user "add me" landing page (OpenChat-qr-onboard). Reached when a
 // non-installed user scans a personal QR (encoded as
-// https://chat.ideaflow.app/u/<userId>). Renders a small SSR page that
-// requires no JS to show the inviter's name + a clear sign-in / install
+// https://chat.ideaflow.app/u/<userId> or the legacy host). Renders a small SSR
+// page that requires no JS to show the inviter's name + a clear sign-in / install
 // CTA carrying the intent forward via ?intent=add-user&id=<id>.
 //
 // Once Associated Domains (OpenChat-84u.2) is enabled, installed-app

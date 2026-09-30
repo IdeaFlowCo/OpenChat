@@ -1,6 +1,6 @@
 # OpenChat domain rollout
 
-The canonical public host is `chat.ideaflow.app`. Keep `chat.globalbr.ai`
+The target canonical public host is `chat.ideaflow.app`. Keep `chat.globalbr.ai`
 serving the same OpenChat backend and responsive client indefinitely for old
 bookmarks, installed native clients, Universal Links, and OAuth state held in
 that browser origin. Do not redirect the old host during this rollout.
@@ -57,9 +57,14 @@ The tar includes `.env`; keep the backup directory mode 0700, verify the archive
 and saved image before changing the host, and never copy them into this repo.
 
 With the new HTTPS route and both callback registrations ready, deploy the
-OpenChat branch, then set production `OPENCHAT_URL=https://chat.ideaflow.app`,
-`CORS_ORIGIN=https://chat.ideaflow.app,https://chat.globalbr.ai`, and
-`IDEAFLOW_ID_REDIRECT_URI=https://chat.ideaflow.app/auth/ideaflow/callback`.
+OpenChat branch, then set production:
+
+```text
+OPENCHAT_URL=https://chat.ideaflow.app
+CORS_ORIGIN=https://chat.ideaflow.app,https://chat.globalbr.ai,https://social.globalbr.ai
+IDEAFLOW_ID_REDIRECT_URI=https://chat.ideaflow.app/auth/ideaflow/callback
+```
+
 The route chooses the exact old or new callback from the requesting Host, so
 old-host sign-in continues even after that environment change. Recreate the
 OpenChat container, then add the explicit `chat` DNS record. Keep the old host
@@ -68,9 +73,10 @@ and its proxy route live.
 If any check fails, remove or revert only the new `chat.ideaflow.app` DNS
 record to the saved absence, restore the saved nginx configuration and the
 saved OpenChat archive and image, then recreate only the OpenChat container.
-Keep the old `chat.globalbr.ai` nginx server block throughout. Leave both OAuth redirect registrations
-in place: additive registrations do not affect existing sessions. Confirm the
-old host's `/health`, `/app/`, sign-in, public cards, and Socket.IO still work.
+Keep the old `chat.globalbr.ai` nginx server block throughout. Leave both OAuth
+redirect registrations in place: additive registrations do not affect existing
+sessions. Confirm the old host's `/health`, `/app/`, sign-in, public cards, and
+Socket.IO still work.
 
 ## Acceptance observations
 

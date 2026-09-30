@@ -108,7 +108,7 @@ These are not the same thing. They are different layers of the stack:
 └─────────────────────────────────────────────────┘
                        ⇅  (REST + Bearer auth)
 ┌─────────────────────────────────────────────────┐
-│  https://chat.globalbr.ai/api/* — OpenChat REST │  ← server
+│  https://chat.ideaflow.app/api/* — OpenChat REST  │  ← server
 └─────────────────────────────────────────────────┘
                        ⇧
               Authorization: Bearer oc_…  ← API key

@@ -2,6 +2,9 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io) adapter for [OpenChat](https://chat.ideaflow.app). Lets any MCP-aware client (Claude Desktop, Cursor, Cline, Codex CLI, …) read conversations, send messages, react, and create DMs — all with a single JSON config snippet.
 
+Until the [domain cutover](../../docs/chat-domain-rollout.md), set
+`OPENCHAT_BASE_URL=https://chat.globalbr.ai` to use the existing live host.
+
 **Bi-directional out of the box:** your agent can read incoming messages AND send replies. Same identity as you — same conversations, same permissions.
 
 ## 30-second setup

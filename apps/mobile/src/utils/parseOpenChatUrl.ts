@@ -50,8 +50,7 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
     if (parts.length >= 2) return { type: 'context', conversationId: parts[0], entryId: parts[1] };
   }
 
-  // https://chat.globalbr.ai/u/<userId>  (web fallback link)
-  // https://chat.globalbr.ai/i/<token>   (group invite web link)
+  // Both public hosts accept user, invite, and card web links.
   if (
     (url.protocol === 'https:' || url.protocol === 'http:') &&
     (url.hostname === 'chat.ideaflow.app' || url.hostname === 'chat.globalbr.ai'

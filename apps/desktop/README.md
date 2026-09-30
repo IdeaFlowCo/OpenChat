@@ -1,9 +1,13 @@
 # OpenChat Desktop
 
-A native Tauri window around the **live** OpenChat client at
+A native Tauri window targeting the OpenChat client at
 `https://chat.ideaflow.app/app/` — the same react-native-web build of
 `apps/mobile` that browsers get. There is no desktop UI codebase and no bundled
 copy of the client.
+
+The new host requires the [domain rollout](../../docs/chat-domain-rollout.md)
+before this build can connect. Existing desktop installs on the old host keep
+working there.
 
 ## Why it loads the live URL instead of bundling the export
 
@@ -13,8 +17,8 @@ mobile and web:
 - **Same origin, same auth.** A bundled build runs from `tauri://localhost`,
   which is not in the server's CORS allowlist (`apps/server/src/index.ts`) and
   breaks the redirect sign-in flows, whose callback URIs are derived from
-  `window.location.origin`. Loaded from `chat.ideaflow.app`, every existing login
-  path works unchanged, with no server change.
+  `window.location.origin`. After the new host and OAuth callbacks are
+  registered, sign-in returns to the same host that opened the desktop app.
 - **Same socket, same data.** The client connects to the same Socket.io server,
   so messages sync live across desktop, web, and the iOS app.
 - **Always current.** Every `/app` deploy updates the desktop app too; no
