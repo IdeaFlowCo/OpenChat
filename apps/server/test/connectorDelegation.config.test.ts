@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import dotenv from 'dotenv';
 import express from 'express';
 import jwt from 'jsonwebtoken';
@@ -72,9 +73,13 @@ describe('delegation initialization after dotenv', () => {
       .set('Authorization', auth).send(startBody)).status).toBe(200);
     loadDotenv('production');
     const app = appFromFinalConfiguration();
-    expect((await request(app).post('/api/connector-delegations/start')
-      .set('Authorization', auth).send(startBody)).status).toBe(404);
-    expect((await request(app).get('/api/chat/conversations')
-      .set('Authorization', 'Bearer ocd_fixture')).status).toBe(403);
+    const start = await request(app).post('/api/connector-delegations/start').set('Authorization', auth).send(startBody);
+    const delegated = await request(app).get('/api/chat/conversations').set('Authorization', 'Bearer ocd_fixture');
+    expect(start.status).toBe(404);
+    expect(delegated.status).toBe(403);
+    if (process.env.OPENCHAT_TEST_EVIDENCE_DIR) writeFileSync(`${process.env.OPENCHAT_TEST_EVIDENCE_DIR}/connector-production-disabled.json`, JSON.stringify({
+      context: 'Local HTTP harness initialized with NODE_ENV=production and delegation enabled flag plus fixture client configured',
+      start: { status: start.status, body: start.text }, delegatedCall: { status: delegated.status, body: delegated.body },
+    }, null, 2));
   });
 });

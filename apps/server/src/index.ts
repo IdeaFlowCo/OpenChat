@@ -40,7 +40,6 @@ import { parseCorsOrigins } from './config/cors.js';
 import googleWebCallbackRoutes from './routes/googleWebCallback.js';
 import ideaflowWebCallbackRoutes from './routes/ideaflowWebCallback.js';
 import {
-  normalizePublicDisplayName,
   sanitizeLegacyPublicDisplayNames,
 } from './privacy/profilePrivacy.js';
 import { resolveInvitePreview, InviteError } from './services/inviteEntry.js';

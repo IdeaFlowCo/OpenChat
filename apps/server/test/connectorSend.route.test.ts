@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import express from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -110,6 +111,29 @@ describe('real delegated send route', () => {
     expect(mocks.effect).toHaveBeenCalledTimes(effects);
     expect(mocks.run).toHaveBeenCalledTimes(2);
     expect(mocks.run.mock.calls.every(([, params]) => params.content === undefined)).toBe(true);
+    if (process.env.OPENCHAT_TEST_EVIDENCE_DIR) writeFileSync(`${process.env.OPENCHAT_TEST_EVIDENCE_DIR}/connector-send-route.json`, JSON.stringify({
+      context: 'Real chat send route via HTTP, mocked Neo4j and delivery effects; no production messages',
+      first: { status: a.status, body: a.body }, retryAfterReauthorization: { status: retry.status, body: retry.body },
+      persistedMessages: [...messages.values()], conversationPreviewBeforeRetry: preview, conversationPreviewAfterRetry: conversations.get('shared'),
+      deliveryEffectsBeforeRetry: effects, deliveryEffectsAfterRetry: mocks.effect.mock.calls.length,
+    }, null, 2));
+  });
+
+  it('denies nonmembers on real read and send routes before persistence or delivery', async () => {
+    mocks.run.mockResolvedValue({ records: [] });
+    const token = issue();
+    const sent = await send(token, 'nonmember', 'forbidden', 'private');
+    const read = await request(app).get('/api/chat/conversations/private/messages')
+      .set('Authorization', `Bearer ${token}`);
+    expect(sent.status).toBe(404);
+    expect(read.status).toBe(404);
+    expect(messages.size).toBe(0);
+    expect(mocks.effect).not.toHaveBeenCalled();
+    if (process.env.OPENCHAT_TEST_EVIDENCE_DIR) writeFileSync(`${process.env.OPENCHAT_TEST_EVIDENCE_DIR}/connector-membership.json`, JSON.stringify({
+      context: 'Real chat read/send routes via HTTP; Neo4j reports no membership',
+      send: { status: sent.status, body: sent.body }, read: { status: read.status, body: read.body }, persistedMessages: [...messages.values()],
+      deliveryEffects: mocks.effect.mock.calls.length,
+    }, null, 2));
   });
 
   it('rejects changed payload or conversation before mutation and scopes IDs by grant', async () => {

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
@@ -55,6 +56,7 @@ describe('disabled connector and bounded code delegation', () => {
   app.get('/api/agent-keys', (_req, res) => res.sendStatus(200));
   let server: Server;
   let upstreamOrigin: string;
+  const consentReviews: unknown[] = [];
   beforeAll(async () => {
     server = app.listen(0);
     const address = server.address();
@@ -71,6 +73,7 @@ describe('disabled connector and bounded code delegation', () => {
     expect(start.status).toBe(200);
     const review = await request(app).get(start.body.reviewPath).set('Authorization', userJwt(openChatUser));
     expect(review.body).toMatchObject({ openChatUserId: openChatUser, scopes });
+    consentReviews.push(review.body);
     const consent = await request(app).post('/api/connector-delegations/consent')
       .set('Authorization', userJwt(openChatUser)).send({ transaction: start.body.transaction, approvedScopes: scopes });
     expect(consent.status).toBe(303);
@@ -142,7 +145,7 @@ describe('disabled connector and bounded code delegation', () => {
       ['grant-b', { ...rp('grant-b', 'notes-b', 'bob'), token: bob.token, scopes: ['openchat.read'] as Array<'openchat.read' | 'openchat.send'>, expiresAt: Date.now() + 30_000 }],
     ]);
     const connector = createDelegatedConnector({ upstreamOrigin, resolve: async (identity) => grants.get(identity.connectorGrantId) ?? null });
-    expect(connector.toolNames).toHaveLength(4);
+    expect(connector.toolNames).toEqual(['oc_list_conversations', 'oc_get_messages', 'oc_search_messages', 'oc_send_message']);
     const [a, b] = await Promise.all([
       connector.call(rp('grant-a', 'notes-a', 'alice'), 'oc_list_conversations', {}),
       connector.call(rp('grant-b', 'notes-b', 'bob'), 'oc_list_conversations', {}),
@@ -168,12 +171,25 @@ describe('disabled connector and bounded code delegation', () => {
     expect(JSON.parse(first.content[0].text)).toMatchObject({ senderId: 'alice', content: args.text });
     expect(retry).toEqual(first);
     expect(messages.size).toBe(1);
+    const read = await connector.call(rp('grant-a', 'notes-a', 'alice'), 'oc_get_messages', { conversationId: 'shared' });
+    expect(JSON.parse(read.content[0].text)).toEqual([JSON.parse(first.content[0].text)]);
     expect(first.content[0].text).not.toContain(alice.token);
     expect((await request(app).post('/api/connector-delegations/revoke').set('Authorization', clientAuth).send({
       connectorGrantId: 'grant-a', connectorUserId: 'notes-a', openChatUserId: 'alice',
     })).status).toBe(204);
     expect((await request(app).get('/api/chat/conversations').set('Authorization', `Bearer ${alice.token}`)).status).toBe(403);
     expect((await request(app).get('/api/chat/conversations').set('Authorization', `Bearer ${bob.token}`)).status).toBe(200);
+    if (process.env.OPENCHAT_TEST_EVIDENCE_DIR) writeFileSync(`${process.env.OPENCHAT_TEST_EVIDENCE_DIR}/connector-tools.json`, JSON.stringify({
+      context: 'Local HTTP authorization-code/PKCE harness; synthetic chat endpoints and in-memory messages, no production traffic',
+      tools: connector.toolNames, consentReviews,
+      aliceConversations: JSON.parse(a.content[0].text), bobConversations: JSON.parse(b.content[0].text),
+      searchAsBob: JSON.parse(search.content[0].text), sendAsAlice: JSON.parse(first.content[0].text),
+      retry: JSON.parse(retry.content[0].text), readAsAlice: JSON.parse(read.content[0].text), persistedMessages: [...messages.values()],
+      afterRevoke: { alice: (await request(app).get('/api/chat/conversations').set('Authorization', `Bearer ${alice.token}`)).status,
+        bob: (await request(app).get('/api/chat/conversations').set('Authorization', `Bearer ${bob.token}`)).status },
+      readOnlySend: await connector.call(rp('grant-b', 'notes-b', 'bob'), 'oc_send_message', args),
+      nonmemberRead: await connector.call(rp('grant-b', 'notes-b', 'bob'), 'oc_get_messages', { conversationId: 'alice-only' }),
+    }, null, 2));
     now += 3_600_001;
     expect((await request(app).get('/api/chat/conversations').set('Authorization', `Bearer ${bob.token}`)).status).toBe(403);
   });
@@ -212,6 +228,18 @@ describe('disabled connector and bounded code delegation', () => {
       resolve: async () => { throw new Error('private storage details and ocd_secret'); } });
     await expect(connector.call(rp('grant', 'notes-a', 'alice'), 'oc_list_conversations', {}))
       .resolves.toEqual({ isError: true, content: [{ type: 'text', text: 'OpenChat request failed' }] });
+  });
+
+  it('denies notes-only grants and unrelated tools without contacting OpenChat', async () => {
+    let resolutions = 0;
+    const connector = createDelegatedConnector({ upstreamOrigin, resolve: async () => { resolutions++; return null; } });
+    const identity = rp('notes-only', 'notes-user', 'alice');
+    for (const name of connector.toolNames) {
+      expect((await connector.call(identity, name, {})).isError).toBe(true);
+    }
+    expect(resolutions).toBe(4);
+    expect((await connector.call(identity, 'oc_create_conversation', {})).isError).toBe(true);
+    expect(resolutions).toBe(4);
   });
 
   it('allows separate read consent when send was requested', async () => {
