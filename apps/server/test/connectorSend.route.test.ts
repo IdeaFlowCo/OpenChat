@@ -4,6 +4,7 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectorDelegationService } from '../src/services/connectorDelegation.js';
 import { connectorDelegationGuard } from '../src/routes/connectorDelegation.js';
+import { createDelegatedConnector } from '../../mcp-server/src/delegated.js';
 
 const mocks = vi.hoisted(() => ({ run: vi.fn(), effect: vi.fn() }));
 vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({ run: mocks.run, close: async () => {} }) }) }));
@@ -59,6 +60,38 @@ describe('real delegated send route', () => {
       conversations.set(params.conversationId, { lastMessagePreview: params.preview, lastMessageAt: params.now });
       return { records: [record({ message, participantIds: ['alice'], wasCreated: true })] };
     });
+  });
+
+  it('returns a fixed tool failure for a dropped send while preserving the REST anti-probe response', async () => {
+    mocks.run.mockResolvedValue({ records: [record({ blockedRelationship: true })] });
+    const token = issue();
+    const direct = await send(token, 'blocked-direct', 'private text');
+    expect(direct.status).toBe(200);
+    expect(direct.body).toEqual({ success: true, dropped: true });
+    const server = app.listen(0, '127.0.0.1');
+    try {
+      await new Promise<void>((resolve, reject) => {
+        if (server.listening) { resolve(); return; }
+        server.once('listening', resolve);
+        server.once('error', reject);
+      });
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+      const identity = { connectorGrantId: 'grant', connectorUserId: 'notes-alice', openChatUserId: 'alice' };
+      const connector = createDelegatedConnector({ upstreamOrigin: `http://127.0.0.1:${address.port}`,
+        resolve: async () => ({ ...identity, token, scopes: ['openchat.read', 'openchat.send'],
+          expiresAt: Date.now() + 30_000 }) });
+      const result = await connector.call(identity, 'oc_send_message', {
+        conversationId: 'shared', text: 'private text', clientRequestId: 'blocked-tool',
+      });
+      expect(result).toEqual({ isError: true, content: [{ type: 'text', text: 'OpenChat request failed' }] });
+      expect(messages.size).toBe(0);
+      expect(conversations.size).toBe(0);
+      expect(mocks.effect).not.toHaveBeenCalled();
+      expect(mocks.run).toHaveBeenCalledTimes(2);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
   });
 
   it('retries across reauthorization without writes, preview changes, or delivery effects', async () => {

@@ -58,6 +58,9 @@ export function createDelegatedConnector(options: { upstreamOrigin: string; reso
             if (!args.clientRequestId || !args.text.trim()) return denied();
             const message = await api.sendMessage(args.conversationId,
               { content: args.text, clientRequestId: args.clientRequestId });
+            if (!message || message.dropped === true || typeof message.id !== 'string' || !message.id) {
+              return unavailable();
+            }
             return asText({ id: message.id, senderId: message.senderId, content: message.content,
               conversationId: message.conversationId, createdAt: message.createdAt });
           }
