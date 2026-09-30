@@ -31,7 +31,7 @@ import { ThoughtCard } from '../components/ThoughtCard';
 import { ThoughtsSearchBar } from '../components/ThoughtsSearchBar';
 import type { ThoughtsNavProp } from '../navigation/types';
 import { AppIcon } from '../components/AppIcon';
-import { streamFetchErrorMessage } from './streamFetchError';
+import { streamErrorMessage } from './streamError';
 
 // ── ThoughtsScreen ────────────────────────────────────────────────────────────
 
@@ -67,7 +67,7 @@ export function ThoughtsScreen() {
         setThoughts(data);
       }
     } catch (e) {
-      if (mountedRef.current) setError(streamFetchErrorMessage(e, 'Failed to load Stream'));
+      if (mountedRef.current) setError(streamErrorMessage(e, 'Failed to load Stream'));
     } finally {
       if (mountedRef.current) {
         setLoading(false);
@@ -134,7 +134,7 @@ export function ThoughtsScreen() {
         setThoughts((prev) => prev.filter((t) => t.id !== id));
       }
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete');
+      Alert.alert('Error', streamErrorMessage(e, 'Failed to delete Stream entry'));
     }
   }, []);
 
@@ -166,7 +166,7 @@ export function ThoughtsScreen() {
       const t = await createThought({ text });
       if (mountedRef.current) setThoughts((prev) => [t, ...prev.filter((x) => x.id !== t.id)]);
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save Stream entry');
+      Alert.alert('Error', streamErrorMessage(e, 'Failed to save Stream entry'));
     }
   }, [newDraft]);
 
@@ -181,7 +181,7 @@ export function ThoughtsScreen() {
       const updated = await updateThought(id, { text });
       if (mountedRef.current) setThoughts((prev) => prev.map((t) => (t.id === id ? { ...t, ...updated } : t)));
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save edit');
+      Alert.alert('Error', streamErrorMessage(e, 'Failed to save Stream entry'));
     }
   }, [editingId, editDraft, thoughts]);
 

@@ -27,6 +27,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { createThought, updateThought, ThoughtKind, ThoughtStatus } from '../services/thoughts';
+import { streamErrorMessage } from './streamError';
 import type { ThoughtsNavProp, ThoughtsRouteProps } from '../navigation/types';
 
 const KINDS: { value: ThoughtKind; label: string; color: string }[] = [
@@ -85,7 +86,7 @@ export function AddEditThoughtScreen() {
       }
       navigation.goBack();
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save Stream entry');
+      Alert.alert('Error', streamErrorMessage(e, 'Failed to save Stream entry'));
     } finally {
       setSaving(false);
     }

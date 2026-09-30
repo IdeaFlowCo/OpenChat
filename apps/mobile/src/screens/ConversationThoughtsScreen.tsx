@@ -45,7 +45,7 @@ import { ThoughtCard } from '../components/ThoughtCard';
 import { ThoughtsSearchBar } from '../components/ThoughtsSearchBar';
 import { AppIcon } from '../components/AppIcon';
 import type { RouteProps } from '../navigation/types';
-import { streamFetchErrorMessage } from './streamFetchError';
+import { streamErrorMessage } from './streamError';
 
 export function ConversationThoughtsScreen() {
   const route = useRoute<RouteProps<'ConversationThoughts'>>();
@@ -91,7 +91,7 @@ export function ConversationThoughtsScreen() {
           setFromChat(data.fromChat);
         }
       } catch (e) {
-        if (mountedRef.current) setError(streamFetchErrorMessage(e, "Failed to load this chat's Stream"));
+        if (mountedRef.current) setError(streamErrorMessage(e, "Failed to load this chat's Stream"));
       } finally {
         if (mountedRef.current) {
           setLoading(false);
@@ -222,7 +222,7 @@ export function ConversationThoughtsScreen() {
         }
         await load(true, queryRef.current);
       } catch (e) {
-        Alert.alert('Error', e instanceof Error ? e.message : 'Pin change failed');
+        Alert.alert('Error', streamErrorMessage(e, 'Failed to change Stream pin'));
       }
     },
     [conversationId, load]
@@ -234,7 +234,7 @@ export function ConversationThoughtsScreen() {
       setPinned((prev) => prev.filter((t) => t.id !== id));
       setFromChat((prev) => prev.filter((t) => t.id !== id));
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete');
+      Alert.alert('Error', streamErrorMessage(e, 'Failed to delete Stream entry'));
     }
   }, []);
 
@@ -267,7 +267,7 @@ export function ConversationThoughtsScreen() {
       const t = await createThought({ text, pinToConversationId: conversationId });
       setPinned((prev) => [t, ...prev.filter((x) => x.id !== t.id)]);
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save Stream entry');
+      Alert.alert('Error', streamErrorMessage(e, 'Failed to save Stream entry'));
     }
   }, [newDraft, conversationId]);
 
@@ -284,7 +284,7 @@ export function ConversationThoughtsScreen() {
       setPinned((prev) => prev.map((t) => (t.id === id ? { ...t, ...updated } : t)));
       setFromChat((prev) => prev.map((t) => (t.id === id ? { ...t, ...updated } : t)));
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save edit');
+      Alert.alert('Error', streamErrorMessage(e, 'Failed to save Stream entry'));
     }
   }, [editingId, editDraft, pinned, fromChat]);
 
