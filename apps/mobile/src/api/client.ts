@@ -8,6 +8,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import { resolveOpenChatUrl } from './openChatUrl';
 
 /**
  * Token storage strategy (OpenChat-ghr):
@@ -64,13 +65,10 @@ async function clearTokenEverywhere(): Promise<void> {
   try { await AsyncStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
 }
 
-// Web requests stay on the page's origin so old-host bookmarks keep their
-// session and OAuth state. Native builds use the new public host by default.
-export const OPENCHAT_URL =
-  process.env.EXPO_PUBLIC_OPENCHAT_URL
-  || (typeof window !== 'undefined' && window.location?.origin
-    ? window.location.origin
-    : 'https://chat.ideaflow.app');
+export const OPENCHAT_URL = resolveOpenChatUrl(
+  process.env.EXPO_PUBLIC_OPENCHAT_URL,
+  typeof window !== 'undefined' ? window.location?.origin : undefined,
+);
 export const NOOS_URL =
   process.env.EXPO_PUBLIC_NOOS_URL || 'https://globalbr.ai';
 
