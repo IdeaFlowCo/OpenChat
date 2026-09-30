@@ -71,9 +71,9 @@ when filling out the ASC form.
 
 **Notes:**
 - Message records, transcripts, reactions and attachment references are stored in Neo4j so they sync across devices. Uploaded image/audio files live in the configured object storage.
-- Voice audio is sent to Deepgram for transcription, with OpenAI Whisper as fallback. This processing applies to audio attachments in human-only chats too; it does not require an AI participant.
+- For voice-transcription processors and purposes, including in human-only chats, see Section 10.
 - We do NOT use this content for advertising, analytics, or model training.
-- Bot-routed messages (when a user invites an AI agent into a conversation) are sent to Anthropic for response generation only — see Section 9.
+- For AI-assistant and pre-send transform processing, see Section 10.
 
 ---
 
@@ -115,7 +115,7 @@ when filling out the ASC form.
 
 **Notes:**
 - No third-party behavioral analytics SDK (no Firebase, no Mixpanel, no Amplitude). Online/offline presence and last-activity timestamps are collected for the chat experience.
-- We do retain server-side HTTP request logs and `client-logs` (browser-error forward endpoint at `/api/client-logs`) for debugging — these are diagnostic, not behavioral analytics. They include error messages, stack traces, supplied diagnostic context and request metadata. These logs do not depend on a Sentry SDK. See Section 9.
+- For diagnostic collection and its classification, see Section 9.
 
 ---
 
@@ -155,40 +155,11 @@ when filling out the ASC form.
 
 ## Reviewer Test Account (REQUIRED for App Review)
 
-App Store Connect → App Information → Notes for Reviewer.
-
-```
-Sign in: tap "Continue with Google" on the login screen
-Reviewer account:
-  Email: openchat-reviewer@globalbr.ai
-  Password: <TBD — set in 1Password, paste here at submission time>
-
-ALTERNATIVELY, you can use the email/password form:
-  Email: openchat-reviewer@globalbr.ai
-  Password: <same as above>
-
-The account has all in-app features enabled, including:
-  - Voice messages
-  - Image attachments
-  - AI agent integration via MCP (agent keys in Settings → DEVELOPER)
-  - Group chat with 2 seed conversations
-  - 3 fixture messages in each thread
-
-Demo data is reset weekly. If you need fresh data, ping
-support@chat.globalbr.ai.
-
-ALL communication is end-to-server-encrypted in transit (TLS 1.3) and
-stored encrypted at rest. We do NOT do end-to-end encryption between
-users — this is a server-side product, similar to iMessage in the Cloud,
-WhatsApp Business, or Slack.
-```
-
-**ACTION FOR JACOB:**
-- [ ] Create `openchat-reviewer@globalbr.ai` via Noos SSO sign-up
-- [ ] Generate a strong reviewer password; store in 1Password under "OpenChat App Store Reviewer"
-- [ ] Seed the reviewer account with 2 demo conversations + 3 messages each (script: `cd ~/code/openchat/server && npm run seed -- --user=reviewer`)
-- [ ] Paste the password into App Store Connect → Notes for Reviewer at submission time
-- [ ] Confirm the support email `support@chat.globalbr.ai` is monitored (forward to Jacob's primary?)
+The reviewer credentials and sign-in instructions are owned by App Store
+Connect → App Information → Notes for Reviewer. Use that existing account;
+do not create or reseed an account from a documentation template. Before a
+separately authorized submission, verify those exact credentials and the
+available synthetic conversations, and confirm the support email is monitored.
 
 ---
 
@@ -204,7 +175,7 @@ The privacy policy at https://chat.globalbr.ai/legal/privacy MUST contain:
 - [ ] "Contact" — support@chat.globalbr.ai
 - [ ] Last-updated date
 
-Audit `/Users/Jacob/code/openchat/server/src/legal/privacy.md` and update to match these requirements before submission.
+Audit the authoritative [privacy policy source](../apps/server/src/legal/privacy.md) against these requirements before a separately authorized submission. Storage and deletion behavior are documented there; this checklist does not establish release readiness.
 
 ---
 

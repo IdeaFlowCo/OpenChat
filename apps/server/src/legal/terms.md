@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Last updated: June 1, 2026**
+**Last updated: September 30, 2026**
 
 These Terms of Service ("Terms") govern your use of OpenChat, a messaging service available at https://chat.globalbr.ai and through the OpenChat mobile apps for iOS and Android (collectively, the "Service"). The Service is operated by Jacob Cole on behalf of the OpenChat project ("we", "us", "our").
 
@@ -63,14 +63,14 @@ Some conversations on OpenChat include an AI assistant (a "Bot User") powered by
 - **AI responses may be incorrect, biased, or out of date.** They are generated automatically and do not reflect the views of OpenChat or its operators. Do not rely on AI responses for medical, legal, financial, safety, or other professional advice. Verify important information independently.
 - **The presence of a Bot User is always visible in the app** (as a "🤖 AI" badge in the conversation header), and a one-time disclosure banner appears the first time you enter such a conversation.
 
-If you do not want your messages sent to a third-party AI, do not participate in conversations that include Bot Users.
+If you do not want your messages sent to Anthropic for assistant replies, do not participate in conversations that include Bot Users. Voice transcription also uses third-party providers in human-only conversations; see the [Privacy Policy](./privacy).
 
 ## 7. Account Deletion
 
 You may delete your account at any time from **Settings → Delete my account** in the mobile app. Deletion:
 
 - Permanently removes your profile, push tokens, sessions, and stored credentials.
-- Replaces the content of messages you authored with "Message deleted" in conversations you participated in. The structure of those conversations (timing, who participated) is preserved for the other participants.
+- Redacts authored message text while preserving shared conversation structure. See the [Privacy Policy](./privacy) for deletion behavior and retained transcripts, attachments and diagnostics.
 - Cannot be reversed. If you create a new account with the same email later, it will be a fresh, unconnected account.
 
 We may also terminate your account if you materially breach these Terms.

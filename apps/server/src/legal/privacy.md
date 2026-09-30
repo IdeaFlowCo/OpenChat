@@ -38,17 +38,17 @@ Some conversations include an AI assistant powered by Anthropic's Claude model. 
 
 ## Data Retention
 
-We retain your account data and messages for as long as your account is active. You can delete your account at any time (see below), which removes all your personal information and redacts the content of your messages from shared conversations.
+We retain your account data and messages for as long as your account is active. You can delete your account at any time (see below). Account deletion does not currently erase stored voice transcripts, attachment references, uploaded files or diagnostic logs. Contact support@chat.globalbr.ai with requests about this retained data.
 
 ## Your Rights
 
-**Delete your account.** In the app, go to Settings → Delete My Account. This permanently deletes your account, push tokens, and all message content you authored. Conversation structure (other participants' messages) is preserved, but your messages are replaced with "Message deleted."
+**Delete your account.** In the app, go to Settings → Delete My Account. This deletes your account and push tokens and replaces the message text you authored with "Message deleted" in shared conversations. Conversation structure and other participants' messages are preserved. See Data Retention above for the data this action does not erase.
 
 **Data requests.** To request a copy of your data or ask questions about privacy, email support@chat.globalbr.ai.
 
 ## Data Security
 
-We use industry-standard transport encryption (TLS/HTTPS) for all data in transit. Your data is stored in a database accessible only to the application server.
+We use industry-standard transport encryption (TLS/HTTPS) for all data in transit. Message records are stored in our server-side database; uploaded photos and voice recordings are stored separately in object storage.
 
 ## Children
 
