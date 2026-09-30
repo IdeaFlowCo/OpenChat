@@ -1,6 +1,6 @@
 # Thoughts — design doc
 
-Source-of-truth design for OpenChat's "Thoughts" feature. Tracks both the original plan and the codex-alternative redesign that landed on top of it, the resolved decisions from the 2026-05-30 voice conversation (raw transcript at `~/memory/research/2026-05-30-openchat-thoughts-design-conversation.md`), and the remaining open questions.
+Design history for OpenChat's Thought data model. The current user-facing surface and labels are in [the client surface map](surface-map.md). This document tracks the original plan, the codex-alternative redesign, the resolved decisions from the 2026-05-30 voice conversation (raw transcript at `~/memory/research/2026-05-30-openchat-thoughts-design-conversation.md`), and the remaining open questions.
 
 This doc is the authoritative reference for the `OpenChat-3kr` epic + sub-tickets. Keep in sync; treat divergence between this doc and the tickets as a bug.
 
@@ -109,7 +109,7 @@ Status-having kinds use `previousId` for superseded chains (decisions) and a sep
 
 ### From codex 2026-05-31 review (incorporated)
 
-- **`:Thought` is too narrow a name.** Codex prefers `:StreamItem` / `:MemoryItem` with `kind` + tags as annotations. Adopting — schema uses `:StreamItem` going forward; "Thoughts" stays as the user-facing feature name.
+- **`:Thought` is too narrow a name.** Codex proposed `:StreamItem` / `:MemoryItem` with `kind` + tags as annotations. This was a schema proposal; see the client surface map for the current visible name.
 - **Provenance fields are first-class:** `sourceMessageId`, `sourceConversationId`, `sourceChannel`, `captureMethod` — added to schema below.
 - **Author identity split:** `createdByUserId` (who actually typed/extracted) and `ownedByUserId` (whose stream it belongs to). Identical for manual capture; diverge when an agent captures for a human.
 - **Tag normalization deferred** — store strings as-typed for v1; build a canonical lowercased index when needed.
@@ -122,7 +122,7 @@ Status-having kinds use `previousId` for superseded chains (decisions) and a sep
 | # | Decision | Resolution |
 |---|---|---|
 | D12 (Q1) | Open-threads-with-others visibility | **Opt-in shareable, default private.** Same per-thought "Send to…" affordance; implements naturally via the visibility set. |
-| D13 (Q2) | Relationship to Thoughtstreams / NoteStream | **NoteStream is the canonical note store; Thoughtstreams becomes the social-network view of NoteStream.** "Thoughtstream" is the general phenomenon with different filters over it; its data structure will closely mirror NoteStream notes. NoteStream is NOT mirrored onto Neo4j yet, so **OpenChat Thoughts keeps writing its own `:Thought` nodes in Neo4j for now**; when the NoteStream→Neo4j mirror lands, converge the schemas (they're already shaped alike). |
+| D13 (Q2) | Relationship to Thoughtstreams / NoteStream | **NoteStream is the canonical note store; Thoughtstreams becomes the social-network view of NoteStream.** "Thoughtstream" is the general phenomenon with different filters over it; its data structure will closely mirror NoteStream notes. NoteStream is NOT mirrored onto Neo4j yet, so **OpenChat keeps writing its own `:Thought` nodes in Neo4j for now**; when the NoteStream→Neo4j mirror lands, converge the schemas (they're already shaped alike). |
 | D14 (Q3) | Agents reading user thoughts | **Yes — agents should read your thoughts.** "It's hugely important that agents do everything." No consent ceremony required for your own agents. |
 | D15 (Q4) | Bot citation posture | **Private bots may quote your thoughts verbatim** — you often want the original text for sharing, so reference-only is too restrictive (revised 2026-09-02, Jacob). Remaining guardrail: a bot shouldn't volunteer your private thoughts *unprompted into a shared/group conversation* — quoting there is fine when you ask it to share. |
 | D16 (Q5) | Leave-a-group semantics | **Shared thoughts stay visible to remaining members after the author leaves** — same as chat messages. |
@@ -205,7 +205,7 @@ If Jacob authored a thought visible to a group and then leaves the group: do his
 (:StreamItem)-[:FROM_MESSAGE]->(:Message)  // when sourceMessageId is set
 ```
 
-**Naming note:** the storage node is `:StreamItem` (codex's recommendation — more accurate for the heterogeneous payload). The user-facing feature stays "Thoughts" (the tab, the verb "capture a thought", etc.).
+**Naming note:** this proposal uses `:StreamItem` for storage. See the client surface map for the current visible name; the existing implementation retains `:Thought` nodes and `/api/thoughts` routes.
 
 **Status semantics:**
 - `null` means "no lifecycle" — applies to most facts/observations
