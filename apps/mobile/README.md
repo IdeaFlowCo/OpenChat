@@ -8,6 +8,7 @@ for the production cutover and old-host compatibility.
 ## What works today
 
 - Sign in with Noos email/password (Alice / Bob / your account)
+- Google sign-in (native iOS and responsive web)
 - Conversation list (live-sorted by latest message)
 - Self-conversations, consistently labeled **Myself**
 - Open a conversation → message thread renders
@@ -29,7 +30,7 @@ for the production cutover and old-host compatibility.
 ## What's stubbed / TODO
 
 - Noos SSO via WebView (currently using direct password POST to `/api/auth/login`)
-- Google sign-in / phone OTP
+- Phone OTP (see the [deferral decision](../../docs/decisions/2026-06-01-phone-sign-in.md))
 - Group creation flow
 - Group settings (rename, add/remove member, leave)
 - Presence indicators, typing indicators
@@ -51,6 +52,20 @@ Then on your iPhone:
 3. The OpenChat-mobile app launches inside Expo Go.
 
 Sign in with `alice@noos.app` / `password123` (test account) or your real Noos credentials.
+
+### Google sign-in and release reporting
+
+Tap **Continue with Google** to choose a Google account. If the native
+sign-in request is still preparing, an alert asks you to retry shortly.
+While Google opens, the button shows a spinner; dismissing the sign-in
+restores the button. Startup and sign-in errors appear in an alert.
+
+When reporting a sign-in problem, include the small version label at the
+bottom right of the login screen. It shows the configured app version and,
+on iOS, the installed build number (falling back to the manifest build if
+installed metadata is unavailable). A running downloaded update adds the
+first eight characters of its update ID; web builds include the configured
+build date when available. The label is available before signing in.
 
 ### Scan an OpenChat card
 

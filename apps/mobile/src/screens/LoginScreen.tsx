@@ -230,9 +230,7 @@ export function LoginScreen() {
   // We then POST the ID token to /api/auth/google/idtoken-exchange where
   // the server verifies it against Google's certs and MERGEs the User.
   //
-  // SDK 54's provider defaults to Application.applicationId:/oauthredirect,
-  // which this iOS app does not register. Supply the reverse-client-ID URI
-  // already registered in app.config.js so the callback can return to the app.
+  // googleAuthRequestConfig owns the iOS callback URI constraint.
   //
   // The Web flow (GOOGLE_CLIENT_ID + code + secret + /google/exchange) is
   // still used by the RN-web app at chat.ideaflow.app/app.

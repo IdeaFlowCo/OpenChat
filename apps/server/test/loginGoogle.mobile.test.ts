@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   requestReady: false,
+  response: null as any,
+  exchange: vi.fn(),
+  bootstrap: vi.fn(),
   authConfig: null as null | { redirectUri?: string; extraParams?: { prompt?: string } },
   prompt: vi.fn(),
   alert: vi.fn(),
@@ -28,7 +31,7 @@ vi.mock('react-native-qrcode-svg', () => ({ default: () => null }));
 vi.mock('expo-auth-session/providers/google', () => ({
   useAuthRequest: (config: { redirectUri?: string; extraParams?: { prompt?: string } }) => {
     mocks.authConfig = config;
-    return [mocks.requestReady ? { url: 'https://accounts.google.com/' } : null, null, mocks.prompt];
+    return [mocks.requestReady ? { url: 'https://accounts.google.com/' } : null, mocks.response, mocks.prompt];
   },
 }));
 vi.mock('expo-web-browser', () => ({ maybeCompleteAuthSession: vi.fn() }));
@@ -42,7 +45,7 @@ vi.mock('expo-constants', () => ({
 }));
 vi.mock('expo-updates', () => mocks.updates);
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
-vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ bootstrapIfAuthed: vi.fn() }) }));
+vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ bootstrapIfAuthed: mocks.bootstrap }) }));
 vi.mock('../../mobile/src/contexts/EntryContext', () => ({ useEntryContext: () => ({ entryIntent: null, refreshEntryIntent: vi.fn() }) }));
 vi.mock('../../mobile/src/components/EntryHeader', () => ({ EntryHeader: () => null }));
 vi.mock('../../mobile/src/api/client', () => ({
@@ -51,6 +54,7 @@ vi.mock('../../mobile/src/api/client', () => ({
   GOOGLE_IOS_CLIENT_ID: 'ios.apps.googleusercontent.com',
   GOOGLE_ANDROID_CLIENT_ID: 'android.apps.googleusercontent.com',
   api: {},
+  googleIdTokenExchange: mocks.exchange,
 }));
 vi.mock('expo-clipboard', () => ({ getStringAsync: vi.fn() }));
 vi.mock('../../mobile/src/utils/parseOpenChatUrl', () => ({ parseOpenChatUrl: vi.fn() }));
@@ -70,6 +74,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.requestReady = false;
+  mocks.response = null;
+  mocks.exchange.mockResolvedValue(undefined);
+  mocks.bootstrap.mockResolvedValue(undefined);
   mocks.authConfig = null;
   mocks.constants.platform = { ios: { buildNumber: '2001' } };
   mocks.updates.isEnabled = false;
@@ -138,5 +145,56 @@ describe('iPhone pre-login Google control', () => {
     await act(async () => { resolvePrompt({ type: 'dismiss' }); });
     button = screen!.root.findByProps({ accessibilityLabel: 'Continue with Google' });
     expect(button.props.disabled).toBe(false);
+  });
+});
+
+
+describe('iPhone Google callback outcomes', () => {
+  it.each(['authentication', 'params'])('exchanges the %s ID token and resumes the signed-in app', async source => {
+    mocks.requestReady = true;
+    await render();
+    mocks.response = source === 'authentication'
+      ? { type: 'success', authentication: { idToken: 'test-google-id-token' } }
+      : { type: 'success', params: { id_token: 'test-google-id-token' } };
+    await render();
+    expect(mocks.exchange).toHaveBeenCalledExactlyOnceWith('test-google-id-token');
+    expect(mocks.bootstrap).toHaveBeenCalledOnce();
+    expect(mocks.alert).not.toHaveBeenCalled();
+  });
+
+  it('reports a callback without an ID token and never exchanges or bootstraps', async () => {
+    mocks.response = { type: 'success', params: {} };
+    await render();
+    expect(mocks.alert).toHaveBeenCalledWith('Google sign-in failed', 'Google did not return an ID token.');
+    expect(mocks.exchange).not.toHaveBeenCalled();
+    expect(mocks.bootstrap).not.toHaveBeenCalled();
+  });
+
+  it('reports an OAuth error and allows retry', async () => {
+    mocks.requestReady = true;
+    mocks.response = { type: 'error', error: { message: 'Access was declined' } };
+    await render();
+    expect(mocks.alert).toHaveBeenCalledWith('Google sign-in failed', 'Access was declined');
+    expect(screen!.root.findByProps({ accessibilityLabel: 'Continue with Google' }).props.disabled).toBe(false);
+    expect(mocks.exchange).not.toHaveBeenCalled();
+  });
+
+  it('reports exchange rejection without entering the signed-in app', async () => {
+    mocks.requestReady = true;
+    mocks.exchange.mockRejectedValue(new Error('Google sign-in is not enabled for this release'));
+    mocks.response = { type: 'success', authentication: { idToken: 'test-google-id-token' } };
+    await render();
+    expect(mocks.alert).toHaveBeenCalledWith('Google sign-in failed', 'Google sign-in is not enabled for this release');
+    expect(mocks.bootstrap).not.toHaveBeenCalled();
+    expect(screen!.root.findByProps({ accessibilityLabel: 'Continue with Google' }).props.disabled).toBe(false);
+  });
+
+  it('reports browser startup failure and allows retry', async () => {
+    mocks.requestReady = true;
+    mocks.prompt.mockRejectedValue(new Error('Could not open authentication browser'));
+    await render();
+    await act(async () => { await screen!.root.findByProps({ accessibilityLabel: 'Continue with Google' }).props.onPress(); });
+    expect(mocks.alert).toHaveBeenCalledWith('Google sign-in failed', 'Could not open authentication browser');
+    expect(screen!.root.findByProps({ accessibilityLabel: 'Continue with Google' }).props.disabled).toBe(false);
   });
 });
