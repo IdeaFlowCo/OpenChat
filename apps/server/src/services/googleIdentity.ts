@@ -111,6 +111,13 @@ export async function resolveGoogleIdentity(
     if (result.records.length !== 1) throw conflict();
     const user = result.records[0].get('user') as GoogleUser;
     if (typeof user.id !== 'string' || !user.id || typeof user.email !== 'string' || !user.email) throw conflict();
+    // JWTs and downstream authorization identify users by id, not elementId.
+    // Even a unique Google subject is unsafe if that id names multiple Users.
+    // Check every resolution path inside the transaction so ambiguity rolls
+    // back profile/link changes as well as preventing a session from escaping.
+    const account = await tx.run(`MATCH (u:User {id: $userId})
+      RETURN elementId(u) AS nodeId LIMIT 2`, { userId: user.id });
+    if (account.records.length !== 1 || account.records[0].get('nodeId') !== nodeId) throw conflict();
     return user;
   });
 }

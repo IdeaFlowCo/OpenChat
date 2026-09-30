@@ -36,6 +36,26 @@ concurrent transactions. All credentials and users in those tests are fixtures.
 No live Google token, production account, production schema, or installed
 iPhone flow was tested, and no actual compromise is established.
 
+Review of the initial repair at `c64d25c1ee03fcf33b8eaad896b759fec0d5796a`
+identified a second ambiguity: a unique Google subject could select a User whose
+`id` is shared by another User. JWTs and downstream authorization use that ID,
+so subject uniqueness alone is insufficient. Seeding just one additional User
+with the same ID and a different subject reproduced token issuance in both
+exchanges, for ordinary sign-in and an explicit link to the already-bound
+account (**4 failing regressions, 2 passing unique-ID link controls**). Unbound
+explicit links already rejected duplicate IDs; the mapped-subject branch
+bypassed that check. Absence of duplicate IDs masks this defect, and refusal to
+issue a token in this exact seeded case would falsify the finding. We have not
+inspected production for duplicate IDs or demonstrated unauthorized access to
+any real account through this condition.
+
+Every resolution path now requires exactly one User with the selected account
+ID, matching the selected node, inside the same transaction before returning.
+Ambiguity returns 409 without a JWT and rolls back identity/profile changes.
+Both-route tests assert that both seeded Users remain unchanged, unique bound
+accounts still accept explicit linking, and unbound duplicate IDs stay denied.
+The expanded Google binding suite has **64 cases**.
+
 History: web email linking began in `d55dbab` (2026-05-30), native email linking
 in `8707dbb` (2026-05-31); the monorepo migration retained both. This is
 independent of the native callback/feedback change in
@@ -68,11 +88,11 @@ email, but an existing subject binding does not depend on current email claims.
 
 | Case | Result |
 | --- | --- |
-| Exactly one User with the verified subject | Authenticate that existing ID, even if Google email changes, is absent/unverified, or now matches another account. Preserve `User.email`; store current provider claims separately in `googleEmail` / `googleEmailVerified`. |
+| Exactly one User with the verified subject and exactly one User with its account ID | Authenticate that existing ID, even if Google email changes, is absent/unverified, or now matches another account. Preserve `User.email`; store current provider claims separately in `googleEmail` / `googleEmailVerified`. |
 | Unknown subject, existing email (case-insensitive) | 409, no JWT, no new User, no implicit linking. |
 | Unknown subject, previously unused verified email | Create a new User, as normal signup. |
 | Explicit link with valid current OpenChat session and valid Google proof | Bind only the session's user ID if its subject is unset. Preserve its existing node, contact email, and relationships. |
-| Stored subject differs, subject belongs to another target, target is deleted/ambiguous, or legacy subject has duplicate Users | 409. Do not overwrite a subject, choose a duplicate, migrate IDs, or create a replacement account. |
+| Stored subject differs, subject belongs to another target, target is deleted/ambiguous, or legacy subject/account ID has duplicate Users | 409, including ordinary sign-in and already-bound explicit links. Do not overwrite a subject, choose a duplicate, migrate IDs, or create a replacement account. |
 
 Both exchange bodies accept optional `link: true`. That explicit intent requires
 `Authorization: Bearer <existing OpenChat session>` through the existing
@@ -115,7 +135,10 @@ Concurrent tests cover same subject with different emails, different subjects
 with the same email, two subjects linking one account, and one subject linking
 two accounts. These guarantees coordinate the repaired Google writers. Other
 providers or an old server instance do not participate in these locks; they can
-still race on shared emails. Cross-provider email provisioning and previously
+still race on shared emails or introduce duplicate IDs/subjects after the
+transaction's checks. The ID check rejects observed ambiguity; it is not a
+global uniqueness constraint or a repair for previously issued sessions.
+Cross-provider email provisioning and previously
 issued sessions need their own disposition. Do not claim this repairs all
 identity providers or deploy a mixture of old and repaired Google writers.
 

@@ -205,6 +205,39 @@ integration('Google account binding (real Neo4j, mocked Google verification)', (
         expect(response.body.token).toBeUndefined();
       });
 
+      it.each([false, true])('fails closed on duplicate account IDs with a unique Google subject (link=%s)', async link => {
+        await query('CREATE (:User {id: $id, email: $email, googleSub: $sub})', {
+          id: accountId, email: `${prefix}duplicate@example.test`, sub: `${prefix}other-subject`,
+        });
+        const snapshot = () => query(`MATCH (u:User {id: $id})
+          RETURN elementId(u) AS nodeId, properties(u) AS properties ORDER BY nodeId`, { id: accountId });
+        const before = await snapshot();
+        const response = await signIn({ link, bearer: link ? accountSession() : undefined });
+        expect(Boolean(response.body.token)).toBe(false);
+        expect(response.status).toBe(409);
+        const after = await snapshot();
+        expect(after.records.map(record => record.toObject()))
+          .toEqual(before.records.map(record => record.toObject()));
+      });
+
+      it('accepts an explicit link to the already-bound unique account', async () => {
+        const response = await signIn({ link: true, bearer: accountSession() });
+        expect(response.status).toBe(200);
+        expect(jwt.verify(response.body.token, 'google-binding-test-secret')).toMatchObject({ userId: accountId });
+      });
+
+      it('refuses to choose among unlinked accounts with duplicate IDs', async () => {
+        await query('MATCH (u:User {id: $id}) REMOVE u.googleSub', { id: accountId });
+        await query('CREATE (:User {id: $id, email: $email})', {
+          id: accountId, email: `${prefix}duplicate@example.test`,
+        });
+        const response = await signIn({ link: true, bearer: accountSession() });
+        expect(response.status).toBe(409);
+        expect(response.body.token).toBeUndefined();
+        const stored = await query('MATCH (u:User {id: $id}) RETURN u.googleSub AS sub', { id: accountId });
+        expect(stored.records.map(record => record.get('sub'))).toEqual([null, null]);
+      });
+
       it('does not choose among duplicate legacy emails', async () => {
         await query('MATCH (u:User {id: $id}) REMOVE u.googleSub', { id: accountId });
         await query('CREATE (:User {id: $id, email: $email})', { id: `${prefix}duplicate`, email });
