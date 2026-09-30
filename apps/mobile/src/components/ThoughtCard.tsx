@@ -68,7 +68,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
       onLongPress={
         onDelete
           ? () =>
-              Alert.alert('Delete thought?', item.text.slice(0, 80), [
+              Alert.alert('Delete Stream entry?', item.text.slice(0, 80), [
                 { text: 'Cancel', style: 'cancel' },
                 { text: 'Delete', style: 'destructive', onPress: onDelete },
               ])

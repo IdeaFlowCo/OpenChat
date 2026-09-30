@@ -418,7 +418,7 @@ export function SettingsScreen() {
             <Text style={[styles.radioMark, { color: c.primary }]}>{socialPreferences.experienceMode === 'simple' ? '●' : '○'}</Text>
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Simple chat</Text>
-              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Chats and Thoughts without the coordination layer</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Chats and Stream without the coordination layer</Text>
             </View>
           </TouchableOpacity>
           {socialPreferences.experienceMode === 'enhanced' && (
@@ -531,7 +531,7 @@ export function SettingsScreen() {
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Export my data</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>
-                Download messages, thoughts, settings, and account metadata
+                Download messages, Stream entries, settings, and account metadata
               </Text>
             </View>
             <Text style={{ color: c.primary, fontSize: 18 }}>↓</Text>

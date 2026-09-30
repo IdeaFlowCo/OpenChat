@@ -2,7 +2,7 @@
  * Route params. Centralized so screens can import a single type rather than
  * redeclaring at each navigation.navigate() call site.
  *
- * The app uses a bottom-tab navigator (Chats / Thoughts) wrapping native stacks.
+ * The app uses a bottom-tab navigator (Chats / Stream) wrapping native stacks.
  * The types below cover all screens across both tabs.
  */
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';

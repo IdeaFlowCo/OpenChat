@@ -28,8 +28,8 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | `StoryComposer` | Asks | **Share a Story** | Asks screen › "Share a Story"; Stories rail "+" button | 2 | Publish 24h stories, requests, and agent-only quiet searches to network. |
 | `StoryViewer` | Asks | **Story** (Header: Author name) | Stories rail avatar tap | 1 | View network story, reply directly, or ask OpenChat Agent about it. |
 | `SocialReview` | Asks | **Review** | Asks screen › "Review" card; AgentOverlay Review card | 2 | Review and approve/decline quiet match opportunities. |
-| `Thoughts` | Thoughts | **Thoughts** | Bottom tab "Thoughts" | 1 | Private notes, ideas, and semantic search. |
-| `ConversationThoughts` | Thoughts | **Thoughts** | 1. In-chat header "Thoughts" button<br>2. In-chat overflow menu › "Thoughts for this chat" | 2 | Chat-scoped thoughts: search, inline compose, pinned notes, and captured notes from this conversation. |
+| `Thoughts` | Stream | **Stream** | Bottom tab "Stream" | 1 | Existing private Thought entries, ideas, and semantic search. Internal route names stay compatible. |
+| `ConversationThoughts` | Stream | **Chat Stream** | 1. In-chat header "Stream" button<br>2. In-chat overflow menu › "Stream for this chat" | 2 | Chat-scoped Thought entries: search, inline compose, pinned notes, and captured notes from this conversation. |
 | `Settings` | Settings | **Settings** | 1. Profile › "Settings" row<br>2. Desktop shortcut (⌘,) | 2 | Account, experience mode, agent keys, theme, notifications, and legal info. |
 | `Search` | Search | **Search** | Chats header magnifying glass; desktop shortcut (⌘K) | 1 | Search conversations and messages. |
 | `BlockedUsers` | Settings | **Blocked users** | Settings › Legal & Account › Blocked users | 3 | Manage blocked contacts. |
@@ -39,7 +39,7 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 
 ## Architectural Principles
 
-1. **Doors hang from nouns, not feature builders.** Features are filed under user concepts (Me, People, Chats, Asks, Thoughts, Settings), not under whichever team or PR introduced them.
+1. **Doors hang from nouns, not feature builders.** Features are filed under user concepts (Me, People, Chats, Asks, Stream, Settings), not under whichever team or PR introduced them.
 2. **Avatar is "Me".** The user's face in the chrome is the single entry point to everything about themselves (their card, their QR code, scanning others' codes, profile editing, agent, settings).
 3. **OpenChat Agent is always an ordinary chat.** The assistant conversation is created server-side upon sign-in and pinned in Chats. The agent noun is never hidden behind `enhanced` mode; only the coordination layer (Asks, Stories, Review, quiet matching) is gated.
 4. **Reciprocal actions live together.** "Show my QR code" and "Scan their code" belong on the same surface (`Profile`), with "Scan a code" directly beneath the user's code.

@@ -1,5 +1,5 @@
 /**
- * Thoughts list screen — shows the user's personal notes feed. (OpenChat-zi1)
+ * Stream list screen — shows the user's personal notes feed. (OpenChat-zi1)
  *
  * NoteStream-style inline editing (2026-09-02, Jacob): entries are edited and
  * written IN the list — no modal.
@@ -165,7 +165,7 @@ export function ThoughtsScreen() {
       const t = await createThought({ text });
       if (mountedRef.current) setThoughts((prev) => [t, ...prev.filter((x) => x.id !== t.id)]);
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save thought');
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save Stream entry');
     }
   }, [newDraft]);
 
@@ -192,7 +192,7 @@ export function ThoughtsScreen() {
         value={value}
         onChangeText={onChange}
         onBlur={onBlur}
-        placeholder={placeholder ?? 'Write a thought…'}
+        placeholder={placeholder ?? 'Write a Stream entry…'}
         placeholderTextColor={c.textMuted}
         multiline
         autoFocus
@@ -213,8 +213,8 @@ export function ThoughtsScreen() {
       <View style={styles.emptyContainer}>
         <Text style={[styles.emptyText, { color: c.textMetadata }]}>
           {searching
-            ? `No thoughts match "${query.trim()}".`
-            : 'No thoughts yet. Tap + to add one.'}
+            ? `No Stream entries match "${query.trim()}".`
+            : 'Your Stream is empty. Tap + to add an entry.'}
         </Text>
       </View>
     );
@@ -237,7 +237,7 @@ export function ThoughtsScreen() {
       <ThoughtsSearchBar
         value={query}
         onChangeText={setQuery}
-        placeholder="Search thoughts and tags"
+        placeholder="Search Stream and tags"
       />
 
       <FlatList
@@ -259,7 +259,7 @@ export function ThoughtsScreen() {
           )
         }
         ListHeaderComponent={
-          creating ? renderEditorCard(newDraft, setNewDraft, () => void commitNew(), 'New thought…') : null
+          creating ? renderEditorCard(newDraft, setNewDraft, () => void commitNew(), 'New Stream entry…') : null
         }
         keyboardDismissMode="on-drag"
         ListEmptyComponent={renderEmpty}
@@ -277,6 +277,8 @@ export function ThoughtsScreen() {
         style={[styles.fab, { backgroundColor: c.primary }]}
         onPress={openAdd}
         activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="New Stream entry"
       >
         <AppIcon name="plus" color={c.onPrimary} size={26} strokeWidth={2.2} />
       </TouchableOpacity>
