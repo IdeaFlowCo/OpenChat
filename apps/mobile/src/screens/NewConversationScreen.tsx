@@ -52,7 +52,10 @@ export function NewConversationScreen() {
 
   const [mode, setMode] = useState<Mode>('direct');
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<User[]>([]);
+  const [contactResult, setContactResult] = useState<{ rows: User[]; query: string }>({ rows: [], query: '' });
+  const results = contactResult.rows;
+  const resultQuery = contactResult.query.trim();
+  const exactEmail = resultQuery.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resultQuery) ? resultQuery : undefined;
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -70,7 +73,7 @@ export function NewConversationScreen() {
     api.getContacts(debounced || undefined, { limit: DIRECTORY_PAGE_SIZE, offset: 0 })
       .then(rows => {
         if (cancelled) return;
-        setResults(rows);
+        setContactResult({ rows, query: debounced });
         setHasMore(
           debounced.trim().length === 0
             && currentUser?.openUserDirectoryEnabled === true
@@ -80,7 +83,7 @@ export function NewConversationScreen() {
       .catch(err => {
         console.warn('[NewConversation] search failed:', err);
         if (!cancelled) {
-          setResults([]);
+          setContactResult({ rows: [], query: debounced });
           setHasMore(false);
         }
       })
@@ -91,6 +94,7 @@ export function NewConversationScreen() {
   const loadMore = () => {
     if (
       debounced.trim().length > 0
+      || contactResult.query.trim().length > 0
       || currentUser?.openUserDirectoryEnabled !== true
       || loading
       || loadingMore
@@ -100,9 +104,10 @@ export function NewConversationScreen() {
     setLoadingMore(true);
     api.getContacts(undefined, { limit: DIRECTORY_PAGE_SIZE, offset: results.length })
       .then(rows => {
-        setResults(previous => {
-          const known = new Set(previous.map(user => user.id));
-          return [...previous, ...rows.filter(user => !known.has(user.id))];
+        setContactResult(previous => {
+          if (previous !== contactResult) return previous;
+          const known = new Set(previous.rows.map(user => user.id));
+          return { ...previous, rows: [...previous.rows, ...rows.filter(user => !known.has(user.id))] };
         });
         setHasMore(rows.length === DIRECTORY_PAGE_SIZE);
       })
@@ -340,7 +345,7 @@ export function NewConversationScreen() {
                 </View>
                 {!item.isBot && item.id !== currentUser?.userId && (
                   <TouchableOpacity
-                    onPress={event => { event.stopPropagation(); navigation.navigate('ContactProfile', { userId: item.id }); }}
+                    onPress={event => { event.stopPropagation(); navigation.navigate('ContactProfile', { userId: item.id, ...(exactEmail ? { exactEmail } : {}) }); }}
                     style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }}
                     accessibilityRole="button"
                     accessibilityLabel={`Profile for ${item.name || 'person'}`}
