@@ -28,6 +28,7 @@ export function ScanQrScreen() {
 
   useFocusEffect(useCallback(() => {
     focused.current = true;
+    setCameraState('idle');
     return () => {
       focused.current = false;
       scanner.current?.stop();
@@ -54,7 +55,8 @@ export function ScanQrScreen() {
       if (focused.current && scanner.current === next) setCameraState('scanning');
     } catch {
       next.stop();
-      if (scanner.current === next) scanner.current = null;
+      if (scanner.current !== next) return;
+      scanner.current = null;
       if (focused.current) {
         setCameraState('unavailable');
         setMessage('Camera access was denied or unavailable. Paste a card link, or scan it with your phone Camera app.');
