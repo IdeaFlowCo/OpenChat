@@ -51,6 +51,26 @@ Then on your iPhone:
 
 Sign in with `alice@noos.app` / `password123` (test account) or your real Noos credentials.
 
+### Scan an OpenChat card
+
+From Chats, open **People** or your **Profile**, then **Scan a code**.
+In a browser, tap **Start camera** to enable the camera; opening the scanner
+alone does not request access. Leaving the scanner or opening a recognized
+card stops the camera. Repeated frames open the card only once.
+
+The browser scanner accepts only OpenChat card links recognized by
+`src/utils/parseOpenChatUrl.ts`, with a valid card token. Other codes, including
+group invites and arbitrary destinations, are rejected; native scanning also
+supports people and group invites.
+
+If camera access is denied or unavailable, paste the card link into
+**Or paste a card link** and tap **Open card**. On a phone, you can also scan
+the card using the system Camera app and tap its OpenChat link.
+
+Scanning opens a card for review. **Save contact** downloads a contact file
+separately; **Add friend** requests the other person's approval. Neither
+scanning nor requesting friendship sends a message.
+
 ### Pointing at a different backend
 
 ```bash
