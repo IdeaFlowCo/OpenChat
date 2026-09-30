@@ -76,6 +76,17 @@ export async function initDatabase(): Promise<void> {
       FOR (u:User) REQUIRE u.ideaflowIdentityKey IS UNIQUE
     `);
 
+    // Google binding transactions serialize by email and subject without
+    // migrating or imposing uniqueness on legacy shared User data.
+    await session.run(`
+      CREATE CONSTRAINT openchat_google_auth_lock IF NOT EXISTS
+      FOR (lock:OpenChatGoogleAuthLock) REQUIRE lock.key IS UNIQUE
+    `);
+    await session.run(`
+      CREATE INDEX openchat_user_google_subject IF NOT EXISTS
+      FOR (u:User) ON (u.googleSub)
+    `);
+
     // Context Lane index
     await session.run(`
       CREATE INDEX thought_lane_conversation IF NOT EXISTS
