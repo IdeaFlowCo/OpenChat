@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
+import { createHash } from 'node:crypto';
 import neo4j from 'neo4j-driver';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -940,9 +941,19 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     messageType = 'text',
     attachments,
     id: clientId,
+    clientRequestId,
     replyToId,
   } = req.body;
   const content = rawContent ?? text;
+
+  if (req.connectorDelegation && (
+    typeof rawContent !== 'string' || !rawContent.trim()
+    || typeof clientRequestId !== 'string' || clientRequestId.length < 1 || clientRequestId.length > 200
+    || Object.keys(req.body).some((key) => key !== 'content' && key !== 'clientRequestId')
+  )) {
+    res.status(400).json({ error: 'Delegated sends require content and a stable message id' });
+    return;
+  }
 
   // Card messages are server-internal. Accepting them here would let a human
   // participant or oc_ agent key forge unattributed match cards.
@@ -1025,10 +1036,14 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // so a WS send whose ack was lost, then retried over this REST fallback,
     // collapses to one row via MERGE instead of persisting a duplicate with a
     // fresh nanoid. See OpenChat-60y.
-    const messageId = (typeof clientId === 'string' && clientId) || nanoid();
+    const messageId = req.connectorDelegation
+      ? 'ocd_' + createHash('sha256').update(req.headers.authorization!).update('\0')
+        .update(clientRequestId).update('\0').update(conversationId as string)
+        .update('\0').update(rawContent).digest('hex')
+      : (typeof clientId === 'string' && clientId) || nanoid();
     const now = new Date().toISOString();
     // Use caption or fallback for preview
-    const messageContent = hasContent ? (content as string).trim() : '';
+    const messageContent = hasContent ? (req.connectorDelegation ? content as string : (content as string).trim()) : '';
     // attachmentsJson stored as a JSON string in Neo4j
     const attachmentsJson = hasAttachments ? JSON.stringify(attachments) : null;
     // lastMessagePreview for image-only messages
@@ -1095,6 +1110,17 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     const message = toJS(result.records[0].get('message')) as Record<string, unknown>;
     const participantIds = result.records[0].get('participantIds') as string[];
     const wasCreated = result.records[0].get('wasCreated') === true;
+    if (req.connectorDelegation && !wasCreated) {
+      // Connector retries return the original row without another broadcast,
+      // push, webhook, assistant turn, or thought extraction.
+      if (message.senderId !== userId || message.conversationId !== conversationId
+        || message.content !== messageContent) {
+        res.status(409).json({ error: 'Idempotency key already used' });
+        return;
+      }
+      res.status(200).json(message);
+      return;
+    }
     // Parse attachments JSON string back to array for the response + broadcast
     if (message && typeof message.attachments === 'string') {
       try { message.attachments = JSON.parse(message.attachments as string); } catch { /* leave as string */ }

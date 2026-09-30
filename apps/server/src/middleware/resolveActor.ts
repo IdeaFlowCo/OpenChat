@@ -155,6 +155,16 @@ export async function resolveActor(
   res: Response,
   next: NextFunction
 ): Promise<void> {
+  // The connector guard already validated this request's exact route, scope,
+  // expiry and named user. Never reinterpret its bearer as a legacy API key.
+  if (req.connectorDelegation) {
+    if (req.user?.userId !== req.connectorDelegation.openChatUserId) {
+      res.status(403).json({ error: 'Delegation denied' });
+      return;
+    }
+    next();
+    return;
+  }
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith('Bearer ')) {

@@ -19,6 +19,7 @@ import aiRoutes from './routes/ai.js';
 import thoughtsRoutes from './routes/thoughts.js';
 import contextRoutes from './routes/context.js';
 import agentKeysRoutes from './routes/agentKeys.js';
+import { connectorDelegations, connectorDelegationRoutes, connectorDelegationGuard } from './routes/connectorDelegation.js';
 import webhooksRoutes from './routes/webhooks.js';
 import feedbackRoutes from './routes/feedback.js';
 import assistantRoutes from './routes/assistant.js';
@@ -405,6 +406,8 @@ app.use(googleWebCallbackRoutes);
 app.use(ideaflowWebCallbackRoutes);
 
 // API routes
+app.use('/api', connectorDelegationGuard(connectorDelegations));
+app.use('/api/connector-delegations', connectorDelegationRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', contextRoutes);
 app.use('/api', entryIntentsRoutes);
