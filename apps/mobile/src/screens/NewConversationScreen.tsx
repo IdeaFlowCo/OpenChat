@@ -176,21 +176,19 @@ export function NewConversationScreen() {
         <Text style={[styles.scanTopLabel, { color: c.textPrimary }]}>Invite a person</Text>
         <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
       </TouchableOpacity>
-      {Platform.OS !== 'web' && (
-        <TouchableOpacity
-          style={[styles.scanTopRow, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}
-          onPress={() => navigation.navigate('ScanQr')}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="Scan a code"
-        >
-          <View style={styles.scanTopContent}>
-            <AppIcon name="camera" color={c.primary} size={20} />
-            <Text style={[styles.scanTopLabel, { color: c.textPrimary }]}>Scan a code</Text>
-          </View>
-          <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
-        </TouchableOpacity>
-      )}
+      <TouchableOpacity
+        style={[styles.scanTopRow, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}
+        onPress={() => navigation.navigate('ScanQr')}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel="Scan a code"
+      >
+        <View style={styles.scanTopContent}>
+          <AppIcon name="camera" color={c.primary} size={20} />
+          <Text style={[styles.scanTopLabel, { color: c.textPrimary }]}>Scan a code</Text>
+        </View>
+        <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
+      </TouchableOpacity>
 
       {/* Mode toggle */}
       <View style={styles.modeRow}>

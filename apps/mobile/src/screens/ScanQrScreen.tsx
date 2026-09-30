@@ -7,9 +7,7 @@
  *   - .../c/<token>          → CardEntry (AddMe card)
  *   - anything else          → Alert "Not a valid OpenChat code"
  *
- * Web: expo-camera does not provide reliable barcode scanning on web, so this
- * screen is hidden on web (the Settings rows are already gated with
- * Platform.OS !== 'web'). But if somehow reached, shows a graceful message.
+ * Browser scanning is implemented separately in ScanQrScreen.web.tsx.
  */
 
 import { useCallback, useRef, useState } from 'react';

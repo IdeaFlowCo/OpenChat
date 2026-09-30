@@ -650,24 +650,22 @@ export function SettingsScreen() {
             </View>
             <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
           </TouchableOpacity>
-          {Platform.OS !== 'web' && (
-            <TouchableOpacity
-              style={[
-                styles.optionRow,
-                { borderTopColor: c.divider, borderTopWidth: StyleSheet.hairlineWidth },
-              ]}
-              onPress={() => navigation.navigate('ScanQr')}
-              activeOpacity={0.7}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Scan QR</Text>
-                <Text style={[styles.optionHint, { color: c.textSecondary }]}>
-                  Add someone by scanning their code
-                </Text>
-              </View>
-              <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={[
+              styles.optionRow,
+              { borderTopColor: c.divider, borderTopWidth: StyleSheet.hairlineWidth },
+            ]}
+            onPress={() => navigation.navigate('ScanQr')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Scan QR</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                Add someone by scanning their code
+              </Text>
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
           {/* Blocked users — OpenChat-46p */}
           <TouchableOpacity
             style={[

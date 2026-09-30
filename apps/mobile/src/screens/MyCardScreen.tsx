@@ -260,18 +260,16 @@ export function MyCardScreen() {
         </View>
       )}
 
-      {Platform.OS !== 'web' && (
-        <TouchableOpacity
-          style={[styles.scanCodeBtn, { backgroundColor: c.primary }]}
-          onPress={() => navigation.navigate('ScanQr')}
-          accessibilityRole="button"
-          accessibilityLabel="Scan a code"
-          activeOpacity={0.8}
-        >
-          <AppIcon name="camera" color={c.onPrimary} size={20} />
-          <Text style={[styles.scanCodeBtnText, { color: c.onPrimary }]}>Scan a code</Text>
-        </TouchableOpacity>
-      )}
+      <TouchableOpacity
+        style={[styles.scanCodeBtn, { backgroundColor: c.primary }]}
+        onPress={() => navigation.navigate('ScanQr')}
+        accessibilityRole="button"
+        accessibilityLabel="Scan a code"
+        activeOpacity={0.8}
+      >
+        <AppIcon name="camera" color={c.onPrimary} size={20} />
+        <Text style={[styles.scanCodeBtnText, { color: c.onPrimary }]}>Scan a code</Text>
+      </TouchableOpacity>
 
       <View style={styles.actions}>
         <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary }]} onPress={handleShare} accessibilityRole="button">
