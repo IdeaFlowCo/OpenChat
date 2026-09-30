@@ -41,6 +41,7 @@ import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { AiDisclosureBanner } from '../components/AiDisclosureBanner';
 import { AppIcon } from '../components/AppIcon';
+import { usePrivateName } from '../contexts/PrivateNamesContext';
 import { ConversationHeaderContent } from '../components/ConversationHeaderContent';
 import { isPlaceholderEmail } from '../utils/email';
 import { NewMessagesPill } from '../components/NewMessagesPill';
@@ -495,6 +496,7 @@ export function ChatScreen({
   const other = conversation && !isGroup
     ? getDirectConversationParticipant(conversation, currentUser)
     : null;
+  const privateName = usePrivateName(!isGroup && !isSelfDM && !other?.isBot ? other?.id : undefined);
   const groupAvatarMembers = useMemo(
     () => isGroup
       ? (conversation?.participants || [])
@@ -672,7 +674,8 @@ export function ChatScreen({
     navigation.setOptions({
       headerTitle: () => (
         <ConversationHeaderContent
-          title={headerTitle}
+          title={privateName.name || headerTitle}
+          officialName={privateName.name ? getUserDisplayName(other) : undefined}
           subtitle={headerSubtitle}
           avatarName={!isGroup ? (other?.name || safeOtherEmail || headerTitle) : headerTitle}
           avatarEmail={safeOtherEmail || undefined}
@@ -686,7 +689,7 @@ export function ChatScreen({
       headerRight: () => headerActions,
       ...(Platform.OS === 'web' ? WEB_HEADER_LAYOUT : null),
     });
-  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, headerSubtitle, other, groupAvatarMembers, openConversationInfo, openConversationThoughts, c.primary, c.textSecondary]);
+  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, headerSubtitle, privateName.name, other, groupAvatarMembers, openConversationInfo, openConversationThoughts, c.primary, c.textSecondary]);
 
   // Ink & Paper: own bubbles are ink-on-paper (light) / paper-on-ink (dark),
   // so translucent overlays inside them derive from the bubble text color
@@ -1490,7 +1493,8 @@ export function ChatScreen({
         return (
           <View style={[styles.embeddedHeader, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
             <ConversationHeaderContent
-              title={headerTitle}
+              title={privateName.name || headerTitle}
+              officialName={privateName.name ? getUserDisplayName(other) : undefined}
               subtitle={headerSubtitle}
               avatarName={!isGroup ? (other?.name || safeOtherEmail || headerTitle) : headerTitle}
               avatarEmail={safeOtherEmail || undefined}

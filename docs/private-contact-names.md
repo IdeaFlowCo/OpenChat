@@ -1,0 +1,9 @@
+# Private contact names
+
+Open a person’s chat from Chats and tap their name to open Contact Info. **Set private name** saves a label visible only to your account. **Edit private name** changes it; **Clear private name** restores their official label. This works in the canonical native and responsive web client. When set, Contact Info and chat headers also show **OpenChat name**, which is the person’s self-set profile name, not proof of identity.
+
+The server stores a directed `OPENCHAT_PRIVATE_NAME` relationship from the authenticated viewer’s `User` to the canonical target `User`. `GET`, `PUT`, and `DELETE /api/private-names/:id` derive the owner exclusively from the signed-in session; no owner identifier is accepted from the caller. Reads and writes respect mutual blocks and existing profile/friend visibility. Writes acquire the same ordered user locks as block/friend mutations. An owner can always delete their own metadata; a delete never reveals target information. Imported/unlinked device contacts have no canonical OpenChat user ID and cannot receive an alias.
+
+Private names are fetched through this dedicated authenticated, uncached endpoint and kept in account-scoped client memory. They do not replace `User.name` or any conversation/title payload and are never passed to cards, vCards, QR codes, share links, exports, notifications, or search projections. Official-name updates therefore retain the alias’s canonical target without overwriting the current official label. Deleting a user removes the relationship with existing account deletion; blocked or unavailable targets are not readable.
+
+Source validation covers HTTP owner isolation, real Neo4j storage/query behavior (disposable database when `NEO4J_TEST_URI` is set), profile edit/clear and both shared chat-header layouts. Physical iPhone VoiceOver/keyboard acceptance and deployment are separate review gates.

@@ -7,8 +7,8 @@
  * simpler read-only view.
  */
 
-import { useCallback, useMemo } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
@@ -16,6 +16,7 @@ import { api } from '../api/client';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
+import { usePrivateName } from '../contexts/PrivateNamesContext';
 import { FriendControls } from '../components/FriendControls';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp, RouteProps } from '../navigation/types';
@@ -41,7 +42,7 @@ export function ContactProfileScreen() {
   const { userId } = route.params;
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  const { conversations, presence, refreshConversations, createConversation } = useChat();
+  const { currentUser, conversations, presence, refreshConversations, createConversation } = useChat();
 
   // Pull the most recent user object from any conversation participant.
   // This stays fresh because ChatContext re-renders on participant updates.
@@ -53,6 +54,22 @@ export function ContactProfileScreen() {
     return null;
   }, [conversations, userId]);
 
+  const canSetPrivateName = !!user && !user.isBot && userId !== currentUser?.userId;
+  const privateName = usePrivateName(canSetPrivateName ? userId : undefined);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameBusy, setNameBusy] = useState(false);
+  const [nameError, setNameError] = useState('');
+  const saveName = async (name: string | null) => {
+    setNameBusy(true);
+    setNameError('');
+    try {
+      await privateName.save(name);
+      setEditingName(false);
+    } catch (error) {
+      setNameError(error instanceof Error ? error.message : 'Could not save private name.');
+    } finally { setNameBusy(false); }
+  };
   const pres = presence.get(userId);
 
   const handleBlock = useCallback(() => {
@@ -119,7 +136,8 @@ export function ContactProfileScreen() {
   }
 
   const safeEmail = isPlaceholderEmail(user.email) ? '' : user.email;
-  const displayName = user.name || safeEmail || 'Unknown';
+  const officialName = user.name || safeEmail || 'Unknown';
+  const displayName = privateName.name || officialName;
   const presenceLine =
     (pres?.statusMessage) ||
     (pres?.status === 'online' ? 'Online' : null) ||
@@ -136,6 +154,11 @@ export function ContactProfileScreen() {
             <Text style={[styles.name, { color: c.textPrimary }]} numberOfLines={1}>{displayName}</Text>
             <BotBadge isBot={user.isBot} />
           </View>
+          {!!privateName.name && (
+            <Text style={[styles.email, { color: c.textMetadata }]} accessibilityLabel={`Official OpenChat name: ${officialName}`}>
+              OpenChat name: {officialName}
+            </Text>
+          )}
           {(user.profileStatus?.emoji || user.profileStatus?.text) && (
             <Text style={{ color: c.textPrimary, fontSize: 15, fontStyle: 'italic', marginTop: 4, textAlign: 'center', maxWidth: 280 }} numberOfLines={2}>
               {`${user.profileStatus.emoji ? user.profileStatus.emoji + ' ' : ''}${user.profileStatus.text || ''}`.trim()}
@@ -150,6 +173,37 @@ export function ContactProfileScreen() {
           )}
         </View>
       </View>
+
+      {canSetPrivateName && (
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, padding: 14, gap: 10 }]}>
+          <Text style={{ color: c.textMetadata }}>Private name — visible only to you. Their OpenChat name is self-set.</Text>
+          {editingName ? <>
+            <TextInput
+              accessibilityLabel="Private name"
+              value={nameDraft}
+              onChangeText={setNameDraft}
+              maxLength={100}
+              editable={!nameBusy}
+              autoFocus
+              style={{ color: c.textPrimary, borderColor: c.border, borderWidth: 1, borderRadius: 6, padding: 12 }}
+            />
+            <TouchableOpacity style={styles.privateNameAction} accessibilityRole="button" disabled={nameBusy || !nameDraft.trim()} onPress={() => void saveName(nameDraft.trim())}>
+              <Text style={{ color: c.primary }}>{nameBusy ? 'Saving…' : 'Save private name'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.privateNameAction} accessibilityRole="button" disabled={nameBusy} onPress={() => setEditingName(false)}>
+              <Text style={{ color: c.textPrimary }}>Cancel</Text>
+            </TouchableOpacity>
+          </> : (
+            <TouchableOpacity style={styles.privateNameAction} accessibilityRole="button" disabled={nameBusy} onPress={() => { setNameDraft(privateName.name || ''); setNameError(''); setEditingName(true); }}>
+              <Text style={{ color: c.primary }}>{privateName.name ? 'Edit private name' : 'Set private name'}</Text>
+            </TouchableOpacity>
+          )}
+          {!!privateName.name && <TouchableOpacity style={styles.privateNameAction} accessibilityRole="button" disabled={nameBusy} onPress={() => void saveName(null)}>
+            <Text style={{ color: c.primary }}>Clear private name</Text>
+          </TouchableOpacity>}
+          {!!nameError && <Text accessibilityRole="alert" style={{ color: c.danger }}>{nameError}</Text>}
+        </View>
+      )}
 
       {!user.isBot && <FriendControls userId={userId} onMessage={async () => {
         const conversation = await createConversation([userId], { type: 'direct' });
@@ -196,5 +250,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
+  privateNameAction: { minHeight: 44, justifyContent: 'center' },
   rowLabel: { fontSize: 16, flex: 1 },
 });
