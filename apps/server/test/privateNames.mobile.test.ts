@@ -2,21 +2,21 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
-  userId: 'alice', targetId: 'bob', name: 'Official Bob', isBot: false,
-  platform: { OS: 'ios', select: (values: any) => values.ios ?? values.default }, get: vi.fn(), set: vi.fn(), clear: vi.fn(), navigate: vi.fn(),
+  noConversation: false, userId: 'alice', targetId: 'bob', name: 'Official Bob', isBot: false,
+  platform: { OS: 'ios', select: (values: any) => values.ios ?? values.default }, getProfile: vi.fn(), get: vi.fn(), set: vi.fn(), clear: vi.fn(), navigate: vi.fn(),
 }));
 vi.mock('react-native', () => ({
   StyleSheet: { create: (s: unknown) => s, hairlineWidth: 1 }, Platform: mocks.platform,
-  Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View', ScrollView: 'ScrollView',
+  ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View', ScrollView: 'ScrollView',
   Alert: { alert: vi.fn() },
 }));
 vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mocks.navigate }), useRoute: () => ({ params: { userId: mocks.targetId } }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({
-  currentUser: { userId: mocks.userId }, conversations: [{ participants: [{ user: { id: mocks.targetId, name: mocks.name, isBot: mocks.isBot } }] }],
+  currentUser: { userId: mocks.userId }, conversations: mocks.noConversation ? [] : [{ participants: [{ user: { id: mocks.targetId, name: mocks.name, isBot: mocks.isBot } }] }],
   presence: new Map(), createConversation: vi.fn(), refreshConversations: vi.fn(),
 }) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
-vi.mock('../../mobile/src/api/client', () => ({ api: { getPrivateName: mocks.get, setPrivateName: mocks.set, clearPrivateName: mocks.clear } }));
+vi.mock('../../mobile/src/api/client', () => ({ api: { getContactProfile: mocks.getProfile, getPrivateName: mocks.get, setPrivateName: mocks.set, clearPrivateName: mocks.clear } }));
 vi.mock('../../mobile/src/components/Avatar', () => ({ Avatar: () => null }));
 vi.mock('../../mobile/src/components/BotBadge', () => ({ BotBadge: () => null }));
 vi.mock('../../mobile/src/components/FriendControls', () => ({ FriendControls: () => null }));
@@ -42,6 +42,8 @@ function button(label: string) {
 }
 beforeEach(() => {
   vi.clearAllMocks(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  mocks.noConversation = false;
+  mocks.getProfile.mockImplementation(async () => ({ id: mocks.targetId, name: mocks.name, isBot: mocks.isBot }));
   mocks.userId = 'alice'; mocks.targetId = 'bob'; mocks.name = 'Official Bob'; mocks.isBot = false;
   mocks.get.mockResolvedValue({ name: null });
   mocks.set.mockImplementation(async (_id: string, name: string) => ({ name }));
@@ -89,6 +91,25 @@ describe('native and canonical web private names', () => {
     await act(async () => button('Save private name').props.onPress());
     expect(root!.root.findAllByType('Text').some(n => n.props.accessibilityRole === 'alert' && n.props.children === 'Person unavailable')).toBe(true);
     expect(text()).toContain('Official Bob'); expect(button('Save private name')).toBeDefined();
+  });
+  it.each(['ios', 'web'])('loads and names a visible canonical person with no DM on %s', async platform => {
+    mocks.platform.OS = platform; mocks.noConversation = true;
+    await render();
+    expect(mocks.getProfile).toHaveBeenCalledWith('bob');
+    expect(text()).toContain('Official Bob');
+    await act(async () => button('Set private name').props.onPress());
+    await act(async () => root!.root.findByType('TextInput').props.onChangeText('No DM needed'));
+    await act(async () => button('Save private name').props.onPress());
+    expect(mocks.set).toHaveBeenCalledWith('bob', 'No DM needed');
+    expect(text()).toContain('No DM needed'); expect(text()).toContain('Official Bob');
+    await act(async () => button('Clear private name').props.onPress());
+    expect(mocks.clear).toHaveBeenCalledWith('bob'); expect(button('Set private name')).toBeDefined();
+  });
+  it('does not keep a cached profile or editor after a denied identity lookup', async () => {
+    mocks.getProfile.mockRejectedValue(new Error('Person unavailable'));
+    await render();
+    expect(text()).toContain('Person unavailable');
+    expect(button('Set private name')).toBeUndefined();
   });
   it('offers no alias editor for yourself', async () => { mocks.targetId = 'alice'; await render(); expect(button('Set private name')).toBeUndefined(); });
   it('offers no alias editor for a bot', async () => { mocks.isBot = true; await render(); expect(button('Set private name')).toBeUndefined(); });

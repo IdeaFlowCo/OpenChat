@@ -2,6 +2,8 @@
 
 For set/edit/clear instructions in the native and responsive web client, see [private contact names in the client README](../apps/mobile/README.md#set-a-private-contact-name).
 
+`GET /api/private-names/:id/profile` also returns a minimal official `{ id, name, avatarUrl, isBot }` projection after the same authenticated visibility check. It contains no email, phone or private name and does not require a conversation. Friends, People and contact Search have a visible **Profile** door.
+
 The server stores a directed `OPENCHAT_PRIVATE_NAME` relationship from the authenticated viewer’s `User` to the canonical target `User`. `GET`, `PUT`, and `DELETE /api/private-names/:id` derive the owner exclusively from the signed-in session; caller-supplied owner identifiers are ignored. `GET` returns `{ name: string | null }`; `PUT` accepts `{ name: string }` and returns the trimmed name; `DELETE` returns `{ name: null }`. Names must be nonempty after trimming, at most 100 UTF-16 code units, and free of C0 control characters, DEL, and Unicode line/paragraph separators; invalid input returns 400.
 
 Reads and sets return 404 for missing, self, bot, or targets blocked in either direction. Otherwise the target must allow name discovery, share a conversation with the viewer, or have a pending/accepted friend connection with them. Sets and clears acquire the same ordered user locks as block/friend mutations. An owner can always delete their own metadata, including after a block or visibility change; deletion is idempotent and never reveals target information. Imported/unlinked device contacts have no canonical OpenChat user ID and cannot receive an alias.

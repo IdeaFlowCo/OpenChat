@@ -29,7 +29,7 @@ jobs:
           npx vitest run test/groupOpen.mobile.test.ts test/chatLoading.mobile.test.ts
           test/conversationDisplay.test.ts test/contactInvite.mobile.test.ts
           test/addMeCard.test.ts test/addMeCard.route.test.ts
-          test/privateNames.route.test.ts test/privateNames.mobile.test.ts
+          test/privateNames.route.test.ts test/privateNames.mobile.test.ts test/contactProfileDoors.mobile.test.ts
 
   private-names-storage:
     runs-on: ubuntu-latest

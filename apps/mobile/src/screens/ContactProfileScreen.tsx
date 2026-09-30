@@ -7,12 +7,12 @@
  * simpler read-only view.
  */
 
-import { useCallback, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
-import { api } from '../api/client';
+import { api, type User } from '../api/client';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
@@ -46,13 +46,32 @@ export function ContactProfileScreen() {
 
   // Pull the most recent user object from any conversation participant.
   // This stays fresh because ChatContext re-renders on participant updates.
-  const user = useMemo(() => {
+  const conversationUser = useMemo(() => {
     for (const conv of conversations) {
-      const p = conv.participants?.find((p) => p.user.id === userId);
+      const p = conv.participants?.find((p) => p.user?.id === userId);
       if (p) return p.user;
     }
     return null;
   }, [conversations, userId]);
+
+  const [profile, setProfile] = useState<{ id: string; user: User | null; unavailable: boolean } | null>(null);
+  const isReadOnlyIdentity = conversationUser?.isBot || userId === currentUser?.userId;
+  useEffect(() => {
+    let active = true;
+    setProfile(null);
+    if (!isReadOnlyIdentity) {
+      api.getContactProfile(userId).then(user => {
+        if (active) setProfile({ id: userId, user, unavailable: false });
+      }).catch(() => {
+        if (active) setProfile({ id: userId, user: null, unavailable: true });
+      });
+    }
+    return () => { active = false; };
+  }, [userId, isReadOnlyIdentity, conversationUser?.name, conversationUser?.avatarUrl]);
+  useEffect(() => { setEditingName(false); setNameDraft(''); setNameError(''); }, [userId]);
+  const currentProfile = profile?.id === userId ? profile : null;
+  const user = currentProfile?.unavailable ? null : currentProfile?.user ? { ...conversationUser, ...currentProfile.user } : conversationUser;
+  const loadingProfile = !isReadOnlyIdentity && !currentProfile && !conversationUser;
 
   const canSetPrivateName = !!user && !user.isBot && userId !== currentUser?.userId;
   const privateName = usePrivateName(canSetPrivateName ? userId : undefined);
@@ -87,8 +106,7 @@ export function ContactProfileScreen() {
             try {
               await api.blockUser(user.id);
               await refreshConversations();
-              navigation.goBack(); // back to Chat
-              navigation.goBack(); // back to Conversations list
+              navigation.goBack();
             } catch (err) {
               Alert.alert('Error', err instanceof Error ? err.message : 'Failed to block.');
             }
@@ -130,7 +148,7 @@ export function ContactProfileScreen() {
   if (!user) {
     return (
       <View style={[styles.root, { backgroundColor: c.background, justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: c.textSecondary }}>Contact not found.</Text>
+        {loadingProfile ? <ActivityIndicator color={c.primary} accessibilityLabel="Loading contact profile" /> : <Text style={{ color: c.textSecondary }}>Person unavailable.</Text>}
       </View>
     );
   }

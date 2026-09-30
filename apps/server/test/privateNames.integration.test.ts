@@ -10,8 +10,8 @@ const integration = uri && user && password ? describe.sequential : describe.ski
 
 integration('private names real Neo4j + HTTP privacy', () => {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const ids = ['alice', 'bob', 'mallory', 'hidden', 'bot', 'deleted'].map(id => `private-name-${id}-${suffix}`);
-  const [alice, bob, mallory, hidden, bot, deleted] = ids;
+  const ids = ['alice', 'bob', 'mallory', 'hidden', 'bot', 'deleted', 'no-dm'].map(id => `private-name-${id}-${suffix}`);
+  const [alice, bob, mallory, hidden, bot, deleted, noDm] = ids;
   const conversationId = `private-name-chat-${suffix}`;
   let driver: Driver;
   let db: typeof import('../src/db.js');
@@ -39,6 +39,25 @@ integration('private names real Neo4j + HTTP privacy', () => {
     await run(`MATCH (c:Conversation {id: $conversationId}) DETACH DELETE c`, { conversationId });
     await run(`MATCH (u:User) WHERE u.id IN $ids OPTIONAL MATCH (u)-[:HAS_ADDME_CARD]->(c:AddMeCard) DETACH DELETE c, u`, { ids });
     await driver.close(); await db.closeDatabase();
+  });
+  it('reads official identity and sets/clears a private name with zero conversations', async () => {
+    await run(`MATCH (u:User {id: $noDm}) SET u.email = 'private@example.test', u.phone = 'private-phone'`, { noDm });
+    const profile = await request(app).get(`${path(noDm)}/profile`).set('Authorization', token(alice));
+    expect(profile.status).toBe(200);
+    expect(profile.body).toEqual({ id: noDm, name: 'Official Name', avatarUrl: null, isBot: false });
+    expect(profile.headers['cache-control']).toBe('no-store');
+    expect((await request(app).put(path(noDm)).set('Authorization', token(alice)).send({ name: 'Person without DM' })).status).toBe(200);
+    expect((await request(app).get(path(noDm)).set('Authorization', token(alice))).body.name).toBe('Person without DM');
+    expect((await request(app).get(`${path(noDm)}/profile`).set('Authorization', token(mallory))).body).toEqual(profile.body);
+    expect((await request(app).get(path(noDm)).set('Authorization', token(mallory))).body.name).toBeNull();
+    expect((await request(app).delete(path(noDm)).set('Authorization', token(alice))).body.name).toBeNull();
+    const count = await run(`MATCH (:User {id: $noDm})-[:PARTICIPATES_IN]->(c) RETURN count(c) AS count`, { noDm });
+    expect(count.records[0].get('count').toNumber()).toBe(0);
+    for (const id of [hidden, 'missing-person']) {
+      expect((await request(app).get(`${path(id)}/profile`).set('Authorization', token(alice))).status).toBe(404);
+    }
+    await run(`MATCH (a:User {id: $alice}), (b:User {id: $noDm}) CREATE (b)-[:BLOCKED]->(a)`, { alice, noDm });
+    expect((await request(app).get(`${path(noDm)}/profile`).set('Authorization', token(alice))).status).toBe(404);
   });
   it('stores per-owner aliases, resists forged owner IDs and preserves official name changes', async () => {
     const put = await request(app).put(path(bob)).set('Authorization', token(alice)).send({ name: ' My Buddy ', ownerId: mallory });

@@ -2,7 +2,7 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ getPrivateName: vi.fn(), setPrivateName: vi.fn(), clearPrivateName: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getContactProfile: vi.fn(), getPrivateName: vi.fn(), setPrivateName: vi.fn(), clearPrivateName: vi.fn() }));
 vi.mock('../src/services/privateNames.js', () => ({ ...mocks,
   PrivateNameError: class extends Error { constructor(public status: number, message: string) { super(message); } },
 }));
@@ -12,6 +12,7 @@ const token = (userId: string) => `Bearer ${jwt.sign({ userId, email: `${userId}
 beforeEach(() => vi.clearAllMocks());
 describe('private names HTTP boundary', () => {
   it('requires authentication for every verb', async () => {
+    expect((await request(app).get('/api/private-names/bob/profile')).status).toBe(401);
     expect((await request(app).get('/api/private-names/bob')).status).toBe(401);
     expect((await request(app).put('/api/private-names/bob').send({ name: 'Buddy' })).status).toBe(401);
     expect((await request(app).delete('/api/private-names/bob')).status).toBe(401);
@@ -32,4 +33,13 @@ describe('private names HTTP boundary', () => {
     await request(app).delete('/api/private-names/bob?ownerId=alice').set('Authorization', token('mallory'));
     expect(mocks.clearPrivateName).toHaveBeenCalledWith('mallory', 'bob');
   });
+});
+
+
+it('binds the independent official-profile read to the authenticated viewer', async () => {
+  mocks.getContactProfile.mockResolvedValue({ id: 'bob', name: 'Official Bob', avatarUrl: null, isBot: false });
+  const response = await request(app).get('/api/private-names/bob/profile?ownerId=alice').set('Authorization', token('mallory'));
+  expect(response.status).toBe(200); expect(response.headers['cache-control']).toBe('no-store');
+  expect(mocks.getContactProfile).toHaveBeenCalledWith('mallory', 'bob');
+  expect(response.body).toEqual({ id: 'bob', name: 'Official Bob', avatarUrl: null, isBot: false });
 });

@@ -1451,6 +1451,7 @@ export const api = {
     request<FriendStatus>(`/api/card/${encodeURIComponent(token)}/friend-status`),
   requestCardFriend: (token: string) =>
     request<FriendStatus>(`/api/card/${encodeURIComponent(token)}/friend-request`, { method: 'POST' }),
+  getContactProfile: (userId: string) => request<User>(`/api/private-names/${encodeURIComponent(userId)}/profile`),
   getPrivateName: (userId: string) => request<{ name: string | null }>(`/api/private-names/${encodeURIComponent(userId)}`),
   setPrivateName: (userId: string, name: string) => request<{ name: string }>(`/api/private-names/${encodeURIComponent(userId)}`, { method: 'PUT', body: JSON.stringify({ name }) }),
   clearPrivateName: (userId: string) => request<{ name: null }>(`/api/private-names/${encodeURIComponent(userId)}`, { method: 'DELETE' }),

@@ -338,6 +338,16 @@ export function NewConversationScreen() {
                     </Text>
                   )}
                 </View>
+                {!item.isBot && item.id !== currentUser?.userId && (
+                  <TouchableOpacity
+                    onPress={event => { event.stopPropagation(); navigation.navigate('ContactProfile', { userId: item.id }); }}
+                    style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Profile for ${item.name || 'person'}`}
+                  >
+                    <Text style={{ color: c.primary, fontWeight: '700' }}>Profile</Text>
+                  </TouchableOpacity>
+                )}
                 {mode === 'group' && (
                   <View style={[styles.check, {
                     borderColor: checked ? c.primary : c.border,

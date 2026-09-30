@@ -1,4 +1,5 @@
 import { getDriver } from '../db.js';
+import { normalizePublicDisplayName } from '../privacy/profilePrivacy.js';
 import { acquireContextAclLocks } from './contextAccess.js';
 
 export class PrivateNameError extends Error {
@@ -68,5 +69,21 @@ export async function clearPrivateName(ownerId: string, targetId: string): Promi
         DELETE privateName`, { ownerId, targetId });
     });
     return { name: null };
+  } finally { await session.close(); }
+}
+
+
+/** Minimal official profile for the authenticated viewer, independent of DMs.
+ * The same visibility gate applies as aliases; no email/phone/private label is
+ * projected into this identity response.
+ */
+export async function getContactProfile(ownerId: string, targetId: string): Promise<{ id: string; name: string; avatarUrl: string | null; isBot: boolean }> {
+  const session = getDriver().session();
+  try {
+    const result = await session.run(`${visibleTarget}
+      RETURN target { .id, .name, .avatarUrl, .isBot } AS user`, paramsFor(ownerId, targetId));
+    if (!result.records.length) throw new PrivateNameError(404, 'Person unavailable');
+    const user = result.records[0].get('user') as { id: string; name?: unknown; avatarUrl?: string | null; isBot?: boolean };
+    return { id: user.id, name: normalizePublicDisplayName(user.name), avatarUrl: user.avatarUrl || null, isBot: user.isBot === true };
   } finally { await session.close(); }
 }

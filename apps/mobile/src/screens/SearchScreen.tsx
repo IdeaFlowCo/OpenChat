@@ -257,6 +257,12 @@ export function SearchScreen() {
             {`OpenChat · ${u.id.slice(0, 6)}`}
           </Text>
         </View>
+        {!u.isBot && u.id !== currentUser?.userId && <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={`Profile for ${u.name || 'person'}`}
+          style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }}
+          onPress={event => { event.stopPropagation(); navigation.navigate('ContactProfile', { userId: u.id }); }}
+        ><Text style={{ color: c.primary, fontWeight: '700' }}>Profile</Text></TouchableOpacity>}
       </TouchableOpacity>
     );
   };

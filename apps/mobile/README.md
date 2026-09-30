@@ -89,6 +89,8 @@ scanning nor requesting friendship sends a message.
 
 ### Set a private contact name
 
+A conversation is optional: from Chats, open **Friends**, **People**, or **Search**, then choose **Profile** beside a person. This loads their visible official identity by canonical OpenChat ID and exposes the same private-name controls without creating or sending a message.
+
 From **Chats**, open a person's chat and tap their name to open **Contact
 Info**. Tap **Set private name**, enter a single-line name of up to 100
 characters, then **Save private name**. Use **Edit private name** to change it
