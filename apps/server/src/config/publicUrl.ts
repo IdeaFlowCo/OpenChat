@@ -14,6 +14,10 @@ export function chatOriginForHost(host: string | undefined): string | null {
   return null;
 }
 
+export function chatOriginForRequestHost(host: string | undefined): string {
+  return chatOriginForHost(host) ?? publicChatOrigin();
+}
+
 /** OAuth callbacks must return to the exact browser origin that began login. */
 export function ideaflowCallbackForHost(host: string | undefined): string | null {
   const origin = chatOriginForHost(host);

@@ -146,6 +146,7 @@ describe('AddMe card page', () => {
     const html = renderCardPage(
       projectCardForStranger({ ...owner, name: '<script>x</script>' }, DEFAULT_CARD_SETTINGS),
       generateCardToken(),
+      'https://chat.ideaflow.app',
     );
     expect(html).not.toContain('<script>x</script>');
     expect(html).toContain('&lt;script&gt;');
@@ -154,6 +155,15 @@ describe('AddMe card page', () => {
     expect(html).toContain('/app/?intent=card&token=');
     expect(html).toContain('Request to be friends with &lt;script&gt;x&lt;/script&gt;');
     expect(html).toContain('/contact.vcf">Save contact</a>');
+  });
+
+  it('keeps the app banner on the requested public host', () => {
+    const card = projectCardForStranger(owner, DEFAULT_CARD_SETTINGS);
+    const token = generateCardToken();
+    for (const origin of ['https://chat.globalbr.ai', 'https://chat.ideaflow.app']) {
+      const html = renderCardPage(card, token, origin);
+      expect(html).toContain(`app-argument=${origin}/c/${token}`);
+    }
   });
 });
 

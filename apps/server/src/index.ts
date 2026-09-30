@@ -37,7 +37,7 @@ import { ensureAgentSocialLayerIndexes } from './services/agentSocialLayer.js';
 import { openapiSpec } from './openapi.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 import { parseCorsOrigins } from './config/cors.js';
-import { LEGACY_CHAT_ORIGIN, NEW_CHAT_ORIGIN, publicChatOrigin } from './config/publicUrl.js';
+import { LEGACY_CHAT_ORIGIN, NEW_CHAT_ORIGIN, chatOriginForRequestHost } from './config/publicUrl.js';
 import googleWebCallbackRoutes from './routes/googleWebCallback.js';
 import ideaflowWebCallbackRoutes from './routes/ideaflowWebCallback.js';
 import {
@@ -178,6 +178,7 @@ app.get('/u/:userId', async (req, res, next) => {
     }
 
     const { id, name, avatarUrl, isBot } = projection;
+    const requestOrigin = chatOriginForRequestHost(req.get('host'));
     const initial = (name[0] || '?').toUpperCase();
     const intentQs = `?intent=add-user&id=${encodeURIComponent(id)}`;
     
@@ -190,7 +191,7 @@ app.get('/u/:userId', async (req, res, next) => {
 <meta name="description" content="${safe(name)} wants to add you on OpenChat.">
 <meta property="og:title" content="${safe(name)} on OpenChat">
 <meta property="og:description" content="${safe(name)} wants to add you on OpenChat. Tap to start a conversation.">
-<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=${publicChatOrigin()}/u/${encodeURIComponent(id)}">
+<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=${requestOrigin}/u/${encodeURIComponent(id)}">
 <style>
   :root { --bg:#0a0c18; --surface:rgba(255,255,255,0.05); --border:rgba(255,255,255,0.10);
           --text:#f4f6ff; --text-dim:#9aa0c5; --accent:#7c80ff; --accent-bg:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%); }
@@ -234,7 +235,7 @@ app.get('/u/:userId', async (req, res, next) => {
   <p class="cta-tiny">Already have OpenChat? <a href="openchat://user/${encodeURIComponent(id)}">Open the app directly</a></p>
 
   <div class="footer">
-    <a href="/">${new URL(publicChatOrigin()).hostname}</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
+    <a href="/">${new URL(requestOrigin).hostname}</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
   </div>
 </div></body></html>`;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -263,7 +264,7 @@ app.get('/c/:token', async (req, res, next) => {
       res.status(404).send(renderCardUnavailablePage());
       return;
     }
-    res.send(renderCardPage(resolved.card, req.params.token as string));
+    res.send(renderCardPage(resolved.card, req.params.token as string, chatOriginForRequestHost(req.get('host'))));
   } catch (err) {
     console.error('/c/:token render error:', err);
     next();
@@ -475,6 +476,7 @@ app.get('/i/:token', async (req, res, next) => {
     const count = preview.memberCount;
     desc = `Join ${groupTitle} with ${count} ${count === 1 ? 'member' : 'members'} on OpenChat`;
 
+    const requestOrigin = chatOriginForRequestHost(req.get('host'));
     const encodedToken = encodeURIComponent(token).replace(/'/g, '%27');
     const html = `<!doctype html>
 <html lang="en"><head>
@@ -485,7 +487,7 @@ app.get('/i/:token', async (req, res, next) => {
 <meta name="description" content="${safe(desc)}">
 <meta property="og:title" content="Join ${safe(groupTitle)} on OpenChat">
 <meta property="og:description" content="${safe(desc)}">
-<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=${publicChatOrigin()}/i/${encodedToken}">
+<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=${requestOrigin}/i/${encodedToken}">
 <style>
   :root { --bg:#0a0c18; --surface:rgba(255,255,255,0.05); --border:rgba(255,255,255,0.10);
           --text:#f4f6ff; --text-dim:#9aa0c5; --accent:#7c80ff; --accent-bg:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%); }
@@ -519,7 +521,7 @@ app.get('/i/:token', async (req, res, next) => {
   ${renderInviteActions(token)}
 
   <div class="footer">
-    <a href="/">${new URL(publicChatOrigin()).hostname}</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
+    <a href="/">${new URL(requestOrigin).hostname}</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
   </div>
 </div>
 <script>
