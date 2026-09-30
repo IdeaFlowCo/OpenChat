@@ -36,11 +36,17 @@ describe('disabled connector and bounded code delegation', () => {
     contacts: req.query.q === 'self' ? [{ id: req.user?.userId }] : [] }));
   app.post('/api/chat/conversations/:id/messages', (req, res) => {
     if (!memberships[req.user?.userId ?? '']?.includes(req.params.id)) { res.sendStatus(404); return; }
-    const id = 'ocd_' + createHash('sha256').update(req.headers.authorization!).update('\0')
-      .update(req.body.clientRequestId).update('\0').update(req.params.id)
-      .update('\0').update(req.body.content).digest('hex');
+    const delegation = req.connectorDelegation!;
+    const id = 'ocd_' + createHash('sha256').update(JSON.stringify([delegation.clientId,
+      delegation.connectorGrantId, delegation.connectorUserId, delegation.openChatUserId,
+      req.body.clientRequestId])).digest('hex');
     const existing = messages.get(id);
-    if (existing) { res.json(existing); return; }
+    if (existing) {
+      if (existing.conversationId !== req.params.id || existing.content !== req.body.content) {
+        res.sendStatus(409); return;
+      }
+      res.json(existing); return;
+    }
     const message = { id, senderId: req.user!.userId,
       conversationId: req.params.id, content: req.body.content };
     messages.set(message.id, message);
@@ -170,6 +176,42 @@ describe('disabled connector and bounded code delegation', () => {
     expect((await request(app).get('/api/chat/conversations').set('Authorization', `Bearer ${bob.token}`)).status).toBe(200);
     now += 3_600_001;
     expect((await request(app).get('/api/chat/conversations').set('Authorization', `Bearer ${bob.token}`)).status).toBe(403);
+  });
+
+  it('invalidates outstanding authorization state at revocation without affecting other identities', () => {
+    const fixture = new ConnectorDelegationService({ enabled: true,
+      clients: [{ id: 'fixture-client', secret: 'fixture-secret', callbacks: [callback] }] });
+    const identity = { clientId: 'fixture-client', connectorGrantId: 'revoked', connectorUserId: 'notes-a' };
+    const start = (overrides = {}) => fixture.start({ ...identity, callback, scopes: ['openchat.read'],
+      state: 'revoke-state', codeChallenge: challenge, ...overrides })!;
+    const pending = start();
+    const expected = start({ expectedOpenChatUserId: 'alice' });
+    const reviewed = start();
+    fixture.review(reviewed, 'alice');
+    const authorized = start();
+    fixture.review(authorized, 'alice');
+    const code = fixture.consent(authorized, 'alice', ['openchat.read'])!.code;
+    const otherAccount = start();
+    fixture.review(otherAccount, 'bob');
+    const otherCode = fixture.consent(otherAccount, 'bob', ['openchat.read'])!.code;
+    const otherGrant = start({ connectorGrantId: 'unrelated' });
+    fixture.review(otherGrant, 'alice');
+    fixture.revoke({ ...identity, openChatUserId: 'alice' });
+    for (const tx of [pending, expected, reviewed]) {
+      expect(fixture.review(tx, 'alice')).toBeNull();
+      expect(fixture.consent(tx, 'alice', ['openchat.read'])).toBeNull();
+    }
+    expect(fixture.exchange({ clientId: identity.clientId, callback, code, state: 'revoke-state', verifier })).toBeNull();
+    expect(fixture.exchange({ clientId: identity.clientId, callback, code: otherCode,
+      state: 'revoke-state', verifier })?.delegation.openChatUserId).toBe('bob');
+    expect(fixture.consent(otherGrant, 'alice', ['openchat.read'])).not.toBeNull();
+  });
+
+  it('returns a fixed tool error when delegation storage rejects', async () => {
+    const connector = createDelegatedConnector({ upstreamOrigin,
+      resolve: async () => { throw new Error('private storage details and ocd_secret'); } });
+    await expect(connector.call(rp('grant', 'notes-a', 'alice'), 'oc_list_conversations', {}))
+      .resolves.toEqual({ isError: true, content: [{ type: 'text', text: 'OpenChat request failed' }] });
   });
 
   it('allows separate read consent when send was requested', async () => {

@@ -6,7 +6,7 @@ export const connectorDelegations = new ConnectorDelegationService(loadConnector
 export const connectorDelegationRoutes = buildConnectorDelegationRoutes(connectorDelegations);
 
 declare module 'express-serve-static-core' {
-  interface Request { connectorDelegation?: { openChatUserId: string; connectorGrantId: string } }
+  interface Request { connectorDelegation?: { clientId: string; connectorUserId: string; openChatUserId: string; connectorGrantId: string } }
 }
 
 export function connectorDelegationGuard(service: ConnectorDelegationService) {
@@ -18,7 +18,8 @@ export function connectorDelegationGuard(service: ConnectorDelegationService) {
     const grant = service.authorize(token, req.method, path);
     if (!grant) { res.status(403).json({ error: 'Delegation denied' }); return; }
     req.user = { userId: grant.openChatUserId, email: '' };
-    req.connectorDelegation = { openChatUserId: grant.openChatUserId, connectorGrantId: grant.connectorGrantId };
+    req.connectorDelegation = { clientId: grant.clientId, connectorUserId: grant.connectorUserId,
+      openChatUserId: grant.openChatUserId, connectorGrantId: grant.connectorGrantId };
     req.agentScopes = grant.scopes;
     next();
   };

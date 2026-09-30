@@ -30,17 +30,17 @@ export function createDelegatedConnector(options: { upstreamOrigin: string; reso
     toolNames: CONNECTOR_TOOL_NAMES,
     async call(invocation: ConnectorInvocation, name: string, rawArgs: unknown): Promise<ConnectorToolResult> {
       if (!CONNECTOR_TOOL_NAMES.includes(name as ConnectorToolName)) return denied();
-      const delegation = await options.resolve(invocation);
-      if (!delegation || delegation.connectorGrantId !== invocation.connectorGrantId
-        || delegation.connectorUserId !== invocation.connectorUserId
-        || delegation.openChatUserId !== invocation.openChatUserId
-        || delegation.expiresAt <= Date.now() || !delegation.token.startsWith('ocd_')) return denied();
-      const scope = name === 'oc_send_message' ? 'openchat.send' : 'openchat.read';
-      if (!delegation.scopes.includes(scope)) return denied();
-      // createApi is the existing typed REST adapter; its config is constructed from
-      // this server's fixed origin and the credential resolved for this one call.
-      const api = createApi({ baseUrl, apiKey: delegation.token });
       try {
+        const delegation = await options.resolve(invocation);
+        if (!delegation || delegation.connectorGrantId !== invocation.connectorGrantId
+          || delegation.connectorUserId !== invocation.connectorUserId
+          || delegation.openChatUserId !== invocation.openChatUserId
+          || delegation.expiresAt <= Date.now() || !delegation.token.startsWith('ocd_')) return denied();
+        const scope = name === 'oc_send_message' ? 'openchat.send' : 'openchat.read';
+        if (!delegation.scopes.includes(scope)) return denied();
+        // createApi is the existing typed REST adapter; its config is constructed from
+        // this server's fixed origin and the credential resolved for this one call.
+        const api = createApi({ baseUrl, apiKey: delegation.token });
         switch (name) {
           case 'oc_list_conversations':
             z.object({}).strict().parse(rawArgs ?? {});

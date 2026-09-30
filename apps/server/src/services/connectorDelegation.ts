@@ -155,6 +155,17 @@ export class ConnectorDelegationService {
         count++;
       }
     }
+    const matches = (pending: Pending) => pending.clientId === input.clientId
+      && pending.connectorGrantId === input.connectorGrantId
+      && pending.connectorUserId === input.connectorUserId;
+    for (const [hash, pending] of this.pending) {
+      if (matches(pending) && (pending.reviewedUserId === input.openChatUserId
+        || pending.expectedOpenChatUserId === input.openChatUserId
+        || (!pending.reviewedUserId && !pending.expectedOpenChatUserId))) this.pending.delete(hash);
+    }
+    for (const [hash, code] of this.codes) {
+      if (matches(code.pending) && code.openChatUserId === input.openChatUserId) this.codes.delete(hash);
+    }
     return count;
   }
 }

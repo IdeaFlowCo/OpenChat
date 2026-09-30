@@ -24,10 +24,10 @@ disabled, and this revision must not be deployed as an activation change.
   signed-in OpenChat user reviews the request; that review binds the transaction
   to that account. The user explicitly approves read,
   with send approved separately. `/token` consumes the code once after exact
-  callback, state, client, and verifier checks. `/revoke` only removes grants
+  callback, state, client, and verifier checks. `/revoke` invalidates pending transactions, codes, and tokens
   matching the client, connector grant, connector account, and OpenChat user.
 - A send call requires a stable `clientRequestId`; the OpenChat route derives a
-  credential-bound message ID so retries preserve one message. The REST route
+  message ID bound to client, connector grant/account, and OpenChat account so retries preserve one message. The REST route
   keeps the exact content for delegated sends and suppresses retry side
   effects. Tool errors use fixed text and never return bearer credentials.
 
@@ -45,5 +45,5 @@ The in-process authorization store deliberately does not survive restart or
 work across server replicas. Production activation needs a durable, atomic
 one-use code and revocation store, an encrypted relying-party grant store,
 login-owner review of account/session boundaries, and an explicit release
-decision. The private integration packet names these gates and the protected
-endpoint change. This component is preparation, not a live connector.
+decision. The [reviewable integration packet](connector-delegation-integration-packet.md)
+names these gates and the exact protected endpoint exception. This component is preparation, not a live connector.

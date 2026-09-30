@@ -1037,9 +1037,9 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // collapses to one row via MERGE instead of persisting a duplicate with a
     // fresh nanoid. See OpenChat-60y.
     const messageId = req.connectorDelegation
-      ? 'ocd_' + createHash('sha256').update(req.headers.authorization!).update('\0')
-        .update(clientRequestId).update('\0').update(conversationId as string)
-        .update('\0').update(rawContent).digest('hex')
+      ? 'ocd_' + createHash('sha256').update(JSON.stringify([req.connectorDelegation.clientId,
+        req.connectorDelegation.connectorGrantId, req.connectorDelegation.connectorUserId,
+        req.connectorDelegation.openChatUserId, clientRequestId])).digest('hex')
       : (typeof clientId === 'string' && clientId) || nanoid();
     const now = new Date().toISOString();
     // Use caption or fallback for preview
@@ -1051,6 +1051,20 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       (a) => typeof a?.mimeType === 'string' && a.mimeType.startsWith('audio/')
     );
     const preview = messageContent || (hasAudio ? 'Voice note' : hasAttachments ? 'Photo' : '');
+
+    if (req.connectorDelegation) {
+      const existing = await session.run('MATCH (m:Message {id: $id}) RETURN m { .* } AS message', { id: messageId });
+      if (existing.records.length) {
+        const message = toJS(existing.records[0].get('message')) as Record<string, unknown>;
+        if (message.senderId !== userId || message.conversationId !== conversationId
+          || message.content !== messageContent) {
+          res.status(409).json({ error: 'Idempotency key already used' });
+          return;
+        }
+        res.status(200).json(message);
+        return;
+      }
+    }
 
     const result = await session.run(`
       MATCH (c:Conversation {id: $conversationId})
@@ -1065,11 +1079,15 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         m.replyToId = $replyToId,
         m.createdAt = datetime($now),
         m._created = true
+      WITH c, sender, m
+      WHERE NOT $delegated OR (m.senderId = $senderId
+        AND m.conversationId = $conversationId AND m.content = $content)
       MERGE (m)-[:IN_CONVERSATION]->(c)
       MERGE (sender)-[:SENT]->(m)
-      SET c.updatedAt = datetime($now),
-          c.lastMessageAt = datetime($now),
-          c.lastMessagePreview = left($preview, 100)
+      FOREACH (_ IN CASE WHEN coalesce(m._created, false) THEN [1] ELSE [] END |
+        SET c.updatedAt = datetime($now),
+            c.lastMessageAt = datetime($now),
+            c.lastMessagePreview = left($preview, 100))
       // OpenChat-uxj: hydrate the reply target so clients can render the
       // quote bubble without an extra fetch. OpenChat-60y: also return the
       // participant ids so we can fan out to per-user rooms.
@@ -1097,6 +1115,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       wasCreated
     `, {
       id: messageId,
+      delegated: Boolean(req.connectorDelegation),
       content: messageContent,
       senderId: userId,
       conversationId,
@@ -1107,6 +1126,10 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       preview,
     });
 
+    if (req.connectorDelegation && result.records.length === 0) {
+      res.status(409).json({ error: 'Idempotency key already used' });
+      return;
+    }
     const message = toJS(result.records[0].get('message')) as Record<string, unknown>;
     const participantIds = result.records[0].get('participantIds') as string[];
     const wasCreated = result.records[0].get('wasCreated') === true;
