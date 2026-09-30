@@ -16,10 +16,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import * as Google from 'expo-auth-session/providers/google';
-// AuthSession previously used for makeRedirectUri — removed; Google.useAuthRequest
-// auto-derives the iOS redirect URI from iosClientId.
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import Constants from 'expo-constants';
+import * as Updates from 'expo-updates';
 import { useTheme } from '../contexts/ThemeContext';
 import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, ideaflowExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL, api } from '../api/client';
 import { getColors } from '../theme/colors';
@@ -29,6 +29,7 @@ import { useEntryContext } from '../contexts/EntryContext';
 import * as Clipboard from 'expo-clipboard';
 import { parseOpenChatUrl } from '../utils/parseOpenChatUrl';
 import { createEntryIntent, saveEntryIntent } from '../services/entryIntents';
+import { googleAuthRequestConfig } from '../utils/googleAuthRequest';
 
 // Required for the in-app browser to dismiss properly after the OAuth round-trip.
 WebBrowser.maybeCompleteAuthSession();
@@ -79,6 +80,19 @@ export function LoginScreen() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const insets = useSafeAreaInsets();
+  const appVersion = Constants.expoConfig?.version;
+  const buildNumber = Platform.OS === 'ios'
+    ? Constants.platform?.ios?.buildNumber ?? Constants.expoConfig?.ios?.buildNumber
+    : Platform.OS === 'android'
+      ? Constants.expoConfig?.android?.versionCode
+      : undefined;
+  const buildDate = (Constants.expoConfig?.extra as { buildDate?: string } | undefined)?.buildDate;
+  const loginBuildLabel = appVersion
+    ? `v${appVersion}${buildNumber != null ? ` (${buildNumber})` : ''}${
+        Platform.OS === 'web' && buildDate ? ` · ${buildDate}` : ''
+      }${Updates.isEnabled && !Updates.isEmbeddedLaunch && Updates.updateId
+        ? ` · update ${Updates.updateId.slice(0, 8)}` : ''}`
+    : null;
   const { bootstrapIfAuthed } = useChat();
   const { entryIntent, refreshEntryIntent } = useEntryContext();
   const [email, setEmail] = useState('');
@@ -216,29 +230,13 @@ export function LoginScreen() {
   // We then POST the ID token to /api/auth/google/idtoken-exchange where
   // the server verifies it against Google's certs and MERGEs the User.
   //
-  // CRITICAL — DO NOT pass `redirectUri` here. Google's iOS OAuth client
-  // requires the redirect URI to be the reverse-client-id format
-  // (com.googleusercontent.apps.874749606899-...:/oauthredirect). The
-  // Google.useAuthRequest provider auto-derives this from iosClientId when
-  // redirectUri is omitted. Passing our app's custom scheme (openchat:/...)
-  // breaks with redirect_uri_mismatch (verified empirically on build 14).
-  // The reverse-client-id is registered as a CFBundleURLScheme in app.json
-  // so iOS deep-links the callback back to the app correctly.
+  // googleAuthRequestConfig owns the iOS callback URI constraint.
   //
   // The Web flow (GOOGLE_CLIENT_ID + code + secret + /google/exchange) is
   // still used by the RN-web app at chat.ideaflow.app/app.
-  const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest({
-    iosClientId: GOOGLE_IOS_CLIENT_ID,
-    androidClientId: GOOGLE_ANDROID_CLIENT_ID, // Android-type client (pkg + SHA-1); falls back to iOS until EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID is set
-    webClientId: GOOGLE_CLIENT_ID,
-    clientId: GOOGLE_IOS_CLIENT_ID,
-    scopes: ['openid', 'email', 'profile'],
-    // Native iOS: we want the ID token back. expo-auth-session handles PKCE.
-    shouldAutoExchangeCode: true,
-    // Always show the account chooser so users can pick/switch Google accounts.
-    extraParams: { prompt: 'select_account' },
-    // redirectUri intentionally omitted — see comment above.
-  });
+  const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest(
+    googleAuthRequestConfig(Platform.OS, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, GOOGLE_CLIENT_ID),
+  );
 
   useEffect(() => {
     if (!googleResponse) return;
@@ -342,12 +340,15 @@ export function LoginScreen() {
     }
 
     if (!googleRequest) {
-      Alert.alert('Google sign-in unavailable', 'Sign-in request is not ready yet. Please try again.');
+      Alert.alert('Google sign-in unavailable', 'Google sign-in is still preparing. Please try again shortly.');
       return;
     }
     setGoogleLoading(true);
     try {
-      await promptGoogle();
+      const result = await promptGoogle();
+      if (result.type === 'cancel' || result.type === 'dismiss' || result.type === 'locked') {
+        setGoogleLoading(false);
+      }
     } catch (err) {
       Alert.alert('Google sign-in failed', err instanceof Error ? err.message : String(err));
       setGoogleLoading(false);
@@ -517,10 +518,10 @@ export function LoginScreen() {
           <TouchableOpacity
             style={[
               styles.googleButton,
-              { borderColor: c.border, opacity: (googleLoading || loading || (!isWeb && !googleRequest)) ? 0.6 : 1 },
+              { borderColor: c.border, opacity: (googleLoading || loading) ? 0.6 : 1 },
             ]}
             onPress={handleGoogleSignIn}
-            disabled={googleLoading || loading || (!isWeb && !googleRequest)}
+            disabled={googleLoading || loading}
             accessibilityLabel="Continue with Google"
           >
             {googleLoading ? (
@@ -681,6 +682,15 @@ export function LoginScreen() {
           </View>
         </View>
       </ScrollView>
+      {loginBuildLabel && (
+        <Text
+          accessibilityLabel={`OpenChat version ${loginBuildLabel}`}
+          pointerEvents="none"
+          style={[styles.buildLabel, { color: c.textMetadata, bottom: insets.bottom + 6, backgroundColor: c.background }]}
+        >
+          {loginBuildLabel}
+        </Text>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -689,6 +699,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   scroll: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingHorizontal: 24, justifyContent: 'center', alignItems: 'stretch' },
+  buildLabel: { position: 'absolute', right: 10, paddingHorizontal: 4, fontSize: 11, lineHeight: 15 },
   card: {
     width: '100%',
     maxWidth: 520,
