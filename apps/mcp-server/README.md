@@ -1,6 +1,9 @@
 # OpenChat MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io) adapter for [OpenChat](https://chat.globalbr.ai). Lets any MCP-aware client (Claude Desktop, Cursor, Cline, Codex CLI, …) read conversations, send messages, react, and create DMs — all with a single JSON config snippet.
+A [Model Context Protocol](https://modelcontextprotocol.io) adapter for [OpenChat](https://chat.ideaflow.app). Lets any MCP-aware client (Claude Desktop, Cursor, Cline, Codex CLI, …) read conversations, send messages, react, and create DMs — all with a single JSON config snippet.
+
+Until the [domain cutover](../../docs/chat-domain-rollout.md), set
+`OPENCHAT_BASE_URL=https://chat.globalbr.ai` to use the existing live host.
 
 **Bi-directional out of the box:** your agent can read incoming messages AND send replies. Same identity as you — same conversations, same permissions.
 
@@ -129,7 +132,7 @@ Set the API key one of three ways (checked in this order):
 1. `OPENCHAT_API_KEY` environment variable
 2. `~/.openchat/credentials.json`:
    ```json
-   { "apiKey": "oc_your_key_here", "baseUrl": "https://chat.globalbr.ai" }
+   { "apiKey": "oc_your_key_here", "baseUrl": "https://chat.ideaflow.app" }
    ```
 3. The MCP server will fail with a clear error if none is set.
 
@@ -138,7 +141,7 @@ Set the API key one of three ways (checked in this order):
 | Variable | Default | Description |
 |---|---|---|
 | `OPENCHAT_API_KEY` | — | Bearer token (`oc_…` agent key or JWT). Falls back to `~/.openchat/credentials.json`. |
-| `OPENCHAT_BASE_URL` | `https://chat.globalbr.ai` | OpenChat server URL. |
+| `OPENCHAT_BASE_URL` | `https://chat.ideaflow.app` | OpenChat server URL. |
 | `PORT` | `8484` | HTTP server port (HTTP transport only) |
 | `HOST` | `0.0.0.0` | HTTP server bind address (HTTP transport only) |
 

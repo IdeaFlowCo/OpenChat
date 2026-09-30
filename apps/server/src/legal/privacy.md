@@ -2,7 +2,7 @@
 
 **Last updated: September 30, 2026**
 
-This Privacy Policy describes how OpenChat (operated by chat.globalbr.ai) collects, uses, and handles your information when you use our service.
+This Privacy Policy describes how OpenChat (available at chat.ideaflow.app and the legacy chat.globalbr.ai address) collects, uses, and handles your information when you use our service.
 
 ## Information We Collect
 

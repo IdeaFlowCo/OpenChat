@@ -3,6 +3,9 @@
 OpenChat supports agent API keys so any bot or script can read and send messages
 using a standard `Authorization: Bearer` header — no JWT required.
 
+These examples use the new host. Until the [domain cutover](./chat-domain-rollout.md),
+use `https://chat.globalbr.ai` for the same API.
+
 ---
 
 ## 30-second quickstart
@@ -15,7 +18,7 @@ using a standard `Authorization: Bearer` header — no JWT required.
 ```bash
 KEY="oc_<your-key>"
 curl -H "Authorization: Bearer $KEY" \
-  https://chat.globalbr.ai/api/chat/conversations
+  https://chat.ideaflow.app/api/chat/conversations
 ```
 
 That's it. The key authenticates as you — same conversations, same permissions.
@@ -130,7 +133,7 @@ Scripts can call the same endpoints directly:
 
 ```bash
 KEY="oc_<your-key>"
-BASE_URL="https://chat.globalbr.ai"
+BASE_URL="https://chat.ideaflow.app"
 
 # Publish an ask. Confirm these exact anonymous terms with the user first.
 curl -X POST "$BASE_URL/api/intents" \
@@ -248,7 +251,7 @@ chmod 700 ~/.openchat
 cat > ~/.openchat/credentials.json << 'EOF'
 {
   "apiKey": "oc_<your-key>",
-  "baseUrl": "https://chat.globalbr.ai"
+  "baseUrl": "https://chat.ideaflow.app"
 }
 EOF
 chmod 600 ~/.openchat/credentials.json

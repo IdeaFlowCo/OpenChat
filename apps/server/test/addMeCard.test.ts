@@ -146,6 +146,7 @@ describe('AddMe card page', () => {
     const html = renderCardPage(
       projectCardForStranger({ ...owner, name: '<script>x</script>' }, DEFAULT_CARD_SETTINGS),
       generateCardToken(),
+      'https://chat.ideaflow.app',
     );
     expect(html).not.toContain('<script>x</script>');
     expect(html).toContain('&lt;script&gt;');
@@ -155,18 +156,29 @@ describe('AddMe card page', () => {
     expect(html).toContain('Request to be friends with &lt;script&gt;x&lt;/script&gt;');
     expect(html).toContain('/contact.vcf">Save contact</a>');
   });
+
+  it('keeps the app banner on the requested public host', () => {
+    const card = projectCardForStranger(owner, DEFAULT_CARD_SETTINGS);
+    const token = generateCardToken();
+    for (const origin of ['https://chat.globalbr.ai', 'https://chat.ideaflow.app']) {
+      const html = renderCardPage(card, token, origin);
+      expect(html).toContain(`app-argument=${origin}/c/${token}`);
+    }
+  });
 });
 
 describe('AddMe vCard', () => {
+  const origin = 'https://chat.ideaflow.app';
+
   it.each([null, '', '\u0000\u0001', 'private@example.test'])('uses a neutral minimum name for %j', name => {
     const card = projectCardForStranger({ name }, DEFAULT_CARD_SETTINGS);
-    expect(renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx')).toContain('FN:OpenChat member\r\n');
+    expect(renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx', origin)).toContain('FN:OpenChat member\r\n');
   });
 
   it('has a useful minimum card with UTF-8 text and CRLF lines', () => {
     const card = projectCardForStranger({ name: '山田 太郎 ✨', email: 'hidden@example.test' }, DEFAULT_CARD_SETTINGS);
-    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx');
-    expect(vcard).toBe('BEGIN:VCARD\r\nVERSION:3.0\r\nN:;山田 太郎 ✨;;;\r\nFN:山田 太郎 ✨\r\nURL:https://chat.globalbr.ai/c/AbCdEfGhIjKlMnOpQrStUvWx\r\nEND:VCARD\r\n');
+    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx', origin);
+    expect(vcard).toBe('BEGIN:VCARD\r\nVERSION:3.0\r\nN:;山田 太郎 ✨;;;\r\nFN:山田 太郎 ✨\r\nURL:https://chat.ideaflow.app/c/AbCdEfGhIjKlMnOpQrStUvWx\r\nEND:VCARD\r\n');
     expect(vcard).not.toContain('hidden@example.test');
   });
 
@@ -175,7 +187,7 @@ describe('AddMe vCard', () => {
       { name: 'Jo\\hn, Doe;\r\nTEL:+12345' },
       { ...DEFAULT_CARD_SETTINGS, headline: 'Hello\nTEL:+99999' },
     );
-    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx');
+    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx', origin);
     expect(vcard).toContain('FN:Jo\\\\hn\\, Doe\\;\\nTEL:+12345\r\n');
     expect(vcard).toContain('NOTE:Hello\\nTEL:+99999\r\n');
     expect(vcard).not.toMatch(/\r\n(?:TEL|EMAIL):/);
@@ -184,7 +196,7 @@ describe('AddMe vCard', () => {
   it('folds long Unicode values by UTF-8 bytes without splitting a character', () => {
     const name = '山😀e\u0301'.repeat(40);
     const card = projectCardForStranger({ name }, DEFAULT_CARD_SETTINGS);
-    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx');
+    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx', origin);
     for (const line of vcard.trimEnd().split('\r\n')) {
       expect(Buffer.byteLength(line, 'utf8')).toBeLessThanOrEqual(75);
     }
@@ -196,7 +208,7 @@ describe('AddMe vCard', () => {
     const card = projectCardForStranger({ name: `Name${separator}TEL:123` }, {
       ...DEFAULT_CARD_SETTINGS, headline: `Hello${separator}END:VCARD`,
     });
-    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx');
+    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx', origin);
     const properties = vcard.replace(/\r\n /g, '').trimEnd().split(/\r\n|[\r\n\u0085\u2028\u2029]/);
     expect(properties.map(line => line.split(':')[0])).toEqual(['BEGIN', 'VERSION', 'N', 'FN', 'NOTE', 'URL', 'END']);
     expect(properties).toContain('FN:Name\\nTEL:123');
@@ -210,8 +222,8 @@ describe('AddMe vCard', () => {
       showX: false, x: 'https://example.com/private-x',
       showLink: false, link: 'https://example.com/private-link',
     });
-    expect(renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx')).toBe(
-      'BEGIN:VCARD\r\nVERSION:3.0\r\nN:;Jacob Cole;;;\r\nFN:Jacob Cole\r\nURL:https://chat.globalbr.ai/c/AbCdEfGhIjKlMnOpQrStUvWx\r\nEND:VCARD\r\n',
+    expect(renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx', origin)).toBe(
+      'BEGIN:VCARD\r\nVERSION:3.0\r\nN:;Jacob Cole;;;\r\nFN:Jacob Cole\r\nURL:https://chat.ideaflow.app/c/AbCdEfGhIjKlMnOpQrStUvWx\r\nEND:VCARD\r\n',
     );
   });
 });

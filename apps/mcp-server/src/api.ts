@@ -7,7 +7,7 @@
  *
  * Auth: `Authorization: Bearer ${apiKey}` on every request.
  *
- * Default base URL: https://chat.globalbr.ai  (overridable via
+ * Default base URL: https://chat.ideaflow.app  (overridable via
  *   OPENCHAT_BASE_URL env var or credentials.json baseUrl field).
  */
 
@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-const DEFAULT_BASE_URL = 'https://chat.globalbr.ai';
+const DEFAULT_BASE_URL = 'https://chat.ideaflow.app';
 const CREDENTIALS_PATH = join(homedir(), '.openchat', 'credentials.json');
 
 // ---- types ----

@@ -92,7 +92,7 @@ function renderPage(title: string, mdContent: string): string {
 </head>
 <body>
   <div class="container">
-    <a class="back-link" href="https://chat.globalbr.ai">← Back to chat.globalbr.ai</a>
+    <a class="back-link" href="https://chat.ideaflow.app">← Back to chat.ideaflow.app</a>
     ${body}
   </div>
 </body>

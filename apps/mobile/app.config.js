@@ -24,7 +24,7 @@ module.exports = {
   expo: {
     name: 'OpenChat',
     slug: 'openchat-mobile',
-    version: '1.0.3',
+    version: '1.0.4',
     // orientation: 'default' unlocks landscape so iPad gets a proper
     // rotatable split-view / multitasking experience (OpenChat-d7f). Phones
     // still lay out the single-column mobile stack in any orientation; the
@@ -55,10 +55,10 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.jacobcole.openchat',
-      buildNumber: '2001',
-      // The AASA on chat.globalbr.ai covers group invites, people, and cards.
+      buildNumber: '2002',
+      // Both hosts serve the same AASA; existing links remain associated.
       // Apple also requires the App ID capability and a regenerated profile.
-      associatedDomains: ['applinks:chat.globalbr.ai'],
+      associatedDomains: ['applinks:chat.ideaflow.app', 'applinks:chat.globalbr.ai'],
       entitlements: {
         'com.apple.developer.applesignin': ['Default'],
       },
@@ -104,7 +104,7 @@ module.exports = {
       eas: {
         projectId: 'fc828863-4fa4-4b62-97f6-8c00ce1dffe3',
       },
-      buildDate: '2026-09-22',
+      buildDate: '2026-09-30',
     },
 
     // baseUrl ONLY set during web exports (when IS_WEB_BUILD=1). Native

@@ -32,7 +32,7 @@ function foldLine(line: string): string {
 }
 
 /** Receives only the authorized stranger projection, never an owner record. */
-export function renderCardVcard(card: StrangerCard, token: string): string {
+export function renderCardVcard(card: StrangerCard, token: string, origin: string): string {
   const name = textValue(card.name) || DEFAULT_PUBLIC_DISPLAY_NAME;
   const lines = [
     'BEGIN:VCARD',
@@ -46,6 +46,6 @@ export function renderCardVcard(card: StrangerCard, token: string): string {
     if (value && isSafeCardLink(value)) lines.push(`URL:${new URL(value).href}`);
   }
   // The token is validated by resolveCardToken before this function is called.
-  lines.push(`URL:https://chat.globalbr.ai/c/${token}`, 'END:VCARD');
+  lines.push(`URL:${origin}/c/${token}`, 'END:VCARD');
   return `${lines.map(foldLine).join('\r\n')}\r\n`;
 }

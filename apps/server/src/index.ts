@@ -37,6 +37,7 @@ import { ensureAgentSocialLayerIndexes } from './services/agentSocialLayer.js';
 import { openapiSpec } from './openapi.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 import { parseCorsOrigins } from './config/cors.js';
+import { LEGACY_CHAT_ORIGIN, NEW_CHAT_ORIGIN, chatOriginForRequestHost } from './config/publicUrl.js';
 import googleWebCallbackRoutes from './routes/googleWebCallback.js';
 import ideaflowWebCallbackRoutes from './routes/ideaflowWebCallback.js';
 import {
@@ -68,7 +69,8 @@ const httpServer = createServer(app);
 // CORS configuration
 const allowedOrigins = [
   'http://localhost:29231',
-  'https://chat.globalbr.ai',
+  NEW_CHAT_ORIGIN,
+  LEGACY_CHAT_ORIGIN,
   ...parseCorsOrigins(process.env.CORS_ORIGIN)
 ];
 
@@ -102,7 +104,7 @@ app.get('/health', (_req, res) => {
 // itself has one canonical responsive browser entry point at /app/.
 const landingHtmlPath = path.join(__dirname, 'landing.html');
 const landingIconPath = path.join(__dirname, 'landing-icon.png');
-const landingQrPath = path.join(__dirname, 'qr-chat-globalbrai.svg');
+const landingQrPath = path.join(__dirname, 'qr-chat-ideaflow.svg');
 app.get(['/', '/about'], (_req, res) => {
   res.sendFile(landingHtmlPath);
 });
@@ -123,8 +125,8 @@ app.get('/about/icon.png', (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.sendFile(landingIconPath);
 });
-// Shareable QR for chat.globalbr.ai (OpenChat-84u). Static SVG generated
-// once at build time; cache long since the URL it encodes never changes.
+// Shareable QR for chat.ideaflow.app (OpenChat-84u). The checked-in SVG is
+// stable between deployments, so cache it for one day.
 app.get('/about/qr.svg', (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.setHeader('Content-Type', 'image/svg+xml');
@@ -133,8 +135,8 @@ app.get('/about/qr.svg', (_req, res) => {
 
 // Per-user "add me" landing page (OpenChat-qr-onboard). Reached when a
 // non-installed user scans a personal QR (encoded as
-// https://chat.globalbr.ai/u/<userId>). Renders a small SSR page that
-// requires no JS to show the inviter's name + a clear sign-in / install
+// https://chat.ideaflow.app/u/<userId> or the legacy host). Renders a small SSR
+// page that requires no JS to show the inviter's name + a clear sign-in / install
 // CTA carrying the intent forward via ?intent=add-user&id=<id>.
 //
 // Once Associated Domains (OpenChat-84u.2) is enabled, installed-app
@@ -176,6 +178,7 @@ app.get('/u/:userId', async (req, res, next) => {
     }
 
     const { id, name, avatarUrl, isBot } = projection;
+    const requestOrigin = chatOriginForRequestHost(req.get('host'));
     const initial = (name[0] || '?').toUpperCase();
     const intentQs = `?intent=add-user&id=${encodeURIComponent(id)}`;
     
@@ -188,7 +191,7 @@ app.get('/u/:userId', async (req, res, next) => {
 <meta name="description" content="${safe(name)} wants to add you on OpenChat.">
 <meta property="og:title" content="${safe(name)} on OpenChat">
 <meta property="og:description" content="${safe(name)} wants to add you on OpenChat. Tap to start a conversation.">
-<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=https://chat.globalbr.ai/u/${encodeURIComponent(id)}">
+<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=${requestOrigin}/u/${encodeURIComponent(id)}">
 <style>
   :root { --bg:#0a0c18; --surface:rgba(255,255,255,0.05); --border:rgba(255,255,255,0.10);
           --text:#f4f6ff; --text-dim:#9aa0c5; --accent:#7c80ff; --accent-bg:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%); }
@@ -232,7 +235,7 @@ app.get('/u/:userId', async (req, res, next) => {
   <p class="cta-tiny">Already have OpenChat? <a href="openchat://user/${encodeURIComponent(id)}">Open the app directly</a></p>
 
   <div class="footer">
-    <a href="/">chat.globalbr.ai</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
+    <a href="/">${new URL(requestOrigin).hostname}</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
   </div>
 </div></body></html>`;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -261,7 +264,7 @@ app.get('/c/:token', async (req, res, next) => {
       res.status(404).send(renderCardUnavailablePage());
       return;
     }
-    res.send(renderCardPage(resolved.card, req.params.token as string));
+    res.send(renderCardPage(resolved.card, req.params.token as string, chatOriginForRequestHost(req.get('host'))));
   } catch (err) {
     console.error('/c/:token render error:', err);
     next();
@@ -271,7 +274,7 @@ app.get('/c/:token', async (req, res, next) => {
 });
 
 // Apple App Site Association (OpenChat-84u.1). Enables Universal Links so
-// tapping https://chat.globalbr.ai/i/<token> or .../u/<id> in Messages /
+// tapping either OpenChat host's /i/<token> or /u/<id> in Messages /
 // Mail / Safari opens the native OpenChat app when installed, instead of
 // landing in mobile Safari. Apple fetches this file once when the app is
 // installed and caches it.
@@ -473,6 +476,7 @@ app.get('/i/:token', async (req, res, next) => {
     const count = preview.memberCount;
     desc = `Join ${groupTitle} with ${count} ${count === 1 ? 'member' : 'members'} on OpenChat`;
 
+    const requestOrigin = chatOriginForRequestHost(req.get('host'));
     const encodedToken = encodeURIComponent(token).replace(/'/g, '%27');
     const html = `<!doctype html>
 <html lang="en"><head>
@@ -483,7 +487,7 @@ app.get('/i/:token', async (req, res, next) => {
 <meta name="description" content="${safe(desc)}">
 <meta property="og:title" content="Join ${safe(groupTitle)} on OpenChat">
 <meta property="og:description" content="${safe(desc)}">
-<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=https://chat.globalbr.ai/i/${encodedToken}">
+<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=${requestOrigin}/i/${encodedToken}">
 <style>
   :root { --bg:#0a0c18; --surface:rgba(255,255,255,0.05); --border:rgba(255,255,255,0.10);
           --text:#f4f6ff; --text-dim:#9aa0c5; --accent:#7c80ff; --accent-bg:linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%); }
@@ -517,7 +521,7 @@ app.get('/i/:token', async (req, res, next) => {
   ${renderInviteActions(token)}
 
   <div class="footer">
-    <a href="/">chat.globalbr.ai</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
+    <a href="/">${new URL(requestOrigin).hostname}</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
   </div>
 </div>
 <script>

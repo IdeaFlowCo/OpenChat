@@ -8,6 +8,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import { resolveOpenChatUrl } from './openChatUrl';
 
 /**
  * Token storage strategy (OpenChat-ghr):
@@ -64,9 +65,10 @@ async function clearTokenEverywhere(): Promise<void> {
   try { await AsyncStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
 }
 
-// Production by default; can override via .env (EXPO_PUBLIC_OPENCHAT_URL).
-export const OPENCHAT_URL =
-  process.env.EXPO_PUBLIC_OPENCHAT_URL || 'https://chat.globalbr.ai';
+export const OPENCHAT_URL = resolveOpenChatUrl(
+  process.env.EXPO_PUBLIC_OPENCHAT_URL,
+  typeof window !== 'undefined' ? window.location?.origin : undefined,
+);
 export const NOOS_URL =
   process.env.EXPO_PUBLIC_NOOS_URL || 'https://globalbr.ai';
 

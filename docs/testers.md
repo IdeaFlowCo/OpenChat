@@ -31,7 +31,10 @@ TestFlight.
 
 | Path | Audience | Notes |
 |------|----------|-------|
-| `https://chat.globalbr.ai/app` | Phone, tablet, and desktop web | The canonical responsive React-Native-web app. It uses compact navigation on narrow screens and master-detail layout on wide screens. Installable as a PWA. |
+| `https://chat.ideaflow.app/app` | Phone, tablet, and desktop web | The responsive React Native web app after the [domain cutover](./chat-domain-rollout.md). It uses compact navigation on narrow screens and master-detail layout on wide screens. Installable as a PWA. |
+
+Until that cutover, use the existing `https://chat.globalbr.ai/app` address.
+Existing links and installed clients continue using it afterward.
 
 Old `/m`, `/d`, and `/legacy` links redirect to `/app` and preserve their
 remaining path and query. See [`collapse-m-d.md`](./collapse-m-d.md).

@@ -53,8 +53,8 @@ provider's server-only registration procedure:
 | Field | Value |
 | --- | --- |
 | client name | `OpenChat Web` |
-| client URI | `https://chat.globalbr.ai` |
-| redirect URI | `https://chat.globalbr.ai/auth/ideaflow/callback` |
+| client URI | `https://chat.ideaflow.app` |
+| redirect URIs | Both OpenChat hosts; see the [domain rollout](./chat-domain-rollout.md) for the exact registrations |
 | post-logout redirect URIs | none during additive migration |
 | scopes | `openid profile email` |
 | token endpoint auth | `client_secret_basic` |
@@ -84,7 +84,7 @@ IDEAFLOW_ID_ENABLED=false
 IDEAFLOW_ID_ISSUER=https://id.ideaflow.app/api/auth
 IDEAFLOW_ID_CLIENT_ID=<registered client id>
 IDEAFLOW_ID_CLIENT_SECRET=<registered client secret>
-IDEAFLOW_ID_REDIRECT_URI=https://chat.globalbr.ai/auth/ideaflow/callback
+IDEAFLOW_ID_REDIRECT_URI=<registered callback for the primary OpenChat host>
 ```
 
 `IDEAFLOW_ID_ENABLED` is a server-side kill switch. The integration remains
@@ -98,7 +98,8 @@ build.
 1. RN-web generates state, nonce, and a PKCE verifier/challenge and keeps the
    verifier in same-tab session storage.
 2. `GET /api/auth/ideaflow/url` obtains the provider discovery document and
-   returns an authorization URL containing the fixed registered callback.
+   returns an authorization URL containing the registered callback for the
+   requesting OpenChat host. The token exchange uses that same callback.
 3. IdeaFlow ID redirects to `/auth/ideaflow/callback`; OpenChat forwards only
    the OAuth result to `/app/`.
 4. RN-web verifies state and calls `POST /api/auth/ideaflow/exchange` with the

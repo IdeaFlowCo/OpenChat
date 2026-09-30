@@ -1,8 +1,9 @@
 # openchat-mobile
 
-React Native (Expo) OpenChat app. Connects to the same production backend at
-`https://chat.globalbr.ai` and exports the canonical responsive RN-web app
-served at `/app`.
+React Native (Expo) OpenChat app. New builds default to
+`https://chat.ideaflow.app` and export the canonical responsive RN-web app
+served at `/app`. See the [domain rollout](../../docs/chat-domain-rollout.md)
+for the production cutover and old-host compatibility.
 
 ## What works today
 
@@ -74,12 +75,13 @@ scanning nor requesting friendship sends a message.
 ### Pointing at a different backend
 
 ```bash
-EXPO_PUBLIC_OPENCHAT_URL=https://chat.globalbr.ai \
+EXPO_PUBLIC_OPENCHAT_URL=https://chat.ideaflow.app \
 EXPO_PUBLIC_NOOS_URL=https://globalbr.ai \
   npx expo start
 ```
 
-Defaults are the production URLs above.
+These are the build defaults; the browser app also uses the origin that served
+it when opened on either public host.
 
 ### Web and desktop exports
 

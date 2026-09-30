@@ -8,6 +8,7 @@ import { getDriver } from '../db.js';
 import { legacyEmailProjection } from '../privacy/legacyEmailCompat.js';
 import { requireAuth, AuthUser } from '../middleware/auth.js';
 import { parseCorsOrigins } from '../config/cors.js';
+import { chatOriginForHost, ideaflowCallbackForHost } from '../config/publicUrl.js';
 import {
   buildIdeaflowAuthorizationUrl,
   exchangeIdeaflowAuthorizationCode,
@@ -290,7 +291,9 @@ router.get('/ideaflow/config', (_req: Request, res: Response) => {
  */
 router.get('/ideaflow/url', async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
-  const config = getIdeaflowOidcConfig();
+  const baseConfig = getIdeaflowOidcConfig();
+  const callback = ideaflowCallbackForHost(req.get('host'));
+  const config = baseConfig && callback ? { ...baseConfig, redirectUri: callback } : baseConfig;
   if (!config) {
     res.status(503).json({ error: 'IdeaFlow ID sign-in is not enabled' });
     return;
@@ -457,7 +460,9 @@ export async function linkIdeaflowIdentity(
  */
 router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
-  const config = getIdeaflowOidcConfig();
+  const baseConfig = getIdeaflowOidcConfig();
+  const callback = ideaflowCallbackForHost(req.get('host'));
+  const config = baseConfig && callback ? { ...baseConfig, redirectUri: callback } : baseConfig;
   if (!config) {
     res.status(503).json({ error: 'IdeaFlow ID sign-in is not enabled' });
     return;
@@ -1142,7 +1147,10 @@ router.post('/logout', requireAuth, async (req: Request, res: Response) => {
  * Would redirect to: ${NOOS_URL}/auth/authorize?redirect_uri=...&client_id=openchat
  */
 router.get('/login', (req: Request, res: Response) => {
-  const fallbackRedirect = getAuthFallbackRedirect(process.env.OPENCHAT_URL, process.env.CORS_ORIGIN);
+  const fallbackRedirect = getAuthFallbackRedirect(
+    chatOriginForHost(req.get('host')) || process.env.OPENCHAT_URL,
+    process.env.CORS_ORIGIN,
+  );
   const redirectUri = typeof req.query.redirect_uri === 'string' ? req.query.redirect_uri : fallbackRedirect;
   const state = typeof req.query.state === 'string' ? req.query.state : undefined;
 

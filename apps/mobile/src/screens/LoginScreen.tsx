@@ -226,7 +226,7 @@ export function LoginScreen() {
   // so iOS deep-links the callback back to the app correctly.
   //
   // The Web flow (GOOGLE_CLIENT_ID + code + secret + /google/exchange) is
-  // still used by the RN-web app at chat.globalbr.ai/app.
+  // still used by the RN-web app at chat.ideaflow.app/app.
   const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest({
     iosClientId: GOOGLE_IOS_CLIENT_ID,
     androidClientId: GOOGLE_ANDROID_CLIENT_ID, // Android-type client (pkg + SHA-1); falls back to iOS until EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID is set
@@ -652,12 +652,12 @@ export function LoginScreen() {
             {Platform.OS !== 'web' ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 16 }}>
                 <View style={styles.qrWrap}>
-                  <QRCode value="https://chat.globalbr.ai/app/" size={80} backgroundColor="#ffffff" color="#000000" />
+                  <QRCode value="https://chat.ideaflow.app/app/" size={80} backgroundColor="#ffffff" color="#000000" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 16, fontWeight: '600', color: c.textPrimary }}>Scan to open on any phone</Text>
                   <TouchableOpacity
-                    onPress={() => Share.share({ message: 'Try OpenChat: https://chat.globalbr.ai/app/' })}
+                    onPress={() => Share.share({ message: 'Try OpenChat: https://chat.ideaflow.app/app/' })}
                     activeOpacity={0.7}
                     style={[styles.shareButton, { backgroundColor: c.surfaceElevated, borderColor: c.border, marginTop: 12 }]}
                   >
@@ -668,7 +668,7 @@ export function LoginScreen() {
             ) : (
               <TouchableOpacity
                 style={{ flexDirection: 'row', alignItems: 'center', padding: 16 }}
-                onPress={() => Linking.openURL('https://chat.globalbr.ai/app/')}
+                onPress={() => Linking.openURL('https://chat.ideaflow.app/app/')}
                 activeOpacity={0.7}
               >
                 <View style={{ flex: 1 }}>

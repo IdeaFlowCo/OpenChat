@@ -1,5 +1,6 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import request from 'supertest';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -109,10 +110,20 @@ describe('AddMe card routes', () => {
     expect(body).toContain('FN:Jacob Cole\r\n');
     expect(body).toContain('NOTE:Founder\r\n');
     expect(body).toContain('URL:https://example.com/me\r\n');
-    expect(body).toContain(`URL:https://chat.globalbr.ai/c/${TOKEN}\r\n`);
+    expect(body).toContain(`URL:https://chat.ideaflow.app/c/${TOKEN}\r\n`);
     for (const secret of ['private@example.test', '+15555550123', 'owner-id-secret', 'private.example.test']) {
       expect(body).not.toContain(secret);
     }
+  });
+
+  it.each([
+    ['chat.globalbr.ai', 'https://chat.globalbr.ai'],
+    ['chat.ideaflow.app', 'https://chat.ideaflow.app'],
+  ])('exports the %s card URL for that public host', async (host, origin) => {
+    mocks.run.mockResolvedValueOnce(cardRecord('owner-id', {}));
+    const response = await request(server).get(`/api/card/${TOKEN}/contact.vcf`).set('Host', host);
+    expect(response.status).toBe(200);
+    expect(response.text).toContain(`URL:${origin}/c/${TOKEN}\r\n`);
   });
 
   it('rejects revoked and malformed vCard tokens', async () => {
