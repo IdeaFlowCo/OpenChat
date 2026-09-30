@@ -24,7 +24,7 @@ import { DirectConversationNotAllowedError, ensureDirectConversation } from '../
 import { classifyContactDiscoveryQuery } from '../privacy/contactDiscovery.js';
 import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
 import { isOpenUserDirectoryEnabled } from '../config/features.js';
-import { publicChatOrigin } from '../config/publicUrl.js';
+import { chatOriginForRequestHost } from '../config/publicUrl.js';
 import { acquireContextAclLocks } from '../services/contextAccess.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
@@ -2571,6 +2571,7 @@ router.get('/messages/since', resolveActor, async (req: Request, res: Response) 
 // POST /api/chat/conversations/:id/invites — owner-only, create or return active invite
 router.post('/conversations/:id/invites', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
+  const requestOrigin = chatOriginForRequestHost(req.get('host'));
   const userId = req.user!.userId;
   const convId = req.params.id as string;
   const { expiresInDays = 7, maxUses = 50 } = req.body as { expiresInDays?: number; maxUses?: number };
@@ -2613,7 +2614,7 @@ router.post('/conversations/:id/invites', requireAuth, async (req: Request, res:
       const token = inv.token as string;
       res.json({
         token,
-        url: `${publicChatOrigin()}/i/${token}`,
+        url: `${requestOrigin}/i/${token}`,
         expiresAt: inv.expiresAt,
         usesLeft: inv.usesLeft,
       });
@@ -2640,7 +2641,7 @@ router.post('/conversations/:id/invites', requireAuth, async (req: Request, res:
 
     res.status(201).json({
       token,
-      url: `${publicChatOrigin()}/i/${token}`,
+      url: `${requestOrigin}/i/${token}`,
       expiresAt,
       usesLeft: maxUses,
     });
@@ -2655,6 +2656,7 @@ router.post('/conversations/:id/invites', requireAuth, async (req: Request, res:
 // GET /api/chat/conversations/:id/invites — owner-only, list active invites
 router.get('/conversations/:id/invites', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
+  const requestOrigin = chatOriginForRequestHost(req.get('host'));
   const userId = req.user!.userId;
   const convId = req.params.id as string;
 
@@ -2684,7 +2686,7 @@ router.get('/conversations/:id/invites', requireAuth, async (req: Request, res: 
       const props = toJS(r.get('inv').properties) as Record<string, unknown>;
       return {
         token: props.token,
-        url: `${publicChatOrigin()}/i/${props.token}`,
+        url: `${requestOrigin}/i/${props.token}`,
         expiresAt: props.expiresAt,
         usesLeft: props.usesLeft,
         createdAt: props.createdAt,

@@ -11,6 +11,7 @@ import {
 } from '../services/addMeCard.js';
 import { DirectConversationNotAllowedError, ensureDirectConversation } from '../services/directConversation.js';
 import { renderCardVcard } from '../services/addMeCardVcard.js';
+import { chatOriginForRequestHost } from '../config/publicUrl.js';
 import { changeFriend, FriendError, getFriendStatus } from '../services/friends.js';
 
 /**
@@ -34,7 +35,7 @@ router.get('/:token/contact.vcf', async (req: Request, res: Response) => {
     }
     res.setHeader('Content-Type', 'text/vcard; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="openchat-contact.vcf"');
-    res.send(renderCardVcard(resolved.card, req.params.token as string));
+    res.send(renderCardVcard(resolved.card, req.params.token as string, chatOriginForRequestHost(req.get('host'))));
   } catch (error) {
     console.error('Error exporting AddMe card:', error);
     res.status(500).json({ error: 'Failed to export card' });

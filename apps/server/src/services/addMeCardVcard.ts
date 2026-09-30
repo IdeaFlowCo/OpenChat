@@ -1,6 +1,5 @@
 import { isSafeCardLink, type StrangerCard } from './addMeCard.js';
 import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
-import { publicChatOrigin } from '../config/publicUrl.js';
 
 /** RFC 2426 text escaping. Normalize all line endings before escaping so an
  * owner-controlled field cannot introduce another vCard property. */
@@ -33,7 +32,7 @@ function foldLine(line: string): string {
 }
 
 /** Receives only the authorized stranger projection, never an owner record. */
-export function renderCardVcard(card: StrangerCard, token: string): string {
+export function renderCardVcard(card: StrangerCard, token: string, origin: string): string {
   const name = textValue(card.name) || DEFAULT_PUBLIC_DISPLAY_NAME;
   const lines = [
     'BEGIN:VCARD',
@@ -47,6 +46,6 @@ export function renderCardVcard(card: StrangerCard, token: string): string {
     if (value && isSafeCardLink(value)) lines.push(`URL:${new URL(value).href}`);
   }
   // The token is validated by resolveCardToken before this function is called.
-  lines.push(`URL:${publicChatOrigin()}/c/${token}`, 'END:VCARD');
+  lines.push(`URL:${origin}/c/${token}`, 'END:VCARD');
   return `${lines.map(foldLine).join('\r\n')}\r\n`;
 }
