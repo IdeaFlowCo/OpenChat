@@ -2,7 +2,7 @@
 
 > **Audience:** the person filling in App Store Connect → App Privacy.
 > **Source of truth:** OpenChat-d8w. Update whenever data collection changes.
-> **Last infrastructure audit:** 2026-08-28 against the live GCP deployment.
+> **Disclosure reconciliation:** 2026-09-30 against build108 source (`4b7f136`) and current production provider configuration. This guide does not itself update App Store Connect.
 
 Apple's "App Privacy" section ("nutrition labels") is a structured answer to:
 *what does your app collect, and is it linked to the user?* These answers must
@@ -70,8 +70,8 @@ when filling out the ASC form.
 | Other User Content (chat messages, reactions) | YES | YES | NO | App Functionality |
 
 **Notes:**
-- Messages, voice notes, reactions, and image attachments are stored in Neo4j (server-side) so they sync across devices.
-- Images live in S3-compatible storage with presigned-URL access.
+- Message records, transcripts, reactions and attachment references are stored in Neo4j so they sync across devices. Uploaded image/audio files live in the configured object storage.
+- Voice audio is sent to Deepgram for transcription, with OpenAI Whisper as fallback. This processing applies to audio attachments in human-only chats too; it does not require an AI participant.
 - We do NOT use this content for advertising, analytics, or model training.
 - Bot-routed messages (when a user invites an AI agent into a conversation) are sent to Anthropic for response generation only — see Section 9.
 
@@ -111,11 +111,11 @@ when filling out the ASC form.
 |---|---|---|---|---|
 | Product Interaction (analytics events) | NO | — | — | — |
 | Advertising Data | NO | — | — | — |
-| Other Usage Data | NO | — | — | — |
+| Other Usage Data (presence / last activity) | YES | YES | NO | App Functionality (presence) |
 
 **Notes:**
-- No third-party analytics SDK (no Firebase, no Mixpanel, no Amplitude).
-- We do retain server-side HTTP request logs and `client-logs` (browser-error forward endpoint at `/api/client-logs`) for debugging — these are diagnostic, not behavioral analytics. They include error messages, stack traces, and user agents. See Section 9.
+- No third-party behavioral analytics SDK (no Firebase, no Mixpanel, no Amplitude). Online/offline presence and last-activity timestamps are collected for the chat experience.
+- We do retain server-side HTTP request logs and `client-logs` (browser-error forward endpoint at `/api/client-logs`) for debugging — these are diagnostic, not behavioral analytics. They include error messages, stack traces, supplied diagnostic context and request metadata. These logs do not depend on a Sentry SDK. See Section 9.
 
 ---
 
@@ -123,13 +123,14 @@ when filling out the ASC form.
 
 | Data Type | Collected? | Linked to user? | Used for tracking? | Purposes |
 |---|---|---|---|---|
-| Crash Data | NO (Sentry not yet shipped — pending OpenChat-7um) | — | — | — |
+| Crash Data (fatal uncaught-error reports) | YES | YES (conservative; see notes) | NO | App Functionality (debugging) |
 | Performance Data | NO | — | — | — |
-| Other Diagnostic Data | YES (`/api/client-logs` browser errors) | YES (when signed in) | NO | App Functionality |
+| Other Diagnostic Data | YES (`/api/client-logs` mobile/web errors and warnings) | YES (conservative; see notes) | NO | App Functionality (debugging) |
 
 **Notes:**
-- `/api/client-logs` accepts forwarded browser error events for debugging. Contains stack traces + browser metadata. Tied to user only when sender is signed-in.
-- Sentry crash reporting will land in OpenChat-7um. When it does, flip Crash Data to YES (Linked / App Functionality). Anthropic, the upstream Sentry vendor, has its own data processing terms.
+- `apps/mobile/src/services/clientLogger.ts` installs global fatal-error and unhandled-rejection handlers and sends diagnostic reports to `/api/client-logs`, including message/stack, supplied context, platform and app version. The server records IP address and user agent. Fatal-error collection exists even while the optional Sentry scaffold is disabled.
+- The log endpoint does not require sign-in or automatically attach a user ID. Do not infer that logs are anonymous: request metadata or supplied context can link them to a person. Keep the conservative linked-to-user classification until the release owner verifies the actual envelopes and any anonymization guarantees.
+- Reconcile Crash Data and Other Diagnostic Data in ASC with this custom collector. Do not wait for Sentry to declare crash collection. Any future Sentry enablement requires a separate processor and data-flow review.
 
 ---
 
@@ -142,9 +143,11 @@ when filling out the ASC form.
 | Vendor | Data Shared | Purpose |
 |---|---|---|
 | **Anthropic** (claude-haiku-4-5) | Message content of conversations where an AI agent participates; pre-send transform requests | AI assistant replies, message rewriting |
+| **Deepgram** (voice transcription) | Uploaded voice-message audio | App Functionality (generating transcripts, including in human-only chats) |
+| **OpenAI** (Whisper fallback) | Uploaded voice-message audio when the primary transcription path does not return text | App Functionality (generating transcripts) |
 | **Expo** (push delivery) | Push notification token, conversation ID, message preview | App Functionality (delivering notifications to iOS/Android) |
 | **Apple** (Sign in with Apple) | Email (or Apple email-relay), name on first sign-in | Account creation |
-| **Google** (OAuth + maybe `gpt-image-1`) | Email, name, profile picture; OAuth code exchange | Account creation |
+| **Google** (OAuth) | Email, name, profile picture; OAuth code exchange | Account creation |
 | **Google Cloud** (Compute Engine and Cloud Storage) | All app data (messages, images, voice notes, profile info) | App Functionality (server infrastructure) |
 | **Noos SSO** (`globalbr.ai`) | Email + password verification | Authentication |
 
@@ -212,7 +215,7 @@ Re-audit this doc when ANY of these change:
 - New data type collected (e.g. contacts, location, health data)
 - New third-party processor added (e.g. Mixpanel, Stripe, Twilio)
 - New user-content surface added (e.g. video calls would add "Video data")
-- Sentry / crash reporting lands (OpenChat-7um) → flip Section 9 Crash Data to YES
+- Changes to the existing custom crash logger, or Sentry enablement → recheck Section 9 and processor disclosures
 - Phone-number sign-in lands (OpenChat-xf4) → flip Section 1 Phone Number to YES
 - Contacts integration lands (OpenChat-ap3) → flip Section 3 Contacts to YES
 - Any new third-party SDK added to mobile or web client
