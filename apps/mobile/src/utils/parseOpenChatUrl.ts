@@ -5,11 +5,9 @@
  *   openchat://user/<userId>?v=1    → { type: 'user', userId }
  *   openchat://invite/<token>       → { type: 'invite', token }
  *   openchat://card/<token>         → { type: 'card', token }   (AddMe card)
- *   https://chat.globalbr.ai/c/<t>  → { type: 'card', token }
- *   https://chat.globalbr.ai/u/<id> → { type: 'user', userId }   (web fallback)
- *   https://chat.globalbr.ai/app/?intent=add-user&id=<id>
- *   https://chat.globalbr.ai/app/?intent=invite&token=<token>
- *   https://chat.globalbr.ai/app/?intent=card&token=<token>
+ *   https://chat.ideaflow.app/c/<t> → { type: 'card', token }
+ *   https://chat.globalbr.ai/c/<t> → { type: 'card', token } (legacy)
+ *   Both hosts also accept /u/<id>, /i/<token>, and /app/?intent=... links.
  *   anything else                   → { type: 'unknown' }
  */
 
@@ -56,7 +54,8 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
   // https://chat.globalbr.ai/i/<token>   (group invite web link)
   if (
     (url.protocol === 'https:' || url.protocol === 'http:') &&
-    (url.hostname === 'chat.globalbr.ai' || url.hostname === 'localhost' || url.hostname === '127.0.0.1')
+    (url.hostname === 'chat.ideaflow.app' || url.hostname === 'chat.globalbr.ai'
+      || url.hostname === 'localhost' || url.hostname === '127.0.0.1')
   ) {
     const userMatch = url.pathname.match(/^\/u\/(.+)$/);
     if (userMatch?.[1]) return { type: 'user', userId: userMatch[1] };

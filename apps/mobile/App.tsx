@@ -34,7 +34,7 @@ import { installClientLogger } from './src/services/clientLogger';
 import { initCrashReporting } from './src/services/crashReporting';
 import { hasCompletedOnboarding } from './src/services/onboarding';
 // Deep-link router (OpenChat-84u.1) — handles openchat:// scheme + Universal
-// Links to chat.globalbr.ai/{i,u}/<id>. Stashes the intent if unauthed so
+// Links to either OpenChat host's /{i,u,c}/<id>. Stashes intent if unauthed so
 // post-OAuth replay lands the user on the right screen.
 import { EntryProvider } from './src/contexts/EntryContext';
 import { installDeepLinkHandling } from './src/services/deepLinks';

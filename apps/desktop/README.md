@@ -1,7 +1,7 @@
 # OpenChat Desktop
 
 A native Tauri window around the **live** OpenChat client at
-`https://chat.globalbr.ai/app/` — the same react-native-web build of
+`https://chat.ideaflow.app/app/` — the same react-native-web build of
 `apps/mobile` that browsers get. There is no desktop UI codebase and no bundled
 copy of the client.
 
@@ -13,7 +13,7 @@ mobile and web:
 - **Same origin, same auth.** A bundled build runs from `tauri://localhost`,
   which is not in the server's CORS allowlist (`apps/server/src/index.ts`) and
   breaks the redirect sign-in flows, whose callback URIs are derived from
-  `window.location.origin`. Loaded from `chat.globalbr.ai`, every existing login
+  `window.location.origin`. Loaded from `chat.ideaflow.app`, every existing login
   path works unchanged, with no server change.
 - **Same socket, same data.** The client connects to the same Socket.io server,
   so messages sync live across desktop, web, and the iOS app.

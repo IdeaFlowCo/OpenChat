@@ -16,7 +16,7 @@
  * Env vars:
  *   PORT               HTTP port to bind (default: 8484)
  *   HOST               Interface to bind (default: 0.0.0.0)
- *   OPENCHAT_BASE_URL  Upstream OpenChat URL (default: https://chat.globalbr.ai)
+ *   OPENCHAT_BASE_URL  Upstream OpenChat URL (default: https://chat.ideaflow.app)
  *   OPENCHAT_API_KEY   Optional fallback key
  *
  * Endpoints:
@@ -62,7 +62,7 @@ function pickApiKey(req: Request): string | undefined {
 async function handleMcpRequest(req: Request, res: Response): Promise<void> {
   const reqId = randomUUID();
   const baseUrl = (
-    process.env.OPENCHAT_BASE_URL || 'https://chat.globalbr.ai'
+    process.env.OPENCHAT_BASE_URL || 'https://chat.ideaflow.app'
   ).replace(/\/+$/, '');
   const apiKey = pickApiKey(req);
 

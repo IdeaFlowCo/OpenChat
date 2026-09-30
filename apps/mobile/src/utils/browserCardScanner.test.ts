@@ -9,6 +9,7 @@ const token = 'AbCdEfGhIjKlMnOpQrStUvWx';
 describe('cardTokenFromScan', () => {
   it('accepts allowlisted card URLs and rejects other destinations and malformed tokens', () => {
     expect(cardTokenFromScan(`https://chat.globalbr.ai/c/${token}`)).toBe(token);
+    expect(cardTokenFromScan(`https://chat.ideaflow.app/c/${token}`)).toBe(token);
     expect(cardTokenFromScan(`openchat://card/${token}`)).toBe(token);
     expect(cardTokenFromScan(`https://chat.globalbr.ai/app/?intent=card&token=${token}`)).toBe(token);
     expect(cardTokenFromScan(`https://evil.example/c/${token}`)).toBeNull();

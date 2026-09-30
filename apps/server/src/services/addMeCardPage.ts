@@ -1,4 +1,5 @@
 import type { StrangerCard } from './addMeCard.js';
+import { publicChatOrigin } from '../config/publicUrl.js';
 
 /**
  * Server-rendered /c/:token page: the no-app (and link-preview) face of an
@@ -71,7 +72,7 @@ export function renderCardPage(card: StrangerCard, token: string): string {
 <meta name="description" content="${escapeHtml(description)}">
 <meta property="og:title" content="${name} on OpenChat">
 <meta property="og:description" content="${escapeHtml(description)}">
-<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=https://chat.globalbr.ai/c/${encodedToken}">
+<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=${publicChatOrigin()}/c/${encodedToken}">
 <style>${PAGE_STYLE}</style>
 </head><body>
 <div class="wrap">
@@ -94,7 +95,7 @@ export function renderCardPage(card: StrangerCard, token: string): string {
   <p class="cta-tiny">Already have OpenChat? <a href="openchat://card/${encodedToken}">Open in the app</a></p>
 
   <div class="footer">
-    <a href="/">chat.globalbr.ai</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
+    <a href="/">${new URL(publicChatOrigin()).hostname}</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
   </div>
 </div></body></html>`;
 }

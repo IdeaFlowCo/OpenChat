@@ -64,9 +64,13 @@ async function clearTokenEverywhere(): Promise<void> {
   try { await AsyncStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
 }
 
-// Production by default; can override via .env (EXPO_PUBLIC_OPENCHAT_URL).
+// Web requests stay on the page's origin so old-host bookmarks keep their
+// session and OAuth state. Native builds use the new public host by default.
 export const OPENCHAT_URL =
-  process.env.EXPO_PUBLIC_OPENCHAT_URL || 'https://chat.globalbr.ai';
+  process.env.EXPO_PUBLIC_OPENCHAT_URL
+  || (typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : 'https://chat.ideaflow.app');
 export const NOOS_URL =
   process.env.EXPO_PUBLIC_NOOS_URL || 'https://globalbr.ai';
 

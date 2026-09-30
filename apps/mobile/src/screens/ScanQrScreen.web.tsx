@@ -67,7 +67,7 @@ export function ScanQrScreen() {
   const openPastedLink = () => {
     const token = cardTokenFromScan(link);
     if (token) openCard(token);
-    else setMessage('Enter an OpenChat card link, such as https://chat.globalbr.ai/c/…');
+    else setMessage('Enter an OpenChat card link, such as https://chat.ideaflow.app/c/…');
   };
 
   return (
@@ -95,7 +95,7 @@ export function ScanQrScreen() {
         style={[styles.input, { color: c.textPrimary, borderColor: c.border, backgroundColor: c.surface }]}
         value={link}
         onChangeText={setLink}
-        placeholder="https://chat.globalbr.ai/c/…"
+        placeholder="https://chat.ideaflow.app/c/…"
         placeholderTextColor={c.textMuted}
         autoCapitalize="none"
         autoCorrect={false}

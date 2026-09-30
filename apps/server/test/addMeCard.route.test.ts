@@ -109,7 +109,7 @@ describe('AddMe card routes', () => {
     expect(body).toContain('FN:Jacob Cole\r\n');
     expect(body).toContain('NOTE:Founder\r\n');
     expect(body).toContain('URL:https://example.com/me\r\n');
-    expect(body).toContain(`URL:https://chat.globalbr.ai/c/${TOKEN}\r\n`);
+    expect(body).toContain(`URL:https://chat.ideaflow.app/c/${TOKEN}\r\n`);
     for (const secret of ['private@example.test', '+15555550123', 'owner-id-secret', 'private.example.test']) {
       expect(body).not.toContain(secret);
     }

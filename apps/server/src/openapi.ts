@@ -402,7 +402,10 @@ export const openapiSpec = {
     description:
       'REST API for OpenChat. Authenticate with `Authorization: Bearer <token>` where the token is either a user JWT or an `oc_` agent API key (mint one in Settings → Agent keys, or via /api/agent-keys). An agent key acts AS the owning user. Field note: message create accepts `content` (preferred) or `text` (alias). Webhook deliveries include `X-OpenChat-Secret` and `X-OpenChat-Signature` headers. Live guide: /about/connect-your-bot',
   },
-  servers: [{ url: 'https://chat.globalbr.ai', description: 'production' }],
+  servers: [
+    { url: 'https://chat.ideaflow.app', description: 'production' },
+    { url: 'https://chat.globalbr.ai', description: 'legacy production host' },
+  ],
   security: bearer,
   components: {
     securitySchemes: {

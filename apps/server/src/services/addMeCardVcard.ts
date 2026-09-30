@@ -1,5 +1,6 @@
 import { isSafeCardLink, type StrangerCard } from './addMeCard.js';
 import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
+import { publicChatOrigin } from '../config/publicUrl.js';
 
 /** RFC 2426 text escaping. Normalize all line endings before escaping so an
  * owner-controlled field cannot introduce another vCard property. */
@@ -46,6 +47,6 @@ export function renderCardVcard(card: StrangerCard, token: string): string {
     if (value && isSafeCardLink(value)) lines.push(`URL:${new URL(value).href}`);
   }
   // The token is validated by resolveCardToken before this function is called.
-  lines.push(`URL:https://chat.globalbr.ai/c/${token}`, 'END:VCARD');
+  lines.push(`URL:${publicChatOrigin()}/c/${token}`, 'END:VCARD');
   return `${lines.map(foldLine).join('\r\n')}\r\n`;
 }

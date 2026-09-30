@@ -24,6 +24,7 @@ import { DirectConversationNotAllowedError, ensureDirectConversation } from '../
 import { classifyContactDiscoveryQuery } from '../privacy/contactDiscovery.js';
 import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
 import { isOpenUserDirectoryEnabled } from '../config/features.js';
+import { publicChatOrigin } from '../config/publicUrl.js';
 import { acquireContextAclLocks } from '../services/contextAccess.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
@@ -2612,7 +2613,7 @@ router.post('/conversations/:id/invites', requireAuth, async (req: Request, res:
       const token = inv.token as string;
       res.json({
         token,
-        url: `https://chat.globalbr.ai/i/${token}`,
+        url: `${publicChatOrigin()}/i/${token}`,
         expiresAt: inv.expiresAt,
         usesLeft: inv.usesLeft,
       });
@@ -2639,7 +2640,7 @@ router.post('/conversations/:id/invites', requireAuth, async (req: Request, res:
 
     res.status(201).json({
       token,
-      url: `https://chat.globalbr.ai/i/${token}`,
+      url: `${publicChatOrigin()}/i/${token}`,
       expiresAt,
       usesLeft: maxUses,
     });
@@ -2683,7 +2684,7 @@ router.get('/conversations/:id/invites', requireAuth, async (req: Request, res: 
       const props = toJS(r.get('inv').properties) as Record<string, unknown>;
       return {
         token: props.token,
-        url: `https://chat.globalbr.ai/i/${props.token}`,
+        url: `${publicChatOrigin()}/i/${props.token}`,
         expiresAt: props.expiresAt,
         usesLeft: props.usesLeft,
         createdAt: props.createdAt,

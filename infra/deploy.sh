@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 GCP_PROJECT="${GCP_PROJECT:-lightsail-migration}"
 GCP_ZONE="${GCP_ZONE:-us-central1-a}"
 GCP_INSTANCE="${GCP_INSTANCE:-noos}"
+GCP_ACCOUNT="${GCP_ACCOUNT:-874749606899-compute@developer.gserviceaccount.com}"
 APP_NAME="openchat"
 APP_PORT="4001"
 
@@ -104,12 +105,14 @@ tar -czf "$DEPLOY_ARCHIVE" \
 # safe when the operator's active gcloud configuration points elsewhere.
 echo "Copying to GCP instance..."
 gcloud compute scp "$DEPLOY_ARCHIVE" "$GCP_INSTANCE:$DEPLOY_ARCHIVE" \
+  --account="$GCP_ACCOUNT" \
   --project="$GCP_PROJECT" \
   --zone="$GCP_ZONE"
 
 # Deploy on server
 echo "Deploying on server..."
 gcloud compute ssh "$GCP_INSTANCE" \
+  --account="$GCP_ACCOUNT" \
   --project="$GCP_PROJECT" \
   --zone="$GCP_ZONE" \
   --command="sudo env APP_NAME=$APP_NAME DEPLOY_ARCHIVE=$DEPLOY_ARCHIVE bash -s" << 'ENDSSH'
@@ -140,7 +143,7 @@ NOOS_JWT_SECRET=CHANGE_ME
 OC_BRIDGE_SECRET=CHANGE_ME
 NOOS_API_URL=http://noos_api:4000/api
 NOOS_URL=https://globalbr.ai
-OPENCHAT_URL=https://chat.globalbr.ai
+OPENCHAT_URL=https://chat.ideaflow.app
 # Friends-only beta directory. Change to 0 and redeploy to require a query.
 OPENCHAT_OPEN_USER_DIRECTORY=1
 # Stage IdeaFlow ID credentials separately, then switch this to true only
@@ -149,7 +152,7 @@ IDEAFLOW_ID_ENABLED=false
 IDEAFLOW_ID_ISSUER=https://id.ideaflow.app/api/auth
 IDEAFLOW_ID_CLIENT_ID=
 IDEAFLOW_ID_CLIENT_SECRET=
-IDEAFLOW_ID_REDIRECT_URI=https://chat.globalbr.ai/auth/ideaflow/callback
+IDEAFLOW_ID_REDIRECT_URI=https://chat.ideaflow.app/auth/ideaflow/callback
 EOF
 fi
 

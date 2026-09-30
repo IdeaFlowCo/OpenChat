@@ -166,7 +166,7 @@ describe('AddMe vCard', () => {
   it('has a useful minimum card with UTF-8 text and CRLF lines', () => {
     const card = projectCardForStranger({ name: '山田 太郎 ✨', email: 'hidden@example.test' }, DEFAULT_CARD_SETTINGS);
     const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx');
-    expect(vcard).toBe('BEGIN:VCARD\r\nVERSION:3.0\r\nN:;山田 太郎 ✨;;;\r\nFN:山田 太郎 ✨\r\nURL:https://chat.globalbr.ai/c/AbCdEfGhIjKlMnOpQrStUvWx\r\nEND:VCARD\r\n');
+    expect(vcard).toBe('BEGIN:VCARD\r\nVERSION:3.0\r\nN:;山田 太郎 ✨;;;\r\nFN:山田 太郎 ✨\r\nURL:https://chat.ideaflow.app/c/AbCdEfGhIjKlMnOpQrStUvWx\r\nEND:VCARD\r\n');
     expect(vcard).not.toContain('hidden@example.test');
   });
 
@@ -211,7 +211,7 @@ describe('AddMe vCard', () => {
       showLink: false, link: 'https://example.com/private-link',
     });
     expect(renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx')).toBe(
-      'BEGIN:VCARD\r\nVERSION:3.0\r\nN:;Jacob Cole;;;\r\nFN:Jacob Cole\r\nURL:https://chat.globalbr.ai/c/AbCdEfGhIjKlMnOpQrStUvWx\r\nEND:VCARD\r\n',
+      'BEGIN:VCARD\r\nVERSION:3.0\r\nN:;Jacob Cole;;;\r\nFN:Jacob Cole\r\nURL:https://chat.ideaflow.app/c/AbCdEfGhIjKlMnOpQrStUvWx\r\nEND:VCARD\r\n',
     );
   });
 });

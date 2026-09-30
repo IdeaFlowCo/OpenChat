@@ -98,4 +98,23 @@ describe('IdeaFlow ID auth routes', () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'A valid PKCE code verifier is required' });
   });
+
+  it('keeps Google account choice and redirects on each browser host', async () => {
+    process.env.GOOGLE_CLIENT_ID = 'google-web-client';
+    try {
+      for (const host of ['chat.globalbr.ai', 'chat.ideaflow.app']) {
+        const response = await fetch(`${baseUrl}/api/auth/google/url?state=chosen-state`, {
+          headers: { 'x-forwarded-host': host, 'x-forwarded-proto': 'https' },
+        });
+        expect(response.status).toBe(200);
+        const body = await response.json() as { url: string };
+        const authorize = new URL(body.url);
+        expect(authorize.searchParams.get('prompt')).toBe('select_account');
+        expect(authorize.searchParams.get('redirect_uri')).toBe(`https://${host}/auth/google/callback`);
+      }
+    } finally {
+      delete process.env.GOOGLE_CLIENT_ID;
+    }
+  });
+
 });

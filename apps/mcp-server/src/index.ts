@@ -10,7 +10,7 @@
  *
  * Env vars:
  *   OPENCHAT_API_KEY    Bearer token (starts `oc_` for agent keys, or a JWT)
- *   OPENCHAT_BASE_URL   default https://chat.globalbr.ai
+ *   OPENCHAT_BASE_URL   default https://chat.ideaflow.app
  *
  * Credentials file (fallback if env vars are unset):
  *   ~/.openchat/credentials.json  — { "apiKey": "oc_…", "baseUrl": "https://…" }

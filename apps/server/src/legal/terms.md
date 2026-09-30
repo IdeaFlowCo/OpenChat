@@ -2,7 +2,7 @@
 
 **Last updated: June 1, 2026**
 
-These Terms of Service ("Terms") govern your use of OpenChat, a messaging service available at https://chat.globalbr.ai and through the OpenChat mobile apps for iOS and Android (collectively, the "Service"). The Service is operated by Jacob Cole on behalf of the OpenChat project ("we", "us", "our").
+These Terms of Service ("Terms") govern your use of OpenChat, a messaging service available at https://chat.ideaflow.app, the legacy https://chat.globalbr.ai address, and through the OpenChat mobile apps for iOS and Android (collectively, the "Service"). The Service is operated by Jacob Cole on behalf of the OpenChat project ("we", "us", "our").
 
 By creating an account or using the Service, you agree to these Terms. If you do not agree, do not use the Service.
 
