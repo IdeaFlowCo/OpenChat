@@ -109,4 +109,24 @@ integration('private names real Neo4j + HTTP privacy', () => {
     const stored = await run(`MATCH (:User {id: $alice})-[r:OPENCHAT_PRIVATE_NAME]->(:User {id: $bob}) RETURN count(r) AS count`, { alice, bob });
     expect(stored.records[0].get('count').toNumber()).toBe(1);
   });
+  it('preserves hidden-profile access through friends or shared chats, but never through a block', async () => {
+    const pairKey = JSON.stringify([alice, hidden].sort());
+    try {
+      for (const state of ['pending', 'accepted']) {
+        await run(`MERGE (c:OpenChatConnection {pairKey: $pairKey}) SET c.state = $state`, { pairKey, state });
+        expect((await request(app).put(path(hidden)).set('Authorization', token(alice)).send({ name: 'Private friend' })).status).toBe(200);
+        expect((await request(app).get(path(hidden)).set('Authorization', token(alice))).body).toEqual({ name: 'Private friend' });
+        expect((await request(app).get(path(hidden)).set('Authorization', token(mallory))).status).toBe(404);
+      }
+      await run(`MATCH (c:OpenChatConnection {pairKey: $pairKey}) DELETE c`, { pairKey });
+      expect((await request(app).get(path(hidden)).set('Authorization', token(alice))).status).toBe(404);
+      await run(`MATCH (h:User {id: $hidden}), (c:Conversation {id: $conversationId}) CREATE (h)-[:PARTICIPATES_IN]->(c)`, { hidden, conversationId });
+      expect((await request(app).get(path(hidden)).set('Authorization', token(alice))).body).toEqual({ name: 'Private friend' });
+      await run(`MATCH (a:User {id: $alice}), (h:User {id: $hidden}) CREATE (a)-[:BLOCKED]->(h)`, { alice, hidden });
+      expect((await request(app).get(path(hidden)).set('Authorization', token(alice))).status).toBe(404);
+      expect((await request(app).put(path(hidden)).set('Authorization', token(alice)).send({ name: 'No' })).status).toBe(404);
+    } finally {
+      await run(`MATCH (c:OpenChatConnection {pairKey: $pairKey}) DELETE c`, { pairKey });
+    }
+  });
 });
