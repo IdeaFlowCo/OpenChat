@@ -1,10 +1,7 @@
 /**
- * Contact profile screen — opened by tapping the DM header avatar/name.
- * (OpenChat-???)
- *
- * Shows: large avatar, name + bot badge, email, status message, presence,
- * and quick actions (block, report). For non-bot users only — bots get a
- * simpler read-only view.
+ * A cached conversation participant must not keep a person's profile visible
+ * after the authenticated official-profile lookup denies access. The lookup
+ * also supports people with no conversation; it does not create a DM.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';

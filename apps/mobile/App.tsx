@@ -231,7 +231,6 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         component={ForwardPickerScreen}
         options={{ title: 'Forward to…', presentation: 'modal' }}
       />
-      {/* Contact profile — tap DM header to open */}
       <ChatsStack.Screen
         name="ContactProfile"
         component={ContactProfileScreen}
