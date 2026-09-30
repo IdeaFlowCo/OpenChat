@@ -27,6 +27,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { createThought, updateThought, ThoughtKind, ThoughtStatus } from '../services/thoughts';
+import { streamErrorMessage } from './streamError';
 import type { ThoughtsNavProp, ThoughtsRouteProps } from '../navigation/types';
 
 const KINDS: { value: ThoughtKind; label: string; color: string }[] = [
@@ -68,7 +69,7 @@ export function AddEditThoughtScreen() {
   const handleSave = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed) {
-      Alert.alert('Text required', 'Please enter some text for your thought.');
+      Alert.alert('Text required', 'Please enter some text for your Stream entry.');
       return;
     }
     if (trimmed.length > 4000) {
@@ -85,7 +86,7 @@ export function AddEditThoughtScreen() {
       }
       navigation.goBack();
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save thought');
+      Alert.alert('Error', streamErrorMessage(e, 'Failed to save Stream entry'));
     } finally {
       setSaving(false);
     }
@@ -204,7 +205,7 @@ export function AddEditThoughtScreen() {
             {saving ? (
               <ActivityIndicator color={c.onPrimary} size="small" />
             ) : (
-              <Text style={[styles.saveBtnText, { color: c.onPrimary }]}>{isEdit ? 'Save changes' : 'Add thought'}</Text>
+              <Text style={[styles.saveBtnText, { color: c.onPrimary }]}>{isEdit ? 'Save changes' : 'Add to Stream'}</Text>
             )}
           </TouchableOpacity>
         </View>

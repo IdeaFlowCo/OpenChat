@@ -19,7 +19,7 @@ export interface ThoughtsSearchBarProps {
 export function ThoughtsSearchBar({
   value,
   onChangeText,
-  placeholder = 'Search thoughts and tags',
+  placeholder = 'Search Stream and tags',
   onClear,
   testID,
 }: ThoughtsSearchBarProps) {
@@ -48,6 +48,7 @@ export function ThoughtsSearchBar({
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
+          accessibilityLabel={placeholder}
           placeholderTextColor={c.textMuted}
           autoCapitalize="none"
           autoCorrect={false}

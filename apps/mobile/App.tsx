@@ -7,7 +7,7 @@
  *
  *   Authenticated — bottom tabs (OpenChat-zi1):
  *     Chats tab  → Conversations stack (all pre-existing chat screens)
- *     Thoughts tab → Thoughts stack (personal notes feed)
+ *     Stream tab → Thoughts stack (personal notes feed)
  *
  * The "is the user signed in?" gate is driven by ChatContext.isAuthed.
  */
@@ -269,12 +269,12 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         component={SecretaryScreen}
         options={{ title: 'Secretary' }}
       />
-      {/* Chat-scoped Thoughts: pinned + captured-from-this-chat */}
+      {/* Chat-scoped Stream: pinned + captured-from-this-chat */}
       <ChatsStack.Screen
         name="ConversationThoughts"
         component={ConversationThoughtsScreen}
         options={({ route }) => ({
-          title: route.params.title ? `Thoughts · ${route.params.title}` : 'Chat Thoughts',
+          title: route.params.title ? `Stream · ${route.params.title}` : 'Chat Stream',
         })}
       />
     </ChatsStack.Navigator>
@@ -316,14 +316,14 @@ function ThoughtsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ThoughtsStack.Screen
         name="ThoughtsList"
         component={ThoughtsScreen}
-        options={{ title: 'Thoughts' }}
+        options={{ title: 'Stream' }}
       />
       <ThoughtsStack.Screen
         name="AddEditThought"
         component={AddEditThoughtScreen}
         options={({ route }) =>
           ({
-            title: route.params?.thought ? 'Edit Thought' : 'New Thought',
+            title: route.params?.thought ? 'Edit Stream entry' : 'New Stream entry',
             presentation: 'modal',
           })
         }
@@ -556,8 +556,10 @@ function AuthedTabs({
       <Tab.Screen
         name="ThoughtsTab"
         options={{
+          title: 'Stream',
+          tabBarAccessibilityLabel: 'Stream',
           tabBarLabel: ({ focused, color }) => (
-            <TabLabel text="Thoughts" focused={focused} color={color} />
+            <TabLabel text="Stream" focused={focused} color={color} />
           ),
           tabBarIcon: ({ focused, color }) => (
             <TabIcon icon="thought" focused={focused} color={color} c={c} stacked={stacked} />

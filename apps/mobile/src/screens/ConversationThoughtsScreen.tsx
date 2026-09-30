@@ -1,11 +1,11 @@
 /**
- * ConversationThoughtsScreen — chat-scoped Thoughts view.
+ * ConversationThoughtsScreen — chat-scoped Stream view.
  *
  * Opened from a chat's header or overflow menu. Shows two sections:
  *   Pinned          — thoughts pinned to this conversation by any participant
  *                     (pinning shares the thought with the whole chat)
  *   From this chat  — all participants' shared #hashtag captures plus the
- *                     caller's private "Save to Thoughts" captures
+ *                     caller's private "Save to Stream" captures
  *
  * Parity with ThoughtsScreen:
  *   - Debounced server-side search (?q=) across text and tags
@@ -45,6 +45,7 @@ import { ThoughtCard } from '../components/ThoughtCard';
 import { ThoughtsSearchBar } from '../components/ThoughtsSearchBar';
 import { AppIcon } from '../components/AppIcon';
 import type { RouteProps } from '../navigation/types';
+import { streamErrorMessage } from './streamError';
 
 export function ConversationThoughtsScreen() {
   const route = useRoute<RouteProps<'ConversationThoughts'>>();
@@ -90,7 +91,7 @@ export function ConversationThoughtsScreen() {
           setFromChat(data.fromChat);
         }
       } catch (e) {
-        if (mountedRef.current) setError(e instanceof Error ? e.message : 'Failed to load');
+        if (mountedRef.current) setError(streamErrorMessage(e, "Failed to load this chat's Stream"));
       } finally {
         if (mountedRef.current) {
           setLoading(false);
@@ -221,7 +222,7 @@ export function ConversationThoughtsScreen() {
         }
         await load(true, queryRef.current);
       } catch (e) {
-        Alert.alert('Error', e instanceof Error ? e.message : 'Pin change failed');
+        Alert.alert('Error', streamErrorMessage(e, 'Failed to change Stream pin'));
       }
     },
     [conversationId, load]
@@ -233,7 +234,7 @@ export function ConversationThoughtsScreen() {
       setPinned((prev) => prev.filter((t) => t.id !== id));
       setFromChat((prev) => prev.filter((t) => t.id !== id));
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete');
+      Alert.alert('Error', streamErrorMessage(e, 'Failed to delete Stream entry'));
     }
   }, []);
 
@@ -266,7 +267,7 @@ export function ConversationThoughtsScreen() {
       const t = await createThought({ text, pinToConversationId: conversationId });
       setPinned((prev) => [t, ...prev.filter((x) => x.id !== t.id)]);
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save thought');
+      Alert.alert('Error', streamErrorMessage(e, 'Failed to save Stream entry'));
     }
   }, [newDraft, conversationId]);
 
@@ -283,7 +284,7 @@ export function ConversationThoughtsScreen() {
       setPinned((prev) => prev.map((t) => (t.id === id ? { ...t, ...updated } : t)));
       setFromChat((prev) => prev.map((t) => (t.id === id ? { ...t, ...updated } : t)));
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save edit');
+      Alert.alert('Error', streamErrorMessage(e, 'Failed to save Stream entry'));
     }
   }, [editingId, editDraft, pinned, fromChat]);
 
@@ -304,7 +305,7 @@ export function ConversationThoughtsScreen() {
         value={value}
         onChangeText={onChange}
         onBlur={onBlur}
-        placeholder={placeholder ?? 'Write a thought…'}
+        placeholder={placeholder ?? 'Write a Stream entry…'}
         placeholderTextColor={c.textMuted}
         multiline
         autoFocus
@@ -321,14 +322,14 @@ export function ConversationThoughtsScreen() {
       <ThoughtsSearchBar
         value={query}
         onChangeText={setQuery}
-        placeholder="Search thoughts in this chat"
+        placeholder="Search this chat's Stream"
       />
 
       {/* Scope header — confirms the chat scope explicitly */}
       <View style={[styles.scopeHeader, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
         <AppIcon name="thought" color={c.primary} size={15} />
         <Text style={[styles.scopeHeaderText, { color: c.textMetadata }]} numberOfLines={1}>
-          Chat Thoughts · <Text style={{ color: c.textPrimary, fontWeight: '600' }}>{title || 'This conversation'}</Text>
+          Chat Stream · <Text style={{ color: c.textPrimary, fontWeight: '600' }}>{title || 'This conversation'}</Text>
         </Text>
       </View>
 
@@ -351,7 +352,7 @@ export function ConversationThoughtsScreen() {
         {isSearching && totalCount === 0 && !loading && (
           <View style={styles.emptyContainer}>
             <Text style={[styles.emptyText, { color: c.textMetadata, textAlign: 'center' }]}>
-              No thoughts match &ldquo;{query.trim()}&rdquo; in this chat.
+              No Stream entries match &ldquo;{query.trim()}&rdquo; in this chat.
             </Text>
             <TouchableOpacity
               onPress={() => setQuery('')}
@@ -378,7 +379,7 @@ export function ConversationThoughtsScreen() {
                 newDraft,
                 setNewDraft,
                 () => void commitNew(),
-                'New pinned thought…'
+                'New pinned Stream entry…'
               )}
             {pinned.length === 0 && !loading && !creating && !isSearching && (
               <Text style={[styles.emptyText, { color: c.textMetadata }]}>
@@ -416,7 +417,7 @@ export function ConversationThoughtsScreen() {
             </Text>
             {fromChat.length === 0 && !loading && !isSearching && (
               <Text style={[styles.emptyText, { color: c.textMetadata }]}>
-                Shared tags from this chat land here — use #fact, #idea, #todo… in a message, or long-press a message → “Save to Thoughts” for a private capture.
+                Shared tags from this chat land here — use #fact, #idea, #todo… in a message, or long-press a message → “Save to Stream” for a private capture.
               </Text>
             )}
             {fromChat.map((t) =>
@@ -444,7 +445,7 @@ export function ConversationThoughtsScreen() {
         onPress={openAdd}
         activeOpacity={0.8}
         accessibilityRole="button"
-        accessibilityLabel="New thought in this chat"
+        accessibilityLabel="New Stream entry in this chat"
       >
         <AppIcon name="plus" color={c.onPrimary} size={26} strokeWidth={2.2} />
       </TouchableOpacity>

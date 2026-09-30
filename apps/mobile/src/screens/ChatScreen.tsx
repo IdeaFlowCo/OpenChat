@@ -83,7 +83,7 @@ import { shouldShowGroupSenderLabel } from '../utils/conversationPresentation';
 
 // react-navigation's web header caps a left-aligned title's width assuming a
 // ~52pt headerRight and never lets it shrink, so a long chat name ran under the
-// wider Thoughts + More actions. Let the title shrink and keep the actions at
+// wider Stream + More actions. Let the title shrink and keep the actions at
 // their natural width so ConversationHeaderContent can ellipsize (web only;
 // the native header lays these out itself).
 const WEB_HEADER_LAYOUT: Pick<HeaderOptions, 'headerTitleContainerStyle' | 'headerRightContainerStyle'> = {
@@ -655,11 +655,11 @@ export function ChatScreen({
       <TouchableOpacity
         onPress={openConversationThoughts}
         accessibilityRole="button"
-        accessibilityLabel="Thoughts for this chat"
+        accessibilityLabel="Stream for this chat"
         style={styles.headerThoughtsButton}
       >
         <AppIcon name="thought" color={c.primary} size={18} />
-        <Text style={[styles.headerThoughtsText, { color: c.primary }]}>Thoughts</Text>
+        <Text style={[styles.headerThoughtsText, { color: c.primary }]}>Stream</Text>
       </TouchableOpacity>
       {moreAction}
     </View>
@@ -1183,10 +1183,10 @@ export function ChatScreen({
     [forwardToAssistant]
   );
 
-  // ── Save to Thoughts / Save & pin (unified capture affordance) ────────────
+  // ── Save to Stream / Save & pin (unified capture affordance) ────────────
   // Saves the message text as a Thought with provenance back to this message;
   // pin=true additionally pins it to this conversation so every participant
-  // sees it in the chat-scoped Thoughts view.
+  // sees it in the chat-scoped Stream view.
   const handleSaveToThoughts = useCallback(
     async (message: Message, pin: boolean) => {
       try {
@@ -1195,10 +1195,10 @@ export function ChatScreen({
           sourceMessageId: message.id,
           ...(pin ? { pinToConversationId: conversationId } : {}),
         });
-        showToast(pin ? 'Saved & pinned to this chat' : 'Saved to Thoughts');
+        showToast(pin ? 'Saved & pinned to this chat' : 'Saved to Stream');
       } catch (err) {
         logError('[thoughts] save-from-message failed', err, { pin });
-        Alert.alert('Error', 'Could not save to Thoughts. Please try again.');
+        Alert.alert('Error', 'Could not save to Stream. Please try again.');
       }
     },
     [conversationId, showToast]
@@ -1543,7 +1543,7 @@ export function ChatScreen({
             </Text>
             <TouchableOpacity onPress={openConversationThoughts} style={styles.conversationMenuRow} accessibilityRole="menuitem">
               <AppIcon name="thought" color={c.primary} size={20} />
-              <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Thoughts for this chat</Text>
+              <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Stream for this chat</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={openAgentNetwork} style={styles.conversationMenuRow} accessibilityRole="menuitem">
               <AppIcon name="bot" color={c.primary} size={20} />

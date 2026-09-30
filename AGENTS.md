@@ -47,7 +47,7 @@ See `docs/surface-map.md` for the canonical surface map of all client screens an
 **The Front-Door Test (Definition of Done for UI features):**
 *From the Chats screen, every feature must be reachable in at most two taps, every tap must have a visible word (not only an accessibility label or icon glyph), and the word must be the one a user would search for.*
 - Every new screen or feature adds a row to `docs/surface-map.md` in the same PR.
-- Doors hang from user nouns (Me, People, Chats, Asks, Thoughts, Settings), never from feature builders or PR lineages.
+- Doors hang from the user nouns in `docs/surface-map.md`, never from feature builders or PR lineages.
 - `enhanced` mode may gate coordination features (Asks, Stories, Review, quiet matching), but must never gate a noun (Profile/Me, People, OpenChat Agent, scanning).
 
 ## Theme tokens (`apps/mobile/src/theme/`)
