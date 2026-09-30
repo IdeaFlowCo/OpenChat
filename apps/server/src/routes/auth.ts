@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
 import { timingSafeEqual } from 'node:crypto';
@@ -22,6 +22,7 @@ import {
 import { isOpenUserDirectoryEnabled } from '../config/features.js';
 import type { Server as IOServer } from 'socket.io';
 import { ensureAssistantConversation } from '../services/assistant.js';
+import { GoogleIdentityError, resolveGoogleIdentity } from '../services/googleIdentity.js';
 
 const router = Router();
 function getJwtSecret(): string {
@@ -1242,20 +1243,30 @@ router.get('/google/url', (req: Request, res: Response) => {
   res.json({ url: authUrl.toString(), state, redirectUri });
 });
 
+// Existing account JWTs do not prove fresh ownership or safe login provenance.
+// Reject linking explicitly; never turn a link request into ordinary signup.
+function rejectGoogleLinking(req: Request, res: Response, next: NextFunction): void {
+  const link = req.body?.link;
+  if (link !== undefined && typeof link !== 'boolean') {
+    res.status(400).json({ error: 'link must be a boolean' });
+    return;
+  }
+  if (link === true) {
+    res.status(409).json({ error: 'Google account linking is unavailable. Account recovery requires independent ownership verification.' });
+    return;
+  }
+  next();
+}
+
 /**
  * POST /api/auth/google/exchange
  * Body: { code: string, redirectUri: string }
  *
- * Exchanges the authorization code for Google tokens, fetches the user's
- * profile, MERGEs the user by email in Neo4j (same shape as /dev-login), and
- * returns an OpenChat JWT.
- *
- * This is sign-up AND sign-in in one endpoint — MERGE handles both. If a user
- * with the same email already exists (e.g. they previously used /dev-login or
- * Noos SSO), we attach the Google identifiers to that record rather than
- * forking. Single identity per email.
+ * Exchanges the authorization code and resolves the Google subject. A matching
+ * email never grants access to an existing account. Unbound legacy email
+ * collisions require a separately reviewed recovery flow; linking is disabled.
  */
-router.post('/google/exchange', async (req: Request, res: Response) => {
+router.post('/google/exchange', rejectGoogleLinking, async (req: Request, res: Response) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
@@ -1320,52 +1331,11 @@ router.post('/google/exchange', async (req: Request, res: Response) => {
     return;
   }
 
-  if (!userinfo.email) {
-    res.status(400).json({ error: 'Google account did not provide an email' });
-    return;
-  }
-
-  // 3. MERGE the user. Same shape as /dev-login plus googleSub/picture so we
-  // can find the same record later even if email changes.
   const session = getDriver().session();
   try {
-    const now = new Date().toISOString();
-    const displayName = normalizePublicDisplayName(
-      userinfo.name || [userinfo.given_name, userinfo.family_name].filter(Boolean).join(' '),
-    );
-
-    const result = await session.run(`
-      MERGE (u:User {email: $email})
-      ON CREATE SET
-        u.id = $id,
-        u.name = $name,
-        u.createdAt = datetime($now),
-        u.presenceStatus = 'available',
-        u.lastSeenAt = datetime($now),
-        u.googleSub = $sub,
-        u.googleEmailVerified = $emailVerified,
-        u.avatarUrl = $picture,
-        u.signupProvider = 'google'
-      ON MATCH SET
-        u.lastSeenAt = datetime($now),
-        u.presenceStatus = 'available',
-        u.googleSub = coalesce(u.googleSub, $sub),
-        u.googleEmailVerified = coalesce(u.googleEmailVerified, $emailVerified),
-        u.avatarUrl = coalesce(u.avatarUrl, $picture)
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END, .avatarUrl, .isBot } AS user
-    `, {
-      email: userinfo.email,
-      name: displayName,
-      id: nanoid(),
-      now,
-      sub: userinfo.sub,
-      emailVerified: userinfo.email_verified ?? false,
-      picture: userinfo.picture ?? null,
-    });
-
-    const user = toJS(result.records[0].get('user')) as {
-      id: string; email: string; name: string;
-    };
+    const user = toJS(await resolveGoogleIdentity(
+      session, userinfo, 'google',
+    )) as { id: string; email: string; name: string };
 
     await ensureAssistantAtSignIn(req, user.id);
 
@@ -1382,7 +1352,11 @@ router.post('/google/exchange', async (req: Request, res: Response) => {
       provider: 'google',
     });
   } catch (e) {
-    console.error('Google sign-in: failed to upsert user:', e);
+    if (e instanceof GoogleIdentityError) {
+      res.status(e.status).json({ error: e.message });
+      return;
+    }
+    console.error('Google sign-in: failed to resolve user:', e);
     res.status(500).json({ error: 'Sign-in failed' });
   } finally {
     await session.close();
@@ -1401,15 +1375,16 @@ router.post('/google/exchange', async (req: Request, res: Response) => {
  *
  * Why a separate endpoint from /google/exchange: that one swaps an auth CODE
  * using the Web client's secret. iOS clients have no secret. The two flows
- * land at the same user record (MERGE by email) so a person who signed up on
- * the web and then signs in on iOS gets the same identity.
+ * resolve the same durable Google subject, preserving the OpenChat user ID
+ * across devices and Google email changes. Unbound legacy email collisions
+ * require a separately reviewed recovery flow; linking is disabled.
  *
  * Accepted audiences (`aud` claim on the ID token):
  *   - GOOGLE_CLIENT_ID         (Web client; used if anything else does an
  *                              ID-token flow in the future)
  *   - GOOGLE_IOS_CLIENT_ID     (iOS client created for this app)
  */
-router.post('/google/idtoken-exchange', async (req: Request, res: Response) => {
+router.post('/google/idtoken-exchange', rejectGoogleLinking, async (req: Request, res: Response) => {
   const webClientId = process.env.GOOGLE_CLIENT_ID;
   const iosClientId = process.env.GOOGLE_IOS_CLIENT_ID;
   if (!webClientId && !iosClientId) {
@@ -1442,51 +1417,16 @@ router.post('/google/idtoken-exchange', async (req: Request, res: Response) => {
     return;
   }
 
-  if (!payload || !payload.email) {
-    res.status(400).json({ error: 'Google ID token did not include an email' });
+  if (!payload) {
+    res.status(400).json({ error: 'Google ID token did not include an identity' });
     return;
   }
 
-  // 2. MERGE the user — same Cypher as /google/exchange.
   const session = getDriver().session();
   try {
-    const now = new Date().toISOString();
-    const displayName = normalizePublicDisplayName(
-      payload.name || [payload.given_name, payload.family_name].filter(Boolean).join(' '),
-    );
-
-    const result = await session.run(`
-      MERGE (u:User {email: $email})
-      ON CREATE SET
-        u.id = $id,
-        u.name = $name,
-        u.createdAt = datetime($now),
-        u.presenceStatus = 'available',
-        u.lastSeenAt = datetime($now),
-        u.googleSub = $sub,
-        u.googleEmailVerified = $emailVerified,
-        u.avatarUrl = $picture,
-        u.signupProvider = 'google-ios'
-      ON MATCH SET
-        u.lastSeenAt = datetime($now),
-        u.presenceStatus = 'available',
-        u.googleSub = coalesce(u.googleSub, $sub),
-        u.googleEmailVerified = coalesce(u.googleEmailVerified, $emailVerified),
-        u.avatarUrl = coalesce(u.avatarUrl, $picture)
-      RETURN u { .id, .email, .name, .presenceStatus, .statusMessage, profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL THEN { text: u.profileStatusText, emoji: u.profileStatusEmoji, updatedAt: u.profileStatusUpdatedAt } ELSE null END, .avatarUrl, .isBot } AS user
-    `, {
-      email: payload.email,
-      name: displayName,
-      id: nanoid(),
-      now,
-      sub: payload.sub,
-      emailVerified: payload.email_verified ?? false,
-      picture: payload.picture ?? null,
-    });
-
-    const user = toJS(result.records[0].get('user')) as {
-      id: string; email: string; name: string;
-    };
+    const user = toJS(await resolveGoogleIdentity(
+      session, payload, 'google-ios',
+    )) as { id: string; email: string; name: string };
 
     await ensureAssistantAtSignIn(req, user.id);
 
@@ -1503,7 +1443,11 @@ router.post('/google/idtoken-exchange', async (req: Request, res: Response) => {
       provider: 'google-ios',
     });
   } catch (e) {
-    console.error('Google iOS sign-in: failed to upsert user:', e);
+    if (e instanceof GoogleIdentityError) {
+      res.status(e.status).json({ error: e.message });
+      return;
+    }
+    console.error('Google iOS sign-in: failed to resolve user:', e);
     res.status(500).json({ error: 'Sign-in failed' });
   } finally {
     await session.close();
