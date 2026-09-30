@@ -19,7 +19,7 @@ export class GoogleIdentityError extends Error {
 }
 
 const conflict = () => new GoogleIdentityError(409,
-  'This Google identity cannot be linked automatically. Sign in to the existing OpenChat account to link it, or contact support.');
+  'This Google identity cannot sign in to the existing OpenChat account. Account recovery requires independent ownership verification.');
 
 const userProjection = `u { .id, .email, .name, .presenceStatus, .statusMessage,
   profileStatus: CASE WHEN u.profileStatusText IS NOT NULL OR u.profileStatusEmoji IS NOT NULL
@@ -36,15 +36,14 @@ async function lock(tx: ManagedTransaction, key: string) {
     SET lock._locked = true REMOVE lock._locked`, { key });
 }
 
-/** Resolve a verified Google identity. Email never authorizes a legacy link.
- * linkUserId must come from an explicitly authenticated OpenChat request,
- * never a client-supplied account ID or an email lookup.
+/** Resolve a verified Google identity. Email and existing account sessions
+ * never authorize linking an unbound legacy account. Recovery needs a
+ * separately reviewed ownership proof; this resolver cannot accept a target ID.
  */
 export async function resolveGoogleIdentity(
   session: Session,
   identity: GoogleIdentity,
   signupProvider: 'google' | 'google-ios',
-  linkUserId?: string,
 ): Promise<GoogleUser> {
   if (typeof identity.sub !== 'string' || !identity.sub.trim()) {
     throw new GoogleIdentityError(400, 'Google identity did not include a subject');
@@ -73,19 +72,7 @@ export async function resolveGoogleIdentity(
 
     let nodeId: string;
     if (mapped.records.length === 1) {
-      if (linkUserId && mapped.records[0].get('id') !== linkUserId) throw conflict();
       nodeId = mapped.records[0].get('nodeId') as string;
-    } else if (linkUserId) {
-      // Take a write lock BEFORE reading googleSub; a WHERE-then-SET alone
-      // can race under Neo4j's read-committed isolation.
-      const target = await tx.run(`MATCH (u:User {id: $userId})
-        SET u._openchatGoogleLinkLock = true REMOVE u._openchatGoogleLinkLock
-        RETURN elementId(u) AS nodeId, u.googleSub AS sub LIMIT 2`, { userId: linkUserId });
-      if (target.records.length !== 1 || target.records[0].get('sub') !== null) throw conflict();
-      if (!verifiedEmail) {
-        throw new GoogleIdentityError(400, 'A verified Google email is required to link an account');
-      }
-      nodeId = target.records[0].get('nodeId') as string;
     } else {
       const collision = await tx.run(`MATCH (u:User)
         WHERE toLower(trim(u.email)) = $email RETURN u.id LIMIT 1`, params);
@@ -114,7 +101,7 @@ export async function resolveGoogleIdentity(
     // JWTs and downstream authorization identify users by id, not elementId.
     // Even a unique Google subject is unsafe if that id names multiple Users.
     // Check every resolution path inside the transaction so ambiguity rolls
-    // back profile/link changes as well as preventing a session from escaping.
+    // back profile changes as well as preventing a session from escaping.
     const account = await tx.run(`MATCH (u:User {id: $userId})
       RETURN elementId(u) AS nodeId LIMIT 2`, { userId: user.id });
     if (account.records.length !== 1 || account.records[0].get('nodeId') !== nodeId) throw conflict();

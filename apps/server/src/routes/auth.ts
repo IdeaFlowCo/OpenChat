@@ -1243,16 +1243,16 @@ router.get('/google/url', (req: Request, res: Response) => {
   res.json({ url: authUrl.toString(), state, redirectUri });
 });
 
-// Linking requires both deliberate intent and an authenticated account. Merely
-// supplying an Authorization header during ordinary sign-in never links users.
-function requireGoogleLinkIntent(req: Request, res: Response, next: NextFunction): void {
+// Existing account JWTs do not prove fresh ownership or safe login provenance.
+// Reject linking explicitly; never turn a link request into ordinary signup.
+function rejectGoogleLinking(req: Request, res: Response, next: NextFunction): void {
   const link = req.body?.link;
   if (link !== undefined && typeof link !== 'boolean') {
     res.status(400).json({ error: 'link must be a boolean' });
     return;
   }
   if (link === true) {
-    requireAuth(req, res, next);
+    res.status(409).json({ error: 'Google account linking is unavailable. Account recovery requires independent ownership verification.' });
     return;
   }
   next();
@@ -1260,13 +1260,13 @@ function requireGoogleLinkIntent(req: Request, res: Response, next: NextFunction
 
 /**
  * POST /api/auth/google/exchange
- * Body: { code: string, redirectUri: string, link?: boolean }
+ * Body: { code: string, redirectUri: string }
  *
  * Exchanges the authorization code and resolves the Google subject. A matching
- * email never grants access to an existing account. Explicit link:true also
- * requires that account's OpenChat bearer session and preserves its user ID.
+ * email never grants access to an existing account. Unbound legacy email
+ * collisions require a separately reviewed recovery flow; linking is disabled.
  */
-router.post('/google/exchange', requireGoogleLinkIntent, async (req: Request, res: Response) => {
+router.post('/google/exchange', rejectGoogleLinking, async (req: Request, res: Response) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
@@ -1334,7 +1334,7 @@ router.post('/google/exchange', requireGoogleLinkIntent, async (req: Request, re
   const session = getDriver().session();
   try {
     const user = toJS(await resolveGoogleIdentity(
-      session, userinfo, 'google', req.body?.link === true ? req.user!.userId : undefined,
+      session, userinfo, 'google',
     )) as { id: string; email: string; name: string };
 
     await ensureAssistantAtSignIn(req, user.id);
@@ -1365,7 +1365,7 @@ router.post('/google/exchange', requireGoogleLinkIntent, async (req: Request, re
 
 /**
  * POST /api/auth/google/idtoken-exchange
- * Body: { idToken: string, link?: boolean }
+ * Body: { idToken: string }
  *
  * Native mobile path for "Sign in with Google" — used by the iOS app (and any
  * future Android client). On iOS the OAuth client is type=iOS (no client
@@ -1376,15 +1376,15 @@ router.post('/google/exchange', requireGoogleLinkIntent, async (req: Request, re
  * Why a separate endpoint from /google/exchange: that one swaps an auth CODE
  * using the Web client's secret. iOS clients have no secret. The two flows
  * resolve the same durable Google subject, preserving the OpenChat user ID
- * across devices and Google email changes. Explicit link:true requires an
- * authenticated OpenChat bearer session; email alone cannot link accounts.
+ * across devices and Google email changes. Unbound legacy email collisions
+ * require a separately reviewed recovery flow; linking is disabled.
  *
  * Accepted audiences (`aud` claim on the ID token):
  *   - GOOGLE_CLIENT_ID         (Web client; used if anything else does an
  *                              ID-token flow in the future)
  *   - GOOGLE_IOS_CLIENT_ID     (iOS client created for this app)
  */
-router.post('/google/idtoken-exchange', requireGoogleLinkIntent, async (req: Request, res: Response) => {
+router.post('/google/idtoken-exchange', rejectGoogleLinking, async (req: Request, res: Response) => {
   const webClientId = process.env.GOOGLE_CLIENT_ID;
   const iosClientId = process.env.GOOGLE_IOS_CLIENT_ID;
   if (!webClientId && !iosClientId) {
@@ -1425,7 +1425,7 @@ router.post('/google/idtoken-exchange', requireGoogleLinkIntent, async (req: Req
   const session = getDriver().session();
   try {
     const user = toJS(await resolveGoogleIdentity(
-      session, payload, 'google-ios', req.body?.link === true ? req.user!.userId : undefined,
+      session, payload, 'google-ios',
     )) as { id: string; email: string; name: string };
 
     await ensureAssistantAtSignIn(req, user.id);

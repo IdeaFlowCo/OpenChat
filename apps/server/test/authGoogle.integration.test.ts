@@ -124,11 +124,16 @@ integration('Google account binding (real Neo4j, mocked Google verification)', (
       });
 
       it('keeps the original account ID and contact email when the bound subject changes email', async () => {
+        await query(`MATCH (u:User {id: $id})
+          CREATE (u)-[:TEST_BINDING]->(:GoogleBindingTestMarker {id: $id})`, { id: accountId });
         google.payload.email = `${prefix}changed@example.test`;
         const response = await signIn();
         expect(response.status).toBe(200);
         expect(response.body.user).toMatchObject({ id: accountId, email, name: 'Original name' });
         expect(jwt.verify(response.body.token, 'google-binding-test-secret')).toMatchObject({ userId: accountId });
+        const membership = await query(`MATCH (u:User {id: $id})-[:TEST_BINDING]->(marker:GoogleBindingTestMarker)
+          RETURN marker.id AS markerId`, { id: accountId });
+        expect(membership.records[0].get('markerId')).toBe(accountId);
       });
 
       it('prefers the bound subject even when its changed email belongs to another account', async () => {
@@ -205,14 +210,14 @@ integration('Google account binding (real Neo4j, mocked Google verification)', (
         expect(response.body.token).toBeUndefined();
       });
 
-      it.each([false, true])('fails closed on duplicate account IDs with a unique Google subject (link=%s)', async link => {
+      it.each([false, true])('fails closed on duplicate account IDs with a unique Google subject (bearer=%s)', async withBearer => {
         await query('CREATE (:User {id: $id, email: $email, googleSub: $sub})', {
           id: accountId, email: `${prefix}duplicate@example.test`, sub: `${prefix}other-subject`,
         });
         const snapshot = () => query(`MATCH (u:User {id: $id})
           RETURN elementId(u) AS nodeId, properties(u) AS properties ORDER BY nodeId`, { id: accountId });
         const before = await snapshot();
-        const response = await signIn({ link, bearer: link ? accountSession() : undefined });
+        const response = await signIn({ bearer: withBearer ? accountSession() : undefined });
         expect(Boolean(response.body.token)).toBe(false);
         expect(response.status).toBe(409);
         const after = await snapshot();
@@ -220,18 +225,12 @@ integration('Google account binding (real Neo4j, mocked Google verification)', (
           .toEqual(before.records.map(record => record.toObject()));
       });
 
-      it('accepts an explicit link to the already-bound unique account', async () => {
-        const response = await signIn({ link: true, bearer: accountSession() });
-        expect(response.status).toBe(200);
-        expect(jwt.verify(response.body.token, 'google-binding-test-secret')).toMatchObject({ userId: accountId });
-      });
-
       it('refuses to choose among unlinked accounts with duplicate IDs', async () => {
         await query('MATCH (u:User {id: $id}) REMOVE u.googleSub', { id: accountId });
         await query('CREATE (:User {id: $id, email: $email})', {
           id: accountId, email: `${prefix}duplicate@example.test`,
         });
-        const response = await signIn({ link: true, bearer: accountSession() });
+        const response = await signIn({ bearer: accountSession() });
         expect(response.status).toBe(409);
         expect(response.body.token).toBeUndefined();
         const stored = await query('MATCH (u:User {id: $id}) RETURN u.googleSub AS sub', { id: accountId });
@@ -261,26 +260,39 @@ integration('Google account binding (real Neo4j, mocked Google verification)', (
         expect(response.body.token).toBeUndefined();
       });
 
-      it('preserves the authenticated legacy ID, profile, and membership on explicit link', async () => {
-        await query(`MATCH (u:User {id: $id}) REMOVE u.googleSub
+      it.each([false, true])('rejects explicit linking even with a valid account bearer (already bound=%s)', async bound => {
+        if (!bound) await query('MATCH (u:User {id: $id}) REMOVE u.googleSub', { id: accountId });
+        await query(`MATCH (u:User {id: $id})
           CREATE (u)-[:TEST_BINDING]->(:GoogleBindingTestMarker {id: $id})`, { id: accountId });
-        // Ownership comes from the signed account session, not either email.
+        const snapshot = () => query(`MATCH (u:User {id: $id})-[:TEST_BINDING]->(marker:GoogleBindingTestMarker)
+          RETURN elementId(u) AS nodeId, properties(u) AS user, marker.id AS markerId`, { id: accountId });
+        const before = await snapshot();
+        // Session signatures do not establish how account access was obtained.
         google.payload.email = `${prefix}google-contact@example.test`;
         const response = await signIn({ link: true, bearer: accountSession(), userId: 'untrusted-body-id' });
-        expect(response.status).toBe(200);
-        expect(response.body.user).toMatchObject({ id: accountId, email, name: 'Original name' });
-        expect(jwt.verify(response.body.token, 'google-binding-test-secret')).toMatchObject({ userId: accountId });
-        const linked = await query(`MATCH (u:User {id: $id})-[:TEST_BINDING]->(marker:GoogleBindingTestMarker)
-          RETURN u.googleSub AS sub, marker.id AS markerId`, { id: accountId });
-        expect(linked.records[0].get('sub')).toBe(subject);
-        expect(linked.records[0].get('markerId')).toBe(accountId);
-        const subsequent = await signIn();
-        expect(subsequent.body.user.id).toBe(accountId);
+        expect(response.status).toBe(409);
+        expect(response.body.token).toBeUndefined();
+        expect(google.verify).not.toHaveBeenCalled();
+        expect(fetch).not.toHaveBeenCalled();
+        const after = await snapshot();
+        expect(after.records.map(record => record.toObject()))
+          .toEqual(before.records.map(record => record.toObject()));
+        const created = await query('MATCH (u:User {email: $email}) RETURN u', { email: google.payload.email });
+        expect(created.records).toHaveLength(0);
       });
 
-      it.each([undefined, 'invalid-session'])('requires a valid account session to link (%s)', async bearer => {
+      it.each([undefined, 'invalid-session'])('rejects linking with a missing or invalid bearer (%s)', async bearer => {
         const response = await signIn({ link: true, bearer, userId: accountId });
-        expect(response.status).toBe(401);
+        expect(response.status).toBe(409);
+        expect(response.body.token).toBeUndefined();
+        expect(google.verify).not.toHaveBeenCalled();
+        expect(fetch).not.toHaveBeenCalled();
+      });
+
+      it.each(['true', 1, null])('rejects malformed link intent (%s)', async link => {
+        const response = await signIn({ link, bearer: accountSession() });
+        expect(response.status).toBe(400);
+        expect(response.body.token).toBeUndefined();
         expect(google.verify).not.toHaveBeenCalled();
         expect(fetch).not.toHaveBeenCalled();
       });
@@ -294,43 +306,48 @@ integration('Google account binding (real Neo4j, mocked Google verification)', (
 
       it('will not replace a stored subject even with an account session', async () => {
         google.payload.sub = `${prefix}different-subject`;
-        const response = await signIn({ link: true, bearer: accountSession() });
+        const response = await signIn({ bearer: accountSession() });
         expect(response.status).toBe(409);
         const stored = await query('MATCH (u:User {id: $id}) RETURN u.googleSub AS sub', { id: accountId });
         expect(stored.records[0].get('sub')).toBe(subject);
       });
 
-      it('will not move a bound Google identity onto another authenticated account', async () => {
+      it('ignores bearer and body target IDs when the Google subject already identifies an account', async () => {
         const otherId = `${prefix}other`;
         await query('CREATE (:User {id: $id, email: $email})', { id: otherId, email: `${prefix}other@example.test` });
-        const response = await signIn({ link: true, bearer: accountSession(otherId) });
-        expect(response.status).toBe(409);
-        expect(response.body.token).toBeUndefined();
+        const response = await signIn({ bearer: accountSession(otherId), userId: otherId });
+        expect(response.status).toBe(200);
+        expect(jwt.verify(response.body.token, 'google-binding-test-secret')).toMatchObject({ userId: accountId });
+        const stored = await query('MATCH (u:User {id: $id}) RETURN u.googleSub AS sub', { id: otherId });
+        expect(stored.records[0].get('sub')).toBeNull();
       });
 
-      it('will not create a replacement for a deleted link target', async () => {
+      it('does not reinterpret a link request as signup when no target exists', async () => {
         await clean();
         const response = await signIn({ link: true, bearer: accountSession() });
         expect(response.status).toBe(409);
         expect(response.body.token).toBeUndefined();
+        const created = await query('MATCH (u:User {googleSub: $sub}) RETURN u', { sub: subject });
+        expect(created.records).toHaveLength(0);
       });
 
-      it('rolls back an explicit link with an unverified Google email', async () => {
+      it('rejects linking regardless of Google email verification', async () => {
         await query('MATCH (u:User {id: $id}) REMOVE u.googleSub', { id: accountId });
         google.payload.email_verified = false;
         const response = await signIn({ link: true, bearer: accountSession() });
-        expect(response.status).toBe(400);
+        expect(response.status).toBe(409);
+        expect(response.body.token).toBeUndefined();
         const stored = await query('MATCH (u:User {id: $id}) RETURN u.googleSub AS sub', { id: accountId });
         expect(stored.records[0].get('sub')).toBeNull();
       });
     });
   }
 
-  async function resolve(sub: string, googleEmail: string, linkUserId?: string) {
+  async function resolve(sub: string, googleEmail: string) {
     const { resolveGoogleIdentity } = await import('../src/services/googleIdentity.js');
     const session = database.getDriver().session();
     try {
-      return await resolveGoogleIdentity(session, { sub, email: googleEmail, email_verified: true }, 'google', linkUserId);
+      return await resolveGoogleIdentity(session, { sub, email: googleEmail, email_verified: true }, 'google');
     } finally {
       await session.close();
     }
@@ -355,27 +372,17 @@ integration('Google account binding (real Neo4j, mocked Google verification)', (
     expect(stored.records).toHaveLength(1);
   });
 
-  it('locks the legacy user before two different subjects race to link it', async () => {
+  it('denies concurrent attempts to claim an unlinked legacy email without duplicating or migrating it', async () => {
     await query('MATCH (u:User {id: $id}) REMOVE u.googleSub', { id: accountId });
     const attempts = await Promise.allSettled([1, 2].map(i =>
-      resolve(`${prefix}new-subject-${i}`, `${prefix}different-${i}@example.test`, accountId)));
-    const winners = attempts.filter(a => a.status === 'fulfilled');
-    expect(winners).toHaveLength(1);
-    expect((winners[0] as PromiseFulfilledResult<{ id: string }>).value.id).toBe(accountId);
-    const rejected = attempts.find(a => a.status === 'rejected') as PromiseRejectedResult;
-    expect(rejected.reason.status).toBe(409);
-  });
-
-  it('cannot bind the same Google subject to two different authenticated accounts concurrently', async () => {
-    const otherId = `${prefix}other`;
-    await query('MATCH (u:User {id: $id}) REMOVE u.googleSub', { id: accountId });
-    await query('CREATE (:User {id: $id, email: $email})', { id: otherId, email: `${prefix}other@example.test` });
-    const attempts = await Promise.allSettled([accountId, otherId].map((id, i) =>
-      resolve(subject, `${prefix}different-${i}@example.test`, id)));
-    expect(attempts.filter(a => a.status === 'fulfilled')).toHaveLength(1);
-    const rejected = attempts.find(a => a.status === 'rejected') as PromiseRejectedResult;
-    expect(rejected.reason.status).toBe(409);
-    const stored = await query('MATCH (u:User {googleSub: $sub}) RETURN u.id', { sub: subject });
+      resolve(`${prefix}new-subject-${i}`, email)));
+    for (const attempt of attempts) {
+      expect(attempt.status).toBe('rejected');
+      expect((attempt as PromiseRejectedResult).reason.status).toBe(409);
+    }
+    const stored = await query('MATCH (u:User {email: $email}) RETURN u.id AS id, u.googleSub AS sub', { email });
     expect(stored.records).toHaveLength(1);
+    expect(stored.records[0].get('id')).toBe(accountId);
+    expect(stored.records[0].get('sub')).toBeNull();
   });
 });

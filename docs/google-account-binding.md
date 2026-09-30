@@ -9,8 +9,8 @@ initializer and `authGoogle.integration.test.ts` define its schema and tests.
 
 Expected behavior: a verified Google subject authenticates its previously bound
 OpenChat user ID. A matching email cannot authorize access to another account or
-replace a different stored subject. An authorized link must keep the original
-User node, ID, profile, and relationships.
+replace a different stored subject. Existing User nodes, IDs, profiles, and
+relationships must survive both successful sign-ins and denied collisions.
 
 At base `25f12f690d7df16506671ef37849d0fc7b75bc08`, both routes instead ran
 `MERGE (u:User {email: $email})`, retained `coalesce(u.googleSub, $sub)`, and
@@ -31,7 +31,7 @@ database files are unchanged in the subsequent base
 
 The initial baseline run had **8 expected failures and 2 passing controls**;
 the identical initial cases passed after the repair. The expanded tests exercise
-both routes, explicit linking, invalid proof, duplicate legacy data, and real
+both routes, denied linking, invalid proof, duplicate legacy data, and real
 concurrent transactions. All credentials and users in those tests are fixtures.
 No live Google token, production account, production schema, or installed
 iPhone flow was tested, and no actual compromise is established.
@@ -51,10 +51,10 @@ any real account through this condition.
 
 Every resolution path now requires exactly one User with the selected account
 ID, matching the selected node, inside the same transaction before returning.
-Ambiguity returns 409 without a JWT and rolls back identity/profile changes.
-Both-route tests assert that both seeded Users remain unchanged, unique bound
-accounts still accept explicit linking, and unbound duplicate IDs stay denied.
-The expanded Google binding suite has **64 cases**.
+Ambiguity returns 409 without a JWT and rolls back profile changes. Both-route
+tests assert that both seeded Users remain unchanged, with or without an ambient
+account bearer. Explicit linking was subsequently disabled as described below;
+unique subject-bound accounts continue through ordinary Google sign-in.
 
 History: web email linking began in `d55dbab` (2026-05-30), native email linking
 in `8707dbb` (2026-05-31); the monorepo migration retained both. This is
@@ -81,39 +81,46 @@ linking guidance](https://developers.google.com/identity/gsi/web/guides/verify-g
 
 Checking only `email_verified` would therefore leave the verified-email case
 unfixed. The repair uses the subject for authentication and treats email as a
-contact attribute. New accounts and new links require a verified, valid-format
+contact attribute. New accounts require a verified, valid-format
 email, but an existing subject binding does not depend on current email claims.
 
-## Account preservation and explicit linking
+## Account preservation and recovery
 
 | Case | Result |
 | --- | --- |
 | Exactly one User with the verified subject and exactly one User with its account ID | Authenticate that existing ID, even if Google email changes, is absent/unverified, or now matches another account. Preserve `User.email`; store current provider claims separately in `googleEmail` / `googleEmailVerified`. |
 | Unknown subject, existing email (case-insensitive) | 409, no JWT, no new User, no implicit linking. |
 | Unknown subject, previously unused verified email | Create a new User, as normal signup. |
-| Explicit link with valid current OpenChat session and valid Google proof | Bind only the session's user ID if its subject is unset. Preserve its existing node, contact email, and relationships. |
-| Stored subject differs, subject belongs to another target, target is deleted/ambiguous, or legacy subject/account ID has duplicate Users | 409, including ordinary sign-in and already-bound explicit links. Do not overwrite a subject, choose a duplicate, migrate IDs, or create a replacement account. |
+| `link: true`, with any bearer or Google proof | 409 before provider verification or database access. Linking is unavailable, including for already-bound subjects; those subjects use ordinary sign-in. Malformed link intent returns 400. |
+| Unknown subject with an email belonging to a differently bound account, or duplicate legacy subject/account ID | 409. Do not overwrite a subject, choose a duplicate, migrate IDs, or create a replacement account. |
 
-Both exchange bodies accept optional `link: true`. That explicit intent requires
-`Authorization: Bearer <existing OpenChat session>` through the existing
-`requireAuth` middleware **before** Google verification. The subject still comes
-from Google; the target ID comes only from the validated account session.
-Request-body IDs and emails cannot choose a target. An ambient session without
-`link: true` does not authorize linking. This is a server API capability; this
-repair does not introduce a client linking/recovery screen.
+The resolver accepts only a Google identity, never an account ID from a bearer or
+request body. Existing account sessions do not authorize linking. Requests to
+link are explicitly rejected rather than being reinterpreted as signup. The
+canonical clients send only the code/redirect URI or ID token; this removes a
+newly proposed capability, not an existing client linking feature.
 
-The account session establishes authorization independently of the incoming
-Google email. It does **not** establish fresh reauthentication or authentication
-provenance: existing JWTs do not carry that assurance, and this repair neither
-revokes old JWTs nor repairs a historically incorrect binding. Do not use a
-session known to have been obtained through the vulnerable path as recovery
-proof.
+The initial repair proposed bearer-authorized linking. Review found that an
+existing non-Google auth path can issue an unrelated account bearer under its
+own email-fallback conditions. The local Google fixtures independently show
+that a valid account-session signature sufficed to bind an unset subject on the
+initial repair: four denied-link regressions return 200 against `d1af987`, for
+bound and unbound accounts on both routes. Those JWTs contain no fresh ownership or authentication-source
+assurance, so a signed or recently issued bearer cannot safely authorize a new
+Google binding. The final repair removes that capability entirely. Apple and
+other providers are unchanged and require separate security disposition;
+this PR does not claim to repair them, revoke old JWTs, or correct historical
+bindings.
 
-Sessionless legacy users must first regain access through an independently
-trusted existing login/recovery method. If none exists, or there are duplicate
-subjects/IDs or a disputed stored subject, the recovery/product owner must
-choose and validate an ownership proof before any mutation. **No automatic
-recovery, reassignment, deletion, or account merge is part of this repair.**
+An unbound legacy account with a colliding email now remains inaccessible via
+Google until a **separately reviewed recovery/linking flow** independently
+proves ownership. This applies even to a legitimate holder of an existing
+account session. The existing node, ID, contact email, profile, and relationships
+remain unchanged; the repair never creates a replacement for that collision.
+Duplicate/disputed subjects or IDs likewise require a recovery decision.
+Before production cutover, the recovery/product owner must choose and validate
+that proof. **No automatic recovery, reassignment, deletion, or account merge is
+part of this repair.**
 
 ## Schema, races, and release limits
 
@@ -126,26 +133,26 @@ destructive cleanup, so this repair does neither.
 Instead, a unique `OpenChatGoogleAuthLock.key` constraint serializes the two
 Google routes by normalized email and exact subject inside one `executeWrite`
 transaction. A nonunique `User.googleSub` index supports the subject lookup.
-Explicit links take a User write lock before checking its stored subject;
-Neo4j's read-committed isolation otherwise permits a check-then-write race.
-This follows the [Neo4j write-lock pattern](https://neo4j.com/docs/operations-manual/current/database-internals/concurrent-data-access/).
 Failed checks roll back; JWT issuance occurs only after commit.
 
 Concurrent tests cover same subject with different emails, different subjects
-with the same email, two subjects linking one account, and one subject linking
-two accounts. These guarantees coordinate the repaired Google writers. Other
+registering the same unused email, and two subjects colliding with one unbound
+legacy email without changing or duplicating its account. These guarantees
+coordinate the repaired Google writers. Other
 providers or an old server instance do not participate in these locks; they can
 still race on shared emails or introduce duplicate IDs/subjects after the
 transaction's checks. The ID check rejects observed ambiguity; it is not a
 global uniqueness constraint or a repair for previously issued sessions.
-Cross-provider email provisioning and previously
-issued sessions need their own disposition. Do not claim this repairs all
+Cross-provider email provisioning and previously issued sessions need their own
+disposition. Do not claim this repairs all
 identity providers or deploy a mixture of old and repaired Google writers.
 
 Local validation used a task-private Neo4j **2026.06.0** server because Docker
 pulls stalled. All Cypher uses constructs available in 5.26, but local results
 alone do not establish version compatibility. The dedicated GitHub workflow
 pins **Neo4j 5.26.0** and runs the real transaction/route tests on every PR.
+The final suite has **69 cases**, including disabled linking, subject and ID
+ambiguity, account preservation, email verification, and transaction races.
 
 Before any separately authorized rollout, review recovery cases and the shared
 schema/other writers, initialize the additive constraint/index, and arrange
