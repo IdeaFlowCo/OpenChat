@@ -30,6 +30,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { getMessagesSchema, searchMessagesSchema, sendMessageSchema } from './connectorTools.js';
 
 import {
   createApi,
@@ -297,17 +298,7 @@ export function buildServer(
       description:
         'Return recent messages from a conversation. Includes sender, timestamp, content, and emoji reactions. ' +
         'Messages are returned in chronological order (oldest first).',
-      inputSchema: {
-        conversationId: z.string().min(1).describe('The conversation id'),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(200)
-          .optional()
-          .default(50)
-          .describe('Maximum number of messages to return (default 50, max 200)'),
-      },
+      inputSchema: getMessagesSchema,
     },
     async ({ conversationId, limit }) => {
       try {
@@ -334,12 +325,9 @@ export function buildServer(
       description:
         'Send a message to a conversation. Returns the created message with its id and timestamp.',
       inputSchema: {
-        conversationId: z.string().min(1).describe('The conversation id'),
-        text: z.string().min(1).describe('Message text content'),
-        attachments: z
-          .array(z.unknown())
-          .optional()
-          .describe('Optional array of attachment objects (reserved for future use)'),
+        conversationId: sendMessageSchema.conversationId,
+        text: sendMessageSchema.text,
+        attachments: z.array(z.unknown()).optional(),
       },
     },
     async ({ conversationId, text, attachments }) => {
@@ -366,17 +354,7 @@ export function buildServer(
         'Full-text search across the authenticated user\'s messages and conversations. Contact results require a complete exact email or self keyword for ordinary members; callers with server-granted trusted directory access may use partial names or emails. ' +
         'Maps to GET /api/chat/search. Returns matching message hits (with sender, conversation, and timestamp), ' +
         'plus any matching conversations and contacts.',
-      inputSchema: {
-        query: z.string().min(1).describe('Message/conversation query; for people, use a complete email or self keyword unless trusted directory access permits partial name/email search'),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(200)
-          .optional()
-          .default(20)
-          .describe('Maximum number of message hits to return (default 20, max 200)'),
-      },
+      inputSchema: searchMessagesSchema,
     },
     async ({ query, limit }) => {
       try {

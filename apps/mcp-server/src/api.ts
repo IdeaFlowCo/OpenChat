@@ -317,7 +317,7 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
 
     sendMessage: (
       conversationId: string,
-      body: { content: string; attachments?: unknown[] }
+      body: { content: string; attachments?: unknown[]; id?: string; clientRequestId?: string }
     ) =>
       request<Message>(
         'POST',

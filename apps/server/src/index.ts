@@ -19,6 +19,7 @@ import aiRoutes from './routes/ai.js';
 import thoughtsRoutes from './routes/thoughts.js';
 import contextRoutes from './routes/context.js';
 import agentKeysRoutes from './routes/agentKeys.js';
+import { createConnectorDelegation } from './routes/connectorDelegation.js';
 import webhooksRoutes from './routes/webhooks.js';
 import feedbackRoutes from './routes/feedback.js';
 import assistantRoutes from './routes/assistant.js';
@@ -39,7 +40,6 @@ import { parseCorsOrigins } from './config/cors.js';
 import googleWebCallbackRoutes from './routes/googleWebCallback.js';
 import ideaflowWebCallbackRoutes from './routes/ideaflowWebCallback.js';
 import {
-  normalizePublicDisplayName,
   sanitizeLegacyPublicDisplayNames,
 } from './privacy/profilePrivacy.js';
 import { resolveInvitePreview, InviteError } from './services/inviteEntry.js';
@@ -52,6 +52,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config({ path: path.join(__dirname, '..', '.env'), override: true });
+
+const connectorDelegation = createConnectorDelegation();
 
 const app = express();
 
@@ -405,6 +407,8 @@ app.use(googleWebCallbackRoutes);
 app.use(ideaflowWebCallbackRoutes);
 
 // API routes
+app.use('/api', connectorDelegation.guard);
+app.use('/api/connector-delegations', connectorDelegation.routes);
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', contextRoutes);
 app.use('/api', entryIntentsRoutes);

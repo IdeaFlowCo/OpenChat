@@ -1,4 +1,9 @@
 import express from 'express';
+import { createHash } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { ConnectorDelegationService } from '../src/services/connectorDelegation.js';
+import { connectorDelegationGuard } from '../src/routes/connectorDelegation.js';
+import { createDelegatedConnector } from '../../mcp-server/src/delegated.js';
 import jwt from 'jsonwebtoken';
 import type { Server } from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -91,11 +96,14 @@ describe('privacy-conscious contact discovery routes', () => {
   let server: Server;
   let baseUrl: string;
   let authorization: string;
+  const callback = 'https://fixture.example.test/callback';
+  const delegation = new ConnectorDelegationService({ enabled: true, clients: [{ id: 'fixture', secret: 'secret', callbacks: [callback] }] });
   const originalDirectoryFlag = process.env.OPENCHAT_OPEN_USER_DIRECTORY;
 
   beforeAll(async () => {
     const app = express();
     app.use(express.json());
+    app.use('/api', connectorDelegationGuard(delegation));
     app.use('/api/chat', chatRouter);
     await new Promise<void>((resolve) => {
       server = app.listen(0, '127.0.0.1', () => resolve());
@@ -240,6 +248,41 @@ describe('privacy-conscious contact discovery routes', () => {
     expect(contactCalls[0][1]).toMatchObject({ contactName: 'alice', contactEmail: '' });
     expect(contactCalls[1][1]).toMatchObject({ contactName: '', contactEmail: emailOnly.email });
     expect(String(contactCalls[0][0])).toContain('.avatarUrl');
+  });
+
+  it('preserves directory restrictions through the delegated search tool', async () => {
+    const verifier = 'A'.repeat(43);
+    const transaction = delegation.start({ clientId: 'fixture', callback, connectorGrantId: 'directory-grant',
+      connectorUserId: 'notes-user', expectedOpenChatUserId: caller.id, scopes: ['openchat.read'],
+      state: 'directory-state', codeChallenge: createHash('sha256').update(verifier).digest('base64url') })!;
+    delegation.review(transaction, caller.id);
+    const code = delegation.consent(transaction, caller.id, ['openchat.read'])!.code;
+    const issued = delegation.exchange({ clientId: 'fixture', callback, code, state: 'directory-state', verifier })!;
+    const identity = { connectorGrantId: 'directory-grant', connectorUserId: 'notes-user', openChatUserId: caller.id };
+    const connector = createDelegatedConnector({ upstreamOrigin: baseUrl,
+      resolve: async () => ({ ...identity, token: issued.token, scopes: ['openchat.read'], expiresAt: issued.delegation.expiresAt }) });
+    const search = async (query: string) => {
+      const result = await connector.call(identity, 'oc_search_messages', { query });
+      expect(result.isError).toBeUndefined();
+      return JSON.parse(result.content[0].text);
+    };
+    const name = await search('Alice');
+    const exactEmail = await search(emailOnly.email);
+    const privateName = await search('Bob');
+    const hiddenEmail = await search(hidden.email);
+    const self = await search('self');
+    expect(name.contacts).toEqual([publicProjection(nameDiscoverable)]);
+    expect(exactEmail.contacts).toEqual([publicProjection(emailOnly)]);
+    expect(privateName.contacts).toEqual([]);
+    expect(hiddenEmail.contacts).toEqual([]);
+    expect(self.contacts).toEqual([publicProjection(caller)]);
+    expect(exactEmail.contacts[0]).not.toHaveProperty('email');
+    const forbidden = await fetch(`${baseUrl}/api/chat/contacts`, { headers: { Authorization: `Bearer ${issued.token}` } });
+    expect(forbidden.status).toBe(403);
+    if (process.env.OPENCHAT_TEST_EVIDENCE_DIR) writeFileSync(`${process.env.OPENCHAT_TEST_EVIDENCE_DIR}/connector-directory.json`, JSON.stringify({
+      context: 'Delegated tool calls over HTTP to real chat/search route; privacy-aware mocked Neo4j, no production traffic',
+      actor: caller.id, name, exactEmail, privateName, hiddenEmail, self, unrelatedDirectoryRouteStatus: forbidden.status,
+    }, null, 2));
   });
 
   it('projects avatarUrl for every person-bearing global search result', async () => {

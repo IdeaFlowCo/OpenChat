@@ -115,6 +115,13 @@ OPENCHAT_API_KEY=oc_... npm start --workspace=openchat-mcp-server
 OPENCHAT_API_KEY=oc_... npm run start:http --workspace=openchat-mcp-server
 ```
 
+## Existing Ideaflow connector preparation
+
+The separate delegated adapter is preparation for the existing Ideaflow
+connector, which has no OpenChat tools yet. It does not use the setup or
+credential fallback below. See the [integration packet](../../docs/connector-delegation-integration-packet.md)
+for its contract and activation gates.
+
 ## Authentication
 
 Set the API key one of three ways (checked in this order):

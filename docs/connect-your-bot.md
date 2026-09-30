@@ -165,8 +165,10 @@ webhooks only to registered service endpoints. OpenChat cannot and does not call
 into a consumer ChatGPT or Claude chat session; there is no reverse-invocation
 path into those conversations.
 
-Milestone 1 intentionally has no OpenChat-hosted `/mcp` HTTP endpoint, no OAuth
-or Dynamic Client Registration, and no npm package publication. The MCP adapter
+The live agent integration has no OpenChat-hosted `/mcp` HTTP endpoint, no OAuth
+or Dynamic Client Registration, and no npm package publication. The separate
+[Ideaflow connector preparation](connector-delegation-integration-packet.md)
+is a disabled authorization-code harness, not a live connector. The MCP adapter
 runs locally over stdio (or on infrastructure you host). Agent-key scope labels
 are stored but are not yet enforced; a valid key currently acts with the owning
 user's permissions.
