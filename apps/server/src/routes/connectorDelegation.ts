@@ -2,8 +2,10 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { requireAuth } from '../middleware/auth.js';
 import { ConnectorDelegationService, loadConnectorDelegationConfig, type ConnectorScope } from '../services/connectorDelegation.js';
 
-export const connectorDelegations = new ConnectorDelegationService(loadConnectorDelegationConfig());
-export const connectorDelegationRoutes = buildConnectorDelegationRoutes(connectorDelegations);
+export function createConnectorDelegation() {
+  const service = new ConnectorDelegationService(loadConnectorDelegationConfig());
+  return { guard: connectorDelegationGuard(service), routes: buildConnectorDelegationRoutes(service) };
+}
 
 declare module 'express-serve-static-core' {
   interface Request { connectorDelegation?: { clientId: string; connectorUserId: string; openChatUserId: string; connectorGrantId: string } }
