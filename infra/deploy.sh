@@ -86,12 +86,14 @@ fi
 # Create deployment package
 echo ""
 echo "Creating deployment package..."
+DEPLOY_ARCHIVE=$(mktemp "/tmp/${APP_NAME}-deploy.XXXXXX")
+trap 'rm -f "$DEPLOY_ARCHIVE"' EXIT
 # Stage Dockerfile + docker-compose at the tar root so the remote extract
 # Just Works without restructuring on the server side.
 cp infra/Dockerfile /tmp/oc-Dockerfile
 cp infra/docker-compose.prod.yml /tmp/oc-docker-compose.prod.yml
 
-tar -czf /tmp/${APP_NAME}-deploy.tar.gz \
+tar -czf "$DEPLOY_ARCHIVE" \
   apps/server/dist/ \
   apps/server/package*.json \
   client-app/dist/ \
@@ -101,7 +103,7 @@ tar -czf /tmp/${APP_NAME}-deploy.tar.gz \
 # Copy to the production GCE instance. Explicit project/zone flags keep this
 # safe when the operator's active gcloud configuration points elsewhere.
 echo "Copying to GCP instance..."
-gcloud compute scp "/tmp/${APP_NAME}-deploy.tar.gz" "$GCP_INSTANCE:/tmp/${APP_NAME}-deploy.tar.gz" \
+gcloud compute scp "$DEPLOY_ARCHIVE" "$GCP_INSTANCE:$DEPLOY_ARCHIVE" \
   --project="$GCP_PROJECT" \
   --zone="$GCP_ZONE"
 
@@ -110,7 +112,7 @@ echo "Deploying on server..."
 gcloud compute ssh "$GCP_INSTANCE" \
   --project="$GCP_PROJECT" \
   --zone="$GCP_ZONE" \
-  --command="sudo env APP_NAME=$APP_NAME bash -s" << 'ENDSSH'
+  --command="sudo env APP_NAME=$APP_NAME DEPLOY_ARCHIVE=$DEPLOY_ARCHIVE bash -s" << 'ENDSSH'
 set -euo pipefail
 
 # Setup app directory
@@ -118,7 +120,8 @@ sudo mkdir -p /opt/$APP_NAME
 cd /opt/$APP_NAME
 
 # Extract deployment
-sudo tar -xzf /tmp/${APP_NAME}-deploy.tar.gz
+sudo tar -xzf "$DEPLOY_ARCHIVE"
+sudo rm -f "$DEPLOY_ARCHIVE"
 
 # Rename staged docker artifacts into place
 sudo mv oc-docker-compose.prod.yml docker-compose.yml 2>/dev/null || true
