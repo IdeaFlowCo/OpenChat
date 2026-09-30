@@ -39,7 +39,7 @@ function relativeLastSeen(iso: string | undefined): string {
 export function ContactProfileScreen() {
   const navigation = useNavigation<NavProp<'ContactProfile'>>();
   const route = useRoute<RouteProps<'ContactProfile'>>();
-  const { userId } = route.params;
+  const { userId, exactEmail } = route.params;
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const { currentUser, conversations, presence, refreshConversations, createConversation } = useChat();
@@ -60,21 +60,21 @@ export function ContactProfileScreen() {
     let active = true;
     setProfile(null);
     if (!isReadOnlyIdentity) {
-      api.getContactProfile(userId).then(user => {
+      api.getContactProfile(userId, exactEmail).then(user => {
         if (active) setProfile({ id: userId, user, unavailable: false });
       }).catch(() => {
         if (active) setProfile({ id: userId, user: null, unavailable: true });
       });
     }
     return () => { active = false; };
-  }, [userId, isReadOnlyIdentity, conversationUser?.name, conversationUser?.avatarUrl]);
+  }, [userId, exactEmail, isReadOnlyIdentity, conversationUser?.name, conversationUser?.avatarUrl]);
   useEffect(() => { setEditingName(false); setNameDraft(''); setNameError(''); }, [userId]);
   const currentProfile = profile?.id === userId ? profile : null;
   const user = currentProfile?.unavailable ? null : currentProfile?.user ? { ...conversationUser, ...currentProfile.user } : conversationUser;
   const loadingProfile = !isReadOnlyIdentity && !currentProfile && !conversationUser;
 
   const canSetPrivateName = !!user && !user.isBot && userId !== currentUser?.userId;
-  const privateName = usePrivateName(canSetPrivateName ? userId : undefined);
+  const privateName = usePrivateName(canSetPrivateName ? userId : undefined, exactEmail);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [nameBusy, setNameBusy] = useState(false);

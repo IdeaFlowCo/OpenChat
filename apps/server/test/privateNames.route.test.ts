@@ -43,3 +43,19 @@ it('binds the independent official-profile read to the authenticated viewer', as
   expect(mocks.getContactProfile).toHaveBeenCalledWith('mallory', 'bob');
   expect(response.body).toEqual({ id: 'bob', name: 'Official Bob', avatarUrl: null, isBot: false });
 });
+
+it('forwards encoded exact-email proof only on authenticated profile and alias requests', async () => {
+  mocks.getContactProfile.mockResolvedValue({ id: 'bob', name: 'Bob' });
+  mocks.getPrivateName.mockResolvedValue({ name: null });
+  mocks.setPrivateName.mockResolvedValue({ name: 'Buddy' });
+  const proof = encodeURIComponent(' BOB@example.test ');
+  for (const suffix of ['/profile', '']) {
+    expect((await request(app).get(`/api/private-names/bob${suffix}`).set('Authorization', token('alice')).set('X-OpenChat-Discovery-Email', proof)).status).toBe(200);
+  }
+  await request(app).put('/api/private-names/bob').set('Authorization', token('alice')).set('X-OpenChat-Discovery-Email', proof).send({ name: 'Buddy' });
+  expect(mocks.getContactProfile).toHaveBeenCalledWith('alice', 'bob', ' BOB@example.test ');
+  expect(mocks.getPrivateName).toHaveBeenCalledWith('alice', 'bob', ' BOB@example.test ');
+  expect(mocks.setPrivateName).toHaveBeenCalledWith('alice', 'bob', 'Buddy', ' BOB@example.test ');
+  expect((await request(app).get('/api/private-names/bob/profile').set('Authorization', token('alice')).set('X-OpenChat-Discovery-Email', '%zz')).status).toBe(400);
+  expect((await request(app).get('/api/private-names/bob/profile').set('X-OpenChat-Discovery-Email', proof)).status).toBe(401);
+});

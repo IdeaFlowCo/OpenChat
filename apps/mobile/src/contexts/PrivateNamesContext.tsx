@@ -4,8 +4,8 @@ import { useChat } from './ChatContext';
 
 interface PrivateNamesValue {
   names: Record<string, string | null>;
-  refresh: (id: string) => Promise<void>;
-  save: (id: string, name: string | null) => Promise<void>;
+  refresh: (id: string, exactEmail?: string) => Promise<void>;
+  save: (id: string, name: string | null, exactEmail?: string) => Promise<void>;
 }
 const Context = createContext<PrivateNamesValue | null>(null);
 
@@ -18,36 +18,36 @@ export function PrivateNamesProvider({ children }: { children: ReactNode }) {
 function AccountPrivateNames({ children }: { children: ReactNode }) {
   const [names, setNames] = useState<Record<string, string | null>>({});
   const revisions = useRef<Record<string, number>>({});
-  const refresh = useCallback(async (id: string) => {
+  const refresh = useCallback(async (id: string, exactEmail?: string) => {
     const version = (revisions.current[id] || 0) + 1;
     revisions.current[id] = version;
     try {
-      const result = await api.getPrivateName(id);
+      const result = await api.getPrivateName(id, exactEmail);
       if ((revisions.current[id] || 0) === version) setNames(current => ({ ...current, [id]: result.name }));
     } catch {
       if ((revisions.current[id] || 0) === version) setNames(current => ({ ...current, [id]: null }));
     }
   }, []);
-  const save = useCallback(async (id: string, name: string | null) => {
+  const save = useCallback(async (id: string, name: string | null, exactEmail?: string) => {
     revisions.current[id] = (revisions.current[id] || 0) + 1;
-    const result = name === null ? await api.clearPrivateName(id) : await api.setPrivateName(id, name);
+    const result = name === null ? await api.clearPrivateName(id) : await api.setPrivateName(id, name, exactEmail);
     revisions.current[id] = (revisions.current[id] || 0) + 1;
     setNames(current => ({ ...current, [id]: result.name }));
   }, []);
   const value = useMemo(() => ({ names, refresh, save }), [names, refresh, save]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
-export function usePrivateName(userId?: string) {
+export function usePrivateName(userId?: string, exactEmail?: string) {
   const context = useContext(Context);
   // Screens rendered in isolated tests without the app provider retain their
   // official label. Every actual app surface lives under the provider.
   const refresh = context?.refresh;
-  useEffect(() => { if (userId && refresh) void refresh(userId); }, [userId, refresh]);
+  useEffect(() => { if (userId && refresh) void refresh(userId, exactEmail); }, [userId, refresh, exactEmail]);
   return {
     name: userId ? context?.names[userId] || null : null,
     save: async (name: string | null) => {
       if (!context || !userId) throw new Error('Person unavailable');
-      await context.save(userId, name);
+      await context.save(userId, name, exactEmail);
     },
   };
 }

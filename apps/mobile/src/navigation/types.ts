@@ -51,7 +51,7 @@ export type RootStackParamList = {
   /** Forward picker — select conversation to forward a message into (OpenChat-hhc). */
   ForwardPicker: { messageId: string };
   /** Contact profile — chat header, Friends, People directory, or contact search. */
-  ContactProfile: { userId: string };
+  ContactProfile: { userId: string; exactEmail?: string };
   /** Agent API keys list (OpenChat-7c9). */
   AgentKeys: undefined;
   /** Create a new agent key. */

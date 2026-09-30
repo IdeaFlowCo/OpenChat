@@ -43,3 +43,14 @@ describe('canonical-person profile doors without a DM', () => {
     if (Screen !== FriendsScreen) expect(stopPropagation).toHaveBeenCalled();
   });
 });
+
+it('keeps exact-email proof tied to the completed contact result while query changes', async () => {
+  await act(async () => { root = create(React.createElement(SearchScreen)); });
+  await act(async () => root!.root.findByType('TextInput').props.onChangeText('bob@example.test'));
+  await act(async () => vi.advanceTimersByTime(350));
+  await act(async () => root!.root.findByType('TextInput').props.onChangeText('someone@example.test'));
+  const door = root!.root.findAllByType('TouchableOpacity').find(n => n.props.accessibilityLabel === 'Profile for Official Bob')!;
+  await act(async () => door.props.onPress({ stopPropagation: vi.fn() }));
+  expect(mocks.navigation.navigate).toHaveBeenCalledWith('ContactProfile', { userId: 'bob', exactEmail: 'bob@example.test' });
+  expect(mocks.createConversation).not.toHaveBeenCalled();
+});

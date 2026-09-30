@@ -2,7 +2,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
-  noConversation: false, userId: 'alice', targetId: 'bob', name: 'Official Bob', isBot: false,
+  exactEmail: undefined as string | undefined, noConversation: false, userId: 'alice', targetId: 'bob', name: 'Official Bob', isBot: false,
   platform: { OS: 'ios', select: (values: any) => values.ios ?? values.default }, getProfile: vi.fn(), get: vi.fn(), set: vi.fn(), clear: vi.fn(), navigate: vi.fn(),
 }));
 vi.mock('react-native', () => ({
@@ -10,7 +10,7 @@ vi.mock('react-native', () => ({
   ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View', ScrollView: 'ScrollView',
   Alert: { alert: vi.fn() },
 }));
-vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mocks.navigate }), useRoute: () => ({ params: { userId: mocks.targetId } }) }));
+vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mocks.navigate }), useRoute: () => ({ params: { userId: mocks.targetId, exactEmail: mocks.exactEmail } }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({
   currentUser: { userId: mocks.userId }, conversations: mocks.noConversation ? [] : [{ participants: [{ user: { id: mocks.targetId, name: mocks.name, isBot: mocks.isBot } }] }],
   presence: new Map(), createConversation: vi.fn(), refreshConversations: vi.fn(),
@@ -42,7 +42,7 @@ function button(label: string) {
 }
 beforeEach(() => {
   vi.clearAllMocks(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
-  mocks.noConversation = false;
+  mocks.noConversation = false; mocks.exactEmail = undefined;
   mocks.getProfile.mockImplementation(async () => ({ id: mocks.targetId, name: mocks.name, isBot: mocks.isBot }));
   mocks.userId = 'alice'; mocks.targetId = 'bob'; mocks.name = 'Official Bob'; mocks.isBot = false;
   mocks.get.mockResolvedValue({ name: null });
@@ -58,7 +58,7 @@ describe('native and canonical web private names', () => {
     await act(async () => root!.root.findByType('TextInput').props.onChangeText('Buddy'));
     expect(root!.root.findByType('TextInput').props.accessibilityLabel).toBe('Private name');
     await act(async () => button('Save private name').props.onPress());
-    expect(mocks.set).toHaveBeenCalledWith('bob', 'Buddy');
+    expect(mocks.set).toHaveBeenCalledWith('bob', 'Buddy', undefined);
     expect(text()).toContain('Buddy'); expect(text()).toContain('OpenChat name: '); expect(text()).toContain('Official Bob');
     const headerButton = root!.root.findAllByType('TouchableOpacity').find(n => n.props.accessibilityLabel?.includes('Conversation information'))!;
     expect(headerButton.props.accessibilityLabel).toContain('Buddy. OpenChat name: Official Bob');
@@ -95,12 +95,12 @@ describe('native and canonical web private names', () => {
   it.each(['ios', 'web'])('loads and names a visible canonical person with no DM on %s', async platform => {
     mocks.platform.OS = platform; mocks.noConversation = true;
     await render();
-    expect(mocks.getProfile).toHaveBeenCalledWith('bob');
+    expect(mocks.getProfile).toHaveBeenCalledWith('bob', undefined);
     expect(text()).toContain('Official Bob');
     await act(async () => button('Set private name').props.onPress());
     await act(async () => root!.root.findByType('TextInput').props.onChangeText('No DM needed'));
     await act(async () => button('Save private name').props.onPress());
-    expect(mocks.set).toHaveBeenCalledWith('bob', 'No DM needed');
+    expect(mocks.set).toHaveBeenCalledWith('bob', 'No DM needed', undefined);
     expect(text()).toContain('No DM needed'); expect(text()).toContain('Official Bob');
     await act(async () => button('Clear private name').props.onPress());
     expect(mocks.clear).toHaveBeenCalledWith('bob'); expect(button('Set private name')).toBeDefined();
@@ -113,4 +113,18 @@ describe('native and canonical web private names', () => {
   });
   it('offers no alias editor for yourself', async () => { mocks.targetId = 'alice'; await render(); expect(button('Set private name')).toBeUndefined(); });
   it('offers no alias editor for a bot', async () => { mocks.isBot = true; await render(); expect(button('Set private name')).toBeUndefined(); });
+});
+
+it.each(['ios', 'web'])('uses search proof for no-conversation profile and alias operations on %s', async platform => {
+  mocks.platform.OS = platform; mocks.noConversation = true; mocks.exactEmail = 'bob@example.test';
+  await act(async () => { root = create(React.createElement(PrivateNamesProvider, null, React.createElement(ContactProfileScreen))); });
+  expect(mocks.getProfile).toHaveBeenCalledWith('bob', 'bob@example.test');
+  expect(mocks.get).toHaveBeenCalledWith('bob', 'bob@example.test');
+  await act(async () => button('Set private name').props.onPress());
+  await act(async () => root!.root.findByType('TextInput').props.onChangeText('Buddy'));
+  await act(async () => button('Save private name').props.onPress());
+  expect(mocks.set).toHaveBeenCalledWith('bob', 'Buddy', 'bob@example.test');
+  expect(text()).toContain('Official Bob');
+  await act(async () => button('Clear private name').props.onPress());
+  expect(mocks.clear).toHaveBeenCalledWith('bob');
 });

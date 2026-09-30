@@ -10,8 +10,8 @@ const integration = uri && user && password ? describe.sequential : describe.ski
 
 integration('private names real Neo4j + HTTP privacy', () => {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const ids = ['alice', 'bob', 'mallory', 'hidden', 'bot', 'deleted', 'no-dm'].map(id => `private-name-${id}-${suffix}`);
-  const [alice, bob, mallory, hidden, bot, deleted, noDm] = ids;
+  const ids = ['alice', 'bob', 'mallory', 'hidden', 'bot', 'deleted', 'no-dm', 'email-only', 'other-email'].map(id => `private-name-${id}-${suffix}`);
+  const [alice, bob, mallory, hidden, bot, deleted, noDm, emailOnly, otherEmail] = ids;
   const conversationId = `private-name-chat-${suffix}`;
   let driver: Driver;
   let db: typeof import('../src/db.js');
@@ -58,6 +58,46 @@ integration('private names real Neo4j + HTTP privacy', () => {
     }
     await run(`MATCH (a:User {id: $alice}), (b:User {id: $noDm}) CREATE (b)-[:BLOCKED]->(a)`, { alice, noDm });
     expect((await request(app).get(`${path(noDm)}/profile`).set('Authorization', token(alice))).status).toBe(404);
+  });
+  it('rechecks exact-email discovery for every profile and alias operation without granting ID access', async () => {
+    const email = `exact-${suffix}@example.test`;
+    await run(`MATCH (u:User) WHERE u.id IN $targets SET u.discoveryMode = 'email_only', u.email = CASE WHEN u.id = $target THEN $email ELSE 'different@example.test' END`, { targets: [emailOnly, otherEmail], target: emailOnly, email });
+    async function access(target: string, proof?: string, owner = alice) {
+      const calls = [request(app).get(`${path(target)}/profile`), request(app).get(path(target)), request(app).put(path(target)).send({ name: 'Email friend' })];
+      return Promise.all(calls.map(call => {
+        call.set('Authorization', token(owner));
+        if (proof !== undefined) call.set('X-OpenChat-Discovery-Email', encodeURIComponent(proof));
+        return call;
+      }));
+    }
+    for (const proof of [undefined, 'exact', '@example.test', 'wrong@example.test', 'name', 'a@b', 'a b@example.test']) {
+      expect((await access(emailOnly, proof)).map(res => res.status)).toEqual([404, 404, 404]);
+    }
+    const search = await request(app).get('/api/chat/search').query({ q: email }).set('Authorization', token(alice));
+    expect(search.body.contacts.some((person: { id: string }) => person.id === emailOnly)).toBe(true);
+    const allowed = await access(emailOnly, ` ${email.toUpperCase()} `);
+    expect(allowed.map(res => res.status)).toEqual([200, 200, 200]);
+    expect(allowed[0].body).toEqual({ id: emailOnly, name: 'Official Name', avatarUrl: null, isBot: false });
+    expect((await access(emailOnly)).map(res => res.status)).toEqual([404, 404, 404]);
+    expect((await access(otherEmail, email)).map(res => res.status)).toEqual([404, 404, 404]);
+    expect((await request(app).get(path(emailOnly)).set('Authorization', token(mallory)).set('X-OpenChat-Discovery-Email', encodeURIComponent(email))).body).toEqual({ name: null });
+    const stored = await run(`MATCH (u:User {id: $target}) OPTIONAL MATCH (u)-[:PARTICIPATES_IN]->(c:Conversation) WITH u, count(c) AS conversations MATCH (:User {id: $owner})-[r:OPENCHAT_PRIVATE_NAME]->(u) RETURN properties(r) AS alias, u.name AS name, conversations`, { target: emailOnly, owner: alice });
+    expect(stored.records[0].get('alias')).toEqual({ name: 'Email friend' });
+    expect(stored.records[0].get('name')).toBe('Official Name');
+    expect(stored.records[0].get('conversations').toNumber()).toBe(0);
+    await run(`MATCH (u:User {id: $target}) SET u.email = 'changed@example.test'`, { target: emailOnly });
+    expect((await access(emailOnly, email)).map(res => res.status)).toEqual([404, 404, 404]);
+    await run(`MATCH (u:User {id: $target}) SET u.email = $email, u.discoveryMode = 'hidden'`, { target: emailOnly, email });
+    expect((await access(emailOnly, email)).map(res => res.status)).toEqual([404, 404, 404]);
+    await run(`MATCH (u:User {id: $target}) SET u.discoveryMode = 'email_only', u.isBot = true`, { target: emailOnly });
+    expect((await access(emailOnly, email)).map(res => res.status)).toEqual([404, 404, 404]);
+    await run(`MATCH (u:User {id: $target}) SET u.isBot = false`, { target: emailOnly });
+    expect((await access(emailOnly, email, emailOnly)).map(res => res.status)).toEqual([404, 404, 404]);
+    for (const reverse of [false, true]) {
+      await run(`MATCH (a:User {id: $a}), (b:User {id: $b}) CREATE (a)-[:BLOCKED]->(b)`, { a: reverse ? emailOnly : alice, b: reverse ? alice : emailOnly });
+      expect((await access(emailOnly, email)).map(res => res.status)).toEqual([404, 404, 404]);
+      await run(`MATCH (:User {id: $a})-[r:BLOCKED]->(:User {id: $b}) DELETE r`, { a: reverse ? emailOnly : alice, b: reverse ? alice : emailOnly });
+    }
   });
   it('stores per-owner aliases, resists forged owner IDs and preserves official name changes', async () => {
     const put = await request(app).put(path(bob)).set('Authorization', token(alice)).send({ name: ' My Buddy ', ownerId: mallory });
