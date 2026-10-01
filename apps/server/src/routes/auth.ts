@@ -13,6 +13,7 @@ import {
   buildIdeaflowAuthorizationUrl,
   exchangeIdeaflowAuthorizationCode,
   getIdeaflowOidcConfig,
+  getIdeaflowPasswordResetUrl,
   IdeaflowIdentityClaims,
 } from '../services/ideaflowOidc.js';
 import {
@@ -275,12 +276,15 @@ const PKCE_VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/;
 /**
  * GET /api/auth/ideaflow/config
  *
- * Public capability check used by the web login screen. Credentials and
+ * Public capability check used by the web login screen. Recovery has an
+ * independent opt-in; see docs/ideaflow-id-migration.md. Credentials and
  * provider internals are never returned.
  */
 router.get('/ideaflow/config', (_req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ enabled: getIdeaflowOidcConfig() !== null });
+  const passwordResetUrl = getIdeaflowPasswordResetUrl();
+  res.json({ enabled: getIdeaflowOidcConfig() !== null,
+    ...(passwordResetUrl ? { passwordResetUrl } : {}) });
 });
 
 /**

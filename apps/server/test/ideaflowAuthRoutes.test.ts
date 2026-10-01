@@ -31,6 +31,8 @@ describe('IdeaFlow ID auth routes', () => {
   });
 
   beforeEach(() => {
+    delete process.env.IDEAFLOW_PASSWORD_RESET_ENABLED;
+    delete process.env.IDEAFLOW_PASSWORD_RESET_URL;
     process.env.IDEAFLOW_ID_ENABLED = 'true';
     process.env.IDEAFLOW_ID_ISSUER = 'https://id.ideaflow.app/api/auth';
     process.env.IDEAFLOW_ID_CLIENT_ID = 'openchat-web';
@@ -39,6 +41,8 @@ describe('IdeaFlow ID auth routes', () => {
   });
 
   afterEach(() => {
+    delete process.env.IDEAFLOW_PASSWORD_RESET_ENABLED;
+    delete process.env.IDEAFLOW_PASSWORD_RESET_URL;
     delete process.env.IDEAFLOW_ID_ENABLED;
     delete process.env.IDEAFLOW_ID_ISSUER;
     delete process.env.IDEAFLOW_ID_CLIENT_ID;
@@ -58,6 +62,17 @@ describe('IdeaFlow ID auth routes', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ enabled: true });
     expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('publishes a recovery destination only after its independent exact-route opt-in', async () => {
+    process.env.IDEAFLOW_PASSWORD_RESET_ENABLED = 'true';
+    process.env.IDEAFLOW_PASSWORD_RESET_URL = 'https://id.ideaflow.app/forgot-password';
+    const response = await fetch(`${baseUrl}/api/auth/ideaflow/config`);
+    expect(await response.json()).toEqual({ enabled: true,
+      passwordResetUrl: 'https://id.ideaflow.app/forgot-password' });
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    process.env.IDEAFLOW_PASSWORD_RESET_URL = 'https://other.example/forgot-password';
+    expect(await (await fetch(`${baseUrl}/api/auth/ideaflow/config`)).json()).toEqual({ enabled: true });
   });
 
   it('stays unavailable when the explicit rollout flag is off', async () => {
