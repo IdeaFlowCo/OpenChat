@@ -13,6 +13,7 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | Screen | Noun | Canonical Visible Label | Front Doors from Chats | Taps from Chats | Notes |
 |---|---|---|---|:---:|---|
 | `Login` | Account | **Continue with Google** | Cold open while signed out | — | Pre-login release label and Google sign-in feedback; see [sign-in and release reporting](../apps/mobile/README.md#google-sign-in-and-release-reporting). |
+| `PasswordRecoveryHelp` | Account | **Forgot password?** | Signed-out Login › Forgot password? | — | Google/Apple recovery, honest legacy Noos limitation, separately enabled Ideaflow ID reset only. No account lookup, mail, migration or linking. |
 | `MyCard` | Me | **Profile** (shareable section: **My card**) | 1. Tapping own avatar (phone Chats header left, desktop sidebar top)<br>2. Settings › Contacts › My card | 1 | Card QR, public-card preview and field controls, share link, WhatsApp handoff, scanning, and profile settings. |
 | `ProfileEdit` | Me | **Edit profile** | 1. Profile › Header row (tap photo/name)<br>2. Profile › "Edit profile" row<br>3. Settings › Account › Edit profile<br>4. Self-DM chat header tap | 2 | Profile photo, display name, headline, status message, and directory visibility. |
 | `Conversations` | Chats | **Chats** | Bottom tab "Chats"; desktop sidebar | 0 | Home screen. Pinned OpenChat Agent row sits at top of conversation list. Visible Friends, Requests, and Find people doors sit above chats. |

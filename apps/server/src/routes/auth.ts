@@ -13,6 +13,7 @@ import {
   buildIdeaflowAuthorizationUrl,
   exchangeIdeaflowAuthorizationCode,
   getIdeaflowOidcConfig,
+  getIdeaflowPasswordResetUrl,
   IdeaflowIdentityClaims,
 } from '../services/ideaflowOidc.js';
 import {
@@ -280,7 +281,9 @@ const PKCE_VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/;
  */
 router.get('/ideaflow/config', (_req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ enabled: getIdeaflowOidcConfig() !== null });
+  const passwordResetUrl = getIdeaflowPasswordResetUrl();
+  res.json({ enabled: getIdeaflowOidcConfig() !== null,
+    ...(passwordResetUrl ? { passwordResetUrl } : {}) });
 });
 
 /**

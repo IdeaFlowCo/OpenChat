@@ -157,3 +157,27 @@ This is the bones of the prototype per the success criteria in `OpenChat-dv0`. B
 - [ ] One platform-only feature works (Android Contacts → "X of your contacts are on OpenChat" UI)
 
 Push notifications (`OpenChat-t81`) are the next big native unlock.
+
+## Password recovery entry
+
+Signed-out Login → **Forgot password?** opens shared native/responsive-web help.
+Google-only users should continue with Google or use Google's recovery page.
+Apple-only users should continue with Apple in the iPhone app or use Apple's recovery page.
+The local email/password fields still use legacy Noos credentials; OpenChat has no verified unauthenticated Noos recovery flow.
+The help says this explicitly and never redirects that password to another identity provider.
+
+Ideaflow ID reset is separately disabled by default.
+The server exposes `passwordResetUrl` in `/api/auth/ideaflow/config` only when
+Ideaflow login is configured and enabled, `IDEAFLOW_PASSWORD_RESET_ENABLED=true`,
+and `IDEAFLOW_PASSWORD_RESET_URL` exactly matches the configured issuer origin's `/forgot-password` page.
+Only configure these after the owner verifies the provider route, mail delivery,
+password-account recovery, account identity preservation and Google/Apple-only behavior.
+The observed public provider returned 404 for this page on October 1, 2026;
+the isolated PR6 provider fixture has the page, which does not establish production readiness.
+Source merge does not activate recovery or authorize a production auth deployment.
+
+The client displays the enabled reset link for Ideaflow ID password accounts only;
+it does not infer account methods from an email, prefill addresses, send mail,
+create an account or link a legacy identity.
+Native help is available immediately; the current Ideaflow config fetch is web-only,
+so enabling a provider reset destination does not silently enable native Ideaflow login.

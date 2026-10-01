@@ -71,6 +71,18 @@ export function getIdeaflowOidcConfig(
   return { issuer, clientId, clientSecret, redirectUri };
 }
 
+/** Separate recovery rollout: a merged UI or enabled login never opts in. */
+export function getIdeaflowPasswordResetUrl(env: NodeJS.ProcessEnv = process.env): string | null {
+  const config = getIdeaflowOidcConfig(env);
+  if (!config || env.IDEAFLOW_PASSWORD_RESET_ENABLED !== 'true') return null;
+  const provider = new URL(config.issuer);
+  if (provider.username || provider.password || provider.search || provider.hash) return null;
+  const expected = new URL('/forgot-password', provider.origin).toString();
+  // The operator must verify this exact provider route and mail behavior before
+  // configuring it. No user input, email, redirect or bearer is appended.
+  return env.IDEAFLOW_PASSWORD_RESET_URL === expected ? expected : null;
+}
+
 async function fetchDiscovery(
   issuer: string,
   fetchImpl: typeof fetch = fetch,

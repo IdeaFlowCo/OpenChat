@@ -108,6 +108,17 @@ describe('iPhone pre-login Google control', () => {
     expect(mocks.prompt).toHaveBeenCalledOnce();
   });
 
+  it('exposes password recovery guidance on native sign-in without issuing a reset', async () => {
+    await render();
+    const help = screen!.root.findByProps({ accessibilityLabel: 'Forgot password?' });
+    expect(help.props.accessibilityState.expanded).toBe(false);
+    await act(async () => { help.props.onPress(); });
+    expect(screen!.root.findAllByType('Text' as any).some(node =>
+      String(node.props.children).includes('existing Noos account'))).toBe(true);
+    expect(mocks.exchange).not.toHaveBeenCalled();
+    expect(mocks.bootstrap).not.toHaveBeenCalled();
+  });
+
   it('shows the installed binary build on the login screen', async () => {
     await render();
     expect(screen!.root.findByProps({ accessibilityLabel: 'OpenChat version v1.0.1 (2001)' })).toBeDefined();

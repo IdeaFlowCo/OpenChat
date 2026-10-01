@@ -30,6 +30,7 @@ import * as Clipboard from 'expo-clipboard';
 import { parseOpenChatUrl } from '../utils/parseOpenChatUrl';
 import { createEntryIntent, saveEntryIntent } from '../services/entryIntents';
 import { googleAuthRequestConfig } from '../utils/googleAuthRequest';
+import { PasswordRecoveryHelp } from '../components/PasswordRecoveryHelp';
 
 // Required for the in-app browser to dismiss properly after the OAuth round-trip.
 WebBrowser.maybeCompleteAuthSession();
@@ -105,6 +106,7 @@ export function LoginScreen() {
   const [appleLoading, setAppleLoading] = useState(false);
   const [ideaflowLoading, setIdeaflowLoading] = useState(false);
   const [ideaflowEnabled, setIdeaflowEnabled] = useState(false);
+  const [providerResetUrl, setProviderResetUrl] = useState<string | null>(null);
 
   // Web Google sign-in uses a full-page REDIRECT, not the expo-auth-session
   // popup: Google's pages set Cross-Origin-Opener-Policy, which severs the
@@ -121,11 +123,18 @@ export function LoginScreen() {
     let cancelled = false;
     fetch(`${OPENCHAT_URL}/api/auth/ideaflow/config`)
       .then(response => response.ok ? response.json() : { enabled: false })
-      .then((body: { enabled?: boolean }) => {
-        if (!cancelled) setIdeaflowEnabled(body.enabled === true);
+      .then((body: { enabled?: boolean; passwordResetUrl?: string | null }) => {
+        if (!cancelled) {
+          setIdeaflowEnabled(body.enabled === true);
+          setProviderResetUrl(body.enabled === true && typeof body.passwordResetUrl === 'string'
+            ? body.passwordResetUrl : null);
+        }
       })
       .catch(() => {
-        if (!cancelled) setIdeaflowEnabled(false);
+        if (!cancelled) {
+          setIdeaflowEnabled(false);
+          setProviderResetUrl(null);
+        }
       });
     return () => { cancelled = true; };
   }, [isWeb]);
@@ -589,6 +598,8 @@ export function LoginScreen() {
               <Text style={[styles.buttonText, { color: c.onPrimary }]}>{mode === 'register' ? 'Create account' : 'Sign In'}</Text>
             )}
           </TouchableOpacity>
+
+          {mode === 'signin' && <PasswordRecoveryHelp colors={c} providerResetUrl={providerResetUrl} />}
 
           <TouchableOpacity
             onPress={() => setMode(mode === 'register' ? 'signin' : 'register')}
