@@ -166,18 +166,12 @@ Apple-only users should continue with Apple in the iPhone app or use Apple's rec
 The local email/password fields still use legacy Noos credentials; OpenChat has no verified unauthenticated Noos recovery flow.
 The help says this explicitly and never redirects that password to another identity provider.
 
-Ideaflow ID reset is separately disabled by default.
-The server exposes `passwordResetUrl` in `/api/auth/ideaflow/config` only when
-Ideaflow login is configured and enabled, `IDEAFLOW_PASSWORD_RESET_ENABLED=true`,
-and `IDEAFLOW_PASSWORD_RESET_URL` exactly matches the configured issuer origin's `/forgot-password` page.
-Only configure these after the owner verifies the provider route, mail delivery,
-password-account recovery, account identity preservation and Google/Apple-only behavior.
-The observed public provider returned 404 for this page on October 1, 2026;
-the isolated PR6 provider fixture has the page, which does not establish production readiness.
-Source merge does not activate recovery or authorize a production auth deployment.
-
-The client displays the enabled reset link for Ideaflow ID password accounts only;
-it does not infer account methods from an email, prefill addresses, send mail,
-create an account or link a legacy identity.
-Native help is available immediately; the current Ideaflow config fetch is web-only,
-so enabling a provider reset destination does not silently enable native Ideaflow login.
+Ideaflow ID password recovery is unavailable by default. If separately enabled,
+the web help displays **Reset Ideaflow ID password** with guidance to use it only
+for an Ideaflow ID password account. Users choose their account method; the help
+does not look up accounts or infer methods from an email. It does not prefill
+addresses, send mail, create accounts or link identities.
+Native help does not display the optional Ideaflow ID reset link.
+See the [provider recovery configuration and activation gate](../../docs/ideaflow-id-migration.md#password-recovery-capability)
+for operator requirements. This entry provides recovery help, not a working
+Noos or production Ideaflow ID password-reset flow.

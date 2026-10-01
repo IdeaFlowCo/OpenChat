@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('react-native', async () => {
   const web = await import('react-native-web');
-  return { ...web, Platform: { ...web.Platform, OS: 'ios' }, Alert: { alert: mocks.alert } };
+  return { ...web, Platform: { ...web.Platform, OS: process.env.OPENCHAT_LOGIN_EVIDENCE_PLATFORM === 'web' ? 'web' : 'ios' }, Alert: { alert: mocks.alert } };
 });
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock('react-native-qrcode-svg', () => ({ default: () => null }));
@@ -69,8 +69,9 @@ it('renders the pre-login release identifier on a phone-sized product surface', 
   AppRegistry.registerComponent('LoginEvidence', () => LoginScreen);
   const { element, getStyleElement } = AppRegistry.getApplication('LoginEvidence', {});
   const markup = renderToStaticMarkup(element);
-  expect(markup).toContain('v1.0.1 (2001) · update abcd1234');
+  expect(markup).toContain(process.env.OPENCHAT_LOGIN_EVIDENCE_PLATFORM === 'web' ? 'v1.0.1 · update abcd1234' : 'v1.0.1 (2001) · update abcd1234');
   expect(markup).toContain('Continue with Google');
+  expect(markup).toContain('Forgot password?');
   const evidenceDir = process.env.OPENCHAT_LOGIN_EVIDENCE_DIR;
   if (evidenceDir) {
     mkdirSync(evidenceDir, { recursive: true });
