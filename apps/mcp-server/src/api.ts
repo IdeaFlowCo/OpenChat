@@ -396,6 +396,25 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
     listIntentDrafts: () =>
       request<{ drafts: IntentDraft[] }>('GET', '/api/intent-drafts'),
 
+    // ---- private graph: the owner's own notes, importance, cadence and links ----
+    getPrivatePerson: (userId: string) =>
+      request<unknown>('GET', `/api/private/people/${encodeURIComponent(userId)}`),
+    updatePrivatePerson: (userId: string, body: Record<string, unknown>) =>
+      request<unknown>('PATCH', `/api/private/people/${encodeURIComponent(userId)}`, { body }),
+    addPrivateNote: (subject: { kind: 'user' | 'thing'; id: string }, text: string) =>
+      request<unknown>('POST', `/api/private/${subject.kind === 'user' ? 'people' : 'things'}/${encodeURIComponent(subject.id)}/notes`, { body: { text } }),
+    deletePrivateNote: (noteId: string) =>
+      request<unknown>('DELETE', `/api/private/notes/${encodeURIComponent(noteId)}`),
+    addPrivateLink: (subject: { kind: 'user' | 'thing'; id: string }, relation: string, to: Record<string, unknown>) =>
+      request<unknown>('POST', `/api/private/${subject.kind === 'user' ? 'people' : 'things'}/${encodeURIComponent(subject.id)}/links`, { body: { relation, to } }),
+    deletePrivateLink: (linkId: string) =>
+      request<unknown>('DELETE', `/api/private/links/${encodeURIComponent(linkId)}`),
+    listPrivateThings: (query?: string, kind?: string) =>
+      request<unknown>('GET', '/api/private/things', { query: { q: query, kind } }),
+    getPrivateThing: (thingId: string) =>
+      request<unknown>('GET', `/api/private/things/${encodeURIComponent(thingId)}`),
+    listCatchUp: () => request<unknown>('GET', '/api/private/due'),
+
     updateIntentDraft: (id: string, body: Record<string, unknown>) =>
       request<{ draft: IntentDraft }>('PATCH', `/api/intent-drafts/${encodeURIComponent(id)}`, { body }),
 
@@ -412,8 +431,8 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
     listOwnedStories: () =>
       request<{ stories: OwnedStory[] }>('GET', '/api/stories/mine'),
 
-    listStoryFeed: () =>
-      request<{ stories: FeedStory[] }>('GET', '/api/stories/feed'),
+    listStoryFeed: (authorId?: string) =>
+      request<{ stories: FeedStory[] }>('GET', `/api/stories/feed${authorId ? `?author=${encodeURIComponent(authorId)}` : ''}`),
 
     createStory: (body: {
       confirm: boolean;

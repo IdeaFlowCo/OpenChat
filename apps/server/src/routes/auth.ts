@@ -17,6 +17,7 @@ import {
   IDEAFLOW_SELECT_ACCOUNT_PROMPT,
   IdeaflowIdentityClaims,
 } from '../services/ideaflowOidc.js';
+import { deletePrivateGraphForUser, exportPrivateGraph } from '../services/privateGraph.js';
 import {
   isSafePublicDisplayName,
   normalizePublicDisplayName,
@@ -867,6 +868,9 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
         return { ...publicDraft, provenance };
       });
 
+    // Private notes, importance, cadence and links are the owner's data too.
+    const privateGraph = await exportPrivateGraph(userId).catch(() => ({ cards: [], notes: [], things: [], links: [], unavailable: true }));
+
     const exportedAt = new Date().toISOString();
     sendJsonDownload(res, `openchat-account-${range}.json`, {
       schema: 'openchat.account_export.v1',
@@ -887,6 +891,7 @@ router.get('/export', requireAuth, async (req: Request, res: Response) => {
       intentDrafts,
       stories: ((toJS(record.get('stories')) as unknown[] | undefined) ?? []).filter(Boolean),
       intents: ((toJS(record.get('intents')) as unknown[] | undefined) ?? []).filter(Boolean),
+      privateGraph,
       socialPreferences: (toJS(record.get('socialPreferences')) as Record<string, unknown> | null) ?? {
         experienceMode: 'enhanced',
         networkPaused: false,
@@ -1569,6 +1574,9 @@ router.delete('/me', requireAuth, async (req: Request, res: Response) => {
         MATCH (u:User {id: $userId})-[:HAS_PENDING_ENTRY]->(pe:PendingEntry)
         DETACH DELETE pe
       `, { userId });
+
+      // 2g. Private graph: this person's own notes and links, and other people's about them.
+      await deletePrivateGraphForUser(tx, userId);
 
       // 3. Delete the User node (and all its relationships).
       await tx.run(`

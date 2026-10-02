@@ -28,6 +28,8 @@ import agentNetworkRoutes from './routes/agentNetwork.js';
 import agentSocialLayerRoutes from './routes/agentSocialLayer.js';
 import addMeCardRoutes from './routes/addMeCard.js';
 import friendsRoutes from './routes/friends.js';
+import privateGraphRoutes from './routes/privateGraph.js';
+import { ensurePrivateGraphIndexes } from './services/privateGraph.js';
 import privateNamesRoutes from './routes/privateNames.js';
 import { ensureAssistantUser } from './services/assistant.js';
 import { ensureGroupbrainBotUser } from './services/groupbrainBot.js';
@@ -430,6 +432,7 @@ app.use('/api', agentNetworkRoutes);
 app.use('/api', agentSocialLayerRoutes);
 app.use('/api/card', addMeCardRoutes);
 app.use('/api/friends', friendsRoutes);
+app.use('/api/private', privateGraphRoutes);
 app.use('/api/private-names', privateNamesRoutes);
 
 // API reference (openchat-8md.1) — public spec + Redoc docs page.
@@ -632,6 +635,13 @@ async function start() {
       console.log('Agent intent indexes ensured');
     } catch (e) {
       console.error('Failed to ensure agent intent indexes:', e);
+    }
+
+    try {
+      await ensurePrivateGraphIndexes();
+      console.log('Private graph indexes ensured');
+    } catch (e) {
+      console.error('Failed to ensure private graph indexes:', e);
     }
 
     // Semantic search (openchat-bfn.2): idempotently create the Message

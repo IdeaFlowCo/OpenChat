@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Last updated: September 30, 2026**
+**Last updated: October 2, 2026**
 
 These Terms of Service ("Terms") govern your use of OpenChat, a messaging service available at https://chat.ideaflow.app, the legacy https://chat.globalbr.ai address, and through the OpenChat mobile apps for iOS and Android (collectively, the "Service"). The Service is operated by Jacob Cole on behalf of the OpenChat project ("we", "us", "our").
 
@@ -18,7 +18,7 @@ You sign in with Google, Apple, or an email and password. You are responsible fo
 
 - Keeping your sign-in credentials secure.
 - All activity that occurs under your account.
-- Notifying us promptly at support@chat.globalbr.ai if you believe your account has been compromised.
+- Notifying us promptly at support@ideaflow.app if you believe your account has been compromised.
 
 You may not share your account, sell it, or transfer it to anyone else.
 
@@ -97,7 +97,7 @@ The OpenChat name and logo are trademarks of the OpenChat project.
 
 ## 11. DMCA / Copyright
 
-If you believe content on the Service infringes your copyright, send a notice to support@chat.globalbr.ai including:
+If you believe content on the Service infringes your copyright, send a notice to support@ideaflow.app including:
 
 1. A physical or electronic signature of the rights holder or authorized agent.
 2. Identification of the copyrighted work.
@@ -151,6 +151,6 @@ Sections that by their nature should survive termination — including ownership
 
 ## 19. Contact
 
-Questions about these Terms? Email **support@chat.globalbr.ai**.
+Questions about these Terms? Email **support@ideaflow.app**.
 
-For account deletion or data requests, see Section 7 above or contact support@chat.globalbr.ai.
+For account deletion or data requests, see Section 7 above or contact support@ideaflow.app.

@@ -121,6 +121,21 @@ describe('agent-social routes', () => {
     }] });
   });
 
+  it('narrows the feed to one author for a profile, without widening what the viewer may see', async () => {
+    mocks.listStoryFeed.mockResolvedValue([]);
+    const headers = { Authorization: bearer() };
+    expect((await fetch(`${baseUrl}/api/stories/feed?author=owner`, { headers })).status).toBe(200);
+    expect(mocks.listStoryFeed).toHaveBeenLastCalledWith('social-user', 'owner');
+    await fetch(`${baseUrl}/api/stories/feed`, { headers });
+    expect(mocks.listStoryFeed).toHaveBeenLastCalledWith('social-user', null);
+    // A malformed author is refused, never quietly answered with the whole feed.
+    mocks.listStoryFeed.mockClear();
+    for (const query of ['author=a&author=b', 'author=', `author=${'x'.repeat(129)}`]) {
+      expect((await fetch(`${baseUrl}/api/stories/feed?${query}`, { headers })).status).toBe(400);
+    }
+    expect(mocks.listStoryFeed).not.toHaveBeenCalled();
+  });
+
   it('rejects human publication without audience and activation without an enabled channel', async () => {
     const headers = { Authorization: bearer(), 'Content-Type': 'application/json' };
     expect((await fetch(`${baseUrl}/api/stories`, {

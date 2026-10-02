@@ -20,6 +20,9 @@ vi.mock('../../mobile/src/api/client', () => ({ api: { getContactProfile: mocks.
 vi.mock('../../mobile/src/components/Avatar', () => ({ Avatar: () => null }));
 vi.mock('../../mobile/src/components/BotBadge', () => ({ BotBadge: () => null }));
 vi.mock('../../mobile/src/components/FriendControls', () => ({ FriendControls: () => null }));
+// The asks list and the private card have their own suites; here they stay out of the way.
+vi.mock('../../mobile/src/components/ProfileAsks', () => ({ ProfileAsks: () => null }));
+vi.mock('../../mobile/src/components/PrivateGraph', () => ({ PrivateCard: () => null }));
 import { PrivateNamesProvider, usePrivateName } from '../../mobile/src/contexts/PrivateNamesContext.js';
 import { ContactProfileScreen } from '../../mobile/src/screens/ContactProfileScreen.js';
 import { ConversationHeaderContent } from '../../mobile/src/components/ConversationHeaderContent.js';

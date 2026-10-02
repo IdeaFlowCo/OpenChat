@@ -789,16 +789,22 @@ const FEED_STORY_QUERY = `
       }
     )
     AND ($storyId IS NULL OR story.id = $storyId)
+    AND ($authorId IS NULL OR owner.id = $authorId)
   RETURN story { .* } AS story, owner { .id, .name } AS author
   ORDER BY story.createdAt DESC
 `;
 
-export async function listStoryFeed(userId: string): Promise<FeedStory[]> {
+/**
+ * Stories the viewer may see. `authorId` narrows the same audited feed to one
+ * person (their profile); it never widens what the viewer is allowed to see.
+ */
+export async function listStoryFeed(userId: string, authorId: string | null = null): Promise<FeedStory[]> {
   const session = getDriver().session();
   try {
     const result = await session.run(FEED_STORY_QUERY, {
       viewerId: userId,
       storyId: null,
+      authorId,
       now: new Date().toISOString(),
     });
     return result.records.map((record) => projectStoryForFeed(
@@ -875,6 +881,7 @@ export async function respondToStory(
     const result = await session.run(FEED_STORY_QUERY, {
       viewerId: userId,
       storyId,
+      authorId: null,
       now: new Date().toISOString(),
     });
     if (result.records.length === 0) return null;

@@ -903,13 +903,15 @@ export function buildServer(
     'oc_list_story_feed',
     {
       title: 'List visible friends’ Stories',
-      description: 'Return only the privacy-redacted human Story feed currently visible to the authenticated user. Audience, membership, blocks, status, and expiry are enforced by OpenChat.',
-      inputSchema: {},
+      description: 'Return only the privacy-redacted human Story feed currently visible to the authenticated user. Audience, membership, blocks, status, and expiry are enforced by OpenChat. Pass authorId to list one person’s asks (the same list their profile shows).',
+      inputSchema: {
+        authorId: z.string().min(1).max(128).optional().describe('Only Stories shared by this OpenChat user id.'),
+      },
     },
-    async () => {
+    async ({ authorId }) => {
       try {
         requireApiKey(api, 'Reading the Story feed');
-        return jsonResult(await api.listStoryFeed());
+        return jsonResult(await api.listStoryFeed(authorId));
       } catch (e) {
         return intentErrorResult(e);
       }
@@ -1072,6 +1074,77 @@ export function buildServer(
       }
     }
   );
+
+  // ---- private graph: the owner's own notes and links about people ----
+  const subjectSchema = {
+    subjectKind: z.enum(['user', 'thing']).describe("'user' for a person on OpenChat (use their user id), 'thing' for one of the owner's saved companies, ideas, projects or people (use its id)"),
+    subjectId: z.string().min(1).max(200).describe('The user id or saved-thing id'),
+  };
+  const privateTool = (name: string, title: string, description: string, inputSchema: Record<string, z.ZodTypeAny>, run: (input: any) => Promise<unknown>) =>
+    server.registerTool(name, { title, description, inputSchema }, async (input: any) => {
+      try { requireApiKey(api, title); return jsonResult(await run(input)); } catch (e) { return errorResult(e); }
+    });
+
+  privateTool('oc_get_person', 'Everything the owner can see about a person',
+    "One read for a person: their name, the asks (Stories) they shared with the owner, and the owner's private card about them (importance, catch-up cadence, notes, links). The asks are what the person chose to share; the card is the owner's own and is never visible to the person.",
+    { userId: z.string().min(1).max(128).describe('The OpenChat user id of the person') },
+    async ({ userId }) => {
+      const [overlay, feed] = await Promise.all([api.getPrivatePerson(userId), api.listStoryFeed(userId)]);
+      const { person, ...privateCard } = overlay as { person?: unknown } & Record<string, unknown>;
+      return { person: person ?? { id: userId }, asks: feed.stories, private: privateCard };
+    });
+
+  privateTool('oc_get_person_private', 'Read private card for a person',
+    "Read the owner's private card about a person: importance, catch-up cadence and next due date, private notes, and private links to people, companies, ideas and projects. Only the owner ever sees this; the person it is about does not.",
+    { userId: z.string().min(1).max(200).describe('The OpenChat user id of the person') },
+    ({ userId }) => api.getPrivatePerson(userId));
+
+  privateTool('oc_set_person_private', 'Set importance or catch-up cadence for a person',
+    "Change the owner's private settings for a person. cadenceDays sets how often to catch up (null clears it); cadenceMode 'expanding' stretches the gap after each catch-up, like spaced repetition; contactedNow records a catch-up today.",
+    {
+      userId: z.string().min(1).max(200),
+      important: z.boolean().optional(),
+      cadenceDays: z.number().int().min(1).max(3650).nullable().optional(),
+      cadenceMode: z.enum(['fixed', 'expanding']).optional(),
+      contactedNow: z.literal(true).optional(),
+    },
+    ({ userId, ...patch }) => api.updatePrivatePerson(userId, patch));
+
+  privateTool('oc_add_private_note', 'Add a private note',
+    "Add a note that only the owner can see, about a person or about one of the owner's saved companies, ideas, projects or people.",
+    { ...subjectSchema, text: z.string().min(1).max(4000) },
+    ({ subjectKind, subjectId, text }) => api.addPrivateNote({ kind: subjectKind, id: subjectId }, text));
+
+  privateTool('oc_delete_private_note', 'Delete a private note', "Delete one of the owner's private notes by id.",
+    { noteId: z.string().min(1).max(64) }, ({ noteId }) => api.deletePrivateNote(noteId));
+
+  privateTool('oc_add_private_link', 'Link a person or thing to another',
+    "Record a private relation such as 'knows', 'works at', 'works on' or 'interested in' from a person or saved thing to another person, company, idea or project. Give toName to create or reuse a saved thing by name, toId to link an existing one, or toKind 'user' with toId for a person on OpenChat. Only the owner sees it.",
+    {
+      ...subjectSchema,
+      relation: z.string().min(1).max(60),
+      toKind: z.enum(['user', 'person', 'company', 'idea', 'project']),
+      toId: z.string().min(1).max(200).optional(),
+      toName: z.string().min(1).max(120).optional(),
+    },
+    ({ subjectKind, subjectId, relation, toKind, toId, toName }) =>
+      api.addPrivateLink({ kind: subjectKind, id: subjectId }, relation, { kind: toKind, ...(toId ? { id: toId } : {}), ...(toName ? { name: toName } : {}) }));
+
+  privateTool('oc_delete_private_link', 'Remove a private link', "Remove one of the owner's private links by id.",
+    { linkId: z.string().min(1).max(64) }, ({ linkId }) => api.deletePrivateLink(linkId));
+
+  privateTool('oc_list_private_things', "List the owner's saved companies, ideas, projects and people",
+    "List the owner's saved things, optionally filtered by name and kind. Use an id with oc_get_private_thing to see who and what is linked to it.",
+    { query: z.string().max(120).optional(), kind: z.enum(['person', 'company', 'idea', 'project']).optional() },
+    ({ query, kind }) => api.listPrivateThings(query, kind));
+
+  privateTool('oc_get_private_thing', 'Read a saved company, idea, project or person',
+    "Read one of the owner's saved things with its private notes and everything linked to it.",
+    { thingId: z.string().min(1).max(64) }, ({ thingId }) => api.getPrivateThing(thingId));
+
+  privateTool('oc_list_catch_up', 'List people due for a catch-up',
+    "List the people whose catch-up date has passed, soonest first, from the owner's private cadence settings.",
+    {}, () => api.listCatchUp());
 
   return server;
 }

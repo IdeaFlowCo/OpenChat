@@ -115,6 +115,11 @@ integration('agent-social private capture and Story privacy', () => {
     const serialized = JSON.stringify((await social.listStoryFeed(selected)).find((story) => story.id === created.story.id));
     expect(serialized).not.toMatch(/intentId|audience|ownerUserId|searchExpiresAt/);
 
+    // A profile's asks are the same feed narrowed to one author: never wider.
+    expect((await social.listStoryFeed(selected, owner)).map((story) => story.id)).toEqual([created.story.id]);
+    expect(await social.listStoryFeed(selected, outsider)).toEqual([]);
+    expect(await social.listStoryFeed(outsider, owner)).toEqual([]);
+
     const session = driver.session();
     try {
       await session.run(

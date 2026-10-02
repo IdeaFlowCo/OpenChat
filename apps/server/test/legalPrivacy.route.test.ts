@@ -33,6 +33,8 @@ describe('privacy disclosure output', () => {
     expect(links).toContain('https://deepgram.com/privacy');
     expect(links).toContain('https://openai.com/policies/privacy-policy/');
     expect(links).toContain('https://www.anthropic.com/privacy');
+    expect(response.text).toContain('support@ideaflow.app');
+    expect(response.text).not.toContain('support@chat.globalbr.ai');
     if (process.env.PRIVACY_TEST_EVIDENCE_DIR) {
       writeFileSync(`${process.env.PRIVACY_TEST_EVIDENCE_DIR}/privacy-policy.html`, response.text);
     }

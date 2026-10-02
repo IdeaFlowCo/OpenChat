@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated: September 30, 2026**
+**Last updated: October 2, 2026**
 
 This Privacy Policy describes how OpenChat (available at chat.ideaflow.app and the legacy chat.globalbr.ai address) collects, uses, and handles your information when you use our service.
 
@@ -26,7 +26,7 @@ This Privacy Policy describes how OpenChat (available at chat.ideaflow.app and t
 - To send push notifications when you receive new messages.
 - To show your presence status to people you have conversations with.
 - To transcribe voice messages and diagnose errors.
-- To respond to support requests sent to support@chat.globalbr.ai.
+- To respond to support requests sent to support@ideaflow.app.
 
 ## Voice Transcription
 
@@ -40,7 +40,7 @@ Some conversations include an AI assistant powered by Anthropic's Claude model. 
 
 ## Data Retention
 
-We retain your account data and messages for as long as your account is active. You can delete your account at any time (see below). Account deletion does not currently erase stored voice transcripts, attachment references, uploaded files or diagnostic logs. Contact support@chat.globalbr.ai with requests about this retained data.
+We retain your account data and messages for as long as your account is active. You can delete your account at any time (see below). Account deletion does not currently erase stored voice transcripts, attachment references, uploaded files or diagnostic logs. Contact support@ideaflow.app with requests about this retained data.
 
 Private contact names remain stored until you clear them or either linked account is deleted. Blocking or a visibility change prevents reading the private name but does not itself delete it.
 
@@ -48,7 +48,7 @@ Private contact names remain stored until you clear them or either linked accoun
 
 **Delete your account.** In the app, go to Settings → Delete My Account. This deletes your account and push tokens and replaces the message text you authored with "Message deleted" in shared conversations. Conversation structure and other participants' messages are preserved. See Data Retention above for the data this action does not erase.
 
-**Data requests.** To request a copy of your data or ask questions about privacy, email support@chat.globalbr.ai.
+**Data requests.** To request a copy of your data or ask questions about privacy, email support@ideaflow.app.
 
 ## Data Security
 
@@ -64,4 +64,4 @@ We may update this policy. If we make material changes, we will notify you via t
 
 ## Contact
 
-Questions? Email us at support@chat.globalbr.ai.
+Questions? Email us at support@ideaflow.app.
