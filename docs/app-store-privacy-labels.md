@@ -19,7 +19,7 @@ when filling out the ASC form.
 
 - **Privacy Policy URL:** https://chat.globalbr.ai/legal/privacy
 - **Terms of Service URL:** https://chat.globalbr.ai/legal/terms
-- **Support URL:** mailto:support@chat.globalbr.ai
+- **Support URL:** mailto:support@ideaflow.app
 - **App category:** Social Networking (primary), Productivity (secondary)
 - **Sign-in providers:** Google OAuth, Sign in with Apple, email/password (via Noos SSO)
 - **Server location:** Google Cloud Compute Engine (`us-central1`), self-hosted Neo4j
@@ -173,7 +173,7 @@ The privacy policy at https://chat.globalbr.ai/legal/privacy MUST contain:
 - [ ] "User Rights" — account deletion path (already shipped: Settings → Delete account)
 - [ ] "Data Retention" — how long messages are retained, deletion policy
 - [ ] "International Transfers" — note that data may flow through Google Cloud US regions
-- [ ] "Contact" — support@chat.globalbr.ai
+- [ ] "Contact" — support@ideaflow.app
 - [ ] Last-updated date
 
 Audit the authoritative [privacy policy source](../apps/server/src/legal/privacy.md) against these requirements before a separately authorized submission. Storage and deletion behavior are documented there; this checklist does not establish release readiness.
