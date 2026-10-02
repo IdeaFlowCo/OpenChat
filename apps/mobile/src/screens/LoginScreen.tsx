@@ -385,7 +385,7 @@ export function LoginScreen() {
         nonce,
         code_challenge: codeChallenge,
       });
-      if (takeIdeaflowAccountChoice()) query.set('prompt', 'login');
+      if (takeIdeaflowAccountChoice()) query.set('prompt', 'select_account');
       const response = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/url?${query}`);
       if (!response.ok) throw new Error(`Could not start Ideaflow sign-in (${response.status})`);
       const body = await response.json() as { url?: string };

@@ -324,7 +324,7 @@ router.get('/ideaflow/url', async (req: Request, res: Response) => {
       state,
       nonce,
       codeChallenge,
-      ...(req.query.prompt === 'login' ? { prompt: 'login' as const } : {}),
+      ...(req.query.prompt === 'select_account' ? { prompt: 'select_account' as const } : {}),
     });
     res.json({ url });
   } catch (error) {

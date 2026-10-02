@@ -26,7 +26,7 @@ describe('buildIdeaflowAuthorizationUrl', () => {
   });
 
   it('asks who is signing in after an explicit sign-out', async () => {
-    const url = new URL(await buildIdeaflowAuthorizationUrl(config, { ...input, prompt: 'login' }, discovery));
-    expect(url.searchParams.get('prompt')).toBe('login');
+    const url = new URL(await buildIdeaflowAuthorizationUrl(config, { ...input, prompt: 'select_account' }, discovery));
+    expect(url.searchParams.get('prompt')).toBe('select_account');
   });
 });
