@@ -51,6 +51,7 @@ import { AppIcon, type AppIconName } from './AppIcon';
 import { AgentOverlayButton } from './AgentOverlayButton';
 import { ConnectionStatusLine } from './ConnectionStatusLine';
 import { isPlaceholderEmail } from '../utils/email';
+import { useIdeaflowAccountSwitch } from '../hooks/useIdeaflowAccountSwitch';
 // The wide /app/ pane renders the same ChatScreen as the compact layout — with full
 // feature parity (voice / preview / transform / forwarding / reactions /
 // edit / delete / mentions / attachments / read receipts / pagination).
@@ -217,6 +218,13 @@ export function MasterDetailLayout() {
   const menuOpenMyCard = useCallback(() => { setAccountMenuOpen(false); openMyCard(); }, [openMyCard]);
   const menuOpenSettings = useCallback(() => { setAccountMenuOpen(false); openSettings(); }, [openSettings]);
   const menuSignOut = useCallback(() => { setAccountMenuOpen(false); void signOut(); }, [signOut]);
+  // Web + Ideaflow enabled only: app-local sign-out, then the Ideaflow
+  // account chooser (prompt=select_account). OpenChat-3ag.12.
+  const ideaflowSwitch = useIdeaflowAccountSwitch();
+  const menuSwitchAccount = useCallback(() => {
+    setAccountMenuOpen(false);
+    void ideaflowSwitch.switchAccount();
+  }, [ideaflowSwitch]);
   const openAgentOverlay = useCallback(() => setAgentPanelOpen(true), []);
   const openShortcuts = useCallback(() => navigation.navigate('KeyboardShortcuts'), [navigation]);
   const openGroupSettings = useCallback(
@@ -510,6 +518,9 @@ export function MasterDetailLayout() {
             </View>
             <AccountMenuRow icon="qr" label="Profile" hint="Card · QR" onPress={menuOpenMyCard} hoverBg={c.surfaceElevated} color={c.textPrimary} iconColor={c.primary} hintColor={c.textMetadata} />
             <AccountMenuRow icon="settings" label="Settings" hint="⌘," onPress={menuOpenSettings} hoverBg={c.surfaceElevated} color={c.textPrimary} iconColor={c.primary} hintColor={c.textMetadata} />
+            {ideaflowSwitch.available && (
+              <AccountMenuRow icon="people" label="Switch account" hint="Ideaflow" onPress={menuSwitchAccount} hoverBg={c.surfaceElevated} color={c.textPrimary} iconColor={c.primary} hintColor={c.textMetadata} />
+            )}
             <AccountMenuRow icon="logout" label="Sign out" onPress={menuSignOut} hoverBg={c.surfaceElevated} color={c.danger} iconColor={c.danger} hintColor={c.textMetadata} />
           </View>
         </>

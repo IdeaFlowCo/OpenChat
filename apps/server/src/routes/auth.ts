@@ -14,6 +14,7 @@ import {
   exchangeIdeaflowAuthorizationCode,
   getIdeaflowOidcConfig,
   getIdeaflowPasswordResetUrl,
+  IDEAFLOW_SELECT_ACCOUNT_PROMPT,
   IdeaflowIdentityClaims,
 } from '../services/ideaflowOidc.js';
 import { deletePrivateGraphForUser, exportPrivateGraph } from '../services/privateGraph.js';
@@ -293,7 +294,9 @@ router.get('/ideaflow/config', (_req: Request, res: Response) => {
  *
  * Starts an OIDC Authorization Code + PKCE flow using browser-generated state,
  * nonce, and code challenge. The redirect URI is server-owned and cannot be
- * overridden by the caller.
+ * overridden by the caller. The optional `prompt` accepts only
+ * `select_account` (the explicit account-switch path); ordinary sign-in omits
+ * it so an existing IdeaFlow ID session stays silent.
  */
 router.get('/ideaflow/url', async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -319,12 +322,18 @@ router.get('/ideaflow/url', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'A valid S256 code challenge is required' });
     return;
   }
+  const rawPrompt = req.query.prompt;
+  if (rawPrompt !== undefined && rawPrompt !== IDEAFLOW_SELECT_ACCOUNT_PROMPT) {
+    res.status(400).json({ error: 'Unsupported prompt' });
+    return;
+  }
 
   try {
     const url = await buildIdeaflowAuthorizationUrl(config, {
       state,
       nonce,
       codeChallenge,
+      ...(rawPrompt === IDEAFLOW_SELECT_ACCOUNT_PROMPT ? { prompt: IDEAFLOW_SELECT_ACCOUNT_PROMPT } : {}),
     });
     res.json({ url });
   } catch (error) {

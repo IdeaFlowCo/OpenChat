@@ -130,12 +130,21 @@ export function getOidcDiscovery(
   return pending;
 }
 
+/**
+ * The only OIDC prompt OpenChat ever requests. Ordinary sign-in sends no
+ * prompt so an existing IdeaFlow ID session completes silently (SSO); the
+ * explicit "Switch account" path asks the provider for its account chooser.
+ */
+export const IDEAFLOW_SELECT_ACCOUNT_PROMPT = 'select_account';
+export type IdeaflowAuthorizationPrompt = typeof IDEAFLOW_SELECT_ACCOUNT_PROMPT;
+
 export async function buildIdeaflowAuthorizationUrl(
   config: IdeaflowOidcConfig,
   input: {
     state: string;
     nonce: string;
     codeChallenge: string;
+    prompt?: IdeaflowAuthorizationPrompt;
   },
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
@@ -149,6 +158,9 @@ export async function buildIdeaflowAuthorizationUrl(
   url.searchParams.set('nonce', input.nonce);
   url.searchParams.set('code_challenge', input.codeChallenge);
   url.searchParams.set('code_challenge_method', 'S256');
+  if (input.prompt === IDEAFLOW_SELECT_ACCOUNT_PROMPT) {
+    url.searchParams.set('prompt', IDEAFLOW_SELECT_ACCOUNT_PROMPT);
+  }
   return url.toString();
 }
 

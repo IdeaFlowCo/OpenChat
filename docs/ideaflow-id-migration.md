@@ -93,6 +93,35 @@ reads the public capability endpoint and renders the button only when the
 server says the path is enabled, so disabling it does not require a new client
 build.
 
+## Web sign-in surface: "you sign in with Ideaflow"
+
+Ideaflow ID is the sign-in for every Ideaflow app (OpenChat-3ag.12). On RN-web,
+while `GET /api/auth/ideaflow/config` reports `enabled: true`:
+
+- the login screen shows only **Continue with Ideaflow**. Nothing is rendered
+  until the capability check answers (8-second ceiling), so Google never
+  flashes first;
+- the legacy methods (Google, email/password, create account, recovery help)
+  stay reachable behind a small **Other sign-in options** link so existing
+  accounts are never stranded. Ideaflow sign-in still links an existing
+  OpenChat user by verified email under the contract above;
+- **Use another Ideaflow account** on the login screen and **Switch account**
+  in the signed-in account menu (desktop avatar menu and Profile) request the
+  provider's account chooser with `prompt=select_account`. The signed-in path
+  first prepares the authorization URL, then performs the ordinary app-local
+  OpenChat sign-out, then redirects. Ordinary sign-in sends no `prompt`, so an
+  existing IdeaFlow ID session completes silently.
+
+`/api/auth/ideaflow/url` accepts no `prompt` or exactly `select_account`; any
+other value is rejected with HTTP 400. Ideaflow start and callback failures
+(including a cancelled account choice) are shown inline, because RN-web's
+`Alert.alert` is a no-op. If the server disables Ideaflow ID or the
+capability check fails, web falls back to the legacy methods. Native iOS and
+Android keep their current methods until native Ideaflow sign-in ships. Covered
+by `apps/server/test/ideaflowOnlyLogin.mobile.test.ts`,
+`apps/server/test/signOut.mobile.test.ts` and
+`apps/mobile/src/services/ideaflowSignIn.test.ts`.
+
 ## Password recovery capability
 
 The [signed-out recovery help](../apps/mobile/README.md#password-recovery-entry)

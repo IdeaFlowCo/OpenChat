@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
   signOut: vi.fn(async () => {}),
   getMyCard: vi.fn(),
   currentUser: { userId: 'u1', name: 'Jacob', email: 'jacob@example.com' } as Record<string, unknown> | null,
+  ideaflowEnabled: false,
+  events: [] as string[],
+  fetch: vi.fn(),
 }));
 
 vi.mock('react-native', async () => {
@@ -125,10 +128,44 @@ function textOrder(root: ReactTestInstance): string[] {
   return root.findAll(n => n.type === 'Text').map(textOf);
 }
 
+const AUTHORIZE_URL = 'https://id.ideaflow.app/api/auth/oauth2/authorize?client_id=openchat-web';
+
 beforeEach(() => {
   mocks.currentUser = { userId: 'u1', name: 'Jacob', email: 'jacob@example.com' };
+  mocks.ideaflowEnabled = false;
+  mocks.events = [];
+  mocks.signOut.mockImplementation(async () => { mocks.events.push('signOut'); });
+  mocks.fetch.mockImplementation(async (input: string) => {
+    const url = new URL(input);
+    if (url.pathname === '/api/auth/ideaflow/config') {
+      return new Response(JSON.stringify({ enabled: mocks.ideaflowEnabled }), { status: 200 });
+    }
+    if (url.pathname === '/api/auth/ideaflow/url') {
+      mocks.events.push(`start:${url.searchParams.get('prompt')}`);
+      return new Response(JSON.stringify({ url: AUTHORIZE_URL }), { status: 200 });
+    }
+    return new Response('{}', { status: 404 });
+  });
+  vi.stubGlobal('fetch', mocks.fetch);
 });
-afterEach(() => vi.clearAllMocks());
+afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); });
+
+/** Browser globals for the web-only Switch account path. */
+function stubBrowser() {
+  const store = new Map<string, string>();
+  const storage = { setItem: (k: string, v: string) => { store.set(k, v); }, getItem: (k: string) => store.get(k) ?? null, removeItem: (k: string) => { store.delete(k); } };
+  const assign = vi.fn((url: string) => { mocks.events.push(`navigate:${url}`); });
+  const alert = vi.fn();
+  vi.stubGlobal('window', { location: { assign, origin: 'https://chat.ideaflow.app' }, sessionStorage: storage, alert });
+  vi.stubGlobal('sessionStorage', storage);
+  vi.stubGlobal('document', { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  return { store, assign, alert };
+}
+
+const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+async function settleUntil(condition: () => boolean, attempts = 50) {
+  for (let i = 0; i < attempts && !condition(); i++) await settle();
+}
 
 describe('Profile (MyCard) sign out', () => {
   it('offers Sign out and Settings even when the card request fails', async () => {
@@ -217,5 +254,73 @@ describe('Desktop sidebar account menu', () => {
       expect(mocks.navigation.navigate).toHaveBeenLastCalledWith(route);
       expect(menuItems(tree.root)).toEqual([]);
     }
+  });
+});
+
+describe('Switch account (web, Ideaflow ID enabled)', () => {
+  const menuItems = (root: ReactTestInstance) =>
+    root.findAll(n => n.type === 'Pressable' && n.props.accessibilityRole === 'menuitem').map(n => n.props.accessibilityLabel);
+
+  it('desktop account menu signs out locally, then starts Ideaflow with prompt=select_account', async () => {
+    mocks.ideaflowEnabled = true;
+    const { store } = stubBrowser();
+    const tree = create(React.createElement(MasterDetailLayout));
+    await settle();
+
+    await act(async () => { buttonLabelled(tree.root, 'Account menu').props.onPress(); });
+    expect(menuItems(tree.root)).toEqual(['Profile', 'Settings', 'Switch account', 'Sign out']);
+
+    const item = tree.root.find(n => n.type === 'Pressable' && n.props.accessibilityLabel === 'Switch account');
+    await act(async () => { item.props.onPress(); });
+    await settleUntil(() => mocks.events.length >= 3);
+
+    expect(mocks.events).toEqual(['start:select_account', 'signOut', `navigate:${AUTHORIZE_URL}`]);
+    expect(mocks.signOut).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(store.get('openchat_ideaflow_web')!)).toEqual(expect.objectContaining({
+      state: expect.any(String), nonce: expect.any(String), codeVerifier: expect.any(String),
+    }));
+    expect(menuItems(tree.root)).toEqual([]);
+  });
+
+  it('Profile offers Switch account above Sign out and uses the same chooser path', async () => {
+    mocks.ideaflowEnabled = true;
+    mocks.getMyCard.mockResolvedValueOnce(CARD);
+    stubBrowser();
+    const tree = create(React.createElement(MyCardScreen));
+    await settle();
+
+    const order = textOrder(tree.root);
+    expect(order.indexOf('Switch account')).toBeGreaterThan(order.indexOf('ACCOUNT'));
+    expect(order.indexOf('Switch account')).toBeLessThan(order.indexOf('Sign out'));
+    await act(async () => { buttonLabelled(tree.root, 'Switch account').props.onPress(); });
+    await settleUntil(() => mocks.events.length >= 3);
+    expect(mocks.events).toEqual(['start:select_account', 'signOut', `navigate:${AUTHORIZE_URL}`]);
+  });
+
+  it('stays signed in and explains when the provider cannot be reached', async () => {
+    mocks.ideaflowEnabled = true;
+    const { assign, alert } = stubBrowser();
+    mocks.fetch.mockImplementation(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/api/auth/ideaflow/config') return new Response(JSON.stringify({ enabled: true }), { status: 200 });
+      return new Response(JSON.stringify({ error: 'Could not reach IdeaFlow ID' }), { status: 502 });
+    });
+    const tree = create(React.createElement(MasterDetailLayout));
+    await settle();
+    await act(async () => { buttonLabelled(tree.root, 'Account menu').props.onPress(); });
+    const item = tree.root.find(n => n.type === 'Pressable' && n.props.accessibilityLabel === 'Switch account');
+    await act(async () => { item.props.onPress(); });
+    await settleUntil(() => alert.mock.calls.length > 0);
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    expect(assign).not.toHaveBeenCalled();
+    expect(alert).toHaveBeenCalledWith('Could not switch account. Could not start Ideaflow sign-in (502)');
+  });
+
+  it('is absent when Ideaflow ID is disabled, leaving Sign out unchanged', async () => {
+    stubBrowser();
+    const tree = create(React.createElement(MasterDetailLayout));
+    await settle();
+    await act(async () => { buttonLabelled(tree.root, 'Account menu').props.onPress(); });
+    expect(menuItems(tree.root)).toEqual(['Profile', 'Settings', 'Sign out']);
   });
 });

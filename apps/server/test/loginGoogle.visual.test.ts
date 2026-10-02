@@ -70,8 +70,15 @@ it('renders the pre-login release identifier on a phone-sized product surface', 
   const { element, getStyleElement } = AppRegistry.getApplication('LoginEvidence', {});
   const markup = renderToStaticMarkup(element);
   expect(markup).toContain(process.env.OPENCHAT_LOGIN_EVIDENCE_PLATFORM === 'web' ? 'v1.0.1 · update abcd1234' : 'v1.0.1 (2001) · update abcd1234');
-  expect(markup).toContain('Continue with Google');
-  expect(markup).toContain('Forgot password?');
+  if (process.env.OPENCHAT_LOGIN_EVIDENCE_PLATFORM === 'web') {
+    // Web renders no sign-in method until /api/auth/ideaflow/config answers
+    // (OpenChat-3ag.12), so the static first paint never flashes Google.
+    expect(markup).toContain('Loading sign-in options');
+    expect(markup).not.toContain('Continue with Google');
+  } else {
+    expect(markup).toContain('Continue with Google');
+    expect(markup).toContain('Forgot password?');
+  }
   const evidenceDir = process.env.OPENCHAT_LOGIN_EVIDENCE_DIR;
   if (evidenceDir) {
     mkdirSync(evidenceDir, { recursive: true });

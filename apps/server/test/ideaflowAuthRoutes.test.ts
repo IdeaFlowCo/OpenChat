@@ -138,6 +138,40 @@ describe('IdeaFlow ID auth routes', () => {
     }
   });
 
+  it('sends prompt=select_account only for the explicit account-switch start', async () => {
+    const discovery = {
+      issuer: 'https://id.ideaflow.app/api/auth',
+      authorization_endpoint: 'https://id.ideaflow.app/api/auth/oauth2/authorize',
+      token_endpoint: 'https://id.ideaflow.app/api/auth/oauth2/token',
+      jwks_uri: 'https://id.ideaflow.app/api/auth/jwks',
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(discovery), { status: 200 })));
+    const pkce = { state: 'state-value-1234567890', nonce: 'nonce-value-1234567890', code_challenge: 'A'.repeat(43) };
+    try {
+      const normal = await request(server).get('/api/auth/ideaflow/url').set('Host', 'chat.ideaflow.app').query(pkce);
+      expect(normal.status).toBe(200);
+      expect(new URL(normal.body.url).searchParams.has('prompt')).toBe(false);
+
+      const switching = await request(server).get('/api/auth/ideaflow/url').set('Host', 'chat.ideaflow.app')
+        .query({ ...pkce, prompt: 'select_account' });
+      expect(switching.status).toBe(200);
+      expect(new URL(switching.body.url).searchParams.getAll('prompt')).toEqual(['select_account']);
+
+      for (const prompt of ['none', 'login', 'consent', 'select_account login', '']) {
+        const rejected = await request(server).get('/api/auth/ideaflow/url').set('Host', 'chat.ideaflow.app')
+          .query({ ...pkce, prompt });
+        expect(rejected.status).toBe(400);
+        expect(rejected.body).toEqual({ error: 'Unsupported prompt' });
+      }
+      const repeated = await request(server)
+        .get(`/api/auth/ideaflow/url?${new URLSearchParams({ ...pkce })}&prompt=select_account&prompt=select_account`)
+        .set('Host', 'chat.ideaflow.app');
+      expect(repeated.status).toBe(400);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('keeps Google account choice and redirects on each browser host', async () => {
     process.env.GOOGLE_CLIENT_ID = 'google-web-client';
     try {

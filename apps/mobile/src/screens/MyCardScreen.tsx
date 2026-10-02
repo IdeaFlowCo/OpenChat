@@ -32,6 +32,7 @@ import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp } from '../navigation/types';
 import { currentCardUrl, shareCard, shareCardOnWhatsApp } from '../utils/cardSharing';
 import { useFocusedAccountGuard } from '../hooks/useFocusedAccountGuard';
+import { useIdeaflowAccountSwitch } from '../hooks/useIdeaflowAccountSwitch';
 
 function confirmReset(onConfirm: () => void) {
   const title = 'Reset card link?';
@@ -53,6 +54,7 @@ export function MyCardScreen() {
   const c = getColors(scheme);
   const { width } = useWindowDimensions();
   const { currentUser, refreshConversations, signOut } = useChat();
+  const ideaflowSwitch = useIdeaflowAccountSwitch();
   const guardAction = useFocusedAccountGuard(currentUser?.userId);
   const safeEmail = isPlaceholderEmail(currentUser?.email) ? undefined : currentUser?.email;
 
@@ -424,6 +426,27 @@ export function MyCardScreen() {
           is two taps everywhere. Settings › Account carries the same row. */}
       <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>ACCOUNT</Text>
       <View style={[styles.menuSection, { backgroundColor: c.surface, borderColor: c.border }]}>
+        {ideaflowSwitch.available && (
+          <TouchableOpacity
+            style={[styles.menuRow, { borderBottomColor: c.divider }]}
+            onPress={() => { void ideaflowSwitch.switchAccount(); }}
+            disabled={ideaflowSwitch.switching}
+            accessibilityRole="button"
+            accessibilityLabel="Switch account"
+            activeOpacity={0.7}
+          >
+            <View style={styles.menuIconWrap}>
+              <AppIcon name="people" color={c.primary} size={20} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.menuLabel, { color: c.textPrimary }]}>Switch account</Text>
+              <Text style={[styles.menuHint, { color: c.textMetadata }]} numberOfLines={1}>
+                Use another Ideaflow account
+              </Text>
+            </View>
+            {ideaflowSwitch.switching && <ActivityIndicator size="small" color={c.primary} />}
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={[styles.menuRow, { borderBottomWidth: 0 }]}
           onPress={() => { void signOut(); }}
