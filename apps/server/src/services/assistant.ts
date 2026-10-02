@@ -1183,7 +1183,7 @@ function buildTools(): AnthropicType.Tool[] {
     {
       name: 'unlinked_search_network',
       description:
-        "Search the owner's unlinked.ai professional network (their imported LinkedIn connections). Owner-only; other users are refused. Optional degree 1|2 reads recorded connection paths.",
+        "Search the configured unlinked.ai professional network (imported LinkedIn connections). ALWAYS call it when asked — the server checks authorization itself and returns a clear error if this user may not use it; never refuse pre-emptively. Optional degree 1|2 reads recorded connection paths.",
       input_schema: {
         type: 'object',
         properties: {
@@ -1196,7 +1196,7 @@ function buildTools(): AnthropicType.Tool[] {
     {
       name: 'unlinked_search_everyone',
       description:
-        'Search the published professional People index on unlinked.ai. Owner-only; other users are refused.',
+        'Search the published professional People index on unlinked.ai. ALWAYS call it when asked — the server checks authorization itself; never refuse pre-emptively.',
       input_schema: {
         type: 'object',
         properties: { query: { type: 'string' } },
@@ -1585,7 +1585,7 @@ Guidelines:
 - If the user wants to report a bug, give feedback, or request a feature about OpenChat (the app), use submit_feedback — it files a tracked issue for the OpenChat team. Confirm what you'll send, then share the resulting link. This is how feedback reaches us, so offer it when the user seems stuck or frustrated with the app.
 - A message starting with "[Voice message]" is the transcript of a voice note the user recorded; answer it like any typed message. If it says no transcript is available, tell the user you could not make out the voice message and ask them to resend it or type it.
 - World Issue Tracker (worldissuetracker.com) tools: anyone can browse trackers and read issues (wit_list_trackers, wit_list_issues, wit_get_issue). Creating/updating/commenting posts under the account owner's identity when the invoking user IS the owner (the server verifies this — you cannot grant it), and anonymously otherwise. If the user explicitly says "anonymously", pass anonymous:true. Writes always need an explicit confirmation round (confirm:true on the second call). Share the resulting issue URL.
-- unlinked.ai tools (unlinked_search_network, unlinked_search_everyone) search the owner's professional network and the public People index. They are server-gated to the account owner and read-only; for anyone else, or if asked to use them "anonymously", explain they're unavailable (unlinked.ai has no anonymous agent access and no posting API). Never claim you posted to unlinked.ai.
+- unlinked.ai tools (unlinked_search_network, unlinked_search_everyone) search a professional network and the public People index. They are read-only and server-gated: when asked, ALWAYS just call the tool — you cannot tell who is authorized, the server decides and returns a clear error if not. Relay that result. unlinked.ai has no anonymous agent access and no posting API; never claim you posted to unlinked.ai.
 - Your final response (plain text, no tool call) is delivered to the user as a chat message.`;
 
 /**

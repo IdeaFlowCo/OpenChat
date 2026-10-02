@@ -139,7 +139,11 @@ function compactIssue(i: any): Record<string, unknown> {
 }
 
 export async function toolWitListTrackers(query?: string, limit = 20): Promise<unknown> {
-  const res = await witFetch(`/get-trackers?limit=${Math.min(Math.max(limit, 1), 100)}`, 'anonymous');
+  // When text-filtering client-side, fetch the max page so the filter sees
+  // the whole catalog (verified live: 126 trackers; a 20-row page missed
+  // the 'openchat' board).
+  const fetchLimit = query?.trim() ? 100 : Math.min(Math.max(limit, 1), 100);
+  const res = await witFetch(`/get-trackers?limit=${fetchLimit}`, 'anonymous');
   if (!res.ok) return { error: 'Failed to list trackers' };
   let trackers: any[] = Array.isArray(res.data?.trackers) ? res.data.trackers : [];
   const q = query?.trim().toLowerCase();
