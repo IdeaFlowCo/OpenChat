@@ -1,15 +1,11 @@
 /**
- * Contact profile screen — opened by tapping the DM header avatar/name.
- * (OpenChat-???)
- *
- * Shows: large avatar, name + bot badge, email, status message, presence,
- * chats in common, the asks they shared with the viewer, the viewer's own
- * "Private to you" card, and quick actions (block, report). For non-bot users
- * only — bots get a simpler read-only view.
+ * A cached conversation participant must not keep a person's profile visible
+ * after the authenticated official-profile lookup denies access. The lookup
+ * also supports people with no conversation; it does not create a DM.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
@@ -17,6 +13,7 @@ import { api, type User } from '../api/client';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
+import { usePrivateName } from '../contexts/PrivateNamesContext';
 import { FriendControls } from '../components/FriendControls';
 import { PrivateCard } from '../components/PrivateGraph';
 import { ProfileAsks } from '../components/ProfileAsks';
@@ -41,50 +38,66 @@ function relativeLastSeen(iso: string | undefined): string {
 export function ContactProfileScreen() {
   const navigation = useNavigation<NavProp<'ContactProfile'>>();
   const route = useRoute<RouteProps<'ContactProfile'>>();
-  const { userId } = route.params;
+  const { userId, exactEmail } = route.params;
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  const { conversations, presence, refreshConversations, createConversation } = useChat();
+  const { currentUser, conversations, presence, refreshConversations, createConversation } = useChat();
 
   // Pull the most recent user object from any conversation participant.
   // This stays fresh because ChatContext re-renders on participant updates.
-  const known = useMemo(() => {
+  const conversationUser = useMemo(() => {
     for (const conv of conversations) {
-      const p = conv.participants?.find((p) => p.user.id === userId);
+      const p = conv.participants?.find((p) => p.user?.id === userId);
       if (p) return p.user;
     }
     return null;
   }, [conversations, userId]);
 
-  // Catch up and private links can point at someone who shares no chat with
-  // you. Their name and picture then come from the private card's own lookup,
-  // which applies the same block and bot rules.
-  const [fallback, setFallback] = useState<User | null>(null);
-  const [fallbackFailed, setFallbackFailed] = useState(false);
-  useEffect(() => {
-    if (known) return;
-    let active = true;
-    setFallback(null); setFallbackFailed(false);
-    api.getPrivatePerson(userId)
-      .then(result => {
-        if (!active) return;
-        if (result.person) setFallback({ id: userId, name: result.person.name, avatarUrl: result.person.avatarUrl ?? undefined });
-        else setFallbackFailed(true);
-      })
-      .catch(() => { if (active) setFallbackFailed(true); });
-    return () => { active = false; };
-  }, [known, userId]);
-  const user = known ?? fallback;
-
-  const pres = presence.get(userId);
   const groupsInCommon = useMemo(
-    () => conversations.filter(conv => conv.type === 'group' && conv.participants?.some(p => p.user.id === userId)).length,
+    () => conversations.filter(conv => conv.type === 'group' && conv.participants?.some(p => p.user?.id === userId)).length,
     [conversations, userId],
   );
 
+  const [profile, setProfile] = useState<{ id: string; user: User | null; unavailable: boolean } | null>(null);
+  const isReadOnlyIdentity = conversationUser?.isBot || userId === currentUser?.userId;
+  useEffect(() => {
+    let active = true;
+    setProfile(null);
+    if (!isReadOnlyIdentity) {
+      api.getContactProfile(userId, exactEmail).then(user => {
+        if (active) setProfile({ id: userId, user, unavailable: false });
+      }).catch(() => {
+        if (active) setProfile({ id: userId, user: null, unavailable: true });
+      });
+    }
+    return () => { active = false; };
+  }, [userId, exactEmail, isReadOnlyIdentity, conversationUser?.name, conversationUser?.avatarUrl]);
+  useEffect(() => { setEditingName(false); setNameDraft(''); setNameError(''); }, [userId]);
+  const currentProfile = profile?.id === userId ? profile : null;
+  const user = currentProfile?.unavailable ? null : currentProfile?.user ? { ...conversationUser, ...currentProfile.user } : conversationUser;
+  const loadingProfile = !isReadOnlyIdentity && !currentProfile && !conversationUser;
+
+  const canSetPrivateName = !!user && !user.isBot && userId !== currentUser?.userId;
+  const privateName = usePrivateName(canSetPrivateName ? userId : undefined, exactEmail);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameBusy, setNameBusy] = useState(false);
+  const [nameError, setNameError] = useState('');
+  const saveName = async (name: string | null) => {
+    setNameBusy(true);
+    setNameError('');
+    try {
+      await privateName.save(name);
+      setEditingName(false);
+    } catch (error) {
+      setNameError(error instanceof Error ? error.message : 'Could not save private name.');
+    } finally { setNameBusy(false); }
+  };
+  const pres = presence.get(userId);
+
   const handleBlock = useCallback(() => {
     if (!user) return;
-    const safeEmail = !user.email || isPlaceholderEmail(user.email) ? '' : user.email;
+    const safeEmail = isPlaceholderEmail(user.email) ? '' : user.email;
     Alert.alert(
       `Block ${user.name || safeEmail || 'Unknown'}?`,
       "You won't receive messages from them anymore. You can unblock from Settings.",
@@ -97,8 +110,7 @@ export function ContactProfileScreen() {
             try {
               await api.blockUser(user.id);
               await refreshConversations();
-              navigation.goBack(); // back to Chat
-              navigation.goBack(); // back to Conversations list
+              navigation.goBack();
             } catch (err) {
               Alert.alert('Error', err instanceof Error ? err.message : 'Failed to block.');
             }
@@ -140,15 +152,14 @@ export function ContactProfileScreen() {
   if (!user) {
     return (
       <View style={[styles.root, { backgroundColor: c.background, justifyContent: 'center', alignItems: 'center' }]}>
-        {fallbackFailed
-          ? <Text style={{ color: c.textSecondary }}>Contact not found.</Text>
-          : <ActivityIndicator color={c.primary} />}
+        {loadingProfile ? <ActivityIndicator color={c.primary} accessibilityLabel="Loading contact profile" /> : <Text style={{ color: c.textSecondary }}>Person unavailable.</Text>}
       </View>
     );
   }
 
-  const safeEmail = !user.email || isPlaceholderEmail(user.email) ? '' : user.email;
-  const displayName = user.name || safeEmail || 'Unknown';
+  const safeEmail = isPlaceholderEmail(user.email) ? '' : user.email;
+  const officialName = user.name || safeEmail || 'Unknown';
+  const displayName = privateName.name || officialName;
   const presenceLine =
     (pres?.statusMessage) ||
     (pres?.status === 'online' ? 'Online' : null) ||
@@ -165,6 +176,11 @@ export function ContactProfileScreen() {
             <Text style={[styles.name, { color: c.textPrimary }]} numberOfLines={1}>{displayName}</Text>
             <BotBadge isBot={user.isBot} />
           </View>
+          {!!privateName.name && (
+            <Text style={[styles.email, { color: c.textMetadata }]} accessibilityLabel={`Official OpenChat name: ${officialName}`}>
+              OpenChat name: {officialName}
+            </Text>
+          )}
           {(user.profileStatus?.emoji || user.profileStatus?.text) && (
             <Text style={{ color: c.textPrimary, fontSize: 15, fontStyle: 'italic', marginTop: 4, textAlign: 'center', maxWidth: 280 }} numberOfLines={2}>
               {`${user.profileStatus.emoji ? user.profileStatus.emoji + ' ' : ''}${user.profileStatus.text || ''}`.trim()}
@@ -185,16 +201,47 @@ export function ContactProfileScreen() {
         </View>
       </View>
 
+      {canSetPrivateName && (
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, padding: 14, gap: 10 }]}>
+          <Text style={{ color: c.textMetadata }}>Private name — visible only to you. Their OpenChat name is self-set.</Text>
+          {editingName ? <>
+            <TextInput
+              accessibilityLabel="Private name"
+              value={nameDraft}
+              onChangeText={setNameDraft}
+              maxLength={100}
+              editable={!nameBusy}
+              autoFocus
+              style={{ color: c.textPrimary, borderColor: c.border, borderWidth: 1, borderRadius: 6, padding: 12 }}
+            />
+            <TouchableOpacity style={styles.privateNameAction} accessibilityRole="button" disabled={nameBusy || !nameDraft.trim()} onPress={() => void saveName(nameDraft.trim())}>
+              <Text style={{ color: c.primary }}>{nameBusy ? 'Saving…' : 'Save private name'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.privateNameAction} accessibilityRole="button" disabled={nameBusy} onPress={() => setEditingName(false)}>
+              <Text style={{ color: c.textPrimary }}>Cancel</Text>
+            </TouchableOpacity>
+          </> : (
+            <TouchableOpacity style={styles.privateNameAction} accessibilityRole="button" disabled={nameBusy} onPress={() => { setNameDraft(privateName.name || ''); setNameError(''); setEditingName(true); }}>
+              <Text style={{ color: c.primary }}>{privateName.name ? 'Edit private name' : 'Set private name'}</Text>
+            </TouchableOpacity>
+          )}
+          {!!privateName.name && <TouchableOpacity style={styles.privateNameAction} accessibilityRole="button" disabled={nameBusy} onPress={() => void saveName(null)}>
+            <Text style={{ color: c.primary }}>Clear private name</Text>
+          </TouchableOpacity>}
+          {!!nameError && <Text accessibilityRole="alert" style={{ color: c.danger }}>{nameError}</Text>}
+        </View>
+      )}
+
       {!user.isBot && <FriendControls userId={userId} onMessage={async () => {
         const conversation = await createConversation([userId], { type: 'direct' });
         navigation.navigate('Chat', { conversationId: conversation.id });
       }} />}
 
       {/* What they are asking for, limited to what they shared with you. */}
-      {!user.isBot && <ProfileAsks userId={userId} onOpenStory={story => navigation.navigate('StoryViewer', { story })} />}
+      {canSetPrivateName && <ProfileAsks userId={userId} onOpenStory={story => navigation.navigate('StoryViewer', { story })} />}
 
       {/* Your own notes, importance, catch-up and links about this person. Collapsed until opened. */}
-      {!user.isBot && (
+      {canSetPrivateName && (
         <PrivateCard
           userId={userId}
           onOpenThing={thingId => navigation.navigate('PrivateThing', { thingId })}
@@ -242,5 +289,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
+  privateNameAction: { minHeight: 44, justifyContent: 'center' },
   rowLabel: { fontSize: 16, flex: 1 },
 });

@@ -391,6 +391,10 @@ function emitAuthExpired() {
   }
 }
 
+function discoveryProofHeaders(exactEmail?: string): RequestInit | undefined {
+  return exactEmail ? { headers: { 'X-OpenChat-Discovery-Email': encodeURIComponent(exactEmail) } } : undefined;
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit & { auth?: boolean }
@@ -1473,6 +1477,11 @@ export const api = {
     request<FriendStatus>(`/api/card/${encodeURIComponent(token)}/friend-status`),
   requestCardFriend: (token: string) =>
     request<FriendStatus>(`/api/card/${encodeURIComponent(token)}/friend-request`, { method: 'POST' }),
+  getContactProfile: (userId: string, exactEmail?: string) => request<User>(`/api/private-names/${encodeURIComponent(userId)}/profile`, discoveryProofHeaders(exactEmail)),
+  getPrivateName: (userId: string, exactEmail?: string) => request<{ name: string | null }>(`/api/private-names/${encodeURIComponent(userId)}`, discoveryProofHeaders(exactEmail)),
+  setPrivateName: (userId: string, name: string, exactEmail?: string) => request<{ name: string }>(`/api/private-names/${encodeURIComponent(userId)}`, { ...discoveryProofHeaders(exactEmail), method: 'PUT', body: JSON.stringify({ name }) }),
+  clearPrivateName: (userId: string) => request<{ name: null }>(`/api/private-names/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
+
   listFriends: () => request<FriendLists>('/api/friends'),
   getFriendStatus: (userId: string) =>
     request<FriendStatus>(`/api/friends/users/${encodeURIComponent(userId)}`),

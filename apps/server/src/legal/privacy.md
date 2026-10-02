@@ -8,6 +8,8 @@ This Privacy Policy describes how OpenChat (available at chat.ideaflow.app and t
 
 **Account information.** When you sign up, we collect your email address and display name. If you sign in with Google or Apple, we receive your profile information from that provider.
 
+**Private contact names.** If you set a private name for another OpenChat person, we store that label linked to your account and their OpenChat user ID to personalize your view. It is visible only to your account and does not change their profile name.
+
 **Secretary quick answers.** If you enable Secretary mode, we store the questions and exact answers you approve so OpenChat can automatically reply to matching questions in your direct chats. Secretary mode is optional and disabled by default.
 
 **Messages and attachments.** We store the messages you send and receive, including uploaded photos, voice recordings and their transcripts, so conversations persist across sessions. Message content and attachments are stored on our servers and storage services.
@@ -39,6 +41,8 @@ Some conversations include an AI assistant powered by Anthropic's Claude model. 
 ## Data Retention
 
 We retain your account data and messages for as long as your account is active. You can delete your account at any time (see below). Account deletion does not currently erase stored voice transcripts, attachment references, uploaded files or diagnostic logs. Contact support@chat.globalbr.ai with requests about this retained data.
+
+Private contact names remain stored until you clear them or either linked account is deleted. Blocking or a visibility change prevents reading the private name but does not itself delete it.
 
 ## Your Rights
 

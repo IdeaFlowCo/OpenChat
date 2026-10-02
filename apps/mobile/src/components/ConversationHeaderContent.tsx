@@ -8,6 +8,7 @@ import { Avatar, type GroupAvatarMember } from './Avatar';
 interface ConversationHeaderContentProps {
   title: string;
   subtitle: string;
+  officialName?: string;
   avatarName: string;
   avatarEmail?: string;
   avatarUrl?: string;
@@ -24,6 +25,7 @@ interface ConversationHeaderContentProps {
 export function ConversationHeaderContent({
   title,
   subtitle,
+  officialName,
   avatarName,
   avatarEmail,
   avatarUrl,
@@ -38,7 +40,8 @@ export function ConversationHeaderContent({
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const accessibleTitle = title || 'Chat';
-  const accessibleStatus = subtitle ? `. ${subtitle}` : '';
+  const displaySubtitle = [officialName ? `OpenChat name: ${officialName}` : '', subtitle].filter(Boolean).join(' · ');
+  const accessibleStatus = displaySubtitle ? `. ${displaySubtitle}` : '';
 
   return (
     <View style={[styles.root, { minHeight }]}>
@@ -67,13 +70,13 @@ export function ConversationHeaderContent({
           >
             {accessibleTitle}
           </Text>
-          {!!subtitle && (
+          {!!displaySubtitle && (
             <Text
               numberOfLines={1}
               ellipsizeMode="tail"
               style={[styles.subtitle, { color: c.textMetadata }]}
             >
-              {subtitle}
+              {displaySubtitle}
             </Text>
           )}
         </View>

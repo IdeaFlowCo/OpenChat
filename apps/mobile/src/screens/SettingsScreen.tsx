@@ -1,11 +1,12 @@
 /**
- * Settings screen — for now just the theme toggle (OpenChat-bji), expo-
- * secure-store status (OpenChat-ghr), notifications permission UI
- * (OpenChat-jzc), and a sign-out button. Reached via a gear icon in the
- * Conversations header.
+ * Settings screen — theme toggle (OpenChat-bji), expo-secure-store status
+ * (OpenChat-ghr), notifications permission UI (OpenChat-jzc), and the
+ * Account card (Edit profile / email / Sign out). Reached via Profile ›
+ * Settings (the avatar is the "Me" door on every width) and ⌘, on desktop.
  *
  * Designed so the surface is easy to extend: add a new row, the screen
- * just grows downward.
+ * just grows downward. Sign out stays in the top Account card, not at the
+ * bottom of the scroll, so it is found without scrolling (OpenChat-3ar0).
  */
 
 import { useCallback, useState } from 'react';
@@ -362,35 +363,52 @@ export function SettingsScreen() {
         <Text style={[styles.agentHeroArrow, { color: c.onPrimary }]}>→</Text>
       </TouchableOpacity>
 
-      {currentUser && (
-        <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>ACCOUNT</Text>
-          <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-            {/* Edit profile (OpenChat-tml) */}
-            <TouchableOpacity
-              style={[
-                styles.optionRow,
-                !isPlaceholderEmail(currentUser.email) && { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }
-              ]}
-              onPress={() => navigation.navigate('ProfileEdit')}
-              activeOpacity={0.7}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Edit profile</Text>
-                <Text style={[styles.optionHint, { color: c.textSecondary }]}>
-                  {currentUser.name ? currentUser.name : 'Set your display name'}
-                </Text>
-              </View>
-              <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
-            </TouchableOpacity>
-            {!isPlaceholderEmail(currentUser.email) && (
-              <View style={[styles.optionRow]}>
-                <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>{currentUser.email}</Text>
-              </View>
-            )}
-          </View>
+      <View style={styles.section}>
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>ACCOUNT</Text>
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          {currentUser && (
+            <>
+              {/* Edit profile (OpenChat-tml) */}
+              <TouchableOpacity
+                style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
+                onPress={() => navigation.navigate('ProfileEdit')}
+                activeOpacity={0.7}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Edit profile</Text>
+                  <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                    {currentUser.name ? currentUser.name : 'Set your display name'}
+                  </Text>
+                </View>
+                <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+              </TouchableOpacity>
+              {!isPlaceholderEmail(currentUser.email) && (
+                <View style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+                  <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>{currentUser.email}</Text>
+                </View>
+              )}
+            </>
+          )}
+          {/* Sign out (OpenChat-3ar0). Lives in the Account card at the top of
+              Settings — the conventional spot — rather than at the bottom of
+              a long scroll below Delete account. Not gated on currentUser so
+              a half-bootstrapped session can still be cleared. */}
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => { void signOut(); }}
+            accessibilityRole="button"
+            accessibilityLabel="Sign out"
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.danger }]}>Sign out</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                Return to the sign-in screen on this device
+              </Text>
+            </View>
+          </TouchableOpacity>
         </View>
-      )}
+      </View>
 
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>EXPERIENCE</Text>
@@ -874,15 +892,6 @@ export function SettingsScreen() {
         </View>
       </View>
 
-      <View style={styles.section}>
-        <TouchableOpacity
-          style={[styles.dangerBtn, { borderColor: c.danger }]}
-          onPress={signOut}
-        >
-          <Text style={{ color: c.danger, fontWeight: '600', fontSize: 16 }}>Sign out</Text>
-        </TouchableOpacity>
-      </View>
-
       <Text style={[styles.versionFooter, { color: c.textMetadata }]}>
         OpenChat mobile · v{Constants.expoConfig?.version ?? '?'}
         {Platform.OS !== 'web' && ` (${Constants.expoConfig?.ios?.buildNumber ?? Constants.expoConfig?.android?.versionCode ?? '?'})`}
@@ -1057,12 +1066,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   radioDot: { width: 10, height: 10, borderRadius: 5 },
-  dangerBtn: {
-    paddingVertical: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
   versionFooter: { fontSize: 11, textAlign: 'center', marginTop: 8 },
   // Android delete-account confirmation modal styles
   modalBackdrop: {

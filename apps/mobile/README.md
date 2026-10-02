@@ -87,6 +87,26 @@ Scanning opens a card for review. **Save contact** downloads a contact file
 separately; **Add friend** requests the other person's approval. Neither
 scanning nor requesting friendship sends a message.
 
+### Set a private contact name
+
+A conversation is optional: from Chats, open **Friends**, **People**, or **Search**, then choose **Profile** beside a person. This loads their visible official identity by canonical OpenChat ID and exposes the same private-name controls without creating or sending a message.
+
+From **Chats**, open a person's chat and tap their name to open **Contact
+Info**. Tap **Set private name**, enter a single-line name of up to 100
+characters, then **Save private name**. Use **Edit private name** to change it
+or **Clear private name** to restore their official label.
+
+The private name appears only for your account in Contact Info and direct-chat
+headers, on native and responsive web. When set, these surfaces also show
+**OpenChat name**, the person's self-set profile name; neither name is proof
+of identity. Your alias does not change their profile or names shown in search,
+shared cards, or other people's views. You cannot set one for yourself, a bot,
+or an imported contact without a linked OpenChat account. If the person becomes
+unavailable, saving fails without changing the displayed name.
+
+See the [private-name API and privacy contract](../../docs/private-contact-names.md)
+for account isolation and visibility rules.
+
 ### Pointing at a different backend
 
 ```bash

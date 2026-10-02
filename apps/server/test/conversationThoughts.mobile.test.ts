@@ -184,10 +184,10 @@ describe('ConversationThoughtsScreen parity & search', () => {
     const initialText = JSON.stringify(screen!.toJSON());
     expect(initialText).toContain('Nothing pinned yet');
     expect(initialText).toContain('Shared tags from this chat land here');
-    expect(initialText).not.toContain('No thoughts match');
+    expect(initialText).not.toContain('No Stream entries match');
 
     // Enter a search query
-    const searchInput = screen!.root.findByProps({ placeholder: 'Search thoughts in this chat' });
+    const searchInput = screen!.root.findByProps({ placeholder: "Search this chat's Stream" });
     await act(async () => {
       searchInput.props.onChangeText('unmatched query');
     });
@@ -199,9 +199,9 @@ describe('ConversationThoughtsScreen parity & search', () => {
 
     expect(mocks.fetchConversationThoughts).toHaveBeenCalledWith('conv-1', { q: 'unmatched query' });
 
-    // Under active search with 0 results: shows distinct "No thoughts match" empty state with Clear search
+    // Under active search with 0 results: shows distinct "No Stream entries match" empty state with Clear search
     const searchingText = JSON.stringify(screen!.toJSON());
-    expect(searchingText).toContain('No thoughts match');
+    expect(searchingText).toContain('No Stream entries match');
     expect(searchingText).toContain('unmatched query');
     expect(searchingText).toContain('Clear search');
   });
@@ -261,7 +261,7 @@ describe('ConversationThoughtsScreen parity & search', () => {
 
     // Perform search
     mocks.fetchConversationThoughts.mockResolvedValueOnce(searchResults);
-    const searchInput = screen!.root.findByProps({ placeholder: 'Search thoughts in this chat' });
+    const searchInput = screen!.root.findByProps({ placeholder: "Search this chat's Stream" });
     await act(async () => {
       searchInput.props.onChangeText('roadmap');
     });
@@ -382,7 +382,7 @@ describe('ConversationThoughtsScreen parity & search', () => {
     expect(JSON.stringify(screen!.toJSON())).toContain('Live incoming thought');
   });
 
-  it('ChatScreen renders a visible Thoughts button satisfying the Front-Door Test', async () => {
+  it('ChatScreen renders a visible Stream button satisfying the Front-Door Test', async () => {
     let chatScreen: ReturnType<typeof create> | undefined;
     mocks.route = {
       name: 'Chat' as any,
@@ -408,10 +408,10 @@ describe('ConversationThoughtsScreen parity & search', () => {
     });
 
     // Verify the visible word "Thoughts" exists in the button
-    const thoughtsBtn = renderedHeader!.root.findByProps({ accessibilityLabel: 'Thoughts for this chat' });
+    const thoughtsBtn = renderedHeader!.root.findByProps({ accessibilityLabel: 'Stream for this chat' });
     expect(thoughtsBtn).toBeDefined();
 
-    const labelText = thoughtsBtn.findByProps({ children: 'Thoughts' });
+    const labelText = thoughtsBtn.findByProps({ children: 'Stream' });
     expect(labelText).toBeDefined();
 
     // Verify tapping the button navigates to ConversationThoughts
