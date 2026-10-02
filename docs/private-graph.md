@@ -7,12 +7,24 @@ Stories or anyone else's profile.
 
 ## What it holds
 
-| Node | Meaning |
+Storage is the people overlay, a layout owned by Noos and kept in the graph
+database OpenChat shares with it. OpenChat is one view of it; another Ideaflow
+app can show the same owner the same notes.
+
+| Stored as | Meaning |
 |---|---|
-| `OpenChatPersonCard` | The owner's settings for one person: importance, catch-up cadence, last catch-up. One per owner and person. |
-| `OpenChatPrivateNote` | A note about a person or a saved thing. |
-| `OpenChatThing` | A saved company, idea, project, or person who is not on OpenChat. Unique per owner, kind and name. |
-| `OpenChatPrivateLink` | A relation in the owner's own words ("knows", "works at", "interested in") from a person or thing to another. Carries real `LINK_FROM` / `LINK_TO` relationships to its endpoints, so the overlay is traversable in the shared graph. |
+| `OverlayEntity` | A person, company, idea or project the owner keeps something about. Importance and catch-up cadence sit on it. One made by name is unique per owner, kind and name. |
+| `OverlayRef` | How an app points at an entity. A person on OpenChat is the entity named by `openchat:user:<id>`; an entity can carry refs from several apps. |
+| `OverlayNote` | A note about an entity. |
+| `OVERLAY_LINK` | A real relationship between two of the owner's entities, with the relation in the owner's own words ("knows", "works at", "interested in"). |
+
+Every node and link carries the owner's key and every query is anchored on it.
+The key is derived from the owner's Ideaflow sign-in when they have one, so the
+overlay is theirs across Ideaflow apps; an account without one is keyed by its
+OpenChat id, and what it wrote moves to the Ideaflow key when the sign-in is
+linked. `services/overlay/` is the layout's code, kept in step with the Noos
+repository; `services/privateGraph.ts` is OpenChat's side: who may be written
+about (no bots, no blocks, not yourself) and the response shapes below.
 
 Catch-up cadence is either fixed (the same gap each time) or expanding (the gap
 grows by 1.6 after each catch-up, up to a year). `nextDueAt` counts from the
@@ -37,9 +49,10 @@ these routes never return it.
 | `GET /things?q=&kind=`, `GET /things/:thingId` | Saved things, and one with its notes and links |
 | `GET /due` | People whose catch-up date has passed |
 
-Account export includes the owner's private graph under `privateGraph`.
-Account deletion removes everything the person wrote and every card, note and
-link other people keep about them.
+Account export includes the owner's private graph under `privateGraph`
+(entities, notes and links). Account deletion removes everything the person
+kept, under either identity that can name them, and removes other owners'
+entities that knew them only as an OpenChat account.
 
 ## In the app and for agents
 

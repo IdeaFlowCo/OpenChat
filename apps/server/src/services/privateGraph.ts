@@ -1,24 +1,26 @@
 /**
- * Private graph — a person's own notes and links about the people they know.
+ * Private graph — a person's own notes, importance, catch-up cadence and links
+ * about the people they know.
  *
- * Everything here belongs to one owner and is returned only to that owner:
+ * Storage is the Noos people overlay (`./overlay/`, kept in step with
+ * `src/overlay/` in the Noos repository), in the graph database OpenChat
+ * shares with Noos. OpenChat is one view of it: a person here is the overlay
+ * entity named by the ref `openchat:user:<id>`, and another app can point at
+ * the same entity with its own ref. Every overlay node and link carries the
+ * owner's key and every query is anchored on it; the person a note or link is
+ * about never sees it, and nothing here is read by search, matching or other
+ * people's profiles.
  *
- *   :OpenChatPersonCard  { key, ownerId, subjectId, important, cadenceDays,
- *                          cadenceMode, intervalDays, lastContactAt }
- *   :OpenChatPrivateNote { id, ownerId, subjectKind, subjectId, text }
- *   :OpenChatThing       { id, ownerId, kind, name, nameKey }   person | company | idea | project
- *   :OpenChatPrivateLink { id, ownerId, fromKind, fromId, relation, toKind, toId }
- *
- * A link also carries real LINK_FROM / LINK_TO relationships to its endpoints,
- * so the overlay is traversable in the shared graph. The person a note or link
- * is about never sees it, and nothing here is read by search, matching or
- * other people's profiles.
+ * This file is OpenChat's side of that: who may be written about (no bots, no
+ * blocks, not yourself), which identity names the owner, and the response
+ * shapes the app and agent tools already use.
  */
 
-import { nanoid } from 'nanoid';
-import neo4j from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
+import { OverlayError, ownerKeyFor } from './overlay/contract.js';
+import type { EntityDetail, Link as OverlayLink, OverlayPrincipal } from './overlay/contract.js';
+import { deleteOwnerIn, OverlayStore, purgeRefIn } from './overlay/store.js';
 
 export class PrivateGraphError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -133,355 +135,249 @@ export function parseLinkTarget(value: unknown): LinkTarget {
   return { kind: input.kind as ThingKind, name: cleanText(input.name, LIMITS.nameLength, 'Name') };
 }
 
-const iso = (value: unknown): string => typeof value === 'string' ? value : '';
-const noteFrom = (value: Record<string, unknown>): PrivateNote => ({ id: String(value.id), text: String(value.text), createdAt: iso(value.createdAt), updatedAt: iso(value.updatedAt) });
 
 type Runner = { run: (query: string, parameters?: Record<string, unknown>) => Promise<{ records: Array<{ get: (key: string) => unknown }> }> };
 
-/** The other person must exist, be a person, and have no block in either direction. */
-async function assertPerson(tx: Runner, ownerId: string, userId: string): Promise<PersonBasics> {
-  if (ownerId === userId) fail(400, 'This card is for other people');
-  const result = await tx.run(`
-    MATCH (owner:User {id: $ownerId}), (subject:User {id: $userId})
-    RETURN coalesce(subject.isBot, false) AS isBot,
-      ((owner)-[:BLOCKED]->(subject) OR (subject)-[:BLOCKED]->(owner)) AS blocked,
-      coalesce(subject.name, 'Unknown') AS name, subject.avatarUrl AS avatarUrl
-  `, { ownerId, userId });
-  const record = result.records[0];
-  if (!record || record.get('isBot') === true || record.get('blocked') === true) return fail(404, 'Person unavailable');
-  return { id: userId, name: String(record.get('name')), avatarUrl: (record.get('avatarUrl') as string | null) ?? null };
+// ---- the overlay store, and how OpenChat names owners and people in it ----
+
+let overlay: OverlayStore | null = null;
+let overlayReady: Promise<void> | null = null;
+async function store(): Promise<OverlayStore> {
+  overlay ??= new OverlayStore(getDriver(), process.env.NEO4J_DATABASE || 'neo4j');
+  overlayReady ??= overlay.initialize().catch(error => { overlayReady = null; throw error; });
+  await overlayReady;
+  return overlay;
 }
 
-const cardKey = (ownerId: string, userId: string) => JSON.stringify([ownerId, userId]);
-
-const linksQuery = `
-  MATCH (link:OpenChatPrivateLink {ownerId: $ownerId})
-  WHERE (link.fromKind = $kind AND link.fromId = $id) OR (link.toKind = $kind AND link.toId = $id)
-  WITH link, CASE WHEN link.fromKind = $kind AND link.fromId = $id THEN 'out' ELSE 'in' END AS direction
-  WITH link, direction,
-    CASE direction WHEN 'out' THEN link.toKind ELSE link.fromKind END AS otherKind,
-    CASE direction WHEN 'out' THEN link.toId ELSE link.fromId END AS otherId
-  OPTIONAL MATCH (user:User {id: otherId}) WHERE otherKind = 'user'
-  OPTIONAL MATCH (thing:OpenChatThing {id: otherId, ownerId: $ownerId}) WHERE otherKind <> 'user'
-  RETURN link.id AS id, link.relation AS relation, direction, otherKind, otherId,
-    CASE WHEN otherKind = 'user'
-      THEN CASE WHEN user.name IS NULL OR trim(user.name) = '' OR user.name CONTAINS '@' THEN $fallbackName ELSE user.name END
-      ELSE thing.name END AS otherName,
-    toString(link.createdAt) AS createdAt
-  ORDER BY link.createdAt DESC
-  LIMIT 500
-`;
-
-async function readLinks(tx: Runner, ownerId: string, kind: NodeKind, id: string): Promise<PrivateLink[]> {
-  const result = await tx.run(linksQuery, { ownerId, kind, id, fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME });
-  return result.records.filter(record => record.get('otherName') !== null).map(record => ({
-    id: String(record.get('id')), relation: String(record.get('relation')), direction: record.get('direction') as 'out' | 'in',
-    other: { kind: record.get('otherKind') as NodeKind, id: String(record.get('otherId')), name: String(record.get('otherName')) },
-    createdAt: iso(record.get('createdAt')),
-  }));
+const MESSAGES: Record<string, string> = {
+  not_found: 'Not found', note_limit: 'This card has reached its note limit', link_limit: 'You have reached the limit for links',
+  entity_limit: 'You have reached the limit for saved items', self_link: 'Choose something else to link to',
+  kind_conflict: 'That item is a different kind', name_conflict: 'You already have something with that name',
+};
+/** Overlay refusals become the app's own wording; anything else stays an unexpected error. */
+async function overlayCall<T>(work: (overlay: OverlayStore) => Promise<T>): Promise<T> {
+  try { return await work(await store()); }
+  catch (error) {
+    if (error instanceof OverlayError && error.status < 500) fail(error.status, MESSAGES[error.code] ?? 'Check what you entered and try again');
+    throw error;
+  }
 }
 
-async function readNotes(tx: Runner, ownerId: string, subjectKind: NodeKind, subjectId: string): Promise<PrivateNote[]> {
-  const result = await tx.run(`
-    MATCH (note:OpenChatPrivateNote {ownerId: $ownerId, subjectKind: $subjectKind, subjectId: $subjectId})
-    RETURN note { .id, .text, createdAt: toString(note.createdAt), updatedAt: toString(note.updatedAt) } AS note
-    ORDER BY note.createdAt DESC LIMIT $limit
-  `, { ownerId, subjectKind, subjectId, limit: neoInt(LIMITS.notesPerSubject) });
-  return result.records.map(record => noteFrom(record.get('note') as Record<string, unknown>));
+/**
+ * An owner is named by their Ideaflow sign-in when they have one, so the same
+ * person owns the same overlay from any Ideaflow app. Accounts without one are
+ * named by their OpenChat id until they link it.
+ */
+const OPENCHAT_ISSUER = 'https://chat.ideaflow.app/openchat-user';
+const fallbackKey = (userId: string) => ownerKeyFor(OPENCHAT_ISSUER, userId);
+const rekeyed = new Set<string>();
+async function principalFor(ownerId: string, issuer: unknown, subject: unknown): Promise<OverlayPrincipal> {
+  if (typeof issuer !== 'string' || !issuer || typeof subject !== 'string' || !subject) return { app: 'openchat', ownerKey: fallbackKey(ownerId) };
+  const ownerKey = ownerKeyFor(issuer, subject);
+  // What they wrote before linking their sign-in follows them, once per process.
+  if (!rekeyed.has(ownerId)) {
+    try { await (await store()).rekeyOwner(fallbackKey(ownerId), ownerKey); rekeyed.add(ownerId); }
+    catch (error) {
+      if (!(error instanceof OverlayError) || error.code !== 'owner_conflict') throw error;
+      // Both identities already hold an overlay; joining them is a deliberate act, not done here.
+      console.warn('Private graph: an overlay under the OpenChat identity was left in place because the Ideaflow identity already has one');
+      rekeyed.add(ownerId);
+    }
+  }
+  return { app: 'openchat', ownerKey };
 }
 
-// neo4j-driver sends JS numbers as floats; LIMIT needs an integer.
-const neoInt = (value: number) => neo4j.int(value);
-const num = (value: unknown): number | null => value === null || value === undefined ? null : typeof value === 'number' ? value : typeof (value as { toNumber?: () => number }).toNumber === 'function' ? (value as { toNumber: () => number }).toNumber() : Number(value);
-
-function cardFrom(value: Record<string, unknown> | null): PersonCard {
-  if (!value) return { ...EMPTY_CARD };
-  const card = {
-    important: value.important === true,
-    cadenceDays: num(value.cadenceDays),
-    cadenceMode: value.cadenceMode === 'expanding' ? 'expanding' as const : 'fixed' as const,
-    intervalDays: num(value.intervalDays),
-    lastContactAt: iso(value.lastContactAt) || null,
-  };
-  return { ...card, nextDueAt: nextDue(card, iso(value.cadenceSetAt) || iso(value.createdAt)) };
-}
-
-const cardProjection = 'card { .important, .cadenceDays, .cadenceMode, .intervalDays, lastContactAt: toString(card.lastContactAt), cadenceSetAt: toString(card.cadenceSetAt), createdAt: toString(card.createdAt) }';
-
-export async function getPersonOverlay(ownerId: string, userId: string): Promise<PersonOverlay> {
+async function ownerPrincipal(ownerId: string): Promise<OverlayPrincipal> {
   const session = getDriver().session();
   try {
-    return await session.executeRead(async tx => {
-      // Name and picture ride along so the card can open for someone who shares no chat with the owner.
-      const person = await assertPerson(tx, ownerId, userId);
-      const result = await tx.run(`OPTIONAL MATCH (card:OpenChatPersonCard {key: $key}) RETURN ${cardProjection} AS card`, { key: cardKey(ownerId, userId) });
-      return {
-        userId, person, card: cardFrom(result.records[0]?.get('card') as Record<string, unknown> | null),
-        notes: await readNotes(tx, ownerId, 'user', userId), links: await readLinks(tx, ownerId, 'user', userId),
-      };
-    });
+    const result = await session.run('MATCH (owner:User {id: $ownerId}) RETURN owner.ideaflowIssuer AS issuer, owner.ideaflowSub AS subject', { ownerId });
+    const record = result.records[0];
+    if (!record) return fail(404, 'Not found');
+    return principalFor(ownerId, record.get('issuer'), record.get('subject'));
   } finally { await session.close(); }
+}
+
+/** A user id as the value of an overlay ref; anything outside the ref alphabet is percent-encoded. */
+const refValue = (id: string) => Array.from(Buffer.from(id, 'utf8')).map(byte => {
+  const char = String.fromCharCode(byte);
+  return /[A-Za-z0-9._@+-]/.test(char) ? char : `%${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+}).join('');
+const USER_REF = 'openchat:user:';
+const userRef = (userId: string) => `${USER_REF}${refValue(userId)}`;
+const userIdOf = (refs: string[]): string | null => {
+  const ref = refs.find(value => value.startsWith(USER_REF));
+  return ref ? decodeURIComponent(ref.slice(USER_REF.length)) : null;
+};
+
+const displayName = `CASE WHEN subject.name IS NULL OR trim(subject.name) = '' OR subject.name CONTAINS '@' THEN $fallbackName ELSE subject.name END`;
+
+/** The other person must exist, be a person, and have no block in either direction. */
+async function assertPerson(ownerId: string, userId: string): Promise<{ person: PersonBasics; principal: OverlayPrincipal; name: string }> {
+  if (ownerId === userId) fail(400, 'This card is for other people');
+  if (typeof userId !== 'string' || !userId || userId.length > 200) fail(404, 'Person unavailable');
+  const session = getDriver().session();
+  try {
+    const result = await session.run(`
+      MATCH (owner:User {id: $ownerId}), (subject:User {id: $userId})
+      RETURN coalesce(subject.isBot, false) AS isBot,
+        ((owner)-[:BLOCKED]->(subject) OR (subject)-[:BLOCKED]->(owner)) AS blocked,
+        coalesce(subject.name, 'Unknown') AS name, subject.avatarUrl AS avatarUrl, ${displayName} AS shownName,
+        owner.ideaflowIssuer AS issuer, owner.ideaflowSub AS subjectId
+    `, { ownerId, userId, fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME });
+    const record = result.records[0];
+    if (!record || record.get('isBot') === true || record.get('blocked') === true) return fail(404, 'Person unavailable');
+    return {
+      person: { id: userId, name: String(record.get('name')), avatarUrl: (record.get('avatarUrl') as string | null) ?? null },
+      principal: await principalFor(ownerId, record.get('issuer'), record.get('subjectId')),
+      name: String(record.get('shownName')),
+    };
+  } finally { await session.close(); }
+}
+
+/** The overlay entity for an OpenChat person, created on first write. */
+async function personEntity(ownerId: string, userId: string): Promise<{ principal: OverlayPrincipal; entityId: string; person: PersonBasics }> {
+  const { person, principal, name } = await assertPerson(ownerId, userId);
+  const { entity } = await overlayCall(overlay => overlay.ensure(principal, { kind: 'person', name, ref: userRef(userId) }));
+  return { principal, entityId: entity.id, person };
+}
+
+/** Link ends as the app knows them: an OpenChat person by user id and current name, anything else by entity id. */
+async function linksFor(links: OverlayLink[]): Promise<PrivateLink[]> {
+  const userIds = [...new Set(links.map(link => userIdOf(link.other.refs)).filter((id): id is string => id !== null))];
+  const names = new Map<string, string>();
+  if (userIds.length) {
+    const session = getDriver().session();
+    try {
+      const result = await session.run(`MATCH (subject:User) WHERE subject.id IN $userIds RETURN subject.id AS id, ${displayName} AS name`, { userIds, fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME });
+      for (const record of result.records) names.set(String(record.get('id')), String(record.get('name')));
+    } finally { await session.close(); }
+  }
+  return links.map(link => {
+    const userId = userIdOf(link.other.refs);
+    const other: LinkEnd = userId !== null
+      ? { kind: 'user', id: userId, name: names.get(userId) ?? link.other.name }
+      : { kind: link.other.kind, id: link.other.id, name: link.other.name };
+    return { id: link.id, relation: link.relation, direction: link.direction, other, createdAt: link.createdAt };
+  });
+}
+
+// ---- what the routes call ----
+
+export async function getPersonOverlay(ownerId: string, userId: string): Promise<PersonOverlay> {
+  // Reading never creates anything: a person nobody has written about has an empty card.
+  const { person, principal } = await assertPerson(ownerId, userId);
+  const found = await overlayCall(overlay => overlay.lookup(principal, userRef(userId)));
+  return { userId, person, card: found?.card ?? { ...EMPTY_CARD }, notes: found?.notes ?? [], links: await linksFor(found?.links ?? []) };
 }
 
 export async function updatePersonCard(ownerId: string, userId: string, patch: CardPatch): Promise<PersonCard> {
-  const session = getDriver().session();
-  try {
-    return await session.executeWrite(async tx => {
-      await assertPerson(tx, ownerId, userId);
-      const key = cardKey(ownerId, userId), now = new Date().toISOString();
-      const existing = await tx.run(`OPTIONAL MATCH (card:OpenChatPersonCard {key: $key}) RETURN ${cardProjection} AS card`, { key });
-      const current = cardFrom(existing.records[0]?.get('card') as Record<string, unknown> | null);
-      const next = { important: current.important, cadenceDays: current.cadenceDays, cadenceMode: current.cadenceMode, intervalDays: current.intervalDays, lastContactAt: current.lastContactAt };
-      let cadenceChanged = false;
-      if (patch.important !== undefined) next.important = patch.important;
-      if (patch.cadenceMode !== undefined && patch.cadenceMode !== next.cadenceMode) { next.cadenceMode = patch.cadenceMode; cadenceChanged = true; }
-      if (patch.cadenceDays !== undefined && patch.cadenceDays !== next.cadenceDays) { next.cadenceDays = patch.cadenceDays; cadenceChanged = true; }
-      // A changed cadence starts again from its base gap.
-      if (cadenceChanged) next.intervalDays = next.cadenceDays;
-      if (patch.contactedNow) {
-        next.intervalDays = intervalAfterContact(next, current.lastContactAt !== null);
-        next.lastContactAt = now;
-      }
-      const written = await tx.run(`
-        MATCH (owner:User {id: $ownerId}), (subject:User {id: $userId})
-        MERGE (card:OpenChatPersonCard {key: $key})
-        ON CREATE SET card.ownerId = $ownerId, card.subjectId = $userId, card.createdAt = datetime($now)
-        SET card.important = $important, card.cadenceDays = $cadenceDays, card.cadenceMode = $cadenceMode,
-            card.intervalDays = $intervalDays, card.updatedAt = datetime($now),
-            card.lastContactAt = CASE WHEN $lastContactAt IS NULL THEN null ELSE datetime($lastContactAt) END,
-            card.cadenceSetAt = CASE WHEN $cadenceChanged OR card.cadenceSetAt IS NULL THEN datetime($now) ELSE card.cadenceSetAt END
-        MERGE (owner)-[:HAS_PERSON_CARD]->(card)
-        MERGE (card)-[:CARD_ABOUT]->(subject)
-        RETURN ${cardProjection} AS card
-      `, { ownerId, userId, key, now, important: next.important, cadenceDays: next.cadenceDays === null ? null : neoInt(next.cadenceDays), cadenceMode: next.cadenceMode, intervalDays: next.intervalDays === null ? null : neoInt(next.intervalDays), lastContactAt: next.lastContactAt, cadenceChanged });
-      return cardFrom(written.records[0]?.get('card') as Record<string, unknown>);
-    });
-  } finally { await session.close(); }
-}
-
-async function ownedThing(tx: Runner, ownerId: string, id: string): Promise<Thing> {
-  const result = await tx.run('MATCH (thing:OpenChatThing {id: $id, ownerId: $ownerId}) RETURN thing { .id, .kind, .name } AS thing', { id, ownerId });
-  const thing = result.records[0]?.get('thing') as Thing | undefined;
-  return thing ?? fail(404, 'Not found');
-}
-
-async function assertSubject(tx: Runner, ownerId: string, kind: NodeKind, id: string): Promise<void> {
-  if (kind === 'user') await assertPerson(tx, ownerId, id);
-  else await ownedThing(tx, ownerId, id);
+  const { principal, entityId } = await personEntity(ownerId, userId);
+  return (await overlayCall(overlay => overlay.update(principal, entityId, { card: patch }))).card;
 }
 
 export async function addNote(ownerId: string, subject: { kind: 'user' | 'thing'; id: string }, rawText: unknown): Promise<PrivateNote> {
   const text = cleanText(rawText, LIMITS.noteLength, 'Note');
-  const session = getDriver().session();
-  try {
-    return await session.executeWrite(async tx => {
-      const subjectKind: NodeKind = subject.kind === 'user' ? 'user' : (await ownedThing(tx, ownerId, subject.id)).kind;
-      if (subject.kind === 'user') await assertPerson(tx, ownerId, subject.id);
-      const count = await tx.run('MATCH (note:OpenChatPrivateNote {ownerId: $ownerId, subjectKind: $subjectKind, subjectId: $subjectId}) RETURN count(note) AS total', { ownerId, subjectKind, subjectId: subject.id });
-      if ((num(count.records[0]?.get('total')) ?? 0) >= LIMITS.notesPerSubject) fail(409, 'This card has reached its note limit');
-      const result = await tx.run(`
-        MATCH (owner:User {id: $ownerId})
-        CREATE (note:OpenChatPrivateNote {id: $id, ownerId: $ownerId, subjectKind: $subjectKind, subjectId: $subjectId, text: $text, createdAt: datetime($now), updatedAt: datetime($now)})
-        CREATE (owner)-[:WROTE_PRIVATE_NOTE]->(note)
-        WITH note
-        OPTIONAL MATCH (user:User {id: $subjectId}) WHERE $subjectKind = 'user'
-        OPTIONAL MATCH (thing:OpenChatThing {id: $subjectId, ownerId: $ownerId}) WHERE $subjectKind <> 'user'
-        FOREACH (target IN CASE WHEN user IS NULL THEN [] ELSE [user] END | CREATE (note)-[:NOTE_ABOUT]->(target))
-        FOREACH (target IN CASE WHEN thing IS NULL THEN [] ELSE [thing] END | CREATE (note)-[:NOTE_ABOUT]->(target))
-        RETURN note { .id, .text, createdAt: toString(note.createdAt), updatedAt: toString(note.updatedAt) } AS note
-      `, { ownerId, id: nanoid(), subjectKind, subjectId: subject.id, text, now: new Date().toISOString() });
-      return noteFrom(result.records[0]!.get('note') as Record<string, unknown>);
-    });
-  } finally { await session.close(); }
+  if (subject.kind === 'user') {
+    const { principal, entityId } = await personEntity(ownerId, subject.id);
+    return overlayCall(overlay => overlay.addNote(principal, entityId, text));
+  }
+  const principal = await ownerPrincipal(ownerId);
+  return overlayCall(overlay => overlay.addNote(principal, subject.id, text));
 }
 
 export async function updateNote(ownerId: string, noteId: string, rawText: unknown): Promise<PrivateNote> {
   const text = cleanText(rawText, LIMITS.noteLength, 'Note');
-  const session = getDriver().session();
-  try {
-    const result = await session.run(`
-      MATCH (note:OpenChatPrivateNote {id: $noteId, ownerId: $ownerId})
-      SET note.text = $text, note.updatedAt = datetime($now)
-      RETURN note { .id, .text, createdAt: toString(note.createdAt), updatedAt: toString(note.updatedAt) } AS note
-    `, { ownerId, noteId, text, now: new Date().toISOString() });
-    const note = result.records[0]?.get('note') as Record<string, unknown> | undefined;
-    return note ? noteFrom(note) : fail(404, 'Note not found');
-  } finally { await session.close(); }
+  const principal = await ownerPrincipal(ownerId);
+  return overlayCall(overlay => overlay.updateNote(principal, noteId, text));
 }
 
 export async function deleteNote(ownerId: string, noteId: string): Promise<{ deleted: true }> {
-  const session = getDriver().session();
-  try {
-    const result = await session.run('MATCH (note:OpenChatPrivateNote {id: $noteId, ownerId: $ownerId}) DETACH DELETE note RETURN count(*) AS removed', { ownerId, noteId });
-    if (!num(result.records[0]?.get('removed'))) fail(404, 'Note not found');
-    return { deleted: true };
-  } finally { await session.close(); }
-}
-
-async function resolveTarget(tx: Runner, ownerId: string, target: LinkTarget): Promise<LinkEnd> {
-  if (target.kind === 'user') {
-    await assertPerson(tx, ownerId, target.id);
-    return { kind: 'user', id: target.id, name: '' };
-  }
-  if (target.id) {
-    const thing = await ownedThing(tx, ownerId, target.id);
-    if (thing.kind !== target.kind) fail(400, 'That item is a different kind');
-    return thing;
-  }
-  const name = target.name!, key = nameKey(name);
-  const existing = await tx.run('MATCH (thing:OpenChatThing {ownerId: $ownerId, kind: $kind, nameKey: $nameKey}) RETURN thing { .id, .kind, .name } AS thing', { ownerId, kind: target.kind, nameKey: key });
-  const found = existing.records[0]?.get('thing') as Thing | undefined;
-  if (found) return found;
-  const count = await tx.run('MATCH (thing:OpenChatThing {ownerId: $ownerId}) RETURN count(thing) AS total', { ownerId });
-  if ((num(count.records[0]?.get('total')) ?? 0) >= LIMITS.thingsPerOwner) fail(409, 'You have reached the limit for saved items');
-  const created = await tx.run(`
-    MATCH (owner:User {id: $ownerId})
-    CREATE (thing:OpenChatThing {id: $id, ownerId: $ownerId, kind: $kind, name: $name, nameKey: $nameKey, thingKey: $thingKey, createdAt: datetime($now)})
-    CREATE (owner)-[:HAS_PRIVATE_THING]->(thing)
-    RETURN thing { .id, .kind, .name } AS thing
-  `, { ownerId, id: nanoid(), kind: target.kind, name, nameKey: key, thingKey: JSON.stringify([ownerId, target.kind, key]), now: new Date().toISOString() });
-  return created.records[0]!.get('thing') as Thing;
+  const principal = await ownerPrincipal(ownerId);
+  await overlayCall(overlay => overlay.deleteNote(principal, noteId));
+  return { deleted: true };
 }
 
 /** Link a person or one of your saved items to another person, company, idea or project. */
 export async function addLink(ownerId: string, from: { kind: 'user' | 'thing'; id: string }, rawRelation: unknown, rawTarget: unknown): Promise<PrivateLink> {
   const relation = cleanRelation(rawRelation), target = parseLinkTarget(rawTarget);
-  const session = getDriver().session();
-  try {
-    return await session.executeWrite(async tx => {
-      const fromKind: NodeKind = from.kind === 'user' ? 'user' : (await ownedThing(tx, ownerId, from.id)).kind;
-      await assertSubject(tx, ownerId, fromKind, from.id);
-      const to = await resolveTarget(tx, ownerId, target);
-      if (to.kind === fromKind && to.id === from.id) fail(400, 'Choose something else to link to');
-      const linkKey = JSON.stringify([ownerId, fromKind, from.id, relation, to.kind, to.id]);
-      const count = await tx.run('MATCH (link:OpenChatPrivateLink {ownerId: $ownerId}) RETURN count(link) AS total', { ownerId });
-      if ((num(count.records[0]?.get('total')) ?? 0) >= LIMITS.linksPerOwner) fail(409, 'You have reached the limit for links');
-      await tx.run(`
-        MATCH (owner:User {id: $ownerId})
-        MERGE (link:OpenChatPrivateLink {linkKey: $linkKey})
-        ON CREATE SET link.id = $id, link.ownerId = $ownerId, link.fromKind = $fromKind, link.fromId = $fromId,
-          link.relation = $relation, link.toKind = $toKind, link.toId = $toId, link.createdAt = datetime($now)
-        MERGE (owner)-[:HAS_PRIVATE_LINK]->(link)
-        WITH link
-        OPTIONAL MATCH (fromUser:User {id: $fromId}) WHERE $fromKind = 'user'
-        OPTIONAL MATCH (fromThing:OpenChatThing {id: $fromId, ownerId: $ownerId}) WHERE $fromKind <> 'user'
-        OPTIONAL MATCH (toUser:User {id: $toId}) WHERE $toKind = 'user'
-        OPTIONAL MATCH (toThing:OpenChatThing {id: $toId, ownerId: $ownerId}) WHERE $toKind <> 'user'
-        FOREACH (node IN CASE WHEN fromUser IS NULL THEN [] ELSE [fromUser] END | MERGE (link)-[:LINK_FROM]->(node))
-        FOREACH (node IN CASE WHEN fromThing IS NULL THEN [] ELSE [fromThing] END | MERGE (link)-[:LINK_FROM]->(node))
-        FOREACH (node IN CASE WHEN toUser IS NULL THEN [] ELSE [toUser] END | MERGE (link)-[:LINK_TO]->(node))
-        FOREACH (node IN CASE WHEN toThing IS NULL THEN [] ELSE [toThing] END | MERGE (link)-[:LINK_TO]->(node))
-      `, { ownerId, linkKey, id: nanoid(), fromKind, fromId: from.id, relation, toKind: to.kind, toId: to.id, now: new Date().toISOString() });
-      const links = await readLinks(tx, ownerId, fromKind, from.id);
-      const link = links.find(value => value.direction === 'out' && value.relation === relation && value.other.kind === to.kind && value.other.id === to.id);
-      return link ?? fail(500, 'Link could not be saved');
-    });
-  } finally { await session.close(); }
+  let principal: OverlayPrincipal, fromId: string;
+  if (from.kind === 'user') ({ principal, entityId: fromId } = await personEntity(ownerId, from.id));
+  else { principal = await ownerPrincipal(ownerId); fromId = from.id; }
+  let toId: string;
+  if (target.kind === 'user') toId = (await personEntity(ownerId, target.id)).entityId;
+  else if (target.id) {
+    const existing = await overlayCall(overlay => overlay.get(principal, target.id));
+    if (existing.kind !== target.kind) fail(400, 'That item is a different kind');
+    toId = existing.id;
+  } else toId = (await overlayCall(overlay => overlay.ensure(principal, { kind: target.kind, name: target.name }))).entity.id;
+  const link = await overlayCall(overlay => overlay.addLink(principal, fromId, relation, toId));
+  return (await linksFor([link]))[0]!;
 }
 
 export async function deleteLink(ownerId: string, linkId: string): Promise<{ deleted: true }> {
-  const session = getDriver().session();
-  try {
-    const result = await session.run('MATCH (link:OpenChatPrivateLink {id: $linkId, ownerId: $ownerId}) DETACH DELETE link RETURN count(*) AS removed', { ownerId, linkId });
-    if (!num(result.records[0]?.get('removed'))) fail(404, 'Link not found');
-    return { deleted: true };
-  } finally { await session.close(); }
+  const principal = await ownerPrincipal(ownerId);
+  await overlayCall(overlay => overlay.deleteLink(principal, linkId));
+  return { deleted: true };
 }
 
+/** Saved companies, ideas, projects and people-by-name. People on OpenChat are reached through their profile instead. */
 export async function listThings(ownerId: string, query: unknown, kind: unknown): Promise<{ things: Thing[] }> {
-  const q = typeof query === 'string' ? nameKey(query).slice(0, LIMITS.nameLength) : '';
   if (kind !== undefined && !THING_KINDS.includes(kind as ThingKind)) fail(400, 'Unknown kind');
-  const session = getDriver().session();
-  try {
-    const result = await session.run(`
-      MATCH (thing:OpenChatThing {ownerId: $ownerId})
-      WHERE ($kind IS NULL OR thing.kind = $kind) AND ($q = '' OR thing.nameKey CONTAINS $q)
-      RETURN thing { .id, .kind, .name } AS thing
-      ORDER BY thing.nameKey LIMIT 50
-    `, { ownerId, q, kind: kind ?? null });
-    return { things: result.records.map(record => record.get('thing') as Thing) };
-  } finally { await session.close(); }
+  const principal = await ownerPrincipal(ownerId);
+  const entities = await overlayCall(overlay => overlay.list(principal, { q: typeof query === 'string' ? query : '', kind }));
+  return { things: entities.filter(entity => userIdOf(entity.refs) === null).map(entity => ({ id: entity.id, kind: entity.kind, name: entity.name })) };
 }
 
 export async function getThing(ownerId: string, thingId: string): Promise<ThingDetail> {
-  const session = getDriver().session();
-  try {
-    return await session.executeRead(async tx => {
-      const thing = await ownedThing(tx, ownerId, thingId);
-      return { ...thing, notes: await readNotes(tx, ownerId, thing.kind, thing.id), links: await readLinks(tx, ownerId, thing.kind, thing.id) };
-    });
-  } finally { await session.close(); }
+  const principal = await ownerPrincipal(ownerId);
+  const found: EntityDetail = await overlayCall(overlay => overlay.get(principal, thingId));
+  if (userIdOf(found.refs) !== null) fail(404, 'Not found');
+  return { id: found.id, kind: found.kind, name: found.name, notes: found.notes, links: await linksFor(found.links) };
 }
 
 /** People whose catch-up date has passed, soonest first; starred people lead ties. */
 export async function listDue(ownerId: string, now = new Date()): Promise<{ due: DuePerson[] }> {
+  const principal = await ownerPrincipal(ownerId);
+  const entries = (await overlayCall(overlay => overlay.due(principal, now)))
+    .map(entry => ({ entry, userId: userIdOf(entry.refs) })).filter((value): value is { entry: typeof value.entry; userId: string } => value.userId !== null);
+  if (!entries.length) return { due: [] };
   const session = getDriver().session();
   try {
+    // Current name and picture, and never someone blocked in either direction.
     const result = await session.run(`
-      MATCH (owner:User {id: $ownerId})-[:HAS_PERSON_CARD]->(card:OpenChatPersonCard)-[:CARD_ABOUT]->(subject:User)
-      WHERE card.cadenceDays IS NOT NULL AND NOT (owner)-[:BLOCKED]->(subject) AND NOT (subject)-[:BLOCKED]->(owner)
-      RETURN subject.id AS userId,
-        CASE WHEN subject.name IS NULL OR trim(subject.name) = '' OR subject.name CONTAINS '@' THEN $fallbackName ELSE subject.name END AS name,
-        subject.avatarUrl AS avatarUrl, ${cardProjection} AS card
-      LIMIT 2000
-    `, { ownerId, fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME });
-    const due = result.records.map(record => {
-      const card = cardFrom(record.get('card') as Record<string, unknown>);
-      return { userId: String(record.get('userId')), name: String(record.get('name')), avatarUrl: (record.get('avatarUrl') as string | null) ?? null, important: card.important, nextDueAt: card.nextDueAt, lastContactAt: card.lastContactAt };
-    }).filter((value): value is DuePerson => value.nextDueAt !== null && Date.parse(value.nextDueAt) <= now.getTime());
-    due.sort((a, b) => Date.parse(a.nextDueAt) - Date.parse(b.nextDueAt) || Number(b.important) - Number(a.important) || a.name.localeCompare(b.name));
-    return { due };
-  } finally { await session.close(); }
-}
-
-/**
- * Account deletion: remove everything this person wrote, and every card, note
- * and link other people keep about them. Runs inside the caller's transaction.
- */
-export async function deletePrivateGraphForUser(tx: Runner, userId: string): Promise<void> {
-  for (const label of ['OpenChatPersonCard', 'OpenChatPrivateNote', 'OpenChatPrivateLink', 'OpenChatThing']) {
-    await tx.run(`MATCH (owned:${label} {ownerId: $userId}) DETACH DELETE owned`, { userId });
-  }
-  await tx.run('MATCH (card:OpenChatPersonCard {subjectId: $userId}) DETACH DELETE card', { userId });
-  await tx.run("MATCH (note:OpenChatPrivateNote {subjectKind: 'user', subjectId: $userId}) DETACH DELETE note", { userId });
-  // Two statements so each can use its own index; an OR across both ends cannot.
-  await tx.run("MATCH (link:OpenChatPrivateLink {fromKind: 'user', fromId: $userId}) DETACH DELETE link", { userId });
-  await tx.run("MATCH (link:OpenChatPrivateLink {toKind: 'user', toId: $userId}) DETACH DELETE link", { userId });
-}
-
-/** Account export: the owner's whole private graph, as plain rows. */
-export async function exportPrivateGraph(userId: string): Promise<{ cards: unknown[]; notes: unknown[]; things: unknown[]; links: unknown[] }> {
-  const session = getDriver().session();
-  try {
-    const rows = async (query: string) => (await session.run(query, { userId })).records.map(record => record.get('row'));
+      MATCH (owner:User {id: $ownerId}), (subject:User) WHERE subject.id IN $userIds
+        AND NOT (owner)-[:BLOCKED]->(subject) AND NOT (subject)-[:BLOCKED]->(owner)
+      RETURN subject.id AS id, ${displayName} AS name, subject.avatarUrl AS avatarUrl
+    `, { ownerId, userIds: entries.map(value => value.userId), fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME });
+    const people = new Map(result.records.map(record => [String(record.get('id')), { name: String(record.get('name')), avatarUrl: (record.get('avatarUrl') as string | null) ?? null }]));
     return {
-      cards: await rows('MATCH (card:OpenChatPersonCard {ownerId: $userId}) RETURN card { .subjectId, .important, .cadenceDays, .cadenceMode, .intervalDays, lastContactAt: toString(card.lastContactAt), createdAt: toString(card.createdAt), updatedAt: toString(card.updatedAt) } AS row ORDER BY card.createdAt'),
-      notes: await rows('MATCH (note:OpenChatPrivateNote {ownerId: $userId}) RETURN note { .id, .subjectKind, .subjectId, .text, createdAt: toString(note.createdAt), updatedAt: toString(note.updatedAt) } AS row ORDER BY note.createdAt'),
-      things: await rows('MATCH (thing:OpenChatThing {ownerId: $userId}) RETURN thing { .id, .kind, .name, createdAt: toString(thing.createdAt) } AS row ORDER BY thing.createdAt'),
-      links: await rows('MATCH (link:OpenChatPrivateLink {ownerId: $userId}) RETURN link { .id, .fromKind, .fromId, .relation, .toKind, .toId, createdAt: toString(link.createdAt) } AS row ORDER BY link.createdAt'),
+      due: entries.filter(value => people.has(value.userId)).map(({ entry, userId }) => ({
+        userId, ...people.get(userId)!, important: entry.important, nextDueAt: entry.nextDueAt, lastContactAt: entry.lastContactAt,
+      })),
     };
   } finally { await session.close(); }
 }
 
+/**
+ * Account deletion, inside the caller's transaction: everything this person
+ * kept, under either identity that can name them, and every other owner's
+ * entity that knew this person only as an OpenChat account.
+ */
+export async function deletePrivateGraphForUser(tx: Runner, userId: string): Promise<void> {
+  const identity = await tx.run('MATCH (user:User {id: $userId}) RETURN user.ideaflowIssuer AS issuer, user.ideaflowSub AS subject', { userId });
+  const issuer = identity.records[0]?.get('issuer'), subject = identity.records[0]?.get('subject');
+  const runner = tx as unknown as Parameters<typeof deleteOwnerIn>[0];
+  await deleteOwnerIn(runner, fallbackKey(userId));
+  if (typeof issuer === 'string' && issuer && typeof subject === 'string' && subject) await deleteOwnerIn(runner, ownerKeyFor(issuer, subject));
+  await purgeRefIn(runner, userRef(userId));
+}
+
+/** Account export: the owner's whole private graph, as plain rows. */
+export async function exportPrivateGraph(userId: string): Promise<{ entities: unknown[]; notes: unknown[]; links: unknown[] }> {
+  const principal = await ownerPrincipal(userId);
+  return overlayCall(overlay => overlay.exportOwner(principal));
+}
+
 export async function ensurePrivateGraphIndexes(): Promise<void> {
-  const session = getDriver().session();
-  try {
-    for (const statement of [
-      'CREATE CONSTRAINT openchat_person_card_key IF NOT EXISTS FOR (card:OpenChatPersonCard) REQUIRE card.key IS UNIQUE',
-      'CREATE CONSTRAINT openchat_private_note_id IF NOT EXISTS FOR (note:OpenChatPrivateNote) REQUIRE note.id IS UNIQUE',
-      'CREATE CONSTRAINT openchat_thing_id IF NOT EXISTS FOR (thing:OpenChatThing) REQUIRE thing.id IS UNIQUE',
-      'CREATE CONSTRAINT openchat_thing_key IF NOT EXISTS FOR (thing:OpenChatThing) REQUIRE thing.thingKey IS UNIQUE',
-      'CREATE CONSTRAINT openchat_private_link_key IF NOT EXISTS FOR (link:OpenChatPrivateLink) REQUIRE link.linkKey IS UNIQUE',
-      'CREATE INDEX openchat_person_card_owner IF NOT EXISTS FOR (card:OpenChatPersonCard) ON (card.ownerId)',
-      'CREATE INDEX openchat_person_card_subject IF NOT EXISTS FOR (card:OpenChatPersonCard) ON (card.subjectId)',
-      'CREATE INDEX openchat_private_note_subject IF NOT EXISTS FOR (note:OpenChatPrivateNote) ON (note.ownerId, note.subjectKind, note.subjectId)',
-      'CREATE INDEX openchat_thing_owner IF NOT EXISTS FOR (thing:OpenChatThing) ON (thing.ownerId, thing.kind, thing.nameKey)',
-      'CREATE INDEX openchat_private_link_owner IF NOT EXISTS FOR (link:OpenChatPrivateLink) ON (link.ownerId)',
-      'CREATE INDEX openchat_private_link_id IF NOT EXISTS FOR (link:OpenChatPrivateLink) ON (link.id)',
-      // Account deletion looks up what others wrote about the leaving person; without these it scans every note and link.
-      'CREATE INDEX openchat_private_note_about IF NOT EXISTS FOR (note:OpenChatPrivateNote) ON (note.subjectKind, note.subjectId)',
-      'CREATE INDEX openchat_private_link_from IF NOT EXISTS FOR (link:OpenChatPrivateLink) ON (link.fromKind, link.fromId)',
-      'CREATE INDEX openchat_private_link_to IF NOT EXISTS FOR (link:OpenChatPrivateLink) ON (link.toKind, link.toId)',
-    ]) await session.run(statement);
-  } finally { await session.close(); }
+  await store();
 }
