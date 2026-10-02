@@ -3,7 +3,7 @@
  * (OpenChat-???)
  *
  * Shows: large avatar, name + bot badge, email, status message, presence,
- * and quick actions (block, report). For non-bot users only — bots get a
+ * the viewer's own "Private to you" card, and quick actions (block, report). For non-bot users only — bots get a
  * simpler read-only view.
  */
 
@@ -17,6 +17,7 @@ import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { FriendControls } from '../components/FriendControls';
+import { PrivateCard } from '../components/PrivateGraph';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp, RouteProps } from '../navigation/types';
 
@@ -155,6 +156,15 @@ export function ContactProfileScreen() {
         const conversation = await createConversation([userId], { type: 'direct' });
         navigation.navigate('Chat', { conversationId: conversation.id });
       }} />}
+
+      {/* Your own notes, importance, catch-up and links about this person. Collapsed until opened. */}
+      {!user.isBot && (
+        <PrivateCard
+          userId={userId}
+          onOpenThing={thingId => navigation.navigate('PrivateThing', { thingId })}
+          onOpenPerson={id => navigation.push('ContactProfile', { userId: id })}
+        />
+      )}
 
       {/* Actions */}
       {!user.isBot && (

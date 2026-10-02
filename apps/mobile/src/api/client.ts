@@ -867,6 +867,27 @@ export interface FriendStatus { userId: string; state: FriendState; updatedAt: s
 export interface FriendRow extends FriendStatus { user: Pick<User, 'id' | 'name' | 'avatarUrl'> }
 export interface FriendLists { friends: FriendRow[]; incoming: FriendRow[]; outgoing: FriendRow[] }
 
+/** Private graph: the signed-in person's own notes and links about people. Only they ever see it. */
+export type PrivateThingKind = 'person' | 'company' | 'idea' | 'project';
+export type PrivateNodeKind = 'user' | PrivateThingKind;
+export type PrivateSubject = { kind: 'user' | 'thing'; id: string };
+export interface PrivatePersonCard {
+  important: boolean;
+  cadenceDays: number | null;
+  cadenceMode: 'fixed' | 'expanding';
+  intervalDays: number | null;
+  lastContactAt: string | null;
+  nextDueAt: string | null;
+}
+export interface PrivateNote { id: string; text: string; createdAt: string; updatedAt: string }
+export interface PrivateLink { id: string; relation: string; direction: 'out' | 'in'; other: { kind: PrivateNodeKind; id: string; name: string }; createdAt: string }
+export interface PrivatePersonOverlay { userId: string; card: PrivatePersonCard; notes: PrivateNote[]; links: PrivateLink[] }
+export interface PrivateThing { id: string; kind: PrivateThingKind; name: string }
+export interface PrivateThingDetail extends PrivateThing { notes: PrivateNote[]; links: PrivateLink[] }
+export interface CatchUpPerson { userId: string; name: string; avatarUrl: string | null; important: boolean; nextDueAt: string; lastContactAt: string | null }
+export type PrivateLinkTarget = { kind: 'user'; id: string } | { kind: PrivateThingKind; id?: string; name?: string };
+const privateSubjectPath = (subject: PrivateSubject) => `/api/private/${subject.kind === 'user' ? 'people' : 'things'}/${encodeURIComponent(subject.id)}`;
+
 export interface AddMeCardSettings {
   showAvatar: boolean;
   showStatus: boolean;
@@ -1456,6 +1477,21 @@ export const api = {
     request<FriendStatus>(`/api/friends/users/${encodeURIComponent(userId)}`),
   changeFriend: (userId: string, action: 'request' | 'accept' | 'decline' | 'cancel' | 'remove') =>
     request<FriendStatus>(`/api/friends/users/${encodeURIComponent(userId)}/${action}`, { method: 'POST' }),
+
+  // Private graph — notes, importance, catch-up cadence and links that only the owner sees.
+  getPrivatePerson: (userId: string) => request<PrivatePersonOverlay>(`/api/private/people/${encodeURIComponent(userId)}`),
+  updatePrivatePerson: (userId: string, patch: { important?: boolean; cadenceDays?: number | null; cadenceMode?: 'fixed' | 'expanding'; contactedNow?: true }) =>
+    request<{ card: PrivatePersonCard }>(`/api/private/people/${encodeURIComponent(userId)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  addPrivateNote: (subject: PrivateSubject, text: string) =>
+    request<PrivateNote>(`${privateSubjectPath(subject)}/notes`, { method: 'POST', body: JSON.stringify({ text }) }),
+  deletePrivateNote: (noteId: string) => request<{ deleted: true }>(`/api/private/notes/${encodeURIComponent(noteId)}`, { method: 'DELETE' }),
+  addPrivateLink: (subject: PrivateSubject, relation: string, to: PrivateLinkTarget) =>
+    request<PrivateLink>(`${privateSubjectPath(subject)}/links`, { method: 'POST', body: JSON.stringify({ relation, to }) }),
+  deletePrivateLink: (linkId: string) => request<{ deleted: true }>(`/api/private/links/${encodeURIComponent(linkId)}`, { method: 'DELETE' }),
+  listPrivateThings: (query: string, kind?: PrivateThingKind) =>
+    request<{ things: PrivateThing[] }>(`/api/private/things?q=${encodeURIComponent(query)}${kind ? `&kind=${kind}` : ''}`),
+  getPrivateThing: (thingId: string) => request<PrivateThingDetail>(`/api/private/things/${encodeURIComponent(thingId)}`),
+  listCatchUp: () => request<{ due: CatchUpPerson[] }>('/api/private/due'),
 
   /**
    * Accept/join via invite token. Idempotent if already a member.

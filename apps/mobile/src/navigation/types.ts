@@ -52,6 +52,10 @@ export type RootStackParamList = {
   ForwardPicker: { messageId: string };
   /** Contact profile — opened by tapping the DM header. */
   ContactProfile: { userId: string };
+  /** One of your own saved companies, ideas, projects or people, with who is linked to it. */
+  PrivateThing: { thingId: string };
+  /** People whose catch-up date has passed. */
+  CatchUp: undefined;
   /** Agent API keys list (OpenChat-7c9). */
   AgentKeys: undefined;
   /** Create a new agent key. */

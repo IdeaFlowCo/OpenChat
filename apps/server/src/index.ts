@@ -28,6 +28,8 @@ import agentNetworkRoutes from './routes/agentNetwork.js';
 import agentSocialLayerRoutes from './routes/agentSocialLayer.js';
 import addMeCardRoutes from './routes/addMeCard.js';
 import friendsRoutes from './routes/friends.js';
+import privateGraphRoutes from './routes/privateGraph.js';
+import { ensurePrivateGraphIndexes } from './services/privateGraph.js';
 import { ensureAssistantUser } from './services/assistant.js';
 import { ensureGroupbrainBotUser } from './services/groupbrainBot.js';
 import { ensureWebhookIndex } from './services/webhookDispatch.js';
@@ -429,6 +431,7 @@ app.use('/api', agentNetworkRoutes);
 app.use('/api', agentSocialLayerRoutes);
 app.use('/api/card', addMeCardRoutes);
 app.use('/api/friends', friendsRoutes);
+app.use('/api/private', privateGraphRoutes);
 
 // API reference (openchat-8md.1) — public spec + Redoc docs page.
 app.get('/api/openapi.json', (_req, res) => res.json(openapiSpec));
@@ -626,6 +629,7 @@ async function start() {
     try {
       await ensureAgentIntentIndexes();
       await ensureAgentSocialLayerIndexes();
+      await ensurePrivateGraphIndexes();
       await reconcileAgentDeliveries(io);
       console.log('Agent intent indexes ensured');
     } catch (e) {

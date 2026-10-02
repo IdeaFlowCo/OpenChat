@@ -71,6 +71,7 @@ export function FriendsScreen() {
       <View style={styles.findRow}>
         <TouchableOpacity onPress={() => navigation.navigate('NewConversation')}><Text style={{ color: c.primary, fontWeight: '700' }}>Find people</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('ScanQr')}><Text style={{ color: c.primary, fontWeight: '700' }}>Scan a code</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate('CatchUp')}><Text style={{ color: c.primary, fontWeight: '700' }}>Catch up</Text></TouchableOpacity>
       </View>
       {error && <TouchableOpacity onPress={() => void refresh()}><Text style={{ color: c.danger }}>{error}</Text></TouchableOpacity>}
       {!lists && !error && <ActivityIndicator color={c.primary} />}
@@ -89,7 +90,7 @@ const styles = StyleSheet.create({
   content: { padding: 16, gap: 16 },
   tabs: { flexDirection: 'row', gap: 8 },
   tab: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 18 },
-  findRow: { flexDirection: 'row', gap: 24, paddingVertical: 8 },
+  findRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 24, paddingVertical: 8 },
   heading: { fontSize: 17, fontWeight: '700', marginTop: 8 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   rowContent: { flex: 1, minWidth: 0 },
