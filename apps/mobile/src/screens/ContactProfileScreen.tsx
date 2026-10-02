@@ -15,6 +15,8 @@ import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { usePrivateName } from '../contexts/PrivateNamesContext';
 import { FriendControls } from '../components/FriendControls';
+import { PrivateCard } from '../components/PrivateGraph';
+import { ProfileAsks } from '../components/ProfileAsks';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp, RouteProps } from '../navigation/types';
 
@@ -50,6 +52,11 @@ export function ContactProfileScreen() {
     }
     return null;
   }, [conversations, userId]);
+
+  const groupsInCommon = useMemo(
+    () => conversations.filter(conv => conv.type === 'group' && conv.participants?.some(p => p.user?.id === userId)).length,
+    [conversations, userId],
+  );
 
   const [profile, setProfile] = useState<{ id: string; user: User | null; unavailable: boolean } | null>(null);
   const isReadOnlyIdentity = conversationUser?.isBot || userId === currentUser?.userId;
@@ -186,6 +193,11 @@ export function ContactProfileScreen() {
           {!!presenceLine && (
             <Text style={[styles.presence, { color: c.textSecondary }]}>{presenceLine}</Text>
           )}
+          {!user.isBot && groupsInCommon > 0 && (
+            <Text style={[styles.presence, { color: c.textMetadata }]}>
+              {`${groupsInCommon} ${groupsInCommon === 1 ? 'group' : 'groups'} in common`}
+            </Text>
+          )}
         </View>
       </View>
 
@@ -224,6 +236,18 @@ export function ContactProfileScreen() {
         const conversation = await createConversation([userId], { type: 'direct' });
         navigation.navigate('Chat', { conversationId: conversation.id });
       }} />}
+
+      {/* What they are asking for, limited to what they shared with you. */}
+      {canSetPrivateName && <ProfileAsks userId={userId} onOpenStory={story => navigation.navigate('StoryViewer', { story })} />}
+
+      {/* Your own notes, importance, catch-up and links about this person. Collapsed until opened. */}
+      {canSetPrivateName && (
+        <PrivateCard
+          userId={userId}
+          onOpenThing={thingId => navigation.navigate('PrivateThing', { thingId })}
+          onOpenPerson={id => navigation.push('ContactProfile', { userId: id })}
+        />
+      )}
 
       {/* Actions */}
       {!user.isBot && (
