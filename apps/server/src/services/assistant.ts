@@ -54,6 +54,7 @@ import { consumePublicationApproval, issuePublicationApproval } from './publicat
 import { assistantTextForMessage } from './assistantContext.js';
 import {
   isOwnerUser,
+  resolveWitTrackerCreationMode,
   toolUnlinkedSearch,
   toolWitComment,
   toolWitCreateIssue,
@@ -1488,12 +1489,14 @@ async function executeTool(
         const trackerName = typeof input.name === 'string' ? input.name.trim() : '';
         if (!trackerName) return { error: 'name is required' };
         const anonymous = input.anonymous === true;
+        const identity = resolveWitTrackerCreationMode(userId, anonymous);
+        if ('error' in identity) return identity;
         if (input.confirm !== true) {
           return {
             needsConfirmation: true,
             message:
               'Echo the exact tracker name and whether it is created as the user or anonymously (anonymous boards are public and owned by no account); call again with confirm:true after an explicit yes.',
-            wouldCreateAs: !anonymous && isOwnerUser(userId) ? 'Jacob (authenticated)' : 'anonymous',
+            wouldCreateAs: identity.mode === 'owner' ? 'Jacob (authenticated)' : 'anonymous',
           };
         }
         return await toolWitCreateTracker(userId, {

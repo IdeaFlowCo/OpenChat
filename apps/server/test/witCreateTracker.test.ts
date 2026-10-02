@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toolWitCreateTracker } from '../src/services/externalActions.js';
+import { resolveWitTrackerCreationMode, toolWitCreateTracker } from '../src/services/externalActions.js';
 
 // world-issue-tracker-wkn4: OpenChat's WIT tracker creation keeps the
 // owner-only identity gate. Only the configured owner sends the WIT agent key;
@@ -76,6 +76,38 @@ describe('toolWitCreateTracker', () => {
     const calls = mockFetch(200, created('anonymous'));
     await toolWitCreateTracker(OWNER, { name: 'Fix Potholes', anonymous: true });
     expect(calls[0].headers['X-Agent-Key']).toBeUndefined();
+  });
+
+  it.each([undefined, '', '   '])('refuses owner creation when the agent key is %j', async (key) => {
+    if (key === undefined) delete process.env.WIT_AGENT_KEY;
+    else process.env.WIT_AGENT_KEY = key;
+    const calls = mockFetch(200, created('anonymous'));
+    const error = { error: 'Owner tracker creation is not configured on the server; ask to create it anonymously instead.' };
+    expect(resolveWitTrackerCreationMode(OWNER, false)).toEqual(error);
+    expect(await toolWitCreateTracker(OWNER, { name: 'Fix Potholes', anonymous: false })).toEqual(error);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('allows anonymous creation without an owner agent key', async () => {
+    delete process.env.WIT_AGENT_KEY;
+    const calls = mockFetch(200, created('anonymous'));
+    expect(resolveWitTrackerCreationMode(OWNER, true)).toEqual({ mode: 'anonymous' });
+    for (const [userId, anonymous] of [[OWNER, true], [user(), false]] as const) {
+      expect(await toolWitCreateTracker(userId, { name: 'Fix Potholes', anonymous })).toMatchObject({ ok: true, createdAs: 'anonymous' });
+    }
+    expect(calls).toHaveLength(2);
+    expect(calls.every((call) => call.headers['X-Agent-Key'] === undefined)).toBe(true);
+  });
+
+  it('preserves successful creation while reporting failed ownership assignment', async () => {
+    const warning = 'Could not assign tracker owner';
+    mockFetch(200, { ...created('agent_key'), ownership_warning: warning });
+    expect(await toolWitCreateTracker(OWNER, { name: 'Fix Potholes', anonymous: false })).toMatchObject({
+      ok: true,
+      url: 'https://worldissuetracker.com/tracker/fix-potholes',
+      ownership_warning: warning,
+      note: 'Tracker created, but ownership assignment failed; do not describe it as owned by the account.',
+    });
   });
 
   it('never retries an owner failure anonymously', async () => {

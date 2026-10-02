@@ -84,6 +84,19 @@ function witMode(userId: string, anonymous: boolean): WitMode {
   return 'anonymous';
 }
 
+export function resolveWitTrackerCreationMode(
+  userId: string,
+  anonymous: boolean
+): { mode: WitMode } | { error: string } {
+  if (!anonymous && isOwnerUser(userId)) {
+    if (!witAgentKey()) {
+      return { error: 'Owner tracker creation is not configured on the server; ask to create it anonymously instead.' };
+    }
+    return { mode: 'owner' };
+  }
+  return { mode: 'anonymous' };
+}
+
 function witHeaders(mode: WitMode): Record<string, string> {
   const anon = witAnonKey();
   // X-WIT-Client is informational provenance only (WIT creation_surface).
@@ -278,8 +291,10 @@ export async function toolWitCreateTracker(
     anonymous: boolean;
   }
 ): Promise<unknown> {
+  const identity = resolveWitTrackerCreationMode(userId, params.anonymous);
+  if ('error' in identity) return identity;
   if (writeRateLimited(userId)) return { error: 'External write rate limit reached — try again later.' };
-  const mode = witMode(userId, params.anonymous);
+  const { mode } = identity;
   const name = params.name.trim().slice(0, 200);
   if (!name) return { error: 'name is required' };
   const sourceUrl = params.sourceUrl?.trim() || undefined;
@@ -313,7 +328,9 @@ export async function toolWitCreateTracker(
     createdAs,
     slug: data.tracker.slug,
     url: data.tracker.url || `${WIT_SITE}/tracker/${data.tracker.slug}`,
-    ...(createdAs === 'anonymous'
+    ...(data.ownership_warning
+      ? { ownership_warning: data.ownership_warning, note: 'Tracker created, but ownership assignment failed; do not describe it as owned by the account.' }
+      : createdAs === 'anonymous'
       ? { note: 'Created anonymously: public, listed, and not owned by any account.' }
       : {}),
   };
