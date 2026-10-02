@@ -71,6 +71,28 @@ describe('buildIdeaflowAuthorizationUrl', () => {
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   });
 
+  it('omits prompt for ordinary sign-in and adds only select_account when explicitly requested', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(discovery), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as unknown as typeof fetch;
+    const input = {
+      state: 'state-value-1234567890',
+      nonce: 'nonce-value-1234567890',
+      codeChallenge: 'A'.repeat(43),
+    };
+
+    const silent = new URL(await buildIdeaflowAuthorizationUrl(config, input, fetchImpl));
+    expect(silent.searchParams.has('prompt')).toBe(false);
+
+    const chooser = new URL(await buildIdeaflowAuthorizationUrl(config, {
+      ...input,
+      prompt: 'select_account',
+    }, fetchImpl));
+    expect(chooser.searchParams.getAll('prompt')).toEqual(['select_account']);
+    expect(chooser.searchParams.get('state')).toBe(input.state);
+  });
+
   it('rejects discovery documents whose issuer does not exactly match', async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       ...discovery,

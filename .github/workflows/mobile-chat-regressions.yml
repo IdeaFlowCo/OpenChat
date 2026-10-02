@@ -30,6 +30,11 @@ jobs:
           test/conversationDisplay.test.ts test/contactInvite.mobile.test.ts
           test/addMeCard.test.ts test/addMeCard.route.test.ts
           test/privateNames.route.test.ts test/privateNames.mobile.test.ts test/contactProfileDoors.mobile.test.ts
+      - name: Ideaflow-only web sign-in, account switch, and native login parity
+        working-directory: apps/server
+        run: >-
+          npx vitest run test/ideaflowOnlyLogin.mobile.test.ts test/signOut.mobile.test.ts
+          test/loginGoogle.mobile.test.ts test/ideaflowAuthRoutes.test.ts test/ideaflowOidc.test.ts
 
   private-names-storage:
     runs-on: ubuntu-latest

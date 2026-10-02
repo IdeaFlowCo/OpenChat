@@ -31,6 +31,8 @@ import { parseOpenChatUrl } from '../utils/parseOpenChatUrl';
 import { createEntryIntent, saveEntryIntent } from '../services/entryIntents';
 import { googleAuthRequestConfig } from '../utils/googleAuthRequest';
 import { PasswordRecoveryHelp } from '../components/PasswordRecoveryHelp';
+import { useIdeaflowConfig } from '../hooks/useIdeaflowConfig';
+import { IDEAFLOW_WEB_STATE_KEY, loginSurface, prepareIdeaflowWebSignIn } from '../services/ideaflowSignIn';
 
 // Required for the in-app browser to dismiss properly after the OAuth round-trip.
 WebBrowser.maybeCompleteAuthSession();
@@ -51,31 +53,6 @@ const TEST_ACCOUNTS: TestAccount[] = [
 ];
 const SHOW_TEST_LOGINS =
   (process.env.EXPO_PUBLIC_SHOW_TEST_LOGINS ?? 'false').toLowerCase() === 'true';
-
-const IDEAFLOW_WEB_STATE_KEY = 'openchat_ideaflow_web';
-
-function bytesToBase64Url(bytes: Uint8Array): string {
-  let binary = '';
-  for (const value of bytes) binary += String.fromCharCode(value);
-  return btoa(binary)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-
-function randomBase64Url(byteLength: number): string {
-  const bytes = new Uint8Array(byteLength);
-  globalThis.crypto.getRandomValues(bytes);
-  return bytesToBase64Url(bytes);
-}
-
-async function pkceChallenge(verifier: string): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(verifier),
-  );
-  return bytesToBase64Url(new Uint8Array(digest));
-}
 
 export function LoginScreen() {
   const { scheme } = useTheme();
@@ -105,8 +82,6 @@ export function LoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
   const [ideaflowLoading, setIdeaflowLoading] = useState(false);
-  const [ideaflowEnabled, setIdeaflowEnabled] = useState(false);
-  const [providerResetUrl, setProviderResetUrl] = useState<string | null>(null);
 
   // Web Google sign-in uses a full-page REDIRECT, not the expo-auth-session
   // popup: Google's pages set Cross-Origin-Opener-Policy, which severs the
@@ -115,29 +90,19 @@ export function LoginScreen() {
   const isWeb = Platform.OS === 'web';
   const GOOGLE_WEB_STATE_KEY = 'openchat_google_web';
 
-  // The server-side flag is the rollout source of truth. This keeps the
-  // button hidden until a production client is registered and allows an
-  // immediate kill switch without rebuilding RN-web.
-  useEffect(() => {
-    if (!isWeb) return;
-    let cancelled = false;
-    fetch(`${OPENCHAT_URL}/api/auth/ideaflow/config`)
-      .then(response => response.ok ? response.json() : { enabled: false })
-      .then((body: { enabled?: boolean; passwordResetUrl?: string | null }) => {
-        if (!cancelled) {
-          setIdeaflowEnabled(body.enabled === true);
-          setProviderResetUrl(body.enabled === true && typeof body.passwordResetUrl === 'string'
-            ? body.passwordResetUrl : null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setIdeaflowEnabled(false);
-          setProviderResetUrl(null);
-        }
-      });
-    return () => { cancelled = true; };
-  }, [isWeb]);
+  // The server-side flag is the rollout source of truth: web shows nothing
+  // until it answers, then either Ideaflow-only (enabled) or the legacy
+  // methods (kill switch / unreachable). Native never asks.
+  const ideaflowConfig = useIdeaflowConfig();
+  const providerResetUrl = ideaflowConfig.status === 'ready' ? ideaflowConfig.passwordResetUrl : null;
+  // "Other sign-in options" starts open when returning from a legacy Google
+  // redirect so its progress and any retry stay visible.
+  const [showOtherOptions, setShowOtherOptions] = useState(() => {
+    if (!isWeb || typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('provider') !== 'ideaflow' && (params.has('code') || params.has('error'));
+  });
+  const surface = loginSurface({ isWeb, config: ideaflowConfig, showOtherOptions });
 
   // Web: finish the IdeaFlow ID redirect. The callback route adds a provider
   // marker because Google and OIDC both use standard `code` and `state` keys.
@@ -364,30 +329,14 @@ export function LoginScreen() {
     }
   };
 
-  const handleIdeaflowSignIn = async () => {
+  const handleIdeaflowSignIn = async (selectAccount = false) => {
     if (!isWeb || typeof window === 'undefined' || ideaflowLoading || loading) return;
     setIdeaflowLoading(true);
     try {
-      const state = randomBase64Url(32);
-      const nonce = randomBase64Url(32);
-      const codeVerifier = randomBase64Url(48);
-      const codeChallenge = await pkceChallenge(codeVerifier);
-      const query = new URLSearchParams({
-        state,
-        nonce,
-        code_challenge: codeChallenge,
-      });
-      const response = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/url?${query}`);
-      if (!response.ok) throw new Error(`Could not start Ideaflow sign-in (${response.status})`);
-      const body = await response.json() as { url?: string };
-      if (!body.url) throw new Error('Ideaflow sign-in did not return an authorization URL');
-
-      window.sessionStorage.setItem(IDEAFLOW_WEB_STATE_KEY, JSON.stringify({
-        state,
-        nonce,
-        codeVerifier,
-      }));
-      window.location.href = body.url;
+      // Ordinary sign-in sends no prompt so an existing Ideaflow session is
+      // reused silently; only "Use another Ideaflow account" asks for the
+      // provider's chooser (prompt=select_account).
+      window.location.href = await prepareIdeaflowWebSignIn(OPENCHAT_URL, { selectAccount });
     } catch (err) {
       Alert.alert('Ideaflow sign-in failed', err instanceof Error ? err.message : String(err));
       setIdeaflowLoading(false);
@@ -503,7 +452,13 @@ export function LoginScreen() {
             )
           )}
 
-          {isWeb && ideaflowEnabled && (
+          {surface.pending && (
+            <View style={styles.pendingMethods} accessibilityLabel="Loading sign-in options">
+              <ActivityIndicator color={c.primary} />
+            </View>
+          )}
+
+          {surface.ideaflow && (
             <TouchableOpacity
               style={[
                 styles.ideaflowButton,
@@ -512,7 +467,7 @@ export function LoginScreen() {
                   opacity: (ideaflowLoading || loading || googleLoading) ? 0.6 : 1,
                 },
               ]}
-              onPress={handleIdeaflowSignIn}
+              onPress={() => { void handleIdeaflowSignIn(); }}
               disabled={ideaflowLoading || loading || googleLoading}
               accessibilityLabel="Continue with Ideaflow"
             >
@@ -524,92 +479,122 @@ export function LoginScreen() {
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity
-            style={[
-              styles.googleButton,
-              { borderColor: c.border, opacity: (googleLoading || loading) ? 0.6 : 1 },
-            ]}
-            onPress={handleGoogleSignIn}
-            disabled={googleLoading || loading}
-            accessibilityLabel="Continue with Google"
-          >
-            {googleLoading ? (
-              <ActivityIndicator color="#1f1f1f" />
-            ) : (
-              <>
-                <View style={styles.googleGlyph}>
-                  <Text style={styles.googleGlyphText}>G</Text>
-                </View>
-                <Text style={styles.googleButtonText}>Continue with Google</Text>
-              </>
+          {surface.switchAccount && (
+            <TouchableOpacity
+              onPress={() => { void handleIdeaflowSignIn(true); }}
+              disabled={ideaflowLoading || loading || googleLoading}
+              accessibilityRole="button"
+              accessibilityLabel="Use another Ideaflow account"
+              style={styles.secondaryLink}
+            >
+              <Text style={[styles.secondaryLinkText, { color: c.primary }]}>Use another Ideaflow account</Text>
+            </TouchableOpacity>
+          )}
+
+          {surface.otherOptionsToggle && (
+            <TouchableOpacity
+              onPress={() => setShowOtherOptions(open => !open)}
+              accessibilityRole="button"
+              accessibilityLabel={showOtherOptions ? 'Hide other sign-in options' : 'Other sign-in options'}
+              accessibilityState={{ expanded: showOtherOptions }}
+              style={styles.otherOptionsLink}
+            >
+              <Text style={[styles.otherOptionsText, { color: c.textMetadata }]}>
+                {showOtherOptions ? 'Hide other sign-in options' : 'Other sign-in options'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {surface.legacy && (
+            <>
+            <TouchableOpacity
+              style={[
+                styles.googleButton,
+                { borderColor: c.border, opacity: (googleLoading || loading) ? 0.6 : 1 },
+              ]}
+              onPress={handleGoogleSignIn}
+              disabled={googleLoading || loading}
+              accessibilityLabel="Continue with Google"
+            >
+              {googleLoading ? (
+                <ActivityIndicator color="#1f1f1f" />
+              ) : (
+                <>
+                  <View style={styles.googleGlyph}>
+                    <Text style={styles.googleGlyphText}>G</Text>
+                  </View>
+                  <Text style={styles.googleButtonText}>Continue with Google</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.orRow}>
+              <View style={[styles.orLine, { backgroundColor: c.border }]} />
+              <Text style={[styles.orLabel, { color: c.textMuted }]}>or</Text>
+              <View style={[styles.orLine, { backgroundColor: c.border }]} />
+            </View>
+
+            {mode === 'register' && (
+              <TextInput
+                style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
+                value={name}
+                onChangeText={setName}
+                placeholder="Your name"
+                placeholderTextColor={c.textMuted}
+                autoCapitalize="words"
+                autoComplete="name"
+                editable={!loading}
+              />
             )}
-          </TouchableOpacity>
-
-          <View style={styles.orRow}>
-            <View style={[styles.orLine, { backgroundColor: c.border }]} />
-            <Text style={[styles.orLabel, { color: c.textMuted }]}>or</Text>
-            <View style={[styles.orLine, { backgroundColor: c.border }]} />
-          </View>
-
-          {mode === 'register' && (
             <TextInput
               style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
-              value={name}
-              onChangeText={setName}
-              placeholder="Your name"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="Email"
               placeholderTextColor={c.textMuted}
-              autoCapitalize="words"
-              autoComplete="name"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
               editable={!loading}
             />
+            <TextInput
+              style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Password"
+              placeholderTextColor={c.textMuted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!loading}
+            />
+
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: c.primary, opacity: loading ? 0.6 : 1 }]}
+              onPress={handleSubmit}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color={c.onPrimary} />
+              ) : (
+                <Text style={[styles.buttonText, { color: c.onPrimary }]}>{mode === 'register' ? 'Create account' : 'Sign In'}</Text>
+              )}
+            </TouchableOpacity>
+
+            {mode === 'signin' && <PasswordRecoveryHelp colors={c} providerResetUrl={providerResetUrl} />}
+
+            <TouchableOpacity
+              onPress={() => setMode(mode === 'register' ? 'signin' : 'register')}
+              disabled={loading}
+              style={{ marginTop: 14, alignSelf: 'center' }}
+            >
+              <Text style={{ color: c.primary, fontSize: 14, fontWeight: '600' }}>
+                {mode === 'register' ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
+              </Text>
+            </TouchableOpacity>
+            </>
           )}
-          <TextInput
-            style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="Email"
-            placeholderTextColor={c.textMuted}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoComplete="email"
-            editable={!loading}
-          />
-          <TextInput
-            style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
-            value={password}
-            onChangeText={setPassword}
-            placeholder="Password"
-            placeholderTextColor={c.textMuted}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!loading}
-          />
-
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: c.primary, opacity: loading ? 0.6 : 1 }]}
-            onPress={handleSubmit}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={c.onPrimary} />
-            ) : (
-              <Text style={[styles.buttonText, { color: c.onPrimary }]}>{mode === 'register' ? 'Create account' : 'Sign In'}</Text>
-            )}
-          </TouchableOpacity>
-
-          {mode === 'signin' && <PasswordRecoveryHelp colors={c} providerResetUrl={providerResetUrl} />}
-
-          <TouchableOpacity
-            onPress={() => setMode(mode === 'register' ? 'signin' : 'register')}
-            disabled={loading}
-            style={{ marginTop: 14, alignSelf: 'center' }}
-          >
-            <Text style={{ color: c.primary, fontSize: 14, fontWeight: '600' }}>
-              {mode === 'register' ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
-            </Text>
-          </TouchableOpacity>
 
           {SHOW_TEST_LOGINS && (
             <View style={styles.quickLogin}>
@@ -638,9 +623,11 @@ export function LoginScreen() {
             </View>
           )}
 
-          <Text style={[styles.footer, { color: c.textMetadata }]}>
-            Uses your Noos credentials. Phone sign-in coming soon.
-          </Text>
+          {surface.legacyFooter && (
+            <Text style={[styles.footer, { color: c.textMetadata }]}>
+              Uses your Noos credentials. Phone sign-in coming soon.
+            </Text>
+          )}
         </View>
 
         {/* Get / Share OpenChat.
@@ -744,6 +731,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ideaflowButtonText: { fontSize: 16, fontWeight: '600' },
+  pendingMethods: { height: 50, alignItems: 'center', justifyContent: 'center' },
+  secondaryLink: { alignSelf: 'center', paddingVertical: 4 },
+  secondaryLinkText: { fontSize: 14, fontWeight: '600' },
+  otherOptionsLink: { alignSelf: 'center', paddingVertical: 4 },
+  otherOptionsText: { fontSize: 13 },
   footer: { fontSize: 12, textAlign: 'center', marginTop: 8 },
   shareSection: { width: '100%', maxWidth: 520, alignSelf: 'center', marginTop: 32, alignItems: 'stretch', opacity: 0.88 },
   shareLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8, textAlign: 'center' },
