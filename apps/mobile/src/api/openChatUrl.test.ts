@@ -7,10 +7,10 @@ describe('resolveOpenChatUrl', () => {
     expect(resolveOpenChatUrl(undefined, 'https://chat.globalbr.ai')).toBe('https://chat.globalbr.ai');
   });
 
-  it('uses the serving legacy host outside the production chat origins until the cutover', () => {
-    expect(resolveOpenChatUrl(undefined, 'http://localhost:8081')).toBe('https://chat.globalbr.ai');
-    expect(resolveOpenChatUrl(undefined, 'https://preview.example.com')).toBe('https://chat.globalbr.ai');
-    expect(resolveOpenChatUrl()).toBe('https://chat.globalbr.ai');
+  it('uses the canonical host outside the production chat origins', () => {
+    expect(resolveOpenChatUrl(undefined, 'http://localhost:8081')).toBe('https://chat.ideaflow.app');
+    expect(resolveOpenChatUrl(undefined, 'https://preview.example.com')).toBe('https://chat.ideaflow.app');
+    expect(resolveOpenChatUrl()).toBe('https://chat.ideaflow.app');
   });
 
   it('honors an explicit development URL', () => {

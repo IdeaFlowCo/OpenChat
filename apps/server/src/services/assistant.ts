@@ -54,9 +54,11 @@ import { consumePublicationApproval, issuePublicationApproval } from './publicat
 import { assistantTextForMessage } from './assistantContext.js';
 import {
   isOwnerUser,
+  resolveWitTrackerCreationMode,
   toolUnlinkedSearch,
   toolWitComment,
   toolWitCreateIssue,
+  toolWitCreateTracker,
   toolWitGetIssue,
   toolWitListIssues,
   toolWitListTrackers,
@@ -1144,6 +1146,24 @@ function buildTools(): AnthropicType.Tool[] {
       },
     },
     {
+      name: 'wit_create_tracker',
+      description:
+        "Create a new public tracker (board) on World Issue Tracker. Call wit_list_trackers first and reuse a matching board instead of creating a duplicate. Created under the user's identity when they are the account owner; otherwise (or with anonymous:true) it is created anonymously — public, listed, rate-limited, and owned by no account. First call returns needsConfirmation — echo the exact name and whether it is created as the user or anonymously, get a clear yes, then call again with confirm:true.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          description: { type: 'string' },
+          location: { type: 'string', description: 'Geographic context, if any' },
+          source_url: { type: 'string', description: 'Website/page this board collects feedback for (http/https)' },
+          source_url_is_default: { type: 'boolean', description: 'Make this the default board for source_url' },
+          anonymous: { type: 'boolean', description: 'True only if the user explicitly asked to act anonymously' },
+          confirm: { type: 'boolean' },
+        },
+        required: ['name'],
+      },
+    },
+    {
       name: 'wit_update_issue',
       description:
         'Update an existing World Issue Tracker issue (title/description/status/priority/labels). Only available to the account owner. Requires confirm:true after echoing the change to the user.',
@@ -1465,6 +1485,29 @@ async function executeTool(
           anonymous,
         });
       }
+      case 'wit_create_tracker': {
+        const trackerName = typeof input.name === 'string' ? input.name.trim() : '';
+        if (!trackerName) return { error: 'name is required' };
+        const anonymous = input.anonymous === true;
+        const identity = resolveWitTrackerCreationMode(userId, anonymous);
+        if ('error' in identity) return identity;
+        if (input.confirm !== true) {
+          return {
+            needsConfirmation: true,
+            message:
+              'Echo the exact tracker name and whether it is created as the user or anonymously (anonymous boards are public and owned by no account); call again with confirm:true after an explicit yes.',
+            wouldCreateAs: identity.mode === 'owner' ? 'Jacob (authenticated)' : 'anonymous',
+          };
+        }
+        return await toolWitCreateTracker(userId, {
+          name: trackerName,
+          description: typeof input.description === 'string' ? input.description : undefined,
+          location: typeof input.location === 'string' ? input.location : undefined,
+          sourceUrl: typeof input.source_url === 'string' ? input.source_url : undefined,
+          sourceUrlIsDefault: input.source_url_is_default === true,
+          anonymous,
+        });
+      }
       case 'wit_update_issue': {
         const issueId = typeof input.issue_id === 'string' ? input.issue_id.trim() : '';
         if (!issueId) return { error: 'issue_id is required' };
@@ -1584,7 +1627,7 @@ Guidelines:
 - Sending to OTHER people requires confirmation: the first send_message / send_message_to_person call returns { needsConfirmation: true, ... } instead of sending. When you get that, DO NOT retry blindly — tell the user exactly what you'll send and to whom, wait for their explicit yes, then call the SAME tool again with the SAME content and confirm:true. If they decline or change the wording, do not send. Messages to the user's own Assistant DM go through immediately with no confirmation.
 - If the user wants to report a bug, give feedback, or request a feature about OpenChat (the app), use submit_feedback — it files a tracked issue for the OpenChat team. Confirm what you'll send, then share the resulting link. This is how feedback reaches us, so offer it when the user seems stuck or frustrated with the app.
 - A message starting with "[Voice message]" is the transcript of a voice note the user recorded; answer it like any typed message. If it says no transcript is available, tell the user you could not make out the voice message and ask them to resend it or type it.
-- World Issue Tracker (worldissuetracker.com) tools: anyone can browse trackers and read issues (wit_list_trackers, wit_list_issues, wit_get_issue). Creating/updating/commenting posts under the account owner's identity when the invoking user IS the owner (the server verifies this — you cannot grant it), and anonymously otherwise. If the user explicitly says "anonymously", pass anonymous:true. Writes always need an explicit confirmation round (confirm:true on the second call). Share the resulting issue URL.
+- World Issue Tracker (worldissuetracker.com) tools: anyone can browse trackers and read issues (wit_list_trackers, wit_list_issues, wit_get_issue). Creating issues/trackers, updating, and commenting post under the account owner's identity when the invoking user IS the owner (the server verifies this — you cannot grant it), and anonymously otherwise. Anyone can create a public tracker with wit_create_tracker; non-owner trackers are anonymous, public, rate-limited, and owned by no account — say so. Check wit_list_trackers first and reuse an existing board instead of duplicating it. If the user explicitly says "anonymously", pass anonymous:true. Writes always need an explicit confirmation round (confirm:true on the second call). Share the resulting issue URL.
 - unlinked.ai tools (unlinked_search_network, unlinked_search_everyone) search a professional network and the public People index. They are read-only and server-gated: when asked, ALWAYS just call the tool — you cannot tell who is authorized, the server decides and returns a clear error if not. Relay that result. unlinked.ai has no anonymous agent access and no posting API; never claim you posted to unlinked.ai.
 - Your final response (plain text, no tool call) is delivered to the user as a chat message.`;
 

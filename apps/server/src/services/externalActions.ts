@@ -12,8 +12,10 @@
 //    server env on the deployment host. They are never included in tool
 //    results, prompts, or error messages.
 //  - Every other user gets the anonymous path where the remote service
-//    itself permits anonymous access (WIT reads + anonymous create), or a
-//    clean refusal (unlinked, WIT updates).
+//    itself permits anonymous access (WIT reads + anonymous issue/comment/
+//    tracker create), or a clean refusal (unlinked, WIT updates). An owner
+//    call that WIT rejects is reported as an error — it is never retried
+//    anonymously, so owner-intended writes cannot silently lose attribution.
 
 // ─── Identity gate ────────────────────────────────────────────────────────────
 
@@ -50,9 +52,11 @@ function writeRateLimited(userId: string): boolean {
 
 // ─── World Issue Tracker ─────────────────────────────────────────────────────
 // API docs: https://worldissuetracker.com/llms.txt
-// Reads + anonymous issue/comment creation need only the public anon JWT
-// (`apikey` header). Authenticated writes (update, tracker create) need the
-// owner agent key: apikey + `Authorization: Bearer <anon>` + `X-Agent-Key`.
+// Reads + anonymous issue/comment/tracker creation need only the public anon
+// JWT (`apikey` header). Owner-attributed writes (update, owned trackers) need
+// the owner agent key: apikey + `Authorization: Bearer <anon>` + `X-Agent-Key`.
+// Anonymous trackers are public, listed, ownerless, and rate-limited by WIT
+// (world-issue-tracker-wkn4); WIT refuses exact duplicates with 409.
 
 const WIT_BASE =
   process.env.WIT_API_BASE || 'https://qmzopiburflputowkuhu.supabase.co/functions/v1';
@@ -80,9 +84,23 @@ function witMode(userId: string, anonymous: boolean): WitMode {
   return 'anonymous';
 }
 
+export function resolveWitTrackerCreationMode(
+  userId: string,
+  anonymous: boolean
+): { mode: WitMode } | { error: string } {
+  if (!anonymous && isOwnerUser(userId)) {
+    if (!witAgentKey()) {
+      return { error: 'Owner tracker creation is not configured on the server; ask to create it anonymously instead.' };
+    }
+    return { mode: 'owner' };
+  }
+  return { mode: 'anonymous' };
+}
+
 function witHeaders(mode: WitMode): Record<string, string> {
   const anon = witAnonKey();
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  // X-WIT-Client is informational provenance only (WIT creation_surface).
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-WIT-Client': 'openchat' };
   if (anon) headers['apikey'] = anon;
   if (mode === 'owner') {
     if (anon) headers['Authorization'] = `Bearer ${anon}`;
@@ -259,6 +277,62 @@ export async function toolWitCreateIssue(
     postedAs: mode === 'owner' ? 'Jacob (authenticated)' : 'anonymous',
     slug: res.data?.issue?.slug,
     url: issueUrl(res.data?.issue?.slug),
+  };
+}
+
+export async function toolWitCreateTracker(
+  userId: string,
+  params: {
+    name: string;
+    description?: string;
+    location?: string;
+    sourceUrl?: string;
+    sourceUrlIsDefault?: boolean;
+    anonymous: boolean;
+  }
+): Promise<unknown> {
+  const identity = resolveWitTrackerCreationMode(userId, params.anonymous);
+  if ('error' in identity) return identity;
+  if (writeRateLimited(userId)) return { error: 'External write rate limit reached — try again later.' };
+  const { mode } = identity;
+  const name = params.name.trim().slice(0, 200);
+  if (!name) return { error: 'name is required' };
+  const sourceUrl = params.sourceUrl?.trim() || undefined;
+  const res = await witFetch('/create-tracker', mode, {
+    method: 'POST',
+    body: {
+      name,
+      description: params.description?.trim().slice(0, 20000) || undefined,
+      location: params.location?.trim().slice(0, 500) || undefined,
+      source_url: sourceUrl,
+      source_url_is_default: sourceUrl ? params.sourceUrlIsDefault === true : undefined,
+    },
+  });
+  const data = res.data ?? {};
+  if (res.status === 409 && (data.code === 'tracker_name_exists' || data.code === 'tracker_slug_exists')) {
+    return {
+      duplicate: true,
+      message: 'A tracker with this name already exists — reuse it instead of creating a duplicate.',
+      existing: data.tracker ? { name: data.tracker.name, slug: data.tracker.slug, url: data.tracker.url } : null,
+    };
+  }
+  if (res.status === 429) {
+    return { error: 'Tracker creation is rate-limited right now — try again later.', retryAfterSeconds: data.retry_after_seconds };
+  }
+  if (!res.ok || !data.success || !data.tracker?.slug) {
+    return { error: 'Failed to create tracker', detail: data.message || data.code || data.error };
+  }
+  const createdAs = data.creator?.kind === 'anonymous' ? 'anonymous' : 'Jacob (authenticated)';
+  return {
+    ok: true,
+    createdAs,
+    slug: data.tracker.slug,
+    url: data.tracker.url || `${WIT_SITE}/tracker/${data.tracker.slug}`,
+    ...(data.ownership_warning
+      ? { ownership_warning: data.ownership_warning, note: 'Tracker created, but ownership assignment failed; do not describe it as owned by the account.' }
+      : createdAs === 'anonymous'
+      ? { note: 'Created anonymously: public, listed, and not owned by any account.' }
+      : {}),
   };
 }
 
