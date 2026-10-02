@@ -52,8 +52,9 @@ export function MyCardScreen() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const { width } = useWindowDimensions();
-  const { currentUser, refreshConversations } = useChat();
+  const { currentUser, refreshConversations, signOut } = useChat();
   const guardAction = useFocusedAccountGuard(currentUser?.userId);
+  const safeEmail = isPlaceholderEmail(currentUser?.email) ? undefined : currentUser?.email;
 
   const [card, setCard] = useState<MyAddMeCard | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -198,16 +199,22 @@ export function MyCardScreen() {
     }
   });
 
-  if (!card) {
+  // Only the very first load blocks the screen. If the card request fails,
+  // the card-specific sections are replaced by an inline error while the
+  // identity header and the Profile/Settings/Sign out menu still render —
+  // Profile is the single "Me" door (docs/surface-map.md), so it must never
+  // strand the user without Settings or Sign out (OpenChat-3ar0).
+  if (!card && !error) {
     return (
       <View style={[styles.center, { backgroundColor: c.background }]}>
-        {error ? <Text style={{ color: c.textSecondary }}>{error}</Text> : <ActivityIndicator color={c.primary} size="large" />}
+        <ActivityIndicator color={c.primary} size="large" />
       </View>
     );
   }
 
-  const url = addMeCardUrl(card.token);
+  const url = card ? addMeCardUrl(card.token) : '';
   const qrSize = Math.max(180, Math.min(width - 96, 320));
+  const headerHeadline = card?.settings.headline || (currentUser as any)?.statusMessage;
 
   return (
     <ScrollView
@@ -224,18 +231,18 @@ export function MyCardScreen() {
         activeOpacity={0.7}
       >
         <Avatar
-          name={card.preview.name || currentUser?.name || 'Profile'}
-          email={isPlaceholderEmail(currentUser?.email) ? undefined : currentUser?.email}
+          name={card?.preview.name || currentUser?.name || 'Profile'}
+          email={safeEmail}
           avatarUrl={currentUser?.avatarUrl ?? undefined}
           size={52}
         />
         <View style={styles.headerInfo}>
           <Text style={[styles.headerName, { color: c.textPrimary }]} numberOfLines={1}>
-            {card.preview.name || currentUser?.name || 'Your Profile'}
+            {card?.preview.name || currentUser?.name || 'Your Profile'}
           </Text>
-          {!!(card.settings.headline || (currentUser as any)?.statusMessage) && (
+          {!!headerHeadline && (
             <Text style={[styles.headerHeadline, { color: c.textSecondary }]} numberOfLines={1}>
-              {card.settings.headline || (currentUser as any)?.statusMessage}
+              {headerHeadline}
             </Text>
           )}
           <Text style={[styles.headerEditHint, { color: c.primary }]}>
@@ -245,6 +252,12 @@ export function MyCardScreen() {
         <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
       </TouchableOpacity>
 
+      {!card ? (
+        <View style={[styles.cardUnavailable, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <Text style={[styles.sub, { color: c.textMetadata }]}>{error}</Text>
+        </View>
+      ) : (
+      <>
       {previewing ? (
         <View style={styles.previewWrap}>
           <Text style={[styles.sub, { color: c.textMetadata }]}>
@@ -347,6 +360,8 @@ export function MyCardScreen() {
       <Text style={[styles.footnote, { color: c.textMetadata }]}>
         Never shown on your card: email, phone number, or account id.
       </Text>
+      </>
+      )}
 
       <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>PROFILE & SETTINGS</Text>
       <View style={[styles.menuSection, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -404,14 +419,40 @@ export function MyCardScreen() {
         </TouchableOpacity>
       </View>
 
-      {error ? <Text style={[styles.error, { color: c.danger }]}>{error}</Text> : null}
+      {/* Sign out lives on Profile because the avatar is the one "Me" door on
+          every width (phone header, desktop sidebar): Chats › avatar › Sign out
+          is two taps everywhere. Settings › Account carries the same row. */}
+      <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>ACCOUNT</Text>
+      <View style={[styles.menuSection, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <TouchableOpacity
+          style={[styles.menuRow, { borderBottomWidth: 0 }]}
+          onPress={() => { void signOut(); }}
+          accessibilityRole="button"
+          accessibilityLabel="Sign out"
+          activeOpacity={0.7}
+        >
+          <View style={styles.menuIconWrap}>
+            <AppIcon name="logout" color={c.danger} size={20} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.menuLabel, { color: c.danger }]}>Sign out</Text>
+            <Text style={[styles.menuHint, { color: c.textMetadata }]} numberOfLines={1}>
+              {safeEmail ? `Signed in as ${safeEmail}` : 'Return to the sign-in screen on this device'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
 
-      <TouchableOpacity onPress={handleReset} disabled={saving} style={styles.reset} accessibilityRole="button">
-        <Text style={{ color: c.danger, fontWeight: '600' }}>Reset card link</Text>
-        <Text style={[styles.hint, { color: c.textMetadata, textAlign: 'center' }]}>
-          Stops your current QR and link from working
-        </Text>
-      </TouchableOpacity>
+      {card && error ? <Text style={[styles.error, { color: c.danger }]}>{error}</Text> : null}
+
+      {card && (
+        <TouchableOpacity onPress={handleReset} disabled={saving} style={styles.reset} accessibilityRole="button">
+          <Text style={{ color: c.danger, fontWeight: '600' }}>Reset card link</Text>
+          <Text style={[styles.hint, { color: c.textMetadata, textAlign: 'center' }]}>
+            Stops your current QR and link from working
+          </Text>
+        </TouchableOpacity>
+      )}
     </ScrollView>
   );
 }
@@ -473,6 +514,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   previewWrap: { width: '100%', alignItems: 'center', gap: 12 },
+  cardUnavailable: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
   sub: { fontSize: 14, textAlign: 'center' },
   actions: { flexDirection: 'row', gap: 12, marginTop: 12, width: '100%', maxWidth: 420 },
   actionBtn: { flex: 1, paddingVertical: 13, borderRadius: 12, alignItems: 'center' },
