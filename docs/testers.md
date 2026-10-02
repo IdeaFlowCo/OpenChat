@@ -168,6 +168,23 @@ eas update --branch production --message "what changed"
 
 Reaches all installs whose native version matches (see runtime version gate).
 
+**Runtime targeting after a version bump (2026-10-02, OpenChat 1.0.5).** With
+`runtimeVersion: { policy: 'appVersion' }`, `eas update` from `main` publishes
+for whatever `version` is in `app.config.js`. Once `main` says `1.0.5`, an
+update from `main` targets runtime `1.0.5` (the App Store 1.0.5 binary and
+its TestFlight build), not the older binaries. Live runtimes at that point:
+
+| Runtime | Binary | Where |
+|---------|--------|-------|
+| `1.0.5` | build 112+ | App Store review / TestFlight (from `main`) |
+| `1.0.4` | build 111 | TestFlight only |
+| `1.0.1` | build 103 | App Store (until 1.0.5 is released) |
+
+To hotfix an older runtime, publish from a checkout whose `app.config.js`
+still has that version (for example, the commit before the bump) to the same
+`production` branch. Never edit the version just to retarget an update: the
+JS must match that binary's native modules.
+
 ### Operator checklist (per release)
 
 - [ ] Decide: OTA-safe change (→ `eas update`) or native change (→ build)?
