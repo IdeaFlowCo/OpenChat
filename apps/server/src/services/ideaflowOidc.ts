@@ -136,6 +136,8 @@ export async function buildIdeaflowAuthorizationUrl(
     state: string;
     nonce: string;
     codeChallenge: string;
+    /** 'login' after an explicit logout: ask who is signing in. */
+    prompt?: 'login';
   },
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
@@ -149,6 +151,7 @@ export async function buildIdeaflowAuthorizationUrl(
   url.searchParams.set('nonce', input.nonce);
   url.searchParams.set('code_challenge', input.codeChallenge);
   url.searchParams.set('code_challenge_method', 'S256');
+  if (input.prompt === 'login') url.searchParams.set('prompt', 'login');
   return url.toString();
 }
 

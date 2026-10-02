@@ -31,6 +31,7 @@ import { parseOpenChatUrl } from '../utils/parseOpenChatUrl';
 import { createEntryIntent, saveEntryIntent } from '../services/entryIntents';
 import { googleAuthRequestConfig } from '../utils/googleAuthRequest';
 import { PasswordRecoveryHelp } from '../components/PasswordRecoveryHelp';
+import { takeIdeaflowAccountChoice } from '../utils/ideaflowAccountChoice';
 
 // Required for the in-app browser to dismiss properly after the OAuth round-trip.
 WebBrowser.maybeCompleteAuthSession();
@@ -106,6 +107,11 @@ export function LoginScreen() {
   const [appleLoading, setAppleLoading] = useState(false);
   const [ideaflowLoading, setIdeaflowLoading] = useState(false);
   const [ideaflowEnabled, setIdeaflowEnabled] = useState(false);
+  // Web hides every sign-in option until the server says whether Ideaflow is
+  // on, so legacy options never flash before the Ideaflow-only screen.
+  const [ideaflowChecked, setIdeaflowChecked] = useState(false);
+  // RN-web's Alert.alert is a no-op, so Ideaflow failures show inline.
+  const [ideaflowError, setIdeaflowError] = useState<string | null>(null);
   const [providerResetUrl, setProviderResetUrl] = useState<string | null>(null);
 
   // Web Google sign-in uses a full-page REDIRECT, not the expo-auth-session
@@ -126,6 +132,7 @@ export function LoginScreen() {
       .then((body: { enabled?: boolean; passwordResetUrl?: string | null }) => {
         if (!cancelled) {
           setIdeaflowEnabled(body.enabled === true);
+          setIdeaflowChecked(true);
           setProviderResetUrl(body.enabled === true && typeof body.passwordResetUrl === 'string'
             ? body.passwordResetUrl : null);
         }
@@ -133,6 +140,7 @@ export function LoginScreen() {
       .catch(() => {
         if (!cancelled) {
           setIdeaflowEnabled(false);
+          setIdeaflowChecked(true);
           setProviderResetUrl(null);
         }
       });
@@ -160,14 +168,13 @@ export function LoginScreen() {
     window.sessionStorage.removeItem(IDEAFLOW_WEB_STATE_KEY);
 
     if (!stored || !returnedState || returnedState !== stored.state) {
-      Alert.alert('Ideaflow sign-in failed', 'Session expired or state mismatch — please try again.');
+      setIdeaflowError('That sign-in took too long or was interrupted. Please try again.');
       return;
     }
     if (oauthError || !code) {
-      Alert.alert(
-        'Ideaflow sign-in failed',
-        params.get('error_description') || oauthError || 'No authorization code was returned.',
-      );
+      setIdeaflowError(oauthError === 'access_denied'
+        ? 'Sign-in was cancelled. You can try again.'
+        : "Ideaflow sign-in didn't work. Please try again.");
       return;
     }
 
@@ -177,7 +184,7 @@ export function LoginScreen() {
         await ideaflowExchange(code, stored!.codeVerifier, stored!.nonce);
         await bootstrapIfAuthed();
       } catch (err) {
-        Alert.alert('Ideaflow sign-in failed', err instanceof Error ? err.message : String(err));
+        setIdeaflowError(err instanceof Error ? err.message : "Ideaflow sign-in didn't work. Please try again.");
       } finally {
         setIdeaflowLoading(false);
       }
@@ -367,6 +374,7 @@ export function LoginScreen() {
   const handleIdeaflowSignIn = async () => {
     if (!isWeb || typeof window === 'undefined' || ideaflowLoading || loading) return;
     setIdeaflowLoading(true);
+    setIdeaflowError(null);
     try {
       const state = randomBase64Url(32);
       const nonce = randomBase64Url(32);
@@ -377,6 +385,7 @@ export function LoginScreen() {
         nonce,
         code_challenge: codeChallenge,
       });
+      if (takeIdeaflowAccountChoice()) query.set('prompt', 'login');
       const response = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/url?${query}`);
       if (!response.ok) throw new Error(`Could not start Ideaflow sign-in (${response.status})`);
       const body = await response.json() as { url?: string };
@@ -389,7 +398,7 @@ export function LoginScreen() {
       }));
       window.location.href = body.url;
     } catch (err) {
-      Alert.alert('Ideaflow sign-in failed', err instanceof Error ? err.message : String(err));
+      setIdeaflowError(err instanceof Error ? err.message : "Ideaflow sign-in didn't work. Please try again.");
       setIdeaflowLoading(false);
     }
   };
@@ -514,15 +523,29 @@ export function LoginScreen() {
               ]}
               onPress={handleIdeaflowSignIn}
               disabled={ideaflowLoading || loading || googleLoading}
-              accessibilityLabel="Continue with Ideaflow"
+              accessibilityLabel="Sign in with Ideaflow"
             >
               {ideaflowLoading ? (
                 <ActivityIndicator color={c.onPrimary} />
               ) : (
-                <Text style={[styles.ideaflowButtonText, { color: c.onPrimary }]}>Continue with Ideaflow</Text>
+                <Text style={[styles.ideaflowButtonText, { color: c.onPrimary }]}>Sign in with Ideaflow</Text>
               )}
             </TouchableOpacity>
           )}
+          {isWeb && ideaflowEnabled && (
+            <Text style={[styles.footer, { color: c.textSecondary, marginTop: 12 }]}>
+              New here? You can create an account on the next screen.
+            </Text>
+          )}
+          {isWeb && ideaflowError && (
+            <Text accessibilityRole="alert" style={[styles.footer, { color: c.danger, marginTop: 12 }]}>
+              {ideaflowError}
+            </Text>
+          )}
+
+          {/* Web with Ideaflow on: Ideaflow is the only sign-in. Native keeps
+              its own methods (the Ideaflow redirect flow is web-only). */}
+          {(!isWeb || (ideaflowChecked && !ideaflowEnabled)) && (<>
 
           <TouchableOpacity
             style={[
@@ -638,9 +661,7 @@ export function LoginScreen() {
             </View>
           )}
 
-          <Text style={[styles.footer, { color: c.textMetadata }]}>
-            Uses your Noos credentials. Phone sign-in coming soon.
-          </Text>
+          </>)}
         </View>
 
         {/* Get / Share OpenChat.

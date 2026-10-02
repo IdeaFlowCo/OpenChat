@@ -59,6 +59,7 @@ import {
   upsertConversation,
 } from './conversationState';
 import { conversationLastMessage } from '../utils/conversationPresentation';
+import { markIdeaflowAccountChoice } from '../utils/ideaflowAccountChoice';
 
 type Status = 'available' | 'away' | 'busy' | 'invisible';
 
@@ -148,7 +149,8 @@ interface ChatContextValue {
   reconnectNewConvIds: Set<string>;
 
   // Lifecycle
-  signOut: () => Promise<void>;
+  /** explicit=false for a session that expired rather than a person signing out. */
+  signOut: (options?: { explicit?: boolean }) => Promise<void>;
   bootstrapIfAuthed: () => Promise<boolean>; // returns true if a session exists
 }
 
@@ -1081,7 +1083,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, [currentUser]);
 
-  const signOut = useCallback(async () => {
+  const signOut = useCallback(async ({ explicit = true }: { explicit?: boolean } = {}) => {
+    if (explicit) markIdeaflowAccountChoice();
     try { emitPresenceUpdate('offline'); } catch { /* best effort */ }
     disconnect();
     await clearSession();
@@ -1110,7 +1113,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // flips us to Login. Listener is global because requests can fire from
   // anywhere — context handler, screen-level fallbacks, etc.
   useEffect(() => {
-    const off = onAuthExpired(() => { void signOut(); });
+    const off = onAuthExpired(() => { void signOut({ explicit: false }); });
     return off;
   }, [signOut]);
 
