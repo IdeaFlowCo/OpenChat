@@ -4,9 +4,10 @@
  * Layout:
  *   [ 320px (or 56px collapsed) sidebar  ][ flex 1 chat pane ]
  *
- * The sidebar has its own header (title + connection dot + Settings cog +
- * Search + New Conversation buttons) so we don't depend on the native-stack
- * header (which native-stack hides for this route — see App.tsx).
+ * The sidebar has its own header (avatar → account menu with Profile /
+ * Settings / Sign out, title + connection dot, People, Search) so we don't
+ * depend on the native-stack header (which native-stack hides for this
+ * route — see App.tsx).
  *
  * The right pane shows either:
  *   - an empty state ("Select a conversation"), or
@@ -46,7 +47,7 @@ import { useSocialExperience } from '../contexts/SocialExperienceContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from './Avatar';
 import { ConversationList } from './ConversationList';
-import { AppIcon } from './AppIcon';
+import { AppIcon, type AppIconName } from './AppIcon';
 import { AgentOverlayButton } from './AgentOverlayButton';
 import { ConnectionStatusLine } from './ConnectionStatusLine';
 import { isPlaceholderEmail } from '../utils/email';
@@ -99,6 +100,36 @@ function IconButton({
   );
 }
 
+/** One row of the desktop account menu: icon, visible word, optional hint. */
+function AccountMenuRow({
+  icon, label, hint, onPress, hoverBg, color, iconColor, hintColor,
+}: {
+  icon: AppIconName;
+  label: string;
+  hint?: string;
+  onPress: () => void;
+  hoverBg: string;
+  color: string;
+  iconColor: string;
+  hintColor: string;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <Pressable
+      onPress={onPress}
+      onHoverIn={Platform.OS === 'web' ? () => setHovered(true) : undefined}
+      onHoverOut={Platform.OS === 'web' ? () => setHovered(false) : undefined}
+      accessibilityRole="menuitem"
+      accessibilityLabel={label}
+      style={[styles.accountMenuRow, hovered ? { backgroundColor: hoverBg } : null]}
+    >
+      <View style={styles.accountMenuIcon}><AppIcon name={icon} color={iconColor} size={18} strokeWidth={1.8} /></View>
+      <Text style={[styles.accountMenuLabel, { color }]}>{label}</Text>
+      {!!hint && <Text style={[styles.accountMenuHint, { color: hintColor }]} numberOfLines={1}>{hint}</Text>}
+    </Pressable>
+  );
+}
+
 export function MasterDetailLayout() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -106,10 +137,17 @@ export function MasterDetailLayout() {
   const { enhanced } = useSocialExperience();
   const {
     currentUser, isConnected, activeConversationId, setActiveConversation,
-    conversationsLoaded, refreshConversations, conversations,
+    conversationsLoaded, refreshConversations, conversations, signOut,
   } = useChat();
 
   const safeEmail = isPlaceholderEmail(currentUser?.email) ? '' : currentUser?.email;
+
+  // Account menu (OpenChat-3ar0). On desktop the avatar is the only "Me"
+  // door and it has no visible word, so clicking it opens a small menu with
+  // the three things behind it — Profile, Settings, Sign out — instead of
+  // jumping straight into the long Profile page. Phone keeps avatar →
+  // Profile (ConversationsScreen); the words are the same on every width.
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
   // Keep the latest list + active id in refs so the keydown handler (bound
   // once) can read current values for arrow-key navigation without
@@ -174,6 +212,11 @@ export function MasterDetailLayout() {
   const openNew = useCallback(() => navigation.navigate('NewConversation'), [navigation]);
   const openSettings = useCallback(() => navigation.navigate('Settings'), [navigation]);
   const openMyCard = useCallback(() => navigation.navigate('MyCard'), [navigation]);
+  const toggleAccountMenu = useCallback(() => setAccountMenuOpen(open => !open), []);
+  const closeAccountMenu = useCallback(() => setAccountMenuOpen(false), []);
+  const menuOpenMyCard = useCallback(() => { setAccountMenuOpen(false); openMyCard(); }, [openMyCard]);
+  const menuOpenSettings = useCallback(() => { setAccountMenuOpen(false); openSettings(); }, [openSettings]);
+  const menuSignOut = useCallback(() => { setAccountMenuOpen(false); void signOut(); }, [signOut]);
   const openAgentOverlay = useCallback(() => setAgentPanelOpen(true), []);
   const openShortcuts = useCallback(() => navigation.navigate('KeyboardShortcuts'), [navigation]);
   const openGroupSettings = useCallback(
@@ -251,6 +294,10 @@ export function MasterDetailLayout() {
         return;
       }
       if (key === 'Escape') {
+        if (accountMenuOpen) {
+          setAccountMenuOpen(false);
+          return;
+        }
         if (agentPanelOpen) {
           setAgentPanelOpen(false);
           return;
@@ -271,7 +318,7 @@ export function MasterDetailLayout() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [openSearch, openNew, openSettings, openShortcuts, navigation, activeConversationId, agentPanelOpen, setActiveConversation]);
+  }, [openSearch, openNew, openSettings, openShortcuts, navigation, activeConversationId, agentPanelOpen, accountMenuOpen, setActiveConversation]);
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
@@ -306,11 +353,13 @@ export function MasterDetailLayout() {
         {collapsed ? (
           <View style={[styles.sidebarHeaderCompact, { borderColor: c.border }]}>
             <TouchableOpacity
-              onPress={openMyCard}
+              onPress={toggleAccountMenu}
               accessibilityRole="button"
-              accessibilityLabel="Profile"
-              // @ts-ignore
-              title="Profile"
+              accessibilityLabel="Account menu"
+              accessibilityState={{ expanded: accountMenuOpen }}
+              // @ts-ignore — web tooltip: the avatar is the only "Me" door on
+              // desktop, so hover must say what is behind it (OpenChat-3ar0).
+              title="Profile · Settings · Sign out"
               style={styles.avatarButtonCompact}
             >
               <Avatar
@@ -333,11 +382,12 @@ export function MasterDetailLayout() {
           <>
             <View style={[styles.sidebarHeader, { borderColor: c.border }]}>
               <TouchableOpacity
-                onPress={openMyCard}
+                onPress={toggleAccountMenu}
                 accessibilityRole="button"
-                accessibilityLabel="Profile"
-                // @ts-ignore
-                title="Profile"
+                accessibilityLabel="Account menu"
+                accessibilityState={{ expanded: accountMenuOpen }}
+                // @ts-ignore — web tooltip (see compact variant above).
+                title="Profile · Settings · Sign out"
                 style={styles.avatarButton}
               >
                 <Avatar
@@ -438,6 +488,32 @@ export function MasterDetailLayout() {
           </View>
         )}
       </View>
+      {accountMenuOpen && (
+        <>
+          {/* Click-away backdrop. Transparent, above the panes, below the menu. */}
+          <Pressable
+            onPress={closeAccountMenu}
+            accessibilityLabel="Close account menu"
+            style={styles.accountBackdrop}
+          />
+          <View
+            accessibilityRole="menu"
+            style={[styles.accountMenu, { backgroundColor: c.surface, borderColor: c.border, shadowColor: '#000' }]}
+          >
+            <View style={[styles.accountMenuHeader, { borderBottomColor: c.divider }]}>
+              <Text style={[styles.accountTitle, { color: c.textPrimary }]} numberOfLines={1}>
+                {currentUser?.name || safeEmail || 'Signed in'}
+              </Text>
+              {!!safeEmail && (
+                <Text style={[styles.accountEmail, { color: c.textMetadata }]} numberOfLines={1}>{safeEmail}</Text>
+              )}
+            </View>
+            <AccountMenuRow icon="qr" label="Profile" hint="Card · QR" onPress={menuOpenMyCard} hoverBg={c.surfaceElevated} color={c.textPrimary} iconColor={c.primary} hintColor={c.textMetadata} />
+            <AccountMenuRow icon="settings" label="Settings" hint="⌘," onPress={menuOpenSettings} hoverBg={c.surfaceElevated} color={c.textPrimary} iconColor={c.primary} hintColor={c.textMetadata} />
+            <AccountMenuRow icon="logout" label="Sign out" onPress={menuSignOut} hoverBg={c.surfaceElevated} color={c.danger} iconColor={c.danger} hintColor={c.textMetadata} />
+          </View>
+        </>
+      )}
       {agentPanelOpen && (
         <View
           style={[styles.agentPanel, { backgroundColor: c.background, borderLeftColor: c.border }]}
@@ -526,19 +602,51 @@ const styles = StyleSheet.create({
     // @ts-ignore — web-only pointer affordance.
     cursor: 'pointer',
   },
-  accountButton: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 44,
+  // Desktop account menu (OpenChat-3ar0), anchored under the sidebar avatar.
+  // Rendered at the root (not inside the sidebar) because the sidebar clips
+  // overflow while its width animates.
+  accountBackdrop: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    zIndex: 20,
+    // @ts-ignore — web-only: default cursor so the backdrop doesn't read as a link.
+    cursor: 'default',
+  },
+  accountMenu: {
+    position: 'absolute',
+    top: 84,
+    left: 12,
+    width: 260,
+    zIndex: 21,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 6,
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  accountMenuHeader: {
+    paddingHorizontal: 14,
+    paddingTop: 6,
+    paddingBottom: 10,
+    marginBottom: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  accountTitle: { fontSize: 13, fontWeight: '600' },
+  accountEmail: { fontSize: 11, lineHeight: 15 },
+  accountMenuRow: {
+    minHeight: 40,
+    paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     // @ts-ignore — web-only pointer affordance.
     cursor: 'pointer',
   },
-  accountCopy: { flex: 1, minWidth: 0 },
-  accountTitle: { fontSize: 13, fontWeight: '600' },
-  accountEmail: { fontSize: 11, lineHeight: 15 },
+  accountMenuIcon: { width: 22, alignItems: 'center' },
+  accountMenuLabel: { flexShrink: 0, fontSize: 14, fontWeight: '500' },
+  accountMenuHint: { flex: 1, minWidth: 0, fontSize: 12, textAlign: 'right' },
   // Back-to-home bar at the top of the sidebar (OpenChat-601.1)
   homeBar: {
     flexDirection: 'row',

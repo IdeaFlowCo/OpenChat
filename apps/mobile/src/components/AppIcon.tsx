@@ -15,6 +15,7 @@ export type AppIconName =
   | 'forward'
   | 'heart'
   | 'info'
+  | 'logout'
   | 'mic'
   | 'more'
   | 'mute'
@@ -260,6 +261,14 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
           <Path d="M14 4h6v6h-6z" {...common} />
           <Path d="M4 14h6v6H4z" {...common} />
           <Path d="M14 14h2.5v2.5H14zM17.5 17.5H20V20h-2.5zM14 17.5h2.5V20H14zM17.5 14H20v2.5h-2.5z" fill={color} stroke="none" />
+        </>
+      )}
+      {name === 'logout' && (
+        /* Door frame + arrow out: the conventional "sign out" glyph. */
+        <>
+          <Path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" {...common} />
+          <Polyline points="16 17 21 12 16 7" {...common} />
+          <Line x1="21" y1="12" x2="9" y2="12" {...common} />
         </>
       )}
       {name === 'x' && (
