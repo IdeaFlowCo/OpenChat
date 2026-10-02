@@ -33,6 +33,7 @@ import { ReactionsBar } from '../components/ReactionsBar';
 import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
 import { ConversationLaneSwitch } from '../components/ConversationLaneSwitch';
+import { HeaderBarButton } from '../components/HeaderBarButton';
 import { ContextLane } from '../components/ContextLane';
 import { ContextComposer } from '../components/ContextComposer';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
@@ -640,27 +641,25 @@ export function ChatScreen({
   }, []);
 
   const moreAction = (
-    <TouchableOpacity
+    <HeaderBarButton
       onPress={() => setConversationMenuVisible(true)}
-      accessibilityRole="button"
       accessibilityLabel="More conversation actions"
       style={styles.headerMoreAction}
     >
       <AppIcon name="more" color={c.textSecondary} size={20} />
-    </TouchableOpacity>
+    </HeaderBarButton>
   );
 
   const headerActions = (
     <View style={styles.headerActionsRow}>
-      <TouchableOpacity
+      <HeaderBarButton
         onPress={openConversationThoughts}
-        accessibilityRole="button"
         accessibilityLabel="Stream for this chat"
         style={styles.headerThoughtsButton}
       >
         <AppIcon name="thought" color={c.primary} size={18} />
         <Text style={[styles.headerThoughtsText, { color: c.primary }]}>Stream</Text>
-      </TouchableOpacity>
+      </HeaderBarButton>
       {moreAction}
     </View>
   );
@@ -1988,12 +1987,9 @@ const styles = StyleSheet.create({
   },
   headerThoughtsButton: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 5,
     paddingHorizontal: 8,
-    paddingVertical: 6,
     borderRadius: 8,
-    minHeight: 36,
   },
   headerThoughtsText: {
     fontSize: 13,
@@ -2001,11 +1997,8 @@ const styles = StyleSheet.create({
   },
   headerMoreAction: {
     width: 44,
-    minWidth: 44,
-    minHeight: 44,
+    paddingHorizontal: 0,
     flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   conversationMenuBackdrop: {
     flex: 1,

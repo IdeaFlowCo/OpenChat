@@ -30,6 +30,7 @@ import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { AppIcon } from '../components/AppIcon';
 import { AgentOverlayButton } from '../components/AgentOverlayButton';
+import { HeaderBarButton } from '../components/HeaderBarButton';
 import { ConnectionStatusLine } from '../components/ConnectionStatusLine';
 import { StoriesStrip } from '../components/StoriesStrip';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
@@ -229,30 +230,20 @@ export function ConversationsScreen() {
       ),
       headerRight: () => (
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Search')}
-            accessibilityLabel="Search"
-            style={styles.headerAction}
-          >
+          <HeaderBarButton onPress={() => navigation.navigate('Search')} accessibilityLabel="Search">
             <AppIcon name="search" color={c.primary} size={20} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('NewConversation')}
-            accessibilityLabel="People"
-            style={styles.headerAction}
-          >
+          </HeaderBarButton>
+          <HeaderBarButton onPress={() => navigation.navigate('NewConversation')} accessibilityLabel="People">
             <Text style={{ color: c.primary, fontSize: 15, fontWeight: '600' }}>People</Text>
-          </TouchableOpacity>
+          </HeaderBarButton>
         </View>
       ),
       headerLeft: () => {
         const safeEmail = isPlaceholderEmail(currentUser?.email) ? '' : (currentUser?.email ?? '');
         return (
-          <TouchableOpacity
+          <HeaderBarButton
             onPress={() => navigation.navigate('MyCard')}
             accessibilityLabel="Profile"
-            accessibilityRole="button"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             style={styles.headerAvatarAction}
           >
             <Avatar
@@ -261,7 +252,7 @@ export function ConversationsScreen() {
               avatarUrl={currentUser?.avatarUrl ?? undefined}
               size={32}
             />
-          </TouchableOpacity>
+          </HeaderBarButton>
         );
       },
     });
@@ -365,20 +356,7 @@ export function ConversationsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  headerAction: {
-    minWidth: 44,
-    minHeight: 44,
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerAvatarAction: {
-    minWidth: 44,
-    minHeight: 44,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  headerAvatarAction: { paddingHorizontal: 8 },
   headerTitleWrap: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
   peopleDoors: { flexDirection: 'row', flexWrap: 'wrap', borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 16 },
   peopleDoor: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, marginRight: 8 },
