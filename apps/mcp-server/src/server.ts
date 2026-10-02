@@ -903,13 +903,15 @@ export function buildServer(
     'oc_list_story_feed',
     {
       title: 'List visible friends’ Stories',
-      description: 'Return only the privacy-redacted human Story feed currently visible to the authenticated user. Audience, membership, blocks, status, and expiry are enforced by OpenChat.',
-      inputSchema: {},
+      description: 'Return only the privacy-redacted human Story feed currently visible to the authenticated user. Audience, membership, blocks, status, and expiry are enforced by OpenChat. Pass authorId to list one person’s asks (the same list their profile shows).',
+      inputSchema: {
+        authorId: z.string().min(1).max(128).optional().describe('Only Stories shared by this OpenChat user id.'),
+      },
     },
-    async () => {
+    async ({ authorId }) => {
       try {
         requireApiKey(api, 'Reading the Story feed');
-        return jsonResult(await api.listStoryFeed());
+        return jsonResult(await api.listStoryFeed(authorId));
       } catch (e) {
         return intentErrorResult(e);
       }

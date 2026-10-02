@@ -301,7 +301,10 @@ router.post('/intent-drafts/:id/activate', resolveActor, async (req: Request, re
 
 router.get('/stories/feed', resolveActor, async (req: Request, res: Response) => {
   try {
-    const stories = await listStoryFeed(req.user!.userId);
+    // `?author=<userId>` narrows the feed to one person, for their profile.
+    const author = typeof req.query.author === 'string' && req.query.author.length > 0 && req.query.author.length <= 128
+      ? req.query.author : null;
+    const stories = await listStoryFeed(req.user!.userId, author);
     // Personal agents receive structured terms only when agent search was
     // approved. Human JWT clients receive only the approved Story text.
     res.json({

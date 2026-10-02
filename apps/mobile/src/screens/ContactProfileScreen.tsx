@@ -3,8 +3,9 @@
  * (OpenChat-???)
  *
  * Shows: large avatar, name + bot badge, email, status message, presence,
- * the viewer's own "Private to you" card, and quick actions (block, report). For non-bot users only — bots get a
- * simpler read-only view.
+ * chats in common, the asks they shared with the viewer, the viewer's own
+ * "Private to you" card, and quick actions (block, report). For non-bot users
+ * only — bots get a simpler read-only view.
  */
 
 import { useCallback, useMemo } from 'react';
@@ -18,6 +19,7 @@ import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { FriendControls } from '../components/FriendControls';
 import { PrivateCard } from '../components/PrivateGraph';
+import { ProfileAsks } from '../components/ProfileAsks';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp, RouteProps } from '../navigation/types';
 
@@ -55,6 +57,10 @@ export function ContactProfileScreen() {
   }, [conversations, userId]);
 
   const pres = presence.get(userId);
+  const groupsInCommon = useMemo(
+    () => conversations.filter(conv => conv.type === 'group' && conv.participants?.some(p => p.user.id === userId)).length,
+    [conversations, userId],
+  );
 
   const handleBlock = useCallback(() => {
     if (!user) return;
@@ -149,6 +155,11 @@ export function ContactProfileScreen() {
           {!!presenceLine && (
             <Text style={[styles.presence, { color: c.textSecondary }]}>{presenceLine}</Text>
           )}
+          {!user.isBot && groupsInCommon > 0 && (
+            <Text style={[styles.presence, { color: c.textMetadata }]}>
+              {`${groupsInCommon} ${groupsInCommon === 1 ? 'group' : 'groups'} in common`}
+            </Text>
+          )}
         </View>
       </View>
 
@@ -156,6 +167,9 @@ export function ContactProfileScreen() {
         const conversation = await createConversation([userId], { type: 'direct' });
         navigation.navigate('Chat', { conversationId: conversation.id });
       }} />}
+
+      {/* What they are asking for, limited to what they shared with you. */}
+      {!user.isBot && <ProfileAsks userId={userId} onOpenStory={story => navigation.navigate('StoryViewer', { story })} />}
 
       {/* Your own notes, importance, catch-up and links about this person. Collapsed until opened. */}
       {!user.isBot && (

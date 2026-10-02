@@ -43,7 +43,12 @@ link other people keep about them.
 
 ## In the app and for agents
 
-The contact profile shows a collapsed **Private to you** card. A linked thing
+The contact profile shows a collapsed **Private to you** card. Opened, it keeps
+to one screen: importance and cadence are two chips (cadence choices unfold on
+tap), and the add-link form appears only after **+ Add link**. Above the card,
+**Asks** shows what the person shared with the viewer (`GET /api/stories/feed?author=<userId>`,
+or `oc_list_story_feed` with `authorId` for agents); that is their public-to-you
+side and is not part of the private graph. A linked thing
 opens its own page, where more links and notes can be added. **Catch up**, on
 the People screen, lists who is due. Agent tools: `oc_get_person_private`,
 `oc_set_person_private`, `oc_add_private_note`, `oc_delete_private_note`,

@@ -58,6 +58,7 @@ describe('the private card on a contact profile', () => {
     expect(mocks.getPrivatePerson).toHaveBeenCalledWith('bob');
     expect(texts()).toContain('Private to you');
     expect(texts()).toContain('Important · catch up monthly · 1 note');
+    expect(texts()).not.toContain('Only you can see this');
     expect(texts()).not.toContain('Secret note');
     expect(root!.root.findAllByType('TextInput')).toHaveLength(0);
     await act(async () => { button('Private to you').props.onPress(); });
@@ -75,9 +76,13 @@ describe('the private card on a contact profile', () => {
     await act(async () => { button('Mark important').props.onPress(); });
     expect(mocks.updatePrivatePerson).toHaveBeenLastCalledWith('bob', { important: true });
     expect(texts()).toContain('★ Important');
+    // Cadence choices stay folded behind one chip until asked for.
+    expect(texts()).not.toContain('Quarterly');
+    await act(async () => { button('Set a catch-up').props.onPress(); });
     await act(async () => { button('Quarterly').props.onPress(); });
     expect(mocks.updatePrivatePerson).toHaveBeenLastCalledWith('bob', { cadenceDays: 90 });
     expect(texts()).toContain('Due now');
+    expect(texts()).toContain('Catch up quarterly');
     await act(async () => { button('Caught up today').props.onPress(); });
     expect(mocks.updatePrivatePerson).toHaveBeenLastCalledWith('bob', { contactedNow: true });
     expect(texts()).toContain('Next catch-up');
@@ -89,15 +94,24 @@ describe('the private card on a contact profile', () => {
     mocks.getPrivatePerson.mockResolvedValue({ userId: 'bob', card: emptyCard, notes: [], links: [{ id: 'l0', relation: 'knows', direction: 'out', other: { kind: 'user', id: 'carol', name: 'Carol' }, createdAt: '2026-10-01T00:00:00Z' }] });
     await mount();
     await act(async () => { button('Private to you').props.onPress(); });
-    expect(button('Add note').props.disabled).toBe(true);
+    expect(() => button('Add note')).toThrow('Missing button');
     await act(async () => { input('Private note').props.onChangeText('  Met at the dinner  '); });
     await act(async () => { button('Add note').props.onPress(); });
     expect(mocks.addPrivateNote).toHaveBeenCalledWith({ kind: 'user', id: 'bob' }, 'Met at the dinner');
     expect(texts()).toContain('Met at the dinner');
 
+    // The add-link form stays out of the way until "+ Add link".
+    expect(input('Name')).toBeUndefined();
+    await act(async () => { button('+ Add link').props.onPress(); });
+    // A suggested relation brings its usual kind with it; your own words are still accepted.
+    await act(async () => { button('interested in').props.onPress(); });
+    expect(input('Name').props.placeholder).toBe('Name of the idea');
     await act(async () => { button('works at').props.onPress(); });
+    expect(input('Name').props.placeholder).toBe('Name of the company');
+    expect(input('Relation').props.value).toBe('');
     await act(async () => { input('Name').props.onChangeText('Acme Robotics'); });
-    await act(async () => { button('Add link').props.onPress(); });
+    await act(async () => { button('Save link').props.onPress(); });
+    expect(input('Name')).toBeUndefined();
     expect(mocks.addPrivateLink).toHaveBeenCalledWith({ kind: 'user', id: 'bob' }, 'works at', { kind: 'company', name: 'Acme Robotics' });
     await act(async () => { button('Acme Robotics').props.onPress(); });
     expect(mocks.openThing).toHaveBeenCalledWith('t1');

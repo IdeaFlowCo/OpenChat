@@ -431,8 +431,8 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
     listOwnedStories: () =>
       request<{ stories: OwnedStory[] }>('GET', '/api/stories/mine'),
 
-    listStoryFeed: () =>
-      request<{ stories: FeedStory[] }>('GET', '/api/stories/feed'),
+    listStoryFeed: (authorId?: string) =>
+      request<{ stories: FeedStory[] }>('GET', `/api/stories/feed${authorId ? `?author=${encodeURIComponent(authorId)}` : ''}`),
 
     createStory: (body: {
       confirm: boolean;

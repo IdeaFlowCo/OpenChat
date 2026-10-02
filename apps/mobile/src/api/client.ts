@@ -1005,8 +1005,9 @@ export const api = {
     `/api/intent-drafts/${encodeURIComponent(id)}/activate`,
     params,
   ),
-  listStoryFeed: async () =>
-    (await request<{ stories: FeedStory[] }>('/api/stories/feed')).stories,
+  /** Stories you may see; pass `authorId` for one person's (their profile). */
+  listStoryFeed: async (authorId?: string) =>
+    (await request<{ stories: FeedStory[] }>(`/api/stories/feed${authorId ? `?author=${encodeURIComponent(authorId)}` : ''}`)).stories,
   listMyStories: async () =>
     (await request<{ stories: OwnedStory[] }>('/api/stories/mine')).stories,
   createStory: (params: {
