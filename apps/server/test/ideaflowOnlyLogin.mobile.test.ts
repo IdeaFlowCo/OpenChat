@@ -68,6 +68,10 @@ function makeStorage() {
 }
 
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+/** Presses fire-and-forget async handlers (PKCE digest, fetch), so wait for the effect. */
+async function settleUntil(condition: () => boolean, attempts = 50) {
+  for (let i = 0; i < attempts && !condition(); i++) await settle();
+}
 
 async function render() {
   await act(async () => { screen = create(React.createElement(LoginScreen)); });
@@ -161,7 +165,7 @@ describe('web login with Ideaflow ID enabled', () => {
     await render();
     await settle();
     await act(async () => { await button('Continue with Ideaflow').props.onPress(); });
-    await settle();
+    await settleUntil(() => fakeWindow.location.href === mocks.authorizeUrl);
 
     const start = requestedUrls().find(u => u.pathname === '/api/auth/ideaflow/url')!;
     expect(start).toBeDefined();
@@ -178,7 +182,7 @@ describe('web login with Ideaflow ID enabled', () => {
     await render();
     await settle();
     await act(async () => { await button('Use another Ideaflow account').props.onPress(); });
-    await settle();
+    await settleUntil(() => fakeWindow.location.href === mocks.authorizeUrl);
 
     const starts = requestedUrls().filter(u => u.pathname === '/api/auth/ideaflow/url');
     expect(starts).toHaveLength(1);
@@ -223,6 +227,7 @@ describe('web Ideaflow failures are visible (RN-web Alert is a no-op)', () => {
     await render();
     await settle();
     await act(async () => { await button('Continue with Ideaflow').props.onPress(); });
+    await settleUntil(() => inlineErrors().length > 0);
     expect(inlineErrors()).toEqual(['Could not start Ideaflow sign-in (502)']);
     expect(button('Continue with Ideaflow').props.disabled).toBe(false);
     expect(fakeWindow.location.href).toBe('https://chat.ideaflow.app/app/');

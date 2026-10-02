@@ -163,6 +163,9 @@ function stubBrowser() {
 }
 
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+async function settleUntil(condition: () => boolean, attempts = 50) {
+  for (let i = 0; i < attempts && !condition(); i++) await settle();
+}
 
 describe('Profile (MyCard) sign out', () => {
   it('offers Sign out and Settings even when the card request fails', async () => {
@@ -269,7 +272,7 @@ describe('Switch account (web, Ideaflow ID enabled)', () => {
 
     const item = tree.root.find(n => n.type === 'Pressable' && n.props.accessibilityLabel === 'Switch account');
     await act(async () => { item.props.onPress(); });
-    await settle();
+    await settleUntil(() => mocks.events.length >= 3);
 
     expect(mocks.events).toEqual(['start:select_account', 'signOut', `navigate:${AUTHORIZE_URL}`]);
     expect(mocks.signOut).toHaveBeenCalledTimes(1);
@@ -290,7 +293,7 @@ describe('Switch account (web, Ideaflow ID enabled)', () => {
     expect(order.indexOf('Switch account')).toBeGreaterThan(order.indexOf('ACCOUNT'));
     expect(order.indexOf('Switch account')).toBeLessThan(order.indexOf('Sign out'));
     await act(async () => { buttonLabelled(tree.root, 'Switch account').props.onPress(); });
-    await settle();
+    await settleUntil(() => mocks.events.length >= 3);
     expect(mocks.events).toEqual(['start:select_account', 'signOut', `navigate:${AUTHORIZE_URL}`]);
   });
 
@@ -307,7 +310,7 @@ describe('Switch account (web, Ideaflow ID enabled)', () => {
     await act(async () => { buttonLabelled(tree.root, 'Account menu').props.onPress(); });
     const item = tree.root.find(n => n.type === 'Pressable' && n.props.accessibilityLabel === 'Switch account');
     await act(async () => { item.props.onPress(); });
-    await settle();
+    await settleUntil(() => alert.mock.calls.length > 0);
     expect(mocks.signOut).not.toHaveBeenCalled();
     expect(assign).not.toHaveBeenCalled();
     expect(alert).toHaveBeenCalledWith('Could not switch account. Could not start Ideaflow sign-in (502)');
