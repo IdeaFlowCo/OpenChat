@@ -38,6 +38,7 @@ when filling out the ASC form.
 
 **Notes:**
 - Email + name come from OAuth providers (Google profile, Apple ID name + email-relay or Apple-provided email).
+- For private contact names, reconcile the [privacy policy's collection and retention disclosures](../apps/server/src/legal/privacy.md) before a separately authorized release; the build108 reconciliation above predates this feature.
 - We do NOT share email with third parties for advertising or analytics.
 
 ---

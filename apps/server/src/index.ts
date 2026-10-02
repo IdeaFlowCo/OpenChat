@@ -28,6 +28,7 @@ import agentNetworkRoutes from './routes/agentNetwork.js';
 import agentSocialLayerRoutes from './routes/agentSocialLayer.js';
 import addMeCardRoutes from './routes/addMeCard.js';
 import friendsRoutes from './routes/friends.js';
+import privateNamesRoutes from './routes/privateNames.js';
 import { ensureAssistantUser } from './services/assistant.js';
 import { ensureGroupbrainBotUser } from './services/groupbrainBot.js';
 import { ensureWebhookIndex } from './services/webhookDispatch.js';
@@ -429,6 +430,7 @@ app.use('/api', agentNetworkRoutes);
 app.use('/api', agentSocialLayerRoutes);
 app.use('/api/card', addMeCardRoutes);
 app.use('/api/friends', friendsRoutes);
+app.use('/api/private-names', privateNamesRoutes);
 
 // API reference (openchat-8md.1) — public spec + Redoc docs page.
 app.get('/api/openapi.json', (_req, res) => res.json(openapiSpec));

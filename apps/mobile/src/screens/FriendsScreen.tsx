@@ -49,10 +49,11 @@ export function FriendsScreen() {
   const renderRow = (row: FriendRow) => (
     <View key={row.userId} style={[styles.row, { borderColor: c.border }]}>
       <Avatar name={row.user.name || 'Person'} avatarUrl={row.user.avatarUrl ?? undefined} size={42} />
-      <View style={styles.rowContent}>
+      <TouchableOpacity style={styles.rowContent} accessibilityRole="button" accessibilityLabel={`Profile for ${row.user.name || 'person'}`} onPress={() => navigation.navigate('ContactProfile', { userId: row.userId })}>
         <Text style={{ color: c.textPrimary, fontSize: 16, fontWeight: '600' }}>{row.user.name || 'Person'}</Text>
+        <Text style={{ color: c.primary, fontSize: 13 }}>Profile</Text>
         <Text style={{ color: c.textMetadata, fontSize: 13 }}>{row.state === 'incoming' ? 'Wants to be friends' : row.state === 'outgoing' ? 'Request sent' : 'Friend'}</Text>
-      </View>
+      </TouchableOpacity>
       {busyId === row.userId ? <ActivityIndicator color={c.primary} /> : (
         <View style={styles.actions}>
           {row.state === 'incoming' && <><TouchableOpacity onPress={() => void act(row.userId, 'accept')}><Text style={{ color: c.primary, fontWeight: '700' }}>Accept</Text></TouchableOpacity><TouchableOpacity onPress={() => void act(row.userId, 'decline')}><Text style={{ color: c.textSecondary }}>Decline</Text></TouchableOpacity><TouchableOpacity onPress={() => void block(row.userId)}><Text style={{ color: c.danger }}>Block</Text></TouchableOpacity></>}
@@ -92,6 +93,6 @@ const styles = StyleSheet.create({
   findRow: { flexDirection: 'row', gap: 24, paddingVertical: 8 },
   heading: { fontSize: 17, fontWeight: '700', marginTop: 8 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  rowContent: { flex: 1, minWidth: 0 },
+  rowContent: { flex: 1, minWidth: 0, minHeight: 44, justifyContent: 'center' },
   actions: { alignItems: 'flex-end', gap: 8 },
 });

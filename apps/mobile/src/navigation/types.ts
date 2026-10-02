@@ -50,8 +50,8 @@ export type RootStackParamList = {
   CardEntry: { token: string };
   /** Forward picker — select conversation to forward a message into (OpenChat-hhc). */
   ForwardPicker: { messageId: string };
-  /** Contact profile — opened by tapping the DM header. */
-  ContactProfile: { userId: string };
+  /** Contact profile — chat header, Friends, People directory, or contact search. */
+  ContactProfile: { userId: string; exactEmail?: string };
   /** Agent API keys list (OpenChat-7c9). */
   AgentKeys: undefined;
   /** Create a new agent key. */

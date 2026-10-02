@@ -19,6 +19,7 @@ import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
+import { PrivateNamesProvider } from './src/contexts/PrivateNamesContext';
 import { ChatProvider, useChat } from './src/contexts/ChatContext';
 import { RecordingProvider } from './src/contexts/RecordingContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
@@ -230,7 +231,6 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         component={ForwardPickerScreen}
         options={{ title: 'Forward to…', presentation: 'modal' }}
       />
-      {/* Contact profile — tap DM header to open */}
       <ChatsStack.Screen
         name="ContactProfile"
         component={ContactProfileScreen}
@@ -689,13 +689,15 @@ function ShellWithBackground() {
     <View style={[styles.root, { backgroundColor: c.background }]}>
       <UpdateBanner />
       <ChatProvider>
-        <EntryProvider>
-          <SocialExperienceProvider>
-            <RecordingBridge>
-              <Shell />
-            </RecordingBridge>
-          </SocialExperienceProvider>
-        </EntryProvider>
+        <PrivateNamesProvider>
+          <EntryProvider>
+            <SocialExperienceProvider>
+              <RecordingBridge>
+                <Shell />
+              </RecordingBridge>
+            </SocialExperienceProvider>
+          </EntryProvider>
+        </PrivateNamesProvider>
       </ChatProvider>
     </View>
   );

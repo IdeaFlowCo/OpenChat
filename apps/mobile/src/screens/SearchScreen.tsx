@@ -72,7 +72,8 @@ export function SearchScreen() {
 
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<SearchResults | null>(null);
+  const [searchResult, setSearchResult] = useState<{ results: SearchResults; query: string } | null>(null);
+  const results = searchResult?.results ?? null;
   const [opening, setOpening] = useState<string | null>(null);
 
   // Focus the input on mount.
@@ -87,7 +88,7 @@ export function SearchScreen() {
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed.length < MIN_QUERY_LEN) {
-      setResults(null);
+      setSearchResult(null);
       setLoading(false);
       return;
     }
@@ -95,7 +96,7 @@ export function SearchScreen() {
     const timer = setTimeout(() => {
       setLoading(true);
       api.search({ q: trimmed, scope: 'global', limit: 25 })
-        .then(res => { if (!cancelled) setResults(res); })
+        .then(res => { if (!cancelled) setSearchResult({ results: res, query: trimmed }); })
         .catch(err => {
           if (!cancelled) console.warn('[Search] search failed:', err);
         })
@@ -257,6 +258,12 @@ export function SearchScreen() {
             {`OpenChat · ${u.id.slice(0, 6)}`}
           </Text>
         </View>
+        {!u.isBot && u.id !== currentUser?.userId && <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={`Profile for ${u.name || 'person'}`}
+          style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }}
+          onPress={event => { event.stopPropagation(); navigation.navigate('ContactProfile', { userId: u.id, ...(searchResult && searchResult.query.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(searchResult.query) ? { exactEmail: searchResult.query } : {}) }); }}
+        ><Text style={{ color: c.primary, fontWeight: '700' }}>Profile</Text></TouchableOpacity>}
       </TouchableOpacity>
     );
   };
