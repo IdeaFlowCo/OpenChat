@@ -128,8 +128,12 @@ describe('agent-social routes', () => {
     expect(mocks.listStoryFeed).toHaveBeenLastCalledWith('social-user', 'owner');
     await fetch(`${baseUrl}/api/stories/feed`, { headers });
     expect(mocks.listStoryFeed).toHaveBeenLastCalledWith('social-user', null);
-    await fetch(`${baseUrl}/api/stories/feed?author=a&author=b`, { headers });
-    expect(mocks.listStoryFeed).toHaveBeenLastCalledWith('social-user', null);
+    // A malformed author is refused, never quietly answered with the whole feed.
+    mocks.listStoryFeed.mockClear();
+    for (const query of ['author=a&author=b', 'author=', `author=${'x'.repeat(129)}`]) {
+      expect((await fetch(`${baseUrl}/api/stories/feed?${query}`, { headers })).status).toBe(400);
+    }
+    expect(mocks.listStoryFeed).not.toHaveBeenCalled();
   });
 
   it('rejects human publication without audience and activation without an enabled channel', async () => {

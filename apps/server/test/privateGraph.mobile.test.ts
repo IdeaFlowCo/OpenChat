@@ -83,6 +83,7 @@ describe('the private card on a contact profile', () => {
     expect(mocks.updatePrivatePerson).toHaveBeenLastCalledWith('bob', { cadenceDays: 90 });
     expect(texts()).toContain('Due now');
     expect(texts()).toContain('Catch up quarterly');
+    expect(texts()).toContain('Stretch the gap each time');
     await act(async () => { button('Caught up today').props.onPress(); });
     expect(mocks.updatePrivatePerson).toHaveBeenLastCalledWith('bob', { contactedNow: true });
     expect(texts()).toContain('Next catch-up');

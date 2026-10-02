@@ -881,7 +881,7 @@ export interface PrivatePersonCard {
 }
 export interface PrivateNote { id: string; text: string; createdAt: string; updatedAt: string }
 export interface PrivateLink { id: string; relation: string; direction: 'out' | 'in'; other: { kind: PrivateNodeKind; id: string; name: string }; createdAt: string }
-export interface PrivatePersonOverlay { userId: string; card: PrivatePersonCard; notes: PrivateNote[]; links: PrivateLink[] }
+export interface PrivatePersonOverlay { userId: string; person?: { id: string; name: string; avatarUrl: string | null }; card: PrivatePersonCard; notes: PrivateNote[]; links: PrivateLink[] }
 export interface PrivateThing { id: string; kind: PrivateThingKind; name: string }
 export interface PrivateThingDetail extends PrivateThing { notes: PrivateNote[]; links: PrivateLink[] }
 export interface CatchUpPerson { userId: string; name: string; avatarUrl: string | null; important: boolean; nextDueAt: string; lastContactAt: string | null }

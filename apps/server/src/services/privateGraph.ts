@@ -40,7 +40,8 @@ export interface PersonCard {
 export interface PrivateNote { id: string; text: string; createdAt: string; updatedAt: string }
 export interface LinkEnd { kind: NodeKind; id: string; name: string }
 export interface PrivateLink { id: string; relation: string; direction: 'out' | 'in'; other: LinkEnd; createdAt: string }
-export interface PersonOverlay { userId: string; card: PersonCard; notes: PrivateNote[]; links: PrivateLink[] }
+export interface PersonBasics { id: string; name: string; avatarUrl: string | null }
+export interface PersonOverlay { userId: string; person: PersonBasics; card: PersonCard; notes: PrivateNote[]; links: PrivateLink[] }
 export interface Thing { id: string; kind: ThingKind; name: string }
 export interface ThingDetail extends Thing { notes: PrivateNote[]; links: PrivateLink[] }
 export interface DuePerson { userId: string; name: string; avatarUrl: string | null; important: boolean; nextDueAt: string; lastContactAt: string | null }
@@ -85,7 +86,8 @@ export function nextDue(card: Pick<PersonCard, 'cadenceDays' | 'intervalDays' | 
 export function intervalAfterContact(card: Pick<PersonCard, 'cadenceDays' | 'cadenceMode' | 'intervalDays'>, hadPriorContact: boolean): number | null {
   if (!card.cadenceDays) return null;
   if (card.cadenceMode !== 'expanding' || !hadPriorContact) return card.intervalDays ?? card.cadenceDays;
-  return Math.min(EXPANDING_CEILING_DAYS, Math.max(card.cadenceDays, Math.round((card.intervalDays ?? card.cadenceDays) * EXPANDING_FACTOR)));
+  // The ceiling never pulls a gap below the cadence the owner chose (a two-year cadence stays two years).
+  return Math.min(Math.max(EXPANDING_CEILING_DAYS, card.cadenceDays), Math.max(card.cadenceDays, Math.round((card.intervalDays ?? card.cadenceDays) * EXPANDING_FACTOR)));
 }
 
 export interface CardPatch { important?: boolean; cadenceDays?: number | null; cadenceMode?: CadenceMode; contactedNow?: boolean }
@@ -137,15 +139,17 @@ const noteFrom = (value: Record<string, unknown>): PrivateNote => ({ id: String(
 type Runner = { run: (query: string, parameters?: Record<string, unknown>) => Promise<{ records: Array<{ get: (key: string) => unknown }> }> };
 
 /** The other person must exist, be a person, and have no block in either direction. */
-async function assertPerson(tx: Runner, ownerId: string, userId: string): Promise<void> {
+async function assertPerson(tx: Runner, ownerId: string, userId: string): Promise<PersonBasics> {
   if (ownerId === userId) fail(400, 'This card is for other people');
   const result = await tx.run(`
     MATCH (owner:User {id: $ownerId}), (subject:User {id: $userId})
     RETURN coalesce(subject.isBot, false) AS isBot,
-      ((owner)-[:BLOCKED]->(subject) OR (subject)-[:BLOCKED]->(owner)) AS blocked
+      ((owner)-[:BLOCKED]->(subject) OR (subject)-[:BLOCKED]->(owner)) AS blocked,
+      coalesce(subject.name, 'Unknown') AS name, subject.avatarUrl AS avatarUrl
   `, { ownerId, userId });
   const record = result.records[0];
-  if (!record || record.get('isBot') === true || record.get('blocked') === true) fail(404, 'Person unavailable');
+  if (!record || record.get('isBot') === true || record.get('blocked') === true) return fail(404, 'Person unavailable');
+  return { id: userId, name: String(record.get('name')), avatarUrl: (record.get('avatarUrl') as string | null) ?? null };
 }
 
 const cardKey = (ownerId: string, userId: string) => JSON.stringify([ownerId, userId]);
@@ -208,10 +212,11 @@ export async function getPersonOverlay(ownerId: string, userId: string): Promise
   const session = getDriver().session();
   try {
     return await session.executeRead(async tx => {
-      await assertPerson(tx, ownerId, userId);
+      // Name and picture ride along so the card can open for someone who shares no chat with the owner.
+      const person = await assertPerson(tx, ownerId, userId);
       const result = await tx.run(`OPTIONAL MATCH (card:OpenChatPersonCard {key: $key}) RETURN ${cardProjection} AS card`, { key: cardKey(ownerId, userId) });
       return {
-        userId, card: cardFrom(result.records[0]?.get('card') as Record<string, unknown> | null),
+        userId, person, card: cardFrom(result.records[0]?.get('card') as Record<string, unknown> | null),
         notes: await readNotes(tx, ownerId, 'user', userId), links: await readLinks(tx, ownerId, 'user', userId),
       };
     });
@@ -439,7 +444,9 @@ export async function deletePrivateGraphForUser(tx: Runner, userId: string): Pro
   }
   await tx.run('MATCH (card:OpenChatPersonCard {subjectId: $userId}) DETACH DELETE card', { userId });
   await tx.run("MATCH (note:OpenChatPrivateNote {subjectKind: 'user', subjectId: $userId}) DETACH DELETE note", { userId });
-  await tx.run("MATCH (link:OpenChatPrivateLink) WHERE (link.fromKind = 'user' AND link.fromId = $userId) OR (link.toKind = 'user' AND link.toId = $userId) DETACH DELETE link", { userId });
+  // Two statements so each can use its own index; an OR across both ends cannot.
+  await tx.run("MATCH (link:OpenChatPrivateLink {fromKind: 'user', fromId: $userId}) DETACH DELETE link", { userId });
+  await tx.run("MATCH (link:OpenChatPrivateLink {toKind: 'user', toId: $userId}) DETACH DELETE link", { userId });
 }
 
 /** Account export: the owner's whole private graph, as plain rows. */
@@ -471,6 +478,10 @@ export async function ensurePrivateGraphIndexes(): Promise<void> {
       'CREATE INDEX openchat_thing_owner IF NOT EXISTS FOR (thing:OpenChatThing) ON (thing.ownerId, thing.kind, thing.nameKey)',
       'CREATE INDEX openchat_private_link_owner IF NOT EXISTS FOR (link:OpenChatPrivateLink) ON (link.ownerId)',
       'CREATE INDEX openchat_private_link_id IF NOT EXISTS FOR (link:OpenChatPrivateLink) ON (link.id)',
+      // Account deletion looks up what others wrote about the leaving person; without these it scans every note and link.
+      'CREATE INDEX openchat_private_note_about IF NOT EXISTS FOR (note:OpenChatPrivateNote) ON (note.subjectKind, note.subjectId)',
+      'CREATE INDEX openchat_private_link_from IF NOT EXISTS FOR (link:OpenChatPrivateLink) ON (link.fromKind, link.fromId)',
+      'CREATE INDEX openchat_private_link_to IF NOT EXISTS FOR (link:OpenChatPrivateLink) ON (link.toKind, link.toId)',
     ]) await session.run(statement);
   } finally { await session.close(); }
 }

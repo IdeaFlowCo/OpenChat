@@ -44,11 +44,11 @@ export function PrivateThingScreen() {
       <Text style={[styles.name, { color: c.textPrimary }]}>{thing.name}</Text>
       <Text style={{ color: c.textMetadata, fontSize: 13 }}>Private to you. Only you can see this.</Text>
       <PrivateLinks
-        subject={subject} links={thing.links} onChange={links => setThing({ ...thing, links })}
+        subject={subject} links={thing.links} onChange={links => setThing(current => current && { ...current, links })}
         onOpenThing={id => navigation.push('PrivateThing', { thingId: id })}
         onOpenPerson={userId => navigation.navigate('ContactProfile', { userId })}
       />
-      <PrivateNotes subject={subject} notes={thing.notes} onChange={notes => setThing({ ...thing, notes })} />
+      <PrivateNotes subject={subject} notes={thing.notes} onChange={notes => setThing(current => current && { ...current, notes })} />
     </ScrollView>
   );
 }

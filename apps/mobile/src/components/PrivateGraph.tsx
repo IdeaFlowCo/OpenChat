@@ -269,7 +269,8 @@ export function PrivateCard({ userId, onOpenThing, onOpenPerson }: { userId: str
               <View style={styles.chips}>
                 {CADENCES.map(option => <Chip key={option.label} label={option.label} selected={card.cadenceDays === option.days} onPress={() => void patch({ cadenceDays: option.days })} c={c} disabled={busy} />)}
               </View>
-              {card.cadenceDays !== null && (
+              {/* Stretching tops out at a year, so it is offered only below that. */}
+              {card.cadenceDays !== null && card.cadenceDays < 365 && (
                 <View style={styles.chips}>
                   <Chip label={card.cadenceMode === 'expanding' ? 'Stretching the gap each time' : 'Stretch the gap each time'} selected={card.cadenceMode === 'expanding'}
                     onPress={() => void patch({ cadenceMode: card.cadenceMode === 'expanding' ? 'fixed' : 'expanding' })} c={c} disabled={busy} />

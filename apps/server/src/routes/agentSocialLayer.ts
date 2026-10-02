@@ -301,10 +301,14 @@ router.post('/intent-drafts/:id/activate', resolveActor, async (req: Request, re
 
 router.get('/stories/feed', resolveActor, async (req: Request, res: Response) => {
   try {
-    // `?author=<userId>` narrows the feed to one person, for their profile.
-    const author = typeof req.query.author === 'string' && req.query.author.length > 0 && req.query.author.length <= 128
-      ? req.query.author : null;
-    const stories = await listStoryFeed(req.user!.userId, author);
+    // `?author=<userId>` narrows the feed to one person, for their profile. A
+    // malformed value is refused rather than quietly answered with everyone's.
+    const { author } = req.query;
+    if (author !== undefined && (typeof author !== 'string' || author.length < 1 || author.length > 128)) {
+      res.status(400).json({ error: 'author must be one user id' });
+      return;
+    }
+    const stories = await listStoryFeed(req.user!.userId, author ?? null);
     // Personal agents receive structured terms only when agent search was
     // approved. Human JWT clients receive only the approved Story text.
     res.json({

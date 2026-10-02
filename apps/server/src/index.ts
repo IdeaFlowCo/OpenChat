@@ -629,11 +629,17 @@ async function start() {
     try {
       await ensureAgentIntentIndexes();
       await ensureAgentSocialLayerIndexes();
-      await ensurePrivateGraphIndexes();
       await reconcileAgentDeliveries(io);
       console.log('Agent intent indexes ensured');
     } catch (e) {
       console.error('Failed to ensure agent intent indexes:', e);
+    }
+
+    try {
+      await ensurePrivateGraphIndexes();
+      console.log('Private graph indexes ensured');
+    } catch (e) {
+      console.error('Failed to ensure private graph indexes:', e);
     }
 
     // Semantic search (openchat-bfn.2): idempotently create the Message

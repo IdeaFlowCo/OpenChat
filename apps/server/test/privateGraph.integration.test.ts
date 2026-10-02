@@ -42,7 +42,7 @@ integration('private graph: one owner, never anyone else', () => {
 
   it('starts empty and refuses yourself, bots, blocked and unknown people', async () => {
     const empty = await graph.getPersonOverlay(alice, bob);
-    expect(empty).toEqual({ userId: bob, card: { important: false, cadenceDays: null, cadenceMode: 'fixed', intervalDays: null, lastContactAt: null, nextDueAt: null }, notes: [], links: [] });
+    expect(empty).toEqual({ userId: bob, person: { id: bob, name: bob, avatarUrl: null }, card: { important: false, cadenceDays: null, cadenceMode: 'fixed', intervalDays: null, lastContactAt: null, nextDueAt: null }, notes: [], links: [] });
     expect(await status(() => graph.getPersonOverlay(alice, alice))).toBe(400);
     for (const target of [bot, blocked, 'no-such-user']) {
       expect(await status(() => graph.getPersonOverlay(alice, target))).toBe(404);

@@ -48,6 +48,9 @@ describe('catch-up cadence', () => {
     // The first catch-up starts the clock at the base gap; later ones stretch it.
     expect(intervalAfterContact({ cadenceDays: 30, cadenceMode: 'expanding', intervalDays: 30 }, false)).toBe(30);
     expect(intervalAfterContact({ cadenceDays: 30, cadenceMode: 'expanding', intervalDays: 30 }, true)).toBe(48);
+    // The one-year ceiling never shortens a cadence the owner set longer than a year.
+    expect(intervalAfterContact({ cadenceDays: 730, cadenceMode: 'expanding', intervalDays: 730 }, true)).toBe(730);
+    expect(intervalAfterContact({ cadenceDays: 300, cadenceMode: 'expanding', intervalDays: 300 }, true)).toBe(365);
     expect(intervalAfterContact({ cadenceDays: 30, cadenceMode: 'expanding', intervalDays: 300 }, true)).toBe(365);
   });
 });

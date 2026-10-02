@@ -8,12 +8,12 @@
  * only — bots get a simpler read-only view.
  */
 
-import { useCallback, useMemo } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
-import { api } from '../api/client';
+import { api, type User } from '../api/client';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
@@ -48,13 +48,33 @@ export function ContactProfileScreen() {
 
   // Pull the most recent user object from any conversation participant.
   // This stays fresh because ChatContext re-renders on participant updates.
-  const user = useMemo(() => {
+  const known = useMemo(() => {
     for (const conv of conversations) {
       const p = conv.participants?.find((p) => p.user.id === userId);
       if (p) return p.user;
     }
     return null;
   }, [conversations, userId]);
+
+  // Catch up and private links can point at someone who shares no chat with
+  // you. Their name and picture then come from the private card's own lookup,
+  // which applies the same block and bot rules.
+  const [fallback, setFallback] = useState<User | null>(null);
+  const [fallbackFailed, setFallbackFailed] = useState(false);
+  useEffect(() => {
+    if (known) return;
+    let active = true;
+    setFallback(null); setFallbackFailed(false);
+    api.getPrivatePerson(userId)
+      .then(result => {
+        if (!active) return;
+        if (result.person) setFallback({ id: userId, name: result.person.name, avatarUrl: result.person.avatarUrl ?? undefined });
+        else setFallbackFailed(true);
+      })
+      .catch(() => { if (active) setFallbackFailed(true); });
+    return () => { active = false; };
+  }, [known, userId]);
+  const user = known ?? fallback;
 
   const pres = presence.get(userId);
   const groupsInCommon = useMemo(
@@ -64,7 +84,7 @@ export function ContactProfileScreen() {
 
   const handleBlock = useCallback(() => {
     if (!user) return;
-    const safeEmail = isPlaceholderEmail(user.email) ? '' : user.email;
+    const safeEmail = !user.email || isPlaceholderEmail(user.email) ? '' : user.email;
     Alert.alert(
       `Block ${user.name || safeEmail || 'Unknown'}?`,
       "You won't receive messages from them anymore. You can unblock from Settings.",
@@ -120,12 +140,14 @@ export function ContactProfileScreen() {
   if (!user) {
     return (
       <View style={[styles.root, { backgroundColor: c.background, justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: c.textSecondary }}>Contact not found.</Text>
+        {fallbackFailed
+          ? <Text style={{ color: c.textSecondary }}>Contact not found.</Text>
+          : <ActivityIndicator color={c.primary} />}
       </View>
     );
   }
 
-  const safeEmail = isPlaceholderEmail(user.email) ? '' : user.email;
+  const safeEmail = !user.email || isPlaceholderEmail(user.email) ? '' : user.email;
   const displayName = user.name || safeEmail || 'Unknown';
   const presenceLine =
     (pres?.statusMessage) ||

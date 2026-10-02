@@ -1085,6 +1085,15 @@ export function buildServer(
       try { requireApiKey(api, title); return jsonResult(await run(input)); } catch (e) { return errorResult(e); }
     });
 
+  privateTool('oc_get_person', 'Everything the owner can see about a person',
+    "One read for a person: their name, the asks (Stories) they shared with the owner, and the owner's private card about them (importance, catch-up cadence, notes, links). The asks are what the person chose to share; the card is the owner's own and is never visible to the person.",
+    { userId: z.string().min(1).max(128).describe('The OpenChat user id of the person') },
+    async ({ userId }) => {
+      const [overlay, feed] = await Promise.all([api.getPrivatePerson(userId), api.listStoryFeed(userId)]);
+      const { person, ...privateCard } = overlay as { person?: unknown } & Record<string, unknown>;
+      return { person: person ?? { id: userId }, asks: feed.stories, private: privateCard };
+    });
+
   privateTool('oc_get_person_private', 'Read private card for a person',
     "Read the owner's private card about a person: importance, catch-up cadence and next due date, private notes, and private links to people, companies, ideas and projects. Only the owner ever sees this; the person it is about does not.",
     { userId: z.string().min(1).max(200).describe('The OpenChat user id of the person') },

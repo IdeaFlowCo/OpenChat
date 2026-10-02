@@ -50,7 +50,7 @@ tap), and the add-link form appears only after **+ Add link**. Above the card,
 or `oc_list_story_feed` with `authorId` for agents); that is their public-to-you
 side and is not part of the private graph. A linked thing
 opens its own page, where more links and notes can be added. **Catch up**, on
-the People screen, lists who is due. Agent tools: `oc_get_person_private`,
+the People screen, lists who is due. Agent tools: `oc_get_person` (name, shared asks and the private card in one read), `oc_get_person_private`,
 `oc_set_person_private`, `oc_add_private_note`, `oc_delete_private_note`,
 `oc_add_private_link`, `oc_delete_private_link`, `oc_list_private_things`,
 `oc_get_private_thing`, `oc_list_catch_up`.
