@@ -113,7 +113,9 @@ while `GET /api/auth/ideaflow/config` reports `enabled: true`:
   existing IdeaFlow ID session completes silently.
 
 `/api/auth/ideaflow/url` accepts no `prompt` or exactly `select_account`; any
-other value is rejected with HTTP 400. If the server disables Ideaflow ID or the
+other value is rejected with HTTP 400. Ideaflow start and callback failures
+(including a cancelled account choice) are shown inline, because RN-web's
+`Alert.alert` is a no-op. If the server disables Ideaflow ID or the
 capability check fails, web falls back to the legacy methods. Native iOS and
 Android keep their current methods until native Ideaflow sign-in ships. Covered
 by `apps/server/test/ideaflowOnlyLogin.mobile.test.ts`,

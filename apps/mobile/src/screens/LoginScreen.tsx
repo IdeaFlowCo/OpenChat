@@ -82,6 +82,13 @@ export function LoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
   const [ideaflowLoading, setIdeaflowLoading] = useState(false);
+  // RN-web's Alert.alert is a no-op, and Ideaflow is the only visible web
+  // method, so its failures are shown inline rather than vanishing.
+  const [ideaflowError, setIdeaflowError] = useState<string | null>(null);
+  const reportIdeaflowError = (message: string) => {
+    setIdeaflowError(message);
+    Alert.alert('Ideaflow sign-in failed', message);
+  };
 
   // Web Google sign-in uses a full-page REDIRECT, not the expo-auth-session
   // popup: Google's pages set Cross-Origin-Opener-Policy, which severs the
@@ -125,14 +132,13 @@ export function LoginScreen() {
     window.sessionStorage.removeItem(IDEAFLOW_WEB_STATE_KEY);
 
     if (!stored || !returnedState || returnedState !== stored.state) {
-      Alert.alert('Ideaflow sign-in failed', 'Session expired or state mismatch — please try again.');
+      reportIdeaflowError('Session expired or state mismatch — please try again.');
       return;
     }
     if (oauthError || !code) {
-      Alert.alert(
-        'Ideaflow sign-in failed',
-        params.get('error_description') || oauthError || 'No authorization code was returned.',
-      );
+      reportIdeaflowError(oauthError === 'access_denied' && !params.get('error_description')
+        ? 'Sign-in was cancelled. Choose an account to continue.'
+        : params.get('error_description') || oauthError || 'No authorization code was returned.');
       return;
     }
 
@@ -142,7 +148,7 @@ export function LoginScreen() {
         await ideaflowExchange(code, stored!.codeVerifier, stored!.nonce);
         await bootstrapIfAuthed();
       } catch (err) {
-        Alert.alert('Ideaflow sign-in failed', err instanceof Error ? err.message : String(err));
+        reportIdeaflowError(err instanceof Error ? err.message : String(err));
       } finally {
         setIdeaflowLoading(false);
       }
@@ -332,13 +338,14 @@ export function LoginScreen() {
   const handleIdeaflowSignIn = async (selectAccount = false) => {
     if (!isWeb || typeof window === 'undefined' || ideaflowLoading || loading) return;
     setIdeaflowLoading(true);
+    setIdeaflowError(null);
     try {
       // Ordinary sign-in sends no prompt so an existing Ideaflow session is
       // reused silently; only "Use another Ideaflow account" asks for the
       // provider's chooser (prompt=select_account).
       window.location.href = await prepareIdeaflowWebSignIn(OPENCHAT_URL, { selectAccount });
     } catch (err) {
-      Alert.alert('Ideaflow sign-in failed', err instanceof Error ? err.message : String(err));
+      reportIdeaflowError(err instanceof Error ? err.message : String(err));
       setIdeaflowLoading(false);
     }
   };
@@ -477,6 +484,12 @@ export function LoginScreen() {
                 <Text style={[styles.ideaflowButtonText, { color: c.onPrimary }]}>Continue with Ideaflow</Text>
               )}
             </TouchableOpacity>
+          )}
+
+          {ideaflowError && !surface.pending && (
+            <Text accessibilityRole="alert" style={[styles.inlineError, { color: c.danger }]}>
+              {ideaflowError}
+            </Text>
           )}
 
           {surface.switchAccount && (
@@ -731,6 +744,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ideaflowButtonText: { fontSize: 16, fontWeight: '600' },
+  inlineError: { fontSize: 14, textAlign: 'center' },
   pendingMethods: { height: 50, alignItems: 'center', justifyContent: 'center' },
   secondaryLink: { alignSelf: 'center', paddingVertical: 4 },
   secondaryLinkText: { fontSize: 14, fontWeight: '600' },

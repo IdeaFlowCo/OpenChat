@@ -155,10 +155,11 @@ function stubBrowser() {
   const store = new Map<string, string>();
   const storage = { setItem: (k: string, v: string) => { store.set(k, v); }, getItem: (k: string) => store.get(k) ?? null, removeItem: (k: string) => { store.delete(k); } };
   const assign = vi.fn((url: string) => { mocks.events.push(`navigate:${url}`); });
-  vi.stubGlobal('window', { location: { assign, origin: 'https://chat.ideaflow.app' }, sessionStorage: storage });
+  const alert = vi.fn();
+  vi.stubGlobal('window', { location: { assign, origin: 'https://chat.ideaflow.app' }, sessionStorage: storage, alert });
   vi.stubGlobal('sessionStorage', storage);
   vi.stubGlobal('document', { addEventListener: vi.fn(), removeEventListener: vi.fn() });
-  return { store, assign };
+  return { store, assign, alert };
 }
 
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
@@ -295,7 +296,7 @@ describe('Switch account (web, Ideaflow ID enabled)', () => {
 
   it('stays signed in and explains when the provider cannot be reached', async () => {
     mocks.ideaflowEnabled = true;
-    const { assign } = stubBrowser();
+    const { assign, alert } = stubBrowser();
     mocks.fetch.mockImplementation(async (input: string) => {
       const url = new URL(input);
       if (url.pathname === '/api/auth/ideaflow/config') return new Response(JSON.stringify({ enabled: true }), { status: 200 });
@@ -309,6 +310,7 @@ describe('Switch account (web, Ideaflow ID enabled)', () => {
     await settle();
     expect(mocks.signOut).not.toHaveBeenCalled();
     expect(assign).not.toHaveBeenCalled();
+    expect(alert).toHaveBeenCalledWith('Could not switch account. Could not start Ideaflow sign-in (502)');
   });
 
   it('is absent when Ideaflow ID is disabled, leaving Sign out unchanged', async () => {

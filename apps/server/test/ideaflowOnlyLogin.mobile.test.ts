@@ -195,6 +195,40 @@ describe('web login with Ideaflow ID enabled', () => {
   });
 });
 
+describe('web Ideaflow failures are visible (RN-web Alert is a no-op)', () => {
+  const inlineErrors = () => screen!.root.findAll(n => n.type === 'Text' && n.props.accessibilityRole === 'alert').map(textOf);
+
+  it('shows a stale or mismatched callback inline', async () => {
+    fakeWindow.location.search = '?provider=ideaflow&code=c&state=unknown-state';
+    await render();
+    await settle();
+    expect(inlineErrors()).toEqual(['Session expired or state mismatch — please try again.']);
+    expect(labels()[0]).toBe('Continue with Ideaflow');
+  });
+
+  it('explains a cancelled account choice', async () => {
+    fakeWindow.sessionStorage.setItem('openchat_ideaflow_web', JSON.stringify({ state: 'S', nonce: 'n', codeVerifier: 'v' }));
+    fakeWindow.location.search = '?provider=ideaflow&error=access_denied&state=S';
+    await render();
+    await settle();
+    expect(inlineErrors()).toEqual(['Sign-in was cancelled. Choose an account to continue.']);
+  });
+
+  it('shows a start failure inline and clears it on retry', async () => {
+    mocks.fetch.mockImplementation(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/api/auth/ideaflow/config') return new Response(JSON.stringify({ enabled: true }), { status: 200 });
+      return new Response('{}', { status: 502 });
+    });
+    await render();
+    await settle();
+    await act(async () => { await button('Continue with Ideaflow').props.onPress(); });
+    expect(inlineErrors()).toEqual(['Could not start Ideaflow sign-in (502)']);
+    expect(button('Continue with Ideaflow').props.disabled).toBe(false);
+    expect(fakeWindow.location.href).toBe('https://chat.ideaflow.app/app/');
+  });
+});
+
 describe('web login when Ideaflow ID is unavailable', () => {
   it.each([
     ['disabled by the server kill switch', { enabled: false }],

@@ -37,7 +37,10 @@ export function useIdeaflowAccountSwitch(): {
       url = await prepareIdeaflowWebSignIn(OPENCHAT_URL, { selectAccount: true });
     } catch (err) {
       setSwitching(false);
-      Alert.alert('Could not switch account', err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      // RN-web's Alert.alert is a no-op; the browser dialog keeps this visible.
+      if (typeof window.alert === 'function') window.alert(`Could not switch account. ${message}`);
+      else Alert.alert('Could not switch account', message);
       return;
     }
     await signOut();
