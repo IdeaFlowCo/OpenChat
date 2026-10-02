@@ -8,6 +8,7 @@ import {
   type CardOwnerRecord,
 } from '../src/services/addMeCard.js';
 import { renderCardPage } from '../src/services/addMeCardPage.js';
+import { renderCardVcard } from '../src/services/addMeCardVcard.js';
 
 // An owner record with every private field the graph might hand back.
 const owner: CardOwnerRecord = {
@@ -86,6 +87,13 @@ describe('AddMe card consent projection', () => {
     expect(card.link).toBeNull();
   });
 
+  it('rejects control characters in owner-published links', () => {
+    expect(parseCardSettingsPatch({ link: 'https://example.com/\r\nTEL:123' }).ok).toBe(false);
+    expect(projectCardForStranger(owner, {
+      ...DEFAULT_CARD_SETTINGS, showLink: true, link: 'https://example.com/\nTEL:123',
+    }).link).toBeNull();
+  });
+
   it('treats blank card-only fields as not shared', () => {
     const card = projectCardForStranger(owner, { ...DEFAULT_CARD_SETTINGS, headline: '   ', link: '' });
     expect(card.headline).toBeNull();
@@ -128,6 +136,7 @@ describe('AddMe card token', () => {
     for (const token of tokens) expect(isWellFormedCardToken(token)).toBe(true);
     expect(isWellFormedCardToken('short')).toBe(false);
     expect(isWellFormedCardToken('a'.repeat(23) + '/')).toBe(false);
+    expect(isWellFormedCardToken('a'.repeat(24) + '\n')).toBe(false);
     expect(isWellFormedCardToken(undefined)).toBe(false);
   });
 });
@@ -137,11 +146,84 @@ describe('AddMe card page', () => {
     const html = renderCardPage(
       projectCardForStranger({ ...owner, name: '<script>x</script>' }, DEFAULT_CARD_SETTINGS),
       generateCardToken(),
+      'https://chat.ideaflow.app',
     );
     expect(html).not.toContain('<script>x</script>');
     expect(html).toContain('&lt;script&gt;');
     expect(html).not.toContain('At the conference');
     expect(html).not.toContain('user-internal-id-123');
     expect(html).toContain('/app/?intent=card&token=');
+    expect(html).toContain('Request to be friends with &lt;script&gt;x&lt;/script&gt;');
+    expect(html).toContain('/contact.vcf">Save contact</a>');
+  });
+
+  it('keeps the app banner on the requested public host', () => {
+    const card = projectCardForStranger(owner, DEFAULT_CARD_SETTINGS);
+    const token = generateCardToken();
+    for (const origin of ['https://chat.globalbr.ai', 'https://chat.ideaflow.app']) {
+      const html = renderCardPage(card, token, origin);
+      expect(html).toContain(`app-argument=${origin}/c/${token}`);
+    }
+  });
+});
+
+describe('AddMe vCard', () => {
+  const origin = 'https://chat.ideaflow.app';
+
+  it.each([null, '', '\u0000\u0001', 'private@example.test'])('uses a neutral minimum name for %j', name => {
+    const card = projectCardForStranger({ name }, DEFAULT_CARD_SETTINGS);
+    expect(renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx', origin)).toContain('FN:OpenChat member\r\n');
+  });
+
+  it('has a useful minimum card with UTF-8 text and CRLF lines', () => {
+    const card = projectCardForStranger({ name: '山田 太郎 ✨', email: 'hidden@example.test' }, DEFAULT_CARD_SETTINGS);
+    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx', origin);
+    expect(vcard).toBe('BEGIN:VCARD\r\nVERSION:3.0\r\nN:;山田 太郎 ✨;;;\r\nFN:山田 太郎 ✨\r\nURL:https://chat.ideaflow.app/c/AbCdEfGhIjKlMnOpQrStUvWx\r\nEND:VCARD\r\n');
+    expect(vcard).not.toContain('hidden@example.test');
+  });
+
+  it('escapes malicious line breaks, slashes, commas, and semicolons', () => {
+    const card = projectCardForStranger(
+      { name: 'Jo\\hn, Doe;\r\nTEL:+12345' },
+      { ...DEFAULT_CARD_SETTINGS, headline: 'Hello\nTEL:+99999' },
+    );
+    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx', origin);
+    expect(vcard).toContain('FN:Jo\\\\hn\\, Doe\\;\\nTEL:+12345\r\n');
+    expect(vcard).toContain('NOTE:Hello\\nTEL:+99999\r\n');
+    expect(vcard).not.toMatch(/\r\n(?:TEL|EMAIL):/);
+  });
+
+  it('folds long Unicode values by UTF-8 bytes without splitting a character', () => {
+    const name = '山😀e\u0301'.repeat(40);
+    const card = projectCardForStranger({ name }, DEFAULT_CARD_SETTINGS);
+    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx', origin);
+    for (const line of vcard.trimEnd().split('\r\n')) {
+      expect(Buffer.byteLength(line, 'utf8')).toBeLessThanOrEqual(75);
+    }
+    expect(vcard.replace(/\r\n /g, '')).toContain(`FN:${name}\r\n`);
+    expect(Buffer.from(vcard).toString('utf8')).toBe(vcard);
+  });
+
+  it.each(['\r\n', '\r', '\n', '\u0085', '\u2028', '\u2029'])('escapes line separator %j before an injected property', separator => {
+    const card = projectCardForStranger({ name: `Name${separator}TEL:123` }, {
+      ...DEFAULT_CARD_SETTINGS, headline: `Hello${separator}END:VCARD`,
+    });
+    const vcard = renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx', origin);
+    const properties = vcard.replace(/\r\n /g, '').trimEnd().split(/\r\n|[\r\n\u0085\u2028\u2029]/);
+    expect(properties.map(line => line.split(':')[0])).toEqual(['BEGIN', 'VERSION', 'N', 'FN', 'NOTE', 'URL', 'END']);
+    expect(properties).toContain('FN:Name\\nTEL:123');
+    expect(properties).toContain('NOTE:Hello\\nEND:VCARD');
+  });
+
+  it('keeps every disabled field and private owner property out of the export', () => {
+    const card = projectCardForStranger({ ...owner, importedContacts: ['private contact'], relationships: ['private edge'] }, {
+      ...DEFAULT_CARD_SETTINGS, showHeadline: false, headline: 'private headline',
+      showLinkedIn: false, linkedIn: 'https://example.com/private-linkedin',
+      showX: false, x: 'https://example.com/private-x',
+      showLink: false, link: 'https://example.com/private-link',
+    });
+    expect(renderCardVcard(card, 'AbCdEfGhIjKlMnOpQrStUvWx', origin)).toBe(
+      'BEGIN:VCARD\r\nVERSION:3.0\r\nN:;Jacob Cole;;;\r\nFN:Jacob Cole\r\nURL:https://chat.ideaflow.app/c/AbCdEfGhIjKlMnOpQrStUvWx\r\nEND:VCARD\r\n',
+    );
   });
 });

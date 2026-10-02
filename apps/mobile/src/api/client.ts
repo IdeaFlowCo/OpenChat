@@ -8,6 +8,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import { resolveOpenChatUrl } from './openChatUrl';
 
 /**
  * Token storage strategy (OpenChat-ghr):
@@ -64,9 +65,10 @@ async function clearTokenEverywhere(): Promise<void> {
   try { await AsyncStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
 }
 
-// Production by default; can override via .env (EXPO_PUBLIC_OPENCHAT_URL).
-export const OPENCHAT_URL =
-  process.env.EXPO_PUBLIC_OPENCHAT_URL || 'https://chat.globalbr.ai';
+export const OPENCHAT_URL = resolveOpenChatUrl(
+  process.env.EXPO_PUBLIC_OPENCHAT_URL,
+  typeof window !== 'undefined' ? window.location?.origin : undefined,
+);
 export const NOOS_URL =
   process.env.EXPO_PUBLIC_NOOS_URL || 'https://globalbr.ai';
 
@@ -387,6 +389,10 @@ function emitAuthExpired() {
   for (const fn of authExpiredListeners) {
     try { fn(); } catch { /* ignore listener errors */ }
   }
+}
+
+function discoveryProofHeaders(exactEmail?: string): RequestInit | undefined {
+  return exactEmail ? { headers: { 'X-OpenChat-Discovery-Email': encodeURIComponent(exactEmail) } } : undefined;
 }
 
 async function request<T>(
@@ -859,6 +865,11 @@ export interface StrangerCard {
   x: string | null;
   link: string | null;
 }
+
+export type FriendState = 'none' | 'incoming' | 'outgoing' | 'friends';
+export interface FriendStatus { userId: string; state: FriendState; updatedAt: string | null }
+export interface FriendRow extends FriendStatus { user: Pick<User, 'id' | 'name' | 'avatarUrl'> }
+export interface FriendLists { friends: FriendRow[]; incoming: FriendRow[]; outgoing: FriendRow[] }
 
 export interface AddMeCardSettings {
   showAvatar: boolean;
@@ -1439,6 +1450,21 @@ export const api = {
       `/api/card/${encodeURIComponent(token)}/add`,
       { method: 'POST' }
     ),
+
+  getCardFriendStatus: (token: string) =>
+    request<FriendStatus>(`/api/card/${encodeURIComponent(token)}/friend-status`),
+  requestCardFriend: (token: string) =>
+    request<FriendStatus>(`/api/card/${encodeURIComponent(token)}/friend-request`, { method: 'POST' }),
+  getContactProfile: (userId: string, exactEmail?: string) => request<User>(`/api/private-names/${encodeURIComponent(userId)}/profile`, discoveryProofHeaders(exactEmail)),
+  getPrivateName: (userId: string, exactEmail?: string) => request<{ name: string | null }>(`/api/private-names/${encodeURIComponent(userId)}`, discoveryProofHeaders(exactEmail)),
+  setPrivateName: (userId: string, name: string, exactEmail?: string) => request<{ name: string }>(`/api/private-names/${encodeURIComponent(userId)}`, { ...discoveryProofHeaders(exactEmail), method: 'PUT', body: JSON.stringify({ name }) }),
+  clearPrivateName: (userId: string) => request<{ name: null }>(`/api/private-names/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
+
+  listFriends: () => request<FriendLists>('/api/friends'),
+  getFriendStatus: (userId: string) =>
+    request<FriendStatus>(`/api/friends/users/${encodeURIComponent(userId)}`),
+  changeFriend: (userId: string, action: 'request' | 'accept' | 'decline' | 'cancel' | 'remove') =>
+    request<FriendStatus>(`/api/friends/users/${encodeURIComponent(userId)}/${action}`, { method: 'POST' }),
 
   /**
    * Accept/join via invite token. Idempotent if already a member.

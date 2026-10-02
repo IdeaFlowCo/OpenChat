@@ -48,7 +48,7 @@ const PAGE_STYLE = `
   .footer a { color:var(--text-dim); }
 `;
 
-export function renderCardPage(card: StrangerCard, token: string): string {
+export function renderCardPage(card: StrangerCard, token: string, origin: string): string {
   const name = escapeHtml(card.name);
   const encodedToken = encodeURIComponent(token);
   const intentQs = `?intent=card&token=${encodedToken}`;
@@ -71,7 +71,7 @@ export function renderCardPage(card: StrangerCard, token: string): string {
 <meta name="description" content="${escapeHtml(description)}">
 <meta property="og:title" content="${name} on OpenChat">
 <meta property="og:description" content="${escapeHtml(description)}">
-<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=https://chat.globalbr.ai/c/${encodedToken}">
+<meta name="apple-itunes-app" content="app-id=6774991932, app-argument=${origin}/c/${encodedToken}">
 <style>${PAGE_STYLE}</style>
 </head><body>
 <div class="wrap">
@@ -87,13 +87,14 @@ export function renderCardPage(card: StrangerCard, token: string): string {
     ${card.link ? `<a class="link" href="${escapeHtml(card.link)}" rel="noopener nofollow ugc" target="_blank">${escapeHtml(card.link.replace(/^https?:\/\//, ''))}</a>` : ''}
   </div>
 
-  <a class="cta cta-primary" href="/app/${intentQs}">Add ${name} on OpenChat</a>
+  <a class="cta cta-primary" href="/app/${intentQs}">Request to be friends with ${name}</a>
+  <a class="cta cta-secondary" href="/api/card/${encodedToken}/contact.vcf">Save contact</a>
   <a class="cta cta-secondary" href="${APP_STORE_URL}">Get the iOS app · App Store</a>
 
   <p class="cta-tiny">Already have OpenChat? <a href="openchat://card/${encodedToken}">Open in the app</a></p>
 
   <div class="footer">
-    <a href="/">chat.globalbr.ai</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
+    <a href="/">${new URL(origin).hostname}</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/terms">Terms</a>
   </div>
 </div></body></html>`;
 }

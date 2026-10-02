@@ -26,7 +26,7 @@ Mobile render regressions also run in the server's Vitest suite:
 | `apps/mobile` | Single product client | React Native 0.81.5 + Expo (`react-native-web`) | Native iOS (TestFlight) + Responsive web (`/app`) | **CANONICAL** (High: 63 commits in 60d) |
 | `apps/web` | Frozen legacy client | React + Vite (no RN) | Nowhere (migration reference only) | **LEGACY** (Low: 14 cross-cutting commits in 60d) |
 | `apps/desktop` | Tauri window around the live `/app` client (same origin/auth/socket; see its README) | Tauri + Rust | macOS `.dmg` via GitHub Releases | **CANONICAL** (active in main) |
-| `apps/server` | Shared backend | Node.js / Express + Socket.IO + Neo4j | GCP Prod (`chat.globalbr.ai/api/*`) | **CANONICAL** (Moderate: 52 commits in 60d) |
+| `apps/server` | Shared backend | Node.js / Express + Socket.IO + Neo4j | GCP Prod (see `docs/chat-domain-rollout.md`) | **CANONICAL** (Moderate: 52 commits in 60d) |
 | `apps/mcp-server` | Agent tools bridge | TypeScript (Node) | Claude local / connector | **CANONICAL** (Low: 8 commits in 60d) |
 | `infra/` | Production deployment | Docker / bash scripts | GCP Prod (Instance `noos`) | **CANONICAL** |
 
@@ -47,7 +47,7 @@ See `docs/surface-map.md` for the canonical surface map of all client screens an
 **The Front-Door Test (Definition of Done for UI features):**
 *From the Chats screen, every feature must be reachable in at most two taps, every tap must have a visible word (not only an accessibility label or icon glyph), and the word must be the one a user would search for.*
 - Every new screen or feature adds a row to `docs/surface-map.md` in the same PR.
-- Doors hang from user nouns (Me, People, Chats, Asks, Thoughts, Settings), never from feature builders or PR lineages.
+- Doors hang from the user nouns in `docs/surface-map.md`, never from feature builders or PR lineages.
 - `enhanced` mode may gate coordination features (Asks, Stories, Review, quiet matching), but must never gate a noun (Profile/Me, People, OpenChat Agent, scanning).
 
 ## Theme tokens (`apps/mobile/src/theme/`)

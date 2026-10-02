@@ -418,7 +418,7 @@ export function SettingsScreen() {
             <Text style={[styles.radioMark, { color: c.primary }]}>{socialPreferences.experienceMode === 'simple' ? '●' : '○'}</Text>
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Simple chat</Text>
-              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Chats and Thoughts without the coordination layer</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Chats and Stream without the coordination layer</Text>
             </View>
           </TouchableOpacity>
           {socialPreferences.experienceMode === 'enhanced' && (
@@ -531,7 +531,7 @@ export function SettingsScreen() {
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Export my data</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>
-                Download messages, thoughts, settings, and account metadata
+                Download messages, Stream entries, settings, and account metadata
               </Text>
             </View>
             <Text style={{ color: c.primary, fontSize: 18 }}>↓</Text>
@@ -650,24 +650,22 @@ export function SettingsScreen() {
             </View>
             <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
           </TouchableOpacity>
-          {Platform.OS !== 'web' && (
-            <TouchableOpacity
-              style={[
-                styles.optionRow,
-                { borderTopColor: c.divider, borderTopWidth: StyleSheet.hairlineWidth },
-              ]}
-              onPress={() => navigation.navigate('ScanQr')}
-              activeOpacity={0.7}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Scan QR</Text>
-                <Text style={[styles.optionHint, { color: c.textSecondary }]}>
-                  Add someone by scanning their code
-                </Text>
-              </View>
-              <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={[
+              styles.optionRow,
+              { borderTopColor: c.divider, borderTopWidth: StyleSheet.hairlineWidth },
+            ]}
+            onPress={() => navigation.navigate('ScanQr')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Scan QR</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                Add someone by scanning their code
+              </Text>
+            </View>
+            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
           {/* Blocked users — OpenChat-46p */}
           <TouchableOpacity
             style={[
@@ -689,14 +687,14 @@ export function SettingsScreen() {
       </View>
 
       {/* Invite people (openchat-37z). Shareable QR/link points to the landing
-          page (chat.globalbr.ai) which branches to iOS App Store, web, and
+          page (chat.ideaflow.app) which branches to iOS App Store, web, and
           Android — so one QR works for whoever scans it. */}
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>INVITE PEOPLE</Text>
         <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
           <View style={{ alignItems: 'center', paddingVertical: 18 }}>
             <View style={{ backgroundColor: '#fff', padding: 12, borderRadius: 12 }}>
-              <QRCode value="https://chat.globalbr.ai" size={168} />
+              <QRCode value="https://chat.ideaflow.app" size={168} />
             </View>
             <Text style={[styles.optionHint, { color: c.textSecondary, marginTop: 10, textAlign: 'center', paddingHorizontal: 16 }]}>
               Scan to open the OpenChat download page — iOS App Store, web, or Android
@@ -705,7 +703,7 @@ export function SettingsScreen() {
           <TouchableOpacity
             style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
             onPress={async () => {
-              const url = 'https://chat.globalbr.ai';
+              const url = 'https://chat.ideaflow.app';
               const message = `Try OpenChat — chat with a built-in AI assistant: ${url}`;
               if (Platform.OS === 'web') {
                 const nav = (globalThis as unknown as { navigator?: { share?: (d: unknown) => Promise<void> } }).navigator;
@@ -718,7 +716,7 @@ export function SettingsScreen() {
           >
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>📤  Share invite link</Text>
-              <Text style={[styles.optionHint, { color: c.textSecondary }]}>chat.globalbr.ai · works on any device</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>chat.ideaflow.app · works on any device</Text>
             </View>
             <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
           </TouchableOpacity>
@@ -735,7 +733,7 @@ export function SettingsScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.optionRow}
-            onPress={() => Linking.openURL('https://chat.globalbr.ai/about')}
+            onPress={() => Linking.openURL('https://chat.ideaflow.app/about')}
             activeOpacity={0.7}
           >
             <View style={{ flex: 1 }}>
@@ -764,20 +762,20 @@ export function SettingsScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
-            onPress={() => Linking.openURL('https://chat.globalbr.ai/')}
+            onPress={() => Linking.openURL('https://chat.ideaflow.app/')}
             activeOpacity={0.7}
           >
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>OpenChat home page</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>
-                chat.globalbr.ai · platform docs, agent setup, source
+                chat.ideaflow.app · platform docs, agent setup, source
               </Text>
             </View>
             <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
-            onPress={() => Linking.openURL('https://chat.globalbr.ai/app/')}
+            onPress={() => Linking.openURL('https://chat.ideaflow.app/app/')}
             activeOpacity={0.7}
           >
             <View style={{ flex: 1 }}>
@@ -830,7 +828,7 @@ export function SettingsScreen() {
           {/* Privacy Policy (OpenChat-wfz) */}
           <TouchableOpacity
             style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
-            onPress={() => Linking.openURL('https://chat.globalbr.ai/legal/privacy')}
+            onPress={() => Linking.openURL('https://chat.ideaflow.app/legal/privacy')}
             activeOpacity={0.7}
           >
             <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>Privacy Policy</Text>
@@ -840,7 +838,7 @@ export function SettingsScreen() {
           {/* Terms of Service (OpenChat-wfz) */}
           <TouchableOpacity
             style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
-            onPress={() => Linking.openURL('https://chat.globalbr.ai/legal/terms')}
+            onPress={() => Linking.openURL('https://chat.ideaflow.app/legal/terms')}
             activeOpacity={0.7}
           >
             <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>Terms of Service</Text>

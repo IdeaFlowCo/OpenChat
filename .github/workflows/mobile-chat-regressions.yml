@@ -21,6 +21,43 @@ jobs:
       - run: npm ci
       - name: Mobile typecheck
         run: npx tsc --noEmit -p apps/mobile/tsconfig.json
-      - name: Group opening and message loading
+      - name: Mobile permission and share utilities
+        run: npm run test --workspace=apps/mobile
+      - name: Group opening, message loading, and contact card privacy
         working-directory: apps/server
-        run: npx vitest run test/groupOpen.mobile.test.ts test/chatLoading.mobile.test.ts test/conversationDisplay.test.ts
+        run: >-
+          npx vitest run test/groupOpen.mobile.test.ts test/chatLoading.mobile.test.ts
+          test/conversationDisplay.test.ts test/contactInvite.mobile.test.ts
+          test/addMeCard.test.ts test/addMeCard.route.test.ts
+          test/privateNames.route.test.ts test/privateNames.mobile.test.ts test/contactProfileDoors.mobile.test.ts
+
+  private-names-storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      neo4j:
+        image: neo4j:5.26.0
+        env:
+          NEO4J_AUTH: neo4j/private-alias-test-only
+          NEO4J_server_memory_heap_initial__size: 256m
+          NEO4J_server_memory_heap_max__size: 256m
+          NEO4J_server_memory_pagecache_size: 128m
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p private-alias-test-only 'RETURN 1'"
+          --health-interval 10s --health-timeout 10s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Owner isolation, block safety, and card nonleakage on real Neo4j
+        working-directory: apps/server
+        env:
+          NEO4J_TEST_URI: bolt://127.0.0.1:7687
+          NEO4J_TEST_USER: neo4j
+          NEO4J_TEST_PASSWORD: private-alias-test-only
+        run: npx vitest run test/privateNames.integration.test.ts

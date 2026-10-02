@@ -1,29 +1,31 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useEntryContext } from '../contexts/EntryContext';
 import { useChat } from '../contexts/ChatContext';
 import { navigationRef } from '../services/notifications';
+import { routeEntryIntentIfReady } from './entryNavigation';
 
 export function EntryRouter() {
   const { isAuthed } = useChat();
   const { entryIntent, isReady } = useEntryContext();
+  const lastRoutedIntent = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!isReady || !isAuthed || !entryIntent) return;
+    if (!isReady || !isAuthed || !entryIntent) {
+      lastRoutedIntent.current = null;
+      return;
+    }
 
-    const navigate = () => {
-      if (entryIntent.target.kind === 'group') {
-        navigationRef.navigate('GroupInvitePreview', { token: entryIntent.target.token });
-      } else if (entryIntent.target.kind === 'person') {
-        navigationRef.navigate('PersonEntry', { userId: entryIntent.target.userId });
-      } else if (entryIntent.target.kind === 'card') {
-        navigationRef.navigate('CardEntry', { token: entryIntent.target.token });
-      }
+    const tryNavigate = () => {
+      routeEntryIntentIfReady(navigationRef, entryIntent, lastRoutedIntent);
     };
 
-    if (navigationRef.isReady()) {
-      // Defer slightly to ensure navigators have mounted their state
-      setTimeout(navigate, 100);
-    }
+    const unsubscribeReady = navigationRef.addListener('ready', tryNavigate);
+    const unsubscribeState = navigationRef.addListener('state', tryNavigate);
+    tryNavigate();
+    return () => {
+      unsubscribeReady();
+      unsubscribeState();
+    };
   }, [isAuthed, isReady, entryIntent]);
 
   return null;

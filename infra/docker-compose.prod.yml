@@ -22,9 +22,9 @@ services:
       - NOOS_API_URL=${NOOS_API_URL:-http://noos_api:4000/api}
       - NOOS_URL=${NOOS_URL:-https://globalbr.ai}
       # Canonical browser base for generated auth callback URLs.
-      - OPENCHAT_URL=${OPENCHAT_URL:-https://chat.globalbr.ai}
+      - OPENCHAT_URL=${OPENCHAT_URL:-https://chat.ideaflow.app}
       # Comma-separated browser origins allowed by Express and Socket.IO.
-      - CORS_ORIGIN=${CORS_ORIGIN:-https://chat.globalbr.ai,https://social.globalbr.ai}
+      - CORS_ORIGIN=${CORS_ORIGIN:-https://chat.ideaflow.app,https://chat.globalbr.ai,https://social.globalbr.ai}
       # Friends-only beta directory; set to 0 to restore query-required discovery.
       - OPENCHAT_OPEN_USER_DIRECTORY=${OPENCHAT_OPEN_USER_DIRECTORY:-1}
       # Context Lane companion view (Phase A); defaults to 1.
@@ -48,7 +48,7 @@ services:
       - IDEAFLOW_ID_ISSUER=${IDEAFLOW_ID_ISSUER:-https://id.ideaflow.app/api/auth}
       - IDEAFLOW_ID_CLIENT_ID=${IDEAFLOW_ID_CLIENT_ID:-}
       - IDEAFLOW_ID_CLIENT_SECRET=${IDEAFLOW_ID_CLIENT_SECRET:-}
-      - IDEAFLOW_ID_REDIRECT_URI=${IDEAFLOW_ID_REDIRECT_URI:-https://chat.globalbr.ai/auth/ideaflow/callback}
+      - IDEAFLOW_ID_REDIRECT_URI=${IDEAFLOW_ID_REDIRECT_URI:-https://chat.ideaflow.app/auth/ideaflow/callback}
       # Agent API key encryption secret (OpenChat-7c9). 32-byte hex string.
       # Generate: openssl rand -hex 32 >> /opt/openchat/.env
       - OC_KEY_ENCRYPTION_SECRET=${OC_KEY_ENCRYPTION_SECRET:-}
@@ -63,6 +63,17 @@ services:
       - WIT_AGENT_KEY=${WIT_AGENT_KEY:-}
       - WIT_API_BASE=${WIT_API_BASE:-https://qmzopiburflputowkuhu.supabase.co/functions/v1}
       - WIT_SITE_URL=${WIT_SITE_URL:-https://worldissuetracker.com}
+      # Assistant external tools (OpenChat-1fwa). OPENCHAT_OWNER_USER_ID gates
+      # the owner-credentialed ("as Jacob") WIT writes + unlinked.ai search to
+      # that exact OpenChat user id, verified server-side. WIT_ANON_KEY is the
+      # public WIT anon JWT (apikey header) used for reads/anonymous creates.
+      # UNLINKED_ACCOUNT_TOKEN is the owner's unlinked.ai Settings bearer
+      # grant (read-only search). Same compose-forwarding caveat as above.
+      - OPENCHAT_OWNER_USER_ID=${OPENCHAT_OWNER_USER_ID:-}
+      - WIT_ANON_KEY=${WIT_ANON_KEY:-}
+      - WIT_OWNER_REPORTER=${WIT_OWNER_REPORTER:-}
+      - UNLINKED_ACCOUNT_TOKEN=${UNLINKED_ACCOUNT_TOKEN:-}
+      - UNLINKED_MCP_URL=${UNLINKED_MCP_URL:-https://www.unlinked.ai/mcp}
       # AI: message transforms (/api/ai), the in-app Assistant bot (bfn.3),
       # and semantic search embeddings (bfn.2). docker-compose only forwards
       # vars explicitly listed here — without these the values in the host

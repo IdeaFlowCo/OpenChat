@@ -33,6 +33,7 @@ import { ReactionsBar } from '../components/ReactionsBar';
 import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
 import { ConversationLaneSwitch } from '../components/ConversationLaneSwitch';
+import { HeaderBarButton } from '../components/HeaderBarButton';
 import { ContextLane } from '../components/ContextLane';
 import { ContextComposer } from '../components/ContextComposer';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
@@ -41,6 +42,7 @@ import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { AiDisclosureBanner } from '../components/AiDisclosureBanner';
 import { AppIcon } from '../components/AppIcon';
+import { usePrivateName } from '../contexts/PrivateNamesContext';
 import { ConversationHeaderContent } from '../components/ConversationHeaderContent';
 import { isPlaceholderEmail } from '../utils/email';
 import { NewMessagesPill } from '../components/NewMessagesPill';
@@ -83,7 +85,7 @@ import { shouldShowGroupSenderLabel } from '../utils/conversationPresentation';
 
 // react-navigation's web header caps a left-aligned title's width assuming a
 // ~52pt headerRight and never lets it shrink, so a long chat name ran under the
-// wider Thoughts + More actions. Let the title shrink and keep the actions at
+// wider Stream + More actions. Let the title shrink and keep the actions at
 // their natural width so ConversationHeaderContent can ellipsize (web only;
 // the native header lays these out itself).
 const WEB_HEADER_LAYOUT: Pick<HeaderOptions, 'headerTitleContainerStyle' | 'headerRightContainerStyle'> = {
@@ -495,6 +497,7 @@ export function ChatScreen({
   const other = conversation && !isGroup
     ? getDirectConversationParticipant(conversation, currentUser)
     : null;
+  const privateName = usePrivateName(!isGroup && !isSelfDM && !other?.isBot ? other?.id : undefined);
   const groupAvatarMembers = useMemo(
     () => isGroup
       ? (conversation?.participants || [])
@@ -640,27 +643,25 @@ export function ChatScreen({
   }, []);
 
   const moreAction = (
-    <TouchableOpacity
+    <HeaderBarButton
       onPress={() => setConversationMenuVisible(true)}
-      accessibilityRole="button"
       accessibilityLabel="More conversation actions"
       style={styles.headerMoreAction}
     >
       <AppIcon name="more" color={c.textSecondary} size={20} />
-    </TouchableOpacity>
+    </HeaderBarButton>
   );
 
   const headerActions = (
     <View style={styles.headerActionsRow}>
-      <TouchableOpacity
+      <HeaderBarButton
         onPress={openConversationThoughts}
-        accessibilityRole="button"
-        accessibilityLabel="Thoughts for this chat"
+        accessibilityLabel="Stream for this chat"
         style={styles.headerThoughtsButton}
       >
         <AppIcon name="thought" color={c.primary} size={18} />
-        <Text style={[styles.headerThoughtsText, { color: c.primary }]}>Thoughts</Text>
-      </TouchableOpacity>
+        <Text style={[styles.headerThoughtsText, { color: c.primary }]}>Stream</Text>
+      </HeaderBarButton>
       {moreAction}
     </View>
   );
@@ -672,7 +673,8 @@ export function ChatScreen({
     navigation.setOptions({
       headerTitle: () => (
         <ConversationHeaderContent
-          title={headerTitle}
+          title={privateName.name || headerTitle}
+          officialName={privateName.name ? getUserDisplayName(other) : undefined}
           subtitle={headerSubtitle}
           avatarName={!isGroup ? (other?.name || safeOtherEmail || headerTitle) : headerTitle}
           avatarEmail={safeOtherEmail || undefined}
@@ -686,7 +688,7 @@ export function ChatScreen({
       headerRight: () => headerActions,
       ...(Platform.OS === 'web' ? WEB_HEADER_LAYOUT : null),
     });
-  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, headerSubtitle, other, groupAvatarMembers, openConversationInfo, openConversationThoughts, c.primary, c.textSecondary]);
+  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, headerSubtitle, privateName.name, other, groupAvatarMembers, openConversationInfo, openConversationThoughts, c.primary, c.textSecondary]);
 
   // Ink & Paper: own bubbles are ink-on-paper (light) / paper-on-ink (dark),
   // so translucent overlays inside them derive from the bubble text color
@@ -1183,10 +1185,10 @@ export function ChatScreen({
     [forwardToAssistant]
   );
 
-  // ── Save to Thoughts / Save & pin (unified capture affordance) ────────────
+  // ── Save to Stream / Save & pin (unified capture affordance) ────────────
   // Saves the message text as a Thought with provenance back to this message;
   // pin=true additionally pins it to this conversation so every participant
-  // sees it in the chat-scoped Thoughts view.
+  // sees it in the chat-scoped Stream view.
   const handleSaveToThoughts = useCallback(
     async (message: Message, pin: boolean) => {
       try {
@@ -1195,10 +1197,10 @@ export function ChatScreen({
           sourceMessageId: message.id,
           ...(pin ? { pinToConversationId: conversationId } : {}),
         });
-        showToast(pin ? 'Saved & pinned to this chat' : 'Saved to Thoughts');
+        showToast(pin ? 'Saved & pinned to this chat' : 'Saved to Stream');
       } catch (err) {
         logError('[thoughts] save-from-message failed', err, { pin });
-        Alert.alert('Error', 'Could not save to Thoughts. Please try again.');
+        Alert.alert('Error', 'Could not save to Stream. Please try again.');
       }
     },
     [conversationId, showToast]
@@ -1490,7 +1492,8 @@ export function ChatScreen({
         return (
           <View style={[styles.embeddedHeader, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
             <ConversationHeaderContent
-              title={headerTitle}
+              title={privateName.name || headerTitle}
+              officialName={privateName.name ? getUserDisplayName(other) : undefined}
               subtitle={headerSubtitle}
               avatarName={!isGroup ? (other?.name || safeOtherEmail || headerTitle) : headerTitle}
               avatarEmail={safeOtherEmail || undefined}
@@ -1543,7 +1546,7 @@ export function ChatScreen({
             </Text>
             <TouchableOpacity onPress={openConversationThoughts} style={styles.conversationMenuRow} accessibilityRole="menuitem">
               <AppIcon name="thought" color={c.primary} size={20} />
-              <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Thoughts for this chat</Text>
+              <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Stream for this chat</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={openAgentNetwork} style={styles.conversationMenuRow} accessibilityRole="menuitem">
               <AppIcon name="bot" color={c.primary} size={20} />
@@ -1988,12 +1991,9 @@ const styles = StyleSheet.create({
   },
   headerThoughtsButton: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 5,
     paddingHorizontal: 8,
-    paddingVertical: 6,
     borderRadius: 8,
-    minHeight: 36,
   },
   headerThoughtsText: {
     fontSize: 13,
@@ -2001,11 +2001,8 @@ const styles = StyleSheet.create({
   },
   headerMoreAction: {
     width: 44,
-    minWidth: 44,
-    minHeight: 44,
+    paddingHorizontal: 0,
     flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   conversationMenuBackdrop: {
     flex: 1,

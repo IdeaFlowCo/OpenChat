@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   route: { name: 'Chat', params: { conversationId: 'sailing' } },
   receive: vi.fn(),
   scroll: vi.fn(),
+  privateName: null as string | null,
 }));
 
 // Exercise the real ChatScreen hooks/render tree, with the OS boundary replaced
@@ -45,6 +46,7 @@ vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ sc
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => mocks.chat }));
 vi.mock('../../mobile/src/contexts/SocialExperienceContext', () => ({ useSocialExperience: () => ({ enhanced: false }) }));
 vi.mock('../../mobile/src/contexts/RecordingContext', () => ({ useRecording: () => mocks.recording }));
+vi.mock('../../mobile/src/contexts/PrivateNamesContext', () => ({ usePrivateName: (id?: string) => ({ name: id ? mocks.privateName : null }) }));
 vi.mock('../../mobile/src/api/client', () => ({ api: {} }));
 vi.mock('../../mobile/src/services/notifications', () => ({ setActiveConversationForNotifications: vi.fn() }));
 vi.mock('../../mobile/src/services/haptics', () => ({ hapticSend: vi.fn(), hapticReceive: mocks.receive }));
@@ -92,6 +94,7 @@ function renderedText() { return JSON.stringify(screen!.toJSON()); }
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  mocks.privateName = null;
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.chat = {
     currentUser: { userId: 'bob', name: 'Bob' },
@@ -214,5 +217,23 @@ describe('opening a group on the native client', () => {
     expect(renderedText()).toContain('OpenChat member is typing');
     await act(async () => { screen!.root.findByType('TextInput').props.onChangeText('@'); });
     expect(renderedText()).toContain('Alice');
+  });
+});
+
+
+describe('private direct-chat header labels', () => {
+  it.each([false, true])('shows a viewer alias and official name with embedded=%s', async embedded => {
+    mocks.chat.conversations[0].type = 'direct'; mocks.chat.conversations[0].title = undefined;
+    mocks.privateName = 'My Alice';
+    await act(async () => { screen = create(React.createElement(ChatScreen, { conversationId: 'sailing', embedded })); });
+    if (!embedded) {
+      const options = mocks.navigation.setOptions.mock.calls.at(-1)![0];
+      await act(async () => { screen!.update(options.headerTitle()); });
+    }
+    expect(renderedText()).toContain('My Alice');
+    expect(renderedText()).toContain('OpenChat name: Alice');
+    const identity = screen!.root.findAllByType('TouchableOpacity').find(n => n.props.accessibilityLabel?.includes('Conversation information'))!;
+    await act(async () => identity.props.onPress());
+    expect(mocks.navigation.navigate).toHaveBeenCalledWith('ContactProfile', { userId: 'alice' });
   });
 });

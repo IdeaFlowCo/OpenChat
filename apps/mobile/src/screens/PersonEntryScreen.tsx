@@ -6,6 +6,7 @@ import { getColors } from '../theme/colors';
 import { api } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
 import { useEntryContext } from '../contexts/EntryContext';
+import { FriendControls } from '../components/FriendControls';
 import type { NavProp, RouteProps } from '../navigation/types';
 
 export function PersonEntryScreen() {
@@ -17,7 +18,7 @@ export function PersonEntryScreen() {
   const { createConversation } = useChat();
   const { clearEntry } = useEntryContext();
 
-  const [person, setPerson] = useState<{ name: string; avatarUrl: string | null } | null>(null);
+  const [person, setPerson] = useState<{ name: string; avatarUrl: string | null; isBot: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [messaging, setMessaging] = useState(false);
@@ -80,7 +81,9 @@ export function PersonEntryScreen() {
     <View style={[styles.root, { backgroundColor: c.background }]}>
       <View style={[styles.card, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
         <Text style={[styles.heading, { color: c.textPrimary }]}>{person.name}</Text>
-        <Text style={[styles.subtitle, { color: c.textSecondary }]}>wants to connect on OpenChat</Text>
+        <Text style={[styles.subtitle, { color: c.textSecondary }]}>Connect on OpenChat</Text>
+
+        {!person.isBot && <FriendControls userId={userId} onMessage={handleMessage} />}
 
         <TouchableOpacity
           style={[styles.btn, { backgroundColor: c.primary, opacity: messaging ? 0.6 : 1 }]}

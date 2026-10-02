@@ -9,7 +9,7 @@
  * a reconnect catch-up briefly pulse with a highlight background.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -21,8 +21,8 @@ import {
   View,
 } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
-import { useNavigation } from '@react-navigation/native';
-import { Conversation, CurrentUser } from '../api/client';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { api, Conversation, CurrentUser } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { serif } from '../theme/typography';
@@ -30,6 +30,7 @@ import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { AppIcon } from '../components/AppIcon';
 import { AgentOverlayButton } from '../components/AgentOverlayButton';
+import { HeaderBarButton } from '../components/HeaderBarButton';
 import { ConnectionStatusLine } from '../components/ConnectionStatusLine';
 import { StoriesStrip } from '../components/StoriesStrip';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
@@ -199,6 +200,12 @@ export function ConversationsScreen() {
     reconnectNewConvIds,
   } = useChat();
   const [refreshing, setRefreshing] = useState(false);
+  const [friendRequestCount, setFriendRequestCount] = useState(0);
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    api.listFriends().then(lists => { if (active) setFriendRequestCount(lists.incoming.length); }).catch(() => {});
+    return () => { active = false; };
+  }, []));
   const orderedConversations = useMemo(() => [...conversations].sort((a, b) => {
     const aAssistant = a.participants?.some(participant => participant?.user?.id === 'assistant') ? 1 : 0;
     const bAssistant = b.participants?.some(participant => participant?.user?.id === 'assistant') ? 1 : 0;
@@ -223,30 +230,20 @@ export function ConversationsScreen() {
       ),
       headerRight: () => (
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Search')}
-            accessibilityLabel="Search"
-            style={styles.headerAction}
-          >
+          <HeaderBarButton onPress={() => navigation.navigate('Search')} accessibilityLabel="Search">
             <AppIcon name="search" color={c.primary} size={20} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('NewConversation')}
-            accessibilityLabel="New conversation"
-            style={styles.headerAction}
-          >
-            <AppIcon name="plus" color={c.primary} size={21} />
-          </TouchableOpacity>
+          </HeaderBarButton>
+          <HeaderBarButton onPress={() => navigation.navigate('NewConversation')} accessibilityLabel="People">
+            <Text style={{ color: c.primary, fontSize: 15, fontWeight: '600' }}>People</Text>
+          </HeaderBarButton>
         </View>
       ),
       headerLeft: () => {
         const safeEmail = isPlaceholderEmail(currentUser?.email) ? '' : (currentUser?.email ?? '');
         return (
-          <TouchableOpacity
+          <HeaderBarButton
             onPress={() => navigation.navigate('MyCard')}
             accessibilityLabel="Profile"
-            accessibilityRole="button"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             style={styles.headerAvatarAction}
           >
             <Avatar
@@ -255,7 +252,7 @@ export function ConversationsScreen() {
               avatarUrl={currentUser?.avatarUrl ?? undefined}
               size={32}
             />
-          </TouchableOpacity>
+          </HeaderBarButton>
         );
       },
     });
@@ -279,11 +276,18 @@ export function ConversationsScreen() {
         data={orderedConversations}
         keyExtractor={item => item.id}
         ListHeaderComponent={
+          <View>
+          <View style={[styles.peopleDoors, { borderBottomColor: c.divider }]}>
+            <TouchableOpacity onPress={() => navigation.navigate('Friends', { section: 'friends' })} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>Friends</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('Friends', { section: 'requests' })} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>{friendRequestCount ? `Requests (${friendRequestCount})` : 'Requests'}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('NewConversation')} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>Find people</Text></TouchableOpacity>
+          </View>
           <StoriesStrip
             onCreate={() => navigation.navigate('StoryComposer')}
             onOpenStory={(story) => navigation.navigate('StoryViewer', { story })}
             onOpenReview={() => navigation.navigate('SocialReview')}
           />
+          </View>
         }
         refreshControl={
           <RefreshControl
@@ -352,21 +356,10 @@ export function ConversationsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  headerAction: {
-    minWidth: 44,
-    minHeight: 44,
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerAvatarAction: {
-    minWidth: 44,
-    minHeight: 44,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  headerAvatarAction: { paddingHorizontal: 8 },
   headerTitleWrap: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
+  peopleDoors: { flexDirection: 'row', flexWrap: 'wrap', borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 16 },
+  peopleDoor: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, marginRight: 8 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

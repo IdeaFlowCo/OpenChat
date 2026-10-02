@@ -7,7 +7,7 @@
  *
  *   Authenticated — bottom tabs (OpenChat-zi1):
  *     Chats tab  → Conversations stack (all pre-existing chat screens)
- *     Thoughts tab → Thoughts stack (personal notes feed)
+ *     Stream tab → Thoughts stack (personal notes feed)
  *
  * The "is the user signed in?" gate is driven by ChatContext.isAuthed.
  */
@@ -19,6 +19,7 @@ import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
+import { PrivateNamesProvider } from './src/contexts/PrivateNamesContext';
 import { ChatProvider, useChat } from './src/contexts/ChatContext';
 import { RecordingProvider } from './src/contexts/RecordingContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
@@ -34,7 +35,7 @@ import { installClientLogger } from './src/services/clientLogger';
 import { initCrashReporting } from './src/services/crashReporting';
 import { hasCompletedOnboarding } from './src/services/onboarding';
 // Deep-link router (OpenChat-84u.1) — handles openchat:// scheme + Universal
-// Links to chat.globalbr.ai/{i,u}/<id>. Stashes the intent if unauthed so
+// Links to either OpenChat host's /{i,u,c}/<id>. Stashes intent if unauthed so
 // post-OAuth replay lands the user on the right screen.
 import { EntryProvider } from './src/contexts/EntryContext';
 import { installDeepLinkHandling } from './src/services/deepLinks';
@@ -43,6 +44,7 @@ import { OnboardingScreen } from './src/screens/OnboardingScreen';
 
 import { PersonEntryScreen } from './src/screens/PersonEntryScreen';
 import { CardEntryScreen } from './src/screens/CardEntryScreen';
+import { FriendsScreen } from './src/screens/FriendsScreen';
 
 // Init crash reporting FIRST so even early-boot errors reach Sentry (OpenChat-7um).
 // No-op if EXPO_PUBLIC_SENTRY_DSN is unset.
@@ -62,6 +64,7 @@ import { KeyboardShortcutsScreen } from './src/screens/KeyboardShortcutsScreen';
 import { PermissionsScreen } from './src/screens/PermissionsScreen';
 import { SecretaryScreen } from './src/screens/SecretaryScreen';
 import { NewConversationScreen } from './src/screens/NewConversationScreen';
+import { InvitePersonScreen } from './src/screens/InvitePersonScreen';
 import { AgentOverlayScreen } from './src/screens/AgentOverlayScreen';
 import { GroupSettingsScreen } from './src/screens/GroupSettingsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
@@ -131,6 +134,11 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         name="NewConversation"
         component={NewConversationScreen}
         options={{ title: 'New Chat', presentation: 'modal' }}
+      />
+      <ChatsStack.Screen
+        name="InvitePerson"
+        component={InvitePersonScreen}
+        options={{ title: 'Invite a person', presentation: 'modal' }}
       />
       <ChatsStack.Screen
         name="AgentOverlay"
@@ -214,15 +222,15 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen
         name="CardEntry"
         component={CardEntryScreen}
-        options={{ title: 'Add Contact', presentation: 'modal' }}
+        options={{ title: 'Add friend', presentation: 'modal' }}
       />
+      <ChatsStack.Screen name="Friends" component={FriendsScreen} options={{ title: 'People' }} />
       {/* Forward picker (OpenChat-hhc) */}
       <ChatsStack.Screen
         name="ForwardPicker"
         component={ForwardPickerScreen}
         options={{ title: 'Forward to…', presentation: 'modal' }}
       />
-      {/* Contact profile — tap DM header to open */}
       <ChatsStack.Screen
         name="ContactProfile"
         component={ContactProfileScreen}
@@ -261,12 +269,12 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         component={SecretaryScreen}
         options={{ title: 'Secretary' }}
       />
-      {/* Chat-scoped Thoughts: pinned + captured-from-this-chat */}
+      {/* Chat-scoped Stream: pinned + captured-from-this-chat */}
       <ChatsStack.Screen
         name="ConversationThoughts"
         component={ConversationThoughtsScreen}
         options={({ route }) => ({
-          title: route.params.title ? `Thoughts · ${route.params.title}` : 'Chat Thoughts',
+          title: route.params.title ? `Stream · ${route.params.title}` : 'Chat Stream',
         })}
       />
     </ChatsStack.Navigator>
@@ -308,14 +316,14 @@ function ThoughtsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ThoughtsStack.Screen
         name="ThoughtsList"
         component={ThoughtsScreen}
-        options={{ title: 'Thoughts' }}
+        options={{ title: 'Stream' }}
       />
       <ThoughtsStack.Screen
         name="AddEditThought"
         component={AddEditThoughtScreen}
         options={({ route }) =>
           ({
-            title: route.params?.thought ? 'Edit Thought' : 'New Thought',
+            title: route.params?.thought ? 'Edit Stream entry' : 'New Stream entry',
             presentation: 'modal',
           })
         }
@@ -548,8 +556,10 @@ function AuthedTabs({
       <Tab.Screen
         name="ThoughtsTab"
         options={{
+          title: 'Stream',
+          tabBarAccessibilityLabel: 'Stream',
           tabBarLabel: ({ focused, color }) => (
-            <TabLabel text="Thoughts" focused={focused} color={color} />
+            <TabLabel text="Stream" focused={focused} color={color} />
           ),
           tabBarIcon: ({ focused, color }) => (
             <TabIcon icon="thought" focused={focused} color={color} c={c} stacked={stacked} />
@@ -679,13 +689,15 @@ function ShellWithBackground() {
     <View style={[styles.root, { backgroundColor: c.background }]}>
       <UpdateBanner />
       <ChatProvider>
-        <EntryProvider>
-          <SocialExperienceProvider>
-            <RecordingBridge>
-              <Shell />
-            </RecordingBridge>
-          </SocialExperienceProvider>
-        </EntryProvider>
+        <PrivateNamesProvider>
+          <EntryProvider>
+            <SocialExperienceProvider>
+              <RecordingBridge>
+                <Shell />
+              </RecordingBridge>
+            </SocialExperienceProvider>
+          </EntryProvider>
+        </PrivateNamesProvider>
       </ChatProvider>
     </View>
   );

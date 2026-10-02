@@ -11,10 +11,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../src/db.js', () => ({
   getDriver: () => ({
-    session: () => ({ run: mocks.run, close: mocks.close }),
+    session: () => ({ run: mocks.run, close: mocks.close, executeWrite: (cb: (tx: { run: typeof mocks.run }) => unknown) => cb({ run: mocks.run }) }),
   }),
   getDriverForRequest: () => ({
-    session: () => ({ run: mocks.run, close: mocks.close }),
+    session: () => ({ run: mocks.run, close: mocks.close, executeWrite: (cb: (tx: { run: typeof mocks.run }) => unknown) => cb({ run: mocks.run }) }),
   }),
 }));
 
@@ -111,5 +111,16 @@ describe('chat route block enforcement', () => {
     expect(authorizationCypher).toContain('[:BLOCKED]');
     expect(authorizationCypher).toContain('other.id <> u.id');
     expect(mocks.run).toHaveBeenCalledOnce();
+  });
+
+  it('invalidates a pending or accepted connection when a person is blocked', async () => {
+    mocks.run.mockResolvedValue({ records: [] });
+    const response = await fetch(`${baseUrl}/api/chat/users/other/block`, {
+      method: 'POST', headers: { Authorization: authorization },
+    });
+    expect(response.status).toBe(201);
+    const blockCall = mocks.run.mock.calls.find(([query]) => String(query).includes('MERGE (me)-[r:BLOCKED]'));
+    expect(String(blockCall?.[0])).toContain("connection.state = 'removed'");
+    expect(blockCall?.[1].pairKey).toBe('["actor","other"]');
   });
 });

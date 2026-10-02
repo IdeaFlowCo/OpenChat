@@ -1,19 +1,19 @@
 /**
  * CardEntryScreen — shown when an AddMe card (/c/<token>) is scanned or
  * opened in the app, including after sign-in via the entry-intent plumbing.
- * Renders the stranger projection and offers the one primary action: add the
- * owner as a contact, which opens (or reuses) the direct chat.
+ * Renders the stranger projection and an explicit friend request action.
  */
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
 import { useEntryContext } from '../contexts/EntryContext';
 import { getColors } from '../theme/colors';
-import { api, ApiError, type StrangerCard } from '../api/client';
+import { api, ApiError, type FriendStatus, type StrangerCard } from '../api/client';
 import { AddMeCardView } from '../components/AddMeCardView';
 import type { NavProp, RouteProps } from '../navigation/types';
+import { OPENCHAT_URL } from '../api/client';
 
 export function CardEntryScreen() {
   const navigation = useNavigation<NavProp<'CardEntry'>>();
@@ -21,7 +21,7 @@ export function CardEntryScreen() {
   const { token } = route.params;
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  const { refreshConversations } = useChat();
+  const { createConversation } = useChat();
   const { clearEntry } = useEntryContext();
 
   const [card, setCard] = useState<StrangerCard | null>(null);
@@ -29,11 +29,21 @@ export function CardEntryScreen() {
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [isOwnCard, setIsOwnCard] = useState(false);
+  const [friend, setFriend] = useState<FriendStatus | null>(null);
 
   useEffect(() => {
     let active = true;
     api.getPublicCard(token)
-      .then((publicCard) => { if (active) setCard(publicCard); })
+      .then(async publicCard => {
+        if (active) setCard(publicCard);
+        try {
+          const status = await api.getCardFriendStatus(token);
+          if (active) setFriend(status);
+        } catch (err) {
+          if (active && err instanceof ApiError && err.status === 400) setIsOwnCard(true);
+          else throw err;
+        }
+      })
       .catch((err) => {
         if (!active) return;
         setError(err instanceof ApiError && err.status === 404
@@ -48,19 +58,34 @@ export function CardEntryScreen() {
     setAdding(true);
     setError(null);
     try {
-      const { conversationId } = await api.addFromCard(token);
-      await refreshConversations();
-      await clearEntry();
-      navigation.replace('Chat', { conversationId });
+      setFriend(await api.requestCardFriend(token));
     } catch (err) {
       // The server refuses self-adds rather than the client fetching (and so
       // minting) the scanner's own card just to compare tokens.
       if (err instanceof ApiError && err.status === 400) setIsOwnCard(true);
       else setError(err instanceof ApiError && err.status === 404
         ? 'This person is not available.'
-        : 'Could not add this contact. Try again.');
+        : 'Could not send a friend request. Try again.');
+    } finally {
       setAdding(false);
     }
+  };
+
+  const handleStatusAction = async () => {
+    if (!friend) return;
+    setAdding(true);
+    setError(null);
+    try {
+      if (friend.state === 'friends') {
+        const conversation = await createConversation([friend.userId], { type: 'direct' });
+        await clearEntry();
+        navigation.replace('Chat', { conversationId: conversation.id });
+      } else {
+        setFriend(await api.changeFriend(friend.userId, friend.state === 'incoming' ? 'accept' : 'cancel'));
+      }
+    } catch {
+      setError('Could not update this friend request. Try again.');
+    } finally { setAdding(false); }
   };
 
   const handleClose = async () => {
@@ -88,18 +113,31 @@ export function CardEntryScreen() {
       {card && !isOwnCard ? (
         <TouchableOpacity
           style={[styles.primary, { backgroundColor: c.primary, opacity: adding ? 0.6 : 1 }]}
-          onPress={handleAdd}
+          onPress={friend?.state && friend.state !== 'none' ? handleStatusAction : handleAdd}
           disabled={adding}
           accessibilityRole="button"
         >
           {adding
             ? <ActivityIndicator color={c.onPrimary} size="small" />
-            : <Text style={[styles.primaryText, { color: c.onPrimary }]}>Add {card.name}</Text>}
+            : <Text style={[styles.primaryText, { color: c.onPrimary }]}>{friend?.state === 'incoming' ? 'Accept friend request' : friend?.state === 'outgoing' ? 'Cancel friend request' : friend?.state === 'friends' ? 'Message' : `Add ${card.name} as a friend`}</Text>}
         </TouchableOpacity>
       ) : null}
       {card && isOwnCard ? (
         <Text style={[styles.note, { color: c.textMetadata }]}>This is your card — this is what others see.</Text>
       ) : null}
+
+      {card && (
+        <TouchableOpacity
+          style={styles.secondary}
+          onPress={() => {
+            void Linking.openURL(`${OPENCHAT_URL}/api/card/${encodeURIComponent(token)}/contact.vcf`)
+              .catch(() => setError('Could not open this contact file.'));
+          }}
+          accessibilityRole="button"
+        >
+          <Text style={{ color: c.primary, fontWeight: '600' }}>Save contact</Text>
+        </TouchableOpacity>
+      )}
 
       <TouchableOpacity style={styles.secondary} onPress={handleClose}>
         <Text style={{ color: c.textSecondary, fontWeight: '600' }}>{card && !isOwnCard ? 'Not now' : 'Close'}</Text>

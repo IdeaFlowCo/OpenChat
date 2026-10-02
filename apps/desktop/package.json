@@ -1,6 +1,6 @@
 {
   "name": "openchat-desktop",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "private": true,
   "description": "Tauri desktop shell around the live OpenChat /app client.",
   "scripts": {

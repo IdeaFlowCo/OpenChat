@@ -10,12 +10,39 @@ import {
   updateOwnCardSettings,
 } from '../services/addMeCard.js';
 import { DirectConversationNotAllowedError, ensureDirectConversation } from '../services/directConversation.js';
+import { renderCardVcard } from '../services/addMeCardVcard.js';
+import { chatOriginForRequestHost } from '../config/publicUrl.js';
+import { changeFriend, FriendError, getFriendStatus } from '../services/friends.js';
 
 /**
  * AddMe card API, mounted at /api/card. The owner-facing routes live under
  * /me; the token routes are the stranger-facing surface.
  */
 const router = Router();
+
+// No-login export. Resolve the active token on every request, using the same
+// consent projection as the public page and JSON route. Never cache a card
+// across rotation or field changes.
+router.get('/:token/contact.vcf', async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  const session = getDriver().session();
+  try {
+    const resolved = await resolveCardToken(session, req.params.token as string);
+    if (!resolved) {
+      res.status(404).json({ error: 'Card not found' });
+      return;
+    }
+    res.setHeader('Content-Type', 'text/vcard; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="openchat-contact.vcf"');
+    res.send(renderCardVcard(resolved.card, req.params.token as string, chatOriginForRequestHost(req.get('host'))));
+  } catch (error) {
+    console.error('Error exporting AddMe card:', error);
+    res.status(500).json({ error: 'Failed to export card' });
+  } finally {
+    await session.close();
+  }
+});
 
 // GET /api/card/me — the caller's card, created with minimum fields on first use.
 router.get('/me', requireAuth, async (req: Request, res: Response) => {
@@ -135,6 +162,31 @@ router.post('/:token/add', requireAuth, async (req: Request, res: Response) => {
     console.error('Error adding contact from AddMe card:', error);
     res.status(500).json({ error: 'Failed to add contact' });
   }
+});
+
+// New clients use an explicit relationship action; /add stays a legacy DM API.
+router.get('/:token/friend-status', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  try {
+    const resolved = await resolveCardToken(session, req.params.token as string);
+    if (!resolved) { res.status(404).json({ error: 'Card not found' }); return; }
+    res.json(await getFriendStatus(req.user!.userId, resolved.ownerId, true));
+  } catch (error) {
+    if (error instanceof FriendError) res.status(error.status).json({ error: error.message });
+    else { console.error('Error loading card friend status:', error); res.status(500).json({ error: 'Failed to load friend status' }); }
+  } finally { await session.close(); }
+});
+
+router.post('/:token/friend-request', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  try {
+    const resolved = await resolveCardToken(session, req.params.token as string);
+    if (!resolved) { res.status(404).json({ error: 'Card not found' }); return; }
+    res.json(await changeFriend(req.user!.userId, resolved.ownerId, 'request', 'card', true, req.params.token as string));
+  } catch (error) {
+    if (error instanceof FriendError) res.status(error.status).json({ error: error.message });
+    else { console.error('Error requesting friend from card:', error); res.status(500).json({ error: 'Failed to request friend' }); }
+  } finally { await session.close(); }
 });
 
 export default router;

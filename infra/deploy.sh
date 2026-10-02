@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 GCP_PROJECT="${GCP_PROJECT:-lightsail-migration}"
 GCP_ZONE="${GCP_ZONE:-us-central1-a}"
 GCP_INSTANCE="${GCP_INSTANCE:-noos}"
+GCP_ACCOUNT="${GCP_ACCOUNT:-874749606899-compute@developer.gserviceaccount.com}"
 APP_NAME="openchat"
 APP_PORT="4001"
 
@@ -86,12 +87,14 @@ fi
 # Create deployment package
 echo ""
 echo "Creating deployment package..."
+DEPLOY_ARCHIVE=$(mktemp "/tmp/${APP_NAME}-deploy.XXXXXX")
+trap 'rm -f "$DEPLOY_ARCHIVE"' EXIT
 # Stage Dockerfile + docker-compose at the tar root so the remote extract
 # Just Works without restructuring on the server side.
 cp infra/Dockerfile /tmp/oc-Dockerfile
 cp infra/docker-compose.prod.yml /tmp/oc-docker-compose.prod.yml
 
-tar -czf /tmp/${APP_NAME}-deploy.tar.gz \
+tar -czf "$DEPLOY_ARCHIVE" \
   apps/server/dist/ \
   apps/server/package*.json \
   client-app/dist/ \
@@ -101,16 +104,18 @@ tar -czf /tmp/${APP_NAME}-deploy.tar.gz \
 # Copy to the production GCE instance. Explicit project/zone flags keep this
 # safe when the operator's active gcloud configuration points elsewhere.
 echo "Copying to GCP instance..."
-gcloud compute scp "/tmp/${APP_NAME}-deploy.tar.gz" "$GCP_INSTANCE:/tmp/${APP_NAME}-deploy.tar.gz" \
+gcloud compute scp "$DEPLOY_ARCHIVE" "$GCP_INSTANCE:$DEPLOY_ARCHIVE" \
+  --account="$GCP_ACCOUNT" \
   --project="$GCP_PROJECT" \
   --zone="$GCP_ZONE"
 
 # Deploy on server
 echo "Deploying on server..."
 gcloud compute ssh "$GCP_INSTANCE" \
+  --account="$GCP_ACCOUNT" \
   --project="$GCP_PROJECT" \
   --zone="$GCP_ZONE" \
-  --command="sudo env APP_NAME=$APP_NAME bash -s" << 'ENDSSH'
+  --command="sudo env APP_NAME=$APP_NAME DEPLOY_ARCHIVE=$DEPLOY_ARCHIVE bash -s" << 'ENDSSH'
 set -euo pipefail
 
 # Setup app directory
@@ -118,7 +123,8 @@ sudo mkdir -p /opt/$APP_NAME
 cd /opt/$APP_NAME
 
 # Extract deployment
-sudo tar -xzf /tmp/${APP_NAME}-deploy.tar.gz
+sudo tar -xzf "$DEPLOY_ARCHIVE"
+sudo rm -f "$DEPLOY_ARCHIVE"
 
 # Rename staged docker artifacts into place
 sudo mv oc-docker-compose.prod.yml docker-compose.yml 2>/dev/null || true
@@ -137,7 +143,7 @@ NOOS_JWT_SECRET=CHANGE_ME
 OC_BRIDGE_SECRET=CHANGE_ME
 NOOS_API_URL=http://noos_api:4000/api
 NOOS_URL=https://globalbr.ai
-OPENCHAT_URL=https://chat.globalbr.ai
+OPENCHAT_URL=https://chat.ideaflow.app
 # Friends-only beta directory. Change to 0 and redeploy to require a query.
 OPENCHAT_OPEN_USER_DIRECTORY=1
 # Stage IdeaFlow ID credentials separately, then switch this to true only
@@ -146,7 +152,7 @@ IDEAFLOW_ID_ENABLED=false
 IDEAFLOW_ID_ISSUER=https://id.ideaflow.app/api/auth
 IDEAFLOW_ID_CLIENT_ID=
 IDEAFLOW_ID_CLIENT_SECRET=
-IDEAFLOW_ID_REDIRECT_URI=https://chat.globalbr.ai/auth/ideaflow/callback
+IDEAFLOW_ID_REDIRECT_URI=https://chat.ideaflow.app/auth/ideaflow/callback
 EOF
 fi
 

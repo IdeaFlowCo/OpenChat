@@ -52,6 +52,16 @@ import {
 } from './agentSocialLayer.js';
 import { consumePublicationApproval, issuePublicationApproval } from './publicationApproval.js';
 import { assistantTextForMessage } from './assistantContext.js';
+import {
+  isOwnerUser,
+  toolUnlinkedSearch,
+  toolWitComment,
+  toolWitCreateIssue,
+  toolWitGetIssue,
+  toolWitListIssues,
+  toolWitListTrackers,
+  toolWitUpdateIssue,
+} from './externalActions.js';
 
 export const ASSISTANT_USER_ID = 'assistant';
 export const ASSISTANT_NAME = 'Assistant';
@@ -1075,6 +1085,124 @@ function buildTools(): AnthropicType.Tool[] {
       description: "Get the user's bounded actionable review queue for drafts, matches, and expiring items.",
       input_schema: { type: 'object', properties: {} },
     },
+    // ── World Issue Tracker (worldissuetracker.com) ──────────────────────────
+    {
+      name: 'wit_list_trackers',
+      description:
+        'List public issue trackers (boards) on World Issue Tracker (worldissuetracker.com). Optional text filter.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Filter trackers by name/slug/description' },
+          limit: { type: 'number' },
+        },
+      },
+    },
+    {
+      name: 'wit_list_issues',
+      description:
+        'List/search issues on World Issue Tracker. Filter by tracker slug, status (open|acknowledged|in-progress|resolved|closed), label, and/or free-text query.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          tracker_slug: { type: 'string' },
+          status: { type: 'string' },
+          label: { type: 'string' },
+          query: { type: 'string', description: 'Free-text match on title/description' },
+          limit: { type: 'number' },
+          offset: { type: 'number' },
+        },
+      },
+    },
+    {
+      name: 'wit_get_issue',
+      description: 'Read one World Issue Tracker issue (full description) plus its comments, by slug or id.',
+      input_schema: {
+        type: 'object',
+        properties: { issue: { type: 'string', description: 'Issue slug or UUID' } },
+        required: ['issue'],
+      },
+    },
+    {
+      name: 'wit_create_issue',
+      description:
+        "Create an issue on World Issue Tracker. Posts under the user's identity when they are the account owner; set anonymous:true if the user explicitly asks to post anonymously. First call returns needsConfirmation — echo the exact title/board to the user, get a clear yes, then call again with confirm:true.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          description: { type: 'string' },
+          tracker_slug: { type: 'string' },
+          priority: { type: 'string', enum: ['low', 'medium', 'high'] },
+          category: { type: 'string' },
+          issue_type: { type: 'string', enum: ['bug', 'feature', 'task', 'epic', 'chore', 'question', 'other'] },
+          labels: { type: 'array', items: { type: 'string' } },
+          anonymous: { type: 'boolean', description: 'True only if the user explicitly asked to act anonymously' },
+          confirm: { type: 'boolean' },
+        },
+        required: ['title'],
+      },
+    },
+    {
+      name: 'wit_update_issue',
+      description:
+        'Update an existing World Issue Tracker issue (title/description/status/priority/labels). Only available to the account owner. Requires confirm:true after echoing the change to the user.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          issue_id: { type: 'string', description: 'Issue UUID (from wit_get_issue)' },
+          title: { type: 'string' },
+          description: { type: 'string' },
+          // Note: WIT's update-issue rejects 'closed' (verified live); 'resolved' is the terminal state.
+          status: { type: 'string', enum: ['open', 'acknowledged', 'in-progress', 'resolved'] },
+          priority: { type: 'string', enum: ['low', 'medium', 'high'] },
+          category: { type: 'string' },
+          issue_type: { type: 'string' },
+          labels: { type: 'array', items: { type: 'string' } },
+          confirm: { type: 'boolean' },
+        },
+        required: ['issue_id'],
+      },
+    },
+    {
+      name: 'wit_comment',
+      description:
+        'Post a comment on a World Issue Tracker issue. Anonymous by default for non-owner users; set anonymous:true if the user explicitly asks. Requires confirm:true after echoing the comment.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          issue_id: { type: 'string', description: 'Issue UUID (from wit_get_issue)' },
+          content: { type: 'string' },
+          anonymous: { type: 'boolean' },
+          confirm: { type: 'boolean' },
+        },
+        required: ['issue_id', 'content'],
+      },
+    },
+    // ── unlinked.ai (owner-only, read-only) ──────────────────────────────────
+    {
+      name: 'unlinked_search_network',
+      description:
+        "Search the configured unlinked.ai professional network (imported LinkedIn connections). ALWAYS call it when asked — the server checks authorization itself and returns a clear error if this user may not use it; never refuse pre-emptively. Optional degree 1|2 reads recorded connection paths.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+          degree: { type: 'number', enum: [1, 2] },
+        },
+        required: ['query'],
+      },
+    },
+    {
+      name: 'unlinked_search_everyone',
+      description:
+        'Search the published professional People index on unlinked.ai. ALWAYS call it when asked — the server checks authorization itself; never refuse pre-emptively.',
+      input_schema: {
+        type: 'object',
+        properties: { query: { type: 'string' } },
+        required: ['query'],
+      },
+    },
   ];
 }
 
@@ -1292,6 +1420,97 @@ async function executeTool(
       }
       case 'get_review_queue':
         return getReviewQueue(userId);
+      case 'wit_list_trackers': {
+        const query = typeof input.query === 'string' ? input.query : undefined;
+        const limit = typeof input.limit === 'number' ? input.limit : 20;
+        return await toolWitListTrackers(query, limit);
+      }
+      case 'wit_list_issues': {
+        return await toolWitListIssues({
+          trackerSlug: typeof input.tracker_slug === 'string' ? input.tracker_slug : undefined,
+          status: typeof input.status === 'string' ? input.status : undefined,
+          label: typeof input.label === 'string' ? input.label : undefined,
+          query: typeof input.query === 'string' ? input.query : undefined,
+          limit: typeof input.limit === 'number' ? input.limit : undefined,
+          offset: typeof input.offset === 'number' ? input.offset : undefined,
+        });
+      }
+      case 'wit_get_issue': {
+        const issue = typeof input.issue === 'string' ? input.issue.trim() : '';
+        if (!issue) return { error: 'issue is required' };
+        return await toolWitGetIssue(issue);
+      }
+      case 'wit_create_issue': {
+        const title = typeof input.title === 'string' ? input.title.trim() : '';
+        if (!title) return { error: 'title is required' };
+        const anonymous = input.anonymous === true;
+        if (input.confirm !== true) {
+          return {
+            needsConfirmation: true,
+            message:
+              'Echo the exact issue title, board, and whether it posts as the user or anonymously; call again with confirm:true after an explicit yes.',
+            wouldPostAs: !anonymous && isOwnerUser(userId) ? 'Jacob (authenticated)' : 'anonymous',
+          };
+        }
+        return await toolWitCreateIssue(userId, {
+          title,
+          description: typeof input.description === 'string' ? input.description : undefined,
+          trackerSlug: typeof input.tracker_slug === 'string' ? input.tracker_slug : undefined,
+          priority: typeof input.priority === 'string' ? input.priority : undefined,
+          category: typeof input.category === 'string' ? input.category : undefined,
+          issueType: typeof input.issue_type === 'string' ? input.issue_type : undefined,
+          labels: Array.isArray(input.labels)
+            ? (input.labels.filter((x) => typeof x === 'string') as string[])
+            : undefined,
+          anonymous,
+        });
+      }
+      case 'wit_update_issue': {
+        const issueId = typeof input.issue_id === 'string' ? input.issue_id.trim() : '';
+        if (!issueId) return { error: 'issue_id is required' };
+        if (input.confirm !== true) {
+          return {
+            needsConfirmation: true,
+            message: 'Echo the exact change to the user and call again with confirm:true after an explicit yes.',
+          };
+        }
+        return await toolWitUpdateIssue(userId, {
+          issueId,
+          title: typeof input.title === 'string' ? input.title : undefined,
+          description: typeof input.description === 'string' ? input.description : undefined,
+          status: typeof input.status === 'string' ? input.status : undefined,
+          priority: typeof input.priority === 'string' ? input.priority : undefined,
+          category: typeof input.category === 'string' ? input.category : undefined,
+          issueType: typeof input.issue_type === 'string' ? input.issue_type : undefined,
+          labels: Array.isArray(input.labels)
+            ? (input.labels.filter((x) => typeof x === 'string') as string[])
+            : undefined,
+        });
+      }
+      case 'wit_comment': {
+        const issueId = typeof input.issue_id === 'string' ? input.issue_id.trim() : '';
+        const content = typeof input.content === 'string' ? input.content : '';
+        if (!issueId) return { error: 'issue_id is required' };
+        if (!content.trim()) return { error: 'content is required' };
+        if (input.confirm !== true) {
+          return {
+            needsConfirmation: true,
+            message: 'Echo the exact comment to the user and call again with confirm:true after an explicit yes.',
+          };
+        }
+        return await toolWitComment(userId, { issueId, content, anonymous: input.anonymous === true });
+      }
+      case 'unlinked_search_network': {
+        const query = typeof input.query === 'string' ? input.query : '';
+        if (!query.trim()) return { error: 'query is required' };
+        const degree = input.degree === 1 || input.degree === 2 ? input.degree : undefined;
+        return await toolUnlinkedSearch(userId, 'unlinked_search_network', { query, degree });
+      }
+      case 'unlinked_search_everyone': {
+        const query = typeof input.query === 'string' ? input.query : '';
+        if (!query.trim()) return { error: 'query is required' };
+        return await toolUnlinkedSearch(userId, 'unlinked_search_everyone', { query });
+      }
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -1365,6 +1584,8 @@ Guidelines:
 - Sending to OTHER people requires confirmation: the first send_message / send_message_to_person call returns { needsConfirmation: true, ... } instead of sending. When you get that, DO NOT retry blindly — tell the user exactly what you'll send and to whom, wait for their explicit yes, then call the SAME tool again with the SAME content and confirm:true. If they decline or change the wording, do not send. Messages to the user's own Assistant DM go through immediately with no confirmation.
 - If the user wants to report a bug, give feedback, or request a feature about OpenChat (the app), use submit_feedback — it files a tracked issue for the OpenChat team. Confirm what you'll send, then share the resulting link. This is how feedback reaches us, so offer it when the user seems stuck or frustrated with the app.
 - A message starting with "[Voice message]" is the transcript of a voice note the user recorded; answer it like any typed message. If it says no transcript is available, tell the user you could not make out the voice message and ask them to resend it or type it.
+- World Issue Tracker (worldissuetracker.com) tools: anyone can browse trackers and read issues (wit_list_trackers, wit_list_issues, wit_get_issue). Creating/updating/commenting posts under the account owner's identity when the invoking user IS the owner (the server verifies this — you cannot grant it), and anonymously otherwise. If the user explicitly says "anonymously", pass anonymous:true. Writes always need an explicit confirmation round (confirm:true on the second call). Share the resulting issue URL.
+- unlinked.ai tools (unlinked_search_network, unlinked_search_everyone) search a professional network and the public People index. They are read-only and server-gated: when asked, ALWAYS just call the tool — you cannot tell who is authorized, the server decides and returns a clear error if not. Relay that result. unlinked.ai has no anonymous agent access and no posting API; never claim you posted to unlinked.ai.
 - Your final response (plain text, no tool call) is delivered to the user as a chat message.`;
 
 /**

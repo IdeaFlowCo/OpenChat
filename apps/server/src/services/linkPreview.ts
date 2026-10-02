@@ -92,7 +92,7 @@ async function fetchPreview(url: string): Promise<Omit<LinkPreview, 'fetchedAt'>
     const resp = await fetch(url, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'OpenChat-LinkPreview/1.0 (+https://chat.globalbr.ai)',
+        'User-Agent': 'OpenChat-LinkPreview/1.0 (+https://chat.ideaflow.app)',
         'Accept': 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
       },
       redirect: 'follow',

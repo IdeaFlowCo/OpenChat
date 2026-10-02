@@ -6,7 +6,7 @@ Last verified: 2026-08-28
 
 | Layer | Production value |
 |---|---|
-| Public URL | `https://chat.globalbr.ai` |
+| Public URL at last verification | `https://chat.globalbr.ai` |
 | Edge DNS/TLS | Cloudflare |
 | GCP project | `lightsail-migration` (`855339352691`) |
 | Compute | GCE instance `noos`, `us-central1-a`, static IP `34.10.134.247` |
@@ -19,6 +19,10 @@ Last verified: 2026-08-28
 Cloudflare is the public TLS endpoint. The origin currently listens on HTTP;
 Cloudflare-to-origin encryption and origin firewall hardening are tracked as
 follow-up work rather than being implied by the public HTTPS URL.
+
+For the new `chat.ideaflow.app` host and preservation of the old address, see
+[the domain rollout](./chat-domain-rollout.md). The topology above records the
+last verified live host, not completion of that cutover.
 
 ## Deploy
 
@@ -36,9 +40,9 @@ curl -fsS https://chat.globalbr.ai/health
 
 `infra/deploy.sh` builds the server and one responsive React Native web export
 for `/app` before copying the release bundle with `gcloud compute scp`. Its
-defaults can be overridden with `GCP_PROJECT`, `GCP_ZONE`, and `GCP_INSTANCE`.
-The script uses explicit project and zone flags so an unrelated active gcloud
-configuration cannot redirect the deploy.
+defaults can be overridden with `GCP_PROJECT`, `GCP_ZONE`, `GCP_INSTANCE`, and
+`GCP_ACCOUNT`. The script uses explicit account, project, and zone flags so an
+unrelated active gcloud configuration cannot redirect the deploy.
 
 ## Operations
 

@@ -2,7 +2,7 @@
  * Route params. Centralized so screens can import a single type rather than
  * redeclaring at each navigation.navigate() call site.
  *
- * The app uses a bottom-tab navigator (Chats / Thoughts) wrapping native stacks.
+ * The app uses a bottom-tab navigator (Chats / Stream) wrapping native stacks.
  * The types below cover all screens across both tabs.
  */
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -24,6 +24,8 @@ export type RootStackParamList = {
   Conversations: undefined;
   Chat: { conversationId: string; lane?: 'chat' | 'context'; entryId?: string };
   NewConversation: undefined;
+  InvitePerson: undefined;
+  Friends: { section?: 'friends' | 'requests' } | undefined;
   /** OpenChat Agent overlay (asks, offers, and anonymous matches; OpenChat-a0e.5). */
   AgentOverlay: { prompt?: string } | undefined;
   StoryComposer: { draftId?: string; initialText?: string; destination?: 'agents_only' | 'both' | 'stories_only' } | undefined;
@@ -48,8 +50,8 @@ export type RootStackParamList = {
   CardEntry: { token: string };
   /** Forward picker — select conversation to forward a message into (OpenChat-hhc). */
   ForwardPicker: { messageId: string };
-  /** Contact profile — opened by tapping the DM header. */
-  ContactProfile: { userId: string };
+  /** Contact profile — chat header, Friends, People directory, or contact search. */
+  ContactProfile: { userId: string; exactEmail?: string };
   /** Agent API keys list (OpenChat-7c9). */
   AgentKeys: undefined;
   /** Create a new agent key. */

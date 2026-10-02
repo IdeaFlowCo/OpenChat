@@ -7,7 +7,7 @@ use tauri::{WebviewUrl, WebviewWindowBuilder};
 /// The live responsive client — the same origin, auth, API, and socket that
 /// browsers and the RN-web build use, so desktop and mobile share one account
 /// and one live conversation state. Keep in sync with `build.frontendDist`.
-const APP_URL: &str = "https://chat.globalbr.ai/app/";
+const APP_URL: &str = "https://chat.ideaflow.app/app/";
 
 /// Hand `window.open` / `Linking.openURL` targets to the system browser; the
 /// webview has no tabs, so an in-app popup would just be a dead window.

@@ -24,7 +24,7 @@ module.exports = {
   expo: {
     name: 'OpenChat',
     slug: 'openchat-mobile',
-    version: '1.0.2',
+    version: '1.0.4',
     // orientation: 'default' unlocks landscape so iPad gets a proper
     // rotatable split-view / multitasking experience (OpenChat-d7f). Phones
     // still lay out the single-column mobile stack in any orientation; the
@@ -55,17 +55,10 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.jacobcole.openchat',
-      buildNumber: '2001',
-      // NOTE — associatedDomains intentionally commented out for now.
-      // Adding it requires enabling the 'Associated Domains' capability on
-      // the App ID via the Apple Developer Portal (or ASC API). Without
-      // that, EAS Build fails generating the provisioning profile (saw on
-      // build 40, 2026-06-01). Universal Links are tracked in OpenChat-84u.2
-      // for proper provisioning + re-enable. The openchat:// URL scheme +
-      // AASA file + web window.location parsing already cover the deep-
-      // link UX without Apple-side capability work.
-      //
-      // associatedDomains: ['applinks:chat.globalbr.ai'],
+      buildNumber: '2002',
+      // Both hosts serve the same AASA; existing links remain associated.
+      // Apple also requires the App ID capability and a regenerated profile.
+      associatedDomains: ['applinks:chat.ideaflow.app', 'applinks:chat.globalbr.ai'],
       entitlements: {
         'com.apple.developer.applesignin': ['Default'],
       },
@@ -92,6 +85,8 @@ module.exports = {
 
     android: {
       package: 'com.jacobcole.openchat',
+      // W1 only reads a user-selected contact; it never edits the address book.
+      blockedPermissions: ['android.permission.WRITE_CONTACTS'],
       adaptiveIcon: {
         backgroundColor: '#faf6ef',
         foregroundImage: './assets/android-icon-foreground.png',
@@ -109,7 +104,7 @@ module.exports = {
       eas: {
         projectId: 'fc828863-4fa4-4b62-97f6-8c00ce1dffe3',
       },
-      buildDate: '2026-09-22',
+      buildDate: '2026-09-30',
     },
 
     // baseUrl ONLY set during web exports (when IS_WEB_BUILD=1). Native
@@ -122,6 +117,7 @@ module.exports = {
       'expo-web-browser',
       'expo-camera',
       'expo-image-picker',
+      ['expo-contacts', { contactsPermission: 'Choose one person to invite to OpenChat. Contacts stay on this device and are not uploaded.' }],
       'expo-apple-authentication',
       ['expo-notifications', { color: '#b3541e' }],
       [

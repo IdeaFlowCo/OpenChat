@@ -76,6 +76,17 @@ export async function initDatabase(): Promise<void> {
       FOR (u:User) REQUIRE u.ideaflowIdentityKey IS UNIQUE
     `);
 
+    // Google binding transactions serialize by email and subject without
+    // migrating or imposing uniqueness on legacy shared User data.
+    await session.run(`
+      CREATE CONSTRAINT openchat_google_auth_lock IF NOT EXISTS
+      FOR (lock:OpenChatGoogleAuthLock) REQUIRE lock.key IS UNIQUE
+    `);
+    await session.run(`
+      CREATE INDEX openchat_user_google_subject IF NOT EXISTS
+      FOR (u:User) ON (u.googleSub)
+    `);
+
     // Context Lane index
     await session.run(`
       CREATE INDEX thought_lane_conversation IF NOT EXISTS
@@ -118,6 +129,14 @@ export async function initDatabase(): Promise<void> {
       CREATE CONSTRAINT addme_card_token IF NOT EXISTS
       FOR (card:AddMeCard) REQUIRE card.token IS UNIQUE
     `);
+
+    // One durable lifecycle per unordered pair, independent of conversations.
+    await session.run(`
+      CREATE CONSTRAINT friend_connection_pair IF NOT EXISTS
+      FOR (connection:OpenChatConnection) REQUIRE connection.pairKey IS UNIQUE
+    `);
+    await session.run(`CREATE INDEX friend_connection_first IF NOT EXISTS FOR (connection:OpenChatConnection) ON (connection.firstId)`);
+    await session.run(`CREATE INDEX friend_connection_second IF NOT EXISTS FOR (connection:OpenChatConnection) ON (connection.secondId)`);
 
     console.log('Database constraints and indexes initialized');
   } finally {

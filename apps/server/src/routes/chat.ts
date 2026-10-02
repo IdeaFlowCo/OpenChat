@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
+import { createHash } from 'node:crypto';
 import neo4j from 'neo4j-driver';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -23,6 +24,7 @@ import { DirectConversationNotAllowedError, ensureDirectConversation } from '../
 import { classifyContactDiscoveryQuery } from '../privacy/contactDiscovery.js';
 import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
 import { isOpenUserDirectoryEnabled } from '../config/features.js';
+import { chatOriginForRequestHost } from '../config/publicUrl.js';
 import { acquireContextAclLocks } from '../services/contextAccess.js';
 
 // ─── S3/GCS client (lazy-initialised on first use) ───────────────────────────
@@ -940,9 +942,19 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     messageType = 'text',
     attachments,
     id: clientId,
+    clientRequestId,
     replyToId,
   } = req.body;
   const content = rawContent ?? text;
+
+  if (req.connectorDelegation && (
+    typeof rawContent !== 'string' || !rawContent.trim()
+    || typeof clientRequestId !== 'string' || clientRequestId.length < 1 || clientRequestId.length > 200
+    || Object.keys(req.body).some((key) => key !== 'content' && key !== 'clientRequestId')
+  )) {
+    res.status(400).json({ error: 'Delegated sends require content and a stable message id' });
+    return;
+  }
 
   // Card messages are server-internal. Accepting them here would let a human
   // participant or oc_ agent key forge unattributed match cards.
@@ -1025,10 +1037,14 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // so a WS send whose ack was lost, then retried over this REST fallback,
     // collapses to one row via MERGE instead of persisting a duplicate with a
     // fresh nanoid. See OpenChat-60y.
-    const messageId = (typeof clientId === 'string' && clientId) || nanoid();
+    const messageId = req.connectorDelegation
+      ? 'ocd_' + createHash('sha256').update(JSON.stringify([req.connectorDelegation.clientId,
+        req.connectorDelegation.connectorGrantId, req.connectorDelegation.connectorUserId,
+        req.connectorDelegation.openChatUserId, clientRequestId])).digest('hex')
+      : (typeof clientId === 'string' && clientId) || nanoid();
     const now = new Date().toISOString();
     // Use caption or fallback for preview
-    const messageContent = hasContent ? (content as string).trim() : '';
+    const messageContent = hasContent ? (req.connectorDelegation ? content as string : (content as string).trim()) : '';
     // attachmentsJson stored as a JSON string in Neo4j
     const attachmentsJson = hasAttachments ? JSON.stringify(attachments) : null;
     // lastMessagePreview for image-only messages
@@ -1036,6 +1052,20 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       (a) => typeof a?.mimeType === 'string' && a.mimeType.startsWith('audio/')
     );
     const preview = messageContent || (hasAudio ? 'Voice note' : hasAttachments ? 'Photo' : '');
+
+    if (req.connectorDelegation) {
+      const existing = await session.run('MATCH (m:Message {id: $id}) RETURN m { .* } AS message', { id: messageId });
+      if (existing.records.length) {
+        const message = toJS(existing.records[0].get('message')) as Record<string, unknown>;
+        if (message.senderId !== userId || message.conversationId !== conversationId
+          || message.content !== messageContent) {
+          res.status(409).json({ error: 'Idempotency key already used' });
+          return;
+        }
+        res.status(200).json(message);
+        return;
+      }
+    }
 
     const result = await session.run(`
       MATCH (c:Conversation {id: $conversationId})
@@ -1050,11 +1080,15 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         m.replyToId = $replyToId,
         m.createdAt = datetime($now),
         m._created = true
+      WITH c, sender, m
+      WHERE NOT $delegated OR (m.senderId = $senderId
+        AND m.conversationId = $conversationId AND m.content = $content)
       MERGE (m)-[:IN_CONVERSATION]->(c)
       MERGE (sender)-[:SENT]->(m)
-      SET c.updatedAt = datetime($now),
-          c.lastMessageAt = datetime($now),
-          c.lastMessagePreview = left($preview, 100)
+      FOREACH (_ IN CASE WHEN coalesce(m._created, false) THEN [1] ELSE [] END |
+        SET c.updatedAt = datetime($now),
+            c.lastMessageAt = datetime($now),
+            c.lastMessagePreview = left($preview, 100))
       // OpenChat-uxj: hydrate the reply target so clients can render the
       // quote bubble without an extra fetch. OpenChat-60y: also return the
       // participant ids so we can fan out to per-user rooms.
@@ -1082,6 +1116,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       wasCreated
     `, {
       id: messageId,
+      delegated: Boolean(req.connectorDelegation),
       content: messageContent,
       senderId: userId,
       conversationId,
@@ -1092,9 +1127,24 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       preview,
     });
 
+    if (req.connectorDelegation && result.records.length === 0) {
+      res.status(409).json({ error: 'Idempotency key already used' });
+      return;
+    }
     const message = toJS(result.records[0].get('message')) as Record<string, unknown>;
     const participantIds = result.records[0].get('participantIds') as string[];
     const wasCreated = result.records[0].get('wasCreated') === true;
+    if (req.connectorDelegation && !wasCreated) {
+      // Connector retries return the original row without another broadcast,
+      // push, webhook, assistant turn, or thought extraction.
+      if (message.senderId !== userId || message.conversationId !== conversationId
+        || message.content !== messageContent) {
+        res.status(409).json({ error: 'Idempotency key already used' });
+        return;
+      }
+      res.status(200).json(message);
+      return;
+    }
     // Parse attachments JSON string back to array for the response + broadcast
     if (message && typeof message.attachments === 'string') {
       try { message.attachments = JSON.parse(message.attachments as string); } catch { /* leave as string */ }
@@ -1629,7 +1679,12 @@ router.post('/users/:id/block', requireAuth, async (req: Request, res: Response)
         MATCH (me:User {id: $myId}), (target:User {id: $targetId})
         MERGE (me)-[r:BLOCKED]->(target)
         ON CREATE SET r.createdAt = datetime($now)
-      `, { myId, targetId, now });
+        WITH me, target
+        OPTIONAL MATCH (connection:OpenChatConnection {pairKey: $pairKey})
+        FOREACH (_ IN CASE WHEN connection IS NULL THEN [] ELSE [1] END |
+          SET connection.state = 'removed', connection.updatedAt = datetime($now),
+              connection.requestedBy = null, connection.requestedTo = null)
+      `, { myId, targetId, now, pairKey: JSON.stringify([myId, targetId].sort()) });
     });
     res.status(201).json({ blocked: true, targetId });
   } catch (error) {
@@ -2516,6 +2571,7 @@ router.get('/messages/since', resolveActor, async (req: Request, res: Response) 
 // POST /api/chat/conversations/:id/invites — owner-only, create or return active invite
 router.post('/conversations/:id/invites', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
+  const requestOrigin = chatOriginForRequestHost(req.get('host'));
   const userId = req.user!.userId;
   const convId = req.params.id as string;
   const { expiresInDays = 7, maxUses = 50 } = req.body as { expiresInDays?: number; maxUses?: number };
@@ -2558,7 +2614,7 @@ router.post('/conversations/:id/invites', requireAuth, async (req: Request, res:
       const token = inv.token as string;
       res.json({
         token,
-        url: `https://chat.globalbr.ai/i/${token}`,
+        url: `${requestOrigin}/i/${token}`,
         expiresAt: inv.expiresAt,
         usesLeft: inv.usesLeft,
       });
@@ -2585,7 +2641,7 @@ router.post('/conversations/:id/invites', requireAuth, async (req: Request, res:
 
     res.status(201).json({
       token,
-      url: `https://chat.globalbr.ai/i/${token}`,
+      url: `${requestOrigin}/i/${token}`,
       expiresAt,
       usesLeft: maxUses,
     });
@@ -2600,6 +2656,7 @@ router.post('/conversations/:id/invites', requireAuth, async (req: Request, res:
 // GET /api/chat/conversations/:id/invites — owner-only, list active invites
 router.get('/conversations/:id/invites', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
+  const requestOrigin = chatOriginForRequestHost(req.get('host'));
   const userId = req.user!.userId;
   const convId = req.params.id as string;
 
@@ -2629,7 +2686,7 @@ router.get('/conversations/:id/invites', requireAuth, async (req: Request, res: 
       const props = toJS(r.get('inv').properties) as Record<string, unknown>;
       return {
         token: props.token,
-        url: `https://chat.globalbr.ai/i/${props.token}`,
+        url: `${requestOrigin}/i/${props.token}`,
         expiresAt: props.expiresAt,
         usesLeft: props.usesLeft,
         createdAt: props.createdAt,

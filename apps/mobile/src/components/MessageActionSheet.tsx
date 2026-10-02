@@ -60,9 +60,9 @@ interface Props {
    */
   onAskAssistant: (message: Message, question: string) => void;
   /**
-   * Save the message into the user's Thoughts stream (with provenance).
+   * Save the message into the user's Stream (with provenance).
    * `pin` additionally pins the new thought to this conversation so all
-   * participants see it in the chat-scoped Thoughts view.
+   * participants see it in the chat-scoped Stream view.
    */
   onSaveToThoughts: (message: Message, pin: boolean) => void;
   /** Edit action (own messages) — enters edit mode in composer */
@@ -158,7 +158,7 @@ export function MessageActionSheet({
     onAskAssistant(msg, q);
   };
 
-  // Save to Thoughts / Save & pin (unified capture affordance).
+  // Save to Stream / Save & pin (unified capture affordance).
   const handleSaveToThoughts = () => {
     if (!message) return;
     const msg = message;
@@ -436,8 +436,8 @@ export function MessageActionSheet({
               </TouchableOpacity>
             )}
 
-            {/* Save to Thoughts / Save & pin — the unified capture affordance.
-                Saves this message's text into the user's Thoughts stream with
+            {/* Save to Stream / Save & pin — the unified capture affordance.
+                Saves this message's text into the user's Stream with
                 provenance; the pin variant also shares it to this chat's
                 pinned notes. Skip for messages with no text (e.g. image-only). */}
             {!message.deletedAt && !!message.content?.trim() && (
@@ -449,7 +449,7 @@ export function MessageActionSheet({
                 <View style={styles.actionIconBox}>
                   <AppIcon name="thought" color={c.textPrimary} size={20} />
                 </View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Save to Thoughts</Text>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Save to Stream</Text>
               </TouchableOpacity>
             )}
             {!message.deletedAt && !!message.content?.trim() && (
@@ -464,7 +464,7 @@ export function MessageActionSheet({
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Pin to chat</Text>
                   <Text style={{ fontSize: 12, color: c.textMetadata, marginTop: 1 }}>
-                    Saves to your Thoughts and pins it for everyone here
+                    Saves to your Stream and pins it for everyone here
                   </Text>
                 </View>
               </TouchableOpacity>

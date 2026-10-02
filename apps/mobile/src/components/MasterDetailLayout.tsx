@@ -63,6 +63,7 @@ const SIDEBAR_WIDTH_EXPANDED = 320;
 const SIDEBAR_WIDTH_COLLAPSED = 56;
 const SIDEBAR_ANIM_MS = 160;
 const STORAGE_KEY = 'openchat_sidebar_collapsed';
+const HOME_HOSTNAME = new URL(OPENCHAT_URL).hostname;
 
 /**
  * Hover-aware icon button for the desktop sidebar header (desktop-ux-audit).
@@ -282,12 +283,12 @@ export function MasterDetailLayout() {
       >
         {/* Back-to-home bar (OpenChat-601.1). Top-of-sidebar affordance
             so users in the master-detail view can always navigate back
-            to the OpenChat home page (chat.globalbr.ai/). Collapses to a
+            to the OpenChat home page. Collapses to a
             tiny icon when the sidebar is in icon-only mode. */}
         <Pressable
           onPress={() => void Linking.openURL(OPENCHAT_URL + '/')}
           // @ts-ignore — title is a web-only DOM attr; RN-web passes through.
-          title="OpenChat home (chat.globalbr.ai)"
+          title={`OpenChat home (${HOME_HOSTNAME})`}
           accessibilityLabel="OpenChat home"
           style={[styles.homeBar, { borderColor: c.border }]}
         >
@@ -297,7 +298,7 @@ export function MasterDetailLayout() {
             <>
               <View style={{ marginRight: 6 }}><AppIcon name="reply" color={c.primary} size={14} /></View>
               <Text style={{ color: c.textSecondary, fontSize: 12, fontWeight: '500' }} numberOfLines={1}>
-                chat.globalbr.ai
+                {HOME_HOSTNAME}
               </Text>
             </>
           )}
@@ -321,11 +322,11 @@ export function MasterDetailLayout() {
             </TouchableOpacity>
             <IconButton
               onPress={openNew}
-              title="New conversation (⌘N)"
-              accessibilityLabel="New conversation"
+              title="People (⌘N)"
+              accessibilityLabel="People"
               hoverBg={c.surfaceElevated}
             >
-              <AppIcon name="plus" color={c.primary} size={20} />
+              <Text style={{ color: c.primary, fontSize: 11, fontWeight: '700' }}>People</Text>
             </IconButton>
           </View>
         ) : (
@@ -360,11 +361,11 @@ export function MasterDetailLayout() {
               </View>
               <IconButton
                 onPress={openNew}
-                title="New conversation (⌘N)"
-                accessibilityLabel="New conversation"
+                title="People (⌘N)"
+                accessibilityLabel="People"
                 hoverBg={c.surfaceElevated}
               >
-                <AppIcon name="plus" color={c.primary} size={20} />
+                <Text style={{ color: c.primary, fontSize: 14, fontWeight: '600' }}>People</Text>
               </IconButton>
             </View>
             <Pressable
