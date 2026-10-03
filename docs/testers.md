@@ -168,17 +168,23 @@ eas update --branch production --message "what changed"
 
 Reaches all installs whose native version matches (see runtime version gate).
 
-**Runtime targeting after a version bump (2026-10-02, OpenChat 1.0.5).** With
-`runtimeVersion: { policy: 'appVersion' }`, `eas update` from `main` publishes
-for whatever `version` is in `app.config.js`. Once `main` says `1.0.5`, an
-update from `main` targets runtime `1.0.5` (the App Store 1.0.5 binary and
-its TestFlight build), not the older binaries. Live runtimes at that point:
+**Runtime targeting after a version bump (updated 2026-10-03, OpenChat 1.0.6).**
+With `runtimeVersion: { policy: 'appVersion' }`, `eas update` from `main`
+publishes for whatever `version` is in `app.config.js`. `main` says `1.0.6`
+since PR #126 (native Sign in with Ideaflow), so an update from `main` targets
+runtime `1.0.6` only. Live runtimes:
 
-| Runtime | Binary | Where |
-|---------|--------|-------|
-| `1.0.5` | build 112+ | App Store review / TestFlight (from `main`) |
-| `1.0.4` | build 111 | TestFlight only |
-| `1.0.1` | build 103 | App Store (until 1.0.5 is released) |
+| Runtime | Binary | Where | Sign-in in the binary |
+|---------|--------|-------|-----------------------|
+| `1.0.6` | build 113+ | App Store review (submitted 2026-10-03, releases automatically after approval); TestFlight Founders + Friends and Family (from `main`) | Sign in with Ideaflow (plus Sign in with Apple) |
+| `1.0.5` | build 112 | TestFlight only. Its App Store submission was withdrawn on 2026-10-03 and the same store version was resubmitted as 1.0.6 | legacy native methods |
+| `1.0.4` | build 111 | TestFlight only | legacy native methods |
+| `1.0.1` | build 103 | App Store (until 1.0.6 is released) | legacy native methods |
+
+The unified sign-in needs native code (`expo-web-browser` auth session), so it
+reaches people only through the 1.0.6 binary. Do not OTA it onto `1.0.5` or
+older runtimes. Removing the native Sign in with Apple button later
+(`KEEP_NATIVE_APPLE_SIGN_IN`) is an OTA to runtime `1.0.6`.
 
 To hotfix an older runtime, publish from a checkout whose `app.config.js`
 still has that version (for example, the commit before the bump) to the same
