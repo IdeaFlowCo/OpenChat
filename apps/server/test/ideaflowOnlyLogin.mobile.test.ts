@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // OpenChat-3ag.12 / code-xbh.3: on web with Ideaflow ID enabled the login
 // screen offers exactly one control, "Sign in with Ideaflow" (Google,
 // email/password and sign-up happen on id.ideaflow.app). Legacy methods remain
-// only as the kill-switch fallback; native is unchanged.
+// only as the kill-switch fallback. Native (code-xbh.14) shows the same button
+// and runs the system-browser flow; iOS keeps Sign in with Apple until
+// Ideaflow ID offers Apple (code-xbh.13).
 
 const mocks = vi.hoisted(() => ({
   platform: { OS: 'web' as string },
@@ -14,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   config: { enabled: true } as Record<string, unknown> | 'reject' | 'hang',
   authorizeUrl: 'https://id.ideaflow.app/api/auth/oauth2/authorize?client_id=openchat-web',
   fetch: vi.fn(),
+  nativeSignIn: vi.fn(),
 }));
 
 vi.mock('react-native', () => ({
@@ -47,6 +50,7 @@ vi.mock('../../mobile/src/api/client', () => ({
   GOOGLE_ANDROID_CLIENT_ID: 'android.apps.googleusercontent.com',
   api: {},
 }));
+vi.mock('../../mobile/src/services/ideaflowNativeSignIn', () => ({ signInWithIdeaflowNative: mocks.nativeSignIn }));
 vi.mock('expo-clipboard', () => ({ getStringAsync: vi.fn() }));
 vi.mock('../../mobile/src/utils/parseOpenChatUrl', () => ({ parseOpenChatUrl: vi.fn() }));
 vi.mock('../../mobile/src/services/entryIntents', () => ({ createEntryIntent: vi.fn(), saveEntryIntent: vi.fn() }));
@@ -235,16 +239,72 @@ describe('web login when Ideaflow ID is unavailable', () => {
   });
 });
 
-describe('native login is unchanged', () => {
-  it.each(['ios', 'android'])('%s keeps Google, email/password and the footer without asking the server', async os => {
+describe('native login (code-xbh.14)', () => {
+  const appleButtons = () => screen!.root.findAll(n => n.type === 'AppleAuthenticationButton');
+
+  it.each(['ios', 'android'])('%s shows Sign in with Ideaflow when the server enables it', async os => {
     mocks.platform.OS = os;
     vi.stubGlobal('window', undefined);
     await render();
     await settle();
-    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(requestedUrls().map(u => u.pathname)).toContain('/api/auth/ideaflow/config');
+    expect(labels()).toEqual(['Sign in with Ideaflow']);
+    expect(inputs()).toEqual([]);
+    expect(hasText('New here? You can create an account on the next screen.')).toBe(true);
+    for (const gone of ['Continue with Google', "Don't have an account? Create one", 'Uses your Noos credentials']) {
+      expect(hasText(gone)).toBe(false);
+    }
+    // Apple-only accounts keep a way in until Ideaflow ID offers Apple (code-xbh.13).
+    expect(appleButtons()).toHaveLength(os === 'ios' ? 1 : 0);
+  });
+
+  it('runs the system-browser flow and boots the session on success', async () => {
+    mocks.platform.OS = 'ios';
+    vi.stubGlobal('window', undefined);
+    mocks.nativeSignIn.mockResolvedValue('signed-in');
+    await render();
+    await settle();
+    await act(async () => { await button('Sign in with Ideaflow').props.onPress(); });
+    await settleUntil(() => mocks.bootstrap.mock.calls.length > 0);
+    expect(mocks.nativeSignIn).toHaveBeenCalledTimes(1);
+    expect(mocks.bootstrap).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays quietly on the login screen when the person cancels', async () => {
+    mocks.platform.OS = 'android';
+    vi.stubGlobal('window', undefined);
+    mocks.nativeSignIn.mockResolvedValue('cancelled');
+    await render();
+    await settle();
+    await act(async () => { await button('Sign in with Ideaflow').props.onPress(); });
+    await settle();
+    expect(mocks.bootstrap).not.toHaveBeenCalled();
+    expect(mocks.alert).not.toHaveBeenCalled();
+  });
+
+  it('shows failures with fixed copy', async () => {
+    mocks.platform.OS = 'ios';
+    vi.stubGlobal('window', undefined);
+    mocks.nativeSignIn.mockRejectedValue(new Error("Ideaflow sign-in didn't work. Please try again."));
+    await render();
+    await settle();
+    await act(async () => { await button('Sign in with Ideaflow').props.onPress(); });
+    await settle();
+    const inline = screen!.root.findAll(n => n.type === 'Text' && n.props.accessibilityRole === 'alert').map(textOf);
+    expect(inline).toEqual(["Ideaflow sign-in didn't work. Please try again."]);
+    expect(mocks.bootstrap).not.toHaveBeenCalled();
+  });
+
+  it.each(['ios', 'android'])('%s falls back to every legacy method when the kill switch is off', async os => {
+    mocks.platform.OS = os;
+    mocks.config = { enabled: false };
+    vi.stubGlobal('window', undefined);
+    await render();
+    await settle();
     expect(labels()).toContain('Continue with Google');
     expect(labels()).not.toContain('Sign in with Ideaflow');
     expect(inputs()).toEqual(['Email', 'Password']);
     expect(hasText('Uses your Noos credentials. Phone sign-in coming soon.')).toBe(true);
+    expect(appleButtons()).toHaveLength(os === 'ios' ? 1 : 0);
   });
 });

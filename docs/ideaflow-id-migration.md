@@ -127,7 +127,8 @@ fixed, readable copy (provider error text is never echoed), because RN-web's
 `Alert.alert` is a no-op. If the server disables Ideaflow ID or the
 capability check fails, web falls back to the legacy methods; that kill-switch
 fallback is the only way the legacy web methods appear. Native iOS and
-Android keep their current methods until native Ideaflow sign-in ships. Covered
+Android follow the same capability response; see
+[Native sign-in](#native-sign-in-ios-and-android-code-xbh14). Covered
 by `apps/server/test/ideaflowOnlyLogin.mobile.test.ts`,
 `apps/server/test/signOut.mobile.test.ts` and
 `apps/mobile/src/services/ideaflowSignIn.test.ts`.
@@ -173,8 +174,57 @@ covered by `apps/server/test/passwordRecovery.config.test.ts` and
 6. The client stores the returned ordinary OpenChat JWT using the existing
    session path.
 
-The first rollout slice is web-only. Native iOS should later use a separately
-registered public/native client with PKCE and no embedded client secret.
+## Native sign-in (iOS and Android, code-xbh.14)
+
+Native apps ask the same `GET /api/auth/ideaflow/config`. When it reports
+`enabled`, the login screen shows **Sign in with Ideaflow** and the "New here?"
+hint; Google, email/password and "Create one" are gone. The legacy native
+methods (and the "Uses your Noos credentials" footer) return only when the
+server disables Ideaflow ID or the check fails, so the server flag is the kill
+switch for native too, with no app update.
+
+iOS keeps the native **Sign in with Apple** button under the Ideaflow button
+("Signed up with Apple? You can keep using it.") because Apple-only accounts,
+often private-relay emails, cannot reach their OpenChat account through
+Ideaflow ID until it offers Sign in with Apple (code-xbh.13). Removing it is
+one constant, `KEEP_NATIVE_APPLE_SIGN_IN` in
+`apps/mobile/src/services/ideaflowSignIn.ts`, shipped as an EAS update for the
+same runtime once id.ideaflow.app offers Apple.
+
+Flow (`apps/mobile/src/services/ideaflowNativeSignIn.native.ts`):
+
+1. The app generates state, nonce and a PKCE verifier/challenge with
+   `expo-crypto`. The state starts with `native-`.
+2. `GET /api/auth/ideaflow/url` returns the authorization URL for the
+   confidential web client and the host's registered https callback, exactly as
+   on web. Ordinary sign-in sends no prompt (silent SSO); the first sign-in after
+   an explicit sign-out sends `prompt=select_account` (marker in AsyncStorage).
+3. `expo-web-browser`'s `openAuthSessionAsync` opens it in the system auth
+   session (ASWebAuthenticationSession on iOS, Custom Tabs on Android) with
+   `preferEphemeralSession: false`, so the system browser's Ideaflow ID and
+   Google sessions are reused. It is never an embedded web view, which Google
+   blocks.
+4. `/auth/ideaflow/callback` sees the `native-` state and redirects to
+   `openchat://auth/ideaflow/callback?provider=ideaflow&code=…&state=…`
+   instead of `/app/`. The auth session hands that URL back to the app.
+5. The app accepts only its own state, then calls
+   `POST /api/auth/ideaflow/exchange` with the code, nonce and verifier. The
+   server redeems the code with its client secret plus the PKCE verifier, which
+   never left the device, verifies the ID token, links the account under the
+   rules above, and returns an ordinary OpenChat JWT stored in SecureStore.
+
+A bounced code is useless without the verifier, and the app rejects any state
+it did not generate. Native therefore needs no separately registered public
+client.
+
+**Switch account** on Profile (and the tablet account menu) opens the
+provider's chooser first while still signed in. Only after an account is picked
+does the app sign out locally and redeem the new code, so cancelling changes
+nothing.
+
+App Store guideline 4.8: OpenChat's only sign-in is the company's own account
+system, Ideaflow ID, plus Sign in with Apple while it remains, so the
+third-party-login requirement does not apply. Say so in the review notes.
 
 ## Safe rollout
 
@@ -189,7 +239,7 @@ registered public/native client with PKCE and no embedded client secret.
    follows the capability response without a separate build flag.
 5. Keep every legacy login path for at least the migration window. Monitor 409
    collisions and resolve them manually; never merge two user IDs automatically.
-6. Add native clients separately. Removing old providers or moving password
+6. Native follows the same server flag (code-xbh.14). Removing old providers or moving password
    credentials is a later explicit project, not part of this rollout.
 
 ## Rollback

@@ -51,6 +51,34 @@ describe('IdeaFlow ID web callback redirect', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
   });
 
+  it('bounces a native-marked response to the fixed app callback (code-xbh.14)', async () => {
+    const response = await fetch(
+      `${baseUrl}/auth/ideaflow/callback?code=abc&state=native-state-value&next=https://attacker.example.test`,
+      { redirect: 'manual' },
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe(
+      'openchat://auth/ideaflow/callback?provider=ideaflow&code=abc&state=native-state-value',
+    );
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('bounces a native denial to the app so the auth session closes', () => {
+    expect(buildIdeaflowWebCallbackRedirect({
+      error: 'access_denied',
+      state: 'native-xyz',
+      redirect_uri: 'https://attacker.example.test',
+    })).toBe('openchat://auth/ideaflow/callback?provider=ideaflow&state=native-xyz&error=access_denied');
+  });
+
+  it('keeps web states (including ones merely containing the marker) on the web path', () => {
+    expect(buildIdeaflowWebCallbackRedirect({ code: 'c', state: 'abc-native-1' }))
+      .toBe('/app/?provider=ideaflow&code=c&state=abc-native-1');
+    expect(buildIdeaflowWebCallbackRedirect({ code: 'c', state: ['native-a', 'native-b'] }))
+      .toBe('/app/?provider=ideaflow&code=c');
+  });
+
   it('forwards an OIDC denial without inventing a navigation target', async () => {
     const response = await fetch(
       `${baseUrl}/auth/ideaflow/callback?error=access_denied&error_description=Nope&returnTo=//evil`,

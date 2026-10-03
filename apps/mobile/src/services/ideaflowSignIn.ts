@@ -1,13 +1,16 @@
 /**
- * Ideaflow ID web sign-in (OpenChat-3ag.12, code-xbh.3).
+ * Ideaflow ID sign-in (OpenChat-3ag.12, code-xbh.3, code-xbh.14).
  *
- * On web, when the server reports the Ideaflow ID path enabled, the login
- * screen offers exactly one control: "Sign in with Ideaflow". Google,
- * email/password, sign-up and password reset all happen on id.ideaflow.app;
- * existing OpenChat accounts link server-side by verified email. The legacy
- * methods remain only as the kill-switch fallback (server flag off or
- * unreachable). Native keeps its current methods until native Ideaflow
- * sign-in ships separately.
+ * When the server reports the Ideaflow ID path enabled, the login screen
+ * offers one control: "Sign in with Ideaflow". Google, email/password,
+ * sign-up and password reset all happen on id.ideaflow.app; existing OpenChat
+ * accounts link server-side by verified email. The legacy methods remain only
+ * as the kill-switch fallback (server flag off or unreachable).
+ *
+ * Web uses a full-page redirect. Native (iOS/Android) uses the system auth
+ * session (ASWebAuthenticationSession / Custom Tabs) with the same server
+ * endpoints: the state carries IDEAFLOW_NATIVE_STATE_PREFIX so the server's
+ * https callback bounces the response to IDEAFLOW_NATIVE_REDIRECT_URI.
  *
  * Kept free of react-native imports so the decision logic and URL building are
  * unit-testable in plain Node.
@@ -58,33 +61,49 @@ export async function fetchIdeaflowConfig(
 }
 
 export interface LoginSurface {
-  /** Web only: capability check still in flight — render no sign-in method yet. */
+  /** Capability check still in flight — render no sign-in method yet. */
   pending: boolean;
   /** The single "Sign in with Ideaflow" button (plus its "New here?" hint). */
   ideaflow: boolean;
   /** Google, email/password, create account, recovery help. */
   legacy: boolean;
-  /** The old "Uses your Noos credentials" footer (native only now). */
+  /** The old "Uses your Noos credentials" footer (native kill-switch only). */
   legacyFooter: boolean;
+  /**
+   * iOS only: the native Sign in with Apple button. Kept beside the Ideaflow
+   * button for existing Apple-only accounts until Ideaflow ID itself offers
+   * Sign in with Apple (code-xbh.13); see KEEP_NATIVE_APPLE_SIGN_IN.
+   */
+  apple: boolean;
 }
 
+/**
+ * Apple-only OpenChat accounts (often a private-relay email) cannot reach
+ * their account through Ideaflow ID until it supports Sign in with Apple
+ * (code-xbh.13). Until then the iOS login keeps the native Apple button next
+ * to "Sign in with Ideaflow". Flip to false and publish an EAS update once
+ * id.ideaflow.app offers Apple.
+ */
+export const KEEP_NATIVE_APPLE_SIGN_IN = true;
+
 export function loginSurface(input: {
-  isWeb: boolean;
+  /** react-native Platform.OS ('web' | 'ios' | 'android' | ...). */
+  platform: string;
   config: IdeaflowConfigState;
+  keepNativeApple?: boolean;
 }): LoginSurface {
-  if (!input.isWeb) {
-    // Native is unchanged until native Ideaflow sign-in ships.
-    return { pending: false, ideaflow: false, legacy: true, legacyFooter: true };
-  }
+  const isWeb = input.platform === 'web';
+  const isIos = input.platform === 'ios';
+  const keepApple = input.keepNativeApple ?? KEEP_NATIVE_APPLE_SIGN_IN;
   if (input.config.status === 'loading') {
-    return { pending: true, ideaflow: false, legacy: false, legacyFooter: false };
+    return { pending: true, ideaflow: false, legacy: false, legacyFooter: false, apple: false };
   }
   if (!input.config.enabled) {
     // Server kill switch (or unreachable): fall back to the legacy methods
     // without a rebuild.
-    return { pending: false, ideaflow: false, legacy: true, legacyFooter: false };
+    return { pending: false, ideaflow: false, legacy: true, legacyFooter: !isWeb, apple: isIos };
   }
-  return { pending: false, ideaflow: true, legacy: false, legacyFooter: false };
+  return { pending: false, ideaflow: true, legacy: false, legacyFooter: false, apple: isIos && keepApple };
 }
 
 /**
@@ -131,13 +150,21 @@ export function takeIdeaflowAccountChoice(): boolean {
   }
 }
 
-function bytesToBase64Url(bytes: Uint8Array): string {
-  let binary = '';
-  for (const value of bytes) binary += String.fromCharCode(value);
-  return btoa(binary)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+const BASE64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+/** Unpadded base64url without btoa, so it runs the same on web and Hermes. */
+export function bytesToBase64Url(bytes: Uint8Array): string {
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < bytes.length ? bytes[i + 1] : 0;
+    const b2 = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    const triple = (b0 << 16) | (b1 << 8) | b2;
+    out += BASE64URL_ALPHABET[(triple >> 18) & 63] + BASE64URL_ALPHABET[(triple >> 12) & 63];
+    if (i + 1 < bytes.length) out += BASE64URL_ALPHABET[(triple >> 6) & 63];
+    if (i + 2 < bytes.length) out += BASE64URL_ALPHABET[triple & 63];
+  }
+  return out;
 }
 
 export function randomBase64Url(byteLength: number): string {
@@ -178,22 +205,38 @@ export function ideaflowStartQuery(input: {
   return query;
 }
 
+export interface IdeaflowPendingSignIn {
+  state: string;
+  nonce: string;
+  codeVerifier: string;
+}
+
+export interface IdeaflowPkceDeps {
+  fetchImpl?: typeof fetch;
+  /** base64url random string of `byteLength` random bytes. */
+  random?: (byteLength: number) => string | Promise<string>;
+  /** base64url(SHA-256(verifier)). */
+  challenge?: (verifier: string) => Promise<string>;
+}
+
 /**
- * Generates state/nonce/PKCE, asks the server for the provider authorization
- * URL, and stores the verifier in same-tab session storage. Returns the URL
- * without navigating so callers can finish local work (e.g. sign out) first.
+ * Generates state/nonce/PKCE and asks the server for the provider
+ * authorization URL. Returns the URL and the secrets the caller must keep to
+ * finish the exchange. `statePrefix` marks native flows for the server's
+ * callback bounce.
  */
-export async function prepareIdeaflowWebSignIn(
+export async function startIdeaflowSignIn(
   baseUrl: string,
-  options: IdeaflowStartOptions = {},
-  deps: { fetchImpl?: typeof fetch; storage?: Pick<Storage, 'setItem'> } = {},
-): Promise<string> {
+  options: IdeaflowStartOptions & { statePrefix?: string } = {},
+  deps: IdeaflowPkceDeps = {},
+): Promise<{ url: string; pending: IdeaflowPendingSignIn }> {
   const fetchImpl = deps.fetchImpl ?? fetch;
-  const storage = deps.storage ?? globalThis.sessionStorage;
-  const state = randomBase64Url(32);
-  const nonce = randomBase64Url(32);
-  const codeVerifier = randomBase64Url(48);
-  const codeChallenge = await pkceChallenge(codeVerifier);
+  const random = deps.random ?? randomBase64Url;
+  const challenge = deps.challenge ?? pkceChallenge;
+  const state = `${options.statePrefix ?? ''}${await random(32)}`;
+  const nonce = await random(32);
+  const codeVerifier = await random(48);
+  const codeChallenge = await challenge(codeVerifier);
   const query = ideaflowStartQuery({
     state,
     nonce,
@@ -204,6 +247,68 @@ export async function prepareIdeaflowWebSignIn(
   if (!response.ok) throw new Error("Couldn't reach Ideaflow. Please try again in a moment.");
   const body = await response.json() as { url?: string };
   if (!body.url) throw new Error("Couldn't reach Ideaflow. Please try again in a moment.");
-  storage.setItem(IDEAFLOW_WEB_STATE_KEY, JSON.stringify({ state, nonce, codeVerifier }));
-  return body.url;
+  return { url: body.url, pending: { state, nonce, codeVerifier } };
+}
+
+/**
+ * Web: starts sign-in and stores the verifier in same-tab session storage.
+ * Returns the URL without navigating so callers can finish local work (e.g.
+ * sign out) first.
+ */
+export async function prepareIdeaflowWebSignIn(
+  baseUrl: string,
+  options: IdeaflowStartOptions = {},
+  deps: { fetchImpl?: typeof fetch; storage?: Pick<Storage, 'setItem'> } = {},
+): Promise<string> {
+  const storage = deps.storage ?? globalThis.sessionStorage;
+  const { url, pending } = await startIdeaflowSignIn(baseUrl, options, { fetchImpl: deps.fetchImpl });
+  storage.setItem(IDEAFLOW_WEB_STATE_KEY, JSON.stringify(pending));
+  return url;
+}
+
+// ── Native (code-xbh.14) ────────────────────────────────────────────────────
+
+/** Must match apps/server/src/routes/ideaflowWebCallback.ts. */
+export const IDEAFLOW_NATIVE_STATE_PREFIX = 'native-';
+/** The app's own scheme (app.config.js `scheme: 'openchat'`). */
+export const IDEAFLOW_NATIVE_REDIRECT_URI = 'openchat://auth/ideaflow/callback';
+
+export type IdeaflowNativeCallback =
+  | { kind: 'code'; code: string }
+  | { kind: 'error'; message: string };
+
+/**
+ * Reads the URL the system auth session returned. Only a callback carrying
+ * the exact state this app generated is accepted; provider text is never
+ * shown verbatim.
+ */
+export function parseIdeaflowNativeCallback(
+  returnedUrl: string,
+  expectedState: string,
+): IdeaflowNativeCallback {
+  let params: URLSearchParams;
+  try {
+    const queryStart = returnedUrl.indexOf('?');
+    if (!returnedUrl.startsWith(IDEAFLOW_NATIVE_REDIRECT_URI) || queryStart < 0) {
+      throw new Error('unexpected callback');
+    }
+    params = new URLSearchParams(returnedUrl.slice(queryStart + 1).split('#')[0]);
+  } catch {
+    return { kind: 'error', message: ideaflowCallbackErrorMessage({ stateMatched: false, error: null }) };
+  }
+  const state = params.get('state');
+  const error = params.get('error');
+  if (!state || state !== expectedState) {
+    return { kind: 'error', message: ideaflowCallbackErrorMessage({ stateMatched: false, error }) };
+  }
+  const code = params.get('code');
+  if (error || !code) {
+    return { kind: 'error', message: ideaflowCallbackErrorMessage({ stateMatched: true, error }) };
+  }
+  return { kind: 'code', code };
+}
+
+/** Standard base64 (as returned by expo-crypto) to unpadded base64url. */
+export function base64ToBase64Url(value: string): string {
+  return value.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }

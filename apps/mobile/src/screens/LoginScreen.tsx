@@ -39,6 +39,7 @@ import {
   prepareIdeaflowWebSignIn,
   takeIdeaflowAccountChoice,
 } from '../services/ideaflowSignIn';
+import { signInWithIdeaflowNative } from '../services/ideaflowNativeSignIn';
 
 // Required for the in-app browser to dismiss properly after the OAuth round-trip.
 WebBrowser.maybeCompleteAuthSession();
@@ -103,13 +104,15 @@ export function LoginScreen() {
   const isWeb = Platform.OS === 'web';
   const GOOGLE_WEB_STATE_KEY = 'openchat_google_web';
 
-  // The server-side flag is the rollout source of truth: web shows nothing
-  // until it answers, then either the single "Sign in with Ideaflow" button
-  // (enabled) or the legacy methods (kill switch / unreachable). Native never
-  // asks. Google, email/password, sign-up and reset live on id.ideaflow.app.
+  // The server-side flag is the rollout source of truth on web and native:
+  // nothing renders until it answers, then either the single "Sign in with
+  // Ideaflow" button (enabled) or the legacy methods (kill switch /
+  // unreachable). Google, email/password, sign-up and reset live on
+  // id.ideaflow.app. iOS keeps Sign in with Apple beside it for Apple-only
+  // accounts until Ideaflow ID offers Apple (code-xbh.13).
   const ideaflowConfig = useIdeaflowConfig();
   const providerResetUrl = ideaflowConfig.status === 'ready' ? ideaflowConfig.passwordResetUrl : null;
-  const surface = loginSurface({ isWeb, config: ideaflowConfig });
+  const surface = loginSurface({ platform: Platform.OS, config: ideaflowConfig });
 
   // Web: finish the Ideaflow ID redirect. The callback route adds a provider
   // marker because Google and OIDC both use standard `code` and `state` keys.
@@ -336,7 +339,23 @@ export function LoginScreen() {
   };
 
   const handleIdeaflowSignIn = async () => {
-    if (!isWeb || typeof window === 'undefined' || ideaflowLoading || loading) return;
+    if (ideaflowLoading || loading) return;
+    if (!isWeb) {
+      // Native: system auth session (ASWebAuthenticationSession / Custom
+      // Tabs), then the same server exchange as web. code-xbh.14
+      setIdeaflowLoading(true);
+      setIdeaflowError(null);
+      try {
+        const result = await signInWithIdeaflowNative();
+        if (result === 'signed-in') await bootstrapIfAuthed();
+      } catch (err) {
+        reportIdeaflowError(err instanceof Error ? err.message : "Ideaflow sign-in didn't work. Please try again.");
+      } finally {
+        setIdeaflowLoading(false);
+      }
+      return;
+    }
+    if (typeof window === 'undefined') return;
     setIdeaflowLoading(true);
     setIdeaflowError(null);
     // Ordinary sign-in sends no prompt so an existing Ideaflow session is
@@ -409,6 +428,22 @@ export function LoginScreen() {
     }
   };
 
+  const renderAppleButton = () => (
+    appleLoading ? (
+      <View style={styles.appleButtonPlaceholder}>
+        <ActivityIndicator color="#fff" />
+      </View>
+    ) : (
+      <AppleAuthentication.AppleAuthenticationButton
+        buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+        buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+        cornerRadius={12}
+        style={styles.appleButton}
+        onPress={handleAppleSignIn}
+      />
+    )
+  );
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -443,22 +478,9 @@ export function LoginScreen() {
           )}
 
           {/* Sign in with Apple — iOS only. Apple requires SIWA to be at least as prominent
-              as any other social login, so it goes ABOVE Google. (OpenChat-c08) */}
-          {Platform.OS === 'ios' && (
-            appleLoading ? (
-              <View style={styles.appleButtonPlaceholder}>
-                <ActivityIndicator color="#fff" />
-              </View>
-            ) : (
-              <AppleAuthentication.AppleAuthenticationButton
-                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-                cornerRadius={12}
-                style={styles.appleButton}
-                onPress={handleAppleSignIn}
-              />
-            )
-          )}
+              as any other social login, so in the legacy layout it goes ABOVE Google.
+              (OpenChat-c08) With Ideaflow on it sits below the Ideaflow button. */}
+          {surface.apple && surface.legacy && renderAppleButton()}
 
           {surface.pending && (
             <View style={styles.pendingMethods} accessibilityLabel="Loading sign-in options">
@@ -492,6 +514,15 @@ export function LoginScreen() {
             <Text style={[styles.newHereHint, { color: c.textMetadata }]}>
               New here? You can create an account on the next screen.
             </Text>
+          )}
+
+          {surface.apple && surface.ideaflow && (
+            <>
+              <Text style={[styles.appleHint, { color: c.textMetadata }]}>
+                Signed up with Apple? You can keep using it.
+              </Text>
+              {renderAppleButton()}
+            </>
           )}
 
           {ideaflowError && !surface.pending && (
@@ -729,6 +760,7 @@ const styles = StyleSheet.create({
   inlineError: { fontSize: 14, textAlign: 'center' },
   pendingMethods: { height: 50, alignItems: 'center', justifyContent: 'center' },
   newHereHint: { fontSize: 13, textAlign: 'center' },
+  appleHint: { fontSize: 13, textAlign: 'center', marginTop: 8 },
   footer: { fontSize: 12, textAlign: 'center', marginTop: 8 },
   shareSection: { width: '100%', maxWidth: 520, alignSelf: 'center', marginTop: 32, alignItems: 'stretch', opacity: 0.88 },
   shareLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8, textAlign: 'center' },
