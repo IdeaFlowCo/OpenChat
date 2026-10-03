@@ -356,9 +356,60 @@ function recordsToUsers(result: { records: Array<{ get: (key: string) => unknown
 }
 
 /**
+ * Thrown when a verified Ideaflow email matches exactly one OpenChat/Noos user
+ * that has a password but whose email Noos never verified. Anyone could have
+ * registered that address with a password (pre-account hijack), so the owner
+ * must prove the password once before the identity is bound. Mirrors Noos
+ * `resolveIdeaflowLoginUser` (noos PR #58, `password_unverified`).
+ */
+export class IdeaflowPasswordProofRequired extends Error {
+  constructor(public readonly userId: string) {
+    super('IDEAFLOW_PASSWORD_PROOF_REQUIRED');
+    this.name = 'IdeaflowPasswordProofRequired';
+  }
+}
+
+/**
+ * Bind an Ideaflow issuer+subject to one existing user. Refuses (returns null)
+ * if the user already carries a different Ideaflow identity.
+ */
+async function bindIdeaflowIdentityToUser(
+  session: AuthDbSession,
+  userId: string,
+  identity: IdeaflowIdentityClaims,
+): Promise<LinkedOpenChatUser | null> {
+  const linked = recordsToUsers(await session.run(`
+    MATCH (u:User {id: $userId})
+    WHERE (u.ideaflowIssuer IS NULL OR u.ideaflowIssuer = $issuer)
+      AND (u.ideaflowSub IS NULL OR u.ideaflowSub = $subject)
+      AND (u.ideaflowIdentityKey IS NULL OR u.ideaflowIdentityKey = $identityKey)
+    SET u.ideaflowIssuer = $issuer,
+        u.ideaflowSub = $subject,
+        u.ideaflowIdentityKey = $identityKey,
+        u.ideaflowEmail = $email,
+        u.ideaflowEmailVerified = true,
+        u.lastSeenAt = datetime($now),
+        u.presenceStatus = 'available',
+        u.avatarUrl = coalesce(u.avatarUrl, $picture)
+    RETURN u { .id, .email, .name, .avatarUrl } AS user
+  `, {
+    userId,
+    issuer: identity.issuer,
+    subject: identity.subject,
+    identityKey: `${identity.issuer}\u001f${identity.subject}`,
+    email: identity.email,
+    picture: identity.picture,
+    now: new Date().toISOString(),
+  }));
+  return linked.length === 1 ? linked[0] : null;
+}
+
+/**
  * Resolve the durable issuer+subject mapping first. A verified email may link
  * an unmapped legacy OpenChat user only when that email identifies exactly one
- * local account. Existing conflicting mappings are never overwritten.
+ * local account, and — if that account has a password — only when its email
+ * was verified (otherwise IdeaflowPasswordProofRequired). Existing conflicting
+ * mappings are never overwritten.
  */
 export async function linkIdeaflowIdentity(
   session: AuthDbSession,
@@ -403,7 +454,8 @@ export async function linkIdeaflowIdentity(
   const byEmail = recordsToUsers(await session.run(`
     MATCH (u:User)
     WHERE toLower(u.email) = $email
-    RETURN u { .id, .email, .name, .avatarUrl, .ideaflowIssuer, .ideaflowSub, .ideaflowIdentityKey } AS user
+    RETURN u { .id, .email, .name, .avatarUrl, .ideaflowIssuer, .ideaflowSub, .ideaflowIdentityKey,
+               .emailVerified, hasPassword: u.passwordHash IS NOT NULL } AS user
     LIMIT 2
   `, params));
   if (byEmail.length > 1) {
@@ -415,6 +467,8 @@ export async function linkIdeaflowIdentity(
       ideaflowIssuer?: string | null;
       ideaflowSub?: string | null;
       ideaflowIdentityKey?: string | null;
+      emailVerified?: unknown;
+      hasPassword?: unknown;
     };
     if (
       (existing.ideaflowIssuer && existing.ideaflowIssuer !== identity.issuer)
@@ -424,23 +478,13 @@ export async function linkIdeaflowIdentity(
       throw new Error('IDEAFLOW_EMAIL_COLLISION');
     }
 
-    const linked = recordsToUsers(await session.run(`
-      MATCH (u:User {id: $userId})
-      WHERE (u.ideaflowIssuer IS NULL OR u.ideaflowIssuer = $issuer)
-        AND (u.ideaflowSub IS NULL OR u.ideaflowSub = $subject)
-        AND (u.ideaflowIdentityKey IS NULL OR u.ideaflowIdentityKey = $identityKey)
-      SET u.ideaflowIssuer = $issuer,
-          u.ideaflowSub = $subject,
-          u.ideaflowIdentityKey = $identityKey,
-          u.ideaflowEmail = $email,
-          u.ideaflowEmailVerified = true,
-          u.lastSeenAt = datetime($now),
-          u.presenceStatus = 'available',
-          u.avatarUrl = coalesce(u.avatarUrl, $picture)
-      RETURN u { .id, .email, .name, .avatarUrl } AS user
-    `, { ...params, userId: existing.id }));
-    if (linked.length !== 1) throw new Error('IDEAFLOW_EMAIL_COLLISION');
-    return linked[0];
+    if (existing.hasPassword === true && existing.emailVerified !== true) {
+      throw new IdeaflowPasswordProofRequired(existing.id);
+    }
+
+    const linked = await bindIdeaflowIdentityToUser(session, existing.id, identity);
+    if (!linked) throw new Error('IDEAFLOW_EMAIL_COLLISION');
+    return linked;
   }
 
   const created = recordsToUsers(await session.run(`
@@ -526,6 +570,18 @@ router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
       provider: 'ideaflow-id',
     });
   } catch (error) {
+    if (error instanceof IdeaflowPasswordProofRequired) {
+      // Not linked. The browser gets a short-lived ticket naming this Ideaflow
+      // identity; the person proves the existing account's password (Noos
+      // login) and POSTs both to /ideaflow/link-with-password.
+      res.status(409).json({
+        error: 'You already have an OpenChat account with this email. Enter its password once to connect it to Ideaflow.',
+        code: 'password_proof_required',
+        email: identity.email,
+        linkTicket: signIdeaflowLinkTicket(identity),
+      });
+      return;
+    }
     const collision = error instanceof Error && error.message.includes('COLLISION');
     console.error('IdeaFlow ID account linking failed:', error);
     res.status(collision ? 409 : 500).json({
@@ -533,6 +589,116 @@ router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
         ? 'This Ideaflow account could not be linked automatically. Contact support@ideaflow.app.'
         : 'Sign-in failed',
     });
+  } finally {
+    await session.close();
+  }
+});
+
+const IDEAFLOW_LINK_TICKET_AUDIENCE = 'openchat-ideaflow-link';
+const IDEAFLOW_LINK_TICKET_TTL_SECONDS = 10 * 60;
+
+interface IdeaflowLinkTicket {
+  purpose: 'ideaflow-link';
+  ideaflowIssuer: string;
+  ideaflowSubject: string;
+  ideaflowEmail: string;
+  ideaflowName: string | null;
+  ideaflowPicture: string | null;
+}
+
+/**
+ * The ticket carries no userId/email pair, so requireAuth's validateToken can
+ * never accept it as a session, and its audience is checked on use.
+ */
+export function signIdeaflowLinkTicket(identity: IdeaflowIdentityClaims): string {
+  const payload: IdeaflowLinkTicket = {
+    purpose: 'ideaflow-link',
+    ideaflowIssuer: identity.issuer,
+    ideaflowSubject: identity.subject,
+    ideaflowEmail: identity.email,
+    ideaflowName: identity.name,
+    ideaflowPicture: identity.picture,
+  };
+  return jwt.sign(payload, getJwtSecret(), {
+    audience: IDEAFLOW_LINK_TICKET_AUDIENCE,
+    expiresIn: IDEAFLOW_LINK_TICKET_TTL_SECONDS,
+  });
+}
+
+function verifyIdeaflowLinkTicket(ticket: unknown): IdeaflowIdentityClaims | null {
+  if (typeof ticket !== 'string' || ticket.length > 4096) return null;
+  try {
+    const decoded = jwt.verify(ticket, getJwtSecret(), { audience: IDEAFLOW_LINK_TICKET_AUDIENCE }) as Partial<IdeaflowLinkTicket>;
+    if (decoded.purpose !== 'ideaflow-link'
+      || typeof decoded.ideaflowIssuer !== 'string'
+      || typeof decoded.ideaflowSubject !== 'string'
+      || typeof decoded.ideaflowEmail !== 'string') return null;
+    return {
+      issuer: decoded.ideaflowIssuer,
+      subject: decoded.ideaflowSubject,
+      email: decoded.ideaflowEmail,
+      emailVerified: true,
+      name: typeof decoded.ideaflowName === 'string' ? decoded.ideaflowName : null,
+      picture: typeof decoded.ideaflowPicture === 'string' ? decoded.ideaflowPicture : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * POST /api/auth/ideaflow/link-with-password
+ * Authorization: Bearer <token from a password sign-in to that account>
+ * Body: { linkTicket }
+ *
+ * Password proof for an existing account that has a password but an
+ * unverified email (see IdeaflowPasswordProofRequired). The bearer must belong
+ * to the single user whose email equals the ticket's verified Ideaflow email;
+ * only then is the Ideaflow identity bound, with the same conflict refusals as
+ * automatic linking. Returns an ordinary OpenChat session.
+ */
+router.post('/ideaflow/link-with-password', requireAuth, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!getIdeaflowOidcConfig()) {
+    res.status(503).json({ error: 'Ideaflow sign-in is not enabled' });
+    return;
+  }
+  const identity = verifyIdeaflowLinkTicket(req.body?.linkTicket);
+  if (!identity) {
+    res.status(400).json({ error: 'This step timed out. Sign in with Ideaflow again.', code: 'link_ticket_invalid' });
+    return;
+  }
+
+  const session = getDriver().session();
+  try {
+    const byEmail = recordsToUsers(await session.run(`
+      MATCH (u:User)
+      WHERE toLower(u.email) = $email
+      RETURN u { .id, .email, .name, .avatarUrl } AS user
+      LIMIT 2
+    `, { email: identity.email }));
+    if (byEmail.length !== 1 || byEmail[0].id !== req.user!.userId) {
+      res.status(403).json({
+        error: 'That password belongs to a different account than this Ideaflow email.',
+        code: 'link_account_mismatch',
+      });
+      return;
+    }
+    const linked = await bindIdeaflowIdentityToUser(session, byEmail[0].id, identity);
+    if (!linked) {
+      res.status(409).json({ error: 'This Ideaflow account could not be linked automatically. Contact support@ideaflow.app.' });
+      return;
+    }
+    await ensureAssistantAtSignIn(req, linked.id);
+    const token = jwt.sign(
+      { userId: linked.id, email: linked.email } as AuthUser,
+      getJwtSecret(),
+      { expiresIn: '7d' },
+    );
+    res.json({ token, user: linked, expiresIn: 7 * 24 * 60 * 60, provider: 'ideaflow-id' });
+  } catch (error) {
+    console.error('Ideaflow password-proof linking failed:', error);
+    res.status(500).json({ error: 'Sign-in failed' });
   } finally {
     await session.close();
   }

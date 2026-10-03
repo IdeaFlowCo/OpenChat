@@ -108,9 +108,20 @@ button since 2026-10-03, code-xbh.3). On RN-web, while
   so Google never flashes first;
 - existing OpenChat users are not stranded: the exchange links an existing
   user by issuer+subject, else by a single strictly verified email match
-  (`linkIdeaflowIdentity`, contract above), else creates a new user. Noos
-  password and Google users therefore land in their existing account when
-  their Ideaflow ID uses the same verified email;
+  (`linkIdeaflowIdentity`, contract above), else creates a new user. Google
+  users and Noos users whose email Noos verified land in their existing
+  account when their Ideaflow ID uses the same verified email;
+- an account that has a password but whose email Noos never verified
+  (`passwordHash` set, `emailVerified` not `true`) is **not** linked
+  automatically, because anyone could have registered that address
+  (pre-account hijack; same rule as Noos `resolveIdeaflowLoginUser`, noos PR
+  #58). The exchange answers 409 `password_proof_required` with the email and
+  a 10-minute, audience-bound link ticket (never accepted as a session). The
+  login page then shows the only link-proof path: "Connect your existing
+  account" with one password field. The client signs in to Noos with that
+  password, and `POST /api/auth/ideaflow/link-with-password` (bearer = that
+  session, body = ticket) binds the identity only if the bearer is the single
+  user owning the ticket's email (code-xbh.7);
 - ordinary sign-in sends no `prompt`, so an existing Ideaflow ID session
   completes silently. After an explicit OpenChat sign-out (not a session
   expiry) the next sign-in sends `prompt=select_account` once, so the provider

@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   config: { enabled: true } as Record<string, unknown> | 'reject' | 'hang',
   authorizeUrl: 'https://id.ideaflow.app/api/auth/oauth2/authorize?client_id=openchat-web',
   fetch: vi.fn(),
+  exchange: vi.fn(),
+  linkWithPassword: vi.fn(),
 }));
 
 vi.mock('react-native', () => ({
@@ -41,6 +43,11 @@ vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ boot
 vi.mock('../../mobile/src/contexts/EntryContext', () => ({ useEntryContext: () => ({ entryIntent: null, refreshEntryIntent: vi.fn() }) }));
 vi.mock('../../mobile/src/components/EntryHeader', () => ({ EntryHeader: () => null }));
 vi.mock('../../mobile/src/api/client', () => ({
+  ideaflowExchange: mocks.exchange,
+  linkIdeaflowWithPassword: mocks.linkWithPassword,
+  IdeaflowPasswordProofRequiredError: class extends Error {
+    constructor(public readonly email: string, public readonly linkTicket: string) { super('proof'); }
+  },
   OPENCHAT_URL: 'https://chat.ideaflow.app',
   GOOGLE_CLIENT_ID: 'web.apps.googleusercontent.com',
   GOOGLE_IOS_CLIENT_ID: 'ios.apps.googleusercontent.com',
@@ -52,6 +59,7 @@ vi.mock('../../mobile/src/utils/parseOpenChatUrl', () => ({ parseOpenChatUrl: vi
 vi.mock('../../mobile/src/services/entryIntents', () => ({ createEntryIntent: vi.fn(), saveEntryIntent: vi.fn() }));
 
 import { LoginScreen } from '../../mobile/src/screens/LoginScreen';
+import { IdeaflowPasswordProofRequiredError } from '../../mobile/src/api/client';
 
 let screen: ReturnType<typeof create> | undefined;
 let fakeWindow: {
@@ -215,6 +223,48 @@ describe('web Ideaflow failures are visible (RN-web Alert is a no-op)', () => {
     expect(inlineErrors()).toEqual(["Couldn't reach Ideaflow. Please try again in a moment."]);
     expect(button('Sign in with Ideaflow').props.disabled).toBe(false);
     expect(fakeWindow.location.href).toBe('https://chat.ideaflow.app/app/');
+  });
+});
+
+describe('password proof before linking an unverified password account (code-xbh.7)', () => {
+  async function returnFromIdeaflow() {
+    fakeWindow.sessionStorage.setItem('openchat_ideaflow_web', JSON.stringify({ state: 'S', nonce: 'n', codeVerifier: 'v' }));
+    fakeWindow.location.search = '?provider=ideaflow&code=c&state=S';
+    mocks.exchange.mockRejectedValue(new IdeaflowPasswordProofRequiredError('person@example.test', 'ticket-1'));
+    await render();
+    await settleUntil(() => labels().includes('Connect account'));
+  }
+
+  it('asks for the existing account password instead of signing in or showing legacy options', async () => {
+    await returnFromIdeaflow();
+    expect(labels()).toEqual(['Connect account', 'Cancel']);
+    expect(inputs()).toEqual(['Password for this account']);
+    expect(hasText('You already have an OpenChat account for person@example.test')).toBe(true);
+    expect(hasText('Continue with Google')).toBe(false);
+    expect(mocks.bootstrap).not.toHaveBeenCalled();
+  });
+
+  it('links with the password and signs in', async () => {
+    mocks.linkWithPassword.mockResolvedValue({ user: {}, token: 't' });
+    await returnFromIdeaflow();
+    const field = screen!.root.find(n => n.type === 'TextInput');
+    await act(async () => { field.props.onChangeText('pw'); });
+    await act(async () => { await button('Connect account').props.onPress(); });
+    await settleUntil(() => mocks.bootstrap.mock.calls.length > 0);
+    expect(mocks.linkWithPassword).toHaveBeenCalledWith('ticket-1', 'person@example.test', 'pw');
+    expect(mocks.bootstrap).toHaveBeenCalled();
+  });
+
+  it('shows a wrong password inline and keeps the step open; Cancel returns to the single button', async () => {
+    mocks.linkWithPassword.mockRejectedValue(new Error("That password didn't work. Please try again."));
+    await returnFromIdeaflow();
+    const field = screen!.root.find(n => n.type === 'TextInput');
+    await act(async () => { field.props.onChangeText('bad'); });
+    await act(async () => { await button('Connect account').props.onPress(); });
+    await settleUntil(() => hasText("That password didn't work."));
+    expect(labels()).toContain('Connect account');
+    await act(async () => { button('Cancel').props.onPress(); });
+    expect(labels()).toEqual(['Sign in with Ideaflow']);
   });
 });
 

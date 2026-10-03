@@ -35,6 +35,7 @@ jobs:
         run: >-
           npx vitest run test/ideaflowOnlyLogin.mobile.test.ts test/signOut.mobile.test.ts
           test/loginGoogle.mobile.test.ts test/ideaflowAuthRoutes.test.ts test/ideaflowOidc.test.ts
+          test/ideaflowIdentityLinking.test.ts test/ideaflowPasswordProof.test.ts
 
   private-names-storage:
     runs-on: ubuntu-latest
