@@ -32,7 +32,13 @@ import { createEntryIntent, saveEntryIntent } from '../services/entryIntents';
 import { googleAuthRequestConfig } from '../utils/googleAuthRequest';
 import { PasswordRecoveryHelp } from '../components/PasswordRecoveryHelp';
 import { useIdeaflowConfig } from '../hooks/useIdeaflowConfig';
-import { IDEAFLOW_WEB_STATE_KEY, loginSurface, prepareIdeaflowWebSignIn } from '../services/ideaflowSignIn';
+import {
+  IDEAFLOW_WEB_STATE_KEY,
+  ideaflowCallbackErrorMessage,
+  loginSurface,
+  prepareIdeaflowWebSignIn,
+  takeIdeaflowAccountChoice,
+} from '../services/ideaflowSignIn';
 
 // Required for the in-app browser to dismiss properly after the OAuth round-trip.
 WebBrowser.maybeCompleteAuthSession();
@@ -82,8 +88,8 @@ export function LoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
   const [ideaflowLoading, setIdeaflowLoading] = useState(false);
-  // RN-web's Alert.alert is a no-op, and Ideaflow is the only visible web
-  // method, so its failures are shown inline rather than vanishing.
+  // RN-web's Alert.alert is a no-op, and Ideaflow is the only web sign-in, so
+  // its failures are shown inline (fixed, readable copy) rather than vanishing.
   const [ideaflowError, setIdeaflowError] = useState<string | null>(null);
   const reportIdeaflowError = (message: string) => {
     setIdeaflowError(message);
@@ -98,20 +104,14 @@ export function LoginScreen() {
   const GOOGLE_WEB_STATE_KEY = 'openchat_google_web';
 
   // The server-side flag is the rollout source of truth: web shows nothing
-  // until it answers, then either Ideaflow-only (enabled) or the legacy
-  // methods (kill switch / unreachable). Native never asks.
+  // until it answers, then either the single "Sign in with Ideaflow" button
+  // (enabled) or the legacy methods (kill switch / unreachable). Native never
+  // asks. Google, email/password, sign-up and reset live on id.ideaflow.app.
   const ideaflowConfig = useIdeaflowConfig();
   const providerResetUrl = ideaflowConfig.status === 'ready' ? ideaflowConfig.passwordResetUrl : null;
-  // "Other sign-in options" starts open when returning from a legacy Google
-  // redirect so its progress and any retry stay visible.
-  const [showOtherOptions, setShowOtherOptions] = useState(() => {
-    if (!isWeb || typeof window === 'undefined') return false;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('provider') !== 'ideaflow' && (params.has('code') || params.has('error'));
-  });
-  const surface = loginSurface({ isWeb, config: ideaflowConfig, showOtherOptions });
+  const surface = loginSurface({ isWeb, config: ideaflowConfig });
 
-  // Web: finish the IdeaFlow ID redirect. The callback route adds a provider
+  // Web: finish the Ideaflow ID redirect. The callback route adds a provider
   // marker because Google and OIDC both use standard `code` and `state` keys.
   useEffect(() => {
     if (!isWeb || typeof window === 'undefined') return;
@@ -132,13 +132,11 @@ export function LoginScreen() {
     window.sessionStorage.removeItem(IDEAFLOW_WEB_STATE_KEY);
 
     if (!stored || !returnedState || returnedState !== stored.state) {
-      reportIdeaflowError('Session expired or state mismatch — please try again.');
+      reportIdeaflowError(ideaflowCallbackErrorMessage({ stateMatched: false, error: oauthError }));
       return;
     }
     if (oauthError || !code) {
-      reportIdeaflowError(oauthError === 'access_denied' && !params.get('error_description')
-        ? 'Sign-in was cancelled. Choose an account to continue.'
-        : params.get('error_description') || oauthError || 'No authorization code was returned.');
+      reportIdeaflowError(ideaflowCallbackErrorMessage({ stateMatched: true, error: oauthError }));
       return;
     }
 
@@ -146,6 +144,8 @@ export function LoginScreen() {
     (async () => {
       try {
         await ideaflowExchange(code, stored!.codeVerifier, stored!.nonce);
+        // Signed in: any pending "ask which account" marker is now spent.
+        takeIdeaflowAccountChoice();
         await bootstrapIfAuthed();
       } catch (err) {
         reportIdeaflowError(err instanceof Error ? err.message : String(err));
@@ -335,17 +335,18 @@ export function LoginScreen() {
     }
   };
 
-  const handleIdeaflowSignIn = async (selectAccount = false) => {
+  const handleIdeaflowSignIn = async () => {
     if (!isWeb || typeof window === 'undefined' || ideaflowLoading || loading) return;
     setIdeaflowLoading(true);
     setIdeaflowError(null);
+    // Ordinary sign-in sends no prompt so an existing Ideaflow session is
+    // reused silently. The first sign-in after an explicit sign-out asks the
+    // provider for its account chooser (prompt=select_account).
+    const selectAccount = takeIdeaflowAccountChoice();
     try {
-      // Ordinary sign-in sends no prompt so an existing Ideaflow session is
-      // reused silently; only "Use another Ideaflow account" asks for the
-      // provider's chooser (prompt=select_account).
       window.location.href = await prepareIdeaflowWebSignIn(OPENCHAT_URL, { selectAccount });
-    } catch (err) {
-      reportIdeaflowError(err instanceof Error ? err.message : String(err));
+    } catch {
+      reportIdeaflowError("Couldn't reach Ideaflow. Please try again in a moment.");
       setIdeaflowLoading(false);
     }
   };
@@ -476,46 +477,27 @@ export function LoginScreen() {
               ]}
               onPress={() => { void handleIdeaflowSignIn(); }}
               disabled={ideaflowLoading || loading || googleLoading}
-              accessibilityLabel="Continue with Ideaflow"
+              accessibilityRole="button"
+              accessibilityLabel="Sign in with Ideaflow"
             >
               {ideaflowLoading ? (
                 <ActivityIndicator color={c.onPrimary} />
               ) : (
-                <Text style={[styles.ideaflowButtonText, { color: c.onPrimary }]}>Continue with Ideaflow</Text>
+                <Text style={[styles.ideaflowButtonText, { color: c.onPrimary }]}>Sign in with Ideaflow</Text>
               )}
             </TouchableOpacity>
+          )}
+
+          {surface.ideaflow && (
+            <Text style={[styles.newHereHint, { color: c.textMetadata }]}>
+              New here? You can create an account on the next screen.
+            </Text>
           )}
 
           {ideaflowError && !surface.pending && (
             <Text accessibilityRole="alert" style={[styles.inlineError, { color: c.danger }]}>
               {ideaflowError}
             </Text>
-          )}
-
-          {surface.switchAccount && (
-            <TouchableOpacity
-              onPress={() => { void handleIdeaflowSignIn(true); }}
-              disabled={ideaflowLoading || loading || googleLoading}
-              accessibilityRole="button"
-              accessibilityLabel="Use another Ideaflow account"
-              style={styles.secondaryLink}
-            >
-              <Text style={[styles.secondaryLinkText, { color: c.primary }]}>Use another Ideaflow account</Text>
-            </TouchableOpacity>
-          )}
-
-          {surface.otherOptionsToggle && (
-            <TouchableOpacity
-              onPress={() => setShowOtherOptions(open => !open)}
-              accessibilityRole="button"
-              accessibilityLabel={showOtherOptions ? 'Hide other sign-in options' : 'Other sign-in options'}
-              accessibilityState={{ expanded: showOtherOptions }}
-              style={styles.otherOptionsLink}
-            >
-              <Text style={[styles.otherOptionsText, { color: c.textMetadata }]}>
-                {showOtherOptions ? 'Hide other sign-in options' : 'Other sign-in options'}
-              </Text>
-            </TouchableOpacity>
           )}
 
           {surface.legacy && (
@@ -746,10 +728,7 @@ const styles = StyleSheet.create({
   ideaflowButtonText: { fontSize: 16, fontWeight: '600' },
   inlineError: { fontSize: 14, textAlign: 'center' },
   pendingMethods: { height: 50, alignItems: 'center', justifyContent: 'center' },
-  secondaryLink: { alignSelf: 'center', paddingVertical: 4 },
-  secondaryLinkText: { fontSize: 14, fontWeight: '600' },
-  otherOptionsLink: { alignSelf: 'center', paddingVertical: 4 },
-  otherOptionsText: { fontSize: 13 },
+  newHereHint: { fontSize: 13, textAlign: 'center' },
   footer: { fontSize: 12, textAlign: 'center', marginTop: 8 },
   shareSection: { width: '100%', maxWidth: 520, alignSelf: 'center', marginTop: 32, alignItems: 'stretch', opacity: 0.88 },
   shareLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8, textAlign: 'center' },

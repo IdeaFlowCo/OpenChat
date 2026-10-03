@@ -1,40 +1,82 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   fetchIdeaflowConfig,
+  ideaflowCallbackErrorMessage,
   ideaflowStartQuery,
   loginSurface,
+  markIdeaflowAccountChoice,
   prepareIdeaflowWebSignIn,
+  takeIdeaflowAccountChoice,
 } from './ideaflowSignIn';
 
 const enabled = { status: 'ready', enabled: true, passwordResetUrl: null } as const;
 const disabled = { status: 'ready', enabled: false, passwordResetUrl: null } as const;
 
 describe('loginSurface', () => {
-  it('shows only Ideaflow (plus secondary links) on web when enabled', () => {
-    expect(loginSurface({ isWeb: true, config: enabled, showOtherOptions: false })).toEqual({
-      pending: false, ideaflow: true, switchAccount: true, otherOptionsToggle: true, legacy: false, legacyFooter: false,
+  it('shows only the single Sign in with Ideaflow button on web when enabled', () => {
+    expect(loginSurface({ isWeb: true, config: enabled })).toEqual({
+      pending: false, ideaflow: true, legacy: false, legacyFooter: false,
     });
-    expect(loginSurface({ isWeb: true, config: enabled, showOtherOptions: true }).legacy).toBe(true);
   });
 
   it('renders no method while the web capability check is in flight', () => {
-    expect(loginSurface({ isWeb: true, config: { status: 'loading' }, showOtherOptions: true })).toEqual({
-      pending: true, ideaflow: false, switchAccount: false, otherOptionsToggle: false, legacy: false, legacyFooter: false,
+    expect(loginSurface({ isWeb: true, config: { status: 'loading' } })).toEqual({
+      pending: true, ideaflow: false, legacy: false, legacyFooter: false,
     });
   });
 
   it('falls back to legacy methods on web when the server disables Ideaflow', () => {
-    expect(loginSurface({ isWeb: true, config: disabled, showOtherOptions: false })).toMatchObject({
-      ideaflow: false, otherOptionsToggle: false, legacy: true, legacyFooter: false,
+    expect(loginSurface({ isWeb: true, config: disabled })).toEqual({
+      pending: false, ideaflow: false, legacy: true, legacyFooter: false,
     });
   });
 
   it('leaves native unchanged regardless of config', () => {
     for (const config of [enabled, disabled, { status: 'loading' } as const]) {
-      expect(loginSurface({ isWeb: false, config, showOtherOptions: false })).toEqual({
-        pending: false, ideaflow: false, switchAccount: false, otherOptionsToggle: false, legacy: true, legacyFooter: true,
+      expect(loginSurface({ isWeb: false, config })).toEqual({
+        pending: false, ideaflow: false, legacy: true, legacyFooter: true,
       });
     }
+  });
+});
+
+describe('ideaflowCallbackErrorMessage', () => {
+  it('uses fixed copy and never echoes provider text', () => {
+    expect(ideaflowCallbackErrorMessage({ stateMatched: false, error: null }))
+      .toBe('That sign-in took too long or was interrupted. Please try again.');
+    expect(ideaflowCallbackErrorMessage({ stateMatched: true, error: 'access_denied' }))
+      .toBe('Sign-in was cancelled. You can try again.');
+    expect(ideaflowCallbackErrorMessage({ stateMatched: true, error: '<script>x</script>' }))
+      .toBe("Ideaflow sign-in didn't work. Please try again.");
+  });
+});
+
+describe('account choice after explicit sign-out', () => {
+  function fakeStorage(): Storage {
+    const values = new Map<string, string>();
+    return {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+      clear: () => values.clear(),
+      key: () => null,
+      get length() { return values.size; },
+    };
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('asks once after an explicit sign-out, then reuses the provider session', () => {
+    vi.stubGlobal('window', { localStorage: fakeStorage() });
+    expect(takeIdeaflowAccountChoice()).toBe(false);
+    markIdeaflowAccountChoice();
+    expect(takeIdeaflowAccountChoice()).toBe(true);
+    expect(takeIdeaflowAccountChoice()).toBe(false);
+  });
+
+  it('is a no-op without browser storage (native)', () => {
+    vi.stubGlobal('window', undefined);
+    expect(() => markIdeaflowAccountChoice()).not.toThrow();
+    expect(takeIdeaflowAccountChoice()).toBe(false);
   });
 });
 
@@ -71,7 +113,7 @@ describe('prepareIdeaflowWebSignIn', () => {
     const storage = { setItem: vi.fn() };
     await expect(prepareIdeaflowWebSignIn('https://chat.example', {}, {
       fetchImpl: (async () => new Response('{}', { status: 503 })) as unknown as typeof fetch, storage,
-    })).rejects.toThrow('503');
+    })).rejects.toThrow("Couldn't reach Ideaflow");
     expect(storage.setItem).not.toHaveBeenCalled();
   });
 });

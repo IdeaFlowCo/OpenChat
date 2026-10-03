@@ -304,7 +304,7 @@ router.get('/ideaflow/url', async (req: Request, res: Response) => {
   const callback = ideaflowCallbackForHost(req.get('host'));
   const config = baseConfig && callback ? { ...baseConfig, redirectUri: callback } : baseConfig;
   if (!config) {
-    res.status(503).json({ error: 'IdeaFlow ID sign-in is not enabled' });
+    res.status(503).json({ error: 'Ideaflow sign-in is not enabled' });
     return;
   }
 
@@ -338,7 +338,7 @@ router.get('/ideaflow/url', async (req: Request, res: Response) => {
     res.json({ url });
   } catch (error) {
     console.error('IdeaFlow ID authorization setup failed:', error);
-    res.status(502).json({ error: 'Could not reach IdeaFlow ID' });
+    res.status(502).json({ error: 'Could not reach Ideaflow ID' });
   }
 });
 
@@ -479,7 +479,7 @@ router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
   const callback = ideaflowCallbackForHost(req.get('host'));
   const config = baseConfig && callback ? { ...baseConfig, redirectUri: callback } : baseConfig;
   if (!config) {
-    res.status(503).json({ error: 'IdeaFlow ID sign-in is not enabled' });
+    res.status(503).json({ error: 'Ideaflow sign-in is not enabled' });
     return;
   }
 
@@ -506,7 +506,7 @@ router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('IdeaFlow ID token exchange failed:', error);
-    res.status(401).json({ error: 'IdeaFlow ID sign-in could not be verified' });
+    res.status(401).json({ error: 'Ideaflow sign-in could not be verified' });
     return;
   }
 
@@ -530,7 +530,7 @@ router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
     console.error('IdeaFlow ID account linking failed:', error);
     res.status(collision ? 409 : 500).json({
       error: collision
-        ? 'This IdeaFlow ID cannot be linked automatically. Contact support.'
+        ? 'This Ideaflow account could not be linked automatically. Contact support@ideaflow.app.'
         : 'Sign-in failed',
     });
   } finally {
