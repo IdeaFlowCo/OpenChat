@@ -104,7 +104,12 @@ export async function signInWithIdeaflowNative(): Promise<IdeaflowNativeResult> 
     if (selectAccount) await markIdeaflowAccountChoiceNative();
     return 'cancelled';
   }
-  await ideaflowExchange(authorization.code, authorization.codeVerifier, authorization.nonce);
+  try {
+    await ideaflowExchange(authorization.code, authorization.codeVerifier, authorization.nonce);
+  } catch (err) {
+    if (selectAccount) await markIdeaflowAccountChoiceNative();
+    throw err;
+  }
   await clearIdeaflowAccountChoiceNative();
   return 'signed-in';
 }

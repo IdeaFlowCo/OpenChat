@@ -94,7 +94,8 @@ export function LoginScreen() {
   const [ideaflowError, setIdeaflowError] = useState<string | null>(null);
   const reportIdeaflowError = (message: string) => {
     setIdeaflowError(message);
-    Alert.alert('Ideaflow sign-in failed', message);
+    // Native shows the inline copy; a second modal alert would only repeat it.
+    if (Platform.OS === 'web') Alert.alert('Ideaflow sign-in failed', message);
   };
 
   // Web Google sign-in uses a full-page REDIRECT, not the expo-auth-session
