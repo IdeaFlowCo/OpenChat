@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { linkIdeaflowIdentity } from '../src/routes/auth.js';
+import { IdeaflowPasswordProofRequired, linkIdeaflowIdentity } from '../src/routes/auth.js';
 
 const identity = {
   issuer: 'https://id.ideaflow.app/api/auth',
@@ -45,6 +45,28 @@ describe('linkIdeaflowIdentity', () => {
     expect(session.run).toHaveBeenCalledTimes(3);
     expect(String(session.run.mock.calls[1][0])).toContain('toLower(u.email) = $email');
     expect(String(session.run.mock.calls[2][0])).toContain('u.ideaflowSub = $subject');
+  });
+
+  it('requires a password proof before linking a password account whose email was never verified', async () => {
+    const session = sessionWithResults(result([]), result([
+      { id: 'password-legacy', email: 'Person@Example.test', name: 'Legacy', hasPassword: true },
+    ]));
+
+    const error = await linkIdeaflowIdentity(session as never, identity).catch(e => e);
+    expect(error).toBeInstanceOf(IdeaflowPasswordProofRequired);
+    expect((error as IdeaflowPasswordProofRequired).userId).toBe('password-legacy');
+    // Nothing was written: only the mapping lookup and the email lookup ran.
+    expect(session.run).toHaveBeenCalledTimes(2);
+    expect(String(session.run.mock.calls[1][0])).toContain('hasPassword: u.passwordHash IS NOT NULL');
+  });
+
+  it('links a password account whose email Noos verified, like Noos PR #58', async () => {
+    const user = { id: 'verified-legacy', email: identity.email, name: 'Legacy', hasPassword: true, emailVerified: true };
+    const linked = { id: 'verified-legacy', email: identity.email, name: 'Legacy' };
+    const session = sessionWithResults(result([]), result([user]), result([linked]));
+
+    await expect(linkIdeaflowIdentity(session as never, identity)).resolves.toEqual(linked);
+    expect(session.run).toHaveBeenCalledTimes(3);
   });
 
   it('refuses ambiguous legacy-email matches instead of choosing an account', async () => {

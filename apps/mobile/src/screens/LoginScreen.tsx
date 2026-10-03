@@ -21,7 +21,7 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { useTheme } from '../contexts/ThemeContext';
-import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, ideaflowExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL, api } from '../api/client';
+import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, ideaflowExchange, IdeaflowPasswordProofRequiredError, linkIdeaflowWithPassword, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL, api } from '../api/client';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
 import { EntryHeader } from '../components/EntryHeader';
@@ -91,6 +91,12 @@ export function LoginScreen() {
   // RN-web's Alert.alert is a no-op, and Ideaflow is the only web sign-in, so
   // its failures are shown inline (fixed, readable copy) rather than vanishing.
   const [ideaflowError, setIdeaflowError] = useState<string | null>(null);
+  // Link-proof step: the Ideaflow email matches an existing account that has a
+  // password but a never-verified email, so its password is proven once before
+  // the Ideaflow identity is connected (code-xbh.7, same rule as Noos).
+  const [passwordProof, setPasswordProof] = useState<{ email: string; linkTicket: string } | null>(null);
+  const [proofPassword, setProofPassword] = useState('');
+  const [proofLoading, setProofLoading] = useState(false);
   const reportIdeaflowError = (message: string) => {
     setIdeaflowError(message);
     Alert.alert('Ideaflow sign-in failed', message);
@@ -148,12 +154,31 @@ export function LoginScreen() {
         takeIdeaflowAccountChoice();
         await bootstrapIfAuthed();
       } catch (err) {
-        reportIdeaflowError(err instanceof Error ? err.message : String(err));
+        if (err instanceof IdeaflowPasswordProofRequiredError) {
+          setPasswordProof({ email: err.email, linkTicket: err.linkTicket });
+        } else {
+          reportIdeaflowError(err instanceof Error ? err.message : String(err));
+        }
       } finally {
         setIdeaflowLoading(false);
       }
     })();
   }, [isWeb, bootstrapIfAuthed]);
+
+  const handlePasswordProof = async () => {
+    if (!passwordProof || !proofPassword || proofLoading) return;
+    setProofLoading(true);
+    setIdeaflowError(null);
+    try {
+      await linkIdeaflowWithPassword(passwordProof.linkTicket, passwordProof.email, proofPassword);
+      takeIdeaflowAccountChoice();
+      await bootstrapIfAuthed();
+    } catch (err) {
+      reportIdeaflowError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setProofLoading(false);
+    }
+  };
 
   // Web: finish the redirect flow when we return from Google with ?code&state.
   useEffect(() => {
@@ -466,7 +491,54 @@ export function LoginScreen() {
             </View>
           )}
 
-          {surface.ideaflow && (
+          {surface.ideaflow && passwordProof && (
+            <View style={styles.proofPanel}>
+              <Text style={[styles.proofTitle, { color: c.textPrimary }]}>Connect your existing account</Text>
+              <Text style={[styles.proofBody, { color: c.textSecondary }]}>
+                You already have an OpenChat account for {passwordProof.email}. Enter its password once to connect it to Ideaflow.
+              </Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: c.surfaceElevated, borderColor: c.border, color: c.textPrimary }]}
+                value={proofPassword}
+                onChangeText={setProofPassword}
+                placeholder="Password for this account"
+                placeholderTextColor={c.textMuted}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="current-password"
+                editable={!proofLoading}
+                onSubmitEditing={() => { void handlePasswordProof(); }}
+              />
+              <TouchableOpacity
+                style={[styles.ideaflowButton, { backgroundColor: c.primary, opacity: (proofLoading || !proofPassword) ? 0.6 : 1 }]}
+                onPress={() => { void handlePasswordProof(); }}
+                disabled={proofLoading || !proofPassword}
+                accessibilityRole="button"
+                accessibilityLabel="Connect account"
+              >
+                {proofLoading ? (
+                  <ActivityIndicator color={c.onPrimary} />
+                ) : (
+                  <Text style={[styles.ideaflowButtonText, { color: c.onPrimary }]}>Connect account</Text>
+                )}
+              </TouchableOpacity>
+              <Text style={[styles.newHereHint, { color: c.textMetadata }]}>
+                Forgot this password? Email support@ideaflow.app and we'll connect the account for you.
+              </Text>
+              <TouchableOpacity
+                onPress={() => { setPasswordProof(null); setProofPassword(''); setIdeaflowError(null); }}
+                disabled={proofLoading}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+                style={styles.proofCancel}
+              >
+                <Text style={{ color: c.textMetadata, fontSize: 13 }}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {surface.ideaflow && !passwordProof && (
             <TouchableOpacity
               style={[
                 styles.ideaflowButton,
@@ -488,7 +560,7 @@ export function LoginScreen() {
             </TouchableOpacity>
           )}
 
-          {surface.ideaflow && (
+          {surface.ideaflow && !passwordProof && (
             <Text style={[styles.newHereHint, { color: c.textMetadata }]}>
               New here? You can create an account on the next screen.
             </Text>
@@ -729,6 +801,10 @@ const styles = StyleSheet.create({
   inlineError: { fontSize: 14, textAlign: 'center' },
   pendingMethods: { height: 50, alignItems: 'center', justifyContent: 'center' },
   newHereHint: { fontSize: 13, textAlign: 'center' },
+  proofPanel: { gap: 12 },
+  proofTitle: { fontSize: 17, fontWeight: '600', textAlign: 'center' },
+  proofBody: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  proofCancel: { alignSelf: 'center', paddingVertical: 4 },
   footer: { fontSize: 12, textAlign: 'center', marginTop: 8 },
   shareSection: { width: '100%', maxWidth: 520, alignSelf: 'center', marginTop: 32, alignItems: 'stretch', opacity: 0.88 },
   shareLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8, textAlign: 'center' },

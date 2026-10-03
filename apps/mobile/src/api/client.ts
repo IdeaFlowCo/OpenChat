@@ -603,11 +603,16 @@ export async function ideaflowExchange(
   if (!res.ok) {
     const text = await res.text();
     let msg = text;
+    let parsed: { error?: string; message?: string; code?: string; email?: string; linkTicket?: string } = {};
     try {
-      const parsed = JSON.parse(text);
+      parsed = JSON.parse(text);
       msg = parsed.error || parsed.message || text;
     } catch {
       /* not JSON */
+    }
+    if (res.status === 409 && parsed.code === 'password_proof_required'
+      && typeof parsed.email === 'string' && typeof parsed.linkTicket === 'string') {
+      throw new IdeaflowPasswordProofRequiredError(parsed.email, parsed.linkTicket);
     }
     // Shown verbatim on the login page, so keep it readable: only the
     // account-linking conflict (409) carries specific, fixed server copy.
@@ -616,6 +621,64 @@ export async function ideaflowExchange(
       : "Ideaflow sign-in didn't work. Please try again.");
   }
 
+  const body = await res.json();
+  const user: CurrentUser = {
+    userId: body.user.id,
+    email: body.user.email,
+    name: body.user.name,
+  };
+  await setSession(body.token, user);
+  return { user, token: body.token };
+}
+
+/**
+ * The Ideaflow email matches an existing account that has a password but a
+ * never-verified email, so it is not linked until its password is proven once
+ * (code-xbh.7; same rule as Noos). Carries the server's short-lived ticket.
+ */
+export class IdeaflowPasswordProofRequiredError extends Error {
+  constructor(public readonly email: string, public readonly linkTicket: string) {
+    super('You already have an OpenChat account with this email. Enter its password once to connect it to Ideaflow.');
+    this.name = 'IdeaflowPasswordProofRequiredError';
+  }
+}
+
+/**
+ * Password proof for IdeaflowPasswordProofRequiredError: signs in to the
+ * existing account with its password (Noos), without keeping that session,
+ * then asks OpenChat to bind the Ideaflow identity and start a session.
+ */
+export async function linkIdeaflowWithPassword(
+  linkTicket: string,
+  email: string,
+  password: string,
+): Promise<{ user: CurrentUser; token: string }> {
+  const login = await fetch(`${NOOS_URL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!login.ok) {
+    throw new Error(login.status === 401 || login.status === 400
+      ? "That password didn't work. Please try again."
+      : "We couldn't check that password right now. Please try again.");
+  }
+  const { accessToken } = await login.json() as { accessToken?: string };
+  if (!accessToken) throw new Error("We couldn't check that password right now. Please try again.");
+
+  const res = await fetch(`${OPENCHAT_URL}/api/auth/ideaflow/link-with-password`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ linkTicket }),
+  });
+  if (!res.ok) {
+    let msg = "Ideaflow sign-in didn't work. Please try again.";
+    try {
+      const parsed = await res.json() as { error?: string };
+      if ((res.status === 400 || res.status === 403 || res.status === 409) && parsed.error) msg = parsed.error;
+    } catch { /* not JSON */ }
+    throw new Error(msg);
+  }
   const body = await res.json();
   const user: CurrentUser = {
     userId: body.user.id,
