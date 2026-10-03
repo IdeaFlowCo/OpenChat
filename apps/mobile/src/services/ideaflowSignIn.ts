@@ -1,10 +1,12 @@
 /**
- * Ideaflow ID web sign-in (OpenChat-3ag.12).
+ * Ideaflow ID web sign-in (OpenChat-3ag.12, code-xbh.3).
  *
- * "You sign in with Ideaflow": on web, when the server reports the Ideaflow ID
- * path enabled, the login screen offers only "Continue with Ideaflow". Legacy
- * methods stay reachable behind "Other sign-in options" so existing accounts
- * are never stranded. Native keeps its current methods until native Ideaflow
+ * On web, when the server reports the Ideaflow ID path enabled, the login
+ * screen offers exactly one control: "Sign in with Ideaflow". Google,
+ * email/password, sign-up and password reset all happen on id.ideaflow.app;
+ * existing OpenChat accounts link server-side by verified email. The legacy
+ * methods remain only as the kill-switch fallback (server flag off or
+ * unreachable). Native keeps its current methods until native Ideaflow
  * sign-in ships separately.
  *
  * Kept free of react-native imports so the decision logic and URL building are
@@ -58,12 +60,8 @@ export async function fetchIdeaflowConfig(
 export interface LoginSurface {
   /** Web only: capability check still in flight — render no sign-in method yet. */
   pending: boolean;
-  /** The primary "Continue with Ideaflow" button. */
+  /** The single "Sign in with Ideaflow" button (plus its "New here?" hint). */
   ideaflow: boolean;
-  /** "Use another Ideaflow account" (prompt=select_account). */
-  switchAccount: boolean;
-  /** The "Other sign-in options" disclosure link. */
-  otherOptionsToggle: boolean;
   /** Google, email/password, create account, recovery help. */
   legacy: boolean;
   /** The old "Uses your Noos credentials" footer (native only now). */
@@ -73,48 +71,64 @@ export interface LoginSurface {
 export function loginSurface(input: {
   isWeb: boolean;
   config: IdeaflowConfigState;
-  showOtherOptions: boolean;
 }): LoginSurface {
   if (!input.isWeb) {
     // Native is unchanged until native Ideaflow sign-in ships.
-    return {
-      pending: false,
-      ideaflow: false,
-      switchAccount: false,
-      otherOptionsToggle: false,
-      legacy: true,
-      legacyFooter: true,
-    };
+    return { pending: false, ideaflow: false, legacy: true, legacyFooter: true };
   }
   if (input.config.status === 'loading') {
-    return {
-      pending: true,
-      ideaflow: false,
-      switchAccount: false,
-      otherOptionsToggle: false,
-      legacy: false,
-      legacyFooter: false,
-    };
+    return { pending: true, ideaflow: false, legacy: false, legacyFooter: false };
   }
   if (!input.config.enabled) {
-    // Server kill switch: fall back to the legacy methods without a rebuild.
-    return {
-      pending: false,
-      ideaflow: false,
-      switchAccount: false,
-      otherOptionsToggle: false,
-      legacy: true,
-      legacyFooter: false,
-    };
+    // Server kill switch (or unreachable): fall back to the legacy methods
+    // without a rebuild.
+    return { pending: false, ideaflow: false, legacy: true, legacyFooter: false };
   }
-  return {
-    pending: false,
-    ideaflow: true,
-    switchAccount: true,
-    otherOptionsToggle: true,
-    legacy: input.showOtherOptions,
-    legacyFooter: false,
-  };
+  return { pending: false, ideaflow: true, legacy: false, legacyFooter: false };
+}
+
+/**
+ * Readable, fixed copy for an Ideaflow redirect that came back without a
+ * usable code. Provider-supplied error text is never shown verbatim.
+ */
+export function ideaflowCallbackErrorMessage(input: {
+  stateMatched: boolean;
+  error: string | null;
+}): string {
+  if (!input.stateMatched) return 'That sign-in took too long or was interrupted. Please try again.';
+  if (input.error === 'access_denied') return 'Sign-in was cancelled. You can try again.';
+  return "Ideaflow sign-in didn't work. Please try again.";
+}
+
+// The Ideaflow provider session outlives an OpenChat sign-out, and without a
+// prompt the provider would sign that same account straight back in. After an
+// explicit sign-out (not a session expiry) the next sign-in sends
+// prompt=select_account so the provider asks which account to use.
+const ACCOUNT_CHOICE_KEY = 'openchat_ideaflow_choose_account';
+
+function localStore(): Storage | null {
+  try {
+    return typeof window !== 'undefined' && window.localStorage ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+export function markIdeaflowAccountChoice(): void {
+  try { localStore()?.setItem(ACCOUNT_CHOICE_KEY, '1'); } catch { /* storage blocked: next sign-in reuses the provider session */ }
+}
+
+/** Returns true once after an explicit sign-out, then clears the marker. */
+export function takeIdeaflowAccountChoice(): boolean {
+  const store = localStore();
+  if (!store) return false;
+  try {
+    const marked = store.getItem(ACCOUNT_CHOICE_KEY) === '1';
+    store.removeItem(ACCOUNT_CHOICE_KEY);
+    return marked;
+  } catch {
+    return false;
+  }
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {
@@ -143,8 +157,9 @@ export async function pkceChallenge(verifier: string): Promise<string> {
 export interface IdeaflowStartOptions {
   /**
    * Ask Ideaflow ID to show its account chooser (OIDC prompt=select_account).
-   * Only the explicit account-switch path sets this; ordinary sign-in sends no
-   * prompt so an existing Ideaflow session signs in silently.
+   * Only "Switch account" and the first sign-in after an explicit sign-out set
+   * this; ordinary sign-in sends no prompt so an existing Ideaflow session
+   * signs in silently.
    */
   selectAccount?: boolean;
 }
@@ -186,9 +201,9 @@ export async function prepareIdeaflowWebSignIn(
     selectAccount: options.selectAccount === true,
   });
   const response = await fetchImpl(`${baseUrl}/api/auth/ideaflow/url?${query}`);
-  if (!response.ok) throw new Error(`Could not start Ideaflow sign-in (${response.status})`);
+  if (!response.ok) throw new Error("Couldn't reach Ideaflow. Please try again in a moment.");
   const body = await response.json() as { url?: string };
-  if (!body.url) throw new Error('Ideaflow sign-in did not return an authorization URL');
+  if (!body.url) throw new Error("Couldn't reach Ideaflow. Please try again in a moment.");
   storage.setItem(IDEAFLOW_WEB_STATE_KEY, JSON.stringify({ state, nonce, codeVerifier }));
   return body.url;
 }

@@ -586,7 +586,7 @@ export async function signInWithApple(
 }
 
 /**
- * Finish the web-only IdeaFlow ID Authorization Code + PKCE flow. The server
+ * Finish the web-only Ideaflow ID Authorization Code + PKCE flow. The server
  * holds the confidential client secret, verifies the ID token, links the
  * external issuer+subject pair, and returns an ordinary OpenChat session.
  */
@@ -609,7 +609,11 @@ export async function ideaflowExchange(
     } catch {
       /* not JSON */
     }
-    throw new Error(`IdeaFlow ID sign-in failed (${res.status}): ${msg}`);
+    // Shown verbatim on the login page, so keep it readable: only the
+    // account-linking conflict (409) carries specific, fixed server copy.
+    throw new Error(res.status === 409 && msg
+      ? msg
+      : "Ideaflow sign-in didn't work. Please try again.");
   }
 
   const body = await res.json();

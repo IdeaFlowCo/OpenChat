@@ -303,7 +303,7 @@ describe('Switch account (web, Ideaflow ID enabled)', () => {
     mocks.fetch.mockImplementation(async (input: string) => {
       const url = new URL(input);
       if (url.pathname === '/api/auth/ideaflow/config') return new Response(JSON.stringify({ enabled: true }), { status: 200 });
-      return new Response(JSON.stringify({ error: 'Could not reach IdeaFlow ID' }), { status: 502 });
+      return new Response(JSON.stringify({ error: 'Could not reach Ideaflow ID' }), { status: 502 });
     });
     const tree = create(React.createElement(MasterDetailLayout));
     await settle();
@@ -313,7 +313,7 @@ describe('Switch account (web, Ideaflow ID enabled)', () => {
     await settleUntil(() => alert.mock.calls.length > 0);
     expect(mocks.signOut).not.toHaveBeenCalled();
     expect(assign).not.toHaveBeenCalled();
-    expect(alert).toHaveBeenCalledWith('Could not switch account. Could not start Ideaflow sign-in (502)');
+    expect(alert).toHaveBeenCalledWith("Could not switch account. Couldn't reach Ideaflow. Please try again in a moment.");
   });
 
   it('is absent when Ideaflow ID is disabled, leaving Sign out unchanged', async () => {

@@ -95,28 +95,38 @@ build.
 
 ## Web sign-in surface: "you sign in with Ideaflow"
 
-Ideaflow ID is the sign-in for every Ideaflow app (OpenChat-3ag.12). On RN-web,
-while `GET /api/auth/ideaflow/config` reports `enabled: true`:
+Ideaflow ID is the sign-in for every Ideaflow app (OpenChat-3ag.12; single
+button since 2026-10-03, code-xbh.3). On RN-web, while
+`GET /api/auth/ideaflow/config` reports `enabled: true`:
 
-- the login screen shows only **Continue with Ideaflow**. Nothing is rendered
-  until the capability check answers (8-second ceiling), so Google never
-  flashes first;
-- the legacy methods (Google, email/password, create account, recovery help)
-  stay reachable behind a small **Other sign-in options** link so existing
-  accounts are never stranded. Ideaflow sign-in still links an existing
-  OpenChat user by verified email under the contract above;
-- **Use another Ideaflow account** on the login screen and **Switch account**
-  in the signed-in account menu (desktop avatar menu and Profile) request the
-  provider's account chooser with `prompt=select_account`. The signed-in path
-  first prepares the authorization URL, then performs the ordinary app-local
-  OpenChat sign-out, then redirects. Ordinary sign-in sends no `prompt`, so an
-  existing IdeaFlow ID session completes silently.
+- the login screen shows exactly one sign-in control, **Sign in with
+  Ideaflow**, with the hint "New here? You can create an account on the next
+  screen." There is no Google button, email/password form, create-account
+  link, "Other sign-in options" or "Use another Ideaflow account". Google,
+  email/password, sign-up and password reset all happen on id.ideaflow.app.
+  Nothing is rendered until the capability check answers (8-second ceiling),
+  so Google never flashes first;
+- existing OpenChat users are not stranded: the exchange links an existing
+  user by issuer+subject, else by a single strictly verified email match
+  (`linkIdeaflowIdentity`, contract above), else creates a new user. Noos
+  password and Google users therefore land in their existing account when
+  their Ideaflow ID uses the same verified email;
+- ordinary sign-in sends no `prompt`, so an existing Ideaflow ID session
+  completes silently. After an explicit OpenChat sign-out (not a session
+  expiry) the next sign-in sends `prompt=select_account` once, so the provider
+  asks which account to use (`markIdeaflowAccountChoice` in `ChatContext`);
+- **Switch account** in the signed-in account menu (desktop avatar menu and
+  Profile, above **Sign out**) also requests `prompt=select_account`. It first
+  prepares the authorization URL, then performs the ordinary app-local
+  OpenChat sign-out, then redirects.
 
 `/api/auth/ideaflow/url` accepts no `prompt` or exactly `select_account`; any
 other value is rejected with HTTP 400. Ideaflow start and callback failures
-(including a cancelled account choice) are shown inline, because RN-web's
+(including a cancelled account choice) are shown inline on the login page with
+fixed, readable copy (provider error text is never echoed), because RN-web's
 `Alert.alert` is a no-op. If the server disables Ideaflow ID or the
-capability check fails, web falls back to the legacy methods. Native iOS and
+capability check fails, web falls back to the legacy methods; that kill-switch
+fallback is the only way the legacy web methods appear. Native iOS and
 Android keep their current methods until native Ideaflow sign-in ships. Covered
 by `apps/server/test/ideaflowOnlyLogin.mobile.test.ts`,
 `apps/server/test/signOut.mobile.test.ts` and
