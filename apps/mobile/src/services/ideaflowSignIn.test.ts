@@ -7,6 +7,12 @@ import {
   markIdeaflowAccountChoice,
   prepareIdeaflowWebSignIn,
   takeIdeaflowAccountChoice,
+  parseIdeaflowNativeCallback,
+  startIdeaflowSignIn,
+  bytesToBase64Url,
+  base64ToBase64Url,
+  IDEAFLOW_NATIVE_STATE_PREFIX,
+  IDEAFLOW_NATIVE_REDIRECT_URI,
 } from './ideaflowSignIn';
 
 const enabled = { status: 'ready', enabled: true, passwordResetUrl: null } as const;
@@ -14,29 +20,106 @@ const disabled = { status: 'ready', enabled: false, passwordResetUrl: null } as 
 
 describe('loginSurface', () => {
   it('shows only the single Sign in with Ideaflow button on web when enabled', () => {
-    expect(loginSurface({ isWeb: true, config: enabled })).toEqual({
-      pending: false, ideaflow: true, legacy: false, legacyFooter: false,
+    expect(loginSurface({ platform: 'web', config: enabled })).toEqual({
+      pending: false, ideaflow: true, legacy: false, legacyFooter: false, apple: false,
     });
   });
 
-  it('renders no method while the web capability check is in flight', () => {
-    expect(loginSurface({ isWeb: true, config: { status: 'loading' } })).toEqual({
-      pending: true, ideaflow: false, legacy: false, legacyFooter: false,
-    });
+  it('renders no method while the capability check is in flight, on every platform', () => {
+    for (const platform of ['web', 'ios', 'android']) {
+      expect(loginSurface({ platform, config: { status: 'loading' } })).toEqual({
+        pending: true, ideaflow: false, legacy: false, legacyFooter: false, apple: false,
+      });
+    }
   });
 
   it('falls back to legacy methods on web when the server disables Ideaflow', () => {
-    expect(loginSurface({ isWeb: true, config: disabled })).toEqual({
-      pending: false, ideaflow: false, legacy: true, legacyFooter: false,
+    expect(loginSurface({ platform: 'web', config: disabled })).toEqual({
+      pending: false, ideaflow: false, legacy: true, legacyFooter: false, apple: false,
     });
   });
 
-  it('leaves native unchanged regardless of config', () => {
-    for (const config of [enabled, disabled, { status: 'loading' } as const]) {
-      expect(loginSurface({ isWeb: false, config })).toEqual({
-        pending: false, ideaflow: false, legacy: true, legacyFooter: true,
-      });
+  it('shows Sign in with Ideaflow on native when enabled (code-xbh.14)', () => {
+    expect(loginSurface({ platform: 'android', config: enabled })).toEqual({
+      pending: false, ideaflow: true, legacy: false, legacyFooter: false, apple: false,
+    });
+  });
+
+  it('keeps the native Apple button on iOS until Ideaflow ID offers Apple (code-xbh.13)', () => {
+    expect(loginSurface({ platform: 'ios', config: enabled })).toEqual({
+      pending: false, ideaflow: true, legacy: false, legacyFooter: false, apple: true,
+    });
+    expect(loginSurface({ platform: 'ios', config: enabled, keepNativeApple: false })).toEqual({
+      pending: false, ideaflow: true, legacy: false, legacyFooter: false, apple: false,
+    });
+  });
+
+  it('restores every legacy native method when the server kill switch is off', () => {
+    expect(loginSurface({ platform: 'ios', config: disabled })).toEqual({
+      pending: false, ideaflow: false, legacy: true, legacyFooter: true, apple: true,
+    });
+    expect(loginSurface({ platform: 'android', config: disabled })).toEqual({
+      pending: false, ideaflow: false, legacy: true, legacyFooter: true, apple: false,
+    });
+  });
+});
+
+describe('native callback parsing (code-xbh.14)', () => {
+  const base = 'openchat://auth/ideaflow/callback';
+  it('accepts only the exact state this app generated', () => {
+    expect(parseIdeaflowNativeCallback(`${base}?provider=ideaflow&code=abc&state=native-S`, 'native-S'))
+      .toEqual({ kind: 'code', code: 'abc' });
+    expect(parseIdeaflowNativeCallback(`${base}?provider=ideaflow&code=abc&state=native-X`, 'native-S'))
+      .toEqual({ kind: 'error', message: 'That sign-in took too long or was interrupted. Please try again.' });
+    expect(parseIdeaflowNativeCallback(`${base}?code=abc`, 'native-S').kind).toBe('error');
+  });
+
+  it('maps provider errors to fixed copy and rejects foreign URLs', () => {
+    expect(parseIdeaflowNativeCallback(`${base}?error=access_denied&error_description=raw&state=native-S`, 'native-S'))
+      .toEqual({ kind: 'error', message: 'Sign-in was cancelled. You can try again.' });
+    expect(parseIdeaflowNativeCallback(`${base}?error=server_error&state=native-S`, 'native-S'))
+      .toEqual({ kind: 'error', message: "Ideaflow sign-in didn't work. Please try again." });
+    expect(parseIdeaflowNativeCallback('https://evil.example/?code=abc&state=native-S', 'native-S').kind).toBe('error');
+  });
+
+  it('matches the server bounce prefix and redirect', () => {
+    expect(IDEAFLOW_NATIVE_STATE_PREFIX).toBe('native-');
+    expect(IDEAFLOW_NATIVE_REDIRECT_URI).toBe('openchat://auth/ideaflow/callback');
+  });
+});
+
+describe('startIdeaflowSignIn with injected (native) randomness', () => {
+  it('prefixes the state, uses the injected PKCE challenge, and returns the secrets', async () => {
+    const fetchImpl = vi.fn(async (_input: string) => new Response(JSON.stringify({ url: 'https://id.ideaflow.app/authorize?x=1' }), { status: 200 }));
+    let n = 0;
+    const result = await startIdeaflowSignIn(
+      'https://chat.ideaflow.app',
+      { statePrefix: 'native-', selectAccount: true },
+      { fetchImpl: fetchImpl as unknown as typeof fetch, random: () => `r${++n}`, challenge: async v => `c-${v}` },
+    );
+    expect(result).toEqual({
+      url: 'https://id.ideaflow.app/authorize?x=1',
+      pending: { state: 'native-r1', nonce: 'r2', codeVerifier: 'r3' },
+    });
+    const requested = new URL(String(fetchImpl.mock.calls[0][0]));
+    expect(requested.searchParams.get('state')).toBe('native-r1');
+    expect(requested.searchParams.get('code_challenge')).toBe('c-r3');
+    expect(requested.searchParams.get('prompt')).toBe('select_account');
+  });
+});
+
+describe('base64url helpers', () => {
+  it('encodes bytes like RFC 4648 base64url without padding', () => {
+    const bytes = new Uint8Array([0xfb, 0xff, 0xbf, 0x00, 0x10]);
+    expect(bytesToBase64Url(bytes)).toBe(Buffer.from(bytes).toString('base64url'));
+    for (let len = 0; len < 50; len++) {
+      const random = new Uint8Array(len).map((_, i) => (i * 37 + len * 11) & 255);
+      expect(bytesToBase64Url(random)).toBe(Buffer.from(random).toString('base64url'));
     }
+  });
+
+  it('converts standard base64 digests to base64url', () => {
+    expect(base64ToBase64Url('a+b/c==')).toBe('a-b_c');
   });
 });
 

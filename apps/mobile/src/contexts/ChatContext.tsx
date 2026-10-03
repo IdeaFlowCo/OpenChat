@@ -60,6 +60,7 @@ import {
 } from './conversationState';
 import { conversationLastMessage } from '../utils/conversationPresentation';
 import { markIdeaflowAccountChoice } from '../services/ideaflowSignIn';
+import { markIdeaflowAccountChoiceNative } from '../services/ideaflowNativeSignIn';
 
 type Status = 'available' | 'away' | 'busy' | 'invisible';
 
@@ -1084,9 +1085,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [currentUser]);
 
   const signOut = useCallback(async ({ explicit = true }: { explicit?: boolean } = {}) => {
-    // Web: the next Ideaflow sign-in asks which account (prompt=select_account)
-    // instead of silently reusing the provider session. No-op on native.
-    if (explicit) markIdeaflowAccountChoice();
+    // The next Ideaflow sign-in asks which account (prompt=select_account)
+    // instead of silently reusing the provider session (web: localStorage,
+    // native: AsyncStorage; each call is a no-op on the other platform).
+    if (explicit) {
+      markIdeaflowAccountChoice();
+      void markIdeaflowAccountChoiceNative();
+    }
     try { emitPresenceUpdate('offline'); } catch { /* best effort */ }
     disconnect();
     await clearSession();

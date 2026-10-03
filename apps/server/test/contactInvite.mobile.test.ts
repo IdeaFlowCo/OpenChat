@@ -39,6 +39,10 @@ vi.mock('../../mobile/src/api/client', () => ({
   api: { getMyCard: mocks.getMyCard },
   addMeCardUrl: (token: string) => `https://chat.globalbr.ai/c/${token}`,
 }));
+// Switch account (Ideaflow config fetch) is covered by the Ideaflow tests.
+vi.mock('../../mobile/src/hooks/useIdeaflowAccountSwitch', () => ({
+  useIdeaflowAccountSwitch: () => ({ available: false, switching: false, switchAccount: async () => {} }),
+}));
 vi.mock('../../mobile/src/utils/deviceContactInvite', () => ({
   getContactAccess: mocks.getAccess, chooseOneContact: mocks.choose, allowMoreContacts: mocks.more,
 }));

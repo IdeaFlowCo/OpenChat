@@ -48,6 +48,11 @@ vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ sc
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ bootstrapIfAuthed: mocks.bootstrap }) }));
 vi.mock('../../mobile/src/contexts/EntryContext', () => ({ useEntryContext: () => ({ entryIntent: null, refreshEntryIntent: vi.fn() }) }));
 vi.mock('../../mobile/src/components/EntryHeader', () => ({ EntryHeader: () => null }));
+// These cover the native legacy Google flow, which now renders only when the
+// server's Ideaflow kill switch is off (code-xbh.14).
+vi.mock('../../mobile/src/hooks/useIdeaflowConfig', () => ({
+  useIdeaflowConfig: () => ({ status: 'ready', enabled: false, passwordResetUrl: null }),
+}));
 vi.mock('../../mobile/src/api/client', () => ({
   OPENCHAT_URL: 'https://chat.globalbr.ai',
   GOOGLE_CLIENT_ID: 'web.apps.googleusercontent.com',
