@@ -61,6 +61,7 @@ import {
 import { conversationLastMessage } from '../utils/conversationPresentation';
 import { markIdeaflowAccountChoice } from '../services/ideaflowSignIn';
 import { markIdeaflowAccountChoiceNative } from '../services/ideaflowNativeSignIn';
+import { clearIdeaflowSignedOut, markIdeaflowSignedOut } from '../services/ideaflowAutoSignIn';
 
 type Status = 'available' | 'away' | 'busy' | 'invisible';
 
@@ -351,6 +352,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     setCurrentUser(u);
     setIsAuthed(true);
+    // Signed in again: an earlier explicit sign-out no longer blocks the
+    // automatic cross-app sign-in (code-xbh.21.1) after a later expiry.
+    clearIdeaflowSignedOut();
     try {
       const sock = await connect();
       setChatSocket(sock);
@@ -1091,6 +1095,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (explicit) {
       markIdeaflowAccountChoice();
       void markIdeaflowAccountChoiceNative();
+      // Web: never sign this browser back in automatically (code-xbh.21.1; no-op on native).
+      markIdeaflowSignedOut();
     }
     try { emitPresenceUpdate('offline'); } catch { /* best effort */ }
     disconnect();

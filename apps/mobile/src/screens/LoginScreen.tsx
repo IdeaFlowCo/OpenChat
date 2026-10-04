@@ -40,6 +40,8 @@ import {
   takeIdeaflowAccountChoice,
 } from '../services/ideaflowSignIn';
 import { signInWithIdeaflowNative } from '../services/ideaflowNativeSignIn';
+import { currentReturnPath, markAutoSignInAttempted, resolveIdeaflowWebCallback } from '../services/ideaflowAutoSignIn';
+import { useIdeaflowAutoSignIn } from '../hooks/useIdeaflowAutoSignIn';
 
 // Required for the in-app browser to dismiss properly after the OAuth round-trip.
 WebBrowser.maybeCompleteAuthSession();
@@ -114,47 +116,53 @@ export function LoginScreen() {
   const ideaflowConfig = useIdeaflowConfig();
   const providerResetUrl = ideaflowConfig.status === 'ready' ? ideaflowConfig.passwordResetUrl : null;
   const surface = loginSurface({ platform: Platform.OS, config: ideaflowConfig });
+  // Automatic cross-app sign-in (code-xbh.21.1): web, signed out, Ideaflow
+  // session elsewhere -> one silent prompt=none round trip per browser session.
+  const autoSignIn = useIdeaflowAutoSignIn(ideaflowConfig);
+  // Redeeming the code from a silent attempt: keep the neutral loading state.
+  const [silentExchange, setSilentExchange] = useState(false);
 
   // Web: finish the Ideaflow ID redirect. The callback route adds a provider
   // marker because Google and OIDC both use standard `code` and `state` keys.
+  // The code is redeemed only for the state this tab stored; the original URL
+  // (path + query + hash) is restored; a silent attempt never shows an error.
   useEffect(() => {
     if (!isWeb || typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('provider') !== 'ideaflow') return;
+    const storedRaw = (() => {
+      try { return window.sessionStorage.getItem(IDEAFLOW_WEB_STATE_KEY); } catch { return null; }
+    })();
+    const action = resolveIdeaflowWebCallback(window.location.search, storedRaw);
+    if (action.kind === 'none') return;
 
-    const code = params.get('code');
-    const oauthError = params.get('error');
-    const returnedState = params.get('state');
+    // Any Ideaflow round trip spends this browser session's automatic attempt.
+    markAutoSignInAttempted();
+    try { window.sessionStorage.removeItem(IDEAFLOW_WEB_STATE_KEY); } catch { /* ignore */ }
     const basePath = `/${window.location.pathname.split('/')[1] || ''}/`;
-    window.history.replaceState({}, '', basePath);
+    // Strip the one-time code from the address bar immediately.
+    window.history.replaceState({}, '', action.returnTo ?? basePath);
 
-    let stored: { state: string; nonce: string; codeVerifier: string } | null = null;
-    try {
-      const raw = window.sessionStorage.getItem(IDEAFLOW_WEB_STATE_KEY);
-      stored = raw ? JSON.parse(raw) : null;
-    } catch { stored = null; }
-    window.sessionStorage.removeItem(IDEAFLOW_WEB_STATE_KEY);
-
-    if (!stored || !returnedState || returnedState !== stored.state) {
-      reportIdeaflowError(ideaflowCallbackErrorMessage({ stateMatched: false, error: oauthError }));
-      return;
-    }
-    if (oauthError || !code) {
-      reportIdeaflowError(ideaflowCallbackErrorMessage({ stateMatched: true, error: oauthError }));
+    if (action.kind === 'quiet') return;
+    if (action.kind === 'error') {
+      reportIdeaflowError(ideaflowCallbackErrorMessage({ stateMatched: action.stateMatched, error: action.error }));
       return;
     }
 
-    setIdeaflowLoading(true);
+    const { silent } = action;
+    if (silent) setSilentExchange(true);
+    else setIdeaflowLoading(true);
     (async () => {
       try {
-        await ideaflowExchange(code, stored!.codeVerifier, stored!.nonce);
+        await ideaflowExchange(action.code, action.codeVerifier, action.nonce);
         // Signed in: any pending "ask which account" marker is now spent.
         takeIdeaflowAccountChoice();
         await bootstrapIfAuthed();
       } catch (err) {
-        reportIdeaflowError(err instanceof Error ? err.message : String(err));
+        // Silent attempt: duplicate email (409), linking, anything -> stay
+        // signed out on the same URL, no error. The button keeps the full flow.
+        if (!silent) reportIdeaflowError(err instanceof Error ? err.message : String(err));
       } finally {
-        setIdeaflowLoading(false);
+        if (silent) setSilentExchange(false);
+        else setIdeaflowLoading(false);
       }
     })();
   }, [isWeb, bootstrapIfAuthed]);
@@ -364,7 +372,10 @@ export function LoginScreen() {
     // provider for its account chooser (prompt=select_account).
     const selectAccount = takeIdeaflowAccountChoice();
     try {
-      window.location.href = await prepareIdeaflowWebSignIn(OPENCHAT_URL, { selectAccount });
+      window.location.href = await prepareIdeaflowWebSignIn(OPENCHAT_URL, {
+        selectAccount,
+        returnTo: currentReturnPath(window.location),
+      });
     } catch {
       reportIdeaflowError("Couldn't reach Ideaflow. Please try again in a moment.");
       setIdeaflowLoading(false);
@@ -444,6 +455,19 @@ export function LoginScreen() {
       />
     )
   );
+
+  if (isWeb && (autoSignIn.pending || silentExchange)) {
+    // Neutral state while the automatic sign-in decides or completes; never
+    // flash the sign-in page for someone who is about to be signed in.
+    return (
+      <View
+        style={[styles.root, styles.autoSignInPending, { backgroundColor: c.background }]}
+        accessibilityLabel="Signing you in"
+      >
+        <ActivityIndicator color={c.primary} />
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -722,6 +746,7 @@ export function LoginScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  autoSignInPending: { alignItems: 'center', justifyContent: 'center' },
   scroll: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingHorizontal: 24, justifyContent: 'center', alignItems: 'stretch' },
   buildLabel: { position: 'absolute', right: 10, paddingHorizontal: 4, fontSize: 11, lineHeight: 15 },

@@ -49,6 +49,9 @@ services:
       - IDEAFLOW_ID_CLIENT_ID=${IDEAFLOW_ID_CLIENT_ID:-}
       - IDEAFLOW_ID_CLIENT_SECRET=${IDEAFLOW_ID_CLIENT_SECRET:-}
       - IDEAFLOW_ID_REDIRECT_URI=${IDEAFLOW_ID_REDIRECT_URI:-https://chat.ideaflow.app/auth/ideaflow/callback}
+      # Automatic cross-app sign-in kill switch (code-xbh.21.1): set to false in
+      # .env and recreate the container to stop the silent prompt=none hop.
+      - IDEAFLOW_AUTO_SIGNIN=${IDEAFLOW_AUTO_SIGNIN:-true}
       # Agent API key encryption secret (OpenChat-7c9). 32-byte hex string.
       # Generate: openssl rand -hex 32 >> /opt/openchat/.env
       - OC_KEY_ENCRYPTION_SECRET=${OC_KEY_ENCRYPTION_SECRET:-}

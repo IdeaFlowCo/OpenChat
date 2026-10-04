@@ -15,8 +15,8 @@ import {
   IDEAFLOW_NATIVE_REDIRECT_URI,
 } from './ideaflowSignIn';
 
-const enabled = { status: 'ready', enabled: true, passwordResetUrl: null } as const;
-const disabled = { status: 'ready', enabled: false, passwordResetUrl: null } as const;
+const enabled = { status: 'ready', enabled: true, passwordResetUrl: null, autoSignIn: false } as const;
+const disabled = { status: 'ready', enabled: false, passwordResetUrl: null, autoSignIn: false } as const;
 
 describe('loginSurface', () => {
   it('shows only the single Sign in with Ideaflow button on web when enabled', () => {
@@ -171,6 +171,11 @@ describe('ideaflowStartQuery', () => {
     expect(ideaflowStartQuery({ ...base, selectAccount: false }).has('prompt')).toBe(false);
   });
 
+  it('sends prompt=none only for the silent automatic attempt, never alongside the chooser', () => {
+    expect(ideaflowStartQuery({ ...base, silent: true }).getAll('prompt')).toEqual(['none']);
+    expect(ideaflowStartQuery({ ...base, silent: true, selectAccount: true }).getAll('prompt')).toEqual(['select_account']);
+  });
+
   it('adds prompt=select_account only for the switch path', () => {
     expect(ideaflowStartQuery({ ...base, selectAccount: true }).getAll('prompt')).toEqual(['select_account']);
   });
@@ -192,6 +197,20 @@ describe('prepareIdeaflowWebSignIn', () => {
     expect(JSON.parse(value).state).toBe(requested.searchParams.get('state'));
   });
 
+  it('remembers a silent attempt and its return URL with the PKCE secrets', async () => {
+    const storage = { setItem: vi.fn() };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ url: 'https://id/authorize' })));
+    const url = await prepareIdeaflowWebSignIn('https://chat.example', { silent: true, returnTo: '/app/c/x?y=1#z' }, {
+      fetchImpl: fetchImpl as unknown as typeof fetch, storage,
+    });
+    expect(url).toBe('https://id/authorize');
+    const requested = new URL(String((fetchImpl.mock.calls[0] as unknown[])[0]));
+    expect(requested.searchParams.getAll('prompt')).toEqual(['none']);
+    const stored = JSON.parse(storage.setItem.mock.calls[0][1]);
+    expect(stored).toMatchObject({ silent: true, returnTo: '/app/c/x?y=1#z', state: requested.searchParams.get('state') });
+    expect(typeof stored.codeVerifier).toBe('string');
+  });
+
   it('does not store state when the server cannot start sign-in', async () => {
     const storage = { setItem: vi.fn() };
     await expect(prepareIdeaflowWebSignIn('https://chat.example', {}, {
@@ -205,9 +224,18 @@ describe('fetchIdeaflowConfig', () => {
   it('reports enabled and the recovery URL only when enabled', async () => {
     const ok = (body: unknown) => (async () => new Response(JSON.stringify(body))) as unknown as typeof fetch;
     expect(await fetchIdeaflowConfig('https://c', ok({ enabled: true, passwordResetUrl: 'https://id/forgot-password' })))
-      .toEqual({ status: 'ready', enabled: true, passwordResetUrl: 'https://id/forgot-password' });
+      .toEqual({ status: 'ready', enabled: true, passwordResetUrl: 'https://id/forgot-password', autoSignIn: false });
     expect(await fetchIdeaflowConfig('https://c', ok({ enabled: false, passwordResetUrl: 'https://x' })))
       .toEqual(disabled);
+  });
+
+  it('turns automatic sign-in on only for an explicit true from an enabled server (code-xbh.21.1)', async () => {
+    const ok = (body: unknown) => (async () => new Response(JSON.stringify(body))) as unknown as typeof fetch;
+    expect((await fetchIdeaflowConfig('https://c', ok({ enabled: true, autoSignIn: true }))))
+      .toEqual({ status: 'ready', enabled: true, passwordResetUrl: null, autoSignIn: true });
+    for (const body of [{ enabled: true }, { enabled: true, autoSignIn: 'true' }, { enabled: false, autoSignIn: true }]) {
+      expect(await fetchIdeaflowConfig('https://c', ok(body))).toMatchObject({ status: 'ready', autoSignIn: false });
+    }
   });
 
   it('treats errors and timeouts as disabled so login never stays blank', async () => {
