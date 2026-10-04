@@ -120,8 +120,9 @@ button since 2026-10-03, code-xbh.3). On RN-web, while
   prepares the authorization URL, then performs the ordinary app-local
   OpenChat sign-out, then redirects.
 
-`/api/auth/ideaflow/url` accepts no `prompt` or exactly `select_account`; any
-other value is rejected with HTTP 400. Ideaflow start and callback failures
+`/api/auth/ideaflow/url` accepts no `prompt`, exactly `select_account`, or
+exactly `none` (automatic sign-in, below); any other value is rejected with
+HTTP 400. Ideaflow start and callback failures
 (including a cancelled account choice) are shown inline on the login page with
 fixed, readable copy (provider error text is never echoed), because RN-web's
 `Alert.alert` is a no-op. If the server disables Ideaflow ID or the
@@ -132,6 +133,37 @@ Android follow the same capability response; see
 by `apps/server/test/ideaflowOnlyLogin.mobile.test.ts`,
 `apps/server/test/signOut.mobile.test.ts` and
 `apps/mobile/src/services/ideaflowSignIn.test.ts`.
+
+## Automatic cross-app sign-in (web, code-xbh.21.1)
+
+Someone already signed in to Ideaflow ID (from any Ideaflow app) who opens the
+OpenChat web app signed out is signed in without a click:
+
+- after the app's own session check comes back signed out, the login screen
+  shows a neutral spinner (never the sign-in page) and, once per browser
+  session, does ONE `location.replace` to the normal Ideaflow start with
+  `prompt=none` (`useIdeaflowAutoSignIn`, `services/ideaflowAutoSignIn.ts`);
+- the same-tab pending record (state/nonce/PKCE in `sessionStorage`) also keeps
+  `silent: true` and the original same-origin path + query + hash. A code is
+  redeemed only for the stored state, then that URL is restored. Any provider
+  error (`login_required`, ...) or app-level failure of a silent attempt
+  (duplicate-email 409, linking, anything) returns to the original URL signed
+  out with no error. The explicit button keeps its full flow and errors;
+- guards: a first-party session cookie `ideaflow_auto_signin` (no expiry,
+  Secure, SameSite=Lax, set before leaving; a callback load also sets it); an
+  explicit OpenChat sign-out (`openchat_ideaflow_signed_out` in localStorage,
+  cleared when a session is established, plus the select-account marker);
+  callback loads; native iOS/Android; embedded webviews, in-app browsers and the
+  desktop Tauri shell (UA tokens, bare WKWebView UA, `__TAURI_INTERNALS__`,
+  `ReactNativeWebView`, Capacitor, Electron); crawlers/unfurlers (shared
+  Ideaflow UA list); prerender; frames; blocked cookies;
+- kill switch: `IDEAFLOW_AUTO_SIGNIN=false` in `/opt/openchat/.env`, then
+  recreate the container (`docker compose up -d --no-build openchat`). The
+  server reports `autoSignIn` in `/api/auth/ideaflow/config`; the client acts
+  only on an explicit `true`. Default on.
+
+Covered by `apps/server/test/ideaflowAutoSignIn.mobile.test.ts` and
+`apps/mobile/src/services/ideaflowAutoSignIn.test.ts`.
 
 ## Password recovery capability
 

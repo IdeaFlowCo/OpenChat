@@ -51,7 +51,7 @@ vi.mock('../../mobile/src/components/EntryHeader', () => ({ EntryHeader: () => n
 // These cover the native legacy Google flow, which now renders only when the
 // server's Ideaflow kill switch is off (code-xbh.14).
 vi.mock('../../mobile/src/hooks/useIdeaflowConfig', () => ({
-  useIdeaflowConfig: () => ({ status: 'ready', enabled: false, passwordResetUrl: null }),
+  useIdeaflowConfig: () => ({ status: 'ready', enabled: false, passwordResetUrl: null, autoSignIn: false }),
 }));
 vi.mock('../../mobile/src/api/client', () => ({
   OPENCHAT_URL: 'https://chat.globalbr.ai',

@@ -23,12 +23,22 @@ export const IDEAFLOW_CONFIG_TIMEOUT_MS = 8000;
 
 export type IdeaflowConfigState =
   | { status: 'loading' }
-  | { status: 'ready'; enabled: boolean; passwordResetUrl: string | null };
+  | {
+    status: 'ready';
+    enabled: boolean;
+    passwordResetUrl: string | null;
+    /**
+     * Server kill switch for the automatic cross-app sign-in (code-xbh.21.1).
+     * Only an explicit `true` from the server turns it on.
+     */
+    autoSignIn: boolean;
+  };
 
 export const IDEAFLOW_CONFIG_DISABLED: IdeaflowConfigState = {
   status: 'ready',
   enabled: false,
   passwordResetUrl: null,
+  autoSignIn: false,
 };
 
 export async function fetchIdeaflowConfig(
@@ -43,7 +53,11 @@ export async function fetchIdeaflowConfig(
       signal: controller?.signal,
     });
     if (!response.ok) return IDEAFLOW_CONFIG_DISABLED;
-    const body = await response.json() as { enabled?: unknown; passwordResetUrl?: unknown };
+    const body = await response.json() as {
+      enabled?: unknown;
+      passwordResetUrl?: unknown;
+      autoSignIn?: unknown;
+    };
     const enabled = body.enabled === true;
     return {
       status: 'ready',
@@ -51,6 +65,7 @@ export async function fetchIdeaflowConfig(
       passwordResetUrl: enabled && typeof body.passwordResetUrl === 'string'
         ? body.passwordResetUrl
         : null,
+      autoSignIn: enabled && body.autoSignIn === true,
     };
   } catch {
     // Unknown capability fails open to the legacy methods, never to a blank screen.
@@ -189,6 +204,12 @@ export interface IdeaflowStartOptions {
    * signs in silently.
    */
   selectAccount?: boolean;
+  /**
+   * Web automatic cross-app sign-in only (code-xbh.21.1): OIDC prompt=none, so
+   * the provider never shows a page and answers login_required when there is
+   * no Ideaflow session. Ignored when selectAccount is set.
+   */
+  silent?: boolean;
 }
 
 export function ideaflowStartQuery(input: {
@@ -202,6 +223,7 @@ export function ideaflowStartQuery(input: {
     code_challenge: input.codeChallenge,
   });
   if (input.selectAccount) query.set('prompt', 'select_account');
+  else if (input.silent) query.set('prompt', 'none');
   return query;
 }
 
@@ -209,6 +231,14 @@ export interface IdeaflowPendingSignIn {
   state: string;
   nonce: string;
   codeVerifier: string;
+}
+
+/** What web keeps in same-tab session storage across the redirect. */
+export interface IdeaflowWebPendingSignIn extends IdeaflowPendingSignIn {
+  /** Started by the automatic cross-app sign-in: every failure stays quiet. */
+  silent?: boolean;
+  /** Same-origin path + query + hash to restore after the round trip. */
+  returnTo?: string;
 }
 
 export interface IdeaflowPkceDeps {
@@ -242,6 +272,7 @@ export async function startIdeaflowSignIn(
     nonce,
     codeChallenge,
     selectAccount: options.selectAccount === true,
+    silent: options.silent === true,
   });
   const response = await fetchImpl(`${baseUrl}/api/auth/ideaflow/url?${query}`);
   if (!response.ok) throw new Error("Couldn't reach Ideaflow. Please try again in a moment.");
@@ -257,12 +288,18 @@ export async function startIdeaflowSignIn(
  */
 export async function prepareIdeaflowWebSignIn(
   baseUrl: string,
-  options: IdeaflowStartOptions = {},
+  options: IdeaflowStartOptions & { returnTo?: string } = {},
   deps: { fetchImpl?: typeof fetch; storage?: Pick<Storage, 'setItem'> } = {},
 ): Promise<string> {
   const storage = deps.storage ?? globalThis.sessionStorage;
-  const { url, pending } = await startIdeaflowSignIn(baseUrl, options, { fetchImpl: deps.fetchImpl });
-  storage.setItem(IDEAFLOW_WEB_STATE_KEY, JSON.stringify(pending));
+  const { returnTo, ...startOptions } = options;
+  const { url, pending } = await startIdeaflowSignIn(baseUrl, startOptions, { fetchImpl: deps.fetchImpl });
+  const record: IdeaflowWebPendingSignIn = {
+    ...pending,
+    ...(startOptions.silent && !startOptions.selectAccount ? { silent: true } : {}),
+    ...(returnTo ? { returnTo } : {}),
+  };
+  storage.setItem(IDEAFLOW_WEB_STATE_KEY, JSON.stringify(record));
   return url;
 }
 

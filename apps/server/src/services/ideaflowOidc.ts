@@ -71,6 +71,19 @@ export function getIdeaflowOidcConfig(
   return { issuer, clientId, clientSecret, redirectUri };
 }
 
+/**
+ * Automatic cross-app sign-in (code-xbh.21.1). When Ideaflow ID is enabled the
+ * web app makes one silent `prompt=none` round trip per browser session for a
+ * signed-out visitor. On by default; set IDEAFLOW_AUTO_SIGNIN to false/0/off/no
+ * (and restart the container) to turn it off without a code revert. The
+ * explicit "Sign in with Ideaflow" button is unaffected.
+ */
+export function isIdeaflowAutoSignInEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!getIdeaflowOidcConfig(env)) return false;
+  const raw = env.IDEAFLOW_AUTO_SIGNIN?.trim().toLowerCase();
+  return !(raw === 'false' || raw === '0' || raw === 'off' || raw === 'no');
+}
+
 /** Separate recovery rollout: a merged UI or enabled login never opts in. */
 export function getIdeaflowPasswordResetUrl(env: NodeJS.ProcessEnv = process.env): string | null {
   const config = getIdeaflowOidcConfig(env);
@@ -131,12 +144,21 @@ export function getOidcDiscovery(
 }
 
 /**
- * The only OIDC prompt OpenChat ever requests. Ordinary sign-in sends no
- * prompt so an existing IdeaFlow ID session completes silently (SSO); the
- * explicit "Switch account" path asks the provider for its account chooser.
+ * The OIDC prompts OpenChat requests. Ordinary sign-in sends no prompt so an
+ * existing IdeaFlow ID session completes silently (SSO); the explicit "Switch
+ * account" path asks the provider for its account chooser; the automatic
+ * cross-app sign-in (code-xbh.21.1) sends `none`, so the provider never shows a
+ * page and answers `login_required` when there is no provider session.
  */
 export const IDEAFLOW_SELECT_ACCOUNT_PROMPT = 'select_account';
-export type IdeaflowAuthorizationPrompt = typeof IDEAFLOW_SELECT_ACCOUNT_PROMPT;
+export const IDEAFLOW_SILENT_PROMPT = 'none';
+export type IdeaflowAuthorizationPrompt =
+  | typeof IDEAFLOW_SELECT_ACCOUNT_PROMPT
+  | typeof IDEAFLOW_SILENT_PROMPT;
+export const IDEAFLOW_AUTHORIZATION_PROMPTS: readonly IdeaflowAuthorizationPrompt[] = [
+  IDEAFLOW_SELECT_ACCOUNT_PROMPT,
+  IDEAFLOW_SILENT_PROMPT,
+];
 
 export async function buildIdeaflowAuthorizationUrl(
   config: IdeaflowOidcConfig,
@@ -158,8 +180,8 @@ export async function buildIdeaflowAuthorizationUrl(
   url.searchParams.set('nonce', input.nonce);
   url.searchParams.set('code_challenge', input.codeChallenge);
   url.searchParams.set('code_challenge_method', 'S256');
-  if (input.prompt === IDEAFLOW_SELECT_ACCOUNT_PROMPT) {
-    url.searchParams.set('prompt', IDEAFLOW_SELECT_ACCOUNT_PROMPT);
+  if (input.prompt && IDEAFLOW_AUTHORIZATION_PROMPTS.includes(input.prompt)) {
+    url.searchParams.set('prompt', input.prompt);
   }
   return url.toString();
 }

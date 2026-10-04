@@ -14,8 +14,10 @@ import {
   exchangeIdeaflowAuthorizationCode,
   getIdeaflowOidcConfig,
   getIdeaflowPasswordResetUrl,
-  IDEAFLOW_SELECT_ACCOUNT_PROMPT,
+  IDEAFLOW_AUTHORIZATION_PROMPTS,
+  IdeaflowAuthorizationPrompt,
   IdeaflowIdentityClaims,
+  isIdeaflowAutoSignInEnabled,
 } from '../services/ideaflowOidc.js';
 import { deletePrivateGraphForUser, exportPrivateGraph } from '../services/privateGraph.js';
 import {
@@ -286,6 +288,7 @@ router.get('/ideaflow/config', (_req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
   const passwordResetUrl = getIdeaflowPasswordResetUrl();
   res.json({ enabled: getIdeaflowOidcConfig() !== null,
+    autoSignIn: isIdeaflowAutoSignInEnabled(),
     ...(passwordResetUrl ? { passwordResetUrl } : {}) });
 });
 
@@ -295,8 +298,9 @@ router.get('/ideaflow/config', (_req: Request, res: Response) => {
  * Starts an OIDC Authorization Code + PKCE flow using browser-generated state,
  * nonce, and code challenge. The redirect URI is server-owned and cannot be
  * overridden by the caller. The optional `prompt` accepts only
- * `select_account` (the explicit account-switch path); ordinary sign-in omits
- * it so an existing IdeaFlow ID session stays silent.
+ * `select_account` (the explicit account-switch path) or `none` (the automatic
+ * cross-app sign-in, code-xbh.21.1); ordinary sign-in omits it so an existing
+ * IdeaFlow ID session stays silent.
  */
 router.get('/ideaflow/url', async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -323,7 +327,9 @@ router.get('/ideaflow/url', async (req: Request, res: Response) => {
     return;
   }
   const rawPrompt = req.query.prompt;
-  if (rawPrompt !== undefined && rawPrompt !== IDEAFLOW_SELECT_ACCOUNT_PROMPT) {
+  const prompt = IDEAFLOW_AUTHORIZATION_PROMPTS.find(allowed => allowed === rawPrompt) as
+    IdeaflowAuthorizationPrompt | undefined;
+  if (rawPrompt !== undefined && !prompt) {
     res.status(400).json({ error: 'Unsupported prompt' });
     return;
   }
@@ -333,7 +339,7 @@ router.get('/ideaflow/url', async (req: Request, res: Response) => {
       state,
       nonce,
       codeChallenge,
-      ...(rawPrompt === IDEAFLOW_SELECT_ACCOUNT_PROMPT ? { prompt: IDEAFLOW_SELECT_ACCOUNT_PROMPT } : {}),
+      ...(prompt ? { prompt } : {}),
     });
     res.json({ url });
   } catch (error) {

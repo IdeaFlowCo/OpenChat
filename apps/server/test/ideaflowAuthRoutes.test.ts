@@ -60,19 +60,34 @@ describe('IdeaFlow ID auth routes', () => {
     const response = await fetch(`${baseUrl}/api/auth/ideaflow/config`);
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ enabled: true });
+    expect(await response.json()).toEqual({ enabled: true, autoSignIn: true });
     expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('turns automatic cross-app sign-in off with IDEAFLOW_AUTO_SIGNIN (code-xbh.21.1)', async () => {
+    try {
+      for (const off of ['false', '0', 'off', 'no', 'FALSE']) {
+        process.env.IDEAFLOW_AUTO_SIGNIN = off;
+        expect(await (await fetch(`${baseUrl}/api/auth/ideaflow/config`)).json()).toEqual({ enabled: true, autoSignIn: false });
+      }
+      process.env.IDEAFLOW_AUTO_SIGNIN = 'true';
+      expect(await (await fetch(`${baseUrl}/api/auth/ideaflow/config`)).json()).toEqual({ enabled: true, autoSignIn: true });
+      process.env.IDEAFLOW_ID_ENABLED = 'false';
+      expect(await (await fetch(`${baseUrl}/api/auth/ideaflow/config`)).json()).toEqual({ enabled: false, autoSignIn: false });
+    } finally {
+      delete process.env.IDEAFLOW_AUTO_SIGNIN;
+    }
   });
 
   it('publishes a recovery destination only after its independent exact-route opt-in', async () => {
     process.env.IDEAFLOW_PASSWORD_RESET_ENABLED = 'true';
     process.env.IDEAFLOW_PASSWORD_RESET_URL = 'https://id.ideaflow.app/forgot-password';
     const response = await fetch(`${baseUrl}/api/auth/ideaflow/config`);
-    expect(await response.json()).toEqual({ enabled: true,
+    expect(await response.json()).toEqual({ enabled: true, autoSignIn: true,
       passwordResetUrl: 'https://id.ideaflow.app/forgot-password' });
     expect(response.headers.get('cache-control')).toBe('no-store');
     process.env.IDEAFLOW_PASSWORD_RESET_URL = 'https://other.example/forgot-password';
-    expect(await (await fetch(`${baseUrl}/api/auth/ideaflow/config`)).json()).toEqual({ enabled: true });
+    expect(await (await fetch(`${baseUrl}/api/auth/ideaflow/config`)).json()).toEqual({ enabled: true, autoSignIn: true });
   });
 
   it('stays unavailable when the explicit rollout flag is off', async () => {
@@ -86,7 +101,7 @@ describe('IdeaFlow ID auth routes', () => {
       body: JSON.stringify({}),
     });
 
-    expect(await config.json()).toEqual({ enabled: false });
+    expect(await config.json()).toEqual({ enabled: false, autoSignIn: false });
     expect(start.status).toBe(503);
     expect(exchange.status).toBe(503);
   });
@@ -138,7 +153,7 @@ describe('IdeaFlow ID auth routes', () => {
     }
   });
 
-  it('sends prompt=select_account only for the explicit account-switch start', async () => {
+  it('sends prompt=select_account for the switch start and prompt=none for the silent start', async () => {
     const discovery = {
       issuer: 'https://id.ideaflow.app/api/auth',
       authorization_endpoint: 'https://id.ideaflow.app/api/auth/oauth2/authorize',
@@ -157,7 +172,15 @@ describe('IdeaFlow ID auth routes', () => {
       expect(switching.status).toBe(200);
       expect(new URL(switching.body.url).searchParams.getAll('prompt')).toEqual(['select_account']);
 
-      for (const prompt of ['none', 'login', 'consent', 'select_account login', '']) {
+      const silent = await request(server).get('/api/auth/ideaflow/url').set('Host', 'chat.ideaflow.app')
+        .query({ ...pkce, prompt: 'none' });
+      expect(silent.status).toBe(200);
+      const silentUrl = new URL(silent.body.url);
+      expect(silentUrl.searchParams.getAll('prompt')).toEqual(['none']);
+      expect(silentUrl.searchParams.get('code_challenge_method')).toBe('S256');
+      expect(silentUrl.searchParams.get('state')).toBe(pkce.state);
+
+      for (const prompt of ['login', 'consent', 'select_account login', 'none login', 'NONE', '']) {
         const rejected = await request(server).get('/api/auth/ideaflow/url').set('Host', 'chat.ideaflow.app')
           .query({ ...pkce, prompt });
         expect(rejected.status).toBe(400);
