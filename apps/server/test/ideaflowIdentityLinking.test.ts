@@ -35,6 +35,18 @@ describe('linkIdeaflowIdentity', () => {
     expect(String(session.run.mock.calls[1][0])).toContain('ideaflowEmail');
   });
 
+  it('activates a shared inbox at first login without replacing its ID or history', async () => {
+    const pending = { id: 'shared-inbox', email: null, name: 'Member' };
+    const active = { ...pending, email: identity.email };
+    const session = sessionWithResults(result([pending]), result([active]));
+    await expect(linkIdeaflowIdentity(session as never, identity)).resolves.toEqual(active);
+    expect(session.run).toHaveBeenCalledTimes(2);
+    const refresh = String(session.run.mock.calls[1][0]);
+    expect(refresh).toContain('u.email = coalesce(u.email, $email)');
+    expect(refresh).toContain('u.sharedInboxPending = false');
+    expect(refresh).not.toContain('CREATE');
+  });
+
   it('links one legacy user by uniquely matched verified email', async () => {
     const user = { id: 'legacy', email: identity.email, name: 'Legacy' };
     const linked = { ...user, avatarUrl: identity.picture };

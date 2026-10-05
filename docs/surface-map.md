@@ -53,3 +53,5 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 2. **Avatar is "Me".** The user's face in the chrome is the single entry point to everything about themselves (their card, their QR code, scanning others' codes, profile editing, agent, settings).
 3. **OpenChat Agent is always an ordinary chat.** The assistant conversation is created server-side upon sign-in and pinned in Chats. The agent noun is never hidden behind `enhanced` mode; only the coordination layer (Asks, Stories, Review, quiet matching) is gated.
 4. **Reciprocal actions live together.** "Show my QR code" and "Scan their code" belong on the same surface (`Profile`), with "Scan a code" directly beneath the user's code.
+
+Unlinked profile → Message with OpenChat opens Compose with the live profile owner already addressed. Unclaimed profiles → Get an invite link → My card. This uses the existing OpenChat inbox and shared Ideaflow account; an embedded Unlinked web Messages surface will reuse it.
