@@ -104,7 +104,7 @@ module.exports = {
       eas: {
         projectId: 'fc828863-4fa4-4b62-97f6-8c00ce1dffe3',
       },
-      buildDate: '2026-10-03',
+      buildDate: '2026-10-05',
     },
 
     // baseUrl ONLY set during web exports (when IS_WEB_BUILD=1). Native

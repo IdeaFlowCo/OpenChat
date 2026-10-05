@@ -1,13 +1,13 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ create: vi.fn(), send: vi.fn(), replace: vi.fn(), contacts: vi.fn(), card: vi.fn(), status: vi.fn(), params: { source: 'unlinked', profile: 'https://www.unlinked.ai/people/public-id', card: undefined as string | undefined } }));
+const mocks = vi.hoisted(() => ({ create: vi.fn(), send: vi.fn(), replace: vi.fn(), contacts: vi.fn(), card: vi.fn(), status: vi.fn(), clear: vi.fn(), goBack: vi.fn(), params: { source: 'unlinked', profile: 'https://www.unlinked.ai/people/public-id', card: undefined as string | undefined } }));
 vi.mock('react-native', () => ({ ActivityIndicator: 'ActivityIndicator', ScrollView: 'ScrollView', Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity' }));
-vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ replace: mocks.replace }), useRoute: () => ({ params: mocks.params }) }));
+vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ replace: mocks.replace, goBack: mocks.goBack }), useRoute: () => ({ params: mocks.params }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ createConversation: mocks.create, sendMessageToConversation: mocks.send }) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/api/client', () => ({ api: { getContacts: mocks.contacts, getPublicCard: mocks.card, getCardFriendStatus: mocks.status } }));
-vi.mock('../../mobile/src/services/composeIntents', () => ({ clearComposeIntent: vi.fn() }));
+vi.mock('../../mobile/src/services/composeIntents', () => ({ clearComposeIntent: mocks.clear }));
 import { ComposeScreen } from '../../mobile/src/screens/ComposeScreen';
 let root: ReturnType<typeof create>;
 afterEach(async () => { await act(async () => root?.unmount()); vi.useRealTimers(); delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT; });
@@ -25,6 +25,7 @@ it('requires recipient and explicit Send; ignores a duplicate send tap', async (
   expect(mocks.create).toHaveBeenCalledTimes(1);
   expect(mocks.send).toHaveBeenCalledExactlyOnceWith('dm', 'About this Unlinked profile: https://www.unlinked.ai/people/public-id');
   expect(mocks.replace).toHaveBeenCalledWith('Chat', { conversationId: 'dm' });
+  expect(mocks.clear).not.toHaveBeenCalled();
 });
 
 it('resets the intent and does not reuse a failed-send conversation for another card', async () => {
@@ -64,4 +65,16 @@ it('ignores an old intent when its conversation creation completes after a new l
   await act(async () => resolve({ id: 'dm-card-a' }));
   expect(mocks.send).not.toHaveBeenCalled();
   expect(mocks.replace).not.toHaveBeenCalled();
+});
+
+it('cancels the visible draft without clearing any newer pending request', async () => {
+  vi.clearAllMocks();
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  mocks.params = { source: 'unlinked', profile: 'https://www.unlinked.ai/people/a', card: undefined };
+  mocks.contacts.mockResolvedValue([]);
+  await act(async () => { root = create(React.createElement(ComposeScreen)); });
+  const cancel = root.root.findAllByType('TouchableOpacity').find(n => n.findAllByType('Text').some(t => t.props.children === 'Cancel'))!;
+  await act(async () => cancel.props.onPress());
+  expect(mocks.goBack).toHaveBeenCalledOnce();
+  expect(mocks.clear).not.toHaveBeenCalled();
 });

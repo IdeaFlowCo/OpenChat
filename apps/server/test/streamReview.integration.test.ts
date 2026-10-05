@@ -137,6 +137,32 @@ integration('Stream routes against graph fixtures', () => {
     expect(shared.status).toBe(200);
     expect(shared.body.pinned.map((t: { id: string }) => t.id)).toContain(thoughtId);
   });
+  it('returns immediate verified provenance and keeps cross-chat source identifiers out of peer events', async () => {
+    const events: Array<{ room: string; event: string; payload: any }> = [];
+    app.set('io', { to: (room: string) => ({ emit: (event: string, payload: any) => events.push({ room, event, payload }) }) });
+    const created = await request(app).post('/api/thoughts').set('Authorization', auth()).send({ text: 'Saved source', sourceMessageId: id('source') });
+    expect(created.status).toBe(201);
+    const thoughtId = created.body.id;
+    await run('MATCH (t:Thought {id: $id}) SET t.fixture = $fixture', { id: thoughtId });
+    expect(created.body).toMatchObject({ hasSourceMessage: true, sourceMessageId: id('source'), sourceConversationId: id('chat'), pinned: false });
+    expect(events.find(e => e.event === 'thought:created')?.payload.thought).toMatchObject({ hasSourceMessage: true, sourceMessageId: id('source') });
+    const sameChat = await request(app).post(`/api/thoughts/${thoughtId}/pin`).set('Authorization', auth()).send({ conversationId: id('chat') });
+    expect(sameChat.status).toBe(200);
+    expect(sameChat.body).toMatchObject({ hasSourceMessage: true, sourceMessageId: id('source') });
+    expect(events.find(e => e.event === 'thought:pinned')?.payload.thought).toMatchObject({ hasSourceMessage: true, sourceMessageId: id('source') });
+    await run(`MATCH (v:User {id: $viewer}), (o:User {id: $outsider}) CREATE (c:Conversation {id: $other, fixture: $fixture}) CREATE (v)-[:PARTICIPATES_IN]->(c)<-[:PARTICIPATES_IN]-(o)`, { viewer: id('viewer'), outsider: id('outsider'), other: id('other') });
+    events.length = 0;
+    const crossChat = await request(app).post(`/api/thoughts/${thoughtId}/pin`).set('Authorization', auth()).send({ conversationId: id('other') });
+    expect(crossChat.status).toBe(200);
+    expect(crossChat.body).toMatchObject({ hasSourceMessage: true, sourceMessageId: id('source') });
+    expect(events.find(e => e.event === 'thought:pinned')?.payload.thought).toMatchObject({ hasSourceMessage: true, sourceMessageId: null, sourceConversationId: null });
+    const outsider = await request(app).get(`/api/thoughts/conversation/${id('other')}`).set('Authorization', auth('outsider'));
+    expect(outsider.status).toBe(200);
+    expect(outsider.body.pinned.find((t: {id: string}) => t.id === thoughtId)).toMatchObject({ hasSourceMessage: true, sourceMessageId: null, sourceConversationId: null });
+    expect((await request(app).get(`/api/thoughts/${thoughtId}/context`).set('Authorization', auth('outsider'))).status).toBe(404);
+    record('Immediate provenance and cross-chat peer protection', outsider);
+    app.set('io', undefined);
+  });
   it('rechecks source membership rather than granting access from an owned saved capture', async () => {
     await capture('hidden-owned', 'viewer', [], 'manual', 'hidden');
     const hidden = await request(app).get(`/api/thoughts/${id('hidden-owned')}/context`).set('Authorization', auth());

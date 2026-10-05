@@ -739,6 +739,7 @@ export interface Thought {
   /** Tags extracted from the thought (e.g. hashtags). Rendered as chips. */
   tags?: string[];
   /** Provenance: the chat this thought was captured from, if any. */
+  hasSourceMessage?: boolean;
   sourceMessageId?: string | null;
   scopeConversationId?: string | null;
   sourceConversationId?: string | null;

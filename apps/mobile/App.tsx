@@ -132,7 +132,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         component={ChatScreenRouter}
         options={{ title: '' /* set dynamically in screen */ }}
       />
-      <ChatsStack.Screen name="Compose" component={ComposeScreen} options={{ title: 'Message with OpenChat' }} />
+      <ChatsStack.Screen name="Compose" component={ComposeScreen} getId={({ params }) => params.requestRevision} options={{ title: 'Message with OpenChat' }} />
       <ChatsStack.Screen name="OriginalMessage" component={OriginalMessageScreen} options={{ title: 'Original message' }} />
       <ChatsStack.Screen
         name="NewConversation"

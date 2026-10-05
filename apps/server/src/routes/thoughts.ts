@@ -238,8 +238,9 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       RETURN t {
         .id, .text, .kind, .status, .createdAt, .updatedAt,
         tags: coalesce(t.tags, []),
-        sourceMessageId: m.id,
-        sourceConversationId: m.conversationId,
+        hasSourceMessage: m IS NOT NULL,
+        sourceMessageId: CASE WHEN EXISTS { MATCH (u)-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.id ELSE null END,
+        sourceConversationId: CASE WHEN EXISTS { MATCH (u)-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.conversationId ELSE null END,
         sourceConversationName: CASE WHEN EXISTS { MATCH (u)-[:PARTICIPATES_IN]->(conv) } THEN conv.name ELSE null END,
         scopeConversationId: t.scopeConversationId
       } AS thought
@@ -309,8 +310,9 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
         tags: coalesce(t.tags, []),
         authorId: t.userId,
         authorName: author.name,
-        sourceMessageId: m.id,
-        sourceConversationId: m.conversationId,
+        hasSourceMessage: m IS NOT NULL,
+        sourceMessageId: CASE WHEN EXISTS { MATCH (:User {id: $userId})-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.id ELSE null END,
+        sourceConversationId: CASE WHEN EXISTS { MATCH (:User {id: $userId})-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.conversationId ELSE null END,
         pinnedBy: p.pinnedBy,
         pinnedAt: p.pinnedAt,
         pinned: true
@@ -318,7 +320,7 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
       ORDER BY p.pinnedAt DESC
       LIMIT 100
       `,
-      { conversationId, q: q ?? undefined }
+      { userId, conversationId, q: q ?? undefined }
     );
 
     const fromChatConds = [
@@ -351,8 +353,9 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
       RETURN t {
         .id, .text, .kind, .status, .createdAt, .updatedAt,
         tags: coalesce(t.tags, []),
-        sourceMessageId: m.id,
-        sourceConversationId: m.conversationId,
+        hasSourceMessage: m IS NOT NULL,
+        sourceMessageId: CASE WHEN EXISTS { MATCH (:User {id: $userId})-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.id ELSE null END,
+        sourceConversationId: CASE WHEN EXISTS { MATCH (:User {id: $userId})-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.conversationId ELSE null END,
         authorId: t.userId,
         authorName: author.name,
         pinned: false
@@ -448,7 +451,13 @@ router.post('/:id/pin', requireAuth, async (req: Request, res: Response) => {
       MATCH (u)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
       MERGE (t)-[p:PINNED_IN]->(c)
       ON CREATE SET p.pinnedBy = $userId, p.pinnedAt = datetime($now)
-      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, tags: coalesce(t.tags, []) } AS thought
+      WITH u, t
+      OPTIONAL MATCH (t)-[:FROM_MESSAGE]->(m:Message)
+      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt,
+        tags: coalesce(t.tags, []), hasSourceMessage: m IS NOT NULL,
+        sourceMessageId: CASE WHEN EXISTS { MATCH (u)-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.id ELSE null END,
+        sourceConversationId: CASE WHEN EXISTS { MATCH (u)-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.conversationId ELSE null END
+      } AS thought
       `,
       { userId, id, conversationId, now }
     );
@@ -465,7 +474,11 @@ router.post('/:id/pin', requireAuth, async (req: Request, res: Response) => {
     if (io) {
       io.to(`conversation:${conversationId}`).emit('thought:pinned', {
         conversationId,
-        thought: { ...thought, pinned: true, pinnedBy: userId, pinnedAt: now, authorId: userId },
+        thought: { ...thought,
+          // A room broadcast cannot assume every peer belongs to the source chat.
+          sourceMessageId: thought.sourceConversationId === conversationId ? thought.sourceMessageId : null,
+          sourceConversationId: thought.sourceConversationId === conversationId ? conversationId : null,
+          pinned: true, pinnedBy: userId, pinnedAt: now, authorId: userId },
       });
     }
 
@@ -634,13 +647,13 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       FOREACH (msg IN CASE WHEN m IS NULL THEN [] ELSE [m] END |
         CREATE (t)-[:FROM_MESSAGE]->(msg)
       )
-      WITH u, t
+      WITH u, t, m
       OPTIONAL MATCH (pc:Conversation {id: $pinToConversationId})
       FOREACH (conv IN CASE WHEN pc IS NULL THEN [] ELSE [pc] END |
         MERGE (t)-[p:PINNED_IN]->(conv)
         ON CREATE SET p.pinnedBy = $userId, p.pinnedAt = datetime($now)
       )
-      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, .scopeConversationId, tags: coalesce(t.tags, []), pinned: $pinToConversationId IS NOT NULL } AS thought
+      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, .scopeConversationId, tags: coalesce(t.tags, []), hasSourceMessage: m IS NOT NULL, sourceMessageId: m.id, sourceConversationId: m.conversationId, pinned: $pinToConversationId IS NOT NULL } AS thought
       `,
       {
         userId,

@@ -5,7 +5,6 @@ import { api, type User } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
-import { clearComposeIntent } from '../services/composeIntents';
 import type { NavProp, RouteProps } from '../navigation/types';
 
 /** Nothing is sent or linked until the sender chooses a recipient and presses Send. */
@@ -59,7 +58,6 @@ function ComposeForm({ params }: { params: RouteProps<'Compose'>['params'] }) {
       conversation.current = { recipientId, id };
       await sendMessageToConversation(id, draft);
       if (!activeIntent.current) return;
-      await clearComposeIntent();
       if (activeIntent.current) navigation.replace('Chat', { conversationId: id });
     } catch (err) { setError(err instanceof Error ? err.message : 'Could not send. Your draft is still here.'); }
     finally { pending.current = false; setSending(false); }
@@ -74,6 +72,6 @@ function ComposeForm({ params }: { params: RouteProps<'Compose'>['params'] }) {
     {!!error && <Text accessibilityRole="alert" style={{ color: c.textMetadata }}>{error}</Text>}
     <TouchableOpacity accessibilityRole="button" disabled={sending || !recipient || !draft.trim()} onPress={() => void send()} style={{ padding: 14, backgroundColor: c.primary, opacity: sending || !recipient || !draft.trim() ? 0.5 : 1 }}><Text style={{ color: c.onPrimary }}>Send message</Text></TouchableOpacity>
     {sending && <ActivityIndicator color={c.primary} />}
-    <TouchableOpacity accessibilityRole="button" disabled={sending} onPress={() => { void clearComposeIntent(); navigation.goBack(); }}><Text style={{ color: c.primary }}>Cancel</Text></TouchableOpacity>
+    <TouchableOpacity accessibilityRole="button" disabled={sending} onPress={() => navigation.goBack()}><Text style={{ color: c.primary }}>Cancel</Text></TouchableOpacity>
   </ScrollView>;
 }

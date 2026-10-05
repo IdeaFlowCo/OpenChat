@@ -380,7 +380,7 @@ export function ConversationThoughtsScreen() {
               ) : (
                 <ThoughtCard
                   key={t.id}
-                  onOpenContext={t.sourceMessageId ? () => navigation.navigate('OriginalMessage', { thoughtId: t.id }) : undefined}
+                  onOpenContext={(t.hasSourceMessage || t.sourceMessageId) ? () => navigation.navigate('OriginalMessage', { thoughtId: t.id }) : undefined}
                   item={{ ...t, pinned: true }}
                   subtitle={mine(t) ? 'pinned by you' : `by ${t.authorName || 'a participant'}`}
                   onPress={mine(t) ? () => startEdit(t) : undefined}
@@ -415,7 +415,7 @@ export function ConversationThoughtsScreen() {
               ) : (
                 <ThoughtCard
                   key={t.id}
-                  onOpenContext={t.sourceMessageId ? () => navigation.navigate('OriginalMessage', { thoughtId: t.id }) : undefined}
+                  onOpenContext={(t.hasSourceMessage || t.sourceMessageId) ? () => navigation.navigate('OriginalMessage', { thoughtId: t.id }) : undefined}
                   item={{ ...t, pinned: false }}
                   subtitle={mine(t) ? undefined : `by ${t.authorName || 'a participant'}`}
                   onPress={mine(t) ? () => startEdit(t) : undefined}

@@ -252,7 +252,7 @@ export function ThoughtsScreen() {
           ) : (
             <ThoughtCard
               item={item}
-              onOpenContext={item.sourceMessageId ? () => navigation.navigate('OriginalMessage', { thoughtId: item.id }) : undefined}
+              onOpenContext={(item.hasSourceMessage || item.sourceMessageId) ? () => navigation.navigate('OriginalMessage', { thoughtId: item.id }) : undefined}
               onPress={() => startEdit(item)}
               onDelete={() => handleDelete(item.id)}
               onTagPress={handleTagPress}

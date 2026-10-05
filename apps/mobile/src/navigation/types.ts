@@ -25,7 +25,7 @@ export type RootStackParamList = {
   Chat: { conversationId: string; lane?: 'chat' | 'context'; entryId?: string };
   NewConversation: undefined;
   OriginalMessage: { thoughtId: string };
-  Compose: import('../utils/composeIntent').ComposeIntent;
+  Compose: import('../utils/composeIntent').ComposeIntent & { requestRevision?: string };
   InvitePerson: undefined;
   Friends: { section?: 'friends' | 'requests' } | undefined;
   /** OpenChat Agent overlay (asks, offers, and anonymous matches; OpenChat-a0e.5). */

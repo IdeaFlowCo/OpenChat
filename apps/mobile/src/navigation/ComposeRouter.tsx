@@ -1,22 +1,29 @@
 import { CommonActions } from '@react-navigation/native';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { navigationRef } from '../services/notifications';
-import { clearComposeIntent, loadComposeIntent, onComposeCaptured } from '../services/composeIntents';
+import { consumeComposeIntent, loadPendingComposeIntent, onComposeCaptured } from '../services/composeIntents';
 export function ComposeRouter({ ready }: { ready: boolean }) {
-  const routing = useRef(false);
   useEffect(() => {
     if (!ready) return;
     let active = true;
+    let routing = false;
+    let rerouteRequested = false;
+    const canRoute = () => navigationRef.isReady() && !['Onboarding', 'Login'].includes(navigationRef.getCurrentRoute()?.name || '');
     const route = async () => {
-      if (routing.current || !navigationRef.isReady() || ['Onboarding', 'Login'].includes(navigationRef.getCurrentRoute()?.name || '')) return;
-      routing.current = true;
+      if (!active) return;
+      if (routing) { rerouteRequested = true; return; }
+      if (!canRoute()) return;
+      routing = true;
       try {
-        const intent = await loadComposeIntent();
-        if (active && intent && navigationRef.isReady()) {
-          navigationRef.dispatch(CommonActions.navigate({ name: 'Main', params: { screen: 'ChatsTab', params: { screen: 'Compose', params: intent } } }));
-          await clearComposeIntent();
-        }
-      } finally { routing.current = false; }
+        do {
+          rerouteRequested = false;
+          const pending = await loadPendingComposeIntent();
+          if (active && pending && canRoute()) {
+            navigationRef.dispatch(CommonActions.navigate({ name: 'Main', params: { screen: 'ChatsTab', params: { screen: 'Compose', params: { ...pending.intent, requestRevision: pending.revision } } } }));
+            await consumeComposeIntent(pending.revision);
+          }
+        } while (active && rerouteRequested && canRoute());
+      } finally { routing = false; }
     };
     const disposers = [navigationRef.addListener('ready', () => void route()), navigationRef.addListener('state', () => void route()), onComposeCaptured(() => void route())];
     void route();

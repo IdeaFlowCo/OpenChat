@@ -24,3 +24,5 @@ and onboarding, then consumed when it opens an unsent editable draft. Edits
 to the draft are not stored in that incoming-entry record. The sender reviews
 the recipient and explicitly presses **Send message**. No automatic sending.
 Cancel discards the incoming entry. Existing `/c/<token>` links are unchanged.
+
+Incoming entries are consumed by their local capture revision. A newer entry arriving during routing remains pending; Send and Cancel affect only the displayed draft. Revisions are internal and are not caller parameters.
