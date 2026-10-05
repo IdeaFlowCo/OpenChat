@@ -68,11 +68,13 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
   const action = (label: string, run: () => void) => <TouchableOpacity onPress={() => { setActions(false); run(); }} accessibilityRole="button" style={{ padding: 14 }}><Text style={{ color: c.primary }}>{label}</Text></TouchableOpacity>;
 
   return (
+    // RN-web's touch responder replaces onContextMenu on TouchableOpacity.
+    // Keep right-click on its View parent and long-press on the touchable.
+    <View {...(Platform.OS === 'web' ? { onContextMenu: (event: { preventDefault: () => void; stopPropagation: () => void }) => { event.preventDefault(); event.stopPropagation(); openActions(); } } : {})}>
     <TouchableOpacity
       onPress={onPress}
       disabled={!onPress && !onDelete && !onOpenContext && !onTogglePin}
       onLongPress={openActions}
-      {...(Platform.OS === 'web' ? { onContextMenu: (event: { preventDefault: () => void; stopPropagation: () => void }) => { event.preventDefault(); event.stopPropagation(); openActions(); } } : {})}
       activeOpacity={0.7}
       style={[
         styles.card,
@@ -176,6 +178,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
         </View>
       )}
     </TouchableOpacity>
+    </View>
   );
 }
 

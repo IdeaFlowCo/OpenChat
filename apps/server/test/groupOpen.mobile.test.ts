@@ -282,9 +282,10 @@ describe('desktop composer input', () => {
     expect(screen!.root.findByType('TextInput').props.onKeyDownCapture).toBeUndefined();
     mocks.platform = 'web';
     await render();
-    const bubble = screen!.root.findAllByType('TouchableOpacity').find(node => node.props.onContextMenu)!;
+    const wrapper = screen!.root.findAllByType('View').find(node => node.props.onContextMenu)!;
+    const bubble = wrapper.findAllByType('TouchableOpacity').find(node => node.props.onLongPress)!;
     const event = { preventDefault: vi.fn() };
-    await act(async () => bubble.props.onContextMenu(event));
+    await act(async () => wrapper.props.onContextMenu(event));
     expect(event.preventDefault).toHaveBeenCalledOnce();
     const clicked = screen!.root.findByType('MessageActionSheet').props;
     expect(clicked.visible).toBe(true);

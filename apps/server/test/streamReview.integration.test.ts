@@ -16,7 +16,7 @@ integration('Stream routes against graph fixtures', () => {
   app.use(express.json());
   let driver: Driver;
   let db: typeof import('../src/db.js');
-  const auth = (name = 'viewer') => `Bearer ${jwt.sign({ userId: id(name) }, process.env.JWT_SECRET || 'dev-secret-change-me')}`;
+  const auth = (name = 'viewer') => `Bearer ${jwt.sign({ userId: id(name), email: `${name}@example.test` }, process.env.JWT_SECRET || 'dev-secret-change-me')}`;
   async function run(query: string, params: Record<string, unknown> = {}) {
     const session = driver.session();
     try { return await session.run(query, { fixture, ...params }); }
@@ -99,6 +99,27 @@ integration('Stream routes against graph fixtures', () => {
     const own = await request(app).patch(`/api/thoughts/${id('own')}`).set('Authorization', auth()).send({ text: 'Updated #équipe' });
     expect(own.status).toBe(200);
     expect(own.body.tags).toEqual(['équipe']);
+  });
+  it('creates private unpinned scoped entries and shares them with peers only after pinning', async () => {
+    const created = await request(app).post('/api/thoughts').set('Authorization', auth()).send({
+      text: 'Private scoped entry', scopeConversationId: id('chat'),
+    });
+    expect(created.status).toBe(201);
+    const thoughtId = created.body.id;
+    expect(typeof thoughtId).toBe('string');
+    await run('MATCH (t:Thought {id: $id}) SET t.fixture = $fixture', { id: thoughtId });
+    expect(created.body).toMatchObject({ scopeConversationId: id('chat'), pinned: false });
+    const owner = await request(app).get(`/api/thoughts/conversation/${id('chat')}`).set('Authorization', auth());
+    expect(owner.status).toBe(200);
+    expect(owner.body.fromChat.map((t: { id: string }) => t.id)).toContain(thoughtId);
+    const peer = await request(app).get(`/api/thoughts/conversation/${id('chat')}`).set('Authorization', auth('peer'));
+    expect(peer.status).toBe(200);
+    expect([...peer.body.fromChat, ...peer.body.pinned].map((t: { id: string }) => t.id)).not.toContain(thoughtId);
+    const pinned = await request(app).post(`/api/thoughts/${thoughtId}/pin`).set('Authorization', auth()).send({ conversationId: id('chat') });
+    expect(pinned.status).toBe(200);
+    const shared = await request(app).get(`/api/thoughts/conversation/${id('chat')}`).set('Authorization', auth('peer'));
+    expect(shared.status).toBe(200);
+    expect(shared.body.pinned.map((t: { id: string }) => t.id)).toContain(thoughtId);
   });
   it('returns five neighbors on each side including equal timestamps ordered by ID', async () => {
     const messageIds = Array.from({ length: 15 }, (_, i) => id(`ordered-${String(i).padStart(2, '0')}`));

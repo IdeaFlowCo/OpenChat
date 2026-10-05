@@ -1311,17 +1311,18 @@ export function ChatScreen({
             )}
           </View>
         )}
-        {/* Column wrapper so ReactionsBar renders below the bubble */}
-        <View style={{ flexDirection: 'column', maxWidth: '78%', alignItems: isOwn ? 'flex-end' : 'flex-start' }}>
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
+        {/* RN-web replaces TouchableOpacity's context-menu handler, so the
+            column owns right-click as well as placing reactions below. */}
+        <View style={{ flexDirection: 'column', maxWidth: '78%', alignItems: isOwn ? 'flex-end' : 'flex-start' }}
           {...(Platform.OS === 'web' ? {
             onContextMenu: (event: React.MouseEvent) => {
               event.preventDefault();
               handleLongPress(m, isOwn, getUserDisplayName(m.sender));
             },
-          } : {})}
+          } : {})}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
           delayLongPress={350}
           style={[
             styles.bubble,
