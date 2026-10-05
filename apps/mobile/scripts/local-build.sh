@@ -205,6 +205,19 @@ fi
 SIGN_AUTH=$(codesign -dvv "$APP" 2>&1 | grep "^Authority=" | head -1)
 echo "── signed by: $SIGN_AUTH"
 
+# A failed local build must never submit an older archive from today's folder.
+if ! python3 - "$LATEST_ARCHIVE" "$PRE_BUILD_TS" "$APP/Info.plist" <<'VERIFY_ARCHIVE'
+import pathlib, plistlib, re, sys
+archive, started, info = pathlib.Path(sys.argv[1]), int(sys.argv[2]), pathlib.Path(sys.argv[3])
+assert archive.stat().st_mtime >= started, 'No fresh archive from this build'
+expected = re.search(r"version:\s*'([^']+)'", pathlib.Path('app.config.js').read_text()).group(1)
+assert plistlib.loads(info.read_bytes())['CFBundleShortVersionString'] == expected, 'Archive version differs from source'
+VERIFY_ARCHIVE
+then
+  echo "ERROR: refusing to submit a stale or mismatched archive."
+  exit 1
+fi
+
 # ── Manually package into .ipa (replaces xcodebuild -exportArchive) ──────────
 IPA_OUT="./build-$(date +%Y%m%d-%H%M%S).ipa"
 echo ""
@@ -226,7 +239,7 @@ echo "── submitting $IPA_OUT to App Store Connect ──"
 eas submit \
   --platform ios \
   --path "$IPA_OUT" \
-  --non-interactive
+  --non-interactive || exit 1
 
 # ── Push the build to external testers (Friends and Family) ─────────────────
 # eas submit makes the build VALID for internal Founders within ~1 minute.
