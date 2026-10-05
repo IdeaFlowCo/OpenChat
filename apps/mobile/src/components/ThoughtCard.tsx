@@ -45,7 +45,7 @@ interface ThoughtCardProps {
   item: Thought;
   /** Tap → usually edit. Omit for read-only cards (e.g. others' pinned). */
   onPress?: () => void;
-  /** Long-press → delete confirm. Omit to disable. */
+  /** Enables Delete entry in the actions menu, with a separate confirmation. */
   onDelete?: () => void;
   onTagPress?: (tag: string) => void;
   /** Provenance / attribution line rendered under the text, e.g. "from Design chat". */

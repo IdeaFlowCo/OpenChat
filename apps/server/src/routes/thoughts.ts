@@ -6,7 +6,7 @@
  * status: 'none' | 'open' | 'closed'
  *
  * All routes require auth. Users only modify their own Thoughts. The
- * conversation-scoped read also exposes inline-tag Thoughts to every current
+ * conversation-scoped read also exposes inline/reply-tag Thoughts to every current
  * participant of the source conversation, matching the source message's
  * visibility.
  */
@@ -100,7 +100,7 @@ export function mergeDuplicateThoughtsFromSameMessage(
  *
  * Composer hashtag suggestions combine two deliberately bounded sources:
  *   - the caller's own previously-used tags (across all of their Thoughts)
- *   - tags other participants used in this conversation
+ *   - inline/reply-tag captures from other current participants' chat messages
  *
  * Without conversationId, shared tags span only the caller’s current chats.
  * Private captures by other users never contribute, even if they have tags.
@@ -271,8 +271,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
  * participant. Returns:
  *   pinned:   thoughts pinned to this conversation by ANY participant
  *             (pinning = sharing with the conversation, Plan B semantics)
- *   fromChat: the caller's private save-to-thoughts captures plus inline-tag
- *             thoughts created by ANY participant in this conversation
+ *   fromChat: the caller's private captures and scopeConversationId entries,
+ *             plus inline/reply-tag thoughts from this conversation
  */
 router.get('/conversation/:conversationId', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;

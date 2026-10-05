@@ -5,7 +5,7 @@
  *   Pinned          — thoughts pinned to this conversation by any participant
  *                     (pinning shares the thought with the whole chat)
  *   From this chat  — all participants' shared #hashtag captures plus the
- *                     caller's private "Save to Stream" captures
+ *                     caller's private captures and manually created scoped entries
  *
  * Parity with ThoughtsScreen:
  *   - Debounced server-side search (?q=) across text and tags
@@ -24,7 +24,6 @@ import {
   StyleSheet,
   Text,
   View,
-  TextInput,
   TouchableOpacity,
 } from 'react-native';
 import { useFocusEffect, useRoute, useNavigation } from '@react-navigation/native';

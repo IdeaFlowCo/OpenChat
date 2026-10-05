@@ -6,7 +6,7 @@
  *
  * - FAB (+) → empty editor card appears at the top; type, tap away to save
  * - Tap a card → edit its text in place; tap away to save
- * - Long-press a card → delete confirmation
+ * - Long-press a card (or right-click on web) → available entry actions
  * - Pull-to-refresh
  */
 
@@ -17,7 +17,6 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';

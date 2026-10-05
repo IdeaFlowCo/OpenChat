@@ -1,4 +1,5 @@
 import express from 'express';
+import { writeFileSync } from 'node:fs';
 import jwt from 'jsonwebtoken';
 import neo4j, { type Driver } from 'neo4j-driver';
 import request from 'supertest';
@@ -14,6 +15,10 @@ integration('Stream routes against graph fixtures', () => {
   const id = (name: string) => `${fixture}-${name}`;
   const app = express();
   app.use(express.json());
+  const receipts: Array<Record<string, unknown>> = [];
+  function record(label: string, response: { status: number; body: unknown }) {
+    receipts.push({ label, status: response.status, body: response.body });
+  }
   let driver: Driver;
   let db: typeof import('../src/db.js');
   const auth = (name = 'viewer') => `Bearer ${jwt.sign({ userId: id(name), email: `${name}@example.test` }, process.env.JWT_SECRET || 'dev-secret-change-me')}`;
@@ -62,12 +67,19 @@ integration('Stream routes against graph fixtures', () => {
   afterAll(async () => {
     if (!driver) return;
     await run('MATCH (n {fixture: $fixture}) DETACH DELETE n');
+    const remaining = await run('MATCH (n {fixture: $fixture}) RETURN count(n) AS count');
+    expect(remaining.records[0].get('count').toNumber()).toBe(0);
+    receipts.push({ label: 'Synthetic graph cleanup', remainingNodes: 0 });
+    if (process.env.STREAM_REVIEW_EVIDENCE_PATH) {
+      writeFileSync(process.env.STREAM_REVIEW_EVIDENCE_PATH, JSON.stringify({ fixture, database: 'Disposable worktree-only Neo4j database', receipts }, null, 2));
+    }
     await driver.close();
     await db.closeDatabase();
   });
   it('returns peer hashtag captures and owner scoped entries without private peer captures', async () => {
     const res = await request(app).get(`/api/thoughts/conversation/${id('chat')}`).set('Authorization', auth());
     expect(res.status).toBe(200);
+    record('Viewer chat Stream excludes private peer captures', res);
     expect(res.body.pinned).toEqual([]);
     expect(res.body.fromChat.map((t: { id: string }) => t.id).sort()).toEqual(['own', 'shared', 'reply', 'scoped'].map(id).sort());
     const search = await request(app).get(`/api/thoughts/conversation/${id('chat')}?q=hiring`).set('Authorization', auth());
@@ -80,6 +92,7 @@ integration('Stream routes against graph fixtures', () => {
       const res = await request(app).get('/api/thoughts/tags/suggestions').query(query).set('Authorization', auth());
       expect(res.status).toBe(200);
       expect(res.body.map((s: { tag: string }) => s.tag)).toEqual(['decision', 'design']);
+      record(query.conversationId ? 'Chat accessible tag suggestions' : 'Global accessible tag suggestions', res);
       expect(res.body[0]).toMatchObject({ source: 'both', ownCount: 1, chatCount: 1 });
       expect(res.body[1]).toMatchObject({ source: 'chat', ownCount: 0, chatCount: 1 });
     }
@@ -105,6 +118,7 @@ integration('Stream routes against graph fixtures', () => {
       text: 'Private scoped entry', scopeConversationId: id('chat'),
     });
     expect(created.status).toBe(201);
+    record('Create private unpinned chat-scoped entry', created);
     const thoughtId = created.body.id;
     expect(typeof thoughtId).toBe('string');
     await run('MATCH (t:Thought {id: $id}) SET t.fixture = $fixture', { id: thoughtId });
@@ -113,13 +127,33 @@ integration('Stream routes against graph fixtures', () => {
     expect(owner.status).toBe(200);
     expect(owner.body.fromChat.map((t: { id: string }) => t.id)).toContain(thoughtId);
     const peer = await request(app).get(`/api/thoughts/conversation/${id('chat')}`).set('Authorization', auth('peer'));
+    record('Peer Stream before explicit pin', peer);
     expect(peer.status).toBe(200);
     expect([...peer.body.fromChat, ...peer.body.pinned].map((t: { id: string }) => t.id)).not.toContain(thoughtId);
     const pinned = await request(app).post(`/api/thoughts/${thoughtId}/pin`).set('Authorization', auth()).send({ conversationId: id('chat') });
     expect(pinned.status).toBe(200);
     const shared = await request(app).get(`/api/thoughts/conversation/${id('chat')}`).set('Authorization', auth('peer'));
+    record('Peer Stream after explicit pin', shared);
     expect(shared.status).toBe(200);
     expect(shared.body.pinned.map((t: { id: string }) => t.id)).toContain(thoughtId);
+  });
+  it('rechecks source membership rather than granting access from an owned saved capture', async () => {
+    await capture('hidden-owned', 'viewer', [], 'manual', 'hidden');
+    const hidden = await request(app).get(`/api/thoughts/${id('hidden-owned')}/context`).set('Authorization', auth());
+    expect(hidden.status).toBe(404);
+    expect(hidden.body).toEqual({ error: 'Original message unavailable' });
+    record('Owned capture of inaccessible original message', hidden);
+    const accessible = await request(app).get(`/api/thoughts/${id('own')}/context`).set('Authorization', auth());
+    expect(accessible.status).toBe(200);
+    await run('MATCH (:User {id: $viewer})-[r:PARTICIPATES_IN]->(:Conversation {id: $chat}) DELETE r', { viewer: id('viewer'), chat: id('chat') });
+    try {
+      const revoked = await request(app).get(`/api/thoughts/${id('own')}/context`).set('Authorization', auth());
+      expect(revoked.status).toBe(404);
+      expect(revoked.body).toEqual({ error: 'Original message unavailable' });
+      record('Previously accessible original after membership revocation', revoked);
+    } finally {
+      await run('MATCH (v:User {id: $viewer}), (c:Conversation {id: $chat}) MERGE (v)-[:PARTICIPATES_IN]->(c)', { viewer: id('viewer'), chat: id('chat') });
+    }
   });
   it('returns five neighbors on each side including equal timestamps ordered by ID', async () => {
     const messageIds = Array.from({ length: 15 }, (_, i) => id(`ordered-${String(i).padStart(2, '0')}`));
@@ -127,10 +161,12 @@ integration('Stream routes against graph fixtures', () => {
     await capture('ordered-capture', 'viewer', [], 'manual', 'chat', 'ordered-07');
     const res = await request(app).get(`/api/thoughts/${id('ordered-capture')}/context`).set('Authorization', auth());
     expect(res.status).toBe(200);
+    record('Original message with exactly five neighbors on either side', res);
     expect(res.body.messageId).toBe(messageIds[7]);
     expect(res.body.messages.map((m: { id: string }) => m.id)).toEqual(messageIds.slice(2, 13));
     await run('MATCH (m:Message {id: $id}) SET m.deletedAt = datetime()', { id: messageIds[7] });
     const deleted = await request(app).get(`/api/thoughts/${id('ordered-capture')}/context`).set('Authorization', auth());
+    record('Deleted original message is unavailable', deleted);
     expect(deleted.status).toBe(404);
     expect(deleted.body).toEqual({ error: 'Original message unavailable' });
   });

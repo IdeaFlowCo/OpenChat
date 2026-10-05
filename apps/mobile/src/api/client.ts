@@ -1588,6 +1588,7 @@ export const api = {
    * Create a new thought. `sourceMessageId` records save-to-thoughts
    * provenance from a chat message; `pinToConversationId` additionally pins
    * the new thought to that conversation ("Save & pin").
+   * `scopeConversationId` associates a private entry with a chat without sharing.
    */
   createThought: (body: {
     text: string;
@@ -1602,7 +1603,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  /** Chat-scoped thoughts: pinned to + captured from one conversation. */
+  /** Chat-scoped thoughts, including the caller's private scoped entries. */
   getConversationThoughts: (conversationId: string, opts?: { q?: string }) => {
     const qs = new URLSearchParams();
     if (opts?.q) qs.set('q', opts.q);
@@ -1612,7 +1613,7 @@ export const api = {
     );
   },
 
-  /** Ranked hashtag suggestions for the message composer. */
+  /** Ranked tags for chat or Stream; empty conversationId uses current chats. */
   getHashtagSuggestions: (conversationId: string, q = '', limit = 8) => {
     const params = new URLSearchParams({ q, limit: String(limit) });
     if (conversationId) params.set('conversationId', conversationId);
