@@ -32,5 +32,7 @@ to settle before registering Main. A fresh device enters Onboarding; its
 completion replaces that screen with Main and replays the same pending
 compose revision. Sign-out or an auth-identity change invalidates an unfinished
 check. Devices already marked complete retain their existing returning-user
-behavior. The receiving correction ships as app version 1.0.8; native build
-allocation/submission is tracked separately from browser verification.
+behavior. See [the onboarding regression](../apps/server/test/composeOnboarding.mobile.test.ts)
+for callback and stale-check coverage. The visible app version is owned by
+[`app.config.js`](../apps/mobile/app.config.js); native build allocation/submission
+is tracked separately from browser verification.

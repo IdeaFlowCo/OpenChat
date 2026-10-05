@@ -156,3 +156,24 @@ it('rechecks a signed-out then signed-in same identity instead of reusing prior 
   await act(async () => resolve(null));
   expect(mocks.route).toBe('Onboarding');
 });
+
+it('does not let a pending identity check complete navigation for a different signed-in identity', async () => {
+  const intent = { source: 'unlinked' as const, profile: 'https://www.unlinked.ai/people/identity-fixture' };
+  await captureComposeIntent(intent);
+  const pending = (await loadPendingComposeIntent())!;
+  const resolves: Array<(value: string | null) => void> = [];
+  mocks.check = () => new Promise(resolve => { resolves.push(resolve); });
+  mocks.auth = { isAuthed: true, authInitialized: true, currentUser: { userId: 'old-identity', name: 'Old fixture' } };
+  await act(async () => { root = create(React.createElement(Shell)); });
+  mocks.auth = { isAuthed: true, authInitialized: true, currentUser: { userId: 'new-identity', name: 'New fixture' } };
+  await act(async () => root!.update(React.createElement(Shell)));
+  expect(resolves).toHaveLength(2);
+  await act(async () => resolves[0]('1'));
+  expect(mocks.dispatch).not.toHaveBeenCalled();
+  expect((await loadPendingComposeIntent())?.revision).toBe(pending.revision);
+  expect(root!.root.findAllByType('StatusBar')).toHaveLength(0);
+  await act(async () => resolves[1](null));
+  expect(mocks.route).toBe('Onboarding');
+  expect(mocks.dispatch).not.toHaveBeenCalled();
+  expect((await loadPendingComposeIntent())?.revision).toBe(pending.revision);
+});
