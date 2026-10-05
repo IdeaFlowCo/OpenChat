@@ -244,12 +244,14 @@ export function ConversationThoughtsScreen() {
 
   // ── Inline editing ───────────────────────────────────────────────────────
   const savingNew = useRef(false);
+  const draftRevision = useRef(0);
   const [creating, setCreating] = useState(false);
   const [newDraft, setNewDraft] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
 
   const openAdd = useCallback((text = '') => {
+    draftRevision.current += 1;
     setEditingId(null);
     setQuery('');
     setCreating(true);
@@ -257,6 +259,7 @@ export function ConversationThoughtsScreen() {
   }, []);
 
   const startEdit = useCallback((thought: Thought) => {
+    draftRevision.current += 1;
     setCreating(false);
     setEditingId(thought.id);
     setEditDraft(thought.text);
@@ -267,6 +270,7 @@ export function ConversationThoughtsScreen() {
     if (savingNew.current) return;
     if (!text) { setCreating(false); return; }
     savingNew.current = true;
+    const submittedRevision = draftRevision.current;
     try {
       const t = await createThought({ text, scopeConversationId: conversationId });
       setFromChat((prev) => [t, ...prev.filter((x) => x.id !== t.id)]);
@@ -274,8 +278,10 @@ export function ConversationThoughtsScreen() {
       Alert.alert('Error', streamErrorMessage(e, 'Failed to save Stream entry'));
       return;
     } finally { savingNew.current = false; }
-    setCreating(false);
-    setNewDraft('');
+    if (draftRevision.current === submittedRevision) {
+      setCreating(false);
+      setNewDraft('');
+    }
   }, [newDraft, conversationId]);
 
   const commitEdit = useCallback(async () => {
@@ -336,7 +342,7 @@ export function ConversationThoughtsScreen() {
       >
         {error && <Text style={[styles.error, { color: c.danger }]}>{error}</Text>}
 
-        {creating && renderEditorCard(newDraft, setNewDraft, () => void commitNew(), 'New private, unpinned Stream entry…')}
+        {creating && renderEditorCard(newDraft, text => { draftRevision.current += 1; setNewDraft(text); }, () => void commitNew(), 'New private, unpinned Stream entry…')}
 
         {/* Global empty state when searching and no results in either section */}
         {isSearching && totalCount === 0 && !loading && (

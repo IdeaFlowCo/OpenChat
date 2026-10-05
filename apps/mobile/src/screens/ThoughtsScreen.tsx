@@ -141,12 +141,14 @@ export function ThoughtsScreen() {
 
   // ── Inline editing (NoteStream behavior) ─────────────────────────────────
   const savingNew = useRef(false);
+  const draftRevision = useRef(0);
   const [creating, setCreating] = useState(false);
   const [newDraft, setNewDraft] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
 
   const openAdd = useCallback((text = '') => {
+    draftRevision.current += 1;
     setEditingId(null);
     setQuery('');
     setCreating(true);
@@ -154,6 +156,7 @@ export function ThoughtsScreen() {
   }, []);
 
   const startEdit = useCallback((thought: Thought) => {
+    draftRevision.current += 1;
     setCreating(false);
     setEditingId(thought.id);
     setEditDraft(thought.text);
@@ -165,6 +168,7 @@ export function ThoughtsScreen() {
     if (savingNew.current) return;
     if (!text) { setCreating(false); return; }
     savingNew.current = true;
+    const submittedRevision = draftRevision.current;
     try {
       const t = await createThought({ text });
       if (mountedRef.current) setThoughts((prev) => [t, ...prev.filter((x) => x.id !== t.id)]);
@@ -172,8 +176,10 @@ export function ThoughtsScreen() {
       Alert.alert('Error', streamErrorMessage(e, 'Failed to save Stream entry'));
       return;
     } finally { savingNew.current = false; }
-    setCreating(false);
-    setNewDraft('');
+    if (draftRevision.current === submittedRevision) {
+      setCreating(false);
+      setNewDraft('');
+    }
   }, [newDraft]);
 
   const commitEdit = useCallback(async () => {
@@ -256,7 +262,7 @@ export function ThoughtsScreen() {
           )
         }
         ListHeaderComponent={
-          creating ? renderEditorCard(newDraft, setNewDraft, () => void commitNew(), 'New Stream entry…') : null
+          creating ? renderEditorCard(newDraft, text => { draftRevision.current += 1; setNewDraft(text); }, () => void commitNew(), 'New Stream entry…') : null
         }
         keyboardDismissMode="on-drag"
         ListEmptyComponent={renderEmpty}

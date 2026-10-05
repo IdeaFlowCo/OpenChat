@@ -118,10 +118,8 @@ router.get('/tags/suggestions', requireAuth, async (req: Request, res: Response)
     MAX_TAG_SUGGESTIONS,
   );
 
-  // Hashtag extraction currently accepts ASCII letters only. Rejecting an
-  // incompatible prefix keeps this endpoint aligned with what sending stores.
-  if (!/^[a-z]*$/i.test(prefix)) {
-    res.status(400).json({ error: 'q must contain letters only' });
+  if (!/^[\p{L}\p{N}_-]*$/u.test(prefix)) {
+    res.status(400).json({ error: 'q must contain hashtag characters only' });
     return;
   }
 
@@ -338,10 +336,17 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
 
     const fromChatResult = await session.run(
       `
-      MATCH (t:Thought)
-      OPTIONAL MATCH (t)-[:FROM_MESSAGE]->(m:Message)
+      CALL {
+        MATCH (m:Message {conversationId: $conversationId})<-[:FROM_MESSAGE]-(t:Thought)
+        RETURN t, m
+        UNION
+        MATCH (:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought)
+        WHERE t.scopeConversationId = $conversationId
+        OPTIONAL MATCH (t)-[:FROM_MESSAGE]->(m:Message)
+        RETURN t, m
+      }
       WITH t, m
-      ${fromChatWhere} AND (m.conversationId = $conversationId OR (t.userId = $userId AND t.scopeConversationId = $conversationId))
+      ${fromChatWhere}
       OPTIONAL MATCH (author:User {id: t.userId})
       RETURN t {
         .id, .text, .kind, .status, .createdAt, .updatedAt,
@@ -395,18 +400,18 @@ router.get('/:id/context', requireAuth, async (req: Request, res: Response) => {
       WHERE source.deletedAt IS NULL
       CALL {
         WITH c, source
-        MATCH (m:Message {conversationId: c.id}) WHERE m.deletedAt IS NULL AND m.createdAt < source.createdAt
-        WITH m ORDER BY m.createdAt DESC LIMIT 5 RETURN collect(m) AS before
+        MATCH (m:Message {conversationId: c.id}) WHERE m.deletedAt IS NULL AND (m.createdAt < source.createdAt OR (m.createdAt = source.createdAt AND m.id < source.id))
+        WITH m ORDER BY m.createdAt DESC, m.id DESC LIMIT 5 RETURN collect(m) AS before
       }
       CALL {
         WITH c, source
-        MATCH (m:Message {conversationId: c.id}) WHERE m.deletedAt IS NULL AND m.createdAt > source.createdAt
-        WITH m ORDER BY m.createdAt ASC LIMIT 5 RETURN collect(m) AS after
+        MATCH (m:Message {conversationId: c.id}) WHERE m.deletedAt IS NULL AND (m.createdAt > source.createdAt OR (m.createdAt = source.createdAt AND m.id > source.id))
+        WITH m ORDER BY m.createdAt ASC, m.id ASC LIMIT 5 RETURN collect(m) AS after
       }
       UNWIND reverse(before) + [source] + after AS m
       OPTIONAL MATCH (sender:User {id: m.senderId})
       RETURN m { .id, .content, .createdAt, senderName: sender.name } AS message
-      ORDER BY m.createdAt ASC
+      ORDER BY m.createdAt ASC, m.id ASC
     `, { userId: req.user!.userId, conversationId: conversation.id, messageId: message.id });
     if (!neighbors.records.length) { res.status(404).json({ error: 'Original message unavailable' }); return; }
     res.json({ conversation, messageId: message.id, messages: neighbors.records.map(r => toJS(r.get('message'))) });
@@ -718,7 +723,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought {id: $id})
       WHERE t.lane IS NULL OR t.lane <> 'context'
       SET t.text      = CASE WHEN $text   IS NOT NULL THEN $text   ELSE t.text   END,
-          t.tags      = CASE WHEN $text IS NOT NULL THEN $tags ELSE t.tags END,
+          t.tags      = CASE WHEN $text IS NOT NULL AND coalesce(t.captureMethod, '') <> 'reply-tag' THEN $tags ELSE t.tags END,
           t.kind      = CASE WHEN $kind   IS NOT NULL THEN $kind   ELSE t.kind   END,
           t.status    = CASE WHEN $status IS NOT NULL THEN $status ELSE t.status END,
           t.updatedAt = datetime($now)

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { api, type User } from '../api/client';
@@ -10,8 +10,12 @@ import type { NavProp, RouteProps } from '../navigation/types';
 
 /** Nothing is sent or linked until the sender chooses a recipient and presses Send. */
 export function ComposeScreen() {
-  const navigation = useNavigation<NavProp<'Compose'>>();
   const { params } = useRoute<RouteProps<'Compose'>>();
+  return <ComposeForm key={JSON.stringify(params)} params={params} />;
+}
+
+function ComposeForm({ params }: { params: RouteProps<'Compose'>['params'] }) {
+  const navigation = useNavigation<NavProp<'Compose'>>();
   const { createConversation, sendMessageToConversation } = useChat();
   const c = getColors(useTheme().scheme);
   const [draft, setDraft] = useState(params.profile ? `About this Unlinked profile: ${params.profile}` : '');
@@ -22,7 +26,12 @@ export function ComposeScreen() {
   const [sending, setSending] = useState(false);
   const pending = useRef(false);
   const manuallyChosen = useRef(false);
-  const conversationId = useRef<string | null>(null);
+  const conversation = useRef<{ recipientId: string; id: string } | null>(null);
+  const activeIntent = useRef(true);
+  useLayoutEffect(() => {
+    activeIntent.current = true;
+    return () => { activeIntent.current = false; };
+  }, []);
   useEffect(() => {
     let active = true;
     const timer = setTimeout(() => {
@@ -43,10 +52,15 @@ export function ComposeScreen() {
     if (pending.current || !recipient || !draft.trim()) return;
     pending.current = true; setSending(true); setError('');
     try {
-      if (!conversationId.current) conversationId.current = (await createConversation([recipient.id], { type: 'direct' })).id;
-      await sendMessageToConversation(conversationId.current, draft);
+      const recipientId = recipient.id;
+      let id = conversation.current?.recipientId === recipientId ? conversation.current.id : undefined;
+      if (!id) id = (await createConversation([recipientId], { type: 'direct' })).id;
+      if (!activeIntent.current) return;
+      conversation.current = { recipientId, id };
+      await sendMessageToConversation(id, draft);
+      if (!activeIntent.current) return;
       await clearComposeIntent();
-      navigation.replace('Chat', { conversationId: conversationId.current });
+      if (activeIntent.current) navigation.replace('Chat', { conversationId: id });
     } catch (err) { setError(err instanceof Error ? err.message : 'Could not send. Your draft is still here.'); }
     finally { pending.current = false; setSending(false); }
   }
@@ -55,7 +69,7 @@ export function ComposeScreen() {
     <Text style={{ color: c.textMetadata }}>The Unlinked profile is context, not a verified OpenChat recipient. Choose who receives your message. Nothing is sent automatically.</Text>
     {recipient ? <Text style={{ color: c.textPrimary }}>To: {recipient.name}</Text> : <Text style={{ color: c.textMetadata }}>No recipient selected</Text>}
     <TextInput accessibilityLabel="Search OpenChat contacts" placeholder="Search OpenChat contacts" placeholderTextColor={c.textMuted} value={query} onChangeText={setQuery} editable={!sending} style={{ color: c.textPrimary, borderWidth: 1, borderColor: c.border, padding: 12 }} />
-    {contacts.map(contact => <TouchableOpacity key={contact.id} accessibilityRole="button" disabled={sending} onPress={() => { manuallyChosen.current = true; conversationId.current = null; setRecipient({ id: contact.id, name: contact.name || 'OpenChat member' }); }} style={{ padding: 12, backgroundColor: c.surface }}><Text style={{ color: c.primary }}>Choose {contact.name || 'OpenChat member'}</Text></TouchableOpacity>)}
+    {contacts.map(contact => <TouchableOpacity key={contact.id} accessibilityRole="button" disabled={sending} onPress={() => { manuallyChosen.current = true; conversation.current = null; setRecipient({ id: contact.id, name: contact.name || 'OpenChat member' }); }} style={{ padding: 12, backgroundColor: c.surface }}><Text style={{ color: c.primary }}>Choose {contact.name || 'OpenChat member'}</Text></TouchableOpacity>)}
     <TextInput accessibilityLabel="Message draft" multiline value={draft} onChangeText={setDraft} editable={!sending} placeholder="Write a message" placeholderTextColor={c.textMuted} style={{ color: c.textPrimary, minHeight: 120, borderWidth: 1, borderColor: c.border, padding: 12 }} />
     {!!error && <Text accessibilityRole="alert" style={{ color: c.textMetadata }}>{error}</Text>}
     <TouchableOpacity accessibilityRole="button" disabled={sending || !recipient || !draft.trim()} onPress={() => void send()} style={{ padding: 14, backgroundColor: c.primary, opacity: sending || !recipient || !draft.trim() ? 0.5 : 1 }}><Text style={{ color: c.onPrimary }}>Send message</Text></TouchableOpacity>

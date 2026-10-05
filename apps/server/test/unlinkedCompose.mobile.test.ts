@@ -1,12 +1,12 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ create: vi.fn(), send: vi.fn(), replace: vi.fn(), contacts: vi.fn() }));
+const mocks = vi.hoisted(() => ({ create: vi.fn(), send: vi.fn(), replace: vi.fn(), contacts: vi.fn(), card: vi.fn(), status: vi.fn(), params: { source: 'unlinked', profile: 'https://www.unlinked.ai/people/public-id', card: undefined as string | undefined } }));
 vi.mock('react-native', () => ({ ActivityIndicator: 'ActivityIndicator', ScrollView: 'ScrollView', Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity' }));
-vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ replace: mocks.replace }), useRoute: () => ({ params: { source: 'unlinked', profile: 'https://www.unlinked.ai/people/public-id' } }) }));
+vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ replace: mocks.replace }), useRoute: () => ({ params: mocks.params }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ createConversation: mocks.create, sendMessageToConversation: mocks.send }) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
-vi.mock('../../mobile/src/api/client', () => ({ api: { getContacts: mocks.contacts } }));
+vi.mock('../../mobile/src/api/client', () => ({ api: { getContacts: mocks.contacts, getPublicCard: mocks.card, getCardFriendStatus: mocks.status } }));
 vi.mock('../../mobile/src/services/composeIntents', () => ({ clearComposeIntent: vi.fn() }));
 import { ComposeScreen } from '../../mobile/src/screens/ComposeScreen';
 let root: ReturnType<typeof create>;
@@ -25,4 +25,43 @@ it('requires recipient and explicit Send; ignores a duplicate send tap', async (
   expect(mocks.create).toHaveBeenCalledTimes(1);
   expect(mocks.send).toHaveBeenCalledExactlyOnceWith('dm', 'About this Unlinked profile: https://www.unlinked.ai/people/public-id');
   expect(mocks.replace).toHaveBeenCalledWith('Chat', { conversationId: 'dm' });
+});
+
+it('resets the intent and does not reuse a failed-send conversation for another card', async () => {
+  vi.clearAllMocks();
+  vi.useFakeTimers(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  mocks.params = { source: 'unlinked', profile: 'https://www.unlinked.ai/people/a', card: 'card-a' };
+  mocks.contacts.mockResolvedValue([]);
+  mocks.card.mockImplementation(async (card: string) => ({ name: card }));
+  mocks.status.mockImplementation(async (card: string) => ({ userId: card }));
+  mocks.create.mockImplementation(async ([recipient]: string[]) => ({ id: `dm-${recipient}` }));
+  mocks.send.mockRejectedValueOnce(new Error('Offline')).mockResolvedValue(undefined);
+  await act(async () => { root = create(React.createElement(ComposeScreen)); });
+  const sendButton = () => root.root.findAllByType('TouchableOpacity').find(n => n.findAllByType('Text').some(t => t.props.children === 'Send message'))!;
+  await act(async () => sendButton().props.onPress());
+  mocks.params = { source: 'unlinked', profile: 'https://www.unlinked.ai/people/b', card: 'card-b' };
+  await act(async () => root.update(React.createElement(ComposeScreen)));
+  expect(root.root.findAllByType('TextInput').find(n => n.props.accessibilityLabel === 'Message draft')!.props.value).toBe('About this Unlinked profile: https://www.unlinked.ai/people/b');
+  await act(async () => sendButton().props.onPress());
+  expect(mocks.create.mock.calls.map(call => call[0])).toEqual([['card-a'], ['card-b']]);
+  expect(mocks.send.mock.calls.map(call => call[0])).toEqual(['dm-card-a', 'dm-card-b']);
+});
+
+it('ignores an old intent when its conversation creation completes after a new link', async () => {
+  vi.clearAllMocks();
+  vi.useFakeTimers(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  mocks.params = { source: 'unlinked', profile: 'https://www.unlinked.ai/people/a', card: 'card-a' };
+  mocks.contacts.mockResolvedValue([]);
+  mocks.card.mockImplementation(async (card: string) => ({ name: card }));
+  mocks.status.mockImplementation(async (card: string) => ({ userId: card }));
+  let resolve!: (value: { id: string }) => void;
+  mocks.create.mockReturnValueOnce(new Promise(r => { resolve = r; }));
+  await act(async () => { root = create(React.createElement(ComposeScreen)); });
+  const sendButton = () => root.root.findAllByType('TouchableOpacity').find(n => n.findAllByType('Text').some(t => t.props.children === 'Send message'))!;
+  await act(async () => { sendButton().props.onPress(); });
+  mocks.params = { source: 'unlinked', profile: 'https://www.unlinked.ai/people/b', card: 'card-b' };
+  await act(async () => root.update(React.createElement(ComposeScreen)));
+  await act(async () => resolve({ id: 'dm-card-a' }));
+  expect(mocks.send).not.toHaveBeenCalled();
+  expect(mocks.replace).not.toHaveBeenCalled();
 });

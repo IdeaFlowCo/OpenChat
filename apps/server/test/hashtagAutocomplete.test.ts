@@ -23,7 +23,16 @@ describe('composer hashtag token handling', () => {
 
   it('stops suggesting once the user finishes or types a non-storable tag character', () => {
     expect(findActiveHashtag('#decision shipped', 17)).toBeNull();
-    expect(findActiveHashtag('#two_words', 10)).toBeNull();
+    expect(findActiveHashtag('#two words', 10)).toBeNull();
+  });
+
+  it('completes Unicode, numeric, underscore and hyphen tags', () => {
+    for (const tag of ['équipe', 'q4-goals', 'two_words', '项目2']) {
+      const text = `#${tag}`;
+      const active = findActiveHashtag(text, Math.min(3, text.length));
+      expect(active).toEqual({ query: tag.slice(0, 2), start: 0, end: text.length });
+      expect(applyHashtagSuggestion(text, active!, tag).text).toBe(`${text} `);
+    }
   });
 
   it('leaves arbitrary new tags freely typable', () => {
