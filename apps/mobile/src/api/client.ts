@@ -945,6 +945,10 @@ export const api = {
   deleteContextPost: (conversationId: string, postId: string) =>
     request<void>(`/api/chat/conversations/${conversationId}/context/${postId}`, { method: 'DELETE' }),
 
+  resolveUnlinkedRecipient: (profile: string) => request<
+    { status: 'ready'; recipient: { id: string; name: string } } |
+    { status: 'unclaimed'; name: string } | { status: 'unavailable' }
+  >('/api/unlinked/recipient', { method: 'POST', body: JSON.stringify({ profile }) }),
   getMe: () => request<User>('/api/auth/me'),
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
   getConversation: (conversationId: string) =>

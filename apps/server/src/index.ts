@@ -1,3 +1,4 @@
+import unlinkedMessagingRoutes from './routes/unlinkedMessaging.js';
 import { isContextLaneEnabled } from './config/features.js';
 import dotenv from 'dotenv';
 import path from 'node:path';
@@ -418,6 +419,7 @@ app.use('/api/connector-delegations', connectorDelegation.routes);
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', contextRoutes);
 app.use('/api', entryIntentsRoutes);
+app.use('/api', unlinkedMessagingRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/client-logs', clientLogsRoutes);
 app.use('/api/push', pushRoutes);

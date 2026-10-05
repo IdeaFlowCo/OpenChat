@@ -396,6 +396,8 @@ export async function linkIdeaflowIdentity(
       MATCH (u:User {id: $userId, ideaflowIdentityKey: $identityKey})
       WHERE u.ideaflowIssuer = $issuer AND u.ideaflowSub = $subject
       SET u.lastSeenAt = datetime($now),
+          u.email = coalesce(u.email, $email),
+          u.sharedInboxPending = false,
           u.presenceStatus = 'available',
           u.ideaflowEmail = $email,
           u.ideaflowEmailVerified = true,

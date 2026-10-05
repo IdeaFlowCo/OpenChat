@@ -1,38 +1,58 @@
-# Unlinked → OpenChat compose contract
+# Unlinked and OpenChat: shared account and inbox
 
-Canonical entry: `https://chat.ideaflow.app/app/?intent=compose&source=unlinked`.
-The legacy OpenChat host accepts the same query. Optional `profile` is one
-URL-encoded canonical **public** `https://www.unlinked.ai/people/<id>` URL
-(an optional trailing slash is accepted):
-1–480 characters in `[A-Za-z0-9._~%-]`; valid percent encoding; no decoded
-slash, whitespace, query/fragment, backslash, controls or dot segments.
-No private origin, query/fragment, profile name, imported email or other payload
-is accepted. The Unlinked caller must omit `profile` for private-only profiles.
-OpenChat never fetches the profile or treats its URL as identity proof.
+Unlinked is the professional network; OpenChat is its messenger. Both use the
+same Ideaflow issuer/subject. Opening either app needs no separate registration.
+App-local records are created as needed; an OpenChat account does not publish an
+Unlinked profile, import contacts, or grant agent access to another person.
 
-Optional `card` is an existing real OpenChat card's 24-alphanumeric token.
-OpenChat resolves it through its own card service and preselects that recipient;
-the sender can choose a different contact. Invalid/deleted cards show
-an honest error and require selecting a contact. A profile URL alone leaves
-no recipient selected. No account linking or friend request occurs.
+The eventual Unlinked web Messages surface must use OpenChat's existing
+conversation IDs, membership, history, unread state, realtime transport and
+sending rules. It must not create a second message store or synchronize copies.
+This release opens the shared inbox composer in OpenChat; embedding that inbox
+inside Unlinked is a separate client surface.
 
-Only `intent`, `source`, `profile`, and `card` query parameters are accepted;
-unknown or repeated parameters invalidate the entry.
+## Profile entry
 
-The incoming entry is retained locally for up to one hour across sign-in
-and onboarding, then consumed when it opens an unsent editable draft. Edits
-to the draft are not stored in that incoming-entry record. The sender reviews
-the recipient and explicitly presses **Send message**. No automatic sending.
-Cancel discards the incoming entry. Existing `/c/<token>` links are unchanged.
+`https://chat.ideaflow.app/app/?intent=compose&source=unlinked` accepts an optional
+canonical public `https://www.unlinked.ai/people/<id>` in `profile`, and an
+optional existing 24-alphanumeric OpenChat `card` token. Unknown or repeated
+parameters invalidate the entry. Private profile fields, names, email addresses,
+message bodies and caller-selected recipient IDs are never accepted in the URL.
 
-Incoming entries are consumed by their local capture revision. A newer entry arriving during routing remains pending; Send and Cancel affect only the displayed draft. Revisions are internal and are not caller parameters.
+A card is resolved by OpenChat's card service. Otherwise a public profile is
+resolved by authenticated `POST /api/unlinked/recipient` with `{profile}`. The
+OpenChat server calls the fixed Unlinked `/api/messaging/v1/recipient` endpoint
+with `{profileId}` and its dedicated `UNLINKED_MESSAGING_SECRET`. Unlinked checks
+the live published profile, its live owner and its exact active Ideaflow binding.
+Only this confidential response can identify the recipient; the URL is not proof.
+The secret and issuer/subject never reach the browser. Redirects are rejected;
+requests time out and are rate limited. Missing configuration fails closed.
 
-Authenticated navigation waits for the existing per-device onboarding check
-to settle before registering Main. A fresh device enters Onboarding; its
-completion replaces that screen with Main and replays the same pending
-compose revision. Sign-out or an auth-identity change invalidates an unfinished
-check. Devices already marked complete retain their existing returning-user
-behavior. See [the onboarding regression](../apps/server/test/composeOnboarding.mobile.test.ts)
-for callback and stale-check coverage. The visible app version is owned by
-[`app.config.js`](../apps/mobile/app.config.js); native build allocation/submission
-is tracked separately from browser verification.
+A member's shared inbox is materialized lazily with the unique issuer/subject
+key already used at sign-in. The first verified login fills its missing email;
+it does not replace the inbox or its conversation history. Provisioning an inbox
+does not sign its owner in, mark them online, add contacts or send a message.
+Existing mapped OpenChat users retain their ID. Legacy accounts without a shared
+identity binding still follow the existing verified sign-in/linking policy;
+imported names/email never merge identities.
+
+The composer shows **Message [name]** with a blank draft and no recipient search.
+An unclaimed profile offers **Get an invite link**, opening the sender's existing
+card sharing screen. An absent/revoked profile is unavailable; a service outage
+shows **Try again**, never an incorrect invitation or an unrelated recipient.
+Generic compose (no profile/card) retains manual contact selection.
+
+## Continuation and sending
+
+Incoming entries survive sign-in and device onboarding for up to one hour and
+are consumed by capture revision. A newer link resets the displayed draft and
+recipient; stale asynchronous results cannot route a message. Draft edits are
+not persisted in the incoming-entry record. The sender explicitly presses
+**Send message**, using the existing direct-conversation service, which reuses
+the same conversation. A failed send retains the draft and conversation; duplicate
+taps are suppressed. Cancel sends nothing. Existing `/c/<token>` links remain.
+
+Deploy the confidential Unlinked resolver and configure the same random service
+secret on both servers before enabling the new OpenChat client. Remove that
+secret to disable resolution without widening recipients. No agent grant gains
+messaging or identity lookup capability from this change.
