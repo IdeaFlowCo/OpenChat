@@ -533,8 +533,6 @@ router.delete('/:id/pin/:conversationId', requireAuth, async (req: Request, res:
 
 /**
  * POST /api/thoughts
- * Body: { text: string, kind?: ThoughtKind, status?: ThoughtStatus,
- *         sourceMessageId?: string, pinToConversationId?: string }
  * Creates a new Thought for the current user.
  *
  * sourceMessageId (save-to-thoughts from a chat message): links the thought
@@ -542,6 +540,8 @@ router.delete('/:id/pin/:conversationId', requireAuth, async (req: Request, res:
  * caller participates in that message's conversation.
  * pinToConversationId: additionally pins the new thought to that conversation
  * in the same call ("Save & pin" — the unified affordance).
+ * scopeConversationId: associates an entry with a chat after checking current
+ * membership; association alone neither pins nor shares the entry.
  */
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;

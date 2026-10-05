@@ -738,10 +738,13 @@ export interface Thought {
   updatedAt: string;
   /** Tags extracted from the thought (e.g. hashtags). Rendered as chips. */
   tags?: string[];
-  /** Provenance: the chat this thought was captured from, if any. */
+  /** Source presence can be disclosed without granting access to source identifiers. */
   hasSourceMessage?: boolean;
+  /** Source identifiers are returned only when the viewer belongs to the source chat. */
   sourceMessageId?: string | null;
+  /** Private chat association; does not imply provenance or sharing. */
   scopeConversationId?: string | null;
+  /** Provenance: the accessible source chat, if any. */
   sourceConversationId?: string | null;
   sourceConversationName?: string | null;
   /** Pin state (chat-scoped views). */

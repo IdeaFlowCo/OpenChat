@@ -17,7 +17,7 @@ export interface ThoughtsSearchBarProps {
 
 /**
  * ThoughtsSearchBar — shared search bar for ThoughtsScreen and ConversationThoughtsScreen.
- * Provides the same debounce, clear affordance, and input styling across both surfaces.
+ * Screens own search debounce; StreamTextInput owns advisory tag suggestions.
  */
 export function ThoughtsSearchBar({
   value,

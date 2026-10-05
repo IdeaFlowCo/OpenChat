@@ -29,10 +29,10 @@ editable entry using your search text, even when nothing matches; with empty
 text it opens a blank entry. The **+ Create** button also opens a blank entry.
 Tap **Save entry** or leave the editor to save; tap an entry to edit it.
 New entries are private and unpinned. Creating in Chat Stream keeps the entry
-associated with that chat without sharing it. Explicitly **Pin to chat** to
-share an entry with participants.
+associated with that chat without sharing it. In Chat Stream, explicitly
+**Pin to chat** to share an entry with participants.
 
-Hashtag suggestions combine your own tags with tags captured from messages
+Hashtag suggestions combine your own tags with tags from hashtagged messages
 and tagged replies in chats you currently belong to. Chat Stream restricts
 the shared suggestions to that chat; other people's private captures never
 contribute. Long-press a Stream entry, or right-click on desktop web, for its
