@@ -11,7 +11,7 @@
  * On completion (any path):
  *   - Calls markOnboardingComplete() (AsyncStorage)
  *   - Calls PATCH /api/auth/me with onboardingComplete: true (server flag)
- *   - navigation.replace('Conversations')
+ *   - navigation.replace('Main')
  *
  * Uses a simple TouchableOpacity-based page nav with a 250ms slide animation
  * so there is no external dependency beyond what's already installed.

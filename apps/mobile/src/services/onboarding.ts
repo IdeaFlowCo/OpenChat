@@ -2,9 +2,8 @@
  * Onboarding helpers (OpenChat-x2s).
  *
  * Tracks per-device onboarding completion in AsyncStorage.
- * The server also receives a `onboardingComplete: true` flag on PATCH /api/auth/me
- * (stored as User.onboardedAt) so returning users on new devices are gracefully
- * handled — but the primary gate is this local flag.
+ * The local flag alone controls the device gate; server `onboardedAt` does not
+ * skip onboarding on a new device. See OnboardingScreen for completion handling.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
