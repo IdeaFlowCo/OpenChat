@@ -33,7 +33,7 @@ vi.mock('react-native', async () => {
     TextInput: 'TextInput',
     TouchableOpacity: 'TouchableOpacity',
     View: 'View',
-    ScrollView: ({ refreshControl, children, ...props }: any) =>
+    ScrollView: ({ refreshControl: _refreshControl, children, ...props }: any) =>
       React.createElement('ScrollView', props, children),
     RefreshControl: () => null,
     Pressable: 'Pressable',
@@ -362,9 +362,9 @@ describe('ConversationThoughtsScreen parity & search', () => {
   });
 
   it('live socket updates update thoughts live', async () => {
-    let socketHandlers: Record<string, Function> = {};
+    const socketHandlers: Record<string, (payload: any) => void> = {};
     mocks.getSocket.mockReturnValue({
-      on: (event: string, handler: Function) => {
+      on: (event: string, handler: (payload: any) => void) => {
         socketHandlers[event] = handler;
       },
       off: (event: string) => {
