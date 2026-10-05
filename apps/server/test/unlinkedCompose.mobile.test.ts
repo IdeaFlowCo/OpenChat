@@ -1,0 +1,28 @@
+import React from 'react';
+import { act, create } from 'react-test-renderer';
+import { afterEach, expect, it, vi } from 'vitest';
+const mocks = vi.hoisted(() => ({ create: vi.fn(), send: vi.fn(), replace: vi.fn(), contacts: vi.fn() }));
+vi.mock('react-native', () => ({ ActivityIndicator: 'ActivityIndicator', ScrollView: 'ScrollView', Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity' }));
+vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ replace: mocks.replace }), useRoute: () => ({ params: { source: 'unlinked', profile: 'https://www.unlinked.ai/people/public-id' } }) }));
+vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ createConversation: mocks.create, sendMessageToConversation: mocks.send }) }));
+vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
+vi.mock('../../mobile/src/api/client', () => ({ api: { getContacts: mocks.contacts } }));
+vi.mock('../../mobile/src/services/composeIntents', () => ({ clearComposeIntent: vi.fn() }));
+import { ComposeScreen } from '../../mobile/src/screens/ComposeScreen';
+let root: ReturnType<typeof create>;
+afterEach(async () => { await act(async () => root?.unmount()); vi.useRealTimers(); delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT; });
+it('requires recipient and explicit Send; ignores a duplicate send tap', async () => {
+  vi.useFakeTimers(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  mocks.contacts.mockResolvedValue([{ id: 'bob', name: 'Bob' }]); mocks.create.mockResolvedValue({ id: 'dm' }); mocks.send.mockResolvedValue(undefined);
+  await act(async () => { root = create(React.createElement(ComposeScreen)); });
+  await act(async () => vi.advanceTimersByTime(300));
+  const sendButton = () => root.root.findAllByType('TouchableOpacity').find(n => n.findAllByType('Text').some(t => t.props.children === 'Send message'))!;
+  expect(sendButton().props.disabled).toBe(true); expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
+  await act(async () => root.root.findAllByType('TouchableOpacity')[0].props.onPress());
+  expect(mocks.send).not.toHaveBeenCalled();
+  const send = sendButton().props.onPress;
+  await act(async () => { send(); send(); });
+  expect(mocks.create).toHaveBeenCalledTimes(1);
+  expect(mocks.send).toHaveBeenCalledExactlyOnceWith('dm', 'About this Unlinked profile: https://www.unlinked.ai/people/public-id');
+  expect(mocks.replace).toHaveBeenCalledWith('Chat', { conversationId: 'dm' });
+});

@@ -34,6 +34,7 @@ vi.mock('react-native', async () => {
     ScrollView: ({ refreshControl, children, ...props }: any) =>
       React.createElement('ScrollView', props, children),
     RefreshControl: () => null,
+    Pressable: 'Pressable',
     Modal: ({ visible, children }: any) => (visible ? children : null),
     FlatList: React.forwardRef(({ data, renderItem, ListEmptyComponent, ListHeaderComponent }: any) =>
       React.createElement(
@@ -187,7 +188,7 @@ describe('ConversationThoughtsScreen parity & search', () => {
     expect(initialText).not.toContain('No Stream entries match');
 
     // Enter a search query
-    const searchInput = screen!.root.findByProps({ placeholder: "Search this chat's Stream" });
+    const searchInput = screen!.root.findByProps({ placeholder: "Search or create in this chat's Stream" });
     await act(async () => {
       searchInput.props.onChangeText('unmatched query');
     });
@@ -261,7 +262,7 @@ describe('ConversationThoughtsScreen parity & search', () => {
 
     // Perform search
     mocks.fetchConversationThoughts.mockResolvedValueOnce(searchResults);
-    const searchInput = screen!.root.findByProps({ placeholder: "Search this chat's Stream" });
+    const searchInput = screen!.root.findByProps({ placeholder: "Search or create in this chat's Stream" });
     await act(async () => {
       searchInput.props.onChangeText('roadmap');
     });

@@ -739,6 +739,8 @@ export interface Thought {
   /** Tags extracted from the thought (e.g. hashtags). Rendered as chips. */
   tags?: string[];
   /** Provenance: the chat this thought was captured from, if any. */
+  sourceMessageId?: string | null;
+  scopeConversationId?: string | null;
   sourceConversationId?: string | null;
   sourceConversationName?: string | null;
   /** Pin state (chat-scoped views). */
@@ -1593,6 +1595,7 @@ export const api = {
     status?: ThoughtStatus;
     sourceMessageId?: string;
     pinToConversationId?: string;
+    scopeConversationId?: string;
   }) =>
     request<Thought>('/api/thoughts', {
       method: 'POST',
@@ -1611,9 +1614,16 @@ export const api = {
 
   /** Ranked hashtag suggestions for the message composer. */
   getHashtagSuggestions: (conversationId: string, q = '', limit = 8) => {
-    const params = new URLSearchParams({ conversationId, q, limit: String(limit) });
+    const params = new URLSearchParams({ q, limit: String(limit) });
+    if (conversationId) params.set('conversationId', conversationId);
     return request<HashtagSuggestion[]>(`/api/thoughts/tags/suggestions?${params}`);
   },
+
+  getThoughtContext: (id: string) => request<{
+    conversation: { id: string; name?: string; type: string };
+    messageId: string;
+    messages: { id: string; content: string; createdAt: string; senderName?: string }[];
+  }>(`/api/thoughts/${encodeURIComponent(id)}/context`),
 
   /** Pin one of my thoughts to a conversation I participate in. */
   pinThought: (id: string, conversationId: string) =>

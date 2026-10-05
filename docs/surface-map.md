@@ -43,6 +43,9 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | `BlockedUsers` | Settings | **Blocked users** | Settings › Legal & Account › Blocked users | 3 | Manage blocked contacts. |
 | `GroupSettings` | Chats | **Group Info** | In-chat header tap on a group conversation | 2 | Group member roster, rename, add/remove participants. |
 
+| `OriginalMessage` | Stream | **Original message** | Chats › Stream › Original message; chat Stream entry | 2 | Exact accessible source and nearby messages; unavailable source gives no chat data. |
+| `Compose` | Chats | **Message with OpenChat** | Chats › New Chat › Message with OpenChat; external Unlinked profile CTA | 2 | Editable unsent profile URL context; explicit OpenChat recipient and Send. Sign-in return retained. Private profiles omit context. |
+
 ---
 
 ## Architectural Principles
@@ -51,3 +54,5 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 2. **Avatar is "Me".** The user's face in the chrome is the single entry point to everything about themselves (their card, their QR code, scanning others' codes, profile editing, agent, settings).
 3. **OpenChat Agent is always an ordinary chat.** The assistant conversation is created server-side upon sign-in and pinned in Chats. The agent noun is never hidden behind `enhanced` mode; only the coordination layer (Asks, Stories, Review, quiet matching) is gated.
 4. **Reciprocal actions live together.** "Show my QR code" and "Scan their code" belong on the same surface (`Profile`), with "Scan a code" directly beneath the user's code.
+
+Stream October 5: both global and chat Stream share search-and-create, accessible hashtag suggestions, and inline editor. Create defaults to private/unpinned; pin is explicit. Saved-message entries expose the visible **Original message** door (Chats → Stream → Original message), displaying the access-checked exact message and neighbors. Right-click mirrors long-press menus on desktop web; native touch unchanged.

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   receive: vi.fn(),
   scroll: vi.fn(),
   privateName: null as string | null,
+  platform: 'ios',
 }));
 
 // Exercise the real ChatScreen hooks/render tree, with the OS boundary replaced
@@ -19,7 +20,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('react-native', async () => {
   const React = await import('react');
   return {
-    Platform: { OS: 'ios', select: (values: any) => values.ios ?? values.default },
+    Platform: { get OS() { return mocks.platform; }, select: (values: any) => values.ios ?? values.default },
     Appearance: { getColorScheme: () => 'light' },
     StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
     ActionSheetIOS: { showActionSheetWithOptions: vi.fn() },
@@ -56,7 +57,7 @@ vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn() }))
 vi.mock('../../mobile/src/services/hashtagSuggestions', () => ({
   fetchHashtagSuggestions: vi.fn(), invalidateHashtagSuggestions: vi.fn(),
 }));
-vi.mock('../../mobile/src/components/MessageActionSheet', () => ({ MessageActionSheet: () => null }));
+vi.mock('../../mobile/src/components/MessageActionSheet', () => ({ MessageActionSheet: (props: any) => React.createElement('MessageActionSheet', props) }));
 vi.mock('../../mobile/src/components/ReactionsBar', () => ({ ReactionsBar: () => null }));
 vi.mock('../../mobile/src/components/ToastMessage', () => ({ ToastMessage: () => null }));
 vi.mock('../../mobile/src/components/AiDisclosureBanner', () => ({ AiDisclosureBanner: () => null }));
@@ -95,6 +96,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   mocks.privateName = null;
+  mocks.platform = 'ios';
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.chat = {
     currentUser: { userId: 'bob', name: 'Bob' },
@@ -235,5 +237,61 @@ describe('private direct-chat header labels', () => {
     const identity = screen!.root.findAllByType('TouchableOpacity').find(n => n.props.accessibilityLabel?.includes('Conversation information'))!;
     await act(async () => identity.props.onPress());
     expect(mocks.navigation.navigate).toHaveBeenCalledWith('ContactProfile', { userId: 'alice' });
+  });
+});
+
+
+describe('desktop composer input', () => {
+  function key(flags: Record<string, unknown> = {}) {
+    return { key: 'Enter', shiftKey: false, altKey: false, ctrlKey: false, metaKey: false, repeat: false,
+      nativeEvent: { isComposing: false, keyCode: 13 }, preventDefault: vi.fn(), ...flags };
+  }
+  it('sends multiline text once and blocks pending/repeated/empty sends', async () => {
+    mocks.platform = 'web';
+    let resolve!: () => void;
+    mocks.chat.sendMessage = vi.fn(() => new Promise<void>(done => { resolve = done; }));
+    await render();
+    await act(async () => screen!.root.findByType('TextInput').props.onKeyDownCapture(key()));
+    expect(mocks.chat.sendMessage).not.toHaveBeenCalled();
+    await act(async () => screen!.root.findByType('TextInput').props.onChangeText('One\nTwo'));
+    const handler = screen!.root.findByType('TextInput').props.onKeyDownCapture;
+    await act(async () => handler(key({ repeat: true })));
+    expect(mocks.chat.sendMessage).not.toHaveBeenCalled();
+    await act(async () => { handler(key()); handler(key()); });
+    expect(mocks.chat.sendMessage).toHaveBeenCalledExactlyOnceWith('One\nTwo', undefined, undefined);
+    await act(async () => screen!.root.findByType('TextInput').props.onChangeText('Pending draft'));
+    await act(async () => screen!.root.findByType('TextInput').props.onKeyDownCapture(key()));
+    expect(mocks.chat.sendMessage).toHaveBeenCalledTimes(1);
+    await act(async () => resolve());
+  });
+  it.each([{ shiftKey: true }, { altKey: true }, { ctrlKey: true }, { metaKey: true },
+    { nativeEvent: { isComposing: true, keyCode: 13 } },
+    { nativeEvent: { isComposing: false, keyCode: 229 } }])('preserves modified/IME input: %j', async flags => {
+    mocks.platform = 'web';
+    mocks.chat.sendMessage = vi.fn();
+    await render();
+    await act(async () => screen!.root.findByType('TextInput').props.onChangeText('Unsent'));
+    const event = key(flags);
+    await act(async () => screen!.root.findByType('TextInput').props.onKeyDownCapture(event));
+    expect(mocks.chat.sendMessage).not.toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+  it('leaves native return intact and uses the long-press menu for web right-click', async () => {
+    mocks.chat.messages = [message('context-target')];
+    await render();
+    expect(screen!.root.findByType('TextInput').props.onKeyDownCapture).toBeUndefined();
+    mocks.platform = 'web';
+    await render();
+    const bubble = screen!.root.findAllByType('TouchableOpacity').find(node => node.props.onContextMenu)!;
+    const event = { preventDefault: vi.fn() };
+    await act(async () => bubble.props.onContextMenu(event));
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    const clicked = screen!.root.findByType('MessageActionSheet').props;
+    expect(clicked.visible).toBe(true);
+    expect(clicked.message.id).toBe('context-target');
+    await act(async () => bubble.props.onLongPress());
+    const held = screen!.root.findByType('MessageActionSheet').props;
+    expect(held.message).toEqual(clicked.message);
+    expect(held.isOwn).toBe(clicked.isOwn);
   });
 });

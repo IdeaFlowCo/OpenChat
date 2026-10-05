@@ -344,6 +344,7 @@ export function ChatScreen({
   const [hashtagSelectedIndex, setHashtagSelectedIndex] = useState(0);
   const [hashtagDismissed, setHashtagDismissed] = useState(false);
   const textInputRef = useRef<TextInput>(null);
+  const sendInFlightRef = useRef(false);
   const listRef = useRef<FlatList<RenderRow>>(null);
   const typingTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -968,11 +969,12 @@ export function ChatScreen({
   const handleSend = async () => {
     const trimmed = text.trim();
     const hasAttachment = !!pendingAsset;
-    if ((!trimmed && !hasAttachment) || composerBusy) return;
+    if ((!trimmed && !hasAttachment) || composerBusy || sendInFlightRef.current) return;
     if (!isConnected) {
       Alert.alert('Offline', 'OpenChat is offline. Your message was not sent. Reconnect, then try again.');
       return;
     }
+    sendInFlightRef.current = true;
     setSending(true);
 
     // Edit mode: PATCH existing message (OpenChat-q9h). Attachments not editable.
@@ -986,6 +988,7 @@ export function ChatScreen({
         console.warn('[ChatScreen] edit failed:', err);
         Alert.alert('Error', 'Could not save your edit. Please try again.');
       } finally {
+        sendInFlightRef.current = false;
         setSending(false);
       }
       return;
@@ -1025,14 +1028,20 @@ export function ChatScreen({
       console.warn('[ChatScreen] send failed:', err);
       Alert.alert('Upload failed', 'Could not send the image. Please try again.');
     } finally {
+      sendInFlightRef.current = false;
       setSending(false);
     }
   };
 
-  // React Native's onKeyPress only reliably covers character keys on web.
-  // RN Web forwards onKeyDown to its underlying textarea, which is what lets
-  // arrow, Tab, and Escape controls work without a global document listener.
+  // RN Web replaces TextInput's onKeyDown with its own handler. Capture is
+  // forwarded to the textarea and runs before that handler inserts a newline.
   const handleComposerWebKeyDown = (event: React.KeyboardEvent) => {
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+      || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.repeat && event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      return;
+    }
     const hashtagPickerOpen = !!activeHashtag
       && !hashtagDismissed
       && hashtagSuggestions.length > 0;
@@ -1050,7 +1059,7 @@ export function ChatScreen({
         );
         return;
       }
-      if ((event.key === 'Enter' || event.key === 'Tab') && !event.nativeEvent.isComposing) {
+      if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) {
         event.preventDefault();
         handleHashtagSelect(hashtagSuggestions[hashtagSelectedIndex]);
         return;
@@ -1307,6 +1316,12 @@ export function ChatScreen({
         <TouchableOpacity
           activeOpacity={0.85}
           onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
+          {...(Platform.OS === 'web' ? {
+            onContextMenu: (event: React.MouseEvent) => {
+              event.preventDefault();
+              handleLongPress(m, isOwn, getUserDisplayName(m.sender));
+            },
+          } : {})}
           delayLongPress={350}
           style={[
             styles.bubble,
@@ -1828,7 +1843,7 @@ export function ChatScreen({
           // Web: a textarea defaults to two rows, which left the placeholder
           // floating above the attach/send row. Start at one row (inputWeb
           // grows it with the text).
-          {...(Platform.OS === 'web' ? { onKeyDown: handleComposerWebKeyDown, rows: 1 } : {})}
+          {...(Platform.OS === 'web' ? { onKeyDownCapture: handleComposerWebKeyDown, rows: 1 } : {})}
           onSelectionChange={(event) => {
             const cursor = event.nativeEvent.selection.end;
             setActiveHashtag(findActiveHashtag(text, cursor));

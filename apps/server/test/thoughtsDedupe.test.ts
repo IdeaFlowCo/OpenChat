@@ -197,7 +197,6 @@ describe('GET /api/thoughts (route-level dedupe)', () => {
       '(u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought)',
     );
     expect(fromChatQuery).toContain("t.captureMethod IN ['inline-tag', 'reply-tag']");
-    expect(fromChatQuery).toContain('size(coalesce(t.tags, [])) > 0');
     expect(fromChatQuery).toContain('authorId: t.userId');
     expect(params).toEqual({ userId: 'jacob', conversationId: 'conv-shared' });
   });

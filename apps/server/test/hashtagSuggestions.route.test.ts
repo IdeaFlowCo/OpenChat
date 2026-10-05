@@ -108,7 +108,7 @@ describe('GET /api/thoughts/tags/suggestions', () => {
       prefix: 'de',
     });
     expect(cypher).toContain('author.id <> caller.id');
-    expect(cypher).toContain('m.conversationId = $conversationId');
+    expect(cypher).toContain('m.conversationId = conversation.id');
     expect(cypher).toContain('ORDER BY (ownCount + chatCount) DESC, lastUsedAt DESC');
   });
 
@@ -134,4 +134,34 @@ describe('GET /api/thoughts/tags/suggestions', () => {
     expect(response.status).toBe(400);
     expect(mocks.run).not.toHaveBeenCalled();
   });
+  it('supports global viewer-accessible suggestions without a conversation parameter', async () => {
+    mocks.run.mockResolvedValueOnce({ records: [{ get: () => ({ tag: 'design', source: 'mine', ownCount: 1, chatCount: 0 }) }] });
+    const response = await fetch(`${baseUrl}/api/thoughts/tags/suggestions?q=de`, { headers: { Authorization: authorization } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([{ tag: 'design', source: 'mine', ownCount: 1, chatCount: 0 }]);
+    expect(mocks.run.mock.calls[0][1]).toMatchObject({ userId: 'user-1', conversationId: '', prefix: 'de' });
+  });
+  it('returns one generic unavailable response for absent source context', async () => {
+    mocks.run.mockResolvedValueOnce({ records: [] });
+    const response = await fetch(`${baseUrl}/api/thoughts/capture/context`, { headers: { Authorization: authorization } });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'Original message unavailable' });
+    expect(mocks.run).toHaveBeenCalledTimes(1);
+    expect(mocks.close).toHaveBeenCalledTimes(1);
+  });
+  it('rejects ordinary chat Stream creation when membership is missing', async () => {
+    mocks.run.mockResolvedValueOnce({ records: [] });
+    const response = await fetch(`${baseUrl}/api/thoughts`, { method: 'POST', headers: { Authorization: authorization, 'content-type': 'application/json' }, body: JSON.stringify({ text: 'draft', scopeConversationId: 'private' }) });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'Conversation not found' });
+    expect(mocks.run).toHaveBeenCalledTimes(1);
+  });
+  it('creates an unpinned private chat-scoped entry without message provenance', async () => {
+    mocks.run.mockResolvedValueOnce({ records: [{ get: () => 'chat' }] }).mockResolvedValueOnce({ records: [{ get: () => ({ id: 'new', text: 'draft #design', tags: ['design'], pinned: false, scopeConversationId: 'chat' }) }] });
+    const response = await fetch(`${baseUrl}/api/thoughts`, { method: 'POST', headers: { Authorization: authorization, 'content-type': 'application/json' }, body: JSON.stringify({ text: 'draft #design', scopeConversationId: 'chat' }) });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ pinned: false, scopeConversationId: 'chat', tags: ['design'] });
+    expect(mocks.run.mock.calls[1][1]).toMatchObject({ scopeConversationId: 'chat', sourceMessageId: null, pinToConversationId: null, tags: ['design'] });
+  });
+
 });

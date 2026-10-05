@@ -11,11 +11,14 @@
  *   anything else                   → { type: 'unknown' }
  */
 
+import { parseComposeIntent, type ComposeIntent } from './composeIntent';
+
 export type ParsedOpenChatUrl =
   | { type: 'user'; userId: string }
   | { type: 'invite'; token: string }
   | { type: 'card'; token: string }
   | { type: 'context'; conversationId: string; entryId: string }
+  | ({ type: 'compose' } & ComposeIntent)
   | { type: 'unknown' };
 
 export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
@@ -72,6 +75,8 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
     // carry their post-auth destination in the query so OAuth can always
     // return to the one registered /app/ callback.
     if (/^\/app\/?$/.test(url.pathname)) {
+      const compose = parseComposeIntent(url);
+      if (compose) return { type: 'compose', ...compose };
       const intent = url.searchParams.get('intent');
       const id = url.searchParams.get('id');
       const token = url.searchParams.get('token');

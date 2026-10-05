@@ -27,6 +27,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { fetchThoughts, createThought, updateThought, deleteThought, Thought } from '../services/thoughts';
 import { getSocket } from '../api/socket';
+import { StreamEditor } from '../components/StreamEditor';
 import { ThoughtCard } from '../components/ThoughtCard';
 import { ThoughtsSearchBar } from '../components/ThoughtsSearchBar';
 import type { ThoughtsNavProp } from '../navigation/types';
@@ -139,15 +140,17 @@ export function ThoughtsScreen() {
   }, []);
 
   // ── Inline editing (NoteStream behavior) ─────────────────────────────────
+  const savingNew = useRef(false);
   const [creating, setCreating] = useState(false);
   const [newDraft, setNewDraft] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
 
-  const openAdd = useCallback(() => {
+  const openAdd = useCallback((text = '') => {
     setEditingId(null);
+    setQuery('');
     setCreating(true);
-    setNewDraft('');
+    setNewDraft(text);
   }, []);
 
   const startEdit = useCallback((thought: Thought) => {
@@ -159,15 +162,18 @@ export function ThoughtsScreen() {
   // Commit on blur ("tap away and it just saves").
   const commitNew = useCallback(async () => {
     const text = newDraft.trim();
-    setCreating(false);
-    setNewDraft('');
-    if (!text) return;
+    if (savingNew.current) return;
+    if (!text) { setCreating(false); return; }
+    savingNew.current = true;
     try {
       const t = await createThought({ text });
       if (mountedRef.current) setThoughts((prev) => [t, ...prev.filter((x) => x.id !== t.id)]);
     } catch (e) {
       Alert.alert('Error', streamErrorMessage(e, 'Failed to save Stream entry'));
-    }
+      return;
+    } finally { savingNew.current = false; }
+    setCreating(false);
+    setNewDraft('');
   }, [newDraft]);
 
   const commitEdit = useCallback(async () => {
@@ -185,20 +191,8 @@ export function ThoughtsScreen() {
     }
   }, [editingId, editDraft, thoughts]);
 
-  /** Index-card editor used for both the new-entry (top) and in-place edits. */
-  const renderEditorCard = (value: string, onChange: (t: string) => void, onBlur: () => void, placeholder?: string) => (
-    <View style={[styles.editorCard, { backgroundColor: c.surface, borderColor: c.border, borderLeftColor: c.primary }]}>
-      <TextInput
-        style={[styles.editorInput, { color: c.textPrimary }]}
-        value={value}
-        onChangeText={onChange}
-        onBlur={onBlur}
-        placeholder={placeholder ?? 'Write a Stream entry…'}
-        placeholderTextColor={c.textMuted}
-        multiline
-        autoFocus
-      />
-    </View>
+  const renderEditorCard = (value: string, onChange: (text: string) => void, onSave: () => void, placeholder?: string) => (
+    <StreamEditor value={value} onChangeText={onChange} onSave={onSave} placeholder={placeholder} />
   );
 
   // Tapping a tag chip filters the list to that tag.
@@ -238,7 +232,8 @@ export function ThoughtsScreen() {
       <ThoughtsSearchBar
         value={query}
         onChangeText={setQuery}
-        placeholder="Search Stream and tags"
+        onCreate={text => openAdd(text)}
+        placeholder="Search or create a Stream entry"
       />
 
       <FlatList
@@ -252,6 +247,7 @@ export function ThoughtsScreen() {
           ) : (
             <ThoughtCard
               item={item}
+              onOpenContext={item.sourceMessageId ? () => navigation.navigate('OriginalMessage', { thoughtId: item.id }) : undefined}
               onPress={() => startEdit(item)}
               onDelete={() => handleDelete(item.id)}
               onTagPress={handleTagPress}
@@ -276,12 +272,12 @@ export function ThoughtsScreen() {
       {/* FAB */}
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: c.primary }]}
-        onPress={openAdd}
+        onPress={() => openAdd()}
         activeOpacity={0.8}
         accessibilityRole="button"
         accessibilityLabel="New Stream entry"
       >
-        <AppIcon name="plus" color={c.onPrimary} size={26} strokeWidth={2.2} />
+        <AppIcon name="plus" color={c.onPrimary} size={22} strokeWidth={2.2} /><Text style={{ color: c.onPrimary, fontSize: 10 }}>Create</Text>
       </TouchableOpacity>
     </View>
   );

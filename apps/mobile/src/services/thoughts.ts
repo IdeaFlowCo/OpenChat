@@ -18,6 +18,7 @@ export async function createThought(params: {
   status?: ThoughtStatus;
   sourceMessageId?: string;
   pinToConversationId?: string;
+  scopeConversationId?: string;
 }): Promise<Thought> {
   return api.createThought(params);
 }

@@ -27,7 +27,7 @@ import {
   TextInput,
   TouchableOpacity,
 } from 'react-native';
-import { useFocusEffect, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useRoute, useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { useChat } from '../contexts/ChatContext';
@@ -41,13 +41,15 @@ import {
   Thought,
 } from '../services/thoughts';
 import { getSocket } from '../api/socket';
+import { StreamEditor } from '../components/StreamEditor';
 import { ThoughtCard } from '../components/ThoughtCard';
 import { ThoughtsSearchBar } from '../components/ThoughtsSearchBar';
 import { AppIcon } from '../components/AppIcon';
-import type { RouteProps } from '../navigation/types';
+import type { NavProp, RouteProps } from '../navigation/types';
 import { streamErrorMessage } from './streamError';
 
 export function ConversationThoughtsScreen() {
+  const navigation = useNavigation<NavProp<'ConversationThoughts'>>();
   const route = useRoute<RouteProps<'ConversationThoughts'>>();
   const { conversationId, title } = route.params;
   const { scheme } = useTheme();
@@ -145,7 +147,7 @@ export function ConversationThoughtsScreen() {
       if (!payload?.thought) return;
       const t = payload.thought;
       // Must be relevant to this conversation
-      if (t.sourceConversationId !== conversationId && !t.pinned) return;
+      if (t.sourceConversationId !== conversationId && t.scopeConversationId !== conversationId) return;
       if (!matchesQuery(t)) return;
 
       if (t.pinned) {
@@ -241,15 +243,17 @@ export function ConversationThoughtsScreen() {
   const mine = (t: Thought) => !t.authorId || t.authorId === myId;
 
   // ── Inline editing ───────────────────────────────────────────────────────
+  const savingNew = useRef(false);
   const [creating, setCreating] = useState(false);
   const [newDraft, setNewDraft] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
 
-  const openAdd = useCallback(() => {
+  const openAdd = useCallback((text = '') => {
     setEditingId(null);
+    setQuery('');
     setCreating(true);
-    setNewDraft('');
+    setNewDraft(text);
   }, []);
 
   const startEdit = useCallback((thought: Thought) => {
@@ -260,15 +264,18 @@ export function ConversationThoughtsScreen() {
 
   const commitNew = useCallback(async () => {
     const text = newDraft.trim();
-    setCreating(false);
-    setNewDraft('');
-    if (!text) return;
+    if (savingNew.current) return;
+    if (!text) { setCreating(false); return; }
+    savingNew.current = true;
     try {
-      const t = await createThought({ text, pinToConversationId: conversationId });
-      setPinned((prev) => [t, ...prev.filter((x) => x.id !== t.id)]);
+      const t = await createThought({ text, scopeConversationId: conversationId });
+      setFromChat((prev) => [t, ...prev.filter((x) => x.id !== t.id)]);
     } catch (e) {
       Alert.alert('Error', streamErrorMessage(e, 'Failed to save Stream entry'));
-    }
+      return;
+    } finally { savingNew.current = false; }
+    setCreating(false);
+    setNewDraft('');
   }, [newDraft, conversationId]);
 
   const commitEdit = useCallback(async () => {
@@ -288,29 +295,8 @@ export function ConversationThoughtsScreen() {
     }
   }, [editingId, editDraft, pinned, fromChat]);
 
-  const renderEditorCard = (
-    value: string,
-    onChange: (t: string) => void,
-    onBlur: () => void,
-    placeholder?: string
-  ) => (
-    <View
-      style={[
-        styles.editorCard,
-        { backgroundColor: c.surface, borderColor: c.border, borderLeftColor: c.primary },
-      ]}
-    >
-      <TextInput
-        style={[styles.editorInput, { color: c.textPrimary }]}
-        value={value}
-        onChangeText={onChange}
-        onBlur={onBlur}
-        placeholder={placeholder ?? 'Write a Stream entry…'}
-        placeholderTextColor={c.textMuted}
-        multiline
-        autoFocus
-      />
-    </View>
+  const renderEditorCard = (value: string, onChange: (text: string) => void, onSave: () => void, placeholder?: string) => (
+    <StreamEditor value={value} onChangeText={onChange} onSave={onSave} placeholder={placeholder} conversationId={conversationId} />
   );
 
   const isSearching = query.trim().length > 0;
@@ -322,7 +308,9 @@ export function ConversationThoughtsScreen() {
       <ThoughtsSearchBar
         value={query}
         onChangeText={setQuery}
-        placeholder="Search this chat's Stream"
+        onCreate={text => openAdd(text)}
+        conversationId={conversationId}
+        placeholder="Search or create in this chat's Stream"
       />
 
       {/* Scope header — confirms the chat scope explicitly */}
@@ -347,6 +335,8 @@ export function ConversationThoughtsScreen() {
         }
       >
         {error && <Text style={[styles.error, { color: c.danger }]}>{error}</Text>}
+
+        {creating && renderEditorCard(newDraft, setNewDraft, () => void commitNew(), 'New private, unpinned Stream entry…')}
 
         {/* Global empty state when searching and no results in either section */}
         {isSearching && totalCount === 0 && !loading && (
@@ -374,16 +364,9 @@ export function ConversationThoughtsScreen() {
             <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>
               {isSearching ? `Pinned matches (${pinned.length})` : 'Pinned'}
             </Text>
-            {creating &&
-              renderEditorCard(
-                newDraft,
-                setNewDraft,
-                () => void commitNew(),
-                'New pinned Stream entry…'
-              )}
             {pinned.length === 0 && !loading && !creating && !isSearching && (
               <Text style={[styles.emptyText, { color: c.textMetadata }]}>
-                Nothing pinned yet. Long-press a message and choose “Save & pin to chat”, or tap + to add one.
+                Nothing pinned yet. Long-press a message and choose “Save & pin to chat”, Pin an entry explicitly to share it here.
               </Text>
             )}
             {pinned.map((t) =>
@@ -392,6 +375,7 @@ export function ConversationThoughtsScreen() {
               ) : (
                 <ThoughtCard
                   key={t.id}
+                  onOpenContext={t.sourceMessageId ? () => navigation.navigate('OriginalMessage', { thoughtId: t.id }) : undefined}
                   item={{ ...t, pinned: true }}
                   subtitle={mine(t) ? 'pinned by you' : `by ${t.authorName || 'a participant'}`}
                   onPress={mine(t) ? () => startEdit(t) : undefined}
@@ -426,6 +410,7 @@ export function ConversationThoughtsScreen() {
               ) : (
                 <ThoughtCard
                   key={t.id}
+                  onOpenContext={t.sourceMessageId ? () => navigation.navigate('OriginalMessage', { thoughtId: t.id }) : undefined}
                   item={{ ...t, pinned: false }}
                   subtitle={mine(t) ? undefined : `by ${t.authorName || 'a participant'}`}
                   onPress={mine(t) ? () => startEdit(t) : undefined}
@@ -442,12 +427,12 @@ export function ConversationThoughtsScreen() {
       {/* FAB */}
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: c.primary }]}
-        onPress={openAdd}
+        onPress={() => openAdd()}
         activeOpacity={0.8}
         accessibilityRole="button"
         accessibilityLabel="New Stream entry in this chat"
       >
-        <AppIcon name="plus" color={c.onPrimary} size={26} strokeWidth={2.2} />
+        <AppIcon name="plus" color={c.onPrimary} size={22} strokeWidth={2.2} /><Text style={{ color: c.onPrimary, fontSize: 10 }}>Create</Text>
       </TouchableOpacity>
     </View>
   );

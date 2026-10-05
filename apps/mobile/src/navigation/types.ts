@@ -24,6 +24,8 @@ export type RootStackParamList = {
   Conversations: undefined;
   Chat: { conversationId: string; lane?: 'chat' | 'context'; entryId?: string };
   NewConversation: undefined;
+  OriginalMessage: { thoughtId: string };
+  Compose: import('../utils/composeIntent').ComposeIntent;
   InvitePerson: undefined;
   Friends: { section?: 'friends' | 'requests' } | undefined;
   /** OpenChat Agent overlay (asks, offers, and anonymous matches; OpenChat-a0e.5). */
@@ -78,6 +80,7 @@ export type RootStackParamList = {
 // ── Thoughts stack (OpenChat-zi1) ─────────────────────────────────────────────
 export type ThoughtsStackParamList = {
   ThoughtsList: undefined;
+  OriginalMessage: { thoughtId: string };
   /** Add / edit a thought. When `thought` is provided it's edit mode. */
   AddEditThought: { thought?: Thought } | undefined;
 };

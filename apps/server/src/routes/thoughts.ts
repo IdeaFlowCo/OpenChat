@@ -16,6 +16,7 @@ import { nanoid } from 'nanoid';
 import neo4j from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { extractTagsFromMessage } from '../services/extractThoughtsFromMessage.js';
 
 const router = Router();
 
@@ -101,8 +102,9 @@ export function mergeDuplicateThoughtsFromSameMessage(
  *   - the caller's own previously-used tags (across all of their Thoughts)
  *   - tags other participants used in this conversation
  *
- * There is intentionally no global cross-user pool. The membership check and
- * the FROM_MESSAGE conversation constraint keep the shared half chat-scoped.
+ * Without conversationId, shared tags span only the caller’s current chats.
+ * Private captures by other users never contribute, even if they have tags.
+ * A supplied conversationId requires membership before any suggestions return.
  */
 router.get('/tags/suggestions', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
@@ -116,10 +118,6 @@ router.get('/tags/suggestions', requireAuth, async (req: Request, res: Response)
     MAX_TAG_SUGGESTIONS,
   );
 
-  if (!conversationId) {
-    res.status(400).json({ error: 'conversationId is required' });
-    return;
-  }
   // Hashtag extraction currently accepts ASCII letters only. Rejecting an
   // incompatible prefix keeps this endpoint aligned with what sending stores.
   if (!/^[a-z]*$/i.test(prefix)) {
@@ -129,11 +127,11 @@ router.get('/tags/suggestions', requireAuth, async (req: Request, res: Response)
 
   const session = getDriver().session();
   try {
-    const partCheck = await session.run(
+    const partCheck = conversationId ? await session.run(
       `MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId}) RETURN c.id`,
       { userId, conversationId },
-    );
-    if (partCheck.records.length === 0) {
+    ) : null;
+    if (partCheck && partCheck.records.length === 0) {
       res.status(404).json({ error: 'Conversation not found' });
       return;
     }
@@ -141,7 +139,6 @@ router.get('/tags/suggestions', requireAuth, async (req: Request, res: Response)
     const result = await session.run(
       `
       MATCH (caller:User {id: $userId})
-      MATCH (conversation:Conversation {id: $conversationId})
       CALL {
         WITH caller
         MATCH (caller)-[:HAS_THOUGHT]->(t:Thought)
@@ -154,11 +151,14 @@ router.get('/tags/suggestions', requireAuth, async (req: Request, res: Response)
 
         UNION ALL
 
-        WITH caller, conversation
+        WITH caller
+        MATCH (caller)-[:PARTICIPATES_IN]->(conversation:Conversation)
+        WHERE $conversationId = '' OR conversation.id = $conversationId
         MATCH (author:User)-[:PARTICIPATES_IN]->(conversation)
         WHERE author.id <> caller.id
         MATCH (author)-[:HAS_THOUGHT]->(t:Thought)-[:FROM_MESSAGE]->(m:Message)
-        WHERE (t.lane IS NULL OR t.lane <> 'context') AND m.conversationId = $conversationId
+        WHERE (t.lane IS NULL OR t.lane <> 'context') AND m.conversationId = conversation.id
+          AND m.deletedAt IS NULL AND t.captureMethod IN ['inline-tag', 'reply-tag']
         UNWIND coalesce(t.tags, []) AS rawTag
         WITH toLower(rawTag) AS tag, t
         WHERE tag STARTS WITH $prefix AND tag <> ''
@@ -223,7 +223,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     );
   if (conversationId)
     conds.push(
-      '(EXISTS { MATCH (t)-[:FROM_MESSAGE]->(:Message {conversationId: $conversationId}) } OR EXISTS { MATCH (t)-[:PINNED_IN]->(:Conversation {id: $conversationId}) })'
+      '(t.scopeConversationId = $conversationId OR EXISTS { MATCH (t)-[:FROM_MESSAGE]->(:Message {conversationId: $conversationId}) } OR EXISTS { MATCH (t)-[:PINNED_IN]->(:Conversation {id: $conversationId}) })'
     );
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
 
@@ -242,7 +242,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         tags: coalesce(t.tags, []),
         sourceMessageId: m.id,
         sourceConversationId: m.conversationId,
-        sourceConversationName: conv.name
+        sourceConversationName: CASE WHEN EXISTS { MATCH (u)-[:PARTICIPATES_IN]->(conv) } THEN conv.name ELSE null END,
+        scopeConversationId: t.scopeConversationId
       } AS thought
       ORDER BY t.createdAt DESC
       LIMIT $limit
@@ -304,11 +305,14 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
       MATCH (t:Thought)-[p:PINNED_IN]->(c:Conversation {id: $conversationId})
       ${pinnedWhere}
       OPTIONAL MATCH (author:User {id: t.userId})
+      OPTIONAL MATCH (t)-[:FROM_MESSAGE]->(m:Message)
       RETURN t {
         .id, .text, .kind, .status, .createdAt, .updatedAt,
         tags: coalesce(t.tags, []),
         authorId: t.userId,
         authorName: author.name,
+        sourceMessageId: m.id,
+        sourceConversationId: m.conversationId,
         pinnedBy: p.pinnedBy,
         pinnedAt: p.pinnedAt,
         pinned: true
@@ -322,8 +326,7 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
     const fromChatConds = [
       "(t.lane IS NULL OR t.lane <> 'context')",
       `(t.userId = $userId
-             OR t.captureMethod IN ['inline-tag', 'reply-tag']
-             OR size(coalesce(t.tags, [])) > 0)`,
+             OR t.captureMethod IN ['inline-tag', 'reply-tag'])`,
       `NOT (t)-[:PINNED_IN]->(:Conversation {id: $conversationId})`,
     ];
     if (q) {
@@ -335,8 +338,10 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
 
     const fromChatResult = await session.run(
       `
-      MATCH (t:Thought)-[:FROM_MESSAGE]->(m:Message {conversationId: $conversationId})
-      ${fromChatWhere}
+      MATCH (t:Thought)
+      OPTIONAL MATCH (t)-[:FROM_MESSAGE]->(m:Message)
+      WITH t, m
+      ${fromChatWhere} AND (m.conversationId = $conversationId OR (t.userId = $userId AND t.scopeConversationId = $conversationId))
       OPTIONAL MATCH (author:User {id: t.userId})
       RETURN t {
         .id, .text, .kind, .status, .createdAt, .updatedAt,
@@ -365,6 +370,50 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
   } finally {
     await session.close();
   }
+});
+
+/** Exact source context; missing, deleted and inaccessible sources share one response. */
+router.get('/:id/context', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  try {
+    const result = await session.run(`
+      MATCH (viewer:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
+      MATCH (t:Thought {id: $id})-[:FROM_MESSAGE]->(m:Message {conversationId: c.id})
+      WHERE m.deletedAt IS NULL AND (t.lane IS NULL OR t.lane <> 'context')
+        AND (t.userId = $userId OR t.captureMethod IN ['inline-tag', 'reply-tag']
+             OR EXISTS { MATCH (t)-[:PINNED_IN]->(pc:Conversation)<-[:PARTICIPATES_IN]-(viewer) })
+      OPTIONAL MATCH (sender:User {id: m.senderId})
+      RETURN c { .id, .name, .type } AS conversation,
+        m { .id, .content, .createdAt, senderName: sender.name } AS message
+    `, { userId: req.user!.userId, id: req.params.id });
+    if (!result.records.length) { res.status(404).json({ error: 'Original message unavailable' }); return; }
+    const conversation = toJS(result.records[0].get('conversation')) as Record<string, unknown>;
+    const message = toJS(result.records[0].get('message')) as Record<string, unknown>;
+    const neighbors = await session.run(`
+      MATCH (viewer:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+      MATCH (source:Message {id: $messageId, conversationId: c.id})
+      WHERE source.deletedAt IS NULL
+      CALL {
+        WITH c, source
+        MATCH (m:Message {conversationId: c.id}) WHERE m.deletedAt IS NULL AND m.createdAt < source.createdAt
+        WITH m ORDER BY m.createdAt DESC LIMIT 5 RETURN collect(m) AS before
+      }
+      CALL {
+        WITH c, source
+        MATCH (m:Message {conversationId: c.id}) WHERE m.deletedAt IS NULL AND m.createdAt > source.createdAt
+        WITH m ORDER BY m.createdAt ASC LIMIT 5 RETURN collect(m) AS after
+      }
+      UNWIND reverse(before) + [source] + after AS m
+      OPTIONAL MATCH (sender:User {id: m.senderId})
+      RETURN m { .id, .content, .createdAt, senderName: sender.name } AS message
+      ORDER BY m.createdAt ASC
+    `, { userId: req.user!.userId, conversationId: conversation.id, messageId: message.id });
+    if (!neighbors.records.length) { res.status(404).json({ error: 'Original message unavailable' }); return; }
+    res.json({ conversation, messageId: message.id, messages: neighbors.records.map(r => toJS(r.get('message'))) });
+  } catch (err) {
+    console.error('Stream context error:', err);
+    res.status(500).json({ error: 'Could not load original message' });
+  } finally { await session.close(); }
 });
 
 /**
@@ -484,6 +533,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     status = 'none',
     sourceMessageId,
     pinToConversationId,
+    scopeConversationId,
   } = req.body ?? {};
 
   if (!text || typeof text !== 'string' || !text.trim()) {
@@ -512,10 +562,21 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     return;
   }
 
+  if (scopeConversationId !== undefined && (typeof scopeConversationId !== 'string' || !scopeConversationId.trim())) {
+    res.status(400).json({ error: 'scopeConversationId must be a non-empty string' });
+    return;
+  }
   const session = getDriver().session();
   try {
     const now = new Date().toISOString();
     const id = nanoid();
+    if (scopeConversationId) {
+      const access = await session.run(
+        'MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $scopeConversationId}) RETURN c.id',
+        { userId, scopeConversationId },
+      );
+      if (!access.records.length) { res.status(404).json({ error: 'Conversation not found' }); return; }
+    }
 
     // Provenance: verify the source message is in a conversation the caller
     // participates in (otherwise you could link thoughts to strangers'
@@ -557,6 +618,8 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         text: $text,
         kind: $kind,
         status: $status,
+        scopeConversationId: $scopeConversationId,
+        tags: $tags,
         createdAt: datetime($now),
         updatedAt: datetime($now)
       })
@@ -572,7 +635,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         MERGE (t)-[p:PINNED_IN]->(conv)
         ON CREATE SET p.pinnedBy = $userId, p.pinnedAt = datetime($now)
       )
-      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, tags: coalesce(t.tags, []) } AS thought
+      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, .scopeConversationId, tags: coalesce(t.tags, []), pinned: $pinToConversationId IS NOT NULL } AS thought
       `,
       {
         userId,
@@ -581,6 +644,8 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         kind,
         status,
         now,
+        tags: extractTagsFromMessage(text).map(tag => tag.name),
+        scopeConversationId: scopeConversationId ?? null,
         sourceMessageId: sourceMessageId ?? null,
         pinToConversationId: pinToConversationId ?? null,
       }
@@ -653,6 +718,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought {id: $id})
       WHERE t.lane IS NULL OR t.lane <> 'context'
       SET t.text      = CASE WHEN $text   IS NOT NULL THEN $text   ELSE t.text   END,
+          t.tags      = CASE WHEN $text IS NOT NULL THEN $tags ELSE t.tags END,
           t.kind      = CASE WHEN $kind   IS NOT NULL THEN $kind   ELSE t.kind   END,
           t.status    = CASE WHEN $status IS NOT NULL THEN $status ELSE t.status END,
           t.updatedAt = datetime($now)
@@ -662,6 +728,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
         userId,
         id,
         text: text !== undefined ? text.trim() : null,
+        tags: text !== undefined ? extractTagsFromMessage(text).map(tag => tag.name) : null,
         kind: kind ?? null,
         status: status ?? null,
         now,
