@@ -33,7 +33,7 @@ import {
 } from './src/services/notifications';
 import { installClientLogger } from './src/services/clientLogger';
 import { initCrashReporting } from './src/services/crashReporting';
-import { hasCompletedOnboarding } from './src/services/onboarding';
+import { useDeviceOnboardingGate } from './src/hooks/useDeviceOnboardingGate';
 // Deep-link router (OpenChat-84u.1) — handles openchat:// scheme + Universal
 // Links to either OpenChat host's /{i,u,c}/<id>. Stashes intent if unauthed so
 // post-OAuth replay lands the user on the right screen.
@@ -596,32 +596,17 @@ import { OriginalMessageScreen } from './src/screens/OriginalMessageScreen';
 import { ComposeRouter } from './src/navigation/ComposeRouter';
 import { EntryRouter } from './src/navigation/EntryRouter';
 
-function Shell() {
+export function Shell() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const { isAuthed, authInitialized, bootstrapIfAuthed, currentUser } = useChat();
 
-  // Onboarding gate (OpenChat-x2s): null = not yet checked, true/false = result.
-  const [onboardingChecked, setOnboardingChecked] = useState<boolean | null>(null);
-  const [onboardingDone, setOnboardingDone] = useState(false);
+  const onboardingDone = useDeviceOnboardingGate(isAuthed, currentUser?.userId);
+  const onboardingChecked = onboardingDone !== null;
 
   useEffect(() => {
     bootstrapIfAuthed();
   }, [bootstrapIfAuthed]);
-
-  // When the user becomes authed, check whether they've completed onboarding.
-  // Reset onboardingChecked when the user signs out (isAuthed → false).
-  useEffect(() => {
-    if (!isAuthed) {
-      setOnboardingChecked(null);
-      setOnboardingDone(false);
-      return;
-    }
-    hasCompletedOnboarding().then((done) => {
-      setOnboardingDone(done);
-      setOnboardingChecked(true);
-    });
-  }, [isAuthed]);
 
   // Configure notification foreground / tap handlers once at mount.
   useEffect(() => {
@@ -638,7 +623,7 @@ function Shell() {
     return dispose;
   }, []);
 
-  if (!authInitialized) {
+  if (!authInitialized || (isAuthed && !onboardingChecked)) {
     return <View style={{ flex: 1, backgroundColor: c.background }} />;
   }
 
@@ -662,7 +647,7 @@ function Shell() {
         backgroundColor={c.background}
       />
       <OfflineBanner />
-      <PushSoftAsk isAuthed={isAuthed && onboardingDone} />
+      <PushSoftAsk isAuthed={isAuthed && onboardingDone === true} />
       <EntryRouter />
       <ComposeRouter ready={isAuthed && onboardingChecked === true} />
       {/* In-app banner for messages arriving in a DIFFERENT conversation.
