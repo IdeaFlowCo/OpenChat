@@ -132,6 +132,8 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         component={ChatScreenRouter}
         options={{ title: '' /* set dynamically in screen */ }}
       />
+      <ChatsStack.Screen name="Compose" component={ComposeScreen} getId={({ params }) => params.requestRevision} options={{ title: 'Message with OpenChat' }} />
+      <ChatsStack.Screen name="OriginalMessage" component={OriginalMessageScreen} options={{ title: 'Original message' }} />
       <ChatsStack.Screen
         name="NewConversation"
         component={NewConversationScreen}
@@ -333,6 +335,7 @@ function ThoughtsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
           })
         }
       />
+      <ThoughtsStack.Screen name="OriginalMessage" component={OriginalMessageScreen} options={{ title: 'Original message' }} />
     </ThoughtsStack.Navigator>
   );
 }
@@ -588,6 +591,9 @@ type RootAuthStack = {
 };
 const RootStack = createNativeStackNavigator<RootAuthStack>();
 
+import { ComposeScreen } from './src/screens/ComposeScreen';
+import { OriginalMessageScreen } from './src/screens/OriginalMessageScreen';
+import { ComposeRouter } from './src/navigation/ComposeRouter';
 import { EntryRouter } from './src/navigation/EntryRouter';
 
 function Shell() {
@@ -658,6 +664,7 @@ function Shell() {
       <OfflineBanner />
       <PushSoftAsk isAuthed={isAuthed && onboardingDone} />
       <EntryRouter />
+      <ComposeRouter ready={isAuthed && onboardingChecked === true} />
       {/* In-app banner for messages arriving in a DIFFERENT conversation.
           Matches iMessage/WhatsApp/Signal pattern — when you're in app but
           not viewing the recipient chat, a small card slides down at the

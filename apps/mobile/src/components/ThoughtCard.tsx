@@ -8,7 +8,8 @@
  * optional pin toggle.
  */
 
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { Modal, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import type { Thought } from '../api/client';
@@ -44,36 +45,36 @@ interface ThoughtCardProps {
   item: Thought;
   /** Tap → usually edit. Omit for read-only cards (e.g. others' pinned). */
   onPress?: () => void;
-  /** Long-press → delete confirm. Omit to disable. */
+  /** Enables Delete entry in the actions menu, with a separate confirmation. */
   onDelete?: () => void;
   onTagPress?: (tag: string) => void;
   /** Provenance / attribution line rendered under the text, e.g. "from Design chat". */
   subtitle?: string | null;
   /** When set, renders a pin toggle reflecting item.pinned. */
   onTogglePin?: () => void;
+  onOpenContext?: () => void;
 }
 
-export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onTogglePin }: ThoughtCardProps) {
+export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onTogglePin, onOpenContext }: ThoughtCardProps) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
 
   const kindColor = KIND_COLORS[item.kind] ?? '#8a7f6d';
   const kindLabel = KIND_LABELS[item.kind] ?? item.kind;
   const tags = item.tags ?? [];
+  const [actions, setActions] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const openActions = () => { setConfirmDelete(false); setActions(true); };
+  const action = (label: string, run: () => void) => <TouchableOpacity onPress={() => { setActions(false); run(); }} accessibilityRole="button" style={{ padding: 14 }}><Text style={{ color: c.primary }}>{label}</Text></TouchableOpacity>;
 
   return (
+    // RN-web's touch responder replaces onContextMenu on TouchableOpacity.
+    // Keep right-click on its View parent and long-press on the touchable.
+    <View {...(Platform.OS === 'web' ? { onContextMenu: (event: { preventDefault: () => void; stopPropagation: () => void }) => { event.preventDefault(); event.stopPropagation(); openActions(); } } : {})}>
     <TouchableOpacity
       onPress={onPress}
-      disabled={!onPress && !onDelete}
-      onLongPress={
-        onDelete
-          ? () =>
-              Alert.alert('Delete Stream entry?', item.text.slice(0, 80), [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Delete', style: 'destructive', onPress: onDelete },
-              ])
-          : undefined
-      }
+      disabled={!onPress && !onDelete && !onOpenContext && !onTogglePin}
+      onLongPress={openActions}
       activeOpacity={0.7}
       style={[
         styles.card,
@@ -131,6 +132,23 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
         )}
       </View>
 
+      <Modal visible={actions} transparent animationType="fade" onRequestClose={() => setActions(false)}>
+        <Pressable onPress={() => setActions(false)} style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0006' }}>
+          <Pressable onPress={event => event.stopPropagation()} style={{ backgroundColor: c.surface, padding: 12, borderRadius: 12, width: 300 }}>
+            <Text style={{ color: c.textPrimary, padding: 14, fontWeight: '600' }}>{confirmDelete ? 'Delete Stream entry?' : 'Stream entry actions'}</Text>
+            {confirmDelete ? <>
+              {onDelete && action('Delete entry', onDelete)}
+            </> : <>
+              {onPress && action('Edit entry', onPress)}
+              {onOpenContext && action('Original message', onOpenContext)}
+              {onTogglePin && action(item.pinned ? 'Unpin from chat' : 'Pin to chat', onTogglePin)}
+              {onDelete && <TouchableOpacity onPress={() => setConfirmDelete(true)} style={{ padding: 14 }}><Text style={{ color: c.danger }}>Delete entry…</Text></TouchableOpacity>}
+            </>}
+            {action('Cancel', () => undefined)}
+          </Pressable>
+        </Pressable>
+      </Modal>
+      {onOpenContext && <TouchableOpacity onPress={onOpenContext} accessibilityRole="button" style={{ paddingVertical: 8 }}><Text style={{ color: c.primary }}>Original message</Text></TouchableOpacity>}
       {/* Body text */}
       <Text style={[styles.bodyText, { color: c.textPrimary }]}>{item.text}</Text>
 
@@ -160,6 +178,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
         </View>
       )}
     </TouchableOpacity>
+    </View>
   );
 }
 

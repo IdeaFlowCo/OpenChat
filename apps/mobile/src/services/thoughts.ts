@@ -18,11 +18,12 @@ export async function createThought(params: {
   status?: ThoughtStatus;
   sourceMessageId?: string;
   pinToConversationId?: string;
+  scopeConversationId?: string;
 }): Promise<Thought> {
   return api.createThought(params);
 }
 
-/** Chat-scoped thoughts: pinned + captured-from-this-chat. */
+/** Chat-scoped thoughts, including the caller's private scoped entries. */
 export async function fetchConversationThoughts(
   conversationId: string,
   opts?: { q?: string }

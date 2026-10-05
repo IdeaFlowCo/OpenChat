@@ -34,14 +34,16 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | `StoryComposer` | Asks | **Share a Story** | Asks screen › "Share a Story"; Stories rail "+" button | 2 | Publish 24h stories, requests, and agent-only quiet searches to network. |
 | `StoryViewer` | Asks | **Story** (Header: Author name) | Stories rail avatar tap | 1 | View network story, reply directly, or ask OpenChat Agent about it. |
 | `SocialReview` | Asks | **Review** | Asks screen › "Review" card; AgentOverlay Review card | 2 | Review and approve/decline quiet match opportunities. |
-| `Thoughts` | Stream | **Stream** | Bottom tab "Stream" | 1 | Existing private Thought entries, ideas, and semantic search. Internal route names stay compatible. |
-| `ConversationThoughts` | Stream | **Chat Stream** | 1. In-chat header "Stream" button<br>2. In-chat overflow menu › "Stream for this chat" | 2 | Chat-scoped Thought entries: search, inline compose, pinned notes, and captured notes from this conversation. |
+| `Thoughts` | Stream | **Stream** | Bottom tab "Stream" | 1 | Personal entries; see [search, creation and actions](../README.md#messages-and-stream). Internal route names stay compatible. |
+| `ConversationThoughts` | Stream | **Chat Stream** | 1. In-chat header "Stream" button<br>2. In-chat overflow menu › "Stream for this chat" | 2 | See [chat-scoped creation and sharing](../README.md#messages-and-stream). |
 | `Settings` | Settings | **Settings** | 1. Profile › "Settings" row<br>2. Desktop: sidebar avatar › account menu › **Settings**<br>3. Desktop shortcut (⌘,) | 2 | Account (Edit profile, email, **Sign out** — top card, no scrolling), experience mode, agent keys, theme, notifications, and legal info. |
 | *(action)* `Sign out` | Me / Account | **Sign out** | 1. Profile › Account › Sign out<br>2. Settings › Account › Sign out<br>3. Desktop: sidebar avatar › account menu › **Sign out** | 2 | Clears the stored token and user, disconnects the socket, and returns to `Login`. The same word in the same places on phone, tablet, and desktop web; desktop adds the avatar menu because its avatar has no visible label. |
 | *(action)* `Switch account` | Me / Account | **Switch account** | 1. Profile › Account › Switch account<br>2. Desktop: sidebar avatar › account menu › **Switch account** | 2 | Web only, when Ideaflow ID is enabled. App-local OpenChat sign-out, then Ideaflow sign-in with the provider's account chooser (`prompt=select_account`). |
 | `Search` | Search | **Search** | Chats header magnifying glass; desktop shortcut (⌘K) | 1 | Search conversations and messages. |
 | `BlockedUsers` | Settings | **Blocked users** | Settings › Legal & Account › Blocked users | 3 | Manage blocked contacts. |
 | `GroupSettings` | Chats | **Group Info** | In-chat header tap on a group conversation | 2 | Group member roster, rename, add/remove participants. |
+| `OriginalMessage` | Stream | **Original message** | Chats › Stream › Original message; chat Stream entry | 2 | Exact accessible source and nearby messages; unavailable source gives no chat data. |
+| `Compose` | Chats | **Message with OpenChat** | Chats › People / New Chat › Message with OpenChat; external Unlinked profile CTA | 2 | See [compose usage](../README.md#message-with-openchat-from-unlinked) and [incoming-link contract](unlinked-compose-contract.md). |
 
 ---
 

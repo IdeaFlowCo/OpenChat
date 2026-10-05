@@ -195,6 +195,11 @@ export function NewConversationScreen() {
         <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
       </TouchableOpacity>
 
+      <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('Compose', { source: 'unlinked' })} style={[styles.scanTopRow, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
+        <Text style={[styles.scanTopLabel, { color: c.textPrimary }]}>Message with OpenChat</Text>
+        <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
+      </TouchableOpacity>
+
       {/* Mode toggle */}
       <View style={styles.modeRow}>
         {(['direct', 'group'] as Mode[]).map(m => {

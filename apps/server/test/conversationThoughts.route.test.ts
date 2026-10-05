@@ -105,6 +105,7 @@ describe('GET /api/thoughts/conversation/:conversationId', () => {
 
     // Verify params passed to cypher did not include q
     expect(mocks.run).toHaveBeenNthCalledWith(2, expect.stringContaining('PINNED_IN'), {
+      userId: 'user-1',
       conversationId: 'conv-1',
       q: undefined,
     });

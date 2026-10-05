@@ -10,17 +10,16 @@ export interface ActiveHashtag {
 /**
  * Find a hashtag token intersecting the caret. This supports the common
  * end-of-message case plus editing an existing tag in the middle of a draft.
- * The grammar intentionally mirrors the server extractor: ASCII letters.
  */
 export function findActiveHashtag(text: string, cursor: number): ActiveHashtag | null {
   const safeCursor = Math.max(0, Math.min(cursor, text.length));
   const beforeCaret = text.slice(0, safeCursor);
-  const match = beforeCaret.match(/(?:^|[^a-zA-Z])#([a-zA-Z]*)$/);
+  const match = beforeCaret.match(/#([\p{L}\p{N}_-]*)$/u);
   if (!match) return null;
 
   const query = match[1] ?? '';
   const start = safeCursor - query.length - 1;
-  const suffix = text.slice(safeCursor).match(/^[a-zA-Z]*/)?.[0] ?? '';
+  const suffix = text.slice(safeCursor).match(/^[\p{L}\p{N}_-]*/u)?.[0] ?? '';
   return { query, start, end: safeCursor + suffix.length };
 }
 

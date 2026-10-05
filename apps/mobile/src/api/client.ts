@@ -738,7 +738,13 @@ export interface Thought {
   updatedAt: string;
   /** Tags extracted from the thought (e.g. hashtags). Rendered as chips. */
   tags?: string[];
-  /** Provenance: the chat this thought was captured from, if any. */
+  /** Source presence can be disclosed without granting access to source identifiers. */
+  hasSourceMessage?: boolean;
+  /** Source identifiers are returned only when the viewer belongs to the source chat. */
+  sourceMessageId?: string | null;
+  /** Private chat association; does not imply provenance or sharing. */
+  scopeConversationId?: string | null;
+  /** Provenance: the accessible source chat, if any. */
   sourceConversationId?: string | null;
   sourceConversationName?: string | null;
   /** Pin state (chat-scoped views). */
@@ -1586,6 +1592,7 @@ export const api = {
    * Create a new thought. `sourceMessageId` records save-to-thoughts
    * provenance from a chat message; `pinToConversationId` additionally pins
    * the new thought to that conversation ("Save & pin").
+   * `scopeConversationId` associates a private entry with a chat without sharing.
    */
   createThought: (body: {
     text: string;
@@ -1593,13 +1600,14 @@ export const api = {
     status?: ThoughtStatus;
     sourceMessageId?: string;
     pinToConversationId?: string;
+    scopeConversationId?: string;
   }) =>
     request<Thought>('/api/thoughts', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
 
-  /** Chat-scoped thoughts: pinned to + captured from one conversation. */
+  /** Chat-scoped thoughts, including the caller's private scoped entries. */
   getConversationThoughts: (conversationId: string, opts?: { q?: string }) => {
     const qs = new URLSearchParams();
     if (opts?.q) qs.set('q', opts.q);
@@ -1609,11 +1617,18 @@ export const api = {
     );
   },
 
-  /** Ranked hashtag suggestions for the message composer. */
+  /** Ranked tags for chat or Stream; empty conversationId uses current chats. */
   getHashtagSuggestions: (conversationId: string, q = '', limit = 8) => {
-    const params = new URLSearchParams({ conversationId, q, limit: String(limit) });
+    const params = new URLSearchParams({ q, limit: String(limit) });
+    if (conversationId) params.set('conversationId', conversationId);
     return request<HashtagSuggestion[]>(`/api/thoughts/tags/suggestions?${params}`);
   },
+
+  getThoughtContext: (id: string) => request<{
+    conversation: { id: string; name?: string; type: string };
+    messageId: string;
+    messages: { id: string; content: string; createdAt: string; senderName?: string }[];
+  }>(`/api/thoughts/${encodeURIComponent(id)}/context`),
 
   /** Pin one of my thoughts to a conversation I participate in. */
   pinThought: (id: string, conversationId: string) =>

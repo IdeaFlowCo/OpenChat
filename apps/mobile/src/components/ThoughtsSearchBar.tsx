@@ -1,8 +1,9 @@
 import React from 'react';
-import { Platform, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { AppIcon } from './AppIcon';
+import { StreamTextInput } from './StreamEditor';
 
 export interface ThoughtsSearchBarProps {
   value: string;
@@ -10,18 +11,22 @@ export interface ThoughtsSearchBarProps {
   placeholder?: string;
   onClear?: () => void;
   testID?: string;
+  conversationId?: string;
+  onCreate?: (text: string) => void;
 }
 
 /**
  * ThoughtsSearchBar — shared search bar for ThoughtsScreen and ConversationThoughtsScreen.
- * Provides the same debounce, clear affordance, and input styling across both surfaces.
+ * Screens own search debounce; StreamTextInput owns advisory tag suggestions.
  */
 export function ThoughtsSearchBar({
   value,
   onChangeText,
-  placeholder = 'Search Stream and tags',
+  placeholder = 'Search or create a Stream entry',
   onClear,
   testID,
+  conversationId,
+  onCreate,
 }: ThoughtsSearchBarProps) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -34,7 +39,8 @@ export function ThoughtsSearchBar({
   return (
     <View style={[styles.searchWrap, { backgroundColor: c.surface, borderColor: c.border }]}>
       <View style={styles.inputContainer}>
-        <TextInput
+        <StreamTextInput
+          conversationId={conversationId}
           testID={testID}
           style={[
             styles.searchInput,
@@ -67,6 +73,9 @@ export function ThoughtsSearchBar({
           </TouchableOpacity>
         )}
       </View>
+      {onCreate && <TouchableOpacity onPress={() => onCreate(value.trim())} accessibilityRole="button" style={{ paddingTop: 10, paddingBottom: 4 }}>
+        <Text style={{ color: c.primary, fontWeight: '600' }}>{value.trim() ? `Create “${value.trim()}”` : 'Create entry'}</Text>
+      </TouchableOpacity>}
     </View>
   );
 }

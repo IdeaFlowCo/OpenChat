@@ -24,7 +24,7 @@ module.exports = {
   expo: {
     name: 'OpenChat',
     slug: 'openchat-mobile',
-    version: '1.0.6',
+    version: '1.0.7',
     // orientation: 'default' unlocks landscape so iPad gets a proper
     // rotatable split-view / multitasking experience (OpenChat-d7f). Phones
     // still lay out the single-column mobile stack in any orientation; the
@@ -104,7 +104,7 @@ module.exports = {
       eas: {
         projectId: 'fc828863-4fa4-4b62-97f6-8c00ce1dffe3',
       },
-      buildDate: '2026-10-03',
+      buildDate: '2026-10-05',
     },
 
     // baseUrl ONLY set during web exports (when IS_WEB_BUILD=1). Native

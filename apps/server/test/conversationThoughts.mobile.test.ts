@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   navigation: { setOptions: vi.fn(), navigate: vi.fn() },
   route: { name: 'ConversationThoughts', params: { conversationId: 'conv-1', title: 'Team Chat' } },
   fetchConversationThoughts: vi.fn(),
+  fetchThoughts: vi.fn(),
+  createThought: vi.fn(),
   getSocket: vi.fn(() => ({
     on: vi.fn(),
     off: vi.fn(),
@@ -31,9 +33,10 @@ vi.mock('react-native', async () => {
     TextInput: 'TextInput',
     TouchableOpacity: 'TouchableOpacity',
     View: 'View',
-    ScrollView: ({ refreshControl, children, ...props }: any) =>
+    ScrollView: ({ refreshControl: _refreshControl, children, ...props }: any) =>
       React.createElement('ScrollView', props, children),
     RefreshControl: () => null,
+    Pressable: 'Pressable',
     Modal: ({ visible, children }: any) => (visible ? children : null),
     FlatList: React.forwardRef(({ data, renderItem, ListEmptyComponent, ListHeaderComponent }: any) =>
       React.createElement(
@@ -106,7 +109,8 @@ vi.mock('../../mobile/src/components/ExportSheet', () => ({ ExportSheet: () => n
 
 vi.mock('../../mobile/src/services/thoughts', () => ({
   fetchConversationThoughts: (...args: any[]) => mocks.fetchConversationThoughts(...args),
-  createThought: vi.fn(),
+  createThought: (...args: any[]) => mocks.createThought(...args),
+  fetchThoughts: (...args: any[]) => mocks.fetchThoughts(...args),
   updateThought: vi.fn(),
   pinThought: vi.fn(),
   unpinThought: vi.fn(),
@@ -114,6 +118,9 @@ vi.mock('../../mobile/src/services/thoughts', () => ({
 }));
 
 import { ConversationThoughtsScreen } from '../../mobile/src/screens/ConversationThoughtsScreen.js';
+import { ThoughtsScreen } from '../../mobile/src/screens/ThoughtsScreen.js';
+import { StreamEditor } from '../../mobile/src/components/StreamEditor.js';
+import { ThoughtsSearchBar } from '../../mobile/src/components/ThoughtsSearchBar.js';
 import { ChatScreen } from '../../mobile/src/screens/ChatScreen.js';
 
 describe('ConversationThoughtsScreen parity & search', () => {
@@ -187,7 +194,7 @@ describe('ConversationThoughtsScreen parity & search', () => {
     expect(initialText).not.toContain('No Stream entries match');
 
     // Enter a search query
-    const searchInput = screen!.root.findByProps({ placeholder: "Search this chat's Stream" });
+    const searchInput = screen!.root.findByProps({ placeholder: "Search or create in this chat's Stream" });
     await act(async () => {
       searchInput.props.onChangeText('unmatched query');
     });
@@ -261,7 +268,7 @@ describe('ConversationThoughtsScreen parity & search', () => {
 
     // Perform search
     mocks.fetchConversationThoughts.mockResolvedValueOnce(searchResults);
-    const searchInput = screen!.root.findByProps({ placeholder: "Search this chat's Stream" });
+    const searchInput = screen!.root.findByProps({ placeholder: "Search or create in this chat's Stream" });
     await act(async () => {
       searchInput.props.onChangeText('roadmap');
     });
@@ -289,6 +296,20 @@ describe('ConversationThoughtsScreen parity & search', () => {
     expect(mocks.fetchConversationThoughts).toHaveBeenLastCalledWith('conv-1', undefined);
     expect(JSON.stringify(screen!.toJSON())).toContain('Project roadmap note');
     expect(JSON.stringify(screen!.toJSON())).toContain('Team budget #finance');
+  });
+
+  it.each([['global', ThoughtsScreen], ['chat', ConversationThoughtsScreen]] as const)('preserves a new draft while %s creation is pending', async (_scope, Screen) => {
+    mocks.fetchThoughts.mockResolvedValue([]);
+    mocks.fetchConversationThoughts.mockResolvedValue({ pinned: [], fromChat: [] });
+    let resolve!: (thought: Thought) => void;
+    mocks.createThought.mockReturnValueOnce(new Promise(r => { resolve = r; }));
+    await act(async () => { screen = create(React.createElement(Screen)); });
+    await act(async () => screen!.root.findByType(ThoughtsSearchBar).props.onCreate('A'));
+    await act(async () => { screen!.root.findByType(StreamEditor).props.onSave(); });
+    expect(mocks.createThought).toHaveBeenCalledWith(_scope === 'global' ? { text: 'A' } : { text: 'A', scopeConversationId: 'conv-1' });
+    await act(async () => screen!.root.findByType(StreamEditor).props.onChangeText('B'));
+    await act(async () => resolve({ id: 'saved-a', text: 'A', tags: [], createdAt: '2026-10-05T00:00:00Z', kind: 'observation', status: 'none' } as Thought));
+    expect(screen!.root.findByType(StreamEditor).props.value).toBe('B');
   });
 
   it('updates search query when a tag chip is pressed', async () => {
@@ -341,9 +362,9 @@ describe('ConversationThoughtsScreen parity & search', () => {
   });
 
   it('live socket updates update thoughts live', async () => {
-    let socketHandlers: Record<string, Function> = {};
+    const socketHandlers: Record<string, (payload: any) => void> = {};
     mocks.getSocket.mockReturnValue({
-      on: (event: string, handler: Function) => {
+      on: (event: string, handler: (payload: any) => void) => {
         socketHandlers[event] = handler;
       },
       off: (event: string) => {
