@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { api } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -21,7 +21,7 @@ function ComposeEntry({ params }: { params: RouteProps<'Compose'>['params'] }) {
   const [profileName, setProfileName] = useState('This person');
   const [attempt, setAttempt] = useState(0);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     let active = true;
     setResolution('loading');
     const open = async () => {
@@ -46,7 +46,7 @@ function ComposeEntry({ params }: { params: RouteProps<'Compose'>['params'] }) {
     void open().catch(() => { if (active) setResolution('error'); });
     // A newer profile link or Back must not be overtaken by an older request.
     return () => { active = false; };
-  }, [params.profile, params.card, attempt, navigation, createConversation]);
+  }, [params.profile, params.card, attempt, navigation, createConversation]));
 
   const button = { padding: 14, borderRadius: 12, alignItems: 'center' as const };
   return <ScrollView contentContainerStyle={{ padding: 24, gap: 18, backgroundColor: c.background, width: '100%', maxWidth: 640, alignSelf: 'center' }}>

@@ -1,9 +1,9 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ create: vi.fn(), send: vi.fn(), replace: vi.fn(), navigate: vi.fn(), contacts: vi.fn(), status: vi.fn(), resolve: vi.fn(), goBack: vi.fn(), params: { source: 'unlinked', profile: 'https://www.unlinked.ai/people/public-id' as string | undefined, card: undefined as string | undefined } }));
+const mocks = vi.hoisted(() => ({ blur: undefined as (() => void) | undefined, create: vi.fn(), send: vi.fn(), replace: vi.fn(), navigate: vi.fn(), contacts: vi.fn(), status: vi.fn(), resolve: vi.fn(), goBack: vi.fn(), params: { source: 'unlinked', profile: 'https://www.unlinked.ai/people/public-id' as string | undefined, card: undefined as string | undefined } }));
 vi.mock('react-native', () => ({ ActivityIndicator: 'ActivityIndicator', ScrollView: 'ScrollView', Text: 'Text', TouchableOpacity: 'TouchableOpacity', View: 'View' }));
-vi.mock('@react-navigation/native', () => ({ useNavigation: () => navigation, useRoute: () => ({ params: mocks.params }) }));
+vi.mock('@react-navigation/native', () => ({ useNavigation: () => navigation, useRoute: () => ({ params: mocks.params }), useFocusEffect: (effect: () => () => void) => React.useEffect(() => { const cleanup = effect(); mocks.blur = cleanup; return cleanup; }, [effect]) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ createConversation: mocks.create, sendMessageToConversation: mocks.send }) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/api/client', () => ({ api: { getContacts: mocks.contacts, getCardFriendStatus: mocks.status, resolveUnlinkedRecipient: mocks.resolve } }));
@@ -89,4 +89,12 @@ it('opens the standard recipient picker for a generic compose link', async () =>
   mocks.params.profile = undefined; await mount();
   expect(mocks.replace).toHaveBeenCalledExactlyOnceWith('NewConversation');
   expect(mocks.resolve).not.toHaveBeenCalled(); expect(mocks.create).not.toHaveBeenCalled();
+});
+
+it('does not route an older entry that remains mounted behind a newer screen', async () => {
+  let resolve!: (value: { id: string }) => void;
+  mocks.create.mockReturnValueOnce(new Promise(r => { resolve = r; })); await mount();
+  await act(async () => mocks.blur?.());
+  await act(async () => resolve({ id: 'old-dm' }));
+  expect(mocks.replace).not.toHaveBeenCalled();
 });
