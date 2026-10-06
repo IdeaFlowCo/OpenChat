@@ -8,7 +8,7 @@ import { chatBackOptions } from '../../mobile/src/navigation/chatBackOptions';
 let root: ReturnType<typeof create> | undefined;
 beforeEach(() => { platform.OS = 'web'; (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT; });
-it.each(['Search', 'NewConversation', 'InvitePerson', 'Compose', 'ContactProfile'])('%s has a visible Back that returns one level without opening a chat', async route => {
+it.each(['Search', 'NewConversation', 'InvitePerson', 'Compose', 'ContactProfile', 'ScanQr'])('%s has a visible Back that returns one level without opening a chat', async route => {
   const navigation = { getState: () => ({ index: 2 }), goBack: vi.fn(), navigate: vi.fn() };
   const options = chatBackOptions(route, navigation as any, '#444');
   await act(async () => { root = create(React.createElement(options.headerLeft as React.ComponentType)); });

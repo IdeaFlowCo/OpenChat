@@ -199,7 +199,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen
         name="ScanQr"
         component={ScanQrScreen}
-        options={{ title: 'Scan QR', presentation: 'modal', headerShown: false }}
+        options={{ title: 'Scan QR', presentation: 'modal', headerShown: Platform.OS === 'web' }}
       />
       <ChatsStack.Screen
         name="BlockedUsers"

@@ -60,4 +60,4 @@ Unlinked profile → Message with OpenChat opens Compose with the live profile o
 
 Unlinked profile and People search **Message** links carry the selected public profile through `/messages` into the embedded compose screen. The verified recipient is selected automatically; Send remains explicit.
 
-Web chat-stack secondary screens have a visible **Back** control, including Search and New message modals. Back returns to the previous chat screen; without local stack history it opens Chats. Native navigation keeps its platform back/dismiss behavior.
+Web chat-stack secondary screens have a visible **Back** control, including Search, New message and the scanner. Back returns to the previous chat screen; without local stack history it opens Chats. Native navigation keeps its platform back/dismiss behavior.
