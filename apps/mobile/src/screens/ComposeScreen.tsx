@@ -81,11 +81,11 @@ function ComposeForm({ params }: { params: RouteProps<'Compose'>['params'] }) {
     <View style={{ gap: 8 }}>
       <Text style={{ color: c.textMetadata, fontSize: 13 }}>UNLINKED · OPENCHAT</Text>
       <Text accessibilityRole="header" style={{ color: c.textPrimary, fontSize: 28, fontWeight: '600' }}>{recipient ? `Message ${recipient.name}` : generic ? 'New message' : resolution === 'unclaimed' ? `Invite ${profileName}` : 'Message'}</Text>
-      <Text style={{ color: c.textMetadata, lineHeight: 22 }}>Your Ideaflow account connects Unlinked and OpenChat.</Text>
+      <Text style={{ color: c.textMetadata, lineHeight: 22 }}>One inbox, across Unlinked and OpenChat.</Text>
     </View>
     {resolution === 'loading' && <View accessibilityLiveRegion="polite" style={{ gap: 12 }}><ActivityIndicator color={c.primary} /><Text style={{ color: c.textMetadata }}>Opening their inbox…</Text></View>}
     {resolution === 'unclaimed' && <>
-      <Text style={{ color: c.textPrimary, lineHeight: 24 }}>{profileName} hasn’t joined yet. Share your OpenChat card so they can sign in and message you.</Text>
+      <Text style={{ color: c.textPrimary, lineHeight: 24 }}>{profileName} isn’t on Unlinked yet. Share your OpenChat card so they can sign in and message you.</Text>
       <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('MyCard')} style={{ ...button, backgroundColor: c.primary }}><Text style={{ color: c.onPrimary }}>Get an invite link</Text></TouchableOpacity>
     </>}
     {resolution === 'unavailable' && <Text style={{ color: c.textMetadata }}>This profile is no longer available for messaging.</Text>}

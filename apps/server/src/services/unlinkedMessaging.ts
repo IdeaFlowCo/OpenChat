@@ -34,6 +34,12 @@ export async function resolveUnlinkedRecipient(profileId: string): Promise<Unlin
   const identity = value?.identity;
   if (value?.status !== 'member' || identity?.issuer !== ISSUER || typeof identity.subject !== 'string' ||
       !identity.subject || identity.subject.length > 512 || /[\x00-\x1f\x7f]/.test(identity.subject)) throw new Error('messaging_unavailable');
+  const recipient = await ensureSharedInbox(identity, name);
+  return { status: 'ready', recipient };
+}
+
+export async function ensureSharedInbox(identity: { issuer: string; subject: string }, name: string): Promise<{ id: string; name: string }> {
+  if (identity?.issuer !== ISSUER || typeof identity.subject !== 'string' || !identity.subject || identity.subject.length > 512 || /[\x00-\x1f\x7f]/.test(identity.subject)) throw new Error('invalid_identity');
   const session = getDriver().session();
   try {
     // Lazily materialize the same shared account. This is an inbox, not a
@@ -46,6 +52,6 @@ export async function resolveUnlinkedRecipient(profileId: string): Promise<Unlin
       WITH u WHERE u.ideaflowIssuer=$issuer AND u.ideaflowSub=$subject
       RETURN u.id AS id,u.name AS name`, { key: `${ISSUER}\u001f${identity.subject}`, id: nanoid(), issuer: ISSUER, subject: identity.subject, name });
     if (result.records.length !== 1 || typeof result.records[0].get('id') !== 'string') throw new Error('messaging_unavailable');
-    return { status: 'ready', recipient: { id: result.records[0].get('id'), name: normalizePublicDisplayName(result.records[0].get('name')) } };
+    return { id: result.records[0].get('id'), name: normalizePublicDisplayName(result.records[0].get('name')) };
   } finally { await session.close(); }
 }

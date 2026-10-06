@@ -1,3 +1,5 @@
+import { isUnlinkedEmbed } from './src/services/unlinkedEmbed';
+import { UnlinkedSessionGate } from './src/components/UnlinkedSessionGate';
 /**
  * App entry. Sets up ThemeProvider + ChatProvider and navigation:
  *
@@ -132,7 +134,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         component={ChatScreenRouter}
         options={{ title: '' /* set dynamically in screen */ }}
       />
-      <ChatsStack.Screen name="Compose" component={ComposeScreen} getId={({ params }) => params.requestRevision} options={{ title: 'Message with OpenChat' }} />
+      <ChatsStack.Screen name="Compose" component={ComposeScreen} getId={({ params }) => params.requestRevision} options={{ title: isUnlinkedEmbed() ? 'New message' : 'Message with OpenChat' }} />
       <ChatsStack.Screen name="OriginalMessage" component={OriginalMessageScreen} options={{ title: 'Original message' }} />
       <ChatsStack.Screen
         name="NewConversation"
@@ -505,7 +507,7 @@ function AuthedTabs({
           <GlobalRecordingBar
             activeConversationId={focusedChatId(props.state as unknown as NestedNavigationState)}
           />
-          <BottomTabBar {...props} />
+          {!isUnlinkedEmbed() && <BottomTabBar {...props} />}
         </View>
       )}
       screenOptions={{
@@ -601,11 +603,12 @@ export function Shell() {
   const c = getColors(scheme);
   const { isAuthed, authInitialized, bootstrapIfAuthed, currentUser } = useChat();
 
-  const onboardingDone = useDeviceOnboardingGate(isAuthed, currentUser?.userId);
+  const deviceOnboardingDone = useDeviceOnboardingGate(isAuthed, currentUser?.userId);
+  const onboardingDone = isUnlinkedEmbed() ? true : deviceOnboardingDone;
   const onboardingChecked = onboardingDone !== null;
 
   useEffect(() => {
-    bootstrapIfAuthed();
+    if (!isUnlinkedEmbed()) void bootstrapIfAuthed();
   }, [bootstrapIfAuthed]);
 
   // Configure notification foreground / tap handlers once at mount.
@@ -622,6 +625,8 @@ export function Shell() {
     const dispose = installDeepLinkHandling();
     return dispose;
   }, []);
+
+  if (isUnlinkedEmbed() && !isAuthed) return <UnlinkedSessionGate />;
 
   if (!authInitialized || (isAuthed && !onboardingChecked)) {
     return <View style={{ flex: 1, backgroundColor: c.background }} />;
@@ -646,8 +651,9 @@ export function Shell() {
         barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'}
         backgroundColor={c.background}
       />
+      {isUnlinkedEmbed() && <UnlinkedSessionGate active />}
       <OfflineBanner />
-      <PushSoftAsk isAuthed={isAuthed && onboardingDone === true} />
+      {!isUnlinkedEmbed() && <PushSoftAsk isAuthed={isAuthed && onboardingDone === true} />}
       <EntryRouter />
       <ComposeRouter ready={isAuthed && onboardingChecked === true} />
       {/* In-app banner for messages arriving in a DIFFERENT conversation.

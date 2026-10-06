@@ -1,3 +1,4 @@
+import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 /**
  * Theme tokens — "Ink & Paper" design direction (design-audit 2026-09-02,
  * chosen by Jacob from the three from-scratch directions).
@@ -20,5 +21,6 @@ function normalize(scheme: ColorSchemeName | ColorScheme | undefined | null): Co
 }
 
 export function getColors(scheme?: ColorSchemeName | ColorScheme): typeof palette.light {
+  if (isUnlinkedEmbed()) return { ...palette.light, background: '#f5f6fc', surface: '#ffffff', surfaceElevated: '#eef0fa', border: '#e6e8ef', divider: '#e6e8ef', textPrimary: '#16181d', textSecondary: '#606576', textMetadata: '#606576', primary: '#4349c4', primaryActive: '#353ba4', primaryMuted: '#ebecfa', bubbleOwn: '#4349c4', bubbleOwnText: '#ffffff', bubbleOther: '#ffffff', bubbleOtherText: '#16181d' };
   return palette[normalize(scheme ?? Appearance.getColorScheme())];
 }

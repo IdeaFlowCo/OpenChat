@@ -1,3 +1,4 @@
+import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 /**
  * OpenChat API client for React Native.
  *
@@ -331,6 +332,7 @@ let memUser: CurrentUser | null = null;
 
 export async function getToken(): Promise<string | null> {
   if (memToken !== null) return memToken;
+  if (isUnlinkedEmbed()) return null;
   const t = await getTokenFromAnywhere();
   memToken = t;
   return t;
@@ -338,6 +340,7 @@ export async function getToken(): Promise<string | null> {
 
 export async function getUser(): Promise<CurrentUser | null> {
   if (memUser) return memUser;
+  if (isUnlinkedEmbed()) return null;
   const u = await AsyncStorage.getItem(USER_KEY);
   if (!u) return null;
   try {
@@ -351,6 +354,7 @@ export async function getUser(): Promise<CurrentUser | null> {
 export async function setSession(token: string, user: CurrentUser): Promise<void> {
   memToken = token;
   memUser = user;
+  if (isUnlinkedEmbed()) return;
   await setTokenSecurely(token);
   await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
 }
@@ -358,6 +362,7 @@ export async function setSession(token: string, user: CurrentUser): Promise<void
 export async function clearSession(): Promise<void> {
   memToken = null;
   memUser = null;
+  if (isUnlinkedEmbed()) return;
   await clearTokenEverywhere();
   try { await AsyncStorage.removeItem(USER_KEY); } catch { /* ignore */ }
 }

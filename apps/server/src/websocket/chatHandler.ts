@@ -131,6 +131,10 @@ export function setupChatSocket(io: Server): void {
 
   io.on('connection', (socket: AuthenticatedSocket) => {
     const userId = socket.user!.userId;
+    if (socket.user?.embedded === 'unlinked' && socket.user.exp) {
+      const expiry = setTimeout(() => socket.disconnect(true), Math.max(0, socket.user.exp * 1000 - Date.now()));
+      socket.once('disconnect', () => clearTimeout(expiry));
+    }
     console.log(`User connected: ${userId} (socket: ${socket.id})`);
 
     // Track user socket

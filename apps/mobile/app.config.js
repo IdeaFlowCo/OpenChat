@@ -24,7 +24,7 @@ module.exports = {
   expo: {
     name: 'OpenChat',
     slug: 'openchat-mobile',
-    version: '1.0.9',
+    version: '1.0.10',
     // orientation: 'default' unlocks landscape so iPad gets a proper
     // rotatable split-view / multitasking experience (OpenChat-d7f). Phones
     // still lay out the single-column mobile stack in any orientation; the

@@ -1,3 +1,4 @@
+import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 /**
  * MasterDetailLayout — the side-by-side desktop view of OpenChat.
  *
@@ -340,7 +341,7 @@ export function MasterDetailLayout() {
             so users in the master-detail view can always navigate back
             to the OpenChat home page. Collapses to a
             tiny icon when the sidebar is in icon-only mode. */}
-        <Pressable
+        {!isUnlinkedEmbed() && <Pressable
           onPress={() => void Linking.openURL(OPENCHAT_URL + '/')}
           // @ts-ignore — title is a web-only DOM attr; RN-web passes through.
           title={`OpenChat home (${HOME_HOSTNAME})`}
@@ -357,7 +358,7 @@ export function MasterDetailLayout() {
               </Text>
             </>
           )}
-        </Pressable>
+        </Pressable>}
         {collapsed ? (
           <View style={[styles.sidebarHeaderCompact, { borderColor: c.border }]}>
             <TouchableOpacity
@@ -488,10 +489,10 @@ export function MasterDetailLayout() {
         ) : (
           <View style={styles.emptyDetail}>
             <Text style={{ color: c.textPrimary, fontSize: 22, fontWeight: '600', marginBottom: 6 }}>
-              OpenChat
+              {isUnlinkedEmbed() ? 'Your conversations, together' : 'OpenChat'}
             </Text>
             <Text style={{ color: c.textSecondary, fontSize: 14, textAlign: 'center', paddingHorizontal: 32 }}>
-              Select a conversation from the sidebar, or press ⌘K to search.
+              {isUnlinkedEmbed() ? 'Choose a conversation to pick up where you left off.' : 'Select a conversation from the sidebar, or press ⌘K to search.'}
             </Text>
           </View>
         )}
