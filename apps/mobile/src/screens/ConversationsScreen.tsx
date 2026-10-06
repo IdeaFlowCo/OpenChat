@@ -234,8 +234,11 @@ export function ConversationsScreen() {
           <HeaderBarButton onPress={() => navigation.navigate('Search')} accessibilityLabel="Search">
             <AppIcon name="search" color={c.primary} size={20} />
           </HeaderBarButton>
-          <HeaderBarButton onPress={() => navigation.navigate('NewConversation')} accessibilityLabel="People">
-            <Text style={{ color: c.primary, fontSize: 15, fontWeight: '600' }}>People</Text>
+          <HeaderBarButton onPress={() => navigation.navigate('NewConversation')} accessibilityLabel="New message">
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <AppIcon name="compose" color={c.primary} size={19} />
+              <Text style={{ color: c.primary, fontSize: 14, fontWeight: '600' }}>New message</Text>
+            </View>
           </HeaderBarButton>
         </View>
       ),

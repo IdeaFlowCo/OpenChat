@@ -6,7 +6,7 @@ import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
  *   [ 320px (or 56px collapsed) sidebar  ][ flex 1 chat pane ]
  *
  * The sidebar has its own header (avatar → account menu with Profile /
- * Settings / Sign out, title + connection dot, People, Search) so we don't
+ * Settings / Sign out, title + connection dot, New message, Search) so we don't
  * depend on the native-stack header (which native-stack hides for this
  * route — see App.tsx).
  *
@@ -380,11 +380,12 @@ export function MasterDetailLayout() {
             </TouchableOpacity>
             <IconButton
               onPress={openNew}
-              title="People (⌘N)"
-              accessibilityLabel="People"
+              title="New message (⌘N)"
+              accessibilityLabel="New message"
               hoverBg={c.surfaceElevated}
             >
-              <Text style={{ color: c.primary, fontSize: 11, fontWeight: '700' }}>People</Text>
+              <AppIcon name="compose" color={c.primary} size={19} />
+              <Text style={{ color: c.primary, fontSize: 10, fontWeight: '600', textAlign: 'center' }}>{'New\nmessage'}</Text>
             </IconButton>
           </View>
         ) : (
@@ -420,11 +421,14 @@ export function MasterDetailLayout() {
               </View>
               <IconButton
                 onPress={openNew}
-                title="People (⌘N)"
-                accessibilityLabel="People"
+                title="New message (⌘N)"
+                accessibilityLabel="New message"
                 hoverBg={c.surfaceElevated}
               >
-                <Text style={{ color: c.primary, fontSize: 14, fontWeight: '600' }}>People</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <AppIcon name="compose" color={c.primary} size={19} />
+                  <Text style={{ color: c.primary, fontSize: 13, fontWeight: '600' }}>New message</Text>
+                </View>
               </IconButton>
             </View>
             <Pressable

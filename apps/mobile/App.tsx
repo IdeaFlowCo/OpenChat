@@ -139,7 +139,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen
         name="NewConversation"
         component={NewConversationScreen}
-        options={{ title: 'New Chat', presentation: 'modal' }}
+        options={{ title: 'New message', presentation: 'modal' }}
       />
       <ChatsStack.Screen
         name="InvitePerson"
