@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
   Animated,
   FlatList,
+  Platform,
   RefreshControl,
   StyleSheet,
   Text,
@@ -215,8 +216,10 @@ export function ConversationsScreen() {
 
   useLayoutEffect(() => {
     navigation.setOptions({
+      // RN-web's centered custom title can overlap a labeled trailing action.
+      ...(Platform.OS === 'web' ? { headerTitleAlign: 'left' as const } : {}),
       headerTitle: () => (
-        <View style={styles.headerTitleWrap}>
+        <View style={[styles.headerTitleWrap, Platform.OS === 'web' && { alignItems: 'flex-start' }]}>
           <Text numberOfLines={1} style={{ fontSize: 18, fontWeight: '600', color: c.textPrimary, fontFamily: serif }}>Chats</Text>
           {!isConnected && (
             <ConnectionStatusLine
