@@ -43,9 +43,9 @@ not grant source access, and deleted or inaccessible sources are unavailable.
 
 ## Message with OpenChat from Unlinked
 
-An Unlinked **Message with OpenChat** link opens an editable, unsent draft.
-Review the recipient and press **Send message** to send. You can also open
-this composer from Chats via **People** / **New Chat** → **Message with OpenChat**.
+An Unlinked **Message** link opens the person's normal conversation, reusing
+any existing thread. Write and send in the usual chat box; opening the link
+sends nothing. **New message** opens the standard recipient picker.
 See the [Unlinked compose contract](docs/unlinked-compose-contract.md) for
 accepted profile context, card recipient resolution, and sign-in return rules.
 
