@@ -5,7 +5,7 @@ same Ideaflow issuer/subject. Opening either app needs no separate registration.
 App-local records are created as needed; an OpenChat account does not publish an
 Unlinked profile, import contacts, or grant agent access to another person.
 
-The eventual Unlinked web Messages surface must use OpenChat's existing
+Unlinked's integrated web Messages surface uses OpenChat's existing
 conversation IDs, membership, history, unread state, realtime transport and
 sending rules. It must not create a second message store or synchronize copies.
 This release opens the shared inbox composer in OpenChat; embedding that inbox
