@@ -181,12 +181,21 @@ eas build \
 
 # ── Find the .xcarchive the build just produced ──────────────────────────────
 ARCHIVES_DIR="$HOME/Library/Developer/Xcode/Archives"
-LATEST_ARCHIVE=$(find "$ARCHIVES_DIR" -name "*.xcarchive" -newer /tmp/.eas-pre-build-marker 2>/dev/null | tail -1)
-if [ -z "$LATEST_ARCHIVE" ]; then
-  # Fallback: pick the newest archive from today's folder
-  TODAY=$(date +%Y-%m-%d)
-  LATEST_ARCHIVE=$(ls -td "$ARCHIVES_DIR/$TODAY"/*.xcarchive 2>/dev/null | head -1)
-fi
+LATEST_ARCHIVE=$(python3 - "$ARCHIVES_DIR" "$PRE_BUILD_TS" <<'FIND_ARCHIVE'
+import pathlib, plistlib, re, sys
+root, started = pathlib.Path(sys.argv[1]), int(sys.argv[2])
+expected = re.search(r"version:\s*'([^']+)'", pathlib.Path('app.config.js').read_text()).group(1)
+candidates = []
+for archive in root.glob('*/*.xcarchive'):
+    if archive.stat().st_mtime < started:
+        continue
+    info = archive / 'Products/Applications/OpenChat.app/Info.plist'
+    if info.is_file() and plistlib.loads(info.read_bytes()).get('CFBundleShortVersionString') == expected:
+        candidates.append(archive)
+if candidates:
+    print(max(candidates, key=lambda path: path.stat().st_mtime))
+FIND_ARCHIVE
+)
 if [ -z "$LATEST_ARCHIVE" ] || [ ! -d "$LATEST_ARCHIVE" ]; then
   echo "ERROR: could not find a .xcarchive produced by this build."
   echo "       Check eas build output above for the actual failure."

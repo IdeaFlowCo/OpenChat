@@ -1,3 +1,4 @@
+import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 /**
  * ChatContext — the single source of truth for socket lifecycle, conversations,
  * presence, typing, and unread counts in the mobile app.
@@ -354,7 +355,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setIsAuthed(true);
     // Signed in again: an earlier explicit sign-out no longer blocks the
     // automatic cross-app sign-in (code-xbh.21.1) after a later expiry.
-    clearIdeaflowSignedOut();
+    if (!isUnlinkedEmbed()) clearIdeaflowSignedOut();
     try {
       const sock = await connect();
       setChatSocket(sock);
@@ -1092,7 +1093,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // The next Ideaflow sign-in asks which account (prompt=select_account)
     // instead of silently reusing the provider session (web: localStorage,
     // native: AsyncStorage; each call is a no-op on the other platform).
-    if (explicit) {
+    if (explicit && !isUnlinkedEmbed()) {
       markIdeaflowAccountChoice();
       void markIdeaflowAccountChoiceNative();
       // Web: never sign this browser back in automatically (code-xbh.21.1; no-op on native).

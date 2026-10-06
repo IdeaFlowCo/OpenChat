@@ -1,3 +1,4 @@
+import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 /**
  * Conversation list — the home screen once signed in.
  *
@@ -239,6 +240,7 @@ export function ConversationsScreen() {
         </View>
       ),
       headerLeft: () => {
+        if (isUnlinkedEmbed()) return null;
         const safeEmail = isPlaceholderEmail(currentUser?.email) ? '' : (currentUser?.email ?? '');
         return (
           <HeaderBarButton
@@ -277,11 +279,11 @@ export function ConversationsScreen() {
         keyExtractor={item => item.id}
         ListHeaderComponent={
           <View>
-          <View style={[styles.peopleDoors, { borderBottomColor: c.divider }]}>
+          {!isUnlinkedEmbed() && <View style={[styles.peopleDoors, { borderBottomColor: c.divider }]}>
             <TouchableOpacity onPress={() => navigation.navigate('Friends', { section: 'friends' })} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>Friends</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => navigation.navigate('Friends', { section: 'requests' })} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>{friendRequestCount ? `Requests (${friendRequestCount})` : 'Requests'}</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => navigation.navigate('NewConversation')} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>Find people</Text></TouchableOpacity>
-          </View>
+          </View>}
           <StoriesStrip
             onCreate={() => navigation.navigate('StoryComposer')}
             onOpenStory={(story) => navigation.navigate('StoryViewer', { story })}

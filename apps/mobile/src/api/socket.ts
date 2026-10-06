@@ -1,3 +1,4 @@
+import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 /**
  * Socket.io connection to OpenChat. WebSocket transport only (matches the
  * web client's choice — Cloudflare's proxy breaks the polling fallback,
@@ -49,13 +50,19 @@ export async function connect(): Promise<Socket> {
     socket.disconnect();
   }
   socket = io(OPENCHAT_URL, {
-    auth: { token },
+    auth: isUnlinkedEmbed() ? (callback) => { void getToken().then(value => callback({ token: value })); } : { token },
     transports: ['websocket'],
     autoConnect: true,
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 10000,
   });
+  if (isUnlinkedEmbed()) {
+    const current = socket;
+    current.on('disconnect', reason => {
+      if (reason === 'io server disconnect') void getToken().then(value => { if (value && socket === current) current.connect(); });
+    });
+  }
   return socket;
 }
 

@@ -388,7 +388,10 @@ app.get('/about/connect-your-bot', (_req, res) => {
 // compact, tablet, or split-pane layouts based on the available width and the
 // user's saved preference.
 const appDistPath = path.join(__dirname, '..', '..', '..', 'client-app', 'dist');
-app.use('/app', express.static(appDistPath));
+app.use('/app', (_req, res, next) => {
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://www.unlinked.ai");
+  next();
+}, express.static(appDistPath));
 app.get(/^\/app(\/|$)/, (_req, res, next) => {
   res.sendFile(path.join(appDistPath, 'index.html'), (err) => {
     if (err) next();

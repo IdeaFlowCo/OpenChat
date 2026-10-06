@@ -4,6 +4,8 @@ import jwt from 'jsonwebtoken';
 export interface AuthUser {
   userId: string;
   email: string;
+  embedded?: string;
+  exp?: number;
 }
 
 declare global {

@@ -5,11 +5,11 @@ same Ideaflow issuer/subject. Opening either app needs no separate registration.
 App-local records are created as needed; an OpenChat account does not publish an
 Unlinked profile, import contacts, or grant agent access to another person.
 
-The eventual Unlinked web Messages surface must use OpenChat's existing
+Unlinked's integrated web Messages surface uses OpenChat's existing
 conversation IDs, membership, history, unread state, realtime transport and
 sending rules. It must not create a second message store or synchronize copies.
-This release opens the shared inbox composer in OpenChat; embedding that inbox
-inside Unlinked is a separate client surface.
+Member profile actions open the composer inside Unlinked; standalone OpenChat
+continues to expose the same inbox.
 
 ## Profile entry
 
@@ -56,3 +56,20 @@ Deploy the confidential Unlinked resolver and configure the same random service
 secret on both servers before enabling the new OpenChat client. Remove that
 secret to disable resolution without widening recipients. No agent grant gains
 messaging or identity lookup capability from this change.
+
+## Integrated Unlinked inbox
+
+`https://www.unlinked.ai/messages` embeds the canonical `/app/?embed=unlinked`
+client. It uses the existing API, sockets, conversations and read state. The
+embedded presentation adopts Unlinked colors and hides the product tab bar;
+standalone and native OpenChat retain their usual presentation.
+
+The Unlinked browser session is exchanged server-to-server at
+`POST /api/unlinked/session` with the dedicated messaging secret and the live
+owner's exact Ideaflow issuer/subject. The resulting 10-minute JWT travels only
+in POST bodies and an exact-origin, exact-window, nonce-bound `postMessage`
+handshake. It stays in iframe memory, never overwriting standalone OpenChat
+credentials. Renewals recheck the Unlinked session and live ownership. Framing is
+allowed only by self and `https://www.unlinked.ai`. No conversation or message is
+created by opening the inbox. LinkedIn channel options are plan-only in
+[linkedin-messaging-plan.md](linkedin-messaging-plan.md).

@@ -55,3 +55,5 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 4. **Reciprocal actions live together.** "Show my QR code" and "Scan their code" belong on the same surface (`Profile`), with "Scan a code" directly beneath the user's code.
 
 Unlinked profile → Message with OpenChat opens Compose with the live profile owner already addressed. Unclaimed profiles → Get an invite link → My card. This uses the existing OpenChat inbox and shared Ideaflow account; an embedded Unlinked web Messages surface will reuse it.
+
+| Messages in Unlinked web | Unlinked header → Messages; a member profile → Message | Canonical OpenChat inbox embedded with Unlinked presentation and the same conversation IDs/history/read state; `docs/unlinked-compose-contract.md` |
