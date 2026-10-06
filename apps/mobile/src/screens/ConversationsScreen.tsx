@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
   Animated,
   FlatList,
+  Platform,
   RefreshControl,
   StyleSheet,
   Text,
@@ -215,8 +216,10 @@ export function ConversationsScreen() {
 
   useLayoutEffect(() => {
     navigation.setOptions({
+      // RN-web's centered custom title can overlap a labeled trailing action.
+      ...(Platform.OS === 'web' ? { headerTitleAlign: 'left' as const } : {}),
       headerTitle: () => (
-        <View style={styles.headerTitleWrap}>
+        <View style={[styles.headerTitleWrap, Platform.OS === 'web' && { alignItems: 'flex-start' }]}>
           <Text numberOfLines={1} style={{ fontSize: 18, fontWeight: '600', color: c.textPrimary, fontFamily: serif }}>Chats</Text>
           {!isConnected && (
             <ConnectionStatusLine
@@ -234,8 +237,11 @@ export function ConversationsScreen() {
           <HeaderBarButton onPress={() => navigation.navigate('Search')} accessibilityLabel="Search">
             <AppIcon name="search" color={c.primary} size={20} />
           </HeaderBarButton>
-          <HeaderBarButton onPress={() => navigation.navigate('NewConversation')} accessibilityLabel="People">
-            <Text style={{ color: c.primary, fontSize: 15, fontWeight: '600' }}>People</Text>
+          <HeaderBarButton onPress={() => navigation.navigate('NewConversation')} accessibilityLabel="New message">
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <AppIcon name="compose" color={c.primary} size={19} />
+              <Text style={{ color: c.primary, fontSize: 14, fontWeight: '600' }}>New message</Text>
+            </View>
           </HeaderBarButton>
         </View>
       ),

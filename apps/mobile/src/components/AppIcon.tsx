@@ -11,6 +11,7 @@ export type AppIconName =
   | 'copy'
   | 'download'
   | 'edit'
+  | 'compose'
   | 'flag'
   | 'forward'
   | 'heart'
@@ -205,6 +206,12 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
           <Circle cx="16.5" cy="9" r="2.5" {...common} />
           <Path d="M3.5 19c.5-4 2.3-6 5.5-6s5 2 5.5 6" {...common} />
           <Path d="M14 14c3.7-.8 6 1 6.5 4.5" {...common} />
+        </>
+      )}
+      {name === 'compose' && (
+        <>
+          <Path d="M13 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" {...common} />
+          <Path d="m17 3 4 4-10 10-4 1 1-4L17 3z" {...common} />
         </>
       )}
       {name === 'edit' && (
