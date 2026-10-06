@@ -59,3 +59,5 @@ Unlinked profile → Message with OpenChat opens Compose with the live profile o
 | Messages in Unlinked web | Unlinked header → Messages; a member profile → Message | Canonical OpenChat inbox embedded with Unlinked presentation and the same conversation IDs/history/read state; `docs/unlinked-compose-contract.md` |
 
 Unlinked profile and People search **Message** links carry the selected public profile through `/messages` into the embedded compose screen. The verified recipient is selected automatically; Send remains explicit.
+
+Web chat-stack secondary screens have a visible **Back** control, including Search and New message modals. Back returns to the previous chat screen; without local stack history it opens Chats. Native navigation keeps its platform back/dismiss behavior.

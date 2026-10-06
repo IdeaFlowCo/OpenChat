@@ -1,3 +1,4 @@
+import { chatBackOptions } from './src/navigation/chatBackOptions';
 import { isUnlinkedEmbed } from './src/services/unlinkedEmbed';
 import { UnlinkedSessionGate } from './src/components/UnlinkedSessionGate';
 /**
@@ -115,12 +116,13 @@ const Tab = createBottomTabNavigator<TabParamList>();
 function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
   return (
     <ChatsStack.Navigator
-      screenOptions={{
+      screenOptions={({ navigation, route }) => ({
         headerStyle: { backgroundColor: c.surface },
         headerTitleStyle: { color: c.textPrimary, fontFamily: serif },
         headerTintColor: c.primary,
         contentStyle: { backgroundColor: c.background },
-      }}
+        ...chatBackOptions(route.name, navigation, c.primary),
+      })}
     >
       <ChatsStack.Screen
         name="Conversations"
