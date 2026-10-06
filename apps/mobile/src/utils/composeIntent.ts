@@ -12,8 +12,10 @@ export function canonicalPublicUnlinkedProfile(value: string): string | null {
 }
 export function parseComposeIntent(url: URL): ComposeIntent | null {
   if (url.searchParams.get('intent') !== 'compose' || url.searchParams.get('source') !== 'unlinked') return null;
-  if ([...url.searchParams.keys()].some(key => !['intent', 'source', 'profile', 'card'].includes(key))) return null;
+  if ([...url.searchParams.keys()].some(key => !['intent', 'source', 'profile', 'card', 'embed'].includes(key))) return null;
   if ([...url.searchParams.keys()].some(key => url.searchParams.getAll(key).length !== 1)) return null;
+  // Unlinked's iframe adds a presentation flag; it is not recipient authority.
+  if (url.searchParams.has('embed') && url.searchParams.get('embed') !== 'unlinked') return null;
   const profile = url.searchParams.get('profile');
   const card = url.searchParams.get('card');
   if (profile !== null && !canonicalPublicUnlinkedProfile(profile)) return null;

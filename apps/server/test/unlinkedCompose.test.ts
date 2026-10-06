@@ -9,6 +9,13 @@ describe('Unlinked compose receiving contract', () => {
   it.each(['https://private.unlinked.ai/people/a', 'https://www.unlinked.ai/people/a?email=secret', 'https://www.unlinked.ai/people/../a', 'https://www.unlinked.ai/people/%2Fprivate', 'https://www.unlinked.ai/people/%ZZ', 'https://www.unlinked.ai/people/a#private', 'https://www.unlinked.ai@evil.test/people/a'])('rejects unsafe context %s', profile => {
     expect(parseOpenChatUrl(entry({ profile }))).toEqual({ type: 'unknown' });
   });
+  it('accepts the embedded profile Message URL without treating embed as recipient data', () => {
+    const profile = 'https://www.unlinked.ai/people/faisal-fixture';
+    expect(parseOpenChatUrl(entry({ embed: 'unlinked', profile }))).toEqual({ type: 'compose', source: 'unlinked', profile });
+    expect(parseOpenChatUrl(entry({ embed: 'other', profile }))).toEqual({ type: 'unknown' });
+    expect(parseOpenChatUrl(entry({ embed: 'unlinked', profile }) + '&embed=unlinked')).toEqual({ type: 'unknown' });
+    expect(parseOpenChatUrl(entry({ embed: 'unlinked', profile, userId: 'forged' }))).toEqual({ type: 'unknown' });
+  });
   it('allows only the real-card token grammar without inventing identity', () => {
     expect(parseOpenChatUrl(entry({ card: 'a'.repeat(24) }))).toEqual({ type: 'compose', source: 'unlinked', card: 'a'.repeat(24) });
     expect(parseOpenChatUrl(entry({ card: 'person-id' }))).toEqual({ type: 'unknown' });
