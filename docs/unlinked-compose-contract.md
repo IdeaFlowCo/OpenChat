@@ -73,3 +73,5 @@ credentials. Renewals recheck the Unlinked session and live ownership. Framing i
 allowed only by self and `https://www.unlinked.ai`. No conversation or message is
 created by opening the inbox. LinkedIn channel options are plan-only in
 [linkedin-messaging-plan.md](linkedin-messaging-plan.md).
+
+The embedded receiver accepts the exact `embed=unlinked` presentation flag alongside the compose query. It still rejects unknown/repeated parameters and resolves the public profile on the server before choosing a recipient. Embedded pending compose state stays in memory per frame, separate from standalone compose storage.
