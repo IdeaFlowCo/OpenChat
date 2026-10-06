@@ -8,7 +8,7 @@ Unlinked profile, import contacts, or grant agent access to another person.
 Unlinked's integrated web Messages surface uses OpenChat's existing
 conversation IDs, membership, history, unread state, realtime transport and
 sending rules. It must not create a second message store or synchronize copies.
-Member profile actions open the composer inside Unlinked; standalone OpenChat
+Member profile actions open the normal conversation inside Unlinked; standalone OpenChat
 continues to expose the same inbox.
 
 ## Profile entry
@@ -36,21 +36,25 @@ Existing mapped OpenChat users retain their ID. Legacy accounts without a shared
 identity binding still follow the existing verified sign-in/linking policy;
 imported names/email never merge identities.
 
-The composer shows **Message [name]** with a blank draft and no recipient search.
+A verified member opens the normal **Chat** directly via the canonical direct-
+conversation service. It reuses the same thread, including repeated/concurrent
+entries; if none exists, it creates an empty direct conversation. There is no
+separate draft form or first-send step. Desktop opens the standard sidebar and
+conversation pane; phone opens the standard chat screen.
 An unclaimed profile offers **Get an invite link**, opening the sender's existing
 card sharing screen. An absent/revoked profile is unavailable; a service outage
 shows **Try again**, never an incorrect invitation or an unrelated recipient.
-Generic compose (no profile/card) retains manual contact selection.
+Generic compose (no profile/card) opens the standard **New message** picker.
 
 ## Continuation and sending
 
 Incoming entries survive sign-in and device onboarding for up to one hour and
-are consumed by capture revision. A newer link resets the displayed draft and
-recipient; stale asynchronous results cannot route a message. Draft edits are
-not persisted in the incoming-entry record. The sender explicitly presses
-**Send message**, using the existing direct-conversation service, which reuses
-the same conversation. A failed send retains the draft and conversation; duplicate
-taps are suppressed. Cancel sends nothing. Existing `/c/<token>` links remain.
+are consumed by capture revision. A newer link replaces the recipient entry;
+stale asynchronous results cannot open the previous person's chat. Back/Cancel
+also invalidates a pending entry. Profile context stays attached until verified
+resolution, then the conversation ID identifies the recipient and history.
+Opening a profile Message link never sends a message. Drafts and explicit Send
+use the normal chat's existing behavior. Existing `/c/<token>` links remain.
 
 Deploy the confidential Unlinked resolver and configure the same random service
 secret on both servers before enabling the new OpenChat client. Remove that
@@ -70,8 +74,8 @@ owner's exact Ideaflow issuer/subject. The resulting 10-minute JWT travels only
 in POST bodies and an exact-origin, exact-window, nonce-bound `postMessage`
 handshake. It stays in iframe memory, never overwriting standalone OpenChat
 credentials. Renewals recheck the Unlinked session and live ownership. Framing is
-allowed only by self and `https://www.unlinked.ai`. No conversation or message is
-created by opening the inbox. LinkedIn channel options are plan-only in
+allowed only by self and `https://www.unlinked.ai`. Opening the generic inbox creates no conversation or message. A profile Message
+entry opens or creates the direct conversation, without sending anything. LinkedIn channel options are plan-only in
 [linkedin-messaging-plan.md](linkedin-messaging-plan.md).
 
 The embedded receiver accepts the exact `embed=unlinked` presentation flag alongside the compose query. It still rejects unknown/repeated parameters and resolves the public profile on the server before choosing a recipient. Embedded pending compose state stays in memory per frame, separate from standalone compose storage.

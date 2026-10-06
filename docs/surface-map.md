@@ -43,7 +43,7 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | `BlockedUsers` | Settings | **Blocked users** | Settings › Legal & Account › Blocked users | 3 | Manage blocked contacts. |
 | `GroupSettings` | Chats | **Group Info** | In-chat header tap on a group conversation | 2 | Group member roster, rename, add/remove participants. |
 | `OriginalMessage` | Stream | **Original message** | Chats › Stream › Original message; chat Stream entry | 2 | Exact accessible source and nearby messages; unavailable source gives no chat data. |
-| `Compose` | Chats | **Message with OpenChat** | Chats › New message › Message with OpenChat; external Unlinked profile CTA | 2 | See [compose usage](../README.md#message-with-openchat-from-unlinked) and [incoming-link contract](unlinked-compose-contract.md). |
+| `Compose` | Chats | **Message with OpenChat** | External Unlinked profile CTA or incoming compose link | 2 | See [compose usage](../README.md#message-with-openchat-from-unlinked) and [incoming-link contract](unlinked-compose-contract.md). |
 
 ---
 
@@ -54,10 +54,10 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 3. **OpenChat Agent is always an ordinary chat.** The assistant conversation is created server-side upon sign-in and pinned in Chats. The agent noun is never hidden behind `enhanced` mode; only the coordination layer (Asks, Stories, Review, quiet matching) is gated.
 4. **Reciprocal actions live together.** "Show my QR code" and "Scan their code" belong on the same surface (`Profile`), with "Scan a code" directly beneath the user's code.
 
-Unlinked profile → Message with OpenChat opens Compose with the live profile owner already addressed. Unclaimed profiles → Get an invite link → My card. This uses the existing OpenChat inbox and shared Ideaflow account; an embedded Unlinked web Messages surface will reuse it.
+Unlinked profile → Message resolves the live profile owner and opens their normal Chat, reusing the existing direct conversation. Unclaimed profiles → Get an invite link → My card. This uses the existing OpenChat inbox and shared Ideaflow account; an embedded Unlinked web Messages surface reuses it.
 
 | Messages in Unlinked web | Unlinked header → Messages; a member profile → Message | Canonical OpenChat inbox embedded with Unlinked presentation and the same conversation IDs/history/read state; `docs/unlinked-compose-contract.md` |
 
-Unlinked profile and People search **Message** links carry the selected public profile through `/messages` into the embedded compose screen. The verified recipient is selected automatically; Send remains explicit.
+Unlinked profile and People search **Message** links carry the selected public profile through `/messages` into the normal embedded conversation. Compose is only a resolving/error/invite entry screen, with no separate message form. Generic compose links open New message. The verified recipient is selected automatically; Send remains explicit.
 
 Web chat-stack secondary screens have a visible **Back** control, including Search, New message and the scanner. Back returns to the previous chat screen; without local stack history it opens Chats. Native navigation keeps its platform back/dismiss behavior.
