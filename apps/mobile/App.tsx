@@ -1,3 +1,4 @@
+import { chatBackOptions } from './src/navigation/chatBackOptions';
 import { isUnlinkedEmbed } from './src/services/unlinkedEmbed';
 import { UnlinkedSessionGate } from './src/components/UnlinkedSessionGate';
 /**
@@ -115,12 +116,13 @@ const Tab = createBottomTabNavigator<TabParamList>();
 function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
   return (
     <ChatsStack.Navigator
-      screenOptions={{
+      screenOptions={({ navigation, route }) => ({
         headerStyle: { backgroundColor: c.surface },
         headerTitleStyle: { color: c.textPrimary, fontFamily: serif },
         headerTintColor: c.primary,
         contentStyle: { backgroundColor: c.background },
-      }}
+        ...chatBackOptions(route.name, navigation, c.primary),
+      })}
     >
       <ChatsStack.Screen
         name="Conversations"
@@ -197,7 +199,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen
         name="ScanQr"
         component={ScanQrScreen}
-        options={{ title: 'Scan QR', presentation: 'modal', headerShown: false }}
+        options={{ title: 'Scan QR', presentation: 'modal', headerShown: Platform.OS === 'web' }}
       />
       <ChatsStack.Screen
         name="BlockedUsers"
