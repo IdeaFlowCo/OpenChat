@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { useChat } from '../contexts/ChatContext';
 import { setSession } from '../api/client';
+import { getSocket } from '../api/socket';
 import { isEmbedSessionMessage, UNLINKED_ORIGIN } from '../services/unlinkedEmbed';
 
 /** Credentials travel by an origin- and window-bound handshake, never in URLs. */
@@ -24,6 +25,12 @@ export function UnlinkedSessionGate({ active = false }: { active?: boolean }) {
       try {
         await setSession(event.data.token, event.data.user);
         if (!active) await bootstrapIfAuthed();
+        else {
+          // A backgrounded tab may resume after its old socket token expired.
+          // Reuse the context-owned socket; its auth callback reads this token.
+          const socket = getSocket();
+          if (socket && !socket.connected) socket.connect();
+        }
         clearTimeout(timeout);
         if (!disposed) setFailed(false);
         window.parent.postMessage({ type: 'openchat:connected', nonce }, UNLINKED_ORIGIN);
