@@ -8,8 +8,8 @@ Unlinked profile, import contacts, or grant agent access to another person.
 Unlinked's integrated web Messages surface uses OpenChat's existing
 conversation IDs, membership, history, unread state, realtime transport and
 sending rules. It must not create a second message store or synchronize copies.
-This release opens the shared inbox composer in OpenChat; embedding that inbox
-inside Unlinked is a separate client surface.
+Member profile actions open the composer inside Unlinked; standalone OpenChat
+continues to expose the same inbox.
 
 ## Profile entry
 
