@@ -600,7 +600,7 @@ it('does not clear hidden unread when an earlier read receipt response arrives',
     await openSendingThread();
     let hide!: () => void;
     await act(async () => { hide = chat.registerConversationVisibility('sailing'); });
-    let resolve!: (value: { readMap: {}; onlineMap: {} }) => void;
+    let resolve!: (value: { readMap: Record<string, never>; onlineMap: Record<string, never> }) => void;
     mocks.markRead.mockReturnValue(new Promise(done => { resolve = done; }));
     await act(async () => chat.markConversationRead('sailing'));
     await act(async () => vi.advanceTimersByTime(500));
