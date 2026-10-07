@@ -80,7 +80,7 @@ export function ContextLane({ conversationId }: { conversationId: string }) {
         {!own && button('Report', () => setReporting(item.id))}
         {item.kind === 'ask' && button('Ask agents', () => void action(item.id, async () => {
           const result = await api.askContextAgents(conversationId, item.id);
-          setFeedback({ text: `Requested help from ${result.queued} agent${result.queued === 1 ? '' : 's'}. Replies will appear here.`, error: false });
+          setFeedback({ text: result.queued ? `Requested help from ${result.queued} agent${result.queued === 1 ? '' : 's'}. Replies will appear here.` : 'These agents have already received this request. Replies will appear here.', error: false });
         }))}
       </View>}
       {confirmDelete === item.id && <View><Text style={{ color: c.textMetadata }}>Delete this post? Replies will remain.</Text><View style={styles.actions}>{button('Confirm delete', () => void action(item.id, () => contextLaneManager.deletePost(conversationId, item.id)), true)}{button('Cancel', () => setConfirmDelete(undefined))}</View></View>}
