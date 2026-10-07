@@ -1,10 +1,11 @@
 import { Session } from 'neo4j-driver';
 import { nanoid } from 'nanoid';
 import { acquireContextAclLocks, checkContextWriteAccess } from './contextAccess.js';
+import { enqueueHostedContext, isHostedContextAvailable } from './contextHosted.js';
 import { ContextLaneError, createContextPost } from './contextLane.js';
 
-// Pull-based requests: no messages, notification delivery, private-source retrieval, or autonomous runs.
-// Enabled agents decide when to poll. Shared text is untrusted input, never new tool authority.
+// Explicit requests: external agents poll; opted-in hosted agents generate owner-private drafts.
+// No messages or notifications are sent. Shared text is untrusted input, never tool authority.
 const activeKey = `k.revokedAt IS NULL AND (k.expiresAt IS NULL OR k.expiresAt > $now)
   AND 'read' IN coalesce(k.scopes,[]) AND 'write' IN coalesce(k.scopes,[])`;
 const permittedRequest = `MATCH (r:ContextAgentRequest {id:$requestId, agentKeyId:$agentKeyId, ownerUserId:$userId})
@@ -41,18 +42,27 @@ export async function askContextAgents(session: Session, userId: string, convers
     const revision = source.records[0].get('revision');
     const recipients = await tx.run(`MATCH (requester:User {id:$userId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
       MATCH (owner:User)-[:PARTICIPATES_IN]->(c)
-      MATCH (k:AgentKey {ownerUserId:owner.id})
+      OPTIONAL MATCH (k:AgentKey {ownerUserId:owner.id})
       WHERE ${activeKey} AND k.contextRequestsEnabled=true
         AND NOT (owner)-[:BLOCKED]-(requester)
         AND ($agentKeyId IS NULL OR k.id <> $agentKeyId)
       WITH owner, k ORDER BY k.id
       WITH owner, head(collect(k)) AS k
-      RETURN owner.id AS ownerId, k.id AS keyId ORDER BY owner.id LIMIT 10`,
-    { userId, conversationId, agentKeyId: agentKeyId || null, now });
+      WHERE (($hostedAvailable AND owner.contextHostedEnabled=true) OR k IS NOT NULL)
+        AND NOT EXISTS { MATCH (owner)-[:BLOCKED]-(:User {id:$userId}) }
+      RETURN owner.id AS ownerId,
+        CASE WHEN $hostedAvailable AND owner.contextHostedEnabled=true THEN 'hosted' ELSE 'key' END AS recipientType,
+        coalesce(owner.contextHostedGeneration,0) AS generation,k.id AS keyId ORDER BY owner.id LIMIT 10`,
+    { userId, conversationId, agentKeyId: agentKeyId || null, now, hostedAvailable:isHostedContextAvailable() });
     if (!recipients.records.length) throw new ContextLaneError(409, 'No agents in this conversation have enabled Context requests');
     // Per-source revision deduplication is shared by all requesters in this conversation.
     let queued = 0;
     for (const recipient of recipients.records) {
+      if(recipient.get('recipientType')==='hosted') {
+        if(await enqueueHostedContext(tx,{id:nanoid(),userId,ownerId:recipient.get('ownerId'),conversationId,postId,revision,
+          generation:recipient.get('generation'),now,expiresAt:new Date(Date.now()+24*60*60*1000).toISOString()}))queued++;
+        continue;
+      }
       const existing = await tx.run(`MATCH (r:ContextAgentRequest {postId:$postId, sourceRevision:$revision, agentKeyId:$keyId}) RETURN r.id AS id`,
         { postId, revision, keyId: recipient.get('keyId') });
       if (existing.records.length) continue;

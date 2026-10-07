@@ -1,3 +1,4 @@
+import type { HostedContextPreferences, HostedContextRequest } from '../types/contextHosted';
 import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 /**
  * OpenChat API client for React Native.
@@ -402,7 +403,7 @@ function discoveryProofHeaders(exactEmail?: string): RequestInit | undefined {
 
 async function request<T>(
   path: string,
-  init?: RequestInit & { auth?: boolean }
+  init?: RequestInit & { auth?: boolean; expireAuthOnForbidden?: boolean }
 ): Promise<T> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
@@ -412,7 +413,8 @@ async function request<T>(
     const token = await getToken();
     if (token) headers['authorization'] = `Bearer ${token}`;
   }
-  const res = await fetch(`${OPENCHAT_URL}${path}`, { ...init, headers });
+  const { expireAuthOnForbidden = true, ...fetchInit } = init || {};
+  const res = await fetch(`${OPENCHAT_URL}${path}`, { ...fetchInit, headers });
   if (!res.ok) {
     const text = await res.text();
     let msg = text;
@@ -422,7 +424,7 @@ async function request<T>(
     } catch {
       /* not JSON */
     }
-    if (res.status === 401 || res.status === 403) {
+    if (res.status === 401 || (res.status === 403 && expireAuthOnForbidden)) {
       // Token is invalid / expired. Cascade to sign-out so the user isn't
       // stuck on a stale screen with no recovery. Caller still gets a typed
       // error (which it usually shouldn't try to display since the listener
@@ -957,6 +959,16 @@ export const api = {
     request<ContextPost>(`/api/chat/conversations/${conversationId}/context/${postId}`, { method: 'PATCH', body: JSON.stringify({ text, expectedRevision }) }),
   deleteContextPost: (conversationId: string, postId: string) =>
     request<void>(`/api/chat/conversations/${conversationId}/context/${postId}`, { method: 'DELETE' }),
+
+  // A Context permission change is a review error, not an expired human session.
+  getHostedContextPreferences: () => request<HostedContextPreferences>('/api/chat/context-hosted/preferences', { expireAuthOnForbidden: false }),
+  setHostedContextPreferences: (enabled: boolean) => request<HostedContextPreferences>('/api/chat/context-hosted/preferences', { method: 'PUT', body: JSON.stringify({ enabled }), expireAuthOnForbidden: false }),
+  getHostedContextRequests: () => request<{ requests: HostedContextRequest[] }>('/api/chat/context-hosted/requests', { expireAuthOnForbidden: false }),
+  getHostedContextRequest: (id: string) => request<HostedContextRequest>(`/api/chat/context-hosted/requests/${encodeURIComponent(id)}`, { expireAuthOnForbidden: false }),
+  reviseHostedContextRequest: (id: string, input: { text?: string; privateText?: string }) => request<HostedContextRequest>(`/api/chat/context-hosted/requests/${encodeURIComponent(id)}/revise`, { method: 'POST', body: JSON.stringify(input), expireAuthOnForbidden: false }),
+  publishHostedContextRequest: (id: string, input: { draftId: string; approvalDigest: string; text: string }) => request<HostedContextRequest>(`/api/chat/context-hosted/requests/${encodeURIComponent(id)}/publish`, { method: 'POST', body: JSON.stringify(input), expireAuthOnForbidden: false }),
+  declineHostedContextRequest: (id: string) => request<HostedContextRequest>(`/api/chat/context-hosted/requests/${encodeURIComponent(id)}/decline`, { method: 'POST', body: '{}', expireAuthOnForbidden: false }),
+  cancelHostedContextRequest: (id: string) => request<HostedContextRequest>(`/api/chat/context-hosted/requests/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: '{}', expireAuthOnForbidden: false }),
 
   getContextAgentPreferences: (keyId: string) => request<{ enabled: boolean }>(`/api/chat/context-agent/preferences?keyId=${encodeURIComponent(keyId)}`),
   setContextAgentPreferences: (keyId: string, enabled: boolean) => request<{ enabled: boolean }>('/api/chat/context-agent/preferences', { method: 'PUT', body: JSON.stringify({ keyId, enabled }) }),

@@ -21,6 +21,8 @@ import thoughtsRoutes from './routes/thoughts.js';
 import contextRoutes from './routes/context.js';
 import agentKeysRoutes from './routes/agentKeys.js';
 import { handleIdeaflowConnector, connectorOperationGuard } from './routes/ideaflowConnector.js';
+import contextHostedRoutes from './routes/contextHosted.js';
+import { ensureHostedContextIndexes, startHostedContextWorker } from './services/contextHosted.js';
 import { createConnectorDelegation } from './routes/connectorDelegation.js';
 import webhooksRoutes from './routes/webhooks.js';
 import feedbackRoutes from './routes/feedback.js';
@@ -430,6 +432,7 @@ app.use(ideaflowWebCallbackRoutes);
 app.use('/api', connectorDelegation.guard);
 app.use('/api/connector-delegations', connectorDelegation.routes);
 app.use('/api/auth', authRoutes);
+app.use('/api/chat/context-hosted', contextHostedRoutes);
 app.use('/api/chat', contextRoutes);
 app.use('/api', entryIntentsRoutes);
 app.use('/api', unlinkedMessagingRoutes);
@@ -607,10 +610,13 @@ app.use(errorNotifierMiddleware);
 // Start server
 const PORT = parseInt(process.env.PORT || '41851', 10);
 
+let stopHostedContextWorker: (()=>void) | undefined;
 async function start() {
   try {
     await initDatabase();
     console.log('Connected to Neo4j database');
+    await ensureHostedContextIndexes(getDriver());
+    stopHostedContextWorker = startHostedContextWorker(getDriver());
 
     const sanitizedNames = await sanitizeLegacyPublicDisplayNames();
     if (sanitizedNames > 0) {
@@ -681,12 +687,14 @@ async function start() {
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('Shutting down...');
+  stopHostedContextWorker?.();
   await closeDatabase();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   console.log('Shutting down...');
+  stopHostedContextWorker?.();
   await closeDatabase();
   process.exit(0);
 });
