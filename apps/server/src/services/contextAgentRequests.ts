@@ -44,8 +44,11 @@ export async function askContextAgents(session: Session, userId: string, convers
     const revision = source.records[0].get('revision');
     const recipients = await tx.run(`MATCH (requester:User {id:$userId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
       MATCH (owner:User)-[:PARTICIPATES_IN]->(c)
+      OPTIONAL MATCH (w:ContextWebhook {ownerUserId:owner.id,conversationId:$conversationId,enabled:true})
+      WITH owner,requester,collect(w) AS subscriptions
       OPTIONAL MATCH (k:AgentKey {ownerUserId:owner.id})
       WHERE ${activeKey} AND k.contextRequestsEnabled=true
+        AND (size(subscriptions)=0 OR (size(subscriptions)=1 AND k.id=head(subscriptions).agentKeyId))
         AND NOT (owner)-[:BLOCKED]-(requester)
         AND ($agentKeyId IS NULL OR k.id <> $agentKeyId)
       WITH owner, k ORDER BY k.id
@@ -57,17 +60,18 @@ export async function askContextAgents(session: Session, userId: string, convers
         coalesce(owner.contextHostedGeneration,0) AS generation,k.id AS keyId ORDER BY owner.id LIMIT 10`,
     { userId, conversationId, agentKeyId: agentKeyId || null, now, hostedAvailable:isHostedContextAvailable() });
     if (!recipients.records.length) throw new ContextLaneError(409, 'No agents in this conversation have enabled Context requests');
-    // Per-source revision deduplication is shared by all requesters in this conversation.
+    // One request per owner/source revision, even after changing receiver or hosted preference.
+    // The conversation lock serializes concurrent Ask actions; old requests are never reassigned.
     let queued = 0;
     for (const recipient of recipients.records) {
+      const existing = await tx.run(`MATCH (r:ContextAgentRequest {postId:$postId, sourceRevision:$revision, ownerUserId:$ownerId}) RETURN r.id AS id LIMIT 1`,
+        { postId, revision, ownerId: recipient.get('ownerId') });
+      if (existing.records.length) continue;
       if(recipient.get('recipientType')==='hosted') {
         if(await enqueueHostedContext(tx,{id:nanoid(),userId,ownerId:recipient.get('ownerId'),conversationId,postId,revision,
           generation:recipient.get('generation'),now,expiresAt:new Date(Date.now()+24*60*60*1000).toISOString()}))queued++;
         continue;
       }
-      const existing = await tx.run(`MATCH (r:ContextAgentRequest {postId:$postId, sourceRevision:$revision, agentKeyId:$keyId}) RETURN r.id AS id`,
-        { postId, revision, keyId: recipient.get('keyId') });
-      if (existing.records.length) continue;
       const budget = await tx.run(`MATCH (r:ContextAgentRequest {requesterId:$userId}) WHERE r.createdAt > datetime($now)-duration('PT1H') RETURN count(r) AS count`, { userId, now });
       if (Number(budget.records[0]?.get('count') || 0) >= 30) throw new ContextLaneError(429, 'Context agent request limit reached (30 recipients per hour)');
       const requestId=nanoid();

@@ -906,11 +906,9 @@ async function completeConnectedMatch(
   try {
     await finishSession.run(
       `
-      MATCH (match:AgentMatch {id: $matchId})-[:MATCHES]->(intent:AgentIntent)
+      MATCH (match:AgentMatch {id: $matchId})
       SET match.conversationId = $conversationId,
-          match.updatedAt = datetime($now),
-          intent.status = CASE WHEN coalesce(intent.closeOnConnect, true) THEN 'connected' ELSE intent.status END,
-          intent.updatedAt = datetime($now)
+          match.updatedAt = datetime($now)
       `,
       { matchId, conversationId, now: new Date().toISOString() },
     );
@@ -1108,6 +1106,10 @@ export async function respondToMatch(
         WHEN match.aResponse = 'approved' AND match.bResponse = 'approved' THEN 'connected'
         ELSE 'proposed'
       END
+      // Canonical search closure belongs to this one-time transition, never delivery repair.
+      FOREACH (intent IN CASE WHEN match.status='connected' THEN [own,other] ELSE [] END |
+        SET intent.status=CASE WHEN coalesce(intent.closeOnConnect,true) THEN 'connected' ELSE intent.status END,
+            intent.updatedAt=datetime($now))
       RETURN match.status AS matchStatus, eligible
       `,
       { userId, matchId, response, now: new Date().toISOString() },

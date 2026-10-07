@@ -8,7 +8,8 @@ that owner's external keys for new requests.
 From Chats, choose **Agent drafts → Set up webhooks**. A direct human session must
 select one conversation, an owned active read/write key with Context requests
 already enabled, and a public HTTPS endpoint. The screen reviews that destination
-and requires explicit approval before **Enable webhook**. Agent keys, delegated
+and requires **Approve this receiver and endpoint** before **Save receiving agent**.
+The review names the key, conversation, and exact URL. Agent keys, delegated
 connector tokens and embedded sessions cannot approve endpoints. Membership and
 key authorization are checked again on creation and before each delivery.
 
@@ -67,10 +68,42 @@ All setup routes are human-session-only and `Cache-Control: no-store`:
 - `DELETE /api/chat/context-webhooks/:id`: disables and cancels queued deliveries.
 
 Creation is idempotent for the same request and destination, including secret
-recovery after a lost response. One active subscription per key/conversation and
+recovery after a lost response. One active subscription per owner/conversation and
 ten active subscriptions per owner are allowed. A changed destination requires
 removal and new explicit approval. Existing ordinary message subscriptions are
 unaffected.
+
+The saved receiving key is the external receiver for that owner in that chat,
+even if another opted-in key sorts first. Hosted drafts still take precedence
+when available and enabled. An invalid saved key suspends external routing; it
+never silently switches to another key. Without a saved enabled subscription,
+the existing stable key-ID selection remains available for polling. Multiple
+legacy enabled subscriptions for one owner/chat fail closed until the owner
+disables the conflicting entries. Disabling and approving a replacement affects
+only new source revisions: existing requests are never rebound or replayed.
+Deduplication is per owner and source revision across hosted and external receivers.
+Toggling preferences does not retry that revision; a new explicit source revision
+is required. When hosted drafts take precedence, a waiting external wake is
+cancelled before sending. Its request remains bound to the original key for
+polling; it is not transferred to the hosted worker.
+
+Both GET and POST subscription objects include server-derived `routingStatus`:
+
+| Status | Meaning |
+| --- | --- |
+| `ready` | The configured external receiver is eligible. |
+| `hosted_precedence` | Hosted drafts currently receive new requests instead. |
+| `key_ineligible` | The saved key is missing, revoked, expired, missing scopes, or opted out. |
+| `conversation_unavailable` | The owner no longer belongs to this conversation. |
+| `conflict` | Multiple enabled legacy receivers need explicit resolution. |
+| `server_disabled` | Webhook transport is unavailable; no wake will be sent. |
+| `disabled` | The owner disabled this saved subscription. |
+
+`enabled` records consent, not current delivery readiness. Status is a current
+configuration snapshot; every Ask and delivery still rechecks live eligibility.
+Saved subscriptions survive key deletion so the missing receiver remains visible
+and cannot silently fall back to a different key. No private source is included
+in setup or wake payloads.
 
 ## Validation
 
@@ -79,3 +112,7 @@ transport: it creates no production subscriptions and makes no external sends.
 It covers consent, deduplication, minimal payload, retries, leases, kill switch,
 expiry, unsubscribe, source changes, membership, key revocation and blocks.
 `contextWebhookSetup.mobile.test.ts` checks destination consent and invalidation.
+
+Routing regressions cover multiple opted-in keys, conflicting concurrent setup,
+legacy ambiguity, suspended/deleted keys, hosted precedence and owner/revision
+deduplication across explicit receiver changes.

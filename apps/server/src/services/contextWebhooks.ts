@@ -4,6 +4,7 @@ import type { Driver, Session, ManagedTransaction } from 'neo4j-driver';
 import { isContextLaneEnabled } from '../config/features.js';
 import { acquireContextAclLocks } from './contextAccess.js';
 import { ContextLaneError } from './contextLane.js';
+import { isHostedContextAvailable } from './contextHosted.js';
 import { deliverContextWebhookOnce } from './webhookDispatch.js';
 
 // Separate consent from message webhooks: only a request-ID wake, never shared/private text.
@@ -20,17 +21,36 @@ const liveDelivery = `MATCH (w:ContextWebhook {id:d.subscriptionId,enabled:true}
  AND r.conversationId=c.id AND r.expiresAt>$now AND w.generation=d.generation AND d.leaseUntil>$now
  AND t.deletedAt IS NULL AND t.revision=r.sourceRevision AND coalesce(t.status,'open')<>'closed'
  AND NOT coalesce(t.intentionState,'open') IN ['fulfilled','withdrawn']
- AND NOT (owner)-[:BLOCKED]-(requester)`;
+ AND NOT (owner)-[:BLOCKED]-(requester)
+ AND NOT ($hostedAvailable AND coalesce(owner.contextHostedEnabled,false))
+ AND NOT EXISTS { MATCH (other:ContextWebhook {ownerUserId:w.ownerUserId,conversationId:w.conversationId,enabled:true}) WHERE other.id<>w.id }`;
 
 export function validateContextWebhookUrl(value: unknown): string {
  if(typeof value!=='string'||value.length>2048)throw new ContextLaneError(400,'A public HTTPS endpoint is required');
  try { const url=new URL(value); if(url.protocol!=='https:'||url.username||url.password||url.hash)throw new Error(); return url.toString(); }
  catch {throw new ContextLaneError(400,'Use an HTTPS endpoint without credentials or a fragment');}
 }
-const projection=`w {.id,.conversationId,.agentKeyId,.url,.enabled,.createdAt,.generation}`;
+export type ContextWebhookRoutingStatus = 'ready'|'hosted_precedence'|'key_ineligible'|'conversation_unavailable'|'conflict'|'server_disabled'|'disabled';
+const projection=`w {.id,.conversationId,.agentKeyId,.url,.enabled,.createdAt,.generation,routingStatus:routingStatus}`;
+async function subscriptions(runner:Session|ManagedTransaction,userId:string,id:string|null=null) {
+ const rows=await runner.run(`MATCH (w:ContextWebhook {ownerUserId:$userId}) WHERE $id IS NULL OR w.id=$id
+  OPTIONAL MATCH (owner:User {id:$userId})
+  OPTIONAL MATCH (owner)-[:PARTICIPATES_IN]->(c:Conversation {id:w.conversationId})
+  OPTIONAL MATCH (k:AgentKey {id:w.agentKeyId,ownerUserId:$userId})
+  WITH w,owner,c,k,CASE
+   WHEN w.enabled<>true THEN 'disabled'
+   WHEN NOT $available THEN 'server_disabled'
+   WHEN c IS NULL THEN 'conversation_unavailable'
+   WHEN EXISTS { MATCH (other:ContextWebhook {ownerUserId:$userId,conversationId:w.conversationId,enabled:true}) WHERE other.id<>w.id } THEN 'conflict'
+   WHEN $hostedAvailable AND owner.contextHostedEnabled=true THEN 'hosted_precedence'
+   WHEN k IS NULL OR NOT coalesce((${activeKey}),false) THEN 'key_ineligible'
+   ELSE 'ready' END AS routingStatus
+  RETURN ${projection} AS subscription ORDER BY w.createdAt,w.id`,
+ {userId,id,available:contextWebhooksAvailable(),hostedAvailable:isHostedContextAvailable(),now:new Date().toISOString()});
+ return rows.records.map(r=>r.get('subscription'));
+}
 export async function listContextWebhooks(session:Session,userId:string) {
- const rows=await session.run(`MATCH (w:ContextWebhook {ownerUserId:$userId}) RETURN ${projection} AS subscription ORDER BY w.createdAt`,{userId});
- return {available:contextWebhooksAvailable(),subscriptions:rows.records.map(r=>r.get('subscription'))};
+ return {available:contextWebhooksAvailable(),subscriptions:await subscriptions(session,userId)};
 }
 export async function createContextWebhook(session:Session,userId:string,input:any) {
  if(!contextWebhooksAvailable())throw new ContextLaneError(503,'Context webhooks are not enabled on this server');
@@ -45,18 +65,21 @@ export async function createContextWebhook(session:Session,userId:string,input:a
    MATCH (k:AgentKey {id:$agentKeyId,ownerUserId:$userId}) WHERE ${activeKey} RETURN k.id`,args);
   if(!allowed.records.length)throw new ContextLaneError(403,'Choose your active read/write key with Context requests enabled in a conversation you belong to');
   const existing=await tx.run(`MATCH (w:ContextWebhook {ownerUserId:$userId})
-   WHERE w.clientRequestId=$requestId OR (w.conversationId=$conversationId AND w.agentKeyId=$agentKeyId AND w.enabled=true)
-   RETURN w ORDER BY CASE WHEN w.clientRequestId=$requestId THEN 0 ELSE 1 END LIMIT 1`,args);
-  if(existing.records.length){const w=existing.records[0].get('w').properties;
-   if(w.url!==url||w.conversationId!==input.conversationId||w.agentKeyId!==input.agentKeyId||!w.enabled)throw new ContextLaneError(409,'A different or disabled subscription already exists; remove it before creating another');
-   return {subscription:{id:w.id,conversationId:w.conversationId,agentKeyId:w.agentKeyId,url:w.url,enabled:w.enabled,createdAt:w.createdAt,generation:Number(w.generation)},secret:w.secret};
+   WHERE w.clientRequestId=$requestId OR (w.conversationId=$conversationId AND w.enabled=true)
+   RETURN w ORDER BY CASE WHEN w.clientRequestId=$requestId THEN 0 ELSE 1 END`,args);
+  if(existing.records.length){
+   if(existing.records.length>1)throw new ContextLaneError(409,'Multiple saved receivers conflict; disable them before choosing one receiver for this conversation');
+   const w=existing.records[0].get('w').properties;
+   if(w.url!==url||w.conversationId!==input.conversationId||w.agentKeyId!==input.agentKeyId||!w.enabled)throw new ContextLaneError(409,'A different or disabled receiver already exists; disable it before choosing another receiver for this conversation');
+   return {subscription:(await subscriptions(tx,userId,w.id))[0],secret:w.secret};
   }
   const count=await tx.run(`MATCH (w:ContextWebhook {ownerUserId:$userId,enabled:true}) RETURN count(w) AS count`,{userId});
   if(Number(count.records[0].get('count'))>=10)throw new ContextLaneError(429,'Limit of 10 Context webhook subscriptions reached');
   const secret='cwh_'+randomBytes(32).toString('base64url');
-  const row=await tx.run(`CREATE (w:ContextWebhook {id:$id,ownerUserId:$userId,conversationId:$conversationId,agentKeyId:$agentKeyId,
-   url:$url,secret:$secret,enabled:true,generation:1,createdAt:$now,clientRequestId:$requestId}) RETURN ${projection} AS subscription`,{...args,id:nanoid(),secret});
-  return {subscription:row.records[0].get('subscription'),secret};
+  const id=nanoid();
+  await tx.run(`CREATE (w:ContextWebhook {id:$id,ownerUserId:$userId,conversationId:$conversationId,agentKeyId:$agentKeyId,
+   url:$url,secret:$secret,enabled:true,generation:1,createdAt:$now,clientRequestId:$requestId})`,{...args,id,secret});
+  return {subscription:(await subscriptions(tx,userId,id))[0],secret};
  });
 }
 export async function deleteContextWebhook(session:Session,userId:string,id:string) {
@@ -115,7 +138,7 @@ export async function runContextWebhookOnce(driver:Driver,transport:ContextWebho
   try {
    await acquireContextAclLocks(tx as unknown as ManagedTransaction,{userIds:[claim.ownerUserId],conversationId:claim.conversationId,agentKeyId:claim.agentKeyId});
    const checked=await tx.run(`MATCH (d:ContextWebhookDelivery {id:$id,leaseToken:$token,status:'delivering'}) ${liveDelivery}
-    RETURN w.url AS url,w.secret AS secret,r.id AS requestId`,{id:claim.id,token,now:new Date().toISOString()});
+    RETURN w.url AS url,w.secret AS secret,r.id AS requestId`,{id:claim.id,token,now:new Date().toISOString(),hostedAvailable:isHostedContextAvailable()});
    if(!checked.records.length||!contextWebhooksAvailable()) {
     await tx.run(`MATCH (d:ContextWebhookDelivery {id:$id,leaseToken:$token}) SET d.status='cancelled',d.finishedAt=$now REMOVE d.leaseToken`,{id:claim.id,token,now});
    } else {
@@ -143,7 +166,8 @@ export async function deleteContextWebhooksForUser(tx:ManagedTransaction,userId:
 export async function cleanupContextWebhooks(driver:Driver) {
  const s=driver.session();try{
   await s.run(`MATCH (d:ContextWebhookDelivery) WHERE d.expiresAt < $cutoff DETACH DELETE d`,{cutoff:new Date(Date.now()-7*86400_000).toISOString()});
-  await s.run(`MATCH (w:ContextWebhook) WHERE NOT EXISTS {MATCH (:User {id:w.ownerUserId})} OR NOT EXISTS {MATCH (:AgentKey {id:w.agentKeyId})} DETACH DELETE w`);
+  // Preserve a saved receiver after key deletion: missing keys suspend routing, never choose a replacement.
+  await s.run(`MATCH (w:ContextWebhook) WHERE NOT EXISTS {MATCH (:User {id:w.ownerUserId})} DETACH DELETE w`);
  }finally{await s.close();}
 }
 export function startContextWebhookWorker(driver:Driver) {

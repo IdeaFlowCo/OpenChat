@@ -1,8 +1,8 @@
 import {beforeAll,beforeEach,afterAll,describe,it,expect,vi} from 'vitest';
 import neo4j,{type Driver} from 'neo4j-driver';
 import {createContextPost,updateContextPost} from '../src/services/contextLane.js';
-import {askContextAgents} from '../src/services/contextAgentRequests.js';
-import {createContextWebhook,deleteContextWebhook,listContextWebhooks,ensureContextWebhookIndexes,runContextWebhookOnce,contextWakeEnvelope,validateContextWebhookUrl,deleteContextWebhooksForUser} from '../src/services/contextWebhooks.js';
+import {askContextAgents,listContextAgentRequests} from '../src/services/contextAgentRequests.js';
+import {createContextWebhook,deleteContextWebhook,listContextWebhooks,ensureContextWebhookIndexes,runContextWebhookOnce,contextWakeEnvelope,validateContextWebhookUrl,deleteContextWebhooksForUser,cleanupContextWebhooks} from '../src/services/contextWebhooks.js';
 import {deliverContextWebhookOnce} from '../src/services/webhookDispatch.js';
 const integration=process.env.NEO4J_TEST_URI?describe.sequential:describe.skip;
 describe('Context webhook transport contract',()=>{
@@ -42,6 +42,105 @@ integration('Context wake durable outbox with fake transport',()=>{
   await session(s=>s.executeWrite((tx:any)=>deleteContextWebhooksForUser(tx,b)));
   expect(await delivery()).toEqual([]);expect((await session(s=>listContextWebhooks(s,b))).subscriptions).toEqual([]);
   const fake=vi.fn(async()=>true);expect(await runContextWebhookOnce(driver,fake)).toBe(false);expect(fake).not.toHaveBeenCalled();
+ });
+
+ it('routes the configured later key instead of the first opted-in key, with one wake',async()=>{
+  const earlier=prefix+'aaa';await run(`CREATE (:AgentKey {id:$earlier,ownerUserId:$b,scopes:['read','write'],contextRequestsEnabled:true})`,{earlier,b});
+  expect((await setup()).subscription.routingStatus).toBe('ready');
+  await queue();
+  expect((await session(s=>listContextAgentRequests(s,b,earlier))).requests).toEqual([]);
+  expect((await session(s=>listContextAgentRequests(s,b,key))).requests).toHaveLength(1);
+  const fake=vi.fn(async()=>true);await runContextWebhookOnce(driver,fake);expect(fake).toHaveBeenCalledTimes(1);
+ });
+ it('serializes conflicting receiver setup per owner and conversation',async()=>{
+  const other=prefix+'other';await run(`CREATE (:AgentKey {id:$other,ownerUserId:$b,scopes:['read','write'],contextRequestsEnabled:true})`,{other,b});
+  const results=await Promise.allSettled([setup(),session(s=>createContextWebhook(s,b,{...input(),agentKeyId:other}))]);
+  expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);
+  expect(results.find(r=>r.status==='rejected')).toMatchObject({reason:{statusCode:409}});
+  expect((await session(s=>listContextWebhooks(s,b))).subscriptions).toHaveLength(1);
+ });
+ for(const [label,mutation] of [
+  ['revoked',`SET k.revokedAt='now'`],['expired',`SET k.expiresAt='2000-01-01'`],
+  ['opted out',`SET k.contextRequestsEnabled=false`],['missing opt-in',`REMOVE k.contextRequestsEnabled`],['read only',`SET k.scopes=['read']`],['deleted',`DETACH DELETE k`],
+ ])it('suspends a saved '+label+' receiver without switching to another opted-in key',async()=>{
+  const other=prefix+'aaa';await run(`CREATE (:AgentKey {id:$other,ownerUserId:$b,scopes:['read','write'],contextRequestsEnabled:true})`,{other,b});
+  await setup();await run(`MATCH (k:AgentKey {id:$key}) `+mutation,{key});await cleanupContextWebhooks(driver);
+  expect((await session(s=>listContextWebhooks(s,b))).subscriptions[0].routingStatus).toBe('key_ineligible');
+  const p=await session(s=>createContextPost(s,a,room,{text:'request',clientRequestId:crypto.randomUUID()}));
+  await expect(session(s=>askContextAgents(s,a,room,p.id))).rejects.toMatchObject({statusCode:409});
+  expect((await session(s=>listContextAgentRequests(s,b,other))).requests).toEqual([]);expect(await delivery()).toEqual([]);
+ });
+ it('does not route a receiving key to itself or fall back to a different key',async()=>{
+  await setup();await run(`CREATE (:AgentKey {id:$other,ownerUserId:$b,scopes:['read','write'],contextRequestsEnabled:true})`,{other:prefix+'aaa',b});
+  const p=await session(s=>createContextPost(s,b,room,{text:'self request',clientRequestId:crypto.randomUUID()}));
+  await expect(session(s=>askContextAgents(s,b,room,p.id,key,['read','write']))).rejects.toMatchObject({statusCode:409});
+  expect(await delivery()).toEqual([]);
+ });
+ it('fails closed for ambiguous legacy saved receivers, including pending deliveries',async()=>{
+  const sub=await setup();await queue();
+  await run(`MATCH (w:ContextWebhook {id:$id}) CREATE (other:ContextWebhook) SET other=w {.*,id:$other,clientRequestId:$other}`,{id:sub.subscription.id,other:prefix+'legacy'});
+  expect((await session(s=>listContextWebhooks(s,b))).subscriptions.map((w:any)=>w.routingStatus)).toEqual(['conflict','conflict']);
+  await expect(setup()).rejects.toMatchObject({statusCode:409});
+  await expect(queue()).rejects.toMatchObject({statusCode:409});
+  const fake=vi.fn(async()=>true);await runContextWebhookOnce(driver,fake);expect(fake).not.toHaveBeenCalled();
+ });
+ it('reports hosted precedence, unavailable conversation, global disable, and explicit disable',async()=>{
+  const savedKey=process.env.ANTHROPIC_API_KEY;
+  try {
+   process.env.OPENCHAT_CONTEXT_HOSTED_ENABLED='true';process.env.ANTHROPIC_API_KEY='synthetic-provider-never-called';
+   await run(`MATCH (u:User {id:$b}) SET u.contextHostedEnabled=true,u.contextHostedGeneration=1`,{b});
+   const sub=await setup();expect(sub.subscription.routingStatus).toBe('hosted_precedence');
+   await queue();expect(await delivery()).toEqual([]);
+   const requests=await run(`MATCH (r:ContextAgentRequest {ownerUserId:$b}) RETURN r.recipientType AS type`,{b});
+   expect(requests.records.map((r:any)=>r.get('type'))).toEqual(['hosted']);
+   await run(`MATCH (:User {id:$b})-[m:PARTICIPATES_IN]->(:Conversation {id:$room}) DELETE m`,{b,room});
+   expect((await session(s=>listContextWebhooks(s,b))).subscriptions[0].routingStatus).toBe('conversation_unavailable');
+   process.env.OPENCHAT_CONTEXT_WEBHOOKS_ENABLED='false';
+   expect((await session(s=>listContextWebhooks(s,b))).subscriptions[0].routingStatus).toBe('server_disabled');
+   await session(s=>deleteContextWebhook(s,b,sub.subscription.id));
+   expect((await session(s=>listContextWebhooks(s,b))).subscriptions[0].routingStatus).toBe('disabled');
+  }finally{if(savedKey===undefined)delete process.env.ANTHROPIC_API_KEY;else process.env.ANTHROPIC_API_KEY=savedKey;}
+ });
+ it('never reassigns or replays an existing owner/source revision after a receiver switch',async()=>{
+  const sub=await setup(),p=await queue(),other=prefix+'aaa';
+  await session(s=>deleteContextWebhook(s,b,sub.subscription.id));
+  await run(`CREATE (:AgentKey {id:$other,ownerUserId:$b,scopes:['read','write'],contextRequestsEnabled:true})`,{other,b});
+  await session(s=>createContextWebhook(s,b,{...input(),agentKeyId:other}));
+  expect((await session(s=>askContextAgents(s,a,room,p.id))).queued).toBe(0);
+  expect((await session(s=>listContextAgentRequests(s,b,key))).requests).toHaveLength(1);
+  expect((await session(s=>listContextAgentRequests(s,b,other))).requests).toEqual([]);
+  expect(await delivery()).toHaveLength(1);expect((await delivery())[0].status).toBe('cancelled');
+  await session(s=>updateContextPost(s,a,room,p.id,'New revision',p.revision));
+  expect((await session(s=>askContextAgents(s,a,room,p.id))).queued).toBe(1);
+  expect((await session(s=>listContextAgentRequests(s,b,other))).requests).toHaveLength(1);
+ });
+ it('deduplicates the same owner/source revision across external and hosted receivers',async()=>{
+  const savedKey=process.env.ANTHROPIC_API_KEY;
+  try{
+   await setup();const p=await queue();
+   process.env.OPENCHAT_CONTEXT_HOSTED_ENABLED='true';process.env.ANTHROPIC_API_KEY='synthetic-provider-never-called';
+   await run(`MATCH (u:User {id:$b}) SET u.contextHostedEnabled=true,u.contextHostedGeneration=1`,{b});
+   expect((await session(s=>askContextAgents(s,a,room,p.id))).queued).toBe(0);
+   await session(s=>updateContextPost(s,a,room,p.id,'New hosted revision',p.revision));
+   expect((await session(s=>askContextAgents(s,a,room,p.id))).queued).toBe(1);
+   await run(`MATCH (u:User {id:$b}) SET u.contextHostedEnabled=false`,{b});
+   expect((await session(s=>askContextAgents(s,a,room,p.id))).queued).toBe(0);
+   const r=await run(`MATCH (r:ContextAgentRequest {ownerUserId:$b}) RETURN count(r) AS count`,{b});expect(Number(r.records[0].get('count'))).toBe(2);
+  }finally{if(savedKey===undefined)delete process.env.ANTHROPIC_API_KEY;else process.env.ANTHROPIC_API_KEY=savedKey;}
+ });
+
+ it('cancels an undelivered wake when hosted takes precedence, preserving original key ownership',async()=>{
+  const savedKey=process.env.ANTHROPIC_API_KEY;
+  try{
+   await setup();const p=await queue();
+   process.env.OPENCHAT_CONTEXT_HOSTED_ENABLED='true';process.env.ANTHROPIC_API_KEY='synthetic-provider-never-called';
+   await run(`MATCH (u:User {id:$b}) SET u.contextHostedEnabled=true,u.contextHostedGeneration=1`,{b});
+   expect((await session(s=>listContextWebhooks(s,b))).subscriptions[0].routingStatus).toBe('hosted_precedence');
+   const fake=vi.fn(async()=>true);await runContextWebhookOnce(driver,fake);expect(fake).not.toHaveBeenCalled();
+   expect((await delivery())[0].status).toBe('cancelled');
+   expect((await session(s=>listContextAgentRequests(s,b,key))).requests).toHaveLength(1);
+   expect((await session(s=>askContextAgents(s,a,room,p.id))).queued).toBe(0);
+  }finally{if(savedKey===undefined)delete process.env.ANTHROPIC_API_KEY;else process.env.ANTHROPIC_API_KEY=savedKey;}
  });
 
 });
