@@ -70,6 +70,7 @@ import { PermissionsScreen } from './src/screens/PermissionsScreen';
 import { SecretaryScreen } from './src/screens/SecretaryScreen';
 import { NewConversationScreen } from './src/screens/NewConversationScreen';
 import { InvitePersonScreen } from './src/screens/InvitePersonScreen';
+import { AgentOverlayButton } from './src/components/AgentOverlayButton';
 import { AgentOverlayScreen } from './src/screens/AgentOverlayScreen';
 import { GroupSettingsScreen } from './src/screens/GroupSettingsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
@@ -122,6 +123,12 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         headerTintColor: c.primary,
         contentStyle: { backgroundColor: c.background },
         ...chatBackOptions(route.name, navigation, c.primary),
+        headerRight: route.name === 'AgentOverlay' ? undefined : () => <AgentOverlayButton color={c.primary} onPress={() => navigation.navigate('AgentOverlay', {
+          context: route.name === 'ContactProfile' ? { kind: 'person', id: (route.params as { userId: string }).userId, label: 'This person', includePrivate: true }
+            : route.name === 'PrivateThing' ? { kind: 'thing', id: (route.params as { thingId: string }).thingId, label: 'This saved item', includePrivate: true }
+            : route.name === 'Chat' ? { kind: 'conversation', id: (route.params as { conversationId: string }).conversationId, label: 'Current conversation', includePrivate: true }
+            : { kind: 'page', label: route.name.replace(/([a-z])([A-Z])/g, '$1 $2') },
+        })} />,
       })}
     >
       <ChatsStack.Screen

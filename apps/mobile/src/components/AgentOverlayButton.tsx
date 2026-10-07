@@ -1,4 +1,4 @@
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useChat } from '../contexts/ChatContext';
 import { AppIcon } from './AppIcon';
 
@@ -20,7 +20,7 @@ export function AgentOverlayButton({ color, onPress, size = 20 }: AgentOverlayBu
       accessibilityLabel={hasPending ? `OpenChat Agent, ${pendingMatchCount} pending` : 'OpenChat Agent'}
       style={styles.button}
     >
-      <AppIcon name="bot" color={color} size={size} />
+      <AppIcon name="bot" color={color} size={size} /><Text style={{ color, fontSize: 11, fontWeight: '600' }}>Ask agent</Text>
       {hasPending && <View style={[styles.badge, { backgroundColor: color }]} />}
     </TouchableOpacity>
   );
@@ -28,7 +28,7 @@ export function AgentOverlayButton({ color, onPress, size = 20 }: AgentOverlayBu
 
 const styles = StyleSheet.create({
   button: {
-    minWidth: 44,
+    minWidth: 60,
     minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',

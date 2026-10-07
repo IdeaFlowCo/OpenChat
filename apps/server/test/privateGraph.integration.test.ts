@@ -176,9 +176,9 @@ integration('private graph: one owner, never anyone else', () => {
 
       // Alice leaves: everything she kept is gone, under either identity that could name her.
       await session.executeWrite(tx => graph.deletePrivateGraphForUser(tx, alice));
-      expect(await graph.exportPrivateGraph(alice)).toEqual({ entities: [], notes: [], links: [] });
+      expect(await graph.exportPrivateGraph(alice)).toEqual({ entities: [], notes: [], links: [], noteReviews: [], privateAsks: [] });
       await session.executeWrite(tx => graph.deletePrivateGraphForUser(tx, erin));
-      expect(await graph.exportPrivateGraph(erin)).toEqual({ entities: [], notes: [], links: [] });
+      expect(await graph.exportPrivateGraph(erin)).toEqual({ entities: [], notes: [], links: [], noteReviews: [], privateAsks: [] });
       // Carol's own overlay is untouched by other people leaving, apart from what pointed at them.
       expect((await graph.exportPrivateGraph(carol) as { entities: unknown[] }).entities).toHaveLength(0);
     } finally { await session.close(); }

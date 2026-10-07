@@ -8,7 +8,8 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { api, type PrivateThingDetail } from '../api/client';
-import { PrivateLinks, PrivateNotes } from '../components/PrivateGraph';
+import { PrivateLinks } from '../components/PrivateGraph';
+import { ProfileNoteCapture } from '../components/ProfileNoteCapture';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import type { NavProp, RouteProps } from '../navigation/types';
@@ -43,12 +44,13 @@ export function PrivateThingScreen() {
       <Text style={{ color: c.textMetadata, fontSize: 13, textTransform: 'capitalize' }}>{thing.kind}</Text>
       <Text style={[styles.name, { color: c.textPrimary }]}>{thing.name}</Text>
       <Text style={{ color: c.textMetadata, fontSize: 13 }}>Private to you. Only you can see this.</Text>
+      <ProfileNoteCapture key={thing.id} subject={subject} notes={thing.notes} onChange={() => { void api.getPrivateThing(thingId).then(setThing).catch(() => setError('Could not refresh connections.')); }} onAskAgent={() => navigation.navigate('AgentOverlay', { context: { kind: 'thing', id: thing.id, label: thing.name, includePrivate: true } })} />
       <PrivateLinks
         subject={subject} links={thing.links} onChange={links => setThing(current => current && { ...current, links })}
         onOpenThing={id => navigation.push('PrivateThing', { thingId: id })}
         onOpenPerson={userId => navigation.navigate('ContactProfile', { userId })}
       />
-      <PrivateNotes subject={subject} notes={thing.notes} onChange={notes => setThing(current => current && { ...current, notes })} />
+      {error && <Text accessibilityRole="alert" style={{ color: c.danger }}>{error}</Text>}
     </ScrollView>
   );
 }
@@ -56,6 +58,6 @@ export function PrivateThingScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   centered: { justifyContent: 'center', alignItems: 'center' },
-  content: { padding: 16, gap: 16 },
+  content: { padding: 16, gap: 16, width: '100%', maxWidth: 960, alignSelf: 'center' },
   name: { fontSize: 22, fontWeight: '700' },
 });

@@ -1,19 +1,14 @@
-import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 /**
- * Typography tokens — "Ink & Paper" (design-audit 2026-09-02).
- *
- * Display (headers, chat titles, section titles) uses a serif to give the app
- * a literary voice; body text stays the system sans for legibility. No custom
- * font files — Georgia ships with iOS/macOS, Android falls back to its system
- * 'serif' (Noto Serif), web gets a serif stack. Zero binary/native cost, so
- * this is OTA-safe.
+ * Warm Paper + System Sans — approved product direction, 6 October 2026.
+ * Use platform system fonts throughout, including headings. The historical
+ * `serif` export remains an alias so existing screens stay visually aligned.
  */
 import { Platform } from 'react-native';
 
-export const serif = isUnlinkedEmbed() ? 'system-ui, -apple-system, sans-serif' : Platform.select({
-  ios: 'Georgia',
-  android: 'serif',
-  default: 'Georgia, "Iowan Old Style", "Times New Roman", serif',
+/** System sans is Jacob's approved product direction. Keep the legacy token name
+ * while callers migrate, so every existing heading gets the same treatment. */
+export const serif = Platform.select({
+  ios: 'System', android: 'sans-serif', default: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
 }) as string;
 
 /** Nav-bar / screen titles. */

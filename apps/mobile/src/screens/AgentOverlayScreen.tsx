@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
-import { api, isDroppedMessageSend, type Message, type SocialReviewItem } from '../api/client';
+import { api, isDroppedMessageSend, type AgentPageContext, type Message, type SocialReviewItem } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
 import { useTheme } from '../contexts/ThemeContext';
 import type { NavProp, RouteProps } from '../navigation/types';
@@ -29,17 +29,36 @@ const EXAMPLES = [
 
 interface AgentOverlayScreenProps {
   embedded?: boolean;
+  context?: AgentPageContext;
   onClose?: () => void;
   onOpenConversation?: (conversationId: string) => void;
 }
 
-export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversation }: AgentOverlayScreenProps = {}) {
+export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversation, context: embeddedContext }: AgentOverlayScreenProps = {}) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const navigation = useNavigation<NavProp<'AgentOverlay'>>();
   const route = useRoute<RouteProps<'AgentOverlay'>>();
   const { currentUser, sendMessageToConversation, refreshConversations } = useChat();
+  const pageContext = embeddedContext ?? route.params?.context;
+  const contextKey = pageContext ? `${pageContext.kind}:${pageContext.id ?? pageContext.label}` : 'general';
+  const [includePrivate, setIncludePrivate] = useState(pageContext?.includePrivate === true);
   const [prompt, setPrompt] = useState(route.params?.prompt ?? '');
+  useEffect(() => {
+    setPrompt(route.params?.prompt ?? '');
+    setIncludePrivate(pageContext?.includePrivate === true);
+  }, [contextKey, route.params?.prompt]);
+  const sendContext = pageContext ? { ...pageContext, includePrivate } : undefined;
+  const contextCard = pageContext ? (
+    <View style={[styles.contextCard, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
+      <Text style={{ color: c.textPrimary, fontWeight: '600' }}>About: {pageContext.label}</Text>
+      <Text style={{ color: c.textMetadata, fontSize: 12 }}>Attached to your next message · Sent only to your agent</Text>
+      {pageContext.kind !== 'page' && <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: includePrivate }} onPress={() => setIncludePrivate(value => !value)} style={{ minHeight: 44, justifyContent: 'center' }}>
+        <Text style={{ color: c.primary }}>{includePrivate ? '✓ Include saved context' : 'Include saved context'}</Text>
+      </TouchableOpacity>}
+      <Text style={{ color: c.textMetadata, fontSize: 12 }}>{includePrivate ? 'Notes and context you send stay in your private agent conversation.' : 'Only the page identity is attached; saved context is excluded from this message.'}</Text>
+    </View>
+  ) : null;
   const [reviewItems, setReviewItems] = useState<SocialReviewItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [loadingReview, setLoadingReview] = useState(true);
@@ -93,12 +112,14 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
     setBusy(true);
     setError(null);
     try {
-      const conversation = await api.ensureAssistant();
+      const conversationId = content && sendContext
+        ? (await api.sendContextualAgentMessage(content, sendContext)).conversationId
+        : (await api.ensureAssistant()).id;
       await refreshConversations();
-      if (content) await sendMessageToConversation(conversation.id, content);
+      if (content && !sendContext) await sendMessageToConversation(conversationId, content);
       setPrompt('');
-      if (onOpenConversation) onOpenConversation(conversation.id);
-      else navigation.replace('Chat', { conversationId: conversation.id });
+      if (onOpenConversation) onOpenConversation(conversationId);
+      else navigation.replace('Chat', { conversationId });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not reach OpenChat Agent.');
     } finally {
@@ -112,6 +133,12 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
     setBusy(true);
     setError(null);
     try {
+      if (sendContext) {
+        await api.sendContextualAgentMessage(content, sendContext);
+        setPrompt('');
+        await refreshThread();
+        return;
+      }
       const message = await api.sendMessage(agentConversationId, content);
       if (isDroppedMessageSend(message)) return;
       setThreadMessages(previous => previous.some(item => item.id === message.id) ? previous : [...previous, message]);
@@ -146,6 +173,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
             </TouchableOpacity>
           )}
         </View>
+        {contextCard}
         {loadingThread ? (
           <View style={styles.threadLoading}><ActivityIndicator color={c.primary} /></View>
         ) : (
@@ -216,6 +244,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
         </View>
         <Text style={[styles.intro, { color: c.textSecondary }]}>Your message starts as a private conversation. If it sounds like an ask, offer, or shared goal, OpenChat Agent will prepare a card and ask before searching or sharing.</Text>
 
+        {contextCard}
         <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
           <TextInput
             autoFocus
@@ -264,6 +293,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
 }
 
 const styles = StyleSheet.create({
+  contextCard: { padding: 12, gap: 6, borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, margin: 12 },
   root: { flex: 1 },
   threadHeader: { minHeight: 58, borderBottomWidth: StyleSheet.hairlineWidth, paddingLeft: 12, paddingRight: 4, flexDirection: 'row', alignItems: 'center', gap: 9 },
   threadMark: { width: 34, height: 34, borderRadius: 11, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },

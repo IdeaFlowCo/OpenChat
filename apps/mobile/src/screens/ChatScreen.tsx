@@ -596,7 +596,7 @@ export function ChatScreen({
 
   const openAgentNetwork = useCallback(() => {
     setConversationMenuVisible(false);
-    (onOpenAgent ?? (() => navigation.navigate('AgentOverlay')))();
+    (onOpenAgent ?? (() => navigation.navigate('AgentOverlay', { context: { kind: 'conversation', id: conversationId, label: 'Current conversation', includePrivate: true } })))();
   }, [navigation, onOpenAgent]);
 
   const showMuteOptions = useCallback(() => {

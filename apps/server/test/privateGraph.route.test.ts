@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  addLink: vi.fn(), addNote: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
+  addLink: vi.fn(), addNote: vi.fn(), createPrivateThing: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
   listDue: vi.fn(), listThings: vi.fn(), updateNote: vi.fn(), updatePersonCard: vi.fn(),
 }));
 vi.mock('../src/services/privateGraph.js', async () => {
@@ -36,7 +36,7 @@ describe('private graph routes', () => {
   });
 
   it('requires sign-in on every route', async () => {
-    for (const [method, path] of [['GET', '/due'], ['GET', '/people/bob'], ['PATCH', '/people/bob'], ['POST', '/people/bob/notes'], ['POST', '/people/bob/links'], ['GET', '/things'], ['GET', '/things/t1'], ['POST', '/things/t1/notes'], ['POST', '/things/t1/links'], ['PATCH', '/notes/n1'], ['DELETE', '/notes/n1'], ['DELETE', '/links/l1']]) {
+    for (const [method, path] of [['GET', '/due'], ['GET', '/people/bob'], ['PATCH', '/people/bob'], ['POST', '/people/bob/notes'], ['POST', '/people/bob/links'], ['GET', '/things'], ['POST', '/things'], ['GET', '/things/t1'], ['POST', '/things/t1/notes'], ['POST', '/things/t1/links'], ['PATCH', '/notes/n1'], ['DELETE', '/notes/n1'], ['DELETE', '/links/l1']]) {
       expect((await fetch(`${baseUrl}/api/private${path}`, { method })).status, `${method} ${path}`).toBe(401);
     }
     expect(Object.values(mocks).every(mock => mock.mock.calls.length === 0)).toBe(true);
@@ -57,6 +57,14 @@ describe('private graph routes', () => {
     expect(mocks.updatePersonCard).toHaveBeenCalledTimes(1);
     expect((await call('/things/t1/links', { method: 'POST', body: JSON.stringify({ relation: 'part of', to: { kind: 'project', name: 'Atlas' } }) })).status).toBe(201);
     expect(mocks.addLink).toHaveBeenCalledWith('alice', { kind: 'thing', id: 't1' }, 'part of', { kind: 'project', name: 'Atlas' });
+  });
+
+  it('creates a saved person only for the signed-in owner without account binding', async () => {
+    mocks.createPrivateThing.mockResolvedValue({id:'saved-person',kind:'person',name:'Chet'});
+    const response = await call('/things', {method:'POST',body:JSON.stringify({kind:'person',name:'Chet',ownerId:'mallory',userId:'other-account'})});
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({id:'saved-person',kind:'person',name:'Chet'});
+    expect(mocks.createPrivateThing).toHaveBeenCalledWith('alice','person','Chet');
   });
 
   it('reports a missing or unavailable person as not found, never as a sign-in failure', async () => {

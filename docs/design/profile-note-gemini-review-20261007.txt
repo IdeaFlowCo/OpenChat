@@ -1,0 +1,73 @@
+Provider: Google Cloud Vertex AI
+Requested model: gemini-3.8-flash
+Returned modelVersion: gemini-3.8-flash
+
+### Executive Verdict
+**Conditionally Approved for Core Flow Prototype; Blocked for Implementation pending hands-free voice/keyboard controls and transactional undo persistence.**
+
+The foundation is sound: preserving the raw note verbatim before offering extracted triples directly respects the "lossless capture" principle, and the separation between personal CRM annotations, unverified person nodes, and authenticated memberships is architecturally correct. However, for a hands-free or voice-first user, the current modal flow and lack of persistent undo will cause high-friction failures.
+
+---
+
+### Explicit Blockers
+
+1. **Ephemerality of Undo & Modal Trap**
+   * *Problem:* In `applyProposals()`, the `lastBatch` undo capability exists *only* within the `#agent-dialog` view. The moment the user clicks "Back to profile" or closes the dialog, `lastBatch` is lost on subsequent agent invocations (`resetAgent()`). 
+   * *Impact:* If a voice user accidentally issues a close command or dismisses the dialog, applied graph mutations cannot be reversed in bulk without manually hunting down each connection/ask.
+   * *Blocker Resolution:* Persist the batch transaction ID on the person record; expose an explicit "Undo last import (N items)" banner directly in the profile view (or via a global toast with no auto-dismissal timeout while active) until superseding edits occur.
+
+2. **Keyboard & Voice Navigation Failures in Capture / Review**
+   * *Problem:* 
+     1. In `#capture`, pressing `Cmd+Enter` / `Ctrl+Enter` does nothing; the user must leave the textarea and target buttons.
+     2. The connection list renders three distinct click targets per row (`.relation`, `.target`, `.details`), two of which do the exact same edit action (`data-edit-connection`). Voice control software (e.g., Talon, Apple Voice Control) numbering click targets creates confusing duplicates.
+     3. When `drawProposals()` renders candidate checkboxes via `innerHTML`, browser focus is dropped to document root instead of being set to the first candidate.
+   * *Blocker Resolution:* Support `Cmd/Ctrl+Enter` inside the capture textarea to trigger `Save note` (or `Cmd/Ctrl+Shift+Enter` for `Save & review updates`). Consolidate connection row tap targets so each row has one primary target and one disambiguated action menu. Enforce programmatic focus shifts on modal dynamic state changes.
+
+3. **Silent Failure on `Hide private` State**
+   * *Problem:* When `hidePrivate` is active, the capture card is completely hidden (`.private-section { display: none }`), and calling `saveNote()` returns `null` silently without feedback. 
+   * *Blocker Resolution:* If a capture shortcut is invoked while private mode is active, prompt with an explicit inline choice: *"Private capture is hidden. Temporarily reveal to capture note? [Reveal & Capture]"*.
+
+---
+
+### Core UX Critique
+
+#### 1. Low-Friction Rough-Note Capture & Original Wording
+* **What works:** The capture card sits prominently above Asks. `Save note` writes the exact string to `notes[]` immediately without forcing extraction or schema validation.
+* **Refinement:** The text area height (92px minimum) is adequate, but for voice dictation, users frequently stream run-on paragraphs. Add an explicit hotkey legend below the card: `"⌘Enter to save · ⇧⌘Enter to review updates"` (in warm muted text). Keep the local draft in `sessionStorage` per person ID so an accidental tab switch or refresh does not discard an in-progress dictation.
+
+#### 2. Reviewed Typed Relationships & Standing Asks
+* **What works:** Clear separation between `Standing ask` and graph connections (`Mentioned`, `Works at`, `Seeking connections in`). Distinguishing `Mentioned` from `Recommended` for `Example project` prevents unwarranted algorithmic endorsement.
+* **Defect:** Candidate selection is currently an "all-or-nothing" or manual checkbox hunt. When the agent outputs multiple entities, there is no inline editing of the proposed extraction *before* applying (e.g., fixing a misclassified relationship type from `Place` to `Project`).
+* **Recommendation:** Allow inline type-adjustment in the proposal row before saving, rather than forcing the user to apply, locate the row in the profile, and click "Details/Edit".
+
+#### 3. Deduplication & Provenance
+* **What works:** `exists()` accurately checks both asks and connections case-insensitively and tags candidates with `Already recorded`.
+* **Gap:** Exact string comparison (`normalized(a.text) === normalized(c.text)`) will miss slight variations (e.g., "Find cool people in Example city" vs. "Find cool people to hang out with in Example city"). 
+* **Provenance Attribution:** Attributing connection sources as `"Your private note: " + pendingNote` becomes bloated when the raw note was a multi-sentence paragraph. It breaks graph metadata readability.
+* **Recommendation:** Store a clean reference pointer (`sourceNoteId: string, timestamp: ISO8601`) and store the excerpt/snippet rather than concatenating the entire raw note body into the `source` field string.
+
+#### 4. Subject Identity Lifecycle & Privacy Boundaries
+* **What works:** The warning callout (*"Linking an account later does not share your private records"*) correctly addresses the mental model confusion between an external CRM contact and an OpenChat network account.
+* **Sharing Model:** The multi-step simulation dialog for sharing an ask (`#share-dialog`) correctly isolates the private original ask from the published copy, preventing accidental leaks of private notes.
+
+#### 5. Page-Context Agent Panel
+* **What works:** The agent dialog explicitly scopes its frame: *"Your private view · Saved asks, notes and connections on this page."* or *"Private content hidden"*.
+* **Gap:** "Summarize this person" re-lists everything that is already visible on the screen 200px to the left, adding little synthesis.
+* **Recommendation:** The summary should focus on open threads and missing context: e.g., *"Example contact has 1 active ask in Example city (unconfirmed) and 1 mentioned project (Example project). No catch-up reminder scheduled."*
+
+---
+
+### Prioritized Implementation Recommendations
+
+#### Priority 1: Hands-Free & Accessibility (Sprint 1)
+1. **Shortcut Engine:** Implement `Cmd/Ctrl+Enter` inside `#note-input` to run `saveNote()`. Add global `g n` (Go to Note) to jump focus straight to the capture area from anywhere on the profile.
+2. **Focus Management:** On `drawProposals()`, shift focus automatically to `#agent-result` with `aria-live="polite"` announcing `"3 suggestions ready for review"`.
+3. **Target Simplification:** Merge `.relation` and `.target` into a single button `<button class="target">Mentioned: Example project</button>` followed by a single `<button class="details">Details</button>` with `aria-label="Details for Example project connection"` to remove duplicate voice targets.
+
+#### Priority 2: Transaction & Data Integrity (Sprint 1)
+4. **Persistent Undo Queue:** Store `appliedBatches: Array<{ id, timestamp, noteId, records: [...] }>` on the person entity. Show an unobtrusive undo bar at the top of the profile when a batch was applied within the current session.
+5. **Structural Note Linkage:** Instead of writing the full note text into `record.source`, assign each saved note a short hash/ID (`note-101`) and reference it: `{ relation: 'Mentioned', target: 'Example project', sourceNoteId: 'note-101' }`.
+
+#### Priority 3: Refinement & Graph Hygiene (Sprint 2)
+6. **Proposal Inline Modification:** In the `#agent-dialog` proposal checklist, render the relationship label as a fast `<select>` or editable dropdown so voice/keyboard users can correct `"Mentioned"` to `"Works on"` prior to insertion.
+7. **Fuzzy Deduplication Alert:** When an extracted ask has high similarity (>0.75 Jaccard or token overlap) with an existing ask, flag it as `"Similar to existing ask"` rather than either silently passing or rigidly failing strict equality.

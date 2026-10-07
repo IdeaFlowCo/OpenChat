@@ -39,7 +39,7 @@ export function ProfileAsks({ userId, onOpenStory }: { userId: string; onOpenSto
   return (
     <View style={styles.root}>
       <Text style={[styles.label, { color: c.textMetadata }]}>
-        {stories.length ? `Asks · ${stories.length} shared with you` : 'Asks'}
+        {stories.length ? `Shared with you · ${stories.length}` : 'Shared with you'}
       </Text>
       {stories.length === 0 ? (
         <Text style={[styles.empty, { color: c.textMetadata }]}>Nothing shared with you right now.</Text>
@@ -73,5 +73,5 @@ const styles = StyleSheet.create({
   card: { borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   ask: { paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
   askFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  respond: { borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 8, paddingHorizontal: 14, minHeight: 36, justifyContent: 'center' },
+  respond: { borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 8, paddingHorizontal: 14, minHeight: 44, justifyContent: 'center' },
 });

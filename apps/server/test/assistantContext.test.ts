@@ -9,6 +9,13 @@ const AUDIO = JSON.stringify([{ type: 'audio', url: 'https://x/voice.m4a', mimeT
 const IMAGE = JSON.stringify([{ type: 'image', url: 'https://x/p.jpg', mimeType: 'image/jpeg' }]);
 
 describe('assistantTextForMessage', () => {
+  it('attaches internal page data only for the model while retaining the visible question', () => {
+    const row = { content: 'Summarize this person', pageContext: JSON.stringify({ notes: ['Private note'] }) };
+    expect(assistantTextForMessage(row)).toContain('Private note');
+    expect(row.content).toBe('Summarize this person');
+    expect(assistantTextForMessage({ ...row, pageContext: '{broken' })).toBe(row.content);
+  });
+
   it('passes typed text through unchanged', () => {
     expect(assistantTextForMessage({ content: ' hello ', attachments: null })).toBe('hello');
   });
