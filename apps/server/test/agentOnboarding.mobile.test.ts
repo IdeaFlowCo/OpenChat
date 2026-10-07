@@ -13,7 +13,7 @@ vi.mock('@react-navigation/native', () => ({
   useFocusEffect: (fn: any) => React.useEffect(fn, [fn]),
 }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
-vi.mock('../../mobile/src/components/McpSetupCard', () => ({ McpSetupCard: () => null }));
+vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 vi.mock('../../mobile/src/api/client', () => ({
   OPENCHAT_URL: 'https://chat.globalbr.ai',
   api: { listAgentKeys: async () => [{ id: 'existing', name: 'Hermes', keyPrefix: 'oc_short', scopes: ['read','write'], createdAt: new Date().toISOString() }], revealAgentKey: mocks.reveal },
@@ -45,4 +45,18 @@ it('shows a posting error and preserves the draft and retry ID until a successfu
   await act(async () => button('Post').props.onPress());
   expect(mocks.addPost.mock.calls[0]).toEqual(mocks.addPost.mock.calls[1]);
   expect(tree.root.findByType('TextInput' as any).props.value).toBe('');
+});
+
+it('copies maintained MCP setup with the full existing key without a reveal step', async () => {
+  await act(async () => { tree = create(React.createElement(AgentKeyDetailScreen)); });
+  const disclosure = tree.root.findAllByType('TouchableOpacity' as any).find(n => n.findAllByType('Text' as any).some(t => t.children.join('').includes('Advanced setup')))!;
+  await act(async () => disclosure.props.onPress());
+  await act(async () => button('Copy').props.onPress());
+  const config = JSON.parse(mocks.copy.mock.calls.at(-1)![0]);
+  expect(config.mcpServers.openchat).toMatchObject({ command: 'node', args: ['/absolute/path/to/OpenChat/apps/mcp-server/dist/index.js'], env: { OPENCHAT_API_KEY: 'oc_complete-existing-key' } });
+  await act(async () => button('Copy one-shot setup prompt (coding agents)').props.onPress());
+  const prompt = mocks.copy.mock.calls.at(-1)![0];
+  expect(prompt).toContain('https://github.com/IdeaFlowCo/OpenChat.git');
+  expect(prompt).not.toContain('tmad4000/openchat-mcp-server');
+  expect(mocks.alert).not.toHaveBeenCalled();
 });

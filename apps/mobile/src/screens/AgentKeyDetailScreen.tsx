@@ -208,7 +208,7 @@ export function AgentKeyDetailScreen() {
 
           {/* Bi-directional MCP setup snippets. Pre-fills with the real key
               once the user has tapped "View full key", otherwise placeholders. */}
-          <McpSetupCard apiKey={plainKey} />
+          <McpSetupCard apiKey={plainKey} getApiKey={getPlainKey} showQuickSetup={false} />
 
           <TouchableOpacity
             style={[styles.actionBtn, { backgroundColor: c.dangerMuted, borderColor: c.danger }]}
