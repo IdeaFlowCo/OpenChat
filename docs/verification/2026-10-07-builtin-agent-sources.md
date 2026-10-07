@@ -8,6 +8,6 @@ Vision reads use the ID gateway's separate first-party read broker and the same 
 
 Server-only config: `IDEAFLOW_BUILTIN_CLIENT_ID=openchat`, `IDEAFLOW_BUILTIN_CLIENT_SECRET`, `UNLINKED_PROVISION_CLIENT_ID`, `UNLINKED_PROVISION_CLIENT_SECRET`; compose explicitly passes these through. No personal owner credential or downstream signing secret is handed to the model.
 
-Validation: server build/lint and full unit suite; focused per-user identity, revocation, incomplete configuration, cancellation and secret-safe failure tests. Independent review returned go. Live deployment receipts will follow.
+Validation: server build/lint and full unit suite; focused per-user identity, revocation, incomplete configuration, cancellation and secret-safe failure tests. Independent review returned go. PR152 shipped after all five CI checks passed. Live built-in Unlinked search returned HTTP200 under the authenticated owner binding; the canonical ID broker returned Vision’s seven read tools. Follow-up public WIT reads use the current GCP endpoint without legacy Supabase credentials.
 
 The screenshot's separate saved-note extraction failure was fixed and deployed in PR151. The original note's review returned ready with two suggestions, preserved original text and zero applied changes.

@@ -116,13 +116,15 @@ async function witFetch(
   mode: WitMode,
   init?: { method?: string; body?: unknown }
 ): Promise<{ ok: boolean; status: number; data: any }> {
-  if (!witAnonKey()) {
+  const publicRead = mode === 'anonymous' && (!init?.method || init.method === 'GET');
+  if (!publicRead && !witAnonKey()) {
     // Without the anon apikey the Edge Functions reject everything.
     return { ok: false, status: 0, data: { error: 'Issue tracker is not configured on the server.' } };
   }
-  const r = await fetch(`${WIT_BASE}${path}`, {
+  const base = publicRead ? (process.env.WIT_PUBLIC_API_BASE || 'https://api.worldissuetracker.com/functions/v1') : WIT_BASE;
+  const r = await fetch(`${base}${path}`, {
     method: init?.method ?? 'GET',
-    headers: witHeaders(mode),
+    headers: publicRead ? { 'Content-Type': 'application/json', 'X-WIT-Client': 'openchat' } : witHeaders(mode),
     body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
     signal: AbortSignal.timeout(WIT_TIMEOUT_MS),
   });

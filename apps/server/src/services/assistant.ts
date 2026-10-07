@@ -1261,7 +1261,7 @@ async function executeTool(
           { name: 'Vision', access: appBridgeConfigured() ? 'identity_scoped_reads_on_request' : 'not_configured', tools: ['vision_read'] },
           { name: 'Unlinked', access: unlinkedProvisionConfigured() ? 'identity_scoped_search_on_request' : 'not_configured', tools: ['unlinked_search_network', 'unlinked_search_everyone'] },
           { name: 'Noos', access: 'public_only', tools: ['search_noos_public'] },
-          { name: 'World Issue Tracker', access: process.env.WIT_ANON_KEY ? 'public_only' : 'not_configured', tools: ['wit_list_issues', 'wit_get_issue', 'wit_list_trackers'] },
+          { name: 'World Issue Tracker', access: 'public_only', tools: ['wit_list_issues', 'wit_get_issue', 'wit_list_trackers'] },
         ];
       case 'search_noos_public':
         return searchPublicNoos(typeof input.query === 'string' ? input.query : '');

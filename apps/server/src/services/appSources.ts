@@ -28,13 +28,3 @@ export async function searchPublicNoos(query: string, abort?: AbortSignal): Prom
     return { scope: 'public_only', nodes: (data.nodes || []).slice(0,10).map(n=>({ id:n.id,title:n.title,content:n.content?.slice(0,4000),type:n.type,url:'https://globalbr.ai/' + (n.slug ? 'n/' + encodeURIComponent(n.slug) : 'node/' + encodeURIComponent(n.id || '')) })) };
   } catch { return { error: 'Noos public search is unavailable.' }; }
 }
-export async function listPublicIssues(query: string, abort?: AbortSignal): Promise<unknown> {
-  if (!process.env.WIT_ANON_KEY) return { error: 'World Issue Tracker is not configured.' };
-  try {
-    const response = await fetch('https://qmzopiburflputowkuhu.supabase.co/functions/v1/get-issues?limit=100', { redirect:'error', signal:signalFor(abort,15000), headers:{apikey:process.env.WIT_ANON_KEY} });
-    if (!response.ok) return {error:'World Issue Tracker is unavailable.'};
-    const data = await response.json() as {issues?: Array<{id?:string;slug?:string;title?:string;description?:string;status?:string}>};
-    const rows = data.issues || [], q = query.trim().toLowerCase();
-    return { scope:'public_only', coverage:'Filters the latest 100 issues; not an exhaustive search.', issues: rows.filter(i=>!q || `${i.title || ''} ${i.description || ''}`.toLowerCase().includes(q)).slice(0,10).map(i=>({id:i.id,title:i.title,description:i.description?.slice(0,3000),status:i.status,url:'https://worldissuetracker.com/issue/' + encodeURIComponent(i.slug || i.id || '')})) };
-  } catch { return {error:'World Issue Tracker is unavailable.'}; }
-}
