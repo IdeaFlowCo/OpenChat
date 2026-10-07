@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   privateName: null as string | null,
   platform: 'ios',
   focused: true,
+  visibilityReleases: [] as ReturnType<typeof vi.fn>[],
 }));
 
 // Exercise the real ChatScreen hooks/render tree, with the OS boundary replaced
@@ -101,6 +102,7 @@ beforeEach(() => {
   mocks.privateName = null;
   mocks.platform = 'ios';
   mocks.focused = true;
+  mocks.visibilityReleases = [];
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.chat = {
     currentUser: { userId: 'bob', name: 'Bob' },
@@ -111,6 +113,11 @@ beforeEach(() => {
     messages: [], loadingMessages: false, isConnected: true,
     activeConversationId: 'sailing', activeConversationLane: 'chat',
     isChatVisible: (id: string) => mocks.chat.activeConversationId === id && mocks.chat.activeConversationLane === 'chat',
+    registerConversationVisibility: vi.fn(() => {
+      const release = vi.fn();
+      mocks.visibilityReleases.push(release);
+      return release;
+    }),
     setActiveConversation: vi.fn(), markConversationRead: vi.fn(),
     presence: new Map(), typingByConv: new Map(), readByOthers: new Map(), onlineUsers: new Map(),
     mutedConvs: {}, muteConv: vi.fn(), reportTyping: vi.fn(),
@@ -307,7 +314,7 @@ it('restores the conversation when returning to an already-mounted chat', async 
   await render();
   mocks.focused = false; await render();
   mocks.focused = true; await render();
-  expect(mocks.chat.setActiveConversation.mock.calls.map((call: any[]) => call[0])).toEqual(['sailing', null, 'sailing']);
+  expect(mocks.chat.setActiveConversation.mock.calls.map((call: any[]) => call[0])).toEqual(['sailing', 'sailing']);
 });
 it('leaves desktop selection and Context lane ownership with the parent', async () => {
   await act(async () => { screen = create(React.createElement(ChatScreen, { conversationId: 'sailing', embedded: true })); });
@@ -351,4 +358,22 @@ it('preserves Context across focus return but honors a new explicit Chat destina
   await render();
   expect(mocks.chat.setActiveConversation).toHaveBeenLastCalledWith('sailing', { lane: 'chat' });
   mocks.route.params = { conversationId: 'sailing' };
+});
+
+it.each([
+  { embedded: false, unmount: false }, { embedded: true, unmount: false }, { embedded: true, unmount: true },
+])('releases visibility without clearing selection with embedded=$embedded and unmount=$unmount', async ({ embedded, unmount }) => {
+  const element = React.createElement(ChatScreen, { conversationId: 'sailing', embedded });
+  await act(async () => { screen = create(element); });
+  expect(mocks.chat.registerConversationVisibility).toHaveBeenCalledExactlyOnceWith('sailing');
+  const release = mocks.visibilityReleases[0];
+  if (unmount) {
+    await act(async () => screen!.unmount());
+    screen = undefined;
+  } else {
+    mocks.focused = false;
+    await act(async () => screen!.update(React.createElement(ChatScreen, { conversationId: 'sailing', embedded })));
+  }
+  expect(release).toHaveBeenCalledOnce();
+  expect(mocks.chat.setActiveConversation).not.toHaveBeenCalledWith(null);
 });

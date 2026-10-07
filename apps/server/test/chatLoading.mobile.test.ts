@@ -4,24 +4,24 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Message } from '../../mobile/src/api/client.js';
 
 const mocks = vi.hoisted(() => ({ getMessages: vi.fn(), getMessagesBefore: vi.fn(),
-  wsSend: vi.fn(), send: vi.fn(), account: 'me', uuid: 0,
+  wsSend: vi.fn(), send: vi.fn(), account: 'me', uuid: 0, banner: vi.fn(), notificationSelection: vi.fn(), messagesSince: vi.fn(),
   markRead: vi.fn(), edit: vi.fn(), remove: vi.fn(), reaction: vi.fn(),
   handlers: new Map<string, (...args: any[]) => void>(),
 }));
 const socket = { connected: true, on: (event: string, handler: (...args: any[]) => void) => mocks.handlers.set(event, handler), off: (event: string) => mocks.handlers.delete(event) };
 vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn() }));
 vi.mock('expo-crypto', () => ({ randomUUID: () => ++mocks.uuid === 1 ? 'client-message' : `client-message-${mocks.uuid}` }));
-vi.mock('../../mobile/src/services/notifications', () => ({ setUnreadBadgeCount: vi.fn(), loadMutedConvs: async () => ({}) }));
+vi.mock('../../mobile/src/services/notifications', () => ({ setUnreadBadgeCount: vi.fn(), setActiveConversationForNotifications: mocks.notificationSelection, loadMutedConvs: async () => ({}) }));
 vi.mock('../../mobile/src/api/client', () => ({
   api: { sendMessage: mocks.send, editMessage: mocks.edit, deleteMessage: mocks.remove, addReaction: mocks.reaction, markRead: mocks.markRead, getMessages: mocks.getMessages, getMessagesBefore: mocks.getMessagesBefore,
     getMe: async () => ({ id: mocks.account }), getConversations: async () => [{ id: 'sailing' }],
-    listMatches: async () => [], getAiDisclosureStatus: async () => ({}), messagesSince: async () => ({ messages: [], truncated: true }),
+    listMatches: async () => [], getAiDisclosureStatus: async () => ({}), messagesSince: mocks.messagesSince,
   }, getToken: async () => 'test', getUser: async () => ({ userId: 'me' }), setSession: vi.fn(), clearSession: vi.fn(),
   onAuthExpired: () => vi.fn(),
   isDroppedMessageSend: (value: any) => value?.dropped === true,
 }));
 vi.mock('../../mobile/src/api/socket', () => ({ sendMessage: mocks.wsSend, joinConversation: vi.fn(), leaveConversation: vi.fn(), connect: async () => socket, disconnect: vi.fn(), emitPresenceUpdate: vi.fn() }));
-vi.mock('../../mobile/src/components/InAppMessageBanner', () => ({ showInAppBanner: vi.fn() }));
+vi.mock('../../mobile/src/components/InAppMessageBanner', () => ({ showInAppBanner: mocks.banner }));
 
 import { ChatProvider, useChat } from '../../mobile/src/contexts/ChatContext.js';
 
@@ -44,6 +44,7 @@ beforeEach(async () => {
   mocks.handlers.clear();
   mocks.account = 'me';
   mocks.uuid = 0;
+  mocks.messagesSince.mockResolvedValue({ messages: [], truncated: true });
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   await act(async () => { root = create(React.createElement(ChatProvider, null, React.createElement(Probe))); });
 });
@@ -185,7 +186,7 @@ it('only emits a read receipt while the selected Chat lane remains visible', asy
   try {
     mocks.getMessages.mockResolvedValue(history);
     mocks.markRead.mockResolvedValue({ readMap: {}, onlineMap: {} });
-    await act(async () => chat.setActiveConversation('sailing'));
+    await act(async () => { chat.setActiveConversation('sailing'); chat.registerConversationVisibility('sailing'); });
     await act(async () => { chat.markConversationRead('sailing'); chat.setActiveConversationLane('context'); });
     await act(async () => vi.advanceTimersByTime(500));
     expect(mocks.markRead).not.toHaveBeenCalled();
@@ -464,4 +465,150 @@ it('uses the loaded history anchor while an older acknowledged send awaits histo
   await act(async () => chat.loadOlderMessages('sailing'));
   expect(mocks.getMessagesBefore).toHaveBeenCalledExactlyOnceWith('sailing', newestPage.messages[0].createdAt);
   expect(chat.messages).toEqual([real, middle, newestPage.messages[0]]);
+});
+
+it('keeps hidden selection and sends while allowing unread and banners and blocking read receipts', async () => {
+  vi.useFakeTimers();
+  try {
+    await openSendingThread();
+    const failed = await failSend();
+    let hide!: () => void;
+    await act(async () => { hide = chat.registerConversationVisibility('sailing'); });
+    expect(chat.isChatVisible('sailing')).toBe(true);
+    expect(mocks.notificationSelection).toHaveBeenLastCalledWith('sailing');
+    await act(async () => { chat.markConversationRead('sailing'); hide(); });
+    expect(chat.activeConversationId).toBe('sailing');
+    expect(chat.messages).toEqual([failed]);
+    expect(chat.isChatVisible('sailing')).toBe(false);
+    expect(mocks.notificationSelection).toHaveBeenLastCalledWith(null);
+    await act(async () => vi.advanceTimersByTime(500));
+    expect(mocks.markRead).not.toHaveBeenCalled();
+    const live = { ...history.messages[0], id: 'hidden-live' };
+    await act(async () => mocks.handlers.get('message:new')!(live));
+    expect(chat.unreadByConv.get('sailing')).toBe(1);
+    expect(mocks.banner).toHaveBeenCalledWith(expect.objectContaining({ conversationId: 'sailing' }));
+    mocks.messagesSince.mockResolvedValue({ messages: [{ ...live, id: 'hidden-missed' }], truncated: false });
+    await act(async () => { mocks.handlers.get('disconnect')!(); mocks.handlers.get('connect')!(); });
+    expect(chat.unreadByConv.get('sailing')).toBe(2);
+    await act(async () => chat.markConversationRead('sailing'));
+    await act(async () => vi.advanceTimersByTime(500));
+    expect(mocks.markRead).not.toHaveBeenCalled();
+    await act(async () => chat.registerConversationVisibility('sailing'));
+    expect(chat.unreadByConv.has('sailing')).toBe(false);
+    expect(chat.messages).toContainEqual(failed);
+  } finally { vi.useRealTimers(); }
+});
+
+it('lets only the current visibility owner release the pane, including same-thread remounts', async () => {
+  await openSendingThread();
+  let old!: () => void;
+  let newer!: () => void;
+  await act(async () => { old = chat.registerConversationVisibility('sailing'); });
+  await act(async () => { newer = chat.registerConversationVisibility('sailing'); });
+  await act(async () => old());
+  expect(chat.isChatVisible('sailing')).toBe(true);
+  expect(mocks.notificationSelection).toHaveBeenLastCalledWith('sailing');
+  await act(async () => chat.setActiveConversation('other'));
+  await act(async () => chat.registerConversationVisibility('other'));
+  await act(async () => newer());
+  expect(chat.isChatVisible('other')).toBe(true);
+  expect(chat.activeConversationId).toBe('other');
+  expect(mocks.notificationSelection).toHaveBeenLastCalledWith('other');
+});
+
+it('keeps Chat unread and banners in a focused native Context lane', async () => {
+  await openSendingThread();
+  await act(async () => chat.setActiveConversation('sailing', { lane: 'context' }));
+  await act(async () => mocks.handlers.get('message:new')!(history.messages[0]));
+  expect(chat.unreadByConv.get('sailing')).toBe(1);
+  await act(async () => chat.registerConversationVisibility('sailing'));
+  expect(chat.isChatVisible('sailing')).toBe(false);
+  expect(chat.unreadByConv.get('sailing')).toBe(1);
+  expect(mocks.notificationSelection).toHaveBeenLastCalledWith(null);
+  await act(async () => chat.markConversationRead('sailing'));
+  expect(mocks.markRead).not.toHaveBeenCalled();
+  await act(async () => mocks.handlers.get('message:new')!({ ...history.messages[0], id: 'context-live' }));
+  expect(chat.unreadByConv.get('sailing')).toBe(2);
+  expect(mocks.banner).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  ['history', 'socket', 'ack'], ['history', 'ack', 'socket'],
+  ['socket', 'history', 'ack'], ['socket', 'ack', 'history'],
+  ['ack', 'history', 'socket'], ['ack', 'socket', 'history'],
+])('preserves fresher canonical versions in %s → %s → %s order', async (...order) => {
+  await openSendingThread();
+  const response = pendingSend();
+  mocks.wsSend.mockReturnValue(response.promise);
+  let sending!: Promise<void>;
+  await act(async () => { sending = chat.sendMessage('creation snapshot'); });
+  const created = { ...chat.messages[0], id: 'client-message' };
+  const updated = { ...created, content: 'edited later', editedAt: '2026-10-08', reactions: [{ emoji: '👍', count: 2, byMe: true }] };
+  let observedUpdated = false;
+  for (const delivery of order) {
+    await act(async () => {
+      if (delivery === 'history') {
+        mocks.getMessages.mockResolvedValue({ messages: [updated], hasMore: false });
+        chat.retryMessages();
+        observedUpdated = true;
+      }
+      if (delivery === 'socket') mocks.handlers.get('message:new')!(created);
+      if (delivery === 'ack') { response.resolve(created); await sending; }
+    });
+    expect(chat.messages).toEqual([observedUpdated ? updated : created]);
+  }
+  await reconnectWith({ messages: [updated], hasMore: false });
+  expect(chat.messages).toEqual([updated]);
+});
+
+it('does not resurrect a history-confirmed send after it falls outside the newest page', async () => {
+  await openSendingThread();
+  const response = pendingSend();
+  mocks.wsSend.mockReturnValue(response.promise);
+  let sending!: Promise<void>;
+  await act(async () => { sending = chat.sendMessage('older send'); });
+  const created = { ...chat.messages[0], id: 'client-message' };
+  await reconnectWith({ messages: [created], hasMore: true });
+  await reconnectWith(newestPage);
+  expect(chat.messages).toEqual(newestPage.messages);
+  await act(async () => { response.resolve(created); await sending; });
+  expect(chat.messages).toEqual(newestPage.messages);
+});
+
+it('does not let a delayed creation ack undo socket edits confirmed by a reload', async () => {
+  await openSendingThread();
+  const response = pendingSend();
+  mocks.wsSend.mockReturnValue(response.promise);
+  let sending!: Promise<void>;
+  await act(async () => { sending = chat.sendMessage('creation'); });
+  const created = { ...chat.messages[0], id: 'client-message' };
+  const reactions = [{ emoji: '👍', count: 1, byMe: true }];
+  await act(async () => {
+    mocks.handlers.get('message:new')!(created);
+    mocks.handlers.get('message:updated')!({ ...created, content: 'edited', editedAt: '2026-10-08' });
+    mocks.handlers.get('message:reactions-updated')!({ messageId: created.id, conversationId: 'sailing', reactions });
+  });
+  const updated = { ...created, content: 'edited', editedAt: '2026-10-08', reactions };
+  await reconnectWith({ messages: [updated], hasMore: false });
+  await act(async () => { response.resolve(created); await sending; });
+  expect(chat.messages).toEqual([updated]);
+});
+
+it('does not clear hidden unread when an earlier read receipt response arrives', async () => {
+  vi.useFakeTimers();
+  try {
+    await openSendingThread();
+    let hide!: () => void;
+    await act(async () => { hide = chat.registerConversationVisibility('sailing'); });
+    let resolve!: (value: { readMap: {}; onlineMap: {} }) => void;
+    mocks.markRead.mockReturnValue(new Promise(done => { resolve = done; }));
+    await act(async () => chat.markConversationRead('sailing'));
+    await act(async () => vi.advanceTimersByTime(500));
+    expect(mocks.markRead).toHaveBeenCalledOnce();
+    await act(async () => hide());
+    await act(async () => mocks.handlers.get('message:new')!(history.messages[0]));
+    await act(async () => resolve({ readMap: {}, onlineMap: {} }));
+    expect(chat.unreadByConv.get('sailing')).toBe(1);
+    expect(chat.isChatVisible('sailing')).toBe(false);
+  } finally { vi.useRealTimers(); }
 });

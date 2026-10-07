@@ -48,7 +48,6 @@ import { NewMessagesPill } from '../components/NewMessagesPill';
 import { ChatEmptyState } from '../components/ChatEmptyState';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import type { NavProp, RouteProps } from '../navigation/types';
-import { setActiveConversationForNotifications } from '../services/notifications';
 import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
 import { pickImage, uploadImage, PickedAsset } from '../services/attachments';
@@ -309,7 +308,7 @@ export function ChatScreen({
     presence, typingByConv, reportTyping,
     aiDisclosureAcceptedAt, mutedConvs, muteConv, blockUser,
     readByOthers, onlineUsers, markConversationRead,
-    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible,
+    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, registerConversationVisibility,
   } = useChat();
 
   const conversation = useMemo<Conversation | undefined>(
@@ -492,16 +491,12 @@ export function ChatScreen({
     setUnreadCount(0);
     prevLenRef.current = 0;
     initialScrollDoneRef.current = false;
-    return () => {
-      if (!embedded) setActiveConversation(null);
-    };
-  }, [conversationId, setActiveConversation, destinationParams, embedded]));
+    return registerConversationVisibility(conversationId);
+  }, [conversationId, setActiveConversation, destinationParams, embedded, registerConversationVisibility]));
 
   useFocusEffect(useCallback(() => {
     const showingChat = activeConversationId === conversationId && isChatVisible(conversationId);
-    setActiveConversationForNotifications(showingChat && isConnected ? conversationId : null);
     if (showingChat) markConversationRead(conversationId);
-    return () => setActiveConversationForNotifications(null);
   }, [conversationId, activeConversationId, activeConversationLane, isConnected, markConversationRead, isChatVisible]));
 
   const isGroup = conversation?.type === 'group';
