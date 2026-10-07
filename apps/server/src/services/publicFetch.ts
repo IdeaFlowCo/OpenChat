@@ -23,18 +23,17 @@ async function resolveTarget(url: URL, signal: AbortSignal) {
     ? [{ address: hostname, family: isIP(hostname) }]
     : await Promise.race([lookup(hostname, { all: true, verbatim: true }), abort]);
   if (!entries.length || entries.some(entry => isBlockedAddress(entry.address))) throw new Error('Blocked public target');
-  return entries[0] as { address: string; family: 4 | 6 };
+  return entries as { address: string; family: 4 | 6 }[];
 }
 
-function getHop(url: URL, target: { address: string; family: 4 | 6 }, signal: AbortSignal, options: Options): Promise<PublicResponse> {
+function getHop(url: URL, targets: { address: string; family: 4 | 6 }[], signal: AbortSignal, options: Options): Promise<PublicResponse> {
   return new Promise((resolve, reject) => {
     const req = (url.protocol === 'https:' ? https : http).request(url, {
-      method: 'GET', agent: false, signal, family: target.family,
+      method: 'GET', agent: false, signal, autoSelectFamily: true,
       headers: { ...options.headers, 'Accept-Encoding': 'identity' },
       lookup: (_host, lookupOptions, callback) => {
-        // Node can request all addresses; either form returns only the pinned one.
-        if (lookupOptions.all) callback(null, [target]);
-        else callback(null, target.address, target.family);
+        if (lookupOptions.all) callback(null, targets);
+        else callback(null, targets[0].address, targets[0].family);
       },
     }, res => {
       const status = res.statusCode ?? 0;

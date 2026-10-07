@@ -62,6 +62,42 @@ describe('public GET connection and redirect boundary', () => {
     publicNetwork(); dns.lookup.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }]).mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
     expect((await publicGet('http://public.test/audio', opts)).body.toString()).toBe('synthetic audio'); expect(dns.lookup).toHaveBeenCalledTimes(1); expect(pins).toEqual(['93.184.216.34']);
   });
+  it.each([
+    { address: '2606:4700:4700::1111', family: 6 },
+    { address: '93.184.216.35', family: 4 },
+  ])('falls back from an unreachable public IPv$family address without resolving again', async first => {
+    const targets = [first, { address: '93.184.216.34', family: 4 }];
+    dns.lookup.mockResolvedValueOnce(targets).mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+    const failed: string[] = [];
+    vi.spyOn(http.Agent.prototype, 'createConnection').mockImplementation((options: any, callback: any) => {
+      const socket = net.createConnection({
+        ...options, port,
+        lookup: (host: string, lookupOptions: any, done: any) => {
+          options.lookup(host, lookupOptions, (error: Error | null, addresses: any, family: number) => {
+            queueMicrotask(() => {
+              if (error) { done(error); return; }
+              const map = (address: string) => address === first.address ? (first.family === 6 ? '::1' : '127.0.0.2') : '127.0.0.1';
+              if (lookupOptions.all) {
+                pins.push(...addresses.map((entry: any) => entry.address));
+                done(null, addresses.map((entry: any) => ({ ...entry, address: map(entry.address) })));
+              } else {
+                pins.push(addresses);
+                done(null, map(addresses), family);
+              }
+            });
+          });
+        },
+      }, callback);
+      socket.on('connectionAttemptFailed', address => failed.push(address));
+      socket.on('connectionAttemptTimeout', address => failed.push(address));
+      return socket;
+    });
+    expect((await publicGet('http://public.test/audio', { ...opts, timeoutMs: 2000 })).body.toString()).toBe('synthetic audio');
+    expect(failed).toEqual([first.family === 6 ? '::1' : '127.0.0.2']);
+    expect(pins).toEqual(targets.map(entry => entry.address));
+    expect(hits).toEqual(['/audio']);
+    expect(dns.lookup).toHaveBeenCalledTimes(1);
+  });
   it('preserves public redirects and preview parsing', async () => {
     publicNetwork(); expect(await fetchPreview('http://public.test/redirect-public')).toMatchObject({ title: 'Public preview', image: 'http://cdn.test/picture.png' }); expect(hits).toEqual(['/redirect-public', '/html']); expect(dns.lookup).toHaveBeenCalledTimes(2);
   });
