@@ -20,8 +20,9 @@ access lets it read conversations and post messages or context as you.
 
 **Copy agent setup** in Settings creates a new read/write key every time and
 copies instructions for an agent that can make HTTPS requests. Existing keys
-keep working until revoked or expired. You can reveal, rename, or revoke an
-existing key from Agent keys. A new key is not required for Context.
+keep working until revoked or expired. Open an existing key to use **Copy API key**, **Copy setup with this key**,
+**View full key**, or **Copy curl snippet** repeatedly. These reuse that key;
+only New API key and the Settings quick setup create a new one. A new key is not required for Context.
 
 Key management requires your signed-in user session; an agent key cannot mint
 or revoke other keys.
@@ -190,7 +191,7 @@ OpenChat does not send an opener for either person.
 
 For Claude Desktop or another Claude/ChatGPT-compatible MCP client that supports
 local stdio servers, follow the maintained build and client configuration in
-[`apps/mcp-server/README.md`](../apps/mcp-server/README.md). That document also
+[`apps/mcp-server/README.md`](https://github.com/IdeaFlowCo/OpenChat/blob/main/apps/mcp-server/README.md). That document also
 owns the tool inventory and confirmation requirements. A plain consumer ChatGPT
 session cannot run a local stdio MCP server; use a compatible MCP client or
 import OpenChat's `/api/openapi.json` into a Custom GPT Action.
@@ -238,7 +239,7 @@ path into those conversations.
 
 The live agent integration has no OpenChat-hosted `/mcp` HTTP endpoint, no OAuth
 or Dynamic Client Registration, and no npm package publication. The separate
-[Ideaflow connector preparation](connector-delegation-integration-packet.md)
+[Ideaflow connector preparation](https://github.com/IdeaFlowCo/OpenChat/blob/main/docs/connector-delegation-integration-packet.md)
 is a disabled authorization-code harness, not a live connector. The MCP adapter
 runs locally over stdio (or on infrastructure you host). Context enforces read/write key scopes and current conversation membership.
 Some older chat endpoints still act with the owning user's permissions rather
@@ -347,16 +348,17 @@ def get_conversations():
 
 ## Scopes
 
-When creating a key you can store scope labels for operator intent:
+Context enforces the scopes on the same key used for chat:
 
 | Scope | Capability |
 |-------|-----------|
-| `read` | Intended for readers of conversations and messages |
-| `write` | Intended for message/reaction writers |
+| `read` | Read conversation Context |
+| `write` | Create, edit, and delete conversation Context, subject to membership and authorship |
 
-Default: both `read` and `write`. The current REST authorization path stores
-and returns these labels but does not enforce them; a valid agent key acts as
-the owning user until scope enforcement is implemented.
+Default: both `read` and `write`. Some older chat endpoints still act with the
+owning user’s permissions rather than enforcing scope labels. Do not treat a
+read-only label as a global restriction on every endpoint. Context checks the
+current stored key on each operation, including revocation and expiration.
 
 ---
 
@@ -373,7 +375,7 @@ the owning user until scope enforcement is implemented.
 
 The OpenChat MCP server lets Claude Desktop, Cursor, Codex CLI, Claude Code, and
 any other MCP-aware client read AND write to your OpenChat conversations as
-*you*. See the [MCP server tool inventory](../apps/mcp-server/README.md#tools)
+*you*. See the [MCP server tool inventory](https://github.com/IdeaFlowCo/OpenChat/blob/main/apps/mcp-server/README.md#tools)
 for the maintained list of chat, private-capture, Story, matching, review, and
 preference tools plus their approval requirements.
 
@@ -381,7 +383,7 @@ Source: <https://github.com/IdeaFlowCo/OpenChat/tree/main/apps/mcp-server>
 
 Build and configuration instructions for Claude Desktop, Cursor, Codex CLI,
 Claude Code, and HTTP clients are maintained in the
-[MCP server README](../apps/mcp-server/README.md#30-second-setup).
+[MCP server README](https://github.com/IdeaFlowCo/OpenChat/blob/main/apps/mcp-server/README.md#30-second-setup).
 
 ### How bi-directional access works
 
@@ -391,8 +393,8 @@ Claude Code, and HTTP clients are maintained in the
   read incoming messages. Polling remains the MCP-server path; service bots
   that need push should use `/api/webhooks`.
 
-There is no "bot mode" — your agent IS you. Scope labels are visible metadata
-today; they are not yet enforced as read/write authorization boundaries.
+Your agent acts as you. Context enforces read/write scopes; see the scope
+limitations for older endpoints above.
 
 ---
 
