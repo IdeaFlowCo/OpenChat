@@ -13,7 +13,7 @@ export function IntentionLifecycleControls({ intention, onChange }: { intention:
   const [busy, setBusy] = useState(false), [error, setError] = useState(''); const pending = useRef(false);
   const prepare = async (target: IntentionLifecycleState) => {
     if (pending.current) return; pending.current = true; setBusy(true); setError('');
-    try { const current = (await api.getContextIntentions()).intentions.find(item => item.intentId === intention.intentId); if (!current) throw new Error('This intention is unavailable. Refresh before trying again.'); setReview({ current, target }); }
+    try { const { intention: current } = await api.getContextIntention(intention.intentId); setReview({ current, target }); }
     catch (e) { setError(e instanceof Error ? e.message : 'Could not review this change.'); }
     finally { pending.current = false; setBusy(false); }
   };

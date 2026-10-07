@@ -43,6 +43,14 @@ export async function listContextIntentions(session:Session,userId:string){
     return {intentions};
   });
 }
+/** Direct owner lookup is independent of the bounded inventory window. */
+export async function getContextIntention(session:Session,userId:string,intentId:string){
+  return session.executeRead(async tx=>{
+    const result=await tx.run('MATCH (:User {id:$userId})-[:OWNS_INTENT]->(i:AgentIntent {id:$intentId}) RETURN i',{userId,intentId});
+    if(!result.records.length)throw new ContextLaneError(404,'Intention not found');
+    return {intention:await project(tx,userId,result.records[0].get('i').properties)};
+  });
+}
 export async function trackContextIntention(session:Session,userId:string,conversationId:string,postId:string,input:{sourceRevision:number;clientRequestId:string;intentId?:string}){
   if(!Number.isInteger(input.sourceRevision)||input.sourceRevision<1||typeof input.clientRequestId!=='string'||!input.clientRequestId.trim()||input.clientRequestId.length>200||
     (input.intentId!==undefined&&(typeof input.intentId!=='string'||!input.intentId.trim())))throw new ContextLaneError(400,'A source revision and clientRequestId are required');

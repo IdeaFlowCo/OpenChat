@@ -780,7 +780,7 @@ export type ConversationContentItem = {
   provenance: 'context' | 'pinned' | 'message_capture' | 'private_note';
   sourceAliases: string[];
 } & ({ origin: 'context'; context: ContextPost } | { origin: 'stream'; thought: Thought });
-export interface ConversationContentPage { items: ConversationContentItem[]; nextCursor?: string }
+export interface ConversationContentPage { contextAvailable?: boolean; items: ConversationContentItem[]; nextCursor?: string }
 
 /** Chat-scoped thoughts payload (GET /api/thoughts/conversation/:id). */
 export interface ConversationThoughts {
@@ -994,6 +994,7 @@ export const api = {
   createContextWebhook: (input: { url: string; conversationId: string; agentKeyId: string; clientRequestId: string; consent: true }) => request<{ subscription: ContextWebhookSubscription; secret: string }>('/api/chat/context-webhooks', { method: 'POST', body: JSON.stringify(input), expireAuthOnForbidden: false }),
   deleteContextWebhook: (id: string) => request<{ deleted: boolean }>(`/api/chat/context-webhooks/${encodeURIComponent(id)}`, { method: 'DELETE', expireAuthOnForbidden: false }),
 
+  getContextIntention: (intentId: string) => request<{ intention: ContextIntention }>(`/api/chat/context-intentions/${encodeURIComponent(intentId)}`, { expireAuthOnForbidden: false }),
   getContextIntentions: () => request<{ intentions: ContextIntention[] }>('/api/chat/context-intentions', { expireAuthOnForbidden: false }),
   trackContextIntention: (conversationId: string, postId: string, input: { sourceRevision: number; clientRequestId: string; intentId?: string }) => request<{ intention: ContextIntention }>(`/api/chat/conversations/${encodeURIComponent(conversationId)}/context/${encodeURIComponent(postId)}/intention`, { method: 'POST', body: JSON.stringify(input), expireAuthOnForbidden: false }),
   updateContextIntention: (intentId: string, input: { expectedRevision: number; lifecycleState: IntentionLifecycleState }) => request<{ intention: ContextIntention }>(`/api/chat/context-intentions/${encodeURIComponent(intentId)}`, { method: 'PATCH', body: JSON.stringify(input), expireAuthOnForbidden: false }),

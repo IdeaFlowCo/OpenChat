@@ -5,6 +5,7 @@ export function useConversationContent(accountId: string, conversationId: string
   const [items, setItems] = useState<ConversationContentItem[]>([]);
   const [filter, setFilter] = useState<ConversationContentFilter>('all');
   const [search, setSearch] = useState('');
+  const [contextAvailable, setContextAvailable] = useState<boolean>();
   const [cursor, setCursor] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -21,6 +22,7 @@ export function useConversationContent(accountId: string, conversationId: string
       if (!alive.current || revision !== sequence.current) return;
       setItems(previous => more ? [...new Map([...previous, ...page.items].map(item => [item.id, item])).values()] : page.items);
       setCursor(page.nextCursor);
+      setContextAvailable(page.contextAvailable !== false);
     } catch (e) {
       if (!alive.current || revision !== sequence.current) return;
       if ([401, 403, 404].includes((e as { status?: number }).status || 0)) { setItems([]); setCursor(undefined); }
@@ -30,5 +32,5 @@ export function useConversationContent(accountId: string, conversationId: string
   const chooseFilter = (value: ConversationContentFilter) => { if (value === state.current.filter) return; sequence.current++; setItems([]); setCursor(undefined); setFilter(value); };
   const chooseSearch = (value: string) => { if (value === state.current.search) return; sequence.current++; setItems([]); setCursor(undefined); setSearch(value); };
   useEffect(() => { const timer = setTimeout(() => void load(), search ? 250 : 0); return () => clearTimeout(timer); }, [filter, search, load]);
-  return { items, filter, search, loading, error, hasMore: !!cursor, load, chooseFilter, chooseSearch };
+  return { items, contextAvailable, filter, search, loading, error, hasMore: !!cursor, load, chooseFilter, chooseSearch };
 }

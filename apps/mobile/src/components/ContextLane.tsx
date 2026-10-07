@@ -48,6 +48,7 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
   const [feedback, setFeedback] = useState<{ text: string; error: boolean }>();
 
   useEffect(() => { contextLaneManager.setAccount(accountId); }, [accountId]);
+  useEffect(() => { if (feed.contextAvailable === false) { setEditing(undefined); setReplyTo(undefined); setConfirmDelete(undefined); setReporting(undefined); } }, [feed.contextAvailable]);
   const load = feed.load;
   useFocusEffect(useCallback(() => {
     const refresh = () => { if (AppState.currentState === 'active') void load(); };
@@ -102,10 +103,11 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
   };
   return <View style={styles.container}>
     <View style={[styles.toolbar, { borderBottomColor: c.border }]}>
-      <TextInput accessibilityLabel="Search conversation content" placeholder="Search Context and Stream" placeholderTextColor={c.textMuted} value={search} onChangeText={feed.chooseSearch} style={[styles.search, { color: c.textPrimary, backgroundColor: c.surface, borderColor: c.border }]} />
+      <TextInput accessibilityLabel="Search conversation content" placeholder={feed.contextAvailable === false ? 'Search Stream' : 'Search Context and Stream'} placeholderTextColor={c.textMuted} value={search} onChangeText={feed.chooseSearch} style={[styles.search, { color: c.textPrimary, backgroundColor: c.surface, borderColor: c.border }]} />
       {search ? button('Clear search', () => feed.chooseSearch('')) : null}{button('Refresh', () => void load())}
     </View>
-    <View style={[styles.actions, { paddingHorizontal: 12 }]}>{(['all', 'context', 'stream'] as const).map(filter => <TouchableOpacity key={filter} accessibilityRole="button" accessibilityLabel={`${filter === 'all' ? 'All content' : filter === 'context' ? 'Context posts' : 'Stream entries'}`} accessibilityState={{ selected: feed.filter === filter }} onPress={() => feed.chooseFilter(filter)} style={[styles.action, { backgroundColor: feed.filter === filter ? c.primaryMuted : undefined, borderRadius: 8 }]}><Text style={{ color: c.primary }}>{filter === 'all' ? 'All' : filter === 'context' ? 'Context' : 'Stream'}</Text></TouchableOpacity>)}{button('Private entry', () => setCreatingPrivate(true))}</View>
+    <View style={[styles.actions, { paddingHorizontal: 12 }]}>{(feed.contextAvailable === false ? ['stream'] as const : ['all', 'context', 'stream'] as const).map(filter => <TouchableOpacity key={filter} accessibilityRole="button" accessibilityLabel={`${filter === 'all' ? 'All content' : filter === 'context' ? 'Context posts' : 'Stream entries'}`} accessibilityState={{ selected: feed.contextAvailable === false || feed.filter === filter }} onPress={() => feed.chooseFilter(filter)} style={[styles.action, { backgroundColor: feed.contextAvailable === false || feed.filter === filter ? c.primaryMuted : undefined, borderRadius: 8 }]}><Text style={{ color: c.primary }}>{filter === 'all' ? 'All' : filter === 'context' ? 'Context' : 'Stream'}</Text></TouchableOpacity>)}{button('Private entry', () => setCreatingPrivate(true))}</View>
+    {feed.contextAvailable === false && <Text style={{ color: c.textMetadata, paddingHorizontal: 16 }}>Context is unavailable. This chat’s Stream and your private entries remain available.</Text>}
     {creatingPrivate && <ConversationEntryEditor conversationId={conversationId} onCancel={() => setCreatingPrivate(false)} onDone={() => { setCreatingPrivate(false); void load(); }} />}
     {feedback && <Text accessibilityRole={feedback.error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={{ color: feedback.error ? c.danger : c.textMetadata, padding: 12 }}>{feedback.text}</Text>}
     {state.isError && <View style={{ paddingHorizontal: 16 }}><Text accessibilityRole="alert" style={{ color: c.danger }}>{feed.error} {feed.items.length ? 'Showing previously loaded content.' : ''}</Text>{button('Retry', () => void load())}</View>}
@@ -114,8 +116,8 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
       refreshing={state.isLoading} onRefresh={() => void load()}
       onEndReached={() => { if (!state.isError) void load(true); }} onEndReachedThreshold={0.5}
       ListFooterComponent={state.hasMore && feed.items.length ? button('Load older content', () => void load(true)) : null}
-      ListEmptyComponent={state.isLoading ? <ActivityIndicator color={c.primary} style={{ margin: 24 }} /> : !state.isError ? <Text style={{ color: c.textMetadata, textAlign: 'center', margin: 24 }}>{search ? 'No matching conversation content.' : 'Context posts and this chat’s Stream entries appear here. Private entries are labeled Only you.'}</Text> : null} />
-    <ContextComposer key={`${conversationId}:${editing?.id || replyTo?.id || 'new'}`} conversationId={conversationId} editing={editing} replyTo={replyTo} onDone={() => { setEditing(undefined); setReplyTo(undefined); void load(); }} />
+      ListEmptyComponent={state.isLoading ? <ActivityIndicator color={c.primary} style={{ margin: 24 }} /> : !state.isError ? <Text style={{ color: c.textMetadata, textAlign: 'center', margin: 24 }}>{search ? 'No matching conversation content.' : feed.contextAvailable === false ? 'This chat’s Stream entries appear here. Private entries are labeled Only you.' : 'Context posts and this chat’s Stream entries appear here. Private entries are labeled Only you.'}</Text> : null} />
+    {feed.contextAvailable === true && <ContextComposer key={`${conversationId}:${editing?.id || replyTo?.id || 'new'}`} conversationId={conversationId} editing={editing} replyTo={replyTo} onDone={() => { setEditing(undefined); setReplyTo(undefined); void load(); }} />}
   </View>;
 }
 const styles = StyleSheet.create({

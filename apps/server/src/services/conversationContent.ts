@@ -4,11 +4,11 @@ import { checkContextReadAccess } from './contextAccess.js';
 import { ContextLaneError, projectContextPost } from './contextLane.js';
 
 export type ContentFilter = 'all' | 'context' | 'stream';
-export interface ConversationContentOptions { filter?: ContentFilter; search?: string; cursor?: string; limit?: number; includePrivate?: boolean }
+export interface ConversationContentOptions { filter?: ContentFilter; search?: string; cursor?: string; limit?: number; includePrivate?: boolean; contextAvailable?: boolean }
 const asString = (value: any): string | undefined => value == null ? undefined : String(value);
 /** A cursor is bound to the viewer and exact query, never an access grant. */
 export function contentCursorScope(userId: string, conversationId: string, options: ConversationContentOptions) {
-  return createHash('sha256').update(JSON.stringify([userId, conversationId, options.filter || 'all', options.search || '', options.includePrivate === true])).digest('hex');
+  return createHash('sha256').update(JSON.stringify([userId, conversationId, options.filter || 'all', options.search || '', options.includePrivate === true, options.contextAvailable !== false])).digest('hex');
 }
 export async function listConversationContent(session: Session, userId: string, conversationId: string, options: ConversationContentOptions = {}, agentKeyId?: string, agentScopes?: string[]) {
   if (options.filter && !['all', 'context', 'stream'].includes(options.filter)) throw new ContextLaneError(400, 'Invalid content filter');
@@ -16,7 +16,9 @@ export async function listConversationContent(session: Session, userId: string, 
   if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100)) throw new ContextLaneError(400, 'limit must be between 1 and 100');
   // Even a misconfigured caller cannot expose owner-private entries to an API key.
   const includePrivate = options.includePrivate === true && !agentKeyId;
-  const scope = contentCursorScope(userId, conversationId, { ...options, includePrivate });
+  const contextAvailable = options.contextAvailable !== false;
+  const filter = contextAvailable ? options.filter || 'all' : 'stream';
+  const scope = contentCursorScope(userId, conversationId, { ...options, filter, includePrivate, contextAvailable });
   let cursor: { at: string; id: string; scope: string } | undefined;
   if (options.cursor) {
     try { cursor = JSON.parse(Buffer.from(options.cursor, 'base64url').toString()); } catch { throw new ContextLaneError(400, 'Invalid content cursor'); }
@@ -75,7 +77,7 @@ export async function listConversationContent(session: Session, userId: string, 
         CASE WHEN source.deletedAt IS NULL AND EXISTS { MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:source.conversationId}) } THEN source.conversationId ELSE null END AS sourceConversationId,
         parent.id AS parentId, parent.text AS parentText, parent.deletedAt AS parentDeletedAt, parent.authorId AS parentAuthorId, parentAuthor.name AS parentAuthorName
       ORDER BY t.createdAt DESC,t.id DESC`, {
-      userId, conversationId, filter: options.filter || 'all', search: options.search || '', includePrivate,
+      userId, conversationId, filter, search: options.search || '', includePrivate,
       cursorAt: cursor?.at ?? null, cursorId: cursor?.id ?? '', limit: limit + 1,
     });
     const items = result.records.slice(0, limit).map(record => {
@@ -97,6 +99,6 @@ export async function listConversationContent(session: Session, userId: string, 
       } };
     });
     const last = items.at(-1);
-    return { items, ...(result.records.length > limit && last ? { nextCursor: Buffer.from(JSON.stringify({ at: last.createdAt, id: last.id, scope })).toString('base64url') } : {}) };
+    return { items, contextAvailable, ...(result.records.length > limit && last ? { nextCursor: Buffer.from(JSON.stringify({ at: last.createdAt, id: last.id, scope })).toString('base64url') } : {}) };
   });
 }

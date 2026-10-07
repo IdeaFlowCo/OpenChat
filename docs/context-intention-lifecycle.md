@@ -23,6 +23,11 @@ not create a Story, an agent scan, a Message or a notification.
 - `GET /api/chat/context-intentions` returns grouped owner intentions and their
   currently accessible Context projections plus owned Stories. Private inventory
   is never returned to API keys, connector operations or embedded sessions.
+- `GET /api/chat/context-intentions/:id` returns one currently owned intention,
+  including its current revision and eligible linked projections. Lifecycle
+  confirmation uses this direct lookup, so intentions older than the 200-item
+  inventory window remain reviewable. Foreign or missing IDs return 404; agent,
+  connector and embedded credentials cannot read this owner-private detail.
 - `POST /api/chat/conversations/:conversationId/context/:postId/intention` accepts
   `{sourceRevision,clientRequestId,intentId?}`. Omitting `intentId` tracks a new
   canonical intention; supplying it links the author's existing intention.

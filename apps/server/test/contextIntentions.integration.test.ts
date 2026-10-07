@@ -7,7 +7,7 @@ import {createCipheriv,randomBytes} from 'node:crypto';
 const state=vi.hoisted(()=>({driver:null as any}));
 vi.mock('../src/db.js',()=>({getDriver:()=>state.driver}));
 import {createContextPost,deleteContextPost,listContextPosts,updateContextPost} from '../src/services/contextLane.js';
-import {trackContextIntention,listContextIntentions,updateContextIntention} from '../src/services/contextIntentions.js';
+import {getContextIntention,trackContextIntention,listContextIntentions,updateContextIntention} from '../src/services/contextIntentions.js';
 import {askContextAgents,listContextAgentRequests,respondToContextAgentRequest} from '../src/services/contextAgentRequests.js';
 import {scanIntentForMatches,withdrawIntent} from '../src/services/agentNetwork.js';
 import {connectorOperationGuard} from '../src/routes/ideaflowConnector.js';
@@ -28,6 +28,21 @@ integration('Context canonical intention lifecycle with real Neo4j',()=>{
  beforeEach(async()=>{await cleanup();await run(`CREATE (a:User {id:$a,name:'Alice'}),(b:User {id:$b,name:'Bob'}),(c:Conversation {id:$room,name:'Synthetic room',type:'group',lastMessageAt:'before'})
    CREATE (a)-[:PARTICIPATES_IN {role:'owner',lastReadAt:'before'}]->(c),(b)-[:PARTICIPATES_IN {role:'member',lastReadAt:'before'}]->(c)`,{a,b,room});});
  afterAll(async()=>{await cleanup();await driver.close();});
+ it('direct owner review reaches an intention older than the bounded inventory and rejects foreign/unauthenticated readers',async()=>{
+  const id=prefix+'-oldest';
+  await run(`MATCH (u:User {id:$a}) CREATE (u)-[:OWNS_INTENT]->(:AgentIntent {id:$id,goal:'Old private goal',status:'paused',lifecycleRevision:7,createdAt:datetime('2020-01-01')})
+    WITH u UNWIND range(1,200) AS n CREATE (u)-[:OWNS_INTENT]->(:AgentIntent {id:$prefix+'-new-'+toString(n),status:'paused',createdAt:datetime()})`,{a,id,prefix});
+  const inventory=await session(s=>listContextIntentions(s,a));expect(inventory.intentions).toHaveLength(200);expect(inventory.intentions.some(i=>i.intentId===id)).toBe(false);
+  expect((await session(s=>getContextIntention(s,a,id))).intention).toMatchObject({intentId:id,revision:7,goal:'Old private goal'});
+  await expect(session(s=>getContextIntention(s,b,id))).rejects.toMatchObject({statusCode:404});
+  const app=express();app.use('/api/chat',routes);const url='/api/chat/context-intentions/'+id;
+  const token=(userId:string,embedded?:string)=>jwt.sign({userId,email:'synthetic@example.test',...(embedded?{embedded}:{})},process.env.JWT_SECRET!);
+  expect((await request(app).get(url)).status).toBe(401);
+  expect((await request(app).get(url).set('Authorization','Bearer oc_synthetic-key')).status).toBe(401);
+  const owner=await request(app).get(url).set('Authorization','Bearer '+token(a));expect(owner.status).toBe(200);expect(owner.headers['cache-control']).toBe('no-store');expect(owner.body.intention.intentId).toBe(id);
+  const foreign=await request(app).get(url).set('Authorization','Bearer '+token(b));expect(foreign.status).toBe(404);expect(JSON.stringify(foreign.body)).not.toContain('Old private goal');
+  expect((await request(app).get(url).set('Authorization','Bearer '+token(a,'unlinked'))).status).toBe(403);
+ });
  it('tracks explicitly once under concurrency, leaves network and Stories off, and exposes only safe shared summary',async()=>{
   const p=await post();const [left,right]=await Promise.all([track(p),track(p)]);expect(left.intention.intentId).toBe(right.intention.intentId);
   expect(left.intention).toMatchObject({searchStatus:'paused',contextOnly:true,lifecycleState:'open',kind:'ask'});expect(left.intention.stories).toEqual([]);
@@ -101,6 +116,9 @@ integration('Context canonical intention lifecycle with real Neo4j',()=>{
   expect((await request(app).get('/api/chat/context-intentions').set('Authorization',`Bearer ${embedded}`)).status).toBe(403);
   const operation=issueConnectorOperation(a,{method:'GET',path:'/api/chat/context-intentions'},['openchat:read']);
   expect((await request(app).get('/api/chat/context-intentions').set('Authorization',`Bearer ${operation}`)).status).toBe(401);
+  const detailPath='/api/chat/context-intentions/'+prefix+'-private';
+  const detailOperation=issueConnectorOperation(a,{method:'GET',path:detailPath},['openchat:read']);
+  expect((await request(app).get(detailPath).set('Authorization',`Bearer ${detailOperation}`)).status).toBe(401);
  });
  it('keeps old agent requests invalid after close/reopen and enforces the open-publication quota',async()=>{
   const linked=await track(await post()),id=linked.intention.intentId,p=linked.intention.contextPosts[0].post,key=prefix+'-key';

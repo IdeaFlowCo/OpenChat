@@ -20,8 +20,10 @@ it('an OpenAPI consumer resolves and validates both discriminated response varia
   expect(operation.operationId).toBe('listConversationContent'); expect(operation.externalDocs.url).toBe('https://chat.ideaflow.app/agents/conversation-content');
   const ajv = new Ajv2020({ strict: false }); addFormats(ajv);
   const validate = ajv.compile({ ...operation.responses['200'].content['application/json'].schema, components: spec.components });
-  for (const page of [{ items: [] }, { items: [context, stream], nextCursor: 'opaque-next-page' }, { items: [{ ...stream, visibility: 'private', provenance: 'private_note' }] }]) expect(validate(page), JSON.stringify(validate.errors)).toBe(true);
-  for (const page of [{ items: [{ ...context, visibility: 'private' }] }, { items: [{ ...stream, origin: 'message' }] }, { items: [{ ...stream, thought: { id: 'missing-body' } }] }, { items: [context], nextCursor: 7 }]) expect(validate(page)).toBe(false);
+  for (const page of [{ items: [] }, { items: [context, stream], nextCursor: 'opaque-next-page' }, { items: [{ ...stream, visibility: 'private', provenance: 'private_note' }] }]) expect(validate({ contextAvailable: true, ...page }), JSON.stringify(validate.errors)).toBe(true);
+  for (const page of [{ items: [{ ...context, visibility: 'private' }] }, { items: [{ ...stream, origin: 'message' }] }, { items: [{ ...stream, thought: { id: 'missing-body' } }] }, { items: [context], contextAvailable: true, nextCursor: 7 }]) expect(validate({ contextAvailable: true, ...page })).toBe(false);
+  expect(validate({ items: [stream], contextAvailable: false })).toBe(true);
+  expect(validate({ items: [], contextAvailable: 'false' })).toBe(false);
   expect(operation.responses['200'].headers['Cache-Control'].schema.const).toBe('no-store');
 });
 it('schema query constraints allow the supported filters and reject malformed pagination inputs', async () => {

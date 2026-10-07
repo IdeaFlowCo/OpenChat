@@ -120,6 +120,7 @@ vi.mock('../../mobile/src/services/thoughts', () => ({
   deleteThought: vi.fn(),
 }));
 
+import { ContextComposer } from '../../mobile/src/components/ContextComposer';
 import { ConversationThoughtsScreen } from '../../mobile/src/screens/ConversationThoughtsScreen.js';
 import { ThoughtCard } from '../../mobile/src/components/ThoughtCard.js';
 import { ChatScreen } from '../../mobile/src/screens/ChatScreen.js';
@@ -210,6 +211,19 @@ describe('ConversationThoughtsScreen parity & search', () => {
     await act(async () => input.props.onChangeText('Saved'));
     await act(async () => button('Save entry').props.onPress());
     expect(mocks.createThought).toHaveBeenCalledWith({ text: 'Saved', scopeConversationId: 'conv-1' });
+  });
+
+  it('keeps private Stream creation and search usable with Context disabled and hides Context controls', async () => {
+    mocks.content.mockResolvedValue({ items: [entry('Private memory with Context off')], contextAvailable: false });
+    mocks.createThought.mockResolvedValue(entry('Saved privately').thought); await mount();
+    expect(JSON.stringify(screen!.toJSON())).toContain('Private memory with Context off');
+    expect(button('Context posts')).toBeUndefined();
+    expect(screen!.root.findAllByType(ContextComposer)).toHaveLength(0);
+    expect(screen!.root.findAllByProps({ accessibilityLabel: 'Search conversation content' })[0].props.placeholder).toBe('Search Stream');
+    await act(async () => button('Private entry').props.onPress());
+    await act(async () => screen!.root.findAllByType('TextInput' as any).find(node => node.props.accessibilityLabel === 'Stream entry text')!.props.onChangeText('Saved privately'));
+    await act(async () => button('Save entry').props.onPress());
+    expect(mocks.createThought).toHaveBeenCalledWith({ text: 'Saved privately', scopeConversationId: 'conv-1' });
   });
 
   it('requires an exact private-entry sharing preview before pinning into the shared chat', async () => {

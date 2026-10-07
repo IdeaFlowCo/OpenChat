@@ -35,6 +35,18 @@ integration('unified conversation content audience and pagination with real Neo4
     expect(JSON.stringify(page)).not.toContain('PRIVATE other note'); expect(JSON.stringify(page)).not.toContain('DELETED PRIVATE TEXT');
     expect(page.items.find(item => item.origin === 'context' && item.context.replyToId)?.context?.replyTo?.text).toBe('Context question');
   });
+  it('Context-off reads preserve Stream audiences and bind cursors to effective availability', async () => {
+    const human = await read({ contextAvailable: false, includePrivate: true });
+    expect(human.contextAvailable).toBe(false); expect(human.items).toHaveLength(3);
+    expect(human.items.every(item => item.origin === 'stream')).toBe(true);
+    expect(JSON.stringify(human)).toContain('PRIVATE owner note'); expect(JSON.stringify(human)).not.toContain('PRIVATE other note');
+    const agent = await read({ contextAvailable: false, includePrivate: true }, a, key, ['read']);
+    expect(agent.items).toHaveLength(2); expect(JSON.stringify(agent)).not.toContain('PRIVATE');
+    const cursor = (await read({ contextAvailable: false, includePrivate: true, limit: 1 })).nextCursor;
+    expect((await read({ contextAvailable: false, includePrivate: true, filter: 'stream', cursor })).items).toHaveLength(2);
+    await expect(read({ contextAvailable: true, includePrivate: true, filter: 'stream', cursor })).rejects.toMatchObject({ statusCode: 400 });
+    await expect(read({ contextAvailable: false }, 'non-member')).rejects.toMatchObject({ statusCode: 403 });
+  });
   it('coalesces legacy capture aliases before pagination and unions tags deterministically', async () => {
     const row = (await read()).items.find(item => item.id === `${prefix}-tag1`)!;
     expect(row.sourceAliases).toEqual([`${prefix}-tag1`, `${prefix}-tag2`]);

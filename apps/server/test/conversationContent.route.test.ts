@@ -29,8 +29,18 @@ it('rejects unauthenticated requests and keys without read scope before reading 
   mocks.actor = 'anonymous'; expect((await request(app).get(path)).status).toBe(401);
   mocks.actor = 'write-key'; expect((await request(app).get(path)).status).toBe(403); expect(mocks.read).not.toHaveBeenCalled();
 });
-it('rejects malformed filters and maintains feature availability before any database read', async () => {
+it('rejects malformed query values before any database read', async () => {
   expect((await request(app).get(path+'?filter=context&filter=stream')).status).toBe(400);
   expect((await request(app).get(path+'?limit=1.5')).status).toBe(400);
-  mocks.enabled = false; expect((await request(app).get(path)).status).toBe(404); expect(mocks.read).not.toHaveBeenCalled();
+  expect(mocks.read).not.toHaveBeenCalled();
+});
+
+it('keeps Stream reachable with Context off and preserves private actor boundaries', async () => {
+  mocks.enabled = false; mocks.read.mockResolvedValue({ items: [], contextAvailable: false });
+  for (const actor of ['human', 'key', 'connector', 'delegation', 'embed']) {
+    mocks.actor = actor;
+    const response = await request(app).get(path + '?filter=all');
+    expect(response.status).toBe(200); expect(response.body.contextAvailable).toBe(false);
+    expect(mocks.read.mock.calls.at(-1)![3]).toMatchObject({ contextAvailable: false, includePrivate: actor === 'human' });
+  }
 });

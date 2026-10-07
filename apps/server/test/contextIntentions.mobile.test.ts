@@ -1,11 +1,11 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ list: vi.fn(), track: vi.fn(), update: vi.fn(), user: 'alice', change: vi.fn() }));
+const mocks = vi.hoisted(() => ({ detail: vi.fn(), list: vi.fn(), track: vi.fn(), update: vi.fn(), user: 'alice', change: vi.fn() }));
 vi.mock('react-native', () => ({ Text: 'Text', View: 'View', TouchableOpacity: 'TouchableOpacity' }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ currentUser: { userId: mocks.user } }) }));
-vi.mock('../../mobile/src/api/client', () => ({ api: { getContextIntentions: mocks.list, trackContextIntention: mocks.track, updateContextIntention: mocks.update } }));
+vi.mock('../../mobile/src/api/client', () => ({ api: { getContextIntention: mocks.detail, getContextIntentions: mocks.list, trackContextIntention: mocks.track, updateContextIntention: mocks.update } }));
 import { ContextIntentionControls, IntentionLifecycleControls } from '../../mobile/src/components/ContextIntentionControls';
 const intent = { intentId: 'same-intent', revision: 4, lifecycleState: 'open', searchStatus: 'paused', kind: 'ask', goal: 'Owner private intention', seeks: [], brings: [], contextPosts: [{ postId: 'p1' }, { postId: 'p2' }], stories: [{ id: 's1' }] };
 const post: any = { id: 'post', revision: 7, authorId: 'alice', kind: 'ask', text: 'Already shared ask' };
@@ -13,7 +13,7 @@ let tree: ReactTestRenderer;
 const rendered = () => JSON.stringify(tree.toJSON());
 const button = (label: string) => tree.root.findAllByType('TouchableOpacity' as any).find(node => node.props.accessibilityLabel === label)!;
 const press = async (label: string) => { await act(async () => button(label).props.onPress()); };
-beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; vi.clearAllMocks(); mocks.user = 'alice'; mocks.list.mockResolvedValue({ intentions: [intent] }); mocks.track.mockResolvedValue({ intention: intent }); mocks.update.mockResolvedValue({ intention: intent }); });
+beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; vi.clearAllMocks(); mocks.user = 'alice'; mocks.list.mockResolvedValue({ intentions: [intent] }); mocks.detail.mockResolvedValue({ intention: intent }); mocks.track.mockResolvedValue({ intention: intent }); mocks.update.mockResolvedValue({ intention: intent }); });
 afterEach(async () => { if (tree) await act(async () => tree.unmount()); });
 it('tracking requires an explicit owner action and retries with the same identity', async () => {
   mocks.track.mockRejectedValueOnce(new Error('Network lost'));
@@ -37,8 +37,24 @@ it('fulfillment reviews all linked projections and confirms the current revision
   await press('Confirm intention change'); expect(mocks.update).toHaveBeenCalledWith('same-intent', { expectedRevision: 4, lifecycleState: 'fulfilled' });
 });
 it('stale lifecycle approval requires another explicit review and reopen does not promise resumed search', async () => {
-  mocks.list.mockResolvedValue({ intentions: [{ ...intent, lifecycleState: 'fulfilled' }] }); mocks.update.mockRejectedValue(Object.assign(new Error('Intention changed; reload'), { status: 409 }));
+  mocks.detail.mockResolvedValue({ intention: { ...intent, lifecycleState: 'fulfilled' } }); mocks.update.mockRejectedValue(Object.assign(new Error('Intention changed; reload'), { status: 409 }));
   await act(async () => { tree = create(React.createElement(IntentionLifecycleControls, { intention: { ...intent, lifecycleState: 'fulfilled' } as any, onChange: mocks.change })); });
   await press('Reopen intention'); expect(rendered()).toContain('Matching stays paused'); await press('Confirm intention change');
   expect(button('Confirm intention change')).toBeUndefined(); expect(rendered()).toContain('Intention changed'); expect(mocks.update).toHaveBeenCalledTimes(1);
+});
+
+it('reviews the selected older intention directly even when absent from the latest inventory', async () => {
+  mocks.list.mockResolvedValue({ intentions: [] });
+  mocks.detail.mockResolvedValue({ intention: { ...intent, revision: 9 } });
+  await act(async () => { tree = create(React.createElement(IntentionLifecycleControls, { intention: intent as any, onChange: mocks.change })); });
+  await press('Mark fulfilled');
+  expect(mocks.list).not.toHaveBeenCalled(); expect(mocks.detail).toHaveBeenCalledWith('same-intent');
+  await press('Confirm intention change');
+  expect(mocks.update).toHaveBeenCalledWith('same-intent', { expectedRevision: 9, lifecycleState: 'fulfilled' });
+});
+it('does not offer confirmation when the selected intention is no longer owned or available', async () => {
+  mocks.detail.mockRejectedValue(Object.assign(new Error('Intention not found'), { status: 404 }));
+  await act(async () => { tree = create(React.createElement(IntentionLifecycleControls, { intention: intent as any, onChange: mocks.change })); });
+  await press('Mark fulfilled'); expect(button('Confirm intention change')).toBeUndefined();
+  expect(rendered()).toContain('Intention not found'); expect(mocks.update).not.toHaveBeenCalled();
 });

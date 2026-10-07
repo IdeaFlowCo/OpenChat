@@ -300,9 +300,10 @@ const ConversationContentItem = {
 } as const;
 const ConversationContentPage = {
   type: 'object', properties: {
+    contextAvailable: { type: 'boolean', description: 'When false, only authorized Stream entries are returned and clients should hide Context posting/filter controls.' },
     items: { type: 'array', maxItems: 100, items: { $ref: '#/components/schemas/ConversationContentItem' } },
     nextCursor: { type: 'string', description: 'Opaque cursor for the next page, absent at the end. Bound to account, conversation, filter, search, and private visibility.' },
-  }, required: ['items'],
+  }, required: ['items', 'contextAvailable'],
 } as const;
 
 const ReactionSummary = {
