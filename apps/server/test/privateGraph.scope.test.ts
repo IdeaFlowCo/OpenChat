@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ scopes: undefined as string[] | undefined, getPersonOverlay: vi.fn(), addNote: vi.fn(), deleteNote: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scopes: undefined as string[] | undefined, getPersonOverlay: vi.fn(), createPrivateThing: vi.fn(), addNote: vi.fn(), deleteNote: vi.fn() }));
 vi.mock('../src/middleware/resolveActor.js', () => ({
   resolveActor: (req: express.Request, _res: express.Response, next: express.NextFunction) => {
     req.user = { userId: 'alice', email: '' };
@@ -13,7 +13,7 @@ vi.mock('../src/middleware/resolveActor.js', () => ({
 }));
 vi.mock('../src/services/privateGraph.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/privateGraph.js')>('../src/services/privateGraph.js');
-  return { ...actual, getPersonOverlay: mocks.getPersonOverlay, addNote: mocks.addNote, deleteNote: mocks.deleteNote };
+  return { ...actual, getPersonOverlay: mocks.getPersonOverlay, createPrivateThing: mocks.createPrivateThing, addNote: mocks.addNote, deleteNote: mocks.deleteNote };
 });
 import privateGraphRoutes from '../src/routes/privateGraph.js';
 
@@ -34,6 +34,7 @@ describe('private graph agent-key scopes', () => {
     mocks.getPersonOverlay.mockResolvedValue({ userId: 'bob', card: {}, notes: [], links: [] });
     mocks.addNote.mockResolvedValue({ id: 'n1' });
     mocks.deleteNote.mockResolvedValue({ deleted: true });
+    mocks.createPrivateThing.mockResolvedValue({id:'private-person',kind:'person',name:'Chet'});
   });
   afterAll(async () => { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
 
@@ -49,6 +50,15 @@ describe('private graph agent-key scopes', () => {
     expect((await call('POST', '/people/bob/notes', { text: 'x' })).status).toBe(201);
     mocks.scopes = [];
     expect((await call('GET', '/people/bob')).status).toBe(404);
+  });
+
+  it('requires write scope to create a private named subject', async () => {
+    mocks.scopes = ['read'];
+    expect((await call('POST','/things',{kind:'person',name:'Chet'})).status).toBe(404);
+    expect(mocks.createPrivateThing).not.toHaveBeenCalled();
+    mocks.scopes = ['write'];
+    expect((await call('POST','/things',{kind:'person',name:'Chet',ownerId:'mallory'})).status).toBe(201);
+    expect(mocks.createPrivateThing).toHaveBeenCalledWith('alice','person','Chet');
   });
 
   it('gives a signed-in person and a read-write key both', async () => {

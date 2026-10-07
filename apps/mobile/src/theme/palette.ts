@@ -34,29 +34,29 @@ export const palette = {
     primaryMuted: 'rgba(179, 84, 30, 0.13)',
   },
   dark: {
-    background: '#16130f',         // midnight ink
-    surface: '#201c16',
-    surfaceElevated: '#2a251d',
-    border: '#3a332a',
-    divider: '#3a332a',
-    textPrimary: '#ede5d8',        // paper-white
-    textSecondary: '#a89f8f',
-    textMetadata: '#a09688',       // readable small text on dark surfaces (>= 5.82:1)
+    background: '#242321',         // midnight ink
+    surface: '#2b2a27',
+    surfaceElevated: '#34332f',
+    border: '#46433d',
+    divider: '#46433d',
+    textPrimary: '#d6cfc4',        // paper-white
+    textSecondary: '#b0a89c',
+    textMetadata: '#b0a89c',       // readable small text on dark surfaces (>= 5.82:1)
     textMuted: '#7d7466',
-    primary: '#d97742',            // sienna, lifted for dark ground
-    onPrimary: '#1c1917',           // dark ink meets contrast on lifted sienna
+    primary: '#d49b74',            // sienna, lifted for dark ground
+    onPrimary: '#26231f',           // dark ink meets contrast on lifted sienna
     primaryActive: '#e08b5c',
-    bubbleOwn: '#ede5d8',          // paper block on ink ground (mirror of light)
-    bubbleOwnText: '#1c1917',
-    bubbleOther: '#201c16',
-    bubbleOtherText: '#ede5d8',
+    bubbleOwn: '#4a4139',          // paper block on ink ground (mirror of light)
+    bubbleOwnText: '#e4dbcf',
+    bubbleOther: '#2b2a27',
+    bubbleOtherText: '#d6cfc4',
     presenceAvailable: '#6da57c',
     presenceAway: '#d99a4e',
     presenceBusy: '#d05f4b',
     presenceOffline: '#7d7466',
     danger: '#d05f4b',
     dangerMuted: 'rgba(208, 95, 75, 0.16)',
-    primaryMuted: 'rgba(217, 119, 66, 0.16)',
+    primaryMuted: '#39312b',
   },
 };
 

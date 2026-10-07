@@ -286,7 +286,7 @@ export function ConversationsScreen() {
         ListHeaderComponent={
           <View>
           {!isUnlinkedEmbed() && <View style={[styles.peopleDoors, { borderBottomColor: c.divider }]}>
-            <TouchableOpacity onPress={() => navigation.navigate('Friends', { section: 'friends' })} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>Friends</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('Friends', { section: 'friends' })} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>People</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => navigation.navigate('Friends', { section: 'requests' })} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>{friendRequestCount ? `Requests (${friendRequestCount})` : 'Requests'}</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => navigation.navigate('NewConversation')} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>Find people</Text></TouchableOpacity>
           </View>}

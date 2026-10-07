@@ -146,6 +146,7 @@ export async function persistMessage(
     messageId?: string;
     matchContextKey?: string;
     agentDeliveryKey?: string;
+    assistantPageContext?: string;
   }
 ): Promise<{ message: Record<string, unknown>; participantIds: string[]; created: boolean } | null> {
   const messageId = opts?.messageId ?? nanoid();
@@ -178,6 +179,7 @@ export async function persistMessage(
       ON CREATE SET
         m.id = $id,
         m.content = $content,
+        m.assistantPageContext = $assistantPageContext,
         m.senderId = $senderId,
         m.conversationId = $conversationId,
         m.messageType = $messageType,
@@ -204,6 +206,7 @@ export async function persistMessage(
       {
         id: messageId,
         content: messageContent,
+        assistantPageContext: opts?.assistantPageContext ?? null,
         senderId,
         conversationId,
         now,
@@ -263,9 +266,10 @@ export async function postMessageAs(
   io: IOServer | undefined,
   senderId: string,
   conversationId: string,
-  content: string
+  content: string,
+  assistantPageContext?: Record<string, unknown>
 ): Promise<{ message: Record<string, unknown>; participantIds: string[]; created: boolean } | null> {
-  return persistMessage(io, senderId, conversationId, content);
+  return persistMessage(io, senderId, conversationId, content, { assistantPageContext: assistantPageContext ? JSON.stringify(assistantPageContext) : undefined });
 }
 
 // ─── Tool implementations (all scoped to the owning HUMAN userId) ─────────────
@@ -1574,7 +1578,7 @@ async function loadConversationContext(
       MATCH (m:Message {conversationId: $conversationId})
       WHERE m.deletedAt IS NULL
       OPTIONAL MATCH (sender:User {id: m.senderId})
-      RETURN m.content AS content, m.transcript AS transcript, m.attachments AS attachments,
+      RETURN m.content AS content, m.transcript AS transcript, m.attachments AS attachments, m.assistantPageContext AS pageContext,
              m.senderId AS senderId, sender.name AS senderName
       ORDER BY m.createdAt DESC
       LIMIT $limit
@@ -1589,6 +1593,7 @@ async function loadConversationContext(
           content: r.get('content') as string | null,
           transcript: r.get('transcript') as string | null,
           attachments: r.get('attachments'),
+          pageContext: r.get('pageContext'),
         }),
         senderId: r.get('senderId') as string,
         senderName: (r.get('senderName') as string | null) ?? 'User',

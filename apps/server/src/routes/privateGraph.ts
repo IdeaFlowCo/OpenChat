@@ -7,9 +7,11 @@
 import { Router, type Request, type Response } from 'express';
 import { resolveActor } from '../middleware/resolveActor.js';
 import {
-  addLink, addNote, deleteLink, deleteNote, getPersonOverlay, getThing, listDue, listThings,
+  addLink, addNote, createPrivateThing, deleteLink, deleteNote, getPersonOverlay, getThing, listDue, listThings,
   parseCardPatch, PrivateGraphError, updateNote, updatePersonCard,
 } from '../services/privateGraph.js';
+
+import { captureNoteReview, listNoteReviews, suggestNoteReview, applyNoteReview, undoNoteReview, updatePrivateAsk } from '../services/privateNoteReview.js';
 
 const router = Router();
 // The owner's session, or an agent key the owner issued. A key needs `read` to
@@ -50,6 +52,10 @@ router.post('/people/:userId/links', async (req: Request, res: Response) => {
   try { res.status(201).json(await addLink(owner(req), { kind: 'user', id: id(req, 'userId') }, req.body?.relation, req.body?.to)); } catch (error) { fail(error, res); }
 });
 
+router.post('/things', async (req: Request, res: Response) => {
+  try { res.status(201).json(await createPrivateThing(owner(req), req.body?.kind, req.body?.name)); } catch (error) { fail(error, res); }
+});
+
 router.get('/things', async (req: Request, res: Response) => {
   try { res.json(await listThings(owner(req), req.query.q, req.query.kind)); } catch (error) { fail(error, res); }
 });
@@ -78,4 +84,24 @@ router.delete('/links/:linkId', async (req: Request, res: Response) => {
   try { res.json(await deleteLink(owner(req), id(req, 'linkId'))); } catch (error) { fail(error, res); }
 });
 
+for (const [path, kind, key] of [['people', 'user', 'userId'], ['things', 'thing', 'thingId']] as const) {
+  router.post(`/${path}/:${key}/note-reviews`, async (req: Request, res: Response) => {
+    try { res.status(201).json(await captureNoteReview(owner(req), { kind, id: id(req, key) }, req.body)); } catch (error) { fail(error, res); }
+  });
+  router.get(`/${path}/:${key}/note-reviews`, async (req: Request, res: Response) => {
+    try { res.json(await listNoteReviews(owner(req), { kind, id: id(req, key) })); } catch (error) { fail(error, res); }
+  });
+}
+router.post('/note-reviews/:reviewId/suggest', async (req: Request, res: Response) => {
+  try { res.json(await suggestNoteReview(owner(req), id(req, 'reviewId'))); } catch (error) { fail(error, res); }
+});
+router.post('/note-reviews/:reviewId/apply', async (req: Request, res: Response) => {
+  try { res.json(await applyNoteReview(owner(req), id(req, 'reviewId'), req.body)); } catch (error) { fail(error, res); }
+});
+router.post('/note-reviews/:reviewId/undo', async (req: Request, res: Response) => {
+  try { res.json(await undoNoteReview(owner(req), id(req, 'reviewId'))); } catch (error) { fail(error, res); }
+});
+router.patch('/asks/:askId', async (req: Request, res: Response) => {
+  try { res.json(await updatePrivateAsk(owner(req), id(req, 'askId'), req.body)); } catch (error) { fail(error, res); }
+});
 export default router;

@@ -19,7 +19,36 @@ import {
   ASSISTANT_USER_ID,
 } from '../services/assistant.js';
 
+import { parsePageContext, resolvePageContext } from '../services/assistantPageContext.js';
+import { PrivateGraphError } from '../services/privateGraph.js';
+
 const router = Router();
+
+// The client names a page; the server supplies only this owner's readable context.
+// Always posts to the owner's private Assistant DM, never to the page's conversation.
+router.post('/context-message', resolveActor, async (req: Request, res: Response) => {
+  if (req.agentScopes && (!req.agentScopes.includes('read') || !req.agentScopes.includes('write'))) {
+    res.status(404).json({ error: 'Not available to this key' }); return;
+  }
+  const question = req.body?.question;
+  if (typeof question !== 'string' || !question.trim() || question.length > 4000) {
+    res.status(400).json({ error: 'Enter a question of at most 4000 characters' }); return;
+  }
+  try {
+    const context = parsePageContext(req.body?.context);
+    const data = await resolvePageContext(req.user!.userId, context);
+    const io = req.app.get('io') as IOServer | undefined;
+    const conversationId = await ensureAssistantConversation(req.user!.userId, io);
+    const posted = await postMessageAs(io, req.user!.userId, conversationId, question.trim(), data);
+    if (!posted) throw new Error('Message was not stored');
+    maybeTriggerAssistant({ senderId: req.user!.userId, conversationId, io });
+    res.status(201).json({ conversationId });
+  } catch (error) {
+    if (error instanceof PrivateGraphError) { res.status(error.status).json({ error: error.message }); return; }
+    console.error('Could not send page-context question');
+    res.status(500).json({ error: 'Could not ask your agent. Your question has been kept; try again.' });
+  }
+});
 
 // POST /api/assistant/ensure
 router.post('/ensure', resolveActor, async (req: Request, res: Response) => {

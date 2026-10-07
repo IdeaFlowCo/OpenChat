@@ -46,7 +46,7 @@ describe('asks on a contact profile', () => {
     mocks.listStoryFeed.mockResolvedValue([first, story('s2', 'carol', 'Someone else’s ask'), story('s3', 'bob', 'Hiring in Oakland?')]);
     await mount();
     expect(mocks.listStoryFeed).toHaveBeenCalledWith('bob');
-    expect(texts()).toContain('Asks · 2 shared with you');
+    expect(texts()).toContain('Shared with you · 2');
     expect(texts()).toContain('Looking for grid-storage founders');
     expect(texts()).toContain('Hiring in Oakland?');
     expect(texts()).not.toContain('Someone else’s ask');
@@ -57,7 +57,7 @@ describe('asks on a contact profile', () => {
   it('says so in one quiet line when nothing is shared', async () => {
     mocks.listStoryFeed.mockResolvedValue([]);
     await mount();
-    expect(texts()).toBe('Asks\nNothing shared with you right now.');
+    expect(texts()).toBe('Shared with you\nNothing shared with you right now.');
     expect(buttons('Respond')).toHaveLength(0);
   });
 

@@ -170,7 +170,7 @@ export function ContactProfileScreen() {
     <ScrollView style={[styles.root, { backgroundColor: c.background }]} contentContainerStyle={styles.content}>
       {/* Avatar + identity block */}
       <View style={styles.identity}>
-        <Avatar name={displayName} email={safeEmail || undefined} isBot={user.isBot} avatarUrl={user.avatarUrl} size={108} />
+        <Avatar name={displayName} email={safeEmail || undefined} isBot={user.isBot} avatarUrl={user.avatarUrl} size={72} />
         <View style={[styles.identityText]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             <Text style={[styles.name, { color: c.textPrimary }]} numberOfLines={1}>{displayName}</Text>
@@ -238,12 +238,13 @@ export function ContactProfileScreen() {
       }} />}
 
       {/* What they are asking for, limited to what they shared with you. */}
-      {canSetPrivateName && <ProfileAsks userId={userId} onOpenStory={story => navigation.navigate('StoryViewer', { story })} />}
 
       {/* Your own notes, importance, catch-up and links about this person. Collapsed until opened. */}
       {canSetPrivateName && (
         <PrivateCard
           userId={userId}
+          onAskAgent={() => navigation.navigate('AgentOverlay', { context: { kind: 'person', id: userId, label: displayName, includePrivate: true } })}
+          sharedAsks={<ProfileAsks userId={userId} onOpenStory={story => navigation.navigate('StoryViewer', { story })} />}
           onOpenThing={thingId => navigation.navigate('PrivateThing', { thingId })}
           onOpenPerson={id => navigation.push('ContactProfile', { userId: id })}
         />
@@ -271,8 +272,8 @@ export function ContactProfileScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  content: { padding: 16, alignItems: 'stretch' },
-  identity: { alignItems: 'center', paddingVertical: 24, gap: 12 },
+  content: { padding: 16, alignItems: 'stretch', width: '100%', maxWidth: 960, alignSelf: 'center' },
+  identity: { alignItems: 'center', paddingVertical: 16, gap: 12 },
   identityText: { alignItems: 'center', gap: 4 },
   name: { fontSize: 22, fontWeight: '700', maxWidth: 280, textAlign: 'center' },
   email: { fontSize: 14 },

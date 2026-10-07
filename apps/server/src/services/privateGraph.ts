@@ -176,7 +176,13 @@ async function principalFor(ownerId: string, issuer: unknown, subject: unknown):
   const ownerKey = ownerKeyFor(issuer, subject);
   // What they wrote before linking their sign-in follows them, once per process.
   if (!rekeyed.has(ownerId)) {
-    try { await (await store()).rekeyOwner(fallbackKey(ownerId), ownerKey); rekeyed.add(ownerId); }
+    try { await (await store()).rekeyOwner(fallbackKey(ownerId), ownerKey);
+      {
+        const db = getDriver().session();
+        try { for (const label of ['OpenChatNoteReview', 'OpenChatPrivateAsk']) await db.run(`MATCH (n:${label} {ownerKey:$fromKey}) SET n.ownerKey=$ownerKey`, { fromKey: fallbackKey(ownerId), ownerKey }); }
+        finally { await db.close(); }
+      }
+      rekeyed.add(ownerId); }
     catch (error) {
       if (!(error instanceof OverlayError) || error.code !== 'owner_conflict') throw error;
       // Both identities already hold an overlay; joining them is a deliberate act, not done here.
@@ -293,7 +299,23 @@ export async function updateNote(ownerId: string, noteId: string, rawText: unkno
 
 export async function deleteNote(ownerId: string, noteId: string): Promise<{ deleted: true }> {
   const principal = await ownerPrincipal(ownerId);
-  await overlayCall(overlay => overlay.deleteNote(principal, noteId));
+  const db = getDriver().session();
+  try {
+    await db.executeWrite(async tx => {
+      const reviews = await tx.run('MATCH (r:OpenChatNoteReview {ownerKey:$ownerKey}) RETURN r.id AS id,r.payload AS payload ORDER BY r.id', { ownerKey: principal.ownerKey });
+      for (const row of reviews.records) {
+        const payload = JSON.parse(String(row.get('payload'))) as { note: { id: string; text: string }; suggestions: Array<{evidence: string}>; sourceNoteAvailable?: boolean };
+        if (payload.note.id !== noteId) continue;
+        const locked = await tx.run('MATCH (r:OpenChatNoteReview {id:$id,ownerKey:$ownerKey}) SET r._lock=true REMOVE r._lock RETURN r.payload AS payload', { id: row.get('id'), ownerKey: principal.ownerKey });
+        const current = JSON.parse(String(locked.records[0]!.get('payload'))) as typeof payload;
+        current.note.text = ''; current.sourceNoteAvailable = false;
+        current.suggestions = [];
+        await tx.run('MATCH (r:OpenChatNoteReview {id:$id,ownerKey:$ownerKey}) SET r.payload=$payload', { id: row.get('id'), ownerKey: principal.ownerKey, payload: JSON.stringify(current) });
+      }
+      const result = await tx.run('MATCH (n:OverlayNote {id:$noteId,ownerKey:$ownerKey}) DETACH DELETE n RETURN count(*) AS removed', { noteId, ownerKey: principal.ownerKey });
+      if (!Number(result.records[0]?.get('removed') ?? 0)) fail(404, 'Not found');
+    });
+  } finally { await db.close(); }
   return { deleted: true };
 }
 
@@ -318,6 +340,15 @@ export async function deleteLink(ownerId: string, linkId: string): Promise<{ del
   const principal = await ownerPrincipal(ownerId);
   await overlayCall(overlay => overlay.deleteLink(principal, linkId));
   return { deleted: true };
+}
+
+/** Save a private named subject; this never binds or creates an OpenChat account. */
+export async function createPrivateThing(ownerId: string, rawKind: unknown, rawName: unknown): Promise<Thing> {
+  if (!THING_KINDS.includes(rawKind as ThingKind)) fail(400, 'Choose a person, company, idea or project');
+  const name = cleanText(rawName, LIMITS.nameLength, 'Name');
+  const principal = await ownerPrincipal(ownerId);
+  const { entity } = await overlayCall(overlay => overlay.ensure(principal, { kind: rawKind, name }));
+  return { id: entity.id, kind: entity.kind, name: entity.name };
 }
 
 /** Saved companies, ideas, projects and people-by-name. People on OpenChat are reached through their profile instead. */
@@ -369,15 +400,54 @@ export async function deletePrivateGraphForUser(tx: Runner, userId: string): Pro
   const runner = tx as unknown as Parameters<typeof deleteOwnerIn>[0];
   await deleteOwnerIn(runner, fallbackKey(userId));
   if (typeof issuer === 'string' && issuer && typeof subject === 'string' && subject) await deleteOwnerIn(runner, ownerKeyFor(issuer, subject));
+  const ownerKeys = [fallbackKey(userId)];
+  if (typeof issuer === 'string' && issuer && typeof subject === 'string' && subject) ownerKeys.push(ownerKeyFor(issuer, subject));
+  for (const label of ['OpenChatNoteReview', 'OpenChatPrivateAsk']) {
+    await tx.run(`MATCH (n:${label}) WHERE n.ownerKey IN $ownerKeys DETACH DELETE n`, { ownerKeys });
+    await tx.run(`MATCH (n:${label}), (r:OverlayRef {ref:$ref})-[:REF_OF]->(e:OverlayEntity {id:n.entityId,ownerKey:n.ownerKey})
+      WHERE NOT EXISTS { MATCH (other:OverlayRef)-[:REF_OF]->(e) WHERE other.ref <> $ref } DETACH DELETE n`, { ref: userRef(userId) });
+  }
   await purgeRefIn(runner, userRef(userId));
 }
 
 /** Account export: the owner's whole private graph, as plain rows. */
-export async function exportPrivateGraph(userId: string): Promise<{ entities: unknown[]; notes: unknown[]; links: unknown[] }> {
+export async function exportPrivateGraph(userId: string): Promise<{ entities: unknown[]; notes: unknown[]; links: unknown[]; noteReviews: unknown[]; privateAsks: unknown[] }> {
   const principal = await ownerPrincipal(userId);
-  return overlayCall(overlay => overlay.exportOwner(principal));
+  const result = await overlayCall(overlay => overlay.exportOwner(principal));
+  const db = getDriver().session();
+  try {
+    const reviews = await db.run('MATCH (r:OpenChatNoteReview {ownerKey:$ownerKey}) RETURN r.payload AS payload', { ownerKey: principal.ownerKey });
+    const asks = await db.run('MATCH (a:OpenChatPrivateAsk {ownerKey:$ownerKey}) RETURN properties(a) AS ask', { ownerKey: principal.ownerKey });
+    return { ...result, noteReviews: reviews.records.map(r => JSON.parse(String(r.get('payload')))), privateAsks: asks.records.map(r => r.get('ask')) };
+  } finally { await db.close(); }
 }
 
 export async function ensurePrivateGraphIndexes(): Promise<void> {
   await store();
+  const db = getDriver().session();
+  try {
+    for (const label of ['OpenChatNoteReview', 'OpenChatPrivateAsk']) {
+      await db.run(`CREATE CONSTRAINT ${label.toLowerCase()}_id IF NOT EXISTS FOR (n:${label}) REQUIRE n.id IS UNIQUE`);
+      await db.run(`CREATE INDEX ${label.toLowerCase()}_subject IF NOT EXISTS FOR (n:${label}) ON (n.ownerKey,n.entityId)`);
+    }
+    await db.run('CREATE CONSTRAINT openchatnotereview_request IF NOT EXISTS FOR (r:OpenChatNoteReview) REQUIRE (r.ownerKey,r.entityId,r.requestId) IS UNIQUE');
+  } finally { await db.close(); }
 }
+
+/** Verified adapter for OpenChat-only review records; the shared overlay contract stays unchanged. */
+export async function privateReviewSubject(ownerId: string, subject: { kind: 'user' | 'thing'; id: string }, create = true): Promise<{ principal: OverlayPrincipal; entityId: string; name: string }> {
+  if (subject.kind === 'user') {
+    if (!create) {
+      const { principal, person } = await assertPerson(ownerId, subject.id);
+      const found = await overlayCall(overlay => overlay.lookup(principal, userRef(subject.id)));
+      return { principal, entityId: found?.id ?? '', name: person.name };
+    }
+    const resolved = await personEntity(ownerId, subject.id);
+    return { principal: resolved.principal, entityId: resolved.entityId, name: resolved.person.name };
+  }
+  const principal = await ownerPrincipal(ownerId);
+  const found = await overlayCall(overlay => overlay.get(principal, subject.id));
+  if (userIdOf(found.refs) !== null) fail(404, 'Not found');
+  return { principal, entityId: found.id, name: found.name };
+}
+export { ownerPrincipal as privateReviewPrincipal };

@@ -1,3 +1,4 @@
+import type { AgentPageContext } from '../api/client';
 /**
  * Route params. Centralized so screens can import a single type rather than
  * redeclaring at each navigation.navigate() call site.
@@ -29,7 +30,7 @@ export type RootStackParamList = {
   InvitePerson: undefined;
   Friends: { section?: 'friends' | 'requests' } | undefined;
   /** OpenChat Agent overlay (asks, offers, and anonymous matches; OpenChat-a0e.5). */
-  AgentOverlay: { prompt?: string } | undefined;
+  AgentOverlay: { prompt?: string; context?: AgentPageContext } | undefined;
   StoryComposer: { draftId?: string; initialText?: string; destination?: 'agents_only' | 'both' | 'stories_only' } | undefined;
   StoryViewer: { story: FeedStory };
   SocialReview: undefined;
@@ -88,7 +89,7 @@ export type ThoughtsStackParamList = {
 export type AsksStackParamList = {
   AsksList: undefined;
   Chat: { conversationId: string; lane?: 'chat' | 'context'; entryId?: string };
-  AgentOverlay: { prompt?: string } | undefined;
+  AgentOverlay: { prompt?: string; context?: AgentPageContext } | undefined;
   StoryComposer: { draftId?: string; initialText?: string; destination?: 'agents_only' | 'both' | 'stories_only' } | undefined;
   StoryViewer: { story: FeedStory };
   SocialReview: undefined;

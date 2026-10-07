@@ -44,7 +44,7 @@ export function useTheme(): ThemeContextValue {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const systemScheme = (useColorScheme() || 'light') as Scheme;
-  const [preference, setPrefState] = useState<ThemePref>('system');
+  const [preference, setPrefState] = useState<ThemePref>('light');
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -55,7 +55,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           setPrefState(stored);
         }
       } catch {
-        // first run / bad json — leave default 'system'
+        // first run / bad json — leave the warm light default
       } finally {
         setHydrated(true);
       }
@@ -79,7 +79,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
 
   // Render even before hydration completes; the worst case is a brief
-  // pre-hydration paint at 'system'. Block-rendering during AsyncStorage
+  // pre-hydration paint in light mode. Block-rendering during AsyncStorage
   // I/O would show a black flash on cold start.
   void hydrated;
 

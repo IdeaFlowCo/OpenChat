@@ -7,7 +7,7 @@
  * is the collapsed card on a contact's profile: it stays out of the way until
  * opened, so the profile itself reads as it always has.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import {
   api, type PrivateLink, type PrivateLinkTarget, type PrivateNote, type PrivatePersonCard, type PrivateSubject,
@@ -15,14 +15,15 @@ import {
 } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
+import { ProfileNoteCapture } from './ProfileNoteCapture';
 
 export const CADENCES: Array<{ label: string; days: number | null }> = [
   { label: 'None', days: null }, { label: 'Weekly', days: 7 }, { label: 'Monthly', days: 30 },
   { label: 'Quarterly', days: 90 }, { label: 'Yearly', days: 365 },
 ];
-export const RELATIONS = ['knows', 'works at', 'works on', 'interested in'];
+export const RELATIONS = ['mentioned', 'knows', 'works at', 'works on', 'interested in'];
 /** The kind a suggested relation most often points at, so the form starts coherent ("works at" → company). */
-const RELATION_KIND: Record<string, PrivateThingKind> = { 'knows': 'person', 'works at': 'company', 'works on': 'project', 'interested in': 'idea' };
+const RELATION_KIND: Record<string, PrivateThingKind> = { 'mentioned': 'idea', 'knows': 'person', 'works at': 'company', 'works on': 'project', 'interested in': 'idea' };
 export const THING_KINDS: Array<{ kind: PrivateThingKind; label: string }> = [
   { kind: 'company', label: 'Company' }, { kind: 'idea', label: 'Idea' }, { kind: 'project', label: 'Project' }, { kind: 'person', label: 'Person' },
 ];
@@ -116,8 +117,11 @@ export function PrivateLinks({ subject, links, onChange, onOpenThing, onOpenPers
 }) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  const [relation, setRelation] = useState(RELATIONS[1]!);
-  const [kind, setKind] = useState<PrivateThingKind>(RELATION_KIND[RELATIONS[1]!]!);
+  const [sources, setSources] = useState<Record<string, PrivateNote>>({});
+  const [sourceOpen, setSourceOpen] = useState<string | null>(null);
+  useEffect(() => { let active = true; void api.getProfileNoteReviews(subject).then(result => { if (!active) return; const map: Record<string, PrivateNote> = {}; for (const review of result.reviews.filter(review => review.sourceNoteAvailable !== false)) for (const record of review.createdRecords ?? []) if (record.kind === 'connection') map[record.id] = review.note; setSources(map); }).catch(() => {}); return () => { active = false; }; }, [subject.kind, subject.id, links]);
+  const [relation, setRelation] = useState(RELATIONS[2]!);
+  const [kind, setKind] = useState<PrivateThingKind>(RELATION_KIND[RELATIONS[2]!]!);
   const [name, setName] = useState('');
   const [suggestions, setSuggestions] = useState<PrivateThing[]>([]);
   const [adding, setAdding] = useState(false);
@@ -156,9 +160,9 @@ export function PrivateLinks({ subject, links, onChange, onOpenThing, onOpenPers
   return (
     <View style={styles.section}>
       <View style={styles.itemMeta}>
-        <Text style={[styles.heading, { color: c.textPrimary }]}>Links</Text>
+        <Text style={[styles.heading, { color: c.textPrimary }]}>Connections</Text>
         <TouchableOpacity onPress={() => setAdding(value => !value)} accessibilityRole="button" accessibilityState={{ expanded: adding }} style={styles.textButton}>
-          <Text style={{ color: c.primary, fontWeight: '700', fontSize: 14 }}>{adding ? 'Cancel' : '+ Add link'}</Text>
+          <Text style={{ color: c.primary, fontWeight: '700', fontSize: 14 }}>{adding ? 'Cancel' : '+ Add connection'}</Text>
         </TouchableOpacity>
       </View>
       {!links.length && !adding && (
@@ -188,32 +192,33 @@ export function PrivateLinks({ subject, links, onChange, onOpenThing, onOpenPers
       ))}
       <TouchableOpacity onPress={() => void add({ kind, name: name.trim() })} disabled={busy || !name.trim() || !relation.trim()}
         style={[styles.button, { backgroundColor: c.primary, opacity: busy || !name.trim() || !relation.trim() ? 0.5 : 1 }]}>
-        <Text style={{ color: c.onPrimary, fontWeight: '700' }}>Save link</Text>
+        <Text style={{ color: c.onPrimary, fontWeight: '700' }}>Save connection</Text>
       </TouchableOpacity>
       </>}
       {links.map(link => (
-        <View key={link.id} style={[styles.item, styles.linkRow, { borderBottomColor: c.divider }]}>
-          <TouchableOpacity style={{ flex: 1, minWidth: 0 }} onPress={() => link.other.kind === 'user' ? onOpenPerson(link.other.id) : onOpenThing(link.other.id)} accessibilityRole="link">
+        <View key={link.id} style={[styles.item, { borderBottomColor: c.divider }]}><View style={styles.linkRow}>
+          <TouchableOpacity style={{ flex: 1, minWidth: 0, minHeight: 44, justifyContent: 'center' }} onPress={() => link.other.kind === 'user' ? onOpenPerson(link.other.id) : onOpenThing(link.other.id)} accessibilityRole="link">
             <Text style={{ color: c.textPrimary, fontSize: 15 }}>
-              <Text style={{ color: c.textMetadata }}>{link.direction === 'out' ? `${link.relation} ` : `← ${link.relation} `}</Text>
+              <Text style={{ color: c.textMetadata }}>{link.direction === 'out' ? `${link.relation}: ` : `← ${link.relation}: `}</Text>
               <Text style={{ color: c.primary, fontWeight: '700' }}>{link.other.name}</Text>
               <Text style={{ color: c.textMetadata }}>{`  ${kindLabel(link.other.kind)}`}</Text>
             </Text>
           </TouchableOpacity>
+          {sources[link.id] && <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Source for ${link.relation}: ${link.other.name}`} onPress={() => setSourceOpen(sourceOpen === link.id ? null : link.id)} style={styles.textButton}><Text style={{ color: c.textSecondary, fontSize: 13 }}>Source</Text></TouchableOpacity>}
           <TouchableOpacity onPress={() => void remove(link.id)} disabled={busy} accessibilityLabel={`Remove link to ${link.other.name}`} style={styles.textButton}>
             <Text style={{ color: c.textSecondary, fontSize: 13 }}>Remove</Text>
           </TouchableOpacity>
-        </View>
+        </View>{sourceOpen === link.id && sources[link.id] && <View style={{ gap: 6 }}><Text style={{ color: c.textMetadata, fontSize: 12 }}>Your private note · {new Date(sources[link.id]!.createdAt).toLocaleDateString()}</Text><Text style={{ color: c.textPrimary, lineHeight: 21 }}>{sources[link.id]!.text}</Text></View>}</View>
       ))}
       {error && <Text style={{ color: c.danger }}>{error}</Text>}
     </View>
   );
 }
 
-export function PrivateCard({ userId, onOpenThing, onOpenPerson }: { userId: string; onOpenThing: (thingId: string) => void; onOpenPerson: (userId: string) => void }) {
+export function PrivateCard({ userId, onOpenThing, onOpenPerson, onAskAgent, sharedAsks }: { userId: string; onOpenThing: (thingId: string) => void; onOpenPerson: (userId: string) => void; onAskAgent?: () => void; sharedAsks?: ReactNode }) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [card, setCard] = useState<PrivatePersonCard | null>(null);
   const [notes, setNotes] = useState<PrivateNote[]>([]);
   const [links, setLinks] = useState<PrivateLink[]>([]);
@@ -229,6 +234,7 @@ export function PrivateCard({ userId, onOpenThing, onOpenPerson }: { userId: str
     return () => { active = false; };
   }, [userId]);
 
+  const reload = () => { void api.getPrivatePerson(userId).then(result => { setCard(result.card); setNotes(result.notes); setLinks(result.links); }).catch(() => setError('Could not refresh private connections.')); };
   const patch = useCallback(async (change: Parameters<typeof api.updatePrivatePerson>[1]) => {
     setBusy(true); setError(null);
     try { setCard((await api.updatePrivatePerson(userId, change)).card); }
@@ -245,13 +251,14 @@ export function PrivateCard({ userId, onOpenThing, onOpenPerson }: { userId: str
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[styles.title, { color: c.textPrimary }]}>Private to you</Text>
           <Text style={{ color: c.textMetadata, fontSize: 13 }} numberOfLines={2}>
-            {open ? 'Only you can see this. They are never told and cannot see it.' : privateSummary(card, notes.length, links.length)}
+            {open ? 'Your notes and connections stay private. Shared asks keep their original audience.' : privateSummary(card, notes.length, links.length)}
           </Text>
         </View>
         <Text style={{ color: c.textMuted, fontSize: 18 }}>{open ? '⌄' : '›'}</Text>
       </TouchableOpacity>
       {open && (
         <View style={styles.body}>
+          <ProfileNoteCapture key={userId} subject={subject} notes={notes} onChange={reload} onAskAgent={onAskAgent} sharedAsks={sharedAsks} />
           <View style={styles.chips}>
             <TouchableOpacity onPress={() => void patch({ important: !card.important })} disabled={busy} accessibilityRole="switch" accessibilityState={{ checked: card.important }}
               style={[styles.chip, { borderColor: c.border, backgroundColor: card.important ? c.primary : c.surface }]}>
@@ -286,7 +293,7 @@ export function PrivateCard({ userId, onOpenThing, onOpenPerson }: { userId: str
               </TouchableOpacity>
             </View>
           )}
-          <PrivateNotes subject={subject} notes={notes} onChange={setNotes} />
+
           <PrivateLinks subject={subject} links={links} onChange={setLinks} onOpenThing={onOpenThing} onOpenPerson={onOpenPerson} />
           {error && <Text style={{ color: c.danger }}>{error}</Text>}
         </View>
@@ -303,12 +310,12 @@ const styles = StyleSheet.create({
   section: { gap: 10 },
   heading: { fontSize: 15, fontWeight: '700' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, paddingVertical: 8, paddingHorizontal: 14, minHeight: 36, justifyContent: 'center' },
+  chip: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, paddingVertical: 8, paddingHorizontal: 14, minHeight: 44, justifyContent: 'center' },
   item: { paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, gap: 6 },
   linkRow: { flexDirection: 'row', alignItems: 'center' },
   itemMeta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   input: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
   noteInput: { minHeight: 72, textAlignVertical: 'top' },
-  textButton: { minHeight: 36, justifyContent: 'center', paddingLeft: 12 },
-  button: { alignSelf: 'flex-start', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16, minHeight: 40, justifyContent: 'center' },
+  textButton: { minHeight: 44, justifyContent: 'center', paddingLeft: 12 },
+  button: { alignSelf: 'flex-start', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16, minHeight: 44, justifyContent: 'center' },
 });

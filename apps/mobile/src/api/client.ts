@@ -901,6 +901,11 @@ export interface PrivatePersonCard {
   lastContactAt: string | null;
   nextDueAt: string | null;
 }
+export interface AgentPageContext { kind: 'person' | 'thing' | 'conversation' | 'page'; id?: string; label: string; includePrivate?: boolean }
+export interface ProfileNoteSuggestion { id: string; kind: 'ask' | 'connection'; text: string; relation?: string; target?: { kind: PrivateThingKind; name: string }; evidence: string; duplicate?: boolean; similar?: boolean }
+export interface ProfileNoteEdit { id: string; text?: string; relation?: string; target?: { kind: PrivateThingKind; name: string } }
+export interface ProfileNoteReview { id: string; subject: PrivateSubject; note: PrivateNote; status: 'saved' | 'ready' | 'unavailable' | 'failed' | 'applied' | 'undone'; suggestions: ProfileNoteSuggestion[]; appliedIds: string[]; createdAt: string; appliedAt?: string; createdRecords?: { id: string; kind: 'ask' | 'connection'; suggestionId: string }[]; sourceNoteAvailable?: boolean }
+export interface PrivateAsk { id: string; text: string; status: 'active' | 'paused' | 'closed'; sourceNoteId: string; reviewId: string; createdAt: string; updatedAt: string }
 export interface PrivateNote { id: string; text: string; createdAt: string; updatedAt: string }
 export interface PrivateLink { id: string; relation: string; direction: 'out' | 'in'; other: { kind: PrivateNodeKind; id: string; name: string }; createdAt: string }
 export interface PrivatePersonOverlay { userId: string; person?: { id: string; name: string; avatarUrl: string | null }; card: PrivatePersonCard; notes: PrivateNote[]; links: PrivateLink[] }
@@ -1517,6 +1522,23 @@ export const api = {
   changeFriend: (userId: string, action: 'request' | 'accept' | 'decline' | 'cancel' | 'remove') =>
     request<FriendStatus>(`/api/friends/users/${encodeURIComponent(userId)}/${action}`, { method: 'POST' }),
 
+  sendContextualAgentMessage: (question: string, context: AgentPageContext) =>
+    request<{ conversationId: string }>('/api/assistant/context-message', { method: 'POST', body: JSON.stringify({ question, context }) }),
+  createProfileNoteReview: (subject: PrivateSubject, text: string, requestId: string) =>
+    request<ProfileNoteReview>(`${privateSubjectPath(subject)}/note-reviews`, { method: 'POST', body: JSON.stringify({ text, requestId }) }),
+  createPrivateAskReview: (subject: PrivateSubject, text: string, requestId: string) =>
+    request<ProfileNoteReview>(`${privateSubjectPath(subject)}/note-reviews`, { method: 'POST', body: JSON.stringify({ text, requestId, asStandingAsk: true }) }),
+  suggestProfileNoteReview: (id: string) =>
+    request<ProfileNoteReview>(`/api/private/note-reviews/${encodeURIComponent(id)}/suggest`, { method: 'POST', body: '{}' }),
+  getProfileNoteReviews: (subject: PrivateSubject) =>
+    request<{ reviews: ProfileNoteReview[]; asks: PrivateAsk[] }>(`${privateSubjectPath(subject)}/note-reviews`),
+  applyProfileNoteReview: (id: string, suggestionIds: string[], edits?: ProfileNoteEdit[]) =>
+    request<ProfileNoteReview>(`/api/private/note-reviews/${encodeURIComponent(id)}/apply`, { method: 'POST', body: JSON.stringify({ suggestionIds, edits }) }),
+  undoProfileNoteReview: (id: string) =>
+    request<ProfileNoteReview>(`/api/private/note-reviews/${encodeURIComponent(id)}/undo`, { method: 'POST', body: '{}' }),
+  updatePrivateAsk: (id: string, status: PrivateAsk['status']) =>
+    request<PrivateAsk>(`/api/private/asks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+
   // Private graph — notes, importance, catch-up cadence and links that only the owner sees.
   getPrivatePerson: (userId: string) => request<PrivatePersonOverlay>(`/api/private/people/${encodeURIComponent(userId)}`),
   updatePrivatePerson: (userId: string, patch: { important?: boolean; cadenceDays?: number | null; cadenceMode?: 'fixed' | 'expanding'; contactedNow?: true }) =>
@@ -1529,6 +1551,8 @@ export const api = {
   deletePrivateLink: (linkId: string) => request<{ deleted: true }>(`/api/private/links/${encodeURIComponent(linkId)}`, { method: 'DELETE' }),
   listPrivateThings: (query: string, kind?: PrivateThingKind) =>
     request<{ things: PrivateThing[] }>(`/api/private/things?q=${encodeURIComponent(query)}${kind ? `&kind=${kind}` : ''}`),
+  createPrivateThing: (kind: PrivateThingKind, name: string) =>
+    request<PrivateThing>('/api/private/things', { method: 'POST', body: JSON.stringify({ kind, name }) }),
   getPrivateThing: (thingId: string) => request<PrivateThingDetail>(`/api/private/things/${encodeURIComponent(thingId)}`),
   listCatchUp: () => request<{ due: CatchUpPerson[] }>('/api/private/due'),
 

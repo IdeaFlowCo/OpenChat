@@ -444,6 +444,9 @@ export function MasterDetailLayout() {
             </Pressable>
           </>
         )}
+        <Pressable accessibilityRole="button" onPress={() => navigation.navigate('Friends', { section: 'friends' })} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: collapsed ? 4 : 16 }}>
+          <Text style={{ color: c.primary, fontWeight: '600', textAlign: collapsed ? 'center' : 'left', fontSize: 13 }}>People</Text>
+        </Pressable>
         <View style={{ flex: 1 }}>
           <ConversationList
             activeId={activeConversationId}
@@ -536,6 +539,7 @@ export function MasterDetailLayout() {
         >
           <AgentOverlayScreen
             embedded
+            context={activeConversationId ? { kind: 'conversation', id: activeConversationId, label: 'Current conversation', includePrivate: true } : { kind: 'page', label: 'Chats' }}
             onClose={() => setAgentPanelOpen(false)}
             onOpenConversation={(conversationId) => {
               setActiveConversation(conversationId);
