@@ -261,9 +261,48 @@ const ContextPostProjection = {
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' },
     replyToId: { type: 'string', nullable: true },
-    clientRequestId: { type: 'string' }
+    clientRequestId: { type: 'string' },
+    intention: { type: 'object', description: 'Public lifecycle summary only; never private intention details.', properties: { intentId: { type: 'string' }, lifecycleState: { type: 'string', enum: ['open', 'fulfilled', 'withdrawn'] }, revision: { type: 'integer' }, sourceChanged: { type: 'boolean' } }, required: ['intentId', 'lifecycleState', 'revision', 'sourceChanged'] }
   },
   required: ['id', 'conversationId', 'authorId', 'text', 'kind', 'lane', 'revision', 'createdAt', 'updatedAt', 'clientRequestId']
+} as const;
+
+const ConversationStreamEntry = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' }, text: { type: 'string' }, kind: { type: 'string' }, status: { type: 'string' },
+    createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
+    tags: { type: 'array', items: { type: 'string' } }, authorId: { type: 'string' }, authorName: { type: 'string' },
+    pinned: { type: 'boolean' }, pinnedBy: { type: ['string', 'null'] }, pinnedAt: { type: 'string', format: 'date-time' },
+    hasSourceMessage: { type: 'boolean' },
+    sourceMessageId: { type: ['string', 'null'], description: 'Null when the original message is deleted or its conversation is inaccessible.' },
+    sourceConversationId: { type: ['string', 'null'], description: 'Only disclosed with independent membership in the original conversation.' },
+  },
+  required: ['id', 'text', 'createdAt', 'updatedAt'],
+} as const;
+const contentItemProperties = {
+  id: { type: 'string', description: 'Existing source node identity; this read creates no copy.' },
+  createdAt: { type: 'string', format: 'date-time' },
+  sourceAliases: { type: 'array', items: { type: 'string' }, description: 'Eligible legacy shared capture aliases coalesced before pagination.' },
+};
+const ConversationContentItem = {
+  oneOf: [
+    { type: 'object', properties: { ...contentItemProperties,
+      origin: { type: 'string', const: 'context' }, visibility: { type: 'string', const: 'conversation' }, provenance: { type: 'string', const: 'context' },
+      context: { $ref: '#/components/schemas/ContextPostProjection' },
+    }, required: ['id', 'createdAt', 'sourceAliases', 'origin', 'visibility', 'provenance', 'context'] },
+    { type: 'object', properties: { ...contentItemProperties,
+      origin: { type: 'string', const: 'stream' }, visibility: { type: 'string', enum: ['conversation', 'private'], description: 'Private is only possible for the owner’s direct human session, never an agent key, connector, delegated call, or embedded session.' },
+      provenance: { type: 'string', enum: ['pinned', 'message_capture', 'private_note'] }, thought: { $ref: '#/components/schemas/ConversationStreamEntry' },
+    }, required: ['id', 'createdAt', 'sourceAliases', 'origin', 'visibility', 'provenance', 'thought'] },
+  ],
+  discriminator: { propertyName: 'origin' },
+} as const;
+const ConversationContentPage = {
+  type: 'object', properties: {
+    items: { type: 'array', maxItems: 100, items: { $ref: '#/components/schemas/ConversationContentItem' } },
+    nextCursor: { type: 'string', description: 'Opaque cursor for the next page, absent at the end. Bound to account, conversation, filter, search, and private visibility.' },
+  }, required: ['items'],
 } as const;
 
 const ReactionSummary = {
@@ -434,6 +473,9 @@ export const openapiSpec = {
       SecretaryConfig,
       AccountExport,
       ContextPostProjection,
+      ConversationStreamEntry,
+      ConversationContentItem,
+      ConversationContentPage,
       ReactionSummary,
       Webhook,
       WebhookDelivery,
@@ -635,6 +677,26 @@ export const openapiSpec = {
     },
     '/api/review': {
       get: { operationId: 'getSocialReviewQueue', tags: ['Agent social'], summary: 'Get the bounded actionable review queue', description: 'Returns at most 50 pending drafts, unanswered matches, and searches/Stories expiring within 72 hours. It is a computed projection, not the raw inference backlog.', responses: { '200': ok({ type: 'object', properties: { items: { type: 'array', maxItems: 50, items: { type: 'object' } }, hasMore: { type: 'boolean' } }, required: ['items', 'hasMore'] }) } },
+    },
+    '/api/chat/conversations/{id}/content': {
+      get: {
+        operationId: 'listConversationContent', tags: ['Chat Context Lane'],
+        summary: 'Read shared Context and conversation Stream in one ordered feed',
+        description: 'Read-only. Uses a read-scoped OpenChat agent key and current conversation membership. The unified connector exposes this as openchat__oc_list_conversation_content under openchat:read. Agents receive only conversation-shared Context posts, pinned Stream entries, and shared message captures: private Stream entries are never returned to API keys, connector principals, delegated calls, or embedded sessions. A direct human session additionally receives its own eligible private entries. Ordinary messages are not duplicated. Every page rechecks live authorization; inaccessible source identifiers are redacted. Results sort by createdAt then source ID, descending. Reuse the returned cursor with the exact same conversation, filter, and search. Returns available shared content. Human-only lifecycle changes, private-sharing approval, and webhook destination setup are not authorized by this read scope; see the linked guide.',
+        externalDocs: { description: 'Conversation content, audiences, and related human-only setup guides', url: 'https://chat.ideaflow.app/agents/conversation-content' },
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'filter', in: 'query', schema: { type: 'string', enum: ['all', 'context', 'stream'], default: 'all' } },
+          { name: 'search', in: 'query', description: 'Case-insensitive text and tag search.', schema: { type: 'string', maxLength: 200 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } },
+          { name: 'cursor', in: 'query', description: 'Opaque nextCursor from the previous page; not an access grant.', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': { ...ok({ $ref: '#/components/schemas/ConversationContentPage' }), headers: { 'Cache-Control': { description: 'Conversation content is not cacheable by intermediaries.', schema: { type: 'string', const: 'no-store' } } } },
+          '400': errResp('Invalid query or cursor does not match its account/conversation/query'),
+          '401': errResp('Authentication required'), '403': errResp('Membership or read scope unavailable'),
+        },
+      },
     },
     '/api/chat/conversations/{id}/context': {
       get: {

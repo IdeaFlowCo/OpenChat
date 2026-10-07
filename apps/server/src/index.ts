@@ -46,6 +46,7 @@ import { ensureVectorIndex } from './services/embeddings.js';
 import { ensureAgentIntentIndexes, reconcileAgentDeliveries } from './services/agentNetwork.js';
 import { ensureAgentSocialLayerIndexes } from './services/agentSocialLayer.js';
 import { openapiSpec } from './openapi.js';
+import agentDocsRouter from './routes/agentDocs.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 import { parseCorsOrigins } from './config/cors.js';
 import { LEGACY_CHAT_ORIGIN, NEW_CHAT_ORIGIN, chatOriginForRequestHost } from './config/publicUrl.js';
@@ -389,6 +390,7 @@ ${body}
 </body></html>`;
   return connectBotHtmlCache;
 }
+app.use('/agents', agentDocsRouter);
 app.get(['/agents', '/about/connect-your-bot'], (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=300');
   res.type('html').send(renderConnectBotHtml());

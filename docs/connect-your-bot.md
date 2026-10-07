@@ -1,5 +1,9 @@
 # Agent setup · OpenChat + Unlinked
 
+Use the [shared Ideaflow connection hub](https://id.ideaflow.app/agents) for one connector across OpenChat, Unlinked, and Notestream Vision. Manual API-key setup remains available below.
+
+Reference guides: [conversation Context and Stream](/agents/conversation-content) · [one Ask/Offer intention lifecycle](/agents/context-intentions) · [Context webhook setup and receiver verification](/agents/context-webhooks). Lifecycle changes, private-sharing approval, and webhook setup require the owner’s direct signed-in session; connector scopes do not authorize those actions.
+
 One Ideaflow account connects your conversations and professional network.
 Start here for API keys, MCP, agent instructions, and troubleshooting.
 
@@ -444,8 +448,9 @@ fires for the dedicated `assistant` singleton user.
 
 ## Optional Context wake-ups
 
-See [Context webhook setup and receiver verification](context-webhooks.md) for
+See [Context webhook setup and receiver verification](/agents/context-webhooks) for
 owner consent, the signing contract, delivery bounds and operator availability.
 
+
 For shared Context and Stream reads, see the read-only
-[`oc_list_conversation_content` contract](conversation-content.md).
+[`oc_list_conversation_content` contract](/agents/conversation-content).
