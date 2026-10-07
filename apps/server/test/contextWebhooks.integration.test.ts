@@ -4,6 +4,7 @@ import {createContextPost,updateContextPost} from '../src/services/contextLane.j
 import {askContextAgents,listContextAgentRequests} from '../src/services/contextAgentRequests.js';
 import {createContextWebhook,deleteContextWebhook,listContextWebhooks,ensureContextWebhookIndexes,runContextWebhookOnce,contextWakeEnvelope,validateContextWebhookUrl,deleteContextWebhooksForUser,cleanupContextWebhooks} from '../src/services/contextWebhooks.js';
 import {deliverContextWebhookOnce} from '../src/services/webhookDispatch.js';
+import {hostedPreference} from '../src/services/contextHosted.js';
 const integration=process.env.NEO4J_TEST_URI?describe.sequential:describe.skip;
 describe('Context webhook transport contract',()=>{
  it('signs timestamp and body without raw secret or content',()=>{const e=contextWakeEnvelope('event','request','secret',123000);expect(JSON.parse(e.body)).toEqual({id:'event',event:'context.requested',requestId:'request'});expect(e.headers['X-OpenChat-Timestamp']).toBe('123');expect(JSON.stringify(e.headers)).not.toContain('secret');expect(e.headers['X-OpenChat-Signature']).not.toBe(contextWakeEnvelope('event','other','secret',123000).headers['X-OpenChat-Signature']);});
@@ -126,6 +127,26 @@ integration('Context wake durable outbox with fake transport',()=>{
    await run(`MATCH (u:User {id:$b}) SET u.contextHostedEnabled=false`,{b});
    expect((await session(s=>askContextAgents(s,a,room,p.id))).queued).toBe(0);
    const r=await run(`MATCH (r:ContextAgentRequest {ownerUserId:$b}) RETURN count(r) AS count`,{b});expect(Number(r.records[0].get('count'))).toBe(2);
+  }finally{if(savedKey===undefined)delete process.env.ANTHROPIC_API_KEY;else process.env.ANTHROPIC_API_KEY=savedKey;}
+ });
+
+ for(const state of ['pending','delivering'])it('cancels a '+state+' wake across hosted on/off, preserving original key ownership',async()=>{
+  const savedKey=process.env.ANTHROPIC_API_KEY;
+  try{
+   await setup();const p=await queue();
+   const original=(await session(s=>listContextAgentRequests(s,b,key))).requests[0];
+   if(state==='delivering')await run(`MATCH (d:ContextWebhookDelivery {conversationId:$room})
+    SET d.status='delivering',d.leaseToken='abandoned',d.leaseUntil='2000-01-01',d.attempts=1`,{room});
+   process.env.OPENCHAT_CONTEXT_HOSTED_ENABLED='true';process.env.ANTHROPIC_API_KEY='synthetic-provider-never-called';
+   await session(s=>hostedPreference(s,b,true));
+   expect((await delivery())[0]).toMatchObject({status:'cancelled',requestId:original.id});
+   expect((await delivery())[0].leaseToken).toBeUndefined();
+   expect((await delivery())[0].leaseUntil).toBeUndefined();
+   await session(s=>hostedPreference(s,b,false));
+   const fake=vi.fn(async()=>true);expect(await runContextWebhookOnce(driver,fake)).toBe(false);expect(fake).not.toHaveBeenCalled();
+   expect((await session(s=>listContextAgentRequests(s,b,key))).requests).toEqual([original]);
+   expect((await session(s=>askContextAgents(s,a,room,p.id))).queued).toBe(0);
+   expect(await delivery()).toHaveLength(1);expect((await delivery())[0].status).toBe('cancelled');
   }finally{if(savedKey===undefined)delete process.env.ANTHROPIC_API_KEY;else process.env.ANTHROPIC_API_KEY=savedKey;}
  });
 
