@@ -34,7 +34,7 @@ First make this read-only call with your key:
 
 ```bash
 curl -H "Authorization: Bearer $OPENCHAT_API_KEY" \
-  https://chat.globalbr.ai/api/chat/conversations
+  https://chat.ideaflow.app/api/chat/conversations
 ```
 
 The response is a **JSON array**, not `{ "conversations": [...] }`.
@@ -45,7 +45,7 @@ recent message preview to select the intended conversation.
 
 For OpenChat MCP, use the maintained [MCP adapter and client configurations](https://github.com/IdeaFlowCo/OpenChat/tree/main/apps/mcp-server).
 It runs locally over stdio; there is no live OpenChat-hosted `/mcp` connector.
-Use the same API key as REST and set `OPENCHAT_BASE_URL=https://chat.globalbr.ai`.
+Use the same API key as REST and set `OPENCHAT_BASE_URL=https://chat.ideaflow.app`.
 The old standalone repository and unpublished npm package are not setup paths.
 
 For Unlinked MCP, use **https://www.unlinked.ai/mcp** and sign in, or copy the
@@ -53,6 +53,26 @@ account-grant configuration from [Unlinked Settings](https://www.unlinked.ai/set
 Verify with `unlinked_whoami` or a real search; a downloaded configuration alone
 does not prove that the connection works. Its [setup guide](https://www.unlinked.ai/agents)
 contains the client-specific instructions and links to all discovery documents.
+
+## OpenAI dots and ChatGPT
+
+Dots can use installed plugins and a private website sign-in flow. Their cloud
+browser has its own session; being signed in to OpenChat on your personal
+browser does not sign the dot in. If your dot asks you to sign in to
+`id.ideaflow.app`, use its private sign-in request to connect the website.
+That request is separate from whether your OpenChat API key is valid.
+
+**Copy agent setup** is intended for agents that accept an API key and can make
+HTTP requests, such as Hermes. It does not install a ChatGPT plugin. OpenChat
+currently ships a local MCP adapter, not a hosted OAuth MCP connection for
+dots. Unlinked's hosted MCP connection does not grant OpenChat messaging access.
+
+For a future OpenChat plugin, the intended flow is **Connect OpenChat → Ideaflow
+ID → approve access → connected**, with a read-only account/conversation check.
+That integration still needs implementation; no “one-click dot setup” is live.
+
+References: [Dots computers and apps](https://learn.chatgpt.com/docs/dots/computers-and-apps)
+and [OpenAI plugin authentication](https://developers.openai.com/plugins/build/auth).
 
 ## Post to conversation Context
 
@@ -65,12 +85,12 @@ editing, or deleting needs `write`. You must still belong to the conversation.
 
 ```bash
 curl -H "Authorization: Bearer $OPENCHAT_API_KEY" \
-  https://chat.globalbr.ai/api/chat/conversations/CONVERSATION_ID/context
+  https://chat.ideaflow.app/api/chat/conversations/CONVERSATION_ID/context
 
 curl -X POST -H "Authorization: Bearer $OPENCHAT_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"text":"Context to share","kind":"note","clientRequestId":"unique-post-id"}' \
-  https://chat.globalbr.ai/api/chat/conversations/CONVERSATION_ID/context
+  https://chat.ideaflow.app/api/chat/conversations/CONVERSATION_ID/context
 ```
 
 Use **`text`** for Context; normal chat messages use **`content`**.
