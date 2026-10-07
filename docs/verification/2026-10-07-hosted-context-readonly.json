@@ -1,0 +1,102 @@
+{
+  "syntheticOnly": true,
+  "checks": [
+    {
+      "check": "dedicated reviewer credential selected",
+      "pass": true
+    },
+    {
+      "check": "dedicated reviewer normal sign-in",
+      "pass": true
+    },
+    {
+      "check": "normal OpenChat sign-in start",
+      "pass": true
+    },
+    {
+      "check": "normal linked-account OAuth callback",
+      "pass": true
+    },
+    {
+      "check": "OAuth state matches",
+      "pass": true
+    },
+    {
+      "check": "synthetic human session issued",
+      "pass": true
+    },
+    {
+      "check": "human preferences readable",
+      "pass": true
+    },
+    {
+      "check": "runtime hosted service available",
+      "pass": true
+    },
+    {
+      "check": "synthetic owner remains off by default",
+      "pass": true
+    },
+    {
+      "check": "private preferences no-store",
+      "pass": true
+    },
+    {
+      "check": "human private inbox readable",
+      "pass": true
+    },
+    {
+      "check": "synthetic owner has no generated requests",
+      "pass": true
+    },
+    {
+      "check": "private inbox no-store",
+      "pass": true
+    },
+    {
+      "check": "anonymous /preferences rejected",
+      "pass": true
+    },
+    {
+      "check": "agent-key credential format /preferences rejected",
+      "pass": true
+    },
+    {
+      "check": "anonymous /requests rejected",
+      "pass": true
+    },
+    {
+      "check": "agent-key credential format /requests rejected",
+      "pass": true
+    },
+    {
+      "check": "existing synthetic Unlinked browser sign-in",
+      "pass": true
+    },
+    {
+      "check": "embedded sign-in CSRF obtained",
+      "pass": true
+    },
+    {
+      "check": "genuine synthetic embedded session issued",
+      "pass": true
+    },
+    {
+      "check": "genuine embedded session /preferences rejected",
+      "pass": true
+    },
+    {
+      "check": "genuine embedded session /requests rejected",
+      "pass": true
+    },
+    {
+      "check": "owner still off after probes",
+      "pass": true
+    }
+  ],
+  "preferenceMutations": 0,
+  "generationRequests": 0,
+  "messageWrites": 0,
+  "embeddedSessionCheck": "genuine restricted session rejected",
+  "completed": true
+}

@@ -10,8 +10,8 @@
 > [the adapter contract](ideaflow-unified-connector.md) and
 > [setup placement](agent-connection-entry.md).
 >
-> The hosted draft runner and owner-only private-sharing review are implemented
-> in the next Context delivery; see the hosted section in the behavior document.
+> PR146 has now shipped the hosted draft runner and owner-only private-sharing
+> review on the web/server in1.0.18; see the hosted section in the behavior document.
 > External webhooks, Asks/Stories lifecycle reconciliation and unified chat
 > Stream/Context reads remain follow-ups. Custom remote MCP works through the shared connector;
 > a published ChatGPT directory listing and actual dot-host acceptance remain
