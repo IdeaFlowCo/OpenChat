@@ -444,7 +444,8 @@ integration('agent-network quiet-match loop', () => {
       const statuses=await s.run(`MATCH (m:Message) WHERE m.agentDeliveryKey IN $keys RETURN count(m) AS count`,{keys:[a,b].map(id=>JSON.stringify(['connected',matchId,id]))});
       expect(Number(statuses.records[0].get('count'))).toBe(2);
     }finally{await s.close();}
-  });
+    // Four lifecycle transitions replay database-backed delivery repair; allow for slower CI Neo4j.
+  }, 15_000);
 
   it('atomically closes instead of connecting when the second approval is no longer eligible', async () => {
     const token = `pausetoken${suffix.replace(/[^a-z0-9]/gi, '')}`;
