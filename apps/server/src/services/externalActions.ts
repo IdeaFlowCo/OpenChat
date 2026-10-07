@@ -1,3 +1,5 @@
+import { getDriver } from '../db.js';
+import { searchUnlinkedForIdentity, unlinkedProvisionConfigured } from './unlinkedProvision.js';
 // External actions for the in-app Assistant (OpenChat-1fwa):
 //  - World Issue Tracker (worldissuetracker.com) — search/read/create/update
 //  - unlinked.ai — account-scoped network/people search
@@ -392,86 +394,19 @@ export async function toolWitComment(
 }
 
 // ─── unlinked.ai ─────────────────────────────────────────────────────────────
-// The live unlinked.ai runtime exposes an account-scoped, search-only MCP
-// endpoint (audience unlinked-account-tools-v1). The bearer grant is issued
-// from the owner's Settings page and is Jacob's personal credential, so this
-// surface is OWNER-ONLY — there is no anonymous unlinked API at all, and the
-// service offers no agent write surface (posting/updating is browser-only).
-
-const UNLINKED_MCP_URL = process.env.UNLINKED_MCP_URL || 'https://www.unlinked.ai/mcp';
-const UNLINKED_TIMEOUT_MS = 60_000;
-
-function unlinkedToken(): string {
-  return (process.env.UNLINKED_ACCOUNT_TOKEN || '').trim();
-}
-
-let unlinkedRpcId = 0;
-
-/** Minimal JSON-RPC tools/call client for the stateless Streamable-HTTP MCP endpoint. */
-async function unlinkedMcpCall(tool: string, args: Record<string, unknown>): Promise<unknown> {
-  const r = await fetch(UNLINKED_MCP_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream',
-      Authorization: `Bearer ${unlinkedToken()}`,
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: ++unlinkedRpcId,
-      method: 'tools/call',
-      params: { name: tool, arguments: args },
-    }),
-    signal: AbortSignal.timeout(UNLINKED_TIMEOUT_MS),
-  });
-  if (r.status === 401) return { error: 'unlinked.ai access is not authorized (grant missing or revoked).' };
-  const contentType = r.headers.get('content-type') || '';
-  let payload: any = null;
-  if (contentType.includes('text/event-stream')) {
-    // Single-response SSE: take the last `data:` line.
-    const text = await r.text();
-    const dataLines = text.split('\n').filter((l) => l.startsWith('data:'));
-    const last = dataLines[dataLines.length - 1];
-    payload = last ? JSON.parse(last.slice(5).trim()) : null;
-  } else {
-    payload = await r.json().catch(() => null);
-  }
-  if (!r.ok || !payload) return { error: `unlinked.ai request failed (${r.status})` };
-  if (payload.error) return { error: `unlinked.ai: ${payload.error.message || 'request rejected'}` };
-  const content = payload.result?.content;
-  const text = Array.isArray(content) && content[0]?.type === 'text' ? content[0].text : undefined;
-  if (payload.result?.isError) return { error: text || 'unlinked.ai tool error' };
-  if (text) {
-    try {
-      return JSON.parse(text);
-    } catch {
-      return { result: text };
-    }
-  }
-  return payload.result ?? { error: 'empty unlinked.ai response' };
-}
-
 export async function toolUnlinkedSearch(
   userId: string,
   tool: 'unlinked_search_network' | 'unlinked_search_everyone',
   args: { query: string; degree?: 1 | 2 }
 ): Promise<unknown> {
-  // Owner-only: the bearer grant is the owner's personal credential and
-  // unlinked has no anonymous access mode for agents.
-  if (!isOwnerUser(userId)) {
-    return {
-      error:
-        'unlinked.ai search is only available to the account owner — it uses his personal network data and has no anonymous mode.',
-    };
+  if (unlinkedProvisionConfigured()) {
+    const db = getDriver().session();
+    try {
+      const rows = await db.run('MATCH (u:User {id:$userId}) RETURN u.ideaflowIssuer AS issuer,u.ideaflowSub AS subject', { userId });
+      const row = rows.records[0];
+      const issuer = row?.get('issuer'), subject = row?.get('subject');
+      return await searchUnlinkedForIdentity(typeof issuer === 'string' && typeof subject === 'string' ? { issuer, subject } : null, tool, args.query, args.degree);
+    } finally { await db.close(); }
   }
-  if (!unlinkedToken()) {
-    return { error: 'unlinked.ai is not configured on the server yet.' };
-  }
-  const query = args.query.trim().slice(0, 1024);
-  if (!query) return { error: 'query is required' };
-  const callArgs: Record<string, unknown> = { query };
-  if (tool === 'unlinked_search_network' && (args.degree === 1 || args.degree === 2)) {
-    callArgs.degree = args.degree;
-  }
-  return unlinkedMcpCall(tool, callArgs);
+  return { code: 'not_configured', error: 'Unlinked is not configured for this agent yet.' };
 }
