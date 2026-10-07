@@ -21,6 +21,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({ default: {
   setItem: async (key: string, value: string) => { mocks.storage.set(key, value); }, removeItem: async (key: string) => { mocks.storage.delete(key); },
 } }));
 vi.mock('@react-navigation/native', () => ({
+  createNavigationContainerRef: () => ({}),
   DefaultTheme: { colors: {} }, DarkTheme: { colors: {} }, CommonActions: { navigate: (action: unknown) => action },
   NavigationContainer: ({ children }: any) => React.createElement(React.Fragment, null, children),
 }));

@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   scroll: vi.fn(),
   privateName: null as string | null,
   platform: 'ios',
+  focused: true,
+  visibilityReleases: [] as ReturnType<typeof vi.fn>[],
 }));
 
 // Exercise the real ChatScreen hooks/render tree, with the OS boundary replaced
@@ -40,6 +42,7 @@ vi.mock('react-native', async () => {
   };
 });
 vi.mock('@react-navigation/native', () => ({
+  useFocusEffect: (fn: any) => React.useEffect(() => mocks.focused ? fn() : undefined, [fn, mocks.focused]),
   useNavigation: () => mocks.navigation, useRoute: () => mocks.route,
 }));
 vi.mock('@react-navigation/elements', () => ({ useHeaderHeight: () => 56 }));
@@ -58,6 +61,7 @@ vi.mock('../../mobile/src/services/hashtagSuggestions', () => ({
   fetchHashtagSuggestions: vi.fn(), invalidateHashtagSuggestions: vi.fn(),
 }));
 vi.mock('../../mobile/src/components/MessageActionSheet', () => ({ MessageActionSheet: (props: any) => React.createElement('MessageActionSheet', props) }));
+vi.mock('../../mobile/src/components/ContextLane', () => ({ ContextLane: () => null }));
 vi.mock('../../mobile/src/components/ReactionsBar', () => ({ ReactionsBar: () => null }));
 vi.mock('../../mobile/src/components/ToastMessage', () => ({ ToastMessage: () => null }));
 vi.mock('../../mobile/src/components/AiDisclosureBanner', () => ({ AiDisclosureBanner: () => null }));
@@ -97,6 +101,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.privateName = null;
   mocks.platform = 'ios';
+  mocks.focused = true;
+  mocks.visibilityReleases = [];
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.chat = {
     currentUser: { userId: 'bob', name: 'Bob' },
@@ -105,6 +111,13 @@ beforeEach(() => {
       { user: { id: 'bob', name: 'Bob' }, role: 'member' },
     ] } satisfies Conversation],
     messages: [], loadingMessages: false, isConnected: true,
+    activeConversationId: 'sailing', activeConversationLane: 'chat',
+    isChatVisible: (id: string) => mocks.chat.activeConversationId === id && mocks.chat.activeConversationLane === 'chat',
+    registerConversationVisibility: vi.fn(() => {
+      const release = vi.fn();
+      mocks.visibilityReleases.push(release);
+      return release;
+    }),
     setActiveConversation: vi.fn(), markConversationRead: vi.fn(),
     presence: new Map(), typingByConv: new Map(), readByOthers: new Map(), onlineUsers: new Map(),
     mutedConvs: {}, muteConv: vi.fn(), reportTyping: vi.fn(),
@@ -295,4 +308,72 @@ describe('desktop composer input', () => {
     expect(held.message).toEqual(clicked.message);
     expect(held.isOwn).toBe(clicked.isOwn);
   });
+});
+
+it('restores the conversation when returning to an already-mounted chat', async () => {
+  await render();
+  mocks.focused = false; await render();
+  mocks.focused = true; await render();
+  expect(mocks.chat.setActiveConversation.mock.calls.map((call: any[]) => call[0])).toEqual(['sailing', 'sailing']);
+});
+it('leaves desktop selection and Context lane ownership with the parent', async () => {
+  await act(async () => { screen = create(React.createElement(ChatScreen, { conversationId: 'sailing', embedded: true })); });
+  await act(async () => screen!.update(React.createElement(ChatScreen, { conversationId: 'other', embedded: true })));
+  expect(mocks.chat.setActiveConversation).not.toHaveBeenCalled();
+});
+it('shows Retry instead of an empty-conversation placeholder after a failed load', async () => {
+  mocks.chat.messageLoadError = 'Could not load messages.'; mocks.chat.retryMessages = vi.fn();
+  await render();
+  expect(renderedText()).toContain('Could not load messages.');
+  expect(renderedText()).not.toContain('Say hello');
+  await act(async () => screen!.root.findByProps({ accessibilityLabel: 'Retry loading messages' }).props.onPress());
+  expect(mocks.chat.retryMessages).toHaveBeenCalledOnce();
+});
+
+
+it('does not mark Chat read when a Context destination starts with stale lane state', async () => {
+  mocks.route.params = { conversationId: 'sailing', lane: 'context' } as any;
+  mocks.chat.setActiveConversation.mockImplementation((_id: string, opts: any) => {
+    mocks.chat.activeConversationLane = opts?.lane ?? 'chat';
+  });
+  try {
+    await render();
+    expect(mocks.chat.markConversationRead).not.toHaveBeenCalled();
+    mocks.chat.activeConversationId = 'sailing';
+    mocks.chat.activeConversationLane = 'context';
+    await render();
+    expect(mocks.chat.markConversationRead).not.toHaveBeenCalled();
+  } finally { mocks.route.params = { conversationId: 'sailing' }; }
+});
+
+it('preserves Context across focus return but honors a new explicit Chat destination', async () => {
+  await render();
+  mocks.chat.activeConversationLane = 'context'; await render();
+  mocks.focused = false; await render();
+  mocks.chat.activeConversationId = null; mocks.chat.activeConversationLane = 'chat';
+  await render();
+  mocks.focused = true; await render();
+  expect(mocks.chat.setActiveConversation).toHaveBeenLastCalledWith('sailing', { lane: 'context' });
+  mocks.route.params = { conversationId: 'sailing', lane: 'chat' } as any;
+  await render();
+  expect(mocks.chat.setActiveConversation).toHaveBeenLastCalledWith('sailing', { lane: 'chat' });
+  mocks.route.params = { conversationId: 'sailing' };
+});
+
+it.each([
+  { embedded: false, unmount: false }, { embedded: true, unmount: false }, { embedded: true, unmount: true },
+])('releases visibility without clearing selection with embedded=$embedded and unmount=$unmount', async ({ embedded, unmount }) => {
+  const element = React.createElement(ChatScreen, { conversationId: 'sailing', embedded });
+  await act(async () => { screen = create(element); });
+  expect(mocks.chat.registerConversationVisibility).toHaveBeenCalledExactlyOnceWith('sailing');
+  const release = mocks.visibilityReleases[0];
+  if (unmount) {
+    await act(async () => screen!.unmount());
+    screen = undefined;
+  } else {
+    mocks.focused = false;
+    await act(async () => screen!.update(React.createElement(ChatScreen, { conversationId: 'sailing', embedded })));
+  }
+  expect(release).toHaveBeenCalledOnce();
+  expect(mocks.chat.setActiveConversation).not.toHaveBeenCalledWith(null);
 });

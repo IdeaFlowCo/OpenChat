@@ -2,8 +2,7 @@ import { captureComposeIntent } from './composeIntents';
 import { Linking, Platform } from 'react-native';
 import { parseOpenChatUrl } from '../utils/parseOpenChatUrl';
 import { createEntryIntent, notifyEntryIntentCaptured, saveEntryIntent, EntryTarget } from './entryIntents';
-import { navigationRef } from './notifications';
-import { getToken } from '../api/client';
+import { openConversation } from '../navigation/conversationNavigation';
 
 export function installDeepLinkHandling(): () => void {
   let disposed = false;
@@ -19,17 +18,7 @@ export function installDeepLinkHandling(): () => void {
     }
 
     if (parsed.type === 'context') {
-      try {
-        const token = await getToken();
-        if (token) {
-          // Give navigation a moment to mount on cold start
-          setTimeout(() => {
-            if (navigationRef.isReady()) {
-              navigationRef.navigate('Chat', { conversationId: parsed.conversationId, lane: 'context', entryId: parsed.entryId });
-            }
-          }, 300);
-        }
-      } catch { }
+      openConversation({ conversationId: parsed.conversationId, lane: 'context', entryId: parsed.entryId });
       return;
     }
 

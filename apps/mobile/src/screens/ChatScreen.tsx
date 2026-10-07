@@ -25,7 +25,7 @@ import {
   View,
 } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { useHeaderHeight, type HeaderOptions } from '@react-navigation/elements';
 import { Attachment, Conversation, ExportRangeKey, Message, api } from '../api/client';
 import { MessageActionSheet, ReplyToData } from '../components/MessageActionSheet';
@@ -48,7 +48,6 @@ import { NewMessagesPill } from '../components/NewMessagesPill';
 import { ChatEmptyState } from '../components/ChatEmptyState';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import type { NavProp, RouteProps } from '../navigation/types';
-import { setActiveConversationForNotifications } from '../services/notifications';
 import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
 import { pickImage, uploadImage, PickedAsset } from '../services/attachments';
@@ -303,13 +302,13 @@ export function ChatScreen({
   }, []);
   const kbOffset = embedded ? 0 : Platform.OS === 'ios' ? (measuredTop ?? headerHeight) : 0;
   const {
-    currentUser, conversations, messages: activeMessages, loadingMessages, isConnected,
+    currentUser, conversations, messages: activeMessages, loadingMessages, messageLoadError, retryMessages, isConnected,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     setActiveConversation, sendMessage, editMessage, deleteMessage, toggleReaction,
     presence, typingByConv, reportTyping,
     aiDisclosureAcceptedAt, mutedConvs, muteConv, blockUser,
     readByOthers, onlineUsers, markConversationRead,
-    activeConversationLane, setActiveConversationLane,
+    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, registerConversationVisibility,
   } = useChat();
 
   const conversation = useMemo<Conversation | undefined>(
@@ -465,15 +464,24 @@ export function ChatScreen({
   // scroll-to-end or unread bump when older messages are prepended (OpenChat-vjc).
   const prependingOlderRef = useRef(false);
 
-  // Activate this conversation in context on mount; clear on unmount.
-  // Also tell the notification service so it can suppress foreground banners
-  // for messages arriving in the conversation the user is already viewing.
-  useEffect(() => {
-    setActiveConversation(conversationId);
-    if (laneProp) setActiveConversationLane(laneProp);
-    setActiveConversationForNotifications(conversationId);
-    // Mark as read when the user opens the conversation (OpenChat-0nj).
-    if (!laneProp || laneProp === 'chat') markConversationRead(conversationId);
+  // Blur releases visibility without clearing the parent's conversation
+  // selection; ChatProvider owns notification suppression.
+  // A mounted compact screen keeps its lane while another screen is on top.
+  // A new route params object is an explicit navigation request, even if its
+  // lane value matches an earlier request (e.g. another notification tap).
+  const destinationParams = embedded ? undefined : routeRaw.params;
+  const laneSelection = useRef<{ conversationId: string; destinationParams: typeof destinationParams; lane: 'chat' | 'context' } | null>(null);
+  if (!laneSelection.current || laneSelection.current.conversationId !== conversationId
+    || laneSelection.current.destinationParams !== destinationParams) {
+    laneSelection.current = { conversationId, destinationParams, lane: laneProp ?? 'chat' };
+  } else if (activeConversationId === conversationId) {
+    laneSelection.current.lane = activeConversationLane;
+  }
+
+  useFocusEffect(useCallback(() => {
+    // The desktop parent owns selection. Re-activating here resets Context
+    // and starts a second load; its cleanup can clear a newer selection.
+    if (!embedded) setActiveConversation(conversationId, { lane: laneSelection.current!.lane });
     // Reset scroll bookkeeping whenever the conversation changes — opening
     // a fresh thread should start "at bottom" with no unread badge, regardless
     // of where we were in the previous thread.
@@ -482,11 +490,13 @@ export function ChatScreen({
     setUnreadCount(0);
     prevLenRef.current = 0;
     initialScrollDoneRef.current = false;
-    return () => {
-      setActiveConversation(null);
-      setActiveConversationForNotifications(null);
-    };
-  }, [conversationId, setActiveConversation, markConversationRead, laneProp, setActiveConversationLane]);
+    return registerConversationVisibility(conversationId);
+  }, [conversationId, setActiveConversation, destinationParams, embedded, registerConversationVisibility]));
+
+  useFocusEffect(useCallback(() => {
+    const showingChat = activeConversationId === conversationId && isChatVisible(conversationId);
+    if (showingChat) markConversationRead(conversationId);
+  }, [conversationId, activeConversationId, activeConversationLane, isConnected, markConversationRead, isChatVisible]));
 
   const isGroup = conversation?.type === 'group';
   // Resolve self-DMs deliberately: there is no "other" participant, so the
@@ -771,7 +781,7 @@ export function ChatScreen({
     const previous = receivedMessagesRef.current;
     receivedMessagesRef.current = { conversationId, latestId: latest?.id, loading: loadingMessages };
     if (latest && (previous?.conversationId !== conversationId || previous.latestId !== latest.id)) {
-      if (activeConversationLane === 'chat') {
+      if (activeConversationId === conversationId && isChatVisible(conversationId)) {
         markConversationRead(conversationId);
       }
     }
@@ -782,7 +792,7 @@ export function ChatScreen({
     // append. The former newest message must still exist in this thread.
     if (previous.latestId && !messages.some(message => message.id === previous.latestId)) return;
     if (latest.senderId && latest.senderId !== currentUser?.userId) hapticReceive();
-  }, [messages, loadingMessages, currentUser?.userId, conversationId, markConversationRead, activeConversationLane]);
+  }, [messages, loadingMessages, currentUser?.userId, conversationId, markConversationRead, activeConversationId, activeConversationLane, isChatVisible]);
 
   // When loadingOlderMessages transitions false→false (completed), flag the
   // next messages update as a prepend so the scroll/unread effect ignores it (OpenChat-vjc).
@@ -1592,6 +1602,13 @@ export function ChatScreen({
         </View>
       ) : (
         <>
+        {messageLoadError && <View style={{ padding: 16, gap: 8 }}>
+          <Text accessibilityRole="alert" style={{ color: c.danger }}>{messageLoadError}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading messages"
+            onPress={retryMessages} style={{ minHeight: 44, justifyContent: 'center' }}>
+            <Text style={{ color: c.primary, fontWeight: '600' }}>Retry</Text>
+          </TouchableOpacity>
+        </View>}
         {loadingMessages && messages.length === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator color={c.primary} />
@@ -1626,7 +1643,7 @@ export function ChatScreen({
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           // Empty-state placeholder when the thread has no messages (OpenChat-0kl).
           ListEmptyComponent={
-            !loadingMessages ? (
+            !loadingMessages && !messageLoadError ? (
               <ChatEmptyState conversation={conversation} currentUser={currentUser} />
             ) : null
           }

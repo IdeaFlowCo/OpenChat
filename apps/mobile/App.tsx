@@ -1,4 +1,5 @@
 import { chatBackOptions } from './src/navigation/chatBackOptions';
+import { flushConversationNavigation } from './src/navigation/conversationNavigation';
 import { isUnlinkedEmbed } from './src/services/unlinkedEmbed';
 import { UnlinkedSessionGate } from './src/components/UnlinkedSessionGate';
 /**
@@ -655,7 +656,8 @@ export function Shell() {
   };
 
   return (
-    <NavigationContainer ref={navigationRef} theme={navTheme}>
+    <NavigationContainer ref={navigationRef} theme={navTheme}
+      onReady={flushConversationNavigation} onStateChange={flushConversationNavigation}>
       <StatusBar
         barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'}
         backgroundColor={c.background}

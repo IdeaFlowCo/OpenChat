@@ -4,9 +4,8 @@ import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
  * ChatContext — the single source of truth for socket lifecycle, conversations,
  * presence, typing, and unread counts in the mobile app.
  *
- * Mirrors the web ChatContext at flinch-sequel/client/src/contexts/ChatContext.tsx
- * but trimmed for mobile + no DOM. The screens consume `useChat()` for state
- * and actions; they shouldn't subscribe to socket events directly.
+ * The native and responsive-web screens consume `useChat()` for state and
+ * actions; they shouldn't subscribe to socket events directly.
  *
  * Reconnect catch-up (OpenChat-qz0): on socket reconnect (not first connect),
  * we call GET /api/chat/messages/since to fetch messages missed during the
@@ -17,6 +16,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { randomUUID } from 'expo-crypto';
 import {
   setUnreadBadgeCount,
+  setActiveConversationForNotifications,
   loadMutedConvs,
   muteConversation as muteConvStorage,
 } from '../services/notifications';
@@ -91,9 +91,12 @@ interface ChatContextValue {
   activeConversationLane: 'chat' | 'context';
   setActiveConversationLane: (lane: 'chat' | 'context') => void;
   isChatVisible: (id: string) => boolean;
+  registerConversationVisibility: (id: string) => () => void;
   setActiveConversation: (id: string | null, opts?: { lane?: 'chat' | 'context' }) => void;
   messages: Message[]; // for the active conversation
   loadingMessages: boolean;
+  messageLoadError: string | null;
+  retryMessages: () => void;
   loadOlderMessages: (conversationId: string) => Promise<void>;
   hasMoreMessages: boolean;
   loadingOlderMessages: boolean;
@@ -205,15 +208,44 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [conversationsLoaded, setConversationsLoaded] = useState(false);
 
   const [activeConversationId, setActiveConversationIdState] = useState<string | null>(null);
-  const [activeConversationLane, setActiveConversationLane] = useState<'chat' | 'context'>('chat');
+  const [activeConversationLane, setActiveConversationLaneState] = useState<'chat' | 'context'>('chat');
   const activeConversationLaneRef = useRef<'chat' | 'context'>('chat');
   useEffect(() => {
     activeConversationLaneRef.current = activeConversationLane;
   }, [activeConversationLane]);
 
+  const setActiveConversationLane = useCallback((lane: 'chat' | 'context') => {
+    activeConversationLaneRef.current = lane;
+    setActiveConversationLaneState(lane);
+  }, []);
+
+  const [visibleConversation, setVisibleConversation] = useState<{ id: string; owner: symbol } | null>(null);
+  const visibilityRef = useRef<typeof visibleConversation>(null);
   const isChatVisible = useCallback((id: string) => {
-    return activeConversationId === id && activeConversationLane === 'chat';
-  }, [activeConversationId, activeConversationLane]);
+    return visibilityRef.current?.id === id && activeConvIdRef.current === id
+      && activeConversationLaneRef.current === 'chat';
+  }, []);
+  const registerConversationVisibility = useCallback((id: string) => {
+    const registration = { id, owner: Symbol() };
+    visibilityRef.current = registration;
+    setVisibleConversation(registration);
+    if (isChatVisible(id)) setUnreadByConv(current => {
+      const next = new Map(current);
+      next.delete(id);
+      return next;
+    });
+    return () => {
+      if (visibilityRef.current?.owner !== registration.owner) return;
+      visibilityRef.current = null;
+      setVisibleConversation(null);
+      setActiveConversationForNotifications(null);
+    };
+  }, [isChatVisible]);
+  useEffect(() => {
+    setActiveConversationForNotifications(isConnected && visibleConversation
+      && isChatVisible(visibleConversation.id) ? visibleConversation.id : null);
+  }, [isConnected, visibleConversation, activeConversationId, activeConversationLane, isChatVisible]);
+  useEffect(() => () => setActiveConversationForNotifications(null), []);
   // Keep a ref so socket handlers (which close over a stale value) can read the
   // current active conversation without re-subscribing on every change.
   const activeConvIdRef = useRef<string | null>(null);
@@ -224,6 +256,64 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const messageLoadGenerationRef = useRef(0);
+  const historyLoadingRef = useRef(false);
+  const [messageLoadError, setMessageLoadError] = useState<string | null>(null);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const retainedSendsRef = useRef(new Map<string, Map<string, Message>>());
+  const messageAccountRef = useRef<string | null>(null);
+  const sendSessionRef = useRef(0);
+  const resetMessageSession = useCallback((accountId: string | null) => {
+    messageAccountRef.current = accountId;
+    ++sendSessionRef.current;
+    retainedSendsRef.current.clear();
+    visibilityRef.current = null;
+    setVisibleConversation(null);
+    setActiveConversationForNotifications(null);
+    activeConvIdRef.current = null;
+    ++messageLoadGenerationRef.current;
+    historyLoadingRef.current = false;
+    setActiveConversationIdState(null);
+    setMessages([]);
+    setLoadingMessages(false);
+    setMessageLoadError(null);
+    setHasMoreMessages(false);
+    setLoadingOlderMessages(false);
+  }, []);
+  const mergeMessages = useCallback((id: string, current: Message[], incoming: Message[], history = false) => {
+    const retained = retainedSendsRef.current.get(id);
+    for (const message of incoming) {
+      if (message.conversationId !== id || !retained?.has(message.id)) continue;
+      if (history) retained.delete(message.id);
+      else retained.set(message.id, message);
+    }
+    const retainedMessages = [...(retained?.values() ?? [])];
+    const localIds = new Set(retainedMessages.map(message => message.id));
+    const merged = new Map([...current.filter(message => message.conversationId === id
+      && (!message.id.startsWith('local-') || localIds.has(message.id))),
+    ...retainedMessages, ...incoming.filter(message => message.conversationId === id)]
+      .map(message => [message.id, message]));
+    return [...merged.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  }, []);
+  const messagePatchesRef = useRef(new Map<string, (message: Message) => Message>());
+  const mergeCreationMessages = useCallback((id: string, current: Message[], incoming: Message[]) => {
+    const retained = retainedSendsRef.current.get(id);
+    const creation = incoming.map(message => {
+      const existing = current.find(item => item.id === message.id) ?? retained?.get(message.id);
+      return existing?.id === message.id ? existing : message;
+    });
+    return mergeMessages(id, current, creation);
+  }, [mergeMessages]);
+  const patchMessage = useCallback((id: string, patch: (message: Message) => Message) => {
+    const previous = messagePatchesRef.current.get(id);
+    messagePatchesRef.current.set(id, previous ? message => patch(previous(message)) : patch);
+    for (const sends of retainedSendsRef.current.values()) {
+      for (const [clientId, message] of sends) {
+        if (message.id === id) sends.set(clientId, patch(message));
+      }
+    }
+    setMessages(current => current.map(message => message.id === id ? patch(message) : message));
+  }, []);
   // Pagination state (OpenChat-vjc)
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
@@ -283,7 +373,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // ── Reconnect catch-up (OpenChat-qz0) ───────────────────────────────────────
   //
   // lastSyncAt: the most recent timestamp at which we were definitively in sync.
-  // Updated on every message:new socket event AND on initial conversation load.
+  // Updated on every message:new socket event and reconnect catch-up.
   // Initialized to the current time at bootstrap so a first-ever connect doesn't
   // try to fetch all messages since epoch.
   const lastSyncAtRef = useRef<string>(new Date().toISOString());
@@ -333,6 +423,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const bootstrapIfAuthed = useCallback(async (): Promise<boolean> => {
     const token = await getToken();
     if (!token) {
+      resetMessageSession(null);
       setIsAuthed(false);
       setAuthInitialized(true);
       return false;
@@ -353,6 +444,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.warn('[ChatContext] current-user refresh failed:', error);
     }
+    const accountId = u?.userId ?? null;
+    if (messageAccountRef.current !== accountId) resetMessageSession(accountId);
     setCurrentUser(u);
     setIsAuthed(true);
     // Signed in again: an earlier explicit sign-out no longer blocks the
@@ -387,7 +480,46 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setMutedConvs(muted);
     setAuthInitialized(true);
     return true;
-  }, [refreshConversations, refetchMatches]);
+  }, [refreshConversations, refetchMatches, resetMessageSession]);
+
+  // Reload history without erasing messages or edits received while REST is in flight.
+  const retryMessages = useCallback(() => {
+    const id = activeConvIdRef.current;
+    if (!id) return;
+    const generation = ++messageLoadGenerationRef.current;
+    const cachedIds = new Set(messagesRef.current.map(message => message.id));
+    messagePatchesRef.current.clear();
+    historyLoadingRef.current = true;
+    setLoadingMessages(true);
+    setLoadingOlderMessages(false);
+    setMessageLoadError(null);
+    api.getMessages(id).then(({ messages: loaded, hasMore }) => {
+      if (activeConvIdRef.current !== id || messageLoadGenerationRef.current !== generation) return;
+      setMessages(current => {
+        const oldest = loaded[0]?.createdAt;
+        const relevant = current.filter(message => message.conversationId === id
+          && (message.id.startsWith('local-')
+            || (oldest !== undefined ? message.createdAt >= oldest : !cachedIds.has(message.id))));
+        const merged = new Map(mergeMessages(id, relevant, loaded, true).map(message => [message.id, message]));
+        for (const [messageId, message] of merged) {
+          const patch = messagePatchesRef.current.get(messageId);
+          if (patch) merged.set(messageId, patch(message));
+        }
+        return [...merged.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+      });
+      setHasMoreMessages(hasMore);
+    }).catch(err => {
+      if (activeConvIdRef.current !== id || messageLoadGenerationRef.current !== generation) return;
+      console.warn('[ChatContext] loadMessages failed:', err);
+      setMessageLoadError('Could not load messages. Check your connection and try again.');
+      if (err?.status === 401 || err?.status === 403 || err?.status === 404) setMessages([]);
+    }).finally(() => {
+      if (messageLoadGenerationRef.current === generation) {
+        historyLoadingRef.current = false;
+        setLoadingMessages(false);
+      }
+    });
+  }, [mergeMessages]);
 
   // Wire socket listeners exactly ONCE per authed session.
   useEffect(() => {
@@ -399,6 +531,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     const onConnect = () => {
       setIsConnected(true);
+      // Repair failed initial loads and truncated catch-up for the open thread.
+      if (activeConvIdRef.current) {
+        joinConversation(activeConvIdRef.current);
+        retryMessages();
+      }
 
       if (wasEverConnectedRef.current) {
         // Match socket events are best-effort too; repair badge/card state at
@@ -415,6 +552,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             return;
           }
           if (missed.length === 0) return;
+          for (const message of missed) mergeCreationMessages(message.conversationId, [], [message]);
 
           const newConvIds = new Set<string>();
 
@@ -425,12 +563,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             if (forActive.length > 0) {
               setMessages(prev => {
                 const existingIds = new Set(prev.map(m => m.id));
-                const fresh = forActive.filter(m => !existingIds.has(m.id));
-                if (fresh.length === 0) return prev;
-                // Insert in chronological order: prev is oldest→newest already.
-                return [...prev, ...fresh].sort((a, b) =>
-                  new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-                );
+                const fresh = forActive.filter(m => !existingIds.has(m.id)
+                  && (!prev[0] || m.createdAt >= prev[0].createdAt))
+                  .map(m => messagePatchesRef.current.get(m.id)?.(m) ?? m);
+                return mergeCreationMessages(activeId, prev, fresh);
               });
             }
           }
@@ -455,13 +591,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             return sortConversationsByRecent(next);
           });
 
-          // Bump unread counters for non-active conversations where someone
-          // else sent messages.
-          const activeId2 = activeConvIdRef.current;
+          // Context and blurred screens must retain Chat unread counts even
+          // when their conversation remains selected.
           setUnreadByConv(prev => {
             const next = new Map(prev);
             for (const msg of missed) {
-              if ((msg.conversationId !== activeId2 || activeConversationLaneRef.current !== 'chat') && msg.senderId !== currentUserId) {
+              if (!isChatVisible(msg.conversationId) && msg.senderId !== currentUserId) {
                 next.set(msg.conversationId, (next.get(msg.conversationId) ?? 0) + 1);
               }
             }
@@ -495,8 +630,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     const onMessage = (msg: Message) => {
       // If this is the active conversation, append to message list.
+      mergeCreationMessages(msg.conversationId, [], [msg]);
       if (msg.conversationId === activeConvIdRef.current) {
-        setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
+        setMessages(prev => mergeCreationMessages(msg.conversationId, prev,
+          [messagePatchesRef.current.get(msg.id)?.(msg) ?? msg]));
       }
       // Update conversation row preview + re-sort.
       setConversations(prev => {
@@ -506,9 +643,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
         return next;
       });
-      // Unread bump + in-app banner: only if msg is for a non-active conv and
-      // not from us. The banner component itself further filters muted convs.
-      if ((msg.conversationId !== activeConvIdRef.current || activeConversationLaneRef.current !== 'chat') && msg.senderId !== currentUser?.userId) {
+      // A selected conversation only suppresses unread/banner updates while
+      // its Chat lane is visible. The banner also filters muted conversations.
+      if (!isChatVisible(msg.conversationId) && msg.senderId !== currentUser?.userId) {
         setUnreadByConv(prev => {
           const next = new Map(prev);
           next.set(msg.conversationId, (next.get(msg.conversationId) ?? 0) + 1);
@@ -651,28 +788,29 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // message:updated — edit or soft-delete (OpenChat-q9h)
     const onMessageUpdated = (msg: Message) => {
       if (msg.conversationId === activeConvIdRef.current) {
-        setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, ...msg } : m));
+        patchMessage(msg.id, message => ({
+          ...message, content: msg.content,
+          ...(msg.editedAt !== undefined ? { editedAt: msg.editedAt } : {}),
+          ...(msg.deletedAt !== undefined ? { deletedAt: msg.deletedAt, attachments: msg.attachments } : {}),
+        }));
       }
     };
 
     // message:reactions-updated — reaction add/remove (OpenChat-7bd)
     const onReactionsUpdated = (payload: { messageId: string; conversationId: string; reactions: ReactionSummary[] }) => {
       if (payload.conversationId === activeConvIdRef.current) {
-        setMessages(prev => prev.map(m =>
-          m.id === payload.messageId ? { ...m, reactions: payload.reactions } : m
-        ));
+        patchMessage(payload.messageId, message => ({ ...message, reactions: payload.reactions }));
       }
     };
 
     // message:preview-ready — link preview fetched server-side (OpenChat-hq2)
     const onPreviewReady = (payload: { messageId: string; preview: LinkPreview }) => {
-      setMessages(prev => prev.map(m => {
-        if (m.id !== payload.messageId) return m;
+      patchMessage(payload.messageId, m => {
         const existing = m.linkPreviews ?? [];
         // Deduplicate by URL
         if (existing.some(p => p.url === payload.preview.url)) return m;
         return { ...m, linkPreviews: [...existing, payload.preview] };
-      }));
+      });
     };
 
     // message:transcript — server-side voice transcription ready (OpenChat-4jn).
@@ -681,9 +819,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // conversation guard keeps stale-conversation events from no-op churning.
     const onTranscript = (payload: { messageId: string; conversationId: string; transcript: string }) => {
       if (payload.conversationId !== activeConvIdRef.current) return;
-      setMessages(prev => prev.map(m =>
-        m.id === payload.messageId ? { ...m, transcript: payload.transcript } : m
-      ));
+      patchMessage(payload.messageId, message => ({ ...message, transcript: payload.transcript }));
     };
 
     sock.on('connect', onConnect);
@@ -725,12 +861,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sock.off('read:updated', onReadUpdated);
       sock.off('user:profile-updated', onProfileUpdated);
     };
-  }, [isAuthed, chatSocket, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage, refetchMatches]);
+  }, [isAuthed, chatSocket, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage, refetchMatches, retryMessages, patchMessage, mergeCreationMessages, isChatVisible]);
 
   // setActiveConversation: clears unread, joins/leaves rooms, loads messages.
   const setActiveConversation = useCallback((id: string | null, opts?: { lane?: 'chat' | 'context' }) => {
     // A late response must not finish a newer load, including A → back → A.
-    const generation = ++messageLoadGenerationRef.current;
+    ++messageLoadGenerationRef.current;
+    setMessageLoadError(null);
     const prev = activeConvIdRef.current;
     if (prev && prev !== id) leaveConversation(prev);
 
@@ -742,7 +879,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     if (id) {
       joinConversation(id);
-      if (nextLane === 'chat') {
+      if (isChatVisible(id)) {
         setUnreadByConv(curr => {
           if (!curr.has(id)) return curr;
           const next = new Map(curr);
@@ -750,58 +887,47 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           return next;
         });
       }
-      setLoadingMessages(true);
+      if (prev !== id) {
+        messagePatchesRef.current.clear();
+        setMessages(mergeMessages(id, [], []));
+      }
       setHasMoreMessages(false);
-      api.getMessages(id)
-        .then(({ messages: msgs, hasMore }) => {
-          if (activeConvIdRef.current === id && messageLoadGenerationRef.current === generation) {
-            setMessages(msgs);
-            setHasMoreMessages(hasMore);
-            // Advance sync cursor to the most recent message in this conversation.
-            if (msgs.length > 0) {
-              const latest = msgs[msgs.length - 1].createdAt;
-              if (latest && latest > lastSyncAtRef.current) {
-                lastSyncAtRef.current = latest;
-              }
-            }
-          }
-        })
-        .catch(err => console.warn('[ChatContext] loadMessages failed:', err))
-        .finally(() => {
-          if (messageLoadGenerationRef.current === generation) setLoadingMessages(false);
-        });
+      setLoadingOlderMessages(false);
+      retryMessages();
     } else {
       setMessages([]);
+      historyLoadingRef.current = false;
       setLoadingMessages(false);
       setHasMoreMessages(false);
     }
-  }, []);
+  }, [retryMessages, mergeMessages, isChatVisible]);
 
   // Load older messages for the active conversation (OpenChat-vjc).
   // Uses the createdAt of the earliest currently-loaded message as the cursor.
   // Prepends results to the message list; deduplicates by id in case of overlap.
   const loadOlderMessages = useCallback(async (conversationId: string) => {
-    if (loadingOlderMessages || !hasMoreMessages) return;
+    if (historyLoadingRef.current || loadingOlderMessages || !hasMoreMessages) return;
     // Find the oldest message currently in state (messages are sorted oldest→newest).
-    const oldest = messages[0];
+    const oldest = messages.find(message => !message.id.startsWith('local-')
+      && !retainedSendsRef.current.get(conversationId)?.has(message.id));
     if (!oldest) return;
+    const generation = messageLoadGenerationRef.current;
     setLoadingOlderMessages(true);
     try {
       const { messages: older, hasMore } = await api.getMessagesBefore(conversationId, oldest.createdAt);
-      if (activeConvIdRef.current === conversationId) {
+      if (activeConvIdRef.current === conversationId && generation === messageLoadGenerationRef.current) {
         setMessages(prev => {
-          const existingIds = new Set(prev.map(m => m.id));
-          const newMsgs = older.filter(m => !existingIds.has(m.id));
-          return [...newMsgs, ...prev];
+          const patched = older.map(message => messagePatchesRef.current.get(message.id)?.(message) ?? message);
+          return mergeMessages(conversationId, prev, patched, true);
         });
         setHasMoreMessages(hasMore);
       }
     } catch (err) {
       console.warn('[ChatContext] loadOlderMessages failed:', err);
     } finally {
-      setLoadingOlderMessages(false);
+      if (generation === messageLoadGenerationRef.current) setLoadingOlderMessages(false);
     }
-  }, [loadingOlderMessages, hasMoreMessages, messages]);
+  }, [loadingOlderMessages, hasMoreMessages, messages, mergeMessages]);
 
   // Optimistic send: append a local message immediately, then replace with
   // server canonical on success. Accepts optional replyToId for threaded replies
@@ -824,9 +950,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // the REST fallback, so a lost-ack retry can't persist two rows (the server
     // MERGEs on this id). See OpenChat-60y.
     const clientId = randomUUID();
+    const sendSession = sendSessionRef.current;
 
     const optimistic: Message = {
-      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `local-${clientId}`,
       content,
       conversationId: id,
       senderId: currentUser?.userId || 'me',
@@ -840,55 +967,54 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       replyToId,
       attachments,
     };
-    const updateActiveMessages = (updater: (prev: Message[]) => Message[]) => {
-      if (activeConvIdRef.current === id) setMessages(updater);
+    let retained = retainedSendsRef.current.get(id);
+    if (!retained) {
+      retained = new Map();
+      retainedSendsRef.current.set(id, retained);
+    }
+    retained.set(clientId, optimistic);
+    if (activeConvIdRef.current === id) setMessages(prev => mergeMessages(id, prev, []));
+    const settle = (incoming: Message | null, failed = false) => {
+      if (sendSessionRef.current !== sendSession) return;
+      const sends = retainedSendsRef.current.get(id);
+      const existing = sends?.get(clientId);
+      if (!existing) return;
+      const canonical = incoming ? messagePatchesRef.current.get(incoming.id)?.(incoming) ?? incoming : null;
+      const real = existing.id !== optimistic.id ? existing : canonical;
+      if (existing) {
+        if (real) sends!.set(clientId, real);
+        else if (!failed) sends!.delete(clientId);
+        else if (existing.id === optimistic.id) sends!.set(clientId, { ...existing, _failed: true } as Message);
+      }
+      if (activeConvIdRef.current === id) {
+        setMessages(prev => mergeCreationMessages(id, prev.filter(message => message.id !== optimistic.id), real ? [real] : []));
+      }
     };
-    updateActiveMessages(prev => [...prev, optimistic]);
-
-    // If there are attachments, always use REST (socket path doesn't carry them).
     if (hasAttachments) {
       try {
         const real = await api.sendMessage(id, content, attachments, clientId, replyToId);
-        if (isDroppedMessageSend(real)) return;
-        updateActiveMessages(prev => {
-          const filtered = prev.filter(m => m.id !== optimistic.id);
-          return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
-        });
-      } catch (e2) {
-        console.warn('[ChatContext] attachment message send failed:', e2);
-        updateActiveMessages(prev => prev.map(m => m.id === optimistic.id ? { ...m, _failed: true } as Message & { _failed?: boolean } : m));
-        throw e2;
+        settle(isDroppedMessageSend(real) ? null : real);
+      } catch (error) {
+        console.warn('[ChatContext] attachment message send failed:', error);
+        settle(null, true);
+        throw error;
       }
       return;
     }
-
-    // Text-only path: try socket first, fall back to REST.
     try {
-      const real = await wsSend(id, content, replyToId, clientId);
-      if (real === null) return;
-      // Replace the optimistic placeholder with the server message.
-      updateActiveMessages(prev => {
-        const filtered = prev.filter(m => m.id !== optimistic.id);
-        return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
-      });
-    } catch (e) {
-      // Socket path failed (incl. the new 10s ack timeout) — try REST fallback.
+      settle(await wsSend(id, content, replyToId, clientId));
+    } catch {
+      if (sendSessionRef.current !== sendSession) return;
       try {
         const real = await api.sendMessage(id, content, undefined, clientId, replyToId);
-        if (isDroppedMessageSend(real)) return;
-        updateActiveMessages(prev => {
-          const filtered = prev.filter(m => m.id !== optimistic.id);
-          return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
-        });
-      } catch (e2) {
-        // Mark optimistic as failed (caller will see it didn't disappear).
-        console.warn('[ChatContext] message send failed:', e2);
-        // Tag the optimistic message; UI can render a retry affordance.
-        updateActiveMessages(prev => prev.map(m => m.id === optimistic.id ? { ...m, _failed: true } as Message & { _failed?: boolean } : m));
-        throw e2;
+        settle(isDroppedMessageSend(real) ? null : real);
+      } catch (error) {
+        console.warn('[ChatContext] message send failed:', error);
+        settle(null, true);
+        throw error;
       }
     }
-  }, [currentUser]);
+  }, [currentUser, mergeMessages, mergeCreationMessages]);
 
   const sendMessage = useCallback(async (
     content: string,
@@ -947,14 +1073,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const editMessage = useCallback(async (messageId: string, content: string) => {
     const updated = await api.editMessage(messageId, content);
     // Optimistic local update (socket event will also arrive for other clients).
-    setMessages(prev => prev.map(m => m.id === messageId ? { ...m, ...updated } : m));
-  }, []);
+    if (updated.conversationId !== activeConvIdRef.current) return;
+    patchMessage(messageId, message => ({ ...message, content: updated.content,
+      ...(updated.editedAt !== undefined ? { editedAt: updated.editedAt } : {}),
+      ...(updated.deletedAt !== undefined ? { deletedAt: updated.deletedAt, attachments: updated.attachments } : {}),
+    }));
+  }, [patchMessage]);
 
   // Soft-delete own message (OpenChat-q9h). Calls DELETE; server emits message:updated.
   const deleteMessage = useCallback(async (messageId: string) => {
     const updated = await api.deleteMessage(messageId);
-    setMessages(prev => prev.map(m => m.id === messageId ? { ...m, ...updated } : m));
-  }, []);
+    if (updated.conversationId !== activeConvIdRef.current) return;
+    patchMessage(messageId, message => ({ ...message, content: updated.content,
+      ...(updated.editedAt !== undefined ? { editedAt: updated.editedAt } : {}),
+      ...(updated.deletedAt !== undefined ? { deletedAt: updated.deletedAt, attachments: updated.attachments } : {}),
+    }));
+  }, [patchMessage]);
 
   // Toggle reaction (OpenChat-7bd). Adds if not present, removes if byMe already.
   const toggleReaction = useCallback(async (messageId: string, emoji: string) => {
@@ -967,10 +1101,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } else {
       result = await api.addReaction(messageId, emoji);
     }
-    setMessages(prev => prev.map(m =>
-      m.id === messageId ? { ...m, reactions: result.reactions } : m
-    ));
-  }, [messages]);
+    if (msg?.conversationId !== activeConvIdRef.current) return;
+    patchMessage(messageId, message => ({ ...message, reactions: result.reactions }));
+  }, [messages, patchMessage]);
 
   // Block user (OpenChat-46p). Calls API, then removes the DM conversation
   // with that user from the local list so the UI updates immediately.
@@ -1025,11 +1158,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Debounced 500ms so we don't hammer the server on every incoming message
   // while the user is actively in the conversation.
   const markConversationRead = useCallback((conversationId: string) => {
+    if (!isChatVisible(conversationId)) return;
     const timers = markReadTimers.current;
     const existing = timers.get(conversationId);
     if (existing) clearTimeout(existing);
     const t = setTimeout(() => {
       timers.delete(conversationId);
+      if (!isChatVisible(conversationId)) return;
       api.markRead(conversationId)
         .then(res => {
           // Seed readByOthers from the response's readMap.
@@ -1050,6 +1185,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             return next;
           });
           // Also clear the unread badge for this conversation.
+          if (!isChatVisible(conversationId)) return;
           setUnreadByConv(curr => {
             if (!curr.has(conversationId)) return curr;
             const next = new Map(curr);
@@ -1060,7 +1196,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         .catch(err => console.warn('[ChatContext] markRead failed:', err));
     }, 500);
     timers.set(conversationId, t);
-  }, []);
+  }, [isChatVisible]);
 
   // Update own profile (OpenChat-tml).
   const updateProfile = useCallback(async (fields: { name?: string; statusMessage?: string; avatarUrl?: string; discoveryMode?: 'name' | 'email_only' | 'hidden'; profileStatus?: { text?: string | null; emoji?: string | null } | null }) => {
@@ -1103,6 +1239,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     try { emitPresenceUpdate('offline'); } catch { /* best effort */ }
     disconnect();
+    resetMessageSession(null);
+    activeConvIdRef.current = null;
+    ++messageLoadGenerationRef.current;
+    historyLoadingRef.current = false;
+    setLoadingMessages(false);
+    setMessageLoadError(null);
     contextLaneManager.setAccount(null);
     await clearSession();
     setIsAuthed(false);
@@ -1124,7 +1266,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setReconnectNewConvIds(new Set());
     wasEverConnectedRef.current = false;
     lastSyncAtRef.current = new Date().toISOString();
-  }, []);
+  }, [resetMessageSession]);
 
   // 401/403 cascade. Any API call that gets back a token-expired response
   // flips us to Login. Listener is global because requests can fire from
@@ -1138,7 +1280,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     currentUser, isAuthed, authInitialized, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
-    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, setActiveConversation, messages, loadingMessages,
+    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, registerConversationVisibility, setActiveConversation, messages, loadingMessages, messageLoadError, retryMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     sendMessage, sendMessageToConversation,
     editMessage, deleteMessage,
@@ -1156,7 +1298,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     currentUser, isAuthed, authInitialized, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
-    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, setActiveConversation, messages, loadingMessages,
+    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, registerConversationVisibility, setActiveConversation, messages, loadingMessages, messageLoadError, retryMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     sendMessage, sendMessageToConversation,
     editMessage, deleteMessage,
@@ -1169,7 +1311,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     readByOthers, onlineUsers, markConversationRead,
     updateProfile,
     reconnectNewConvIds,
-    signOut, bootstrapIfAuthed,
+    signOut, bootstrapIfAuthed, visibleConversation,
   ]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

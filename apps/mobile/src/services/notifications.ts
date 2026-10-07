@@ -11,7 +11,7 @@
  *   - Install a response handler so tapping the OS notification navigates to the
  *     right Chat screen.
  *
- * Web platform is a no-op (web push is handled separately via service worker).
+ * Web platform is a no-op. See the repository README's notification delivery limits.
  */
 
 import { Platform } from 'react-native';
@@ -19,10 +19,10 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import { createNavigationContainerRef } from '@react-navigation/native';
 
 import { api } from '../api/client';
-import type { RootStackParamList } from '../navigation/types';
+import { openConversation } from '../navigation/conversationNavigation';
+export { navigationRef } from '../navigation/conversationNavigation';
 
 // Muted conversations: convId → ISO expiry string (or 'always')
 const MUTED_CONVS_KEY = 'openchat_muted_convs';
@@ -101,16 +101,14 @@ export async function setUnreadBadgeCount(count: number): Promise<void> {
 
 const REGISTERED_TOKEN_KEY = 'openchat_native_push_token_registered';
 
-/** Set by App.tsx, used by the tap-handler to navigate. */
-export const navigationRef = createNavigationContainerRef<RootStackParamList>();
-
 /**
  * The conversation the user is currently viewing on this device. Used by the
  * foreground handler to suppress redundant banners — if a message arrives for
  * the conv that's already on screen, the in-app UI will show it; we don't need
  * a system banner on top.
  *
- * ChatScreen calls setActiveConversation(id) in its mount effect.
+ * ChatProvider combines ChatScreen's focus registration with the selected lane
+ * and socket connectivity; Context must not suppress Chat alerts.
  */
 let activeConversationId: string | null = null;
 export function getActiveConversationIdForNotifications(): string | null {
@@ -139,8 +137,7 @@ export function configureNotificationHandlers(): void {
       const muted = convId ? await isConversationMuted(convId) : false;
       // If the user is already viewing the conversation, suppress the banner +
       // sound (the in-app message:new socket event already updated the UI).
-      // We still let it through silently so the system notification center has
-      // a record — but no audible/visual alert.
+      // Suppression also hides it from the system notification list.
       const suppress = inThisConv || muted;
       return {
         shouldShowBanner: !suppress,
@@ -159,21 +156,32 @@ export function configureNotificationHandlers(): void {
 export function addNotificationTapListener(): { remove: () => void } | null {
   if (Platform.OS === 'web') return null;
 
-  const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+  let disposed = false;
+  let receivedLiveResponse = false;
+  const seen = new Set<string>();
+  const handleResponse = (response: Notifications.NotificationResponse | null) => {
+    if (disposed || !response || response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
+    const identifier = response.notification.request.identifier;
+    if (seen.has(identifier)) return;
     const data = (response.notification.request.content.data || {}) as {
       conversationId?: string;
+      lane?: 'chat' | 'context';
     };
     const conversationId = data.conversationId;
-    if (!conversationId) return;
-    if (!navigationRef.isReady()) return;
-    try {
-      navigationRef.navigate('Chat', { conversationId });
-    } catch (err) {
-      console.warn('[notifications] navigate on tap failed:', err);
-    }
+    if (typeof conversationId !== 'string' || !conversationId.trim()) return;
+    seen.add(identifier);
+    openConversation({ conversationId, lane: data.lane === 'context' ? 'context' : 'chat' });
+    void Notifications.clearLastNotificationResponseAsync().catch(() => {});
+  };
+  const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+    receivedLiveResponse = true;
+    handleResponse(response);
   });
-
-  return sub;
+  // A tap that launched a terminated app predates the listener.
+  void Notifications.getLastNotificationResponseAsync().then(response => {
+    if (!receivedLiveResponse) handleResponse(response);
+  }).catch(err => console.warn('[notifications] initial response failed:', err));
+  return { remove: () => { disposed = true; sub.remove(); } };
 }
 
 /**
