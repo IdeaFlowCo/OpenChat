@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Message } from '../../mobile/src/api/client.js';
 
 const mocks = vi.hoisted(() => ({ getMessages: vi.fn() }));
+vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn() }));
 vi.mock('expo-crypto', () => ({ randomUUID: vi.fn() }));
 vi.mock('../../mobile/src/services/notifications', () => ({ setUnreadBadgeCount: vi.fn() }));
 vi.mock('../../mobile/src/api/client', () => ({

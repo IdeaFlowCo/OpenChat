@@ -853,6 +853,9 @@ export interface ContextPost {
   id: string;
   conversationId: string;
   authorId: string;
+  author?: { id: string; name: string; avatarUrl?: string };
+  agent?: { id: string; name: string };
+  replyTo?: { id: string; text: string; author?: { id: string; name: string }; isDeleted?: boolean };
   text: string;
   kind: string; // 'note' | 'ask' | 'offer'
   lane: 'context';
@@ -949,6 +952,13 @@ export const api = {
     request<ContextPost>(`/api/chat/conversations/${conversationId}/context/${postId}`, { method: 'PATCH', body: JSON.stringify({ text, expectedRevision }) }),
   deleteContextPost: (conversationId: string, postId: string) =>
     request<void>(`/api/chat/conversations/${conversationId}/context/${postId}`, { method: 'DELETE' }),
+
+  getContextAgentPreferences: (keyId: string) => request<{ enabled: boolean }>(`/api/chat/context-agent/preferences?keyId=${encodeURIComponent(keyId)}`),
+  setContextAgentPreferences: (keyId: string, enabled: boolean) => request<{ enabled: boolean }>('/api/chat/context-agent/preferences', { method: 'PUT', body: JSON.stringify({ keyId, enabled }) }),
+  askContextAgents: (conversationId: string, postId: string) =>
+    request<{ queued: number; available: number }>(`/api/chat/conversations/${conversationId}/context/${postId}/ask-agents`, { method: 'POST' }),
+  reportContextPost: (conversationId: string, postId: string, reason: string) =>
+    request<void>(`/api/chat/conversations/${conversationId}/context/${postId}/report`, { method: 'POST', body: JSON.stringify({ reason }) }),
 
   resolveUnlinkedRecipient: (profile: string) => request<
     { status: 'ready'; recipient: { id: string; name: string } } |

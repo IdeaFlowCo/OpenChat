@@ -1,3 +1,4 @@
+import { ConnectAgentLink } from '../components/ConnectAgentLink';
 /**
  * Agent API Keys list screen (OpenChat-7c9).
  * Settings → DEVELOPER → Agent keys
@@ -106,20 +107,20 @@ export function AgentKeysScreen() {
   // device browser. Surfaces the agent-integration story even when the
   // user hasn't minted any keys yet.
   const GuideBanner = () => (
-    <TouchableOpacity
+    <View><ConnectAgentLink detail /><TouchableOpacity
       style={[styles.guideBanner, { backgroundColor: c.surface, borderColor: c.border }]}
       onPress={() => void Linking.openURL(GUIDE_URL)}
       activeOpacity={0.7}
     >
       <Text style={styles.guideEmoji}>📖</Text>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.guideTitle, { color: c.textPrimary }]}>Agent setup · OpenChat + Unlinked</Text>
+        <Text style={[styles.guideTitle, { color: c.textPrimary }]}>API key and MCP guide</Text>
         <Text style={[styles.guideHint, { color: c.textSecondary }]}>
           API keys, MCP, context posting, and troubleshooting
         </Text>
       </View>
       <Text style={{ color: c.textMuted, fontSize: 18 }}>↗</Text>
-    </TouchableOpacity>
+    </TouchableOpacity></View>
   );
 
   return (

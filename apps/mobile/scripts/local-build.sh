@@ -258,9 +258,10 @@ eas submit \
 echo ""
 echo "── publishing to external testers (Friends and Family) ──"
 chmod +x "$SCRIPT_DIR/publish-to-testers.py"
-python3 "$SCRIPT_DIR/publish-to-testers.py"
+export OPENCHAT_ASC_BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist")
+python3 "$SCRIPT_DIR/publish-to-testers.py" || exit 1
 
 echo ""
 echo "════ DONE ════"
-echo "Built locally on $(hostname). On TestFlight for internal + external testers."
+echo "Built locally on $(hostname) and uploaded to TestFlight. External access requires Apple beta review."
 echo "Check status:  eas submit:list --platform ios --limit 1"

@@ -1,4 +1,5 @@
 import { Session } from 'neo4j-driver';
+import { createHash } from 'node:crypto';
 import { nanoid } from 'nanoid';
 import { acquireContextAclLocks, checkContextReadAccess, checkContextWriteAccess } from './contextAccess.js';
 
@@ -13,6 +14,9 @@ export interface ContextPostProjection {
   id: string;
   conversationId: string;
   authorId: string;
+  author: { id: string; name: string };
+  agent?: { id: string; name: string };
+  replyTo?: { id: string; text: string; author: { id: string; name: string }; isDeleted: boolean };
   text: string;
   kind: string;
   lane: 'context';
@@ -31,20 +35,48 @@ export class ContextLaneError extends Error {
   }
 }
 
+const MAX_TEXT_LENGTH = 20000;
+function validateText(text: unknown): asserts text is string {
+  if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT_LENGTH) {
+    throw new ContextLaneError(400, `text must contain 1–${MAX_TEXT_LENGTH} characters`);
+  }
+}
+const projectionJoins = `
+  OPTIONAL MATCH (author:User {id: t.authorId})
+  OPTIONAL MATCH (t)-[:REPLIES_TO]->(parent:Thought)
+  OPTIONAL MATCH (parentAuthor:User {id: parent.authorId})`;
+const projectionReturn = `t, author.name AS authorName, parent.id AS replyToId,
+  parent.text AS replyText, parent.deletedAt AS replyDeletedAt,
+  parent.authorId AS replyAuthorId, parentAuthor.name AS replyAuthorName`;
+function projectRecord(record: any): ContextPostProjection {
+  const post = projectContextPost(record.get('t'), record.get('authorName'));
+  if (record.get('replyToId')) {
+    post.replyToId = record.get('replyToId');
+    post.replyTo = { id: post.replyToId!, text: record.get('replyDeletedAt') ? '' : record.get('replyText') || '',
+      author: { id: record.get('replyAuthorId'), name: record.get('replyAuthorName') || 'Former member' },
+      isDeleted: !!record.get('replyDeletedAt') };
+  }
+  return post;
+}
+
 export async function createContextPost(
   session: Session,
   userId: string,
   conversationId: string,
   input: ContextPostInput,
   agentKeyId?: string,
-  agentScopes?: string[]
+  agentScopes?: string[],
+  authenticatedAgent?: { id: string; name: string }
 ): Promise<ContextPostProjection> {
   const { text, clientRequestId, replyToId } = input;
   const kind = input.kind || 'note';
 
-  if (!text || text.trim() === '') {
-    throw new ContextLaneError(400, 'Text is required');
+  validateText(text);
+  if (!['note', 'ask', 'offer'].includes(kind) || typeof clientRequestId !== 'string' || !clientRequestId.trim() || clientRequestId.length > 200 ||
+      (replyToId !== undefined && (typeof replyToId !== 'string' || !replyToId.trim()))) {
+    throw new ContextLaneError(400, 'Invalid kind, clientRequestId, or replyToId');
   }
+  const requestHash = createHash('sha256').update(JSON.stringify([text, kind, replyToId || null, agentKeyId || authenticatedAgent?.id || null])).digest('hex');
 
   return await session.executeWrite(async (tx) => {
     // 1. Lock and check access
@@ -57,11 +89,25 @@ export async function createContextPost(
     // 2. Check for idempotency (same clientRequestId)
     const idempotencyCheck = await tx.run(
       `MATCH (t:Thought {clientRequestId: $clientRequestId, authorId: $userId, conversationId: $conversationId, lane: 'context'})
-       RETURN t`,
+       ${projectionJoins}
+       RETURN ${projectionReturn}`,
       { clientRequestId, userId, conversationId }
     );
     if (idempotencyCheck.records.length > 0) {
-      return projectContextPost(idempotencyCheck.records[0].get('t'));
+      const record = idempotencyCheck.records[0];
+      const existing = record.get('t').properties;
+      // Legacy posts predate the digest; compare the available original fields.
+      if (existing.requestHash ? existing.requestHash !== requestHash :
+          existing.text !== text || (existing.kind || 'note') !== kind || (record.get('replyToId') || null) !== (replyToId || null)) {
+        throw new ContextLaneError(409, 'clientRequestId was already used for a different post');
+      }
+      return projectRecord(record);
+    }
+
+    if (replyToId) {
+      const parent = await tx.run(`MATCH (parent:Thought {id:$replyToId, conversationId:$conversationId, lane:'context'})
+        WHERE parent.deletedAt IS NULL RETURN parent.id AS id`, { replyToId, conversationId });
+      if (!parent.records.length) throw new ContextLaneError(404, 'Reply target not found');
     }
 
     // Check quotas
@@ -73,7 +119,7 @@ export async function createContextPost(
       `MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
        RETURN u.contextMutationsMinute AS cmMinute, u.contextMutationsCount AS cmCount,
               rel.contextPubsDate AS cpDate, rel.contextPubsCount AS cpCount,
-              size([(u)-[:HAS_THOUGHT]->(t:Thought) WHERE t.lane = 'context' AND t.conversationId = $conversationId AND t.kind IN ['ask', 'offer'] AND (t.status IS NULL OR t.status = 'open') | t]) AS activeCount
+              size([(u)-[:HAS_THOUGHT]->(t:Thought) WHERE t.lane = 'context' AND t.conversationId = $conversationId AND t.deletedAt IS NULL AND t.kind IN ['ask', 'offer'] AND (t.status IS NULL OR t.status = 'open') | t]) AS activeCount
       `,
       { userId, conversationId }
     );
@@ -100,10 +146,10 @@ export async function createContextPost(
       // Update counters
       await tx.run(
         `MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-         SET u.contextMutationsMinute = $currentMinute,
-             u.contextMutationsCount = CASE WHEN u.contextMutationsMinute = $currentMinute THEN u.contextMutationsCount + 1 ELSE 1 END,
-             rel.contextPubsDate = $currentDate,
-             rel.contextPubsCount = CASE WHEN rel.contextPubsDate = $currentDate THEN rel.contextPubsCount + 1 ELSE 1 END
+         SET u.contextMutationsCount = CASE WHEN u.contextMutationsMinute = $currentMinute THEN coalesce(u.contextMutationsCount, 0) + 1 ELSE 1 END,
+             u.contextMutationsMinute = $currentMinute,
+             rel.contextPubsCount = CASE WHEN rel.contextPubsDate = $currentDate THEN coalesce(rel.contextPubsCount, 0) + 1 ELSE 1 END,
+             rel.contextPubsDate = $currentDate
         `,
         { userId, conversationId, currentMinute, currentDate }
       );
@@ -125,6 +171,7 @@ export async function createContextPost(
 
     const result = await tx.run(`
       MATCH (u:User {id: $userId}), (c:Conversation {id: $conversationId})
+      OPTIONAL MATCH (key:AgentKey {id: $agentKeyId})
       CREATE (t:Thought {
         id: $id,
         authorId: $userId,
@@ -135,23 +182,24 @@ export async function createContextPost(
         revision: 1,
         createdAt: datetime($now),
         updatedAt: datetime($now),
-        clientRequestId: $clientRequestId
+        clientRequestId: $clientRequestId,
+        requestHash: $requestHash,
+        agentKeyId: $agentKeyId,
+        connectorAgentId: $connectorAgentId,
+        agentName: CASE WHEN $agentKeyId IS NULL THEN $connectorAgentName ELSE coalesce(key.name, 'Agent') END
       })
       CREATE (u)-[:HAS_THOUGHT]->(t)
       ${replyClause}
-      RETURN t
-    `, { userId, conversationId, id, text, kind, now, clientRequestId, replyToId });
+      WITH t
+      ${projectionJoins}
+      RETURN ${projectionReturn}
+    `, { userId, conversationId, id, text, kind, now, clientRequestId, replyToId: replyToId || null, agentKeyId: agentKeyId || null, connectorAgentId: authenticatedAgent?.id || null, connectorAgentName: authenticatedAgent?.name || null, requestHash });
 
     if (result.records.length === 0) {
       throw new ContextLaneError(500, 'Failed to create context post');
     }
 
-    const t = result.records[0].get('t');
-    const projection = projectContextPost(t);
-    if (replyToId) {
-      projection.replyToId = replyToId;
-    }
-    return projection;
+    return projectRecord(result.records[0]);
   });
 }
 
@@ -165,6 +213,8 @@ export async function updateContextPost(
   agentKeyId?: string,
   agentScopes?: string[]
 ): Promise<ContextPostProjection> {
+  validateText(text);
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) throw new ContextLaneError(400, 'expectedRevision must be a positive integer');
   return await session.executeWrite(async (tx) => {
     await acquireContextAclLocks(tx, { userIds: [userId], conversationId, agentKeyId });
     const hasAccess = await checkContextWriteAccess(tx, userId, conversationId, agentKeyId, agentScopes);
@@ -174,6 +224,7 @@ export async function updateContextPost(
 
     const check = await tx.run(
       `MATCH (t:Thought {id: $postId, conversationId: $conversationId, lane: 'context'})
+       WHERE t.deletedAt IS NULL
        RETURN t.authorId AS authorId, t.revision AS revision`,
       { postId, conversationId }
     );
@@ -198,18 +249,12 @@ export async function updateContextPost(
       `MATCH (t:Thought {id: $postId, conversationId: $conversationId, lane: 'context'})
        SET t.text = $text, t.revision = t.revision + 1, t.updatedAt = datetime($now)
        WITH t
-       OPTIONAL MATCH (t)-[:REPLIES_TO]->(parent:Thought)
-       RETURN t, parent.id AS replyToId`,
+       ${projectionJoins}
+       RETURN ${projectionReturn}`,
       { postId, conversationId, text, now }
     );
 
-    const t = result.records[0].get('t');
-    const replyToId = result.records[0].get('replyToId');
-    const projection = projectContextPost(t);
-    if (replyToId) {
-      projection.replyToId = replyToId;
-    }
-    return projection;
+    return projectRecord(result.records[0]);
   });
 }
 
@@ -251,7 +296,8 @@ export async function deleteContextPost(
 
     await tx.run(
       `MATCH (t:Thought {id: $postId, conversationId: $conversationId, lane: 'context'})
-       DETACH DELETE t`,
+       SET t.text = '', t.deletedAt = coalesce(t.deletedAt, datetime()),
+           t.updatedAt = datetime(), t.revision = t.revision + 1`,
       { postId, conversationId }
     );
   });
@@ -279,56 +325,64 @@ export async function listContextPosts(
     let filterClause = `t.lane = 'context' AND t.conversationId = $conversationId`;
     const params: any = { conversationId };
 
+    if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1)) throw new ContextLaneError(400, 'limit must be a positive integer');
+    if (options.kind && !['note', 'ask', 'offer'].includes(options.kind)) throw new ContextLaneError(400, 'Invalid kind');
+    if (options.search && (typeof options.search !== 'string' || options.search.length > 200)) throw new ContextLaneError(400, 'search must be at most 200 characters');
+
     if (options.kind) {
       filterClause += ` AND t.kind = $kind`;
       params.kind = options.kind;
     }
 
     if (options.search) {
-      filterClause += ` AND t.text CONTAINS $search`;
+      filterClause += ` AND t.deletedAt IS NULL AND toLower(t.text) CONTAINS toLower($search)`;
       params.search = options.search;
     }
 
     if (options.cursor) {
-      filterClause += ` AND t.createdAt < datetime($cursor)`;
-      params.cursor = options.cursor;
+      // Accept old timestamp cursors while new cursors include the ID tie-breaker.
+      let cursor: { createdAt: string; id?: string };
+      try { cursor = JSON.parse(Buffer.from(options.cursor, 'base64url').toString()); }
+      catch { cursor = { createdAt: options.cursor }; }
+      if (!cursor || typeof cursor.createdAt !== 'string' || !Number.isFinite(Date.parse(cursor.createdAt)) || (cursor.id !== undefined && typeof cursor.id !== 'string')) {
+        throw new ContextLaneError(400, 'Invalid cursor');
+      }
+      filterClause += cursor.id ? ` AND (t.createdAt < datetime($cursor) OR (t.createdAt = datetime($cursor) AND t.id < $cursorId))` : ` AND t.createdAt < datetime($cursor)`;
+      params.cursor = cursor.createdAt;
+      params.cursorId = cursor.id || null;
     }
 
     const limit = Math.min(options.limit || 50, 100);
-    params.limit = limit;
+    params.limit = limit + 1;
 
     const result = await tx.run(
       `MATCH (t:Thought)
        WHERE ${filterClause}
-       OPTIONAL MATCH (t)-[:REPLIES_TO]->(parent:Thought)
-       RETURN t, parent.id AS replyToId
+       ${projectionJoins}
+       RETURN ${projectionReturn}
        ORDER BY t.createdAt DESC, t.id DESC
        LIMIT toInteger($limit)`,
       params
     );
 
-    const posts = result.records.map(r => {
-      const p = projectContextPost(r.get('t'));
-      const replyToId = r.get('replyToId');
-      if (replyToId) p.replyToId = replyToId;
-      return p;
-    });
-
-    let nextCursor: string | undefined;
-    if (posts.length === limit && posts.length > 0) {
-      nextCursor = posts[posts.length - 1].createdAt;
-    }
+    const posts = result.records.slice(0, limit).map(projectRecord);
+    const last = posts[posts.length - 1];
+    const nextCursor = result.records.length > limit && last ?
+      Buffer.from(JSON.stringify({ createdAt: last.createdAt, id: last.id })).toString('base64url') : undefined;
 
     return { posts, nextCursor };
   });
 }
 
-function projectContextPost(node: any): ContextPostProjection {
+function projectContextPost(node: any, authorName?: string): ContextPostProjection {
   return {
     id: node.properties.id,
     conversationId: node.properties.conversationId,
     authorId: node.properties.authorId,
-    text: node.properties.text,
+    author: { id: node.properties.authorId, name: authorName || 'Former member' },
+    ...((node.properties.agentKeyId || node.properties.connectorAgentId) ? { agent: { id: node.properties.agentKeyId || node.properties.connectorAgentId, name: node.properties.agentName || 'Agent' } } : {}),
+    isDeleted: !!node.properties.deletedAt,
+    text: node.properties.deletedAt ? '' : node.properties.text,
     kind: node.properties.kind || 'note',
     lane: 'context',
     revision: node.properties.revision ? (node.properties.revision.toNumber ? node.properties.revision.toNumber() : node.properties.revision) : 1,
@@ -336,4 +390,25 @@ function projectContextPost(node: any): ContextPostProjection {
     updatedAt: node.properties.updatedAt.toString(),
     clientRequestId: node.properties.clientRequestId,
   };
+}
+/** Report is deliberately stored locally; shared Context bodies never fan out to webhooks. */
+export async function reportContextPost(
+  session: Session, userId: string, conversationId: string, postId: string,
+  reason: string, freeform?: string, agentKeyId?: string, agentScopes?: string[]
+): Promise<{ id: string }> {
+  if (typeof reason !== 'string' || !reason.trim() || reason.length > 100 ||
+      (freeform !== undefined && (typeof freeform !== 'string' || freeform.length > 2000))) {
+    throw new ContextLaneError(400, 'reason is required (up to 100 characters); details must be at most 2000 characters');
+  }
+  return session.executeWrite(async tx => {
+    await acquireContextAclLocks(tx, { userIds: [userId], conversationId, agentKeyId });
+    if (!await checkContextWriteAccess(tx, userId, conversationId, agentKeyId, agentScopes)) throw new ContextLaneError(403, 'Not authorized');
+    const result = await tx.run(`MATCH (t:Thought {id:$postId, conversationId:$conversationId, lane:'context'})
+      WHERE t.deletedAt IS NULL
+      MERGE (r:Report {reporterId:$userId, targetType:'context', targetId:$postId})
+      ON CREATE SET r.id=$id, r.createdAt=datetime(), r.status='open', r.reason=$reason, r.freeform=$freeform
+      RETURN r.id AS id`, { postId, conversationId, userId, id: nanoid(), reason: reason.trim(), freeform: freeform || null });
+    if (!result.records.length) throw new ContextLaneError(404, 'Post not found');
+    return { id: result.records[0].get('id') };
+  });
 }

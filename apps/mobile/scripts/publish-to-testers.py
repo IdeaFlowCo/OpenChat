@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""publish-to-testers.py — assign the newest build to F&F + submit for Apple beta review.
+"""publish-to-testers.py — assign the exact uploaded archive to F&F + request beta review.
 
 Runs as the post-build step inside scripts/local-build.sh after `eas build --local`
 uploads the .ipa to App Store Connect. Polls until the new build is processed and
@@ -9,12 +9,13 @@ visible in ASC (the upload is async — usually 30-90 seconds), then:
   2. POST /v1/betaAppReviewSubmissions                   → trigger Apple Beta App Review
 
 If a previous build is still in review (HTTP 422 ENTITY_UNPROCESSABLE.ANOTHER_BUILD_IN_REVIEW),
-the assignment to F&F still succeeds — the review submission queues for after the
-currently-reviewing build is approved.
+the assignment to F&F still succeeds; review submission must be retried after
+the currently reviewing build is approved.
 
 Requires PyJWT: `pip3 install pyjwt[crypto]` (already installed on M3).
 
 Environment variables expected (same set as eas):
+  OPENCHAT_ASC_BUILD_NUMBER  CFBundleVersion from the freshly built archive
   EXPO_ASC_API_KEY_PATH   path to AuthKey_*.p8
   EXPO_ASC_KEY_ID         e.g. KWJX4896S5
   EXPO_ASC_ISSUER_ID      e.g. 69a6de95-2833-47e3-e053-5b8c7c11a4d1
@@ -82,7 +83,8 @@ def read_current_version() -> str:
     (45, 46…) not the marketing version, so we don't use this for the query."""
     here = os.path.dirname(os.path.abspath(__file__))
     cfg_path = os.path.join(here, "..", "app.config.js")
-    src = open(cfg_path).read()
+    with open(cfg_path) as config:
+        src = config.read()
     m = re.search(r"version:\s*'(\d+\.\d+\.\d+)'", src)
     if not m:
         return "?"
@@ -112,36 +114,44 @@ def find_latest_build(min_uploaded_iso: str | None = None) -> dict | None:
     return None
 
 
+def find_release_build(version: str, build_number: str) -> dict | None:
+    """Select only this archive, including when it finished processing before polling."""
+    status, body = asc(
+        "GET",
+        f"/v1/builds?filter[app]={ASC_APP_ID}&filter[version]={build_number}&include=preReleaseVersion&limit=5",
+    )
+    if status != 200 or not isinstance(body, dict):
+        return None
+    versions = {item["id"]: item.get("attributes", {}).get("version")
+                for item in body.get("included", [])}
+    for build in body.get("data", []):
+        attrs = build.get("attributes", {})
+        release = build.get("relationships", {}).get("preReleaseVersion", {}).get("data") or {}
+        if (attrs.get("version") == build_number
+                and versions.get(release.get("id")) == version
+                and attrs.get("processingState") == "VALID"
+                and not attrs.get("expired")):
+            return build
+    return None
+
+
 def main() -> int:
     version = read_current_version()
-    # Get the script's start time as the "min uploaded" floor — any VALID
-    # build that was uploaded after we started polling is the fresh one.
-    # 90s of slack so we don't miss a build uploaded just before this script
-    # kicked in (the eas-build → ASC upload happens just before this runs).
-    floor_iso = (
-        time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - 600)) + "Z"
-    )
-    # Get pre-existing newest VALID build for comparison — so we wait for a
-    # NEW upload rather than immediately picking up the previous one.
-    existing = find_latest_build()
-    existing_id = existing["id"] if existing else None
-    existing_uploaded = (existing or {}).get("attributes", {}).get("uploadedDate", "")
-    print(f"── publish-to-testers: v{version} (newest existing build: "
-          f"{existing.get('attributes',{}).get('version','?') if existing else 'none'} "
-          f"uploaded {existing_uploaded[:19]}) ──")
-
+    build_number = os.environ.get("OPENCHAT_ASC_BUILD_NUMBER", "")
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", build_number):
+        print("ERROR: OPENCHAT_ASC_BUILD_NUMBER must identify the archive just uploaded")
+        return 1
+    print(f"── publish-to-testers: v{version} build {build_number} ──")
     deadline = time.time() + POLL_TIMEOUT_SECONDS
     build = None
     while time.time() < deadline:
-        candidate = find_latest_build(min_uploaded_iso=existing_uploaded or floor_iso)
-        if candidate and candidate["id"] != existing_id:
-            build = candidate
+        build = find_release_build(version, build_number)
+        if build:
             break
-        print("  no newer VALID build yet; sleeping…")
+        print("  waiting for this archive to finish processing…")
         time.sleep(POLL_INTERVAL_SECONDS)
-
     if not build:
-        print(f"ERROR: no newer VALID build appeared after {POLL_TIMEOUT_SECONDS}s — skipping")
+        print(f"ERROR: v{version} build {build_number} was not VALID after {POLL_TIMEOUT_SECONDS}s")
         return 1
 
     build_id = build["id"]
@@ -160,6 +170,7 @@ def main() -> int:
         print("  ✓ already assigned to Friends and Family")
     else:
         print(f"  ✗ assign failed: status={status} body={body}")
+        return 1
 
     # 2. Submit for Apple Beta App Review
     status, body = asc(
@@ -179,11 +190,12 @@ def main() -> int:
         and isinstance(body, dict)
         and "ANOTHER_BUILD_IN_REVIEW" in json.dumps(body)
     ):
-        print("  ↩ another build is currently in review — this build will queue after that one")
+        print("  ↩ another build is currently in review — assigned to testers; retry review submission after the current review completes")
     elif status == 409:
         print("  ✓ already submitted for review")
     else:
         print(f"  ✗ review submission failed: status={status} body={body}")
+        return 1
 
     print("── done ──")
     return 0

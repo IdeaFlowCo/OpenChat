@@ -45,6 +45,9 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | `OriginalMessage` | Stream | **Original message** | Chats › Stream › Original message; chat Stream entry | 2 | Exact accessible source and nearby messages; unavailable source gives no chat data. |
 | `Compose` | Chats | **Message with OpenChat** | External Unlinked profile CTA or incoming compose link | 2 | See [compose usage](../README.md#message-with-openchat-from-unlinked) and [incoming-link contract](unlinked-compose-contract.md). |
 
+| *(action)* `ConnectAgentLink` | Agents | **Connect an agent** | Chats list utility row; Profile; Settings | 1 | Opens the shared Ideaflow connection hub for OpenChat, Unlinked, and Notestream Vision. No connection status is inferred from API key existence. API keys and repeatable setup copy remain in Settings. |
+| `ContextLane` | Context | **Context** | Chats › conversation › Context | 2 | Quiet back-channel with author/agent attribution, grouped replies, edit/delete, scoped search, report, refresh and explicit Ask agents for opted-in agents. Note/Ask/Offer describes the post; only Ask agents queues a request. |
+
 ---
 
 ## Architectural Principles

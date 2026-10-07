@@ -138,6 +138,12 @@ export async function initDatabase(): Promise<void> {
     await session.run(`CREATE INDEX friend_connection_first IF NOT EXISTS FOR (connection:OpenChatConnection) ON (connection.firstId)`);
     await session.run(`CREATE INDEX friend_connection_second IF NOT EXISTS FOR (connection:OpenChatConnection) ON (connection.secondId)`);
 
+    // Context remains separate from ordinary Message delivery and indexing.
+    await session.run(`CREATE INDEX context_posts_page IF NOT EXISTS FOR (t:Thought) ON (t.conversationId, t.lane, t.createdAt)`);
+    await session.run(`CREATE INDEX context_requests_recipient IF NOT EXISTS FOR (r:ContextAgentRequest) ON (r.agentKeyId, r.ownerUserId)`);
+    await session.run(`CREATE INDEX context_requests_source IF NOT EXISTS FOR (r:ContextAgentRequest) ON (r.postId, r.sourceRevision, r.agentKeyId)`);
+    await session.run(`CREATE INDEX context_requests_budget IF NOT EXISTS FOR (r:ContextAgentRequest) ON (r.requesterId, r.createdAt)`);
+
     console.log('Database constraints and indexes initialized');
   } finally {
     await session.close();
