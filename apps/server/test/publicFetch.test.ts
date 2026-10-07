@@ -2,6 +2,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import http from 'node:http';
 import net from 'node:net';
 import { gzipSync } from 'node:zlib';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 const dns = vi.hoisted(() => ({ lookup: vi.fn() }));
 vi.mock('node:dns/promises', () => ({ lookup: dns.lookup }));
 import { publicGet } from '../src/services/publicFetch.js';
@@ -15,6 +17,15 @@ const opts = { timeoutMs: 500, maxBytes: 1024 };
 beforeAll(async () => {
   server = http.createServer((req, res) => {
     hits.push(req.url!);
+    const requestUrl = new URL(req.url!, 'http://fixture.test');
+    if (requestUrl.pathname === '/sized') {
+      const size = Number(requestUrl.searchParams.get('bytes'));
+      const html = requestUrl.searchParams.get('html') === '1';
+      const prefix = html ? '<title>Boundary preview</title>' : '';
+      const body = Buffer.concat([Buffer.from(prefix), Buffer.alloc(size - prefix.length, 32)]);
+      res.writeHead(200, { 'content-type': html ? 'text/html' : 'audio/webm', 'content-encoding': 'gzip' });
+      res.end(gzipSync(body)); return;
+    }
     if (req.url === '/redirect-private') { res.writeHead(302, { location: 'http://metadata.test/secret' }).end(); return; }
     if (req.url === '/redirect-literal') { res.writeHead(307, { location: 'http://[::ffff:7f00:1]/secret' }).end(); return; }
     if (req.url === '/redirect-public') { res.writeHead(301, { location: 'http://cdn.test/html' }).end(); return; }
@@ -120,4 +131,61 @@ describe('public GET connection and redirect boundary', () => {
       expect(await transcribeAudio('http://169.254.169.254/private', 'audio/webm')).toBeNull(); expect(provider).toHaveBeenCalledTimes(1);
     } finally { vi.unstubAllEnvs(); }
   });
+  it('enforces the real preview and audio limits after decompression, including accepted boundaries', async () => {
+    publicNetwork();
+    vi.stubEnv('DEEPGRAM_API_KEY', 'synthetic-key');
+    vi.stubEnv('OPENAI_API_KEY', '');
+    const provider = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ results: { channels: [{ alternatives: [{ transcript: 'Boundary voice' }] }] } }), { status: 200 }));
+    try {
+      expect(await fetchPreview('http://public.test/sized?html=1&bytes=' + 5 * 1024 * 1024)).toMatchObject({ title: 'Boundary preview' });
+      expect(await fetchPreview('http://public.test/sized?html=1&bytes=' + (5 * 1024 * 1024 + 1))).toBeNull();
+      expect(await transcribeAudio('http://public.test/sized?bytes=' + 10 * 1024 * 1024, 'audio/webm')).toBe('Boundary voice');
+      expect((provider.mock.calls[0][1]!.body as ArrayBuffer).byteLength).toBe(10 * 1024 * 1024);
+      expect(await transcribeAudio('http://public.test/sized?bytes=' + (10 * 1024 * 1024 + 1), 'audio/webm')).toBeNull();
+      expect(provider).toHaveBeenCalledTimes(1);
+    } finally { vi.unstubAllEnvs(); }
+  });
+  it('preserves provider fallback and records preview/transcript outputs and denied redirect behavior', async () => {
+    publicNetwork();
+    vi.stubEnv('DEEPGRAM_API_KEY', 'synthetic-key');
+    vi.stubEnv('OPENAI_API_KEY', 'synthetic-key');
+    const provider = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('temporary provider failure', { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ text: 'Fallback voice transcript' }), { status: 200 }));
+    try {
+      const preview = await fetchPreview('http://public.test/redirect-public');
+      expect(preview).toMatchObject({ title: 'Public preview', image: 'http://cdn.test/picture.png' });
+      const transcript = await transcribeAudio('http://public.test/audio', 'audio/webm');
+      expect(transcript).toBe('Fallback voice transcript');
+      expect(provider.mock.calls.map(call => call[0])).toEqual([
+        'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&punctuate=true',
+        'https://api.openai.com/v1/audio/transcriptions',
+      ]);
+      const form = provider.mock.calls[1][1]!.body as FormData;
+      const audio = form.get('file') as File;
+      expect(await audio.text()).toBe('synthetic audio');
+      expect(audio.name).toBe('voice.webm');
+      expect(form.get('model')).toBe('whisper-1');
+      const blockedPreview = await fetchPreview('http://public.test/redirect-private');
+      const blockedTranscript = await transcribeAudio('http://public.test/redirect-literal', 'audio/webm');
+      expect(blockedPreview).toBeNull();
+      expect(blockedTranscript).toBeNull();
+      expect(hits).toEqual(['/redirect-public', '/html', '/audio', '/redirect-private', '/redirect-literal']);
+      expect(provider).toHaveBeenCalledTimes(2);
+      const evidenceDirectory = process.env.PUBLIC_FETCH_EVIDENCE_DIR;
+      if (evidenceDirectory) {
+        await mkdir(evidenceDirectory, { recursive: true });
+        await writeFile(join(evidenceDirectory, 'download-consumer-responses.json'), JSON.stringify({
+          fixture: 'Real HTTP request/body/redirect flows using synthetic public DNS and local socket transport; provider POST responses simulated.',
+          preview, transcript,
+          providerRequests: provider.mock.calls.map(call => ({ url: call[0], method: call[1]!.method })),
+          fallbackAudio: { filename: audio.name, bytes: await audio.text(), model: form.get('model') },
+          blockedPreview, blockedTranscript, serverRequests: [...hits], checkedSocketAddresses: [...pins],
+        }, null, 2));
+      }
+      provider.mockResolvedValue(new Response('provider unavailable', { status: 503 }));
+      expect(await transcribeAudio('http://public.test/audio', 'audio/webm')).toBeNull();
+    } finally { vi.unstubAllEnvs(); }
+  });
+
 });

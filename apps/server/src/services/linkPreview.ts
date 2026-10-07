@@ -5,11 +5,8 @@
  * in Neo4j (deduplicated by URL, cached for 7 days), and links it to the
  * originating message via HAS_PREVIEW.
  *
- * Safety guardrails:
- *   - 5-second fetch timeout
- *   - 5 MB max content-length
- *   - non-HTML responses are ignored
- *   - localhost / private IP ranges are rejected (SSRF defence)
+ * Non-HTML responses are ignored. Remote-download safety policy and limits
+ * are documented in apps/server/README.md; publicFetch.ts enforces them.
  */
 
 import { load as cheerioLoad } from 'cheerio';
@@ -27,7 +24,7 @@ export interface LinkPreview {
 
 const CACHE_TTL_DAYS = 7;
 const FETCH_TIMEOUT_MS = 5_000;
-const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
 /**
  * Extract up to 2 URLs from a message body.
