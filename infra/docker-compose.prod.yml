@@ -44,6 +44,8 @@ services:
       - GOOGLE_IOS_CLIENT_ID=${GOOGLE_IOS_CLIENT_ID:-}
       # Additive centralized identity login. The explicit enabled flag is a
       # kill switch; credentials can be staged while the UI remains off.
+      # Dedicated shared-connector delegation key; never a user API key.
+      - IDEAFLOW_CONNECTOR_SECRET=${IDEAFLOW_CONNECTOR_SECRET:-}
       - IDEAFLOW_ID_ENABLED=${IDEAFLOW_ID_ENABLED:-false}
       - IDEAFLOW_ID_ISSUER=${IDEAFLOW_ID_ISSUER:-https://id.ideaflow.app/api/auth}
       - IDEAFLOW_ID_CLIENT_ID=${IDEAFLOW_ID_CLIENT_ID:-}
