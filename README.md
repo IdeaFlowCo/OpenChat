@@ -29,23 +29,25 @@ visible during transient failures. Reconnecting also reloads the open thread.
 If access is denied or the conversation is unavailable, cached messages are
 cleared instead.
 
-Open **Stream** from Chats, or **Stream** in a chat's header for **Chat Stream**.
-The search bar filters text and tags. Its visible **Create** action opens an
-editable entry using your search text, even when nothing matches; with empty
-text it opens a blank entry. The **+ Create** button also opens a blank entry.
-Tap **Save entry** or leave the editor to save; tap an entry to edit it.
-New entries are private and unpinned. Creating in Chat Stream keeps the entry
-associated with that chat without sharing it. In Chat Stream, explicitly
-**Pin to chat** to share an entry with participants.
+Open **Stream** from Chats for personal entries. The search bar filters text and
+tags. Its visible **Create** action opens an editable entry using your search
+text, even when nothing matches; with empty text it opens a blank entry. The
+**+ Create** button also opens a blank entry. Tap **Save entry** or leave the
+editor to save; tap an entry to edit it. New entries are private and unpinned.
+Long-press an entry, or right-click on desktop web, for its available actions.
+
+A chat's **Stream** header button and **Stream for this chat** menu open the same
+collection as **Context**. See [conversation content](docs/conversation-content.md)
+for filters, audience labels, private entries, sharing and source access. See
+[Context intention lifecycle](docs/context-intention-lifecycle.md) for tracking
+and linking shared Ask/Offer posts and managing their linked projections.
 
 Hashtag suggestions combine your own tags with tags from hashtagged messages
-and tagged replies in chats you currently belong to. Chat Stream restricts
-the shared suggestions to that chat; other people's private captures never
-contribute. Long-press a Stream entry, or right-click on desktop web, for its
-available actions. Saved-message entries have an **Original message** door:
-it highlights the source with up to five nondeleted messages before and after,
-and offers **Open chat**. Current membership is required; saving an entry does
-not grant source access, and deleted or inaccessible sources are unavailable.
+and tagged replies in chats you currently belong to; other people's private
+captures never contribute. Saved-message entries have an **Original message**
+door: it highlights the source with up to five nondeleted messages before and
+after, and offers **Open chat**. Current membership is required; saving an entry
+does not grant source access, and deleted or inaccessible sources are unavailable.
 
 ## Notifications and conversation links
 

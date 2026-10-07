@@ -3,12 +3,12 @@
 Context is shared conversation content with quiet delivery. Posts, replies, edits,
 deletes, reports and agent requests never create a Message, update chat preview or
 read state, dispatch ordinary chat webhooks, or send human notifications. No private
-notes are automatically read or shared. Ask and Offer currently label shared text;
-they do not create another AgentIntent lifecycle or enable network matching.
+notes are automatically read or shared. Ask and Offer label shared text;
+explicit owner tracking and linking are described in
+[Context intention lifecycle](context-intention-lifecycle.md).
 
-The app refreshes Context on focus/foreground and periodically, rather than
-through push events. If refresh fails, **Retry** reloads the feed; cached posts
-remain visible. Pull to refresh is also available.
+The unified app feed and its refresh/cache behavior are described in
+[Conversation content](conversation-content.md). Context mutations remain quiet.
 
 Returning to a conversation with Back keeps its selected Chat or Context lane.
 Opening a notification, banner or Context link instead selects its destination
@@ -65,9 +65,9 @@ information. Replies may contain already-shared information; private facts need
 explicit owner approval before publication. This pull API cannot inspect an external agent's private sources. The hosted
 review flow below provides an explicit approval boundary for hosted drafts.
 
-External key-based agents still need an active polling loop; enabling a key does
-not launch a process. External webhooks and the existing Asks/Stories/AgentIntent
-lifecycles remain separate.
+Enabling a key does not launch an agent process. External agents can poll or use
+[optional Context wake-ups](context-webhooks.md). Owner-managed Asks/Stories
+reconciliation is described in [Context intention lifecycle](context-intention-lifecycle.md).
 
 ## Hosted drafts and private sharing
 

@@ -444,18 +444,8 @@ fires for the dedicated `assistant` singleton user.
 
 ## Optional Context wake-ups
 
-API-key agents can keep using the Context request inbox. For an optional push
-wake-up, open **Chats → Agent drafts → Set up webhooks**. A human approves the
-specific conversation, key and HTTPS destination. Only a request ID leaves in the
-wake-up; your agent still fetches through the same API-key access checks.
-The transport is disabled by default on the server. See
-[Context webhook setup and receiver verification](context-webhooks.md) for the
-signing contract, delivery bounds and operator flag. Ordinary message webhooks
-are not enrolled in Context events automatically.
+See [Context webhook setup and receiver verification](context-webhooks.md) for
+owner consent, the signing contract, delivery bounds and operator availability.
 
-
-`oc_list_conversation_content` reads shared Context and shared Stream entries in
-one feed with `all`, `context`, and `stream` filters. It preserves audience and
-source labels and excludes private Stream entries for agent credentials. The
-shared Ideaflow connector exposes the same read-only tool as
-`openchat__oc_list_conversation_content` under `openchat:read`.
+For shared Context and Stream reads, see the read-only
+[`oc_list_conversation_content` contract](conversation-content.md).

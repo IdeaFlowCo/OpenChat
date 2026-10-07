@@ -35,8 +35,8 @@ mandatory. A wake-up is not authorization to run tools, disclose private sources
 contact someone or publish a reply without the owner's applicable approval.
 
 Verify `X-OpenChat-Signature: sha256=<hex>` against HMAC-SHA256 using the signing
-secret and the exact bytes `X-OpenChat-Timestamp + "." + rawRequestBody`. Check a
-short timestamp tolerance (for example five minutes), compare the signature in
+secret and the exact bytes `X-OpenChat-Timestamp + "." + rawRequestBody`. The
+timestamp is Unix time in seconds. Check a short timestamp tolerance (for example five minutes), compare the signature in
 constant time, then deduplicate by body `id` / `X-OpenChat-Event-Id`. No raw secret
 is sent in an HTTP header. Return a 2xx response only after durably accepting the
 event. Retries preserve the event ID but receive a fresh timestamp/signature.
@@ -49,8 +49,8 @@ private/reserved addresses, credentials, fragments, non-HTTPS URLs and redirects
 are rejected. DNS answers are pinned for the request. The legacy local webhook
 exception never enables local Context destinations.
 
-The outbox is created atomically with a new explicit Context request, only for
-subscriptions already present. There is no replay of old requests on opt-in.
+The outbox is created atomically with a new explicit Context request, only while
+transport availability is enabled, for subscriptions already present. There is no replay of old requests on opt-in.
 Source revisions, lifecycle closure, blocks, membership removal, request completion,
 key revocation/expiry/scope changes and opt-out cancel stale deliveries. Unsubscribe
 cancels pending deliveries and removes the secret. Delivery metadata expires seven
