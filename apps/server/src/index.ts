@@ -370,7 +370,7 @@ function renderConnectBotHtml(): string {
     <span class="sep">·</span>
     <a href="/about/connect-your-bot">Connect your agent</a>
     <span class="sep">·</span>
-    <a href="https://github.com/tmad4000/openchat-mcp-server" target="_blank" rel="noopener">MCP Server</a>
+    <a href="https://github.com/IdeaFlowCo/OpenChat/tree/main/apps/mcp-server" target="_blank" rel="noopener">MCP Server</a>
   </nav>
   <article class="doc">
 ${body}
@@ -379,9 +379,15 @@ ${body}
 </body></html>`;
   return connectBotHtmlCache;
 }
-app.get('/about/connect-your-bot', (_req, res) => {
+app.get(['/agents', '/about/connect-your-bot'], (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=300');
   res.type('html').send(renderConnectBotHtml());
+});
+
+// Public machine-readable onboarding uses the same source as the human guide.
+app.get(['/llms.txt', '/AGENTS.md'], (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.type('text/plain').send(readFileSync(connectBotMdPath, 'utf8'));
 });
 
 // One canonical responsive client. The same React Native Web export renders

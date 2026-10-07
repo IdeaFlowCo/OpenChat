@@ -113,7 +113,7 @@ export function SettingsScreen() {
       Clipboard.setString(blob);
       Alert.alert(
         'Agent setup copied',
-        'Paste it into ChatGPT, Claude, Gemini, or any chatbot — no install needed. The model will read and send messages on your behalf.'
+        'A fresh API key and setup instructions are copied. Paste into an agent with HTTP tools. It can read and post messages or context on your behalf.'
       );
     } catch (err) {
       Alert.alert(
@@ -335,7 +335,7 @@ export function SettingsScreen() {
           <>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><AppIcon name="copy" color={c.onPrimary} size={16} /><Text style={[styles.copySetupTitle, { color: c.onPrimary }]}>Copy agent setup</Text></View>
             <Text style={[styles.copySetupSub, { color: c.onPrimary, opacity: 0.88 }]}>
-              Mints a key + copies a paste-anywhere setup for ChatGPT, Claude, any LLM
+              Creates a fresh API key and copies setup for an agent with HTTP tools
             </Text>
           </>
         )}
@@ -355,9 +355,9 @@ export function SettingsScreen() {
       >
         <View style={{ flex: 1 }}>
           <Text style={[styles.agentHeroEyebrow, { color: c.onPrimary, opacity: 0.85 }]}>OPENCHAT FOR AGENTS</Text>
-          <Text style={[styles.agentHeroTitle, { color: c.onPrimary }]}>Plug in Claude, Cursor, Codex</Text>
+          <Text style={[styles.agentHeroTitle, { color: c.onPrimary }]}>Agent keys</Text>
           <Text style={[styles.agentHeroSubtitle, { color: c.onPrimary, opacity: 0.92 }]}>
-            Bi-directional MCP access · paste-into-Claude-Code prompt · 30-second setup
+            Create, reveal, or revoke keys · OpenChat + Unlinked setup guide
           </Text>
         </View>
         <Text style={[styles.agentHeroArrow, { color: c.onPrimary }]}>→</Text>

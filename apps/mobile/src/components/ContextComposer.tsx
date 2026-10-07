@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { View, TextInput, TouchableOpacity, Text, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
@@ -10,30 +10,42 @@ export function ContextComposer({ conversationId }: { conversationId: string }) 
   const c = getColors(scheme);
   const [text, setText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pending = useRef<{ text: string; id: string } | null>(null);
+  const sending = useRef(false);
 
   const handleSend = async () => {
-    if (!text.trim() || isSending) return;
+    if (!text.trim() || sending.current) return;
+    sending.current = true;
+    const value = text.trim();
+    if (pending.current?.text !== value) pending.current = { text: value, id: nanoid() };
+    setError(null);
     setIsSending(true);
     try {
-      await contextLaneManager.addPost(conversationId, text.trim(), nanoid());
+      await contextLaneManager.addPost(conversationId, value, pending.current.id);
+      pending.current = null;
       setText('');
     } catch (e) {
-      console.warn('Failed to post context', e);
+      setError(e instanceof Error ? e.message : 'Could not post context. Try again.');
     } finally {
+      sending.current = false;
       setIsSending(false);
     }
   };
 
   return (
     <View style={[styles.container, { backgroundColor: c.surface, borderTopColor: c.border }]}>
-      <Text style={{ color: c.textMuted, fontSize: 12, marginBottom: 8 }}>
+      <Text style={{ color: c.textMetadata, fontSize: 12, marginBottom: 8 }}>
         Post quietly — visible to this chat; no notifications.
       </Text>
+      {error && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={{ color: c.danger, marginBottom: 8 }}>{error}</Text>}
       <View style={[styles.inputRow, { backgroundColor: c.background, borderColor: c.border }]}>
         <TextInput
           style={[styles.input, { color: c.textPrimary }]}
           placeholder="Add to context..."
           placeholderTextColor={c.textMuted}
+          accessibilityLabel="Add to context"
+          editable={!isSending}
           value={text}
           onChangeText={setText}
           multiline
@@ -41,13 +53,15 @@ export function ContextComposer({ conversationId }: { conversationId: string }) 
         />
         <TouchableOpacity
           style={[styles.sendButton, { backgroundColor: text.trim() ? c.primary : c.primaryMuted }]}
+          accessibilityRole="button"
+          accessibilityLabel="Post to context"
           onPress={handleSend}
           disabled={!text.trim() || isSending}
         >
           {isSending ? (
-            <ActivityIndicator size="small" color="#fff" />
+            <ActivityIndicator size="small" color={c.onPrimary} />
           ) : (
-            <Text style={styles.sendText}>Post</Text>
+            <Text style={[styles.sendText, { color: c.onPrimary }]}>Post</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -80,6 +94,7 @@ const styles = StyleSheet.create({
     paddingBottom: 0,
   },
   sendButton: {
+    minHeight: 44,
     marginLeft: 12,
     paddingHorizontal: 16,
     paddingVertical: 6,
@@ -88,7 +103,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sendText: {
-    color: '#fff',
     fontWeight: '600',
     fontSize: 14,
   },

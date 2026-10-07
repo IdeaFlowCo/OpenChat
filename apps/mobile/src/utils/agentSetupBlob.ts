@@ -15,14 +15,27 @@ export function buildAgentSetupBlob(key: string, baseUrl: string): string {
 Base URL: ${baseUrl}
 Auth (send on EVERY request): Authorization: Bearer ${key}
 
+Setup guide for OpenChat and Unlinked: ${baseUrl}/agents
+API reference: ${baseUrl}/api/docs
+Machine-readable guide: ${baseUrl}/llms.txt
+The same OpenChat key works for messages and conversation context. Unlinked network search uses its own connection at https://www.unlinked.ai/agents (same Ideaflow account, separate credential).
+
 What you can do:
 • List my conversations (start here):
     GET /api/chat/conversations
+    Returns a JSON array (not a conversations wrapper). Participants are nested at participants[].user; use user.name, conversation id, and lastMessagePreview to choose the right DM.
 • Read a conversation's messages:
     GET /api/chat/conversations/{conversationId}/messages
 • Send a message — you appear AS me, not as a separate bot:
     POST /api/chat/conversations/{conversationId}/messages
     JSON body: {"content": "your message text"}
+• Read the conversation's Context tab (same key, read scope):
+    GET /api/chat/conversations/{conversationId}/context
+• Post to Context (same key, write scope; visible to conversation participants):
+    POST /api/chat/conversations/{conversationId}/context
+    JSON body: {"text":"context to share", "kind":"note", "clientRequestId":"a unique ID for this post"}
+    Use text, not content. Reuse clientRequestId only when retrying the same post.
+    kind can be note, ask, or offer. Context posts do not activate public discovery.
 • Poll only new messages since a timestamp:
     GET /api/chat/messages/since?since=2026-01-01T00:00:00Z
 • Publish an ask or offer (publishing opts it into anonymous discovery):
@@ -49,6 +62,8 @@ If you're plain ChatGPT (no tools) and can't make HTTP requests yourself:
 create a Custom GPT → Configure → Create new Action → "Import from URL"
 ${baseUrl}/api/openapi.json → set Authentication = API Key, Auth Type = Bearer,
 and paste the key above. After that you can do everything listed here from chat.
+
+Troubleshooting: 401 means an invalid/expired/revoked credential; 403 means missing conversation membership or read/write scope; 400 describes a malformed body. A new key is not needed just to post context. Create an additional key in Settings → Agent keys → New API key; existing keys keep working until revoked.
 
 Treat the key as a secret — don't print it back or commit it anywhere.
 To begin: call GET /api/chat/conversations, show me the list, and ask which conversation I want you to use.`;

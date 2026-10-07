@@ -61,3 +61,10 @@ Unlinked profile → Message resolves the live profile owner and opens their nor
 Unlinked profile and People search **Message** links carry the selected public profile through `/messages` into the normal embedded conversation. Compose is only a resolving/error/invite entry screen, with no separate message form. Generic compose links open New message. The verified recipient is selected automatically; Send remains explicit.
 
 Web chat-stack secondary screens have a visible **Back** control, including Search, New message and the scanner. Back returns to the previous chat screen; without local stack history it opens Chats. Native navigation keeps its platform back/dismiss behavior.
+
+### Agent setup (OpenChat-8apt)
+
+Settings → Agent keys exposes the visible **New API key** action and the shared
+**Agent setup · OpenChat + Unlinked** guide at `/agents`. The same guide is
+readable at `/llms.txt` and `/AGENTS.md`; the existing `/about/connect-your-bot`
+bookmark remains valid. Copy agent setup explains context and response shapes.

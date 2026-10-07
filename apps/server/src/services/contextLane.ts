@@ -48,7 +48,7 @@ export async function createContextPost(
 
   return await session.executeWrite(async (tx) => {
     // 1. Lock and check access
-    await acquireContextAclLocks(tx, { userIds: [userId], conversationId });
+    await acquireContextAclLocks(tx, { userIds: [userId], conversationId, agentKeyId });
     const hasAccess = await checkContextWriteAccess(tx, userId, conversationId, agentKeyId, agentScopes);
     if (!hasAccess) {
       throw new ContextLaneError(403, 'Not authorized to write to this context lane');
@@ -166,7 +166,7 @@ export async function updateContextPost(
   agentScopes?: string[]
 ): Promise<ContextPostProjection> {
   return await session.executeWrite(async (tx) => {
-    await acquireContextAclLocks(tx, { userIds: [userId], conversationId });
+    await acquireContextAclLocks(tx, { userIds: [userId], conversationId, agentKeyId });
     const hasAccess = await checkContextWriteAccess(tx, userId, conversationId, agentKeyId, agentScopes);
     if (!hasAccess) {
       throw new ContextLaneError(403, 'Not authorized to write to this context lane');
@@ -221,7 +221,7 @@ export async function deleteContextPost(
   agentScopes?: string[]
 ): Promise<void> {
   return await session.executeWrite(async (tx) => {
-    await acquireContextAclLocks(tx, { userIds: [actorId], conversationId });
+    await acquireContextAclLocks(tx, { userIds: [actorId], conversationId, agentKeyId });
     const hasAccess = await checkContextWriteAccess(tx, actorId, conversationId, agentKeyId, agentScopes);
     if (!hasAccess) {
       throw new ContextLaneError(403, 'Not authorized');
