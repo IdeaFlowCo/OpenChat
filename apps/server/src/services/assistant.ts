@@ -1,3 +1,5 @@
+import { appBridgeConfigured, readApp, searchPublicNoos } from './appSources.js';
+import { unlinkedProvisionConfigured } from './unlinkedProvision.js';
 /**
  * In-app Assistant bot (openchat-bfn.3).
  *
@@ -832,6 +834,21 @@ async function toolSubmitFeedback(
 function buildTools(): AnthropicType.Tool[] {
   return [
     {
+      name: 'get_data_sources',
+      description: 'List the five supported apps and actual source access for this built-in agent.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'vision_read',
+      description: 'Read this user’s Vision notes through their linked Ideaflow identity. First call tool=list_tools with arguments={} to discover read-only tool names and schemas, then call the named tool. Source note permissions apply.',
+      input_schema: { type: 'object', properties: { tool: { type: 'string' }, arguments: { type: 'object', additionalProperties: true } }, required: ['tool', 'arguments'] },
+    },
+    {
+      name: 'search_noos_public',
+      description: 'Search public Noos knowledge graph nodes by keyword. Private nodes are unavailable.',
+      input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+    },
+    {
       name: 'search_messages',
       description:
         "Search the user's own messages (across all their conversations) by keyword/semantic relevance. Returns matching messages with their conversationId so you can read or act on them.",
@@ -1203,11 +1220,11 @@ function buildTools(): AnthropicType.Tool[] {
         required: ['issue_id', 'content'],
       },
     },
-    // ── unlinked.ai (owner-only, read-only) ──────────────────────────────────
+    // ── unlinked.ai (identity-scoped, read-only) ──────────────────────────────────
     {
       name: 'unlinked_search_network',
       description:
-        "Search the configured unlinked.ai professional network (imported LinkedIn connections). ALWAYS call it when asked — the server checks authorization itself and returns a clear error if this user may not use it; never refuse pre-emptively. Optional degree 1|2 reads recorded connection paths.",
+        "Search this user’s unlinked.ai professional network (imported LinkedIn connections). ALWAYS call it when asked — the server checks authorization itself and returns a clear error if this user may not use it; never refuse pre-emptively. Optional degree 1|2 reads recorded connection paths.",
       input_schema: {
         type: 'object',
         properties: {
@@ -1238,6 +1255,24 @@ async function executeTool(
 ): Promise<unknown> {
   try {
     switch (name) {
+      case 'get_data_sources':
+        return [
+          { name: 'OpenChat', access: 'signed_in_account', tools: ['search_messages', 'list_conversations', 'read_messages'] },
+          { name: 'Vision', access: appBridgeConfigured() ? 'identity_scoped_reads_on_request' : 'not_configured', tools: ['vision_read'] },
+          { name: 'Unlinked', access: unlinkedProvisionConfigured() ? 'identity_scoped_search_on_request' : 'not_configured', tools: ['unlinked_search_network', 'unlinked_search_everyone'] },
+          { name: 'Noos', access: 'public_only', tools: ['search_noos_public'] },
+          { name: 'World Issue Tracker', access: process.env.WIT_ANON_KEY ? 'public_only' : 'not_configured', tools: ['wit_list_issues', 'wit_get_issue', 'wit_list_trackers'] },
+        ];
+      case 'search_noos_public':
+        return searchPublicNoos(typeof input.query === 'string' ? input.query : '');
+      case 'vision_read': {
+        const db = getDriver().session();
+        try {
+          const rows = await db.run('MATCH (u:User {id:$userId}) RETURN u.ideaflowIssuer AS issuer,u.ideaflowSub AS subject', { userId });
+          const row = rows.records[0], issuer = row?.get('issuer'), subject = row?.get('subject');
+          return await readApp(typeof issuer === 'string' && typeof subject === 'string' ? { issuer, subject } : null, 'vision', typeof input.tool === 'string' ? input.tool : '', input.arguments && typeof input.arguments === 'object' && !Array.isArray(input.arguments) ? input.arguments as Record<string, unknown> : {});
+        } finally { await db.close(); }
+      }
       case 'search_messages': {
         const query = typeof input.query === 'string' ? input.query : '';
         const limit = typeof input.limit === 'number' && input.limit > 0 ? Math.min(input.limit, 50) : 10;
@@ -1633,7 +1668,7 @@ Guidelines:
 - If the user wants to report a bug, give feedback, or request a feature about OpenChat (the app), use submit_feedback — it files a tracked issue for the OpenChat team. Confirm what you'll send, then share the resulting link. This is how feedback reaches us, so offer it when the user seems stuck or frustrated with the app.
 - A message starting with "[Voice message]" is the transcript of a voice note the user recorded; answer it like any typed message. If it says no transcript is available, tell the user you could not make out the voice message and ask them to resend it or type it.
 - World Issue Tracker (worldissuetracker.com) tools: anyone can browse trackers and read issues (wit_list_trackers, wit_list_issues, wit_get_issue). Creating issues/trackers, updating, and commenting post under the account owner's identity when the invoking user IS the owner (the server verifies this — you cannot grant it), and anonymously otherwise. Anyone can create a public tracker with wit_create_tracker; non-owner trackers are anonymous, public, rate-limited, and owned by no account — say so. Check wit_list_trackers first and reuse an existing board instead of duplicating it. If the user explicitly says "anonymously", pass anonymous:true. Writes always need an explicit confirmation round (confirm:true on the second call). Share the resulting issue URL.
-- unlinked.ai tools (unlinked_search_network, unlinked_search_everyone) search a professional network and the public People index. They are read-only and server-gated: when asked, ALWAYS just call the tool — you cannot tell who is authorized, the server decides and returns a clear error if not. Relay that result. unlinked.ai has no anonymous agent access and no posting API; never claim you posted to unlinked.ai.
+- unlinked.ai tools (unlinked_search_network, unlinked_search_everyone) search a professional network and the public People index. They are read-only and server-gated: when asked, ALWAYS just call the tool — you cannot tell who is authorized, the server decides and returns a clear error if not. Relay that result. Unlinked grants follow the signed-in Ideaflow identity and existing revocation settings. If access is not linked or revoked, relay the tool’s setup guidance. Never use another account’s data or claim you posted to Unlinked. Vision contains personal notes; Noos is the knowledge graph; World Issue Tracker contains public issues. Only claim to have searched a source if a tool actually returned its data.
 - Your final response (plain text, no tool call) is delivered to the user as a chat message.`;
 
 /**
