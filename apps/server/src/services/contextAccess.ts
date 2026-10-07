@@ -49,78 +49,41 @@ export async function acquireContextAclLocks(
   }
 }
 
-/**
- * Verifies that the actor has permission to read the Context lane of a conversation.
- * If the actor is an agent, verifies the agent has the correct scope and delegation.
- * This is the read-only check (does not lock).
+/** Context shares the owning user's conversation membership and read/write key scopes.
+ * Recheck the persisted key so cached authentication cannot outlive revocation,
+ * expiry, or a scope change. Mutations call this after acquiring the ACL locks.
  */
-export async function checkContextReadAccess(
+async function checkContextAccess(
   tx: ManagedTransaction,
   userId: string,
   conversationId: string,
+  scope: 'read' | 'write',
   agentKeyId?: string,
   agentScopes?: string[]
 ): Promise<boolean> {
-  const membershipResult = await tx.run(
-    `MATCH (u:User {id: $userId})-[p:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-     RETURN p`,
-    { userId, conversationId }
+  if (agentKeyId && !agentScopes?.includes(scope)) return false;
+  const result = await tx.run(
+    `MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+     ${agentKeyId ? `MATCH (k:AgentKey {id: $agentKeyId, ownerUserId: $userId})
+     WHERE k.revokedAt IS NULL
+       AND (k.expiresAt IS NULL OR k.expiresAt > $now)
+       AND $scope IN coalesce(k.scopes, [])` : ''}
+     RETURN c.id AS conversationId`,
+    { userId, conversationId, agentKeyId: agentKeyId ?? null, scope, now: new Date().toISOString() }
   );
+  return result.records.length > 0;
+}
 
-  if (membershipResult.records.length === 0) {
-    return false;
-  }
-
-  if (agentKeyId) {
-    if (!agentScopes || !agentScopes.includes('read')) {
-      return false;
-    }
-    // Check if user has explicitly granted context access to this agent for this conversation
-    const delegationResult = await tx.run(
-      `MATCH (u:User {id: $userId})-[g:GRANTS_CONTEXT_ACCESS]->(k:AgentKey {id: $agentKeyId})
-       WHERE g.conversationId = $conversationId OR g.conversationId IS NULL
-       RETURN g`,
-      { userId, agentKeyId, conversationId }
-    );
-    if (delegationResult.records.length === 0) {
-      return false;
-    }
-  }
-
-  return true;
+export async function checkContextReadAccess(
+  tx: ManagedTransaction, userId: string, conversationId: string,
+  agentKeyId?: string, agentScopes?: string[]
+): Promise<boolean> {
+  return checkContextAccess(tx, userId, conversationId, 'read', agentKeyId, agentScopes);
 }
 
 export async function checkContextWriteAccess(
-  tx: ManagedTransaction,
-  userId: string,
-  conversationId: string,
-  agentKeyId?: string,
-  agentScopes?: string[]
+  tx: ManagedTransaction, userId: string, conversationId: string,
+  agentKeyId?: string, agentScopes?: string[]
 ): Promise<boolean> {
-  const membershipResult = await tx.run(
-    `MATCH (u:User {id: $userId})-[p:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-     RETURN p`,
-    { userId, conversationId }
-  );
-
-  if (membershipResult.records.length === 0) {
-    return false;
-  }
-
-  if (agentKeyId) {
-    if (!agentScopes || !agentScopes.includes('write')) {
-      return false;
-    }
-    const delegationResult = await tx.run(
-      `MATCH (u:User {id: $userId})-[g:GRANTS_CONTEXT_ACCESS]->(k:AgentKey {id: $agentKeyId})
-       WHERE g.conversationId = $conversationId OR g.conversationId IS NULL
-       RETURN g`,
-      { userId, agentKeyId, conversationId }
-    );
-    if (delegationResult.records.length === 0) {
-      return false;
-    }
-  }
-
-  return true;
+  return checkContextAccess(tx, userId, conversationId, 'write', agentKeyId, agentScopes);
 }

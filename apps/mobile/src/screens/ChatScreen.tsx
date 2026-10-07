@@ -1590,7 +1590,7 @@ export function ChatScreen({
       {activeConversationLane === 'context' ? (
         <View style={{ flex: 1 }}>
           <ContextLane conversationId={conversationId} />
-          <ContextComposer conversationId={conversationId} />
+          <ContextComposer key={conversationId} conversationId={conversationId} />
         </View>
       ) : (
         <>

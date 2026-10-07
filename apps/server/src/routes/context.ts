@@ -59,10 +59,20 @@ router.get('/conversations/:conversationId/context', async (req: Request, res: R
 router.post('/conversations/:conversationId/context', async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const conversationId = String(req.params.conversationId);
-  const { text, kind, clientRequestId, replyToId } = req.body;
+  const { text, kind, clientRequestId, replyToId } = req.body ?? {};
 
-  if (!clientRequestId) {
+  if (typeof clientRequestId !== 'string' || !clientRequestId.trim()) {
     res.status(400).json({ error: 'clientRequestId is required' });
+    return;
+  }
+
+  if (typeof text !== 'string' || !text.trim()) {
+    res.status(400).json({ error: 'text must be a non-empty string (use text, not content, for context posts)' });
+    return;
+  }
+  if ((kind !== undefined && !['note', 'ask', 'offer'].includes(kind)) ||
+      (replyToId !== undefined && (typeof replyToId !== 'string' || !replyToId.trim()))) {
+    res.status(400).json({ error: 'kind must be note, ask, or offer; replyToId must be a non-empty string' });
     return;
   }
 

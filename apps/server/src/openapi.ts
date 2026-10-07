@@ -637,7 +637,7 @@ export const openapiSpec = {
         operationId: 'listContextPosts',
         tags: ['Chat Context Lane'],
         summary: 'List Context lane posts in a conversation',
-        description: 'Requires OPENCHAT_CONTEXT_LANE_ENABLED. Bounded cursor pagination.',
+        description: 'Uses the same OpenChat key as messages, with read scope and conversation membership. Requires OPENCHAT_CONTEXT_LANE=true. Bounded cursor pagination.',
         parameters: [
           { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
           { name: 'cursor', in: 'query', schema: { type: 'string', format: 'date-time' } },
@@ -651,9 +651,10 @@ export const openapiSpec = {
         operationId: 'createContextPost',
         tags: ['Chat Context Lane'],
         summary: 'Create a Context lane post',
+        description: 'Uses the same OpenChat key as messages, with write scope and conversation membership. No separate context grant. Shared with conversation participants without notifications. Use text, not content; reuse clientRequestId for retries.',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        requestBody: { required: true, content: json({ type: 'object', properties: { text: { type: 'string' }, kind: { type: 'string' }, clientRequestId: { type: 'string' }, replyToId: { type: 'string' } }, required: ['text', 'clientRequestId'] }) },
-        responses: { '201': ok({ $ref: '#/components/schemas/ContextPostProjection' }, 'Created'), '401': errResp('Unauthorized'), '403': errResp('Forbidden'), '429': errResp('Rate limited') }
+        requestBody: { required: true, content: json({ type: 'object', properties: { text: { type: 'string' }, kind: { type: 'string', enum: ['note', 'ask', 'offer'] }, clientRequestId: { type: 'string', minLength: 1 }, replyToId: { type: 'string' } }, required: ['text', 'clientRequestId'] }) },
+        responses: { '201': ok({ $ref: '#/components/schemas/ContextPostProjection' }, 'Created'), '400': errResp('text and clientRequestId required; kind must be note, ask, or offer'), '401': errResp('Unauthorized'), '403': errResp('Forbidden'), '429': errResp('Rate limited') }
       }
     },
     '/api/chat/conversations/{id}/context/{postId}': {

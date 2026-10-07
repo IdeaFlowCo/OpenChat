@@ -14,9 +14,9 @@
  * inline the real key so it's truly copy-and-paste.
  */
 import { useState } from 'react';
+import * as Clipboard from 'expo-clipboard';
 import {
   Alert,
-  Clipboard,
   Linking,
   StyleSheet,
   Text,
@@ -54,9 +54,9 @@ function snippetFor(target: Target, key: string): string {
       return JSON.stringify({
         mcpServers: {
           openchat: {
-            command: 'npx',
-            args: ['-y', 'github:tmad4000/openchat-mcp-server'],
-            env: { OPENCHAT_API_KEY: k },
+            command: 'node',
+            args: ['/absolute/path/to/OpenChat/apps/mcp-server/dist/index.js'],
+            env: { OPENCHAT_API_KEY: k, OPENCHAT_BASE_URL: OPENCHAT_URL },
           },
         },
       }, null, 2);
@@ -64,21 +64,21 @@ function snippetFor(target: Target, key: string): string {
       return JSON.stringify({
         mcpServers: {
           openchat: {
-            command: 'npx',
-            args: ['-y', 'github:tmad4000/openchat-mcp-server'],
-            env: { OPENCHAT_API_KEY: k },
+            command: 'node',
+            args: ['/absolute/path/to/OpenChat/apps/mcp-server/dist/index.js'],
+            env: { OPENCHAT_API_KEY: k, OPENCHAT_BASE_URL: OPENCHAT_URL },
           },
         },
       }, null, 2);
     case 'codex':
       return `[mcp_servers.openchat]
-command = "npx"
-args = ["-y", "github:tmad4000/openchat-mcp-server"]
-env = { OPENCHAT_API_KEY = "${k}" }`;
+command = "node"
+args = ["/absolute/path/to/OpenChat/apps/mcp-server/dist/index.js"]
+env = { OPENCHAT_API_KEY = "${k}", OPENCHAT_BASE_URL = "${OPENCHAT_URL}" }`;
     case 'code':
       return `claude mcp add openchat \\
   --env OPENCHAT_API_KEY=${k} \\
-  -- npx -y github:tmad4000/openchat-mcp-server`;
+  -- node /absolute/path/to/OpenChat/apps/mcp-server/dist/index.js`;
     case 'curl':
       return `curl -H "Authorization: Bearer ${k}" \\
   ${OPENCHAT_URL}/api/chat/conversations`;
@@ -112,7 +112,7 @@ ${key}
 
 Steps:
 1. Read the guide above to understand the available tools and how this MCP server works.
-2. Install + register the MCP server using the install form appropriate for this client (e.g. \`claude mcp add openchat --env OPENCHAT_API_KEY=<key> -- npx -y github:tmad4000/openchat-mcp-server\` for Claude Code).
+2. Clone https://github.com/IdeaFlowCo/OpenChat.git, run npm ci in that checkout, then npm run build --workspace=openchat-mcp-server. Register node with the absolute path to apps/mcp-server/dist/index.js in your MCP client. Set OPENCHAT_API_KEY to the key above and OPENCHAT_BASE_URL to ${OPENCHAT_URL}. Do not use the old standalone repository or assume an npm package or hosted /mcp endpoint exists.
 3. If the MCP server is registered correctly, call \`oc_list_conversations\` to verify it works and print the list of conversations.
 4. Tell me what you'd like me to do next — or wait for instructions.
 
@@ -122,9 +122,11 @@ Treat the API key as a credential: write it to \`~/.openchat/credentials.json\` 
 interface Props {
   /** The plaintext API key. If null we render `oc_your_key_here` placeholders. */
   apiKey: string | null;
+  getApiKey?: () => Promise<string>;
+  showQuickSetup?: boolean;
 }
 
-export function McpSetupCard({ apiKey }: Props) {
+export function McpSetupCard({ apiKey, getApiKey, showQuickSetup = true }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const [active, setActive] = useState<Target>('claude');
@@ -132,41 +134,48 @@ export function McpSetupCard({ apiKey }: Props) {
 
   const displayedKey = apiKey ?? 'oc_your_key_here';
   const snippet = snippetFor(active, displayedKey);
-  const guideUrl = `${OPENCHAT_URL}/about/connect-your-bot`;
+  const guideUrl = `${OPENCHAT_URL}/agents`;
+  const [copying, setCopying] = useState(false);
+  const [copyStatus, setCopyStatus] = useState('');
+  const canCopy = !!apiKey || !!getApiKey;
+  const copyWithKey = async (build: (key: string) => string) => {
+    if (copying) return;
+    setCopying(true);
+    try {
+      const key = apiKey ?? await getApiKey?.();
+      if (!key) throw new Error('Open a saved key to copy its setup.');
+      if (!await Clipboard.setStringAsync(build(key))) throw new Error('Clipboard unavailable. Try View full key.');
+      setCopyStatus('Copied with your existing API key.');
+    } catch (err) {
+      Alert.alert('Could not copy setup', err instanceof Error ? err.message : 'Please try again.');
+    } finally { setCopying(false); }
+  };
 
   // Primary CTA payload: the tool-less "ChatGPT / Any LLM" REST blob. Paste
   // it into any chatbot and the model talks to OpenChat over plain HTTPS —
   // no MCP server, no shell, no installs. Disabled (visually) until the
   // plaintext key is revealed, otherwise the blob would carry a placeholder.
-  const primaryBlob = snippetFor('chatgpt', displayedKey);
 
   return (
     <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
       <Text style={[styles.title, { color: c.textPrimary }]}>Connect an agent</Text>
       <Text style={[styles.subtitle, { color: c.textSecondary }]}>
         Let an AI read and send messages on your behalf — bi-directional access to your conversations.
-        {apiKey ? '' : ' Reveal the key above first so it can be inlined.'}
+        {canCopy ? ' Copying reuses this key.' : ' Open a saved key to copy its setup.'}
       </Text>
 
       {/* PRIMARY CTA: copy the tool-less onboarding blob for any LLM. */}
-      <TouchableOpacity
-        style={[styles.heroBtn, { backgroundColor: c.primary, opacity: apiKey ? 1 : 0.55 }]}
-        onPress={() => {
-          if (!apiKey) {
-            Alert.alert('Reveal your key first', 'Tap "View full key" above so the setup text can include the real key.');
-            return;
-          }
-          Clipboard.setString(primaryBlob);
-          Alert.alert(
-            'Setup copied',
-            'Paste it into ChatGPT, Claude, Gemini, or any chatbot. The model will connect to OpenChat over plain HTTPS — no install needed.'
-          );
-        }}
+      {showQuickSetup && <TouchableOpacity
+        style={[styles.heroBtn, { backgroundColor: c.primary, opacity: canCopy ? 1 : 0.55 }]}
+        onPress={() => void copyWithKey(key => snippetFor('chatgpt', key))}
+        disabled={!canCopy || copying}
+        accessibilityRole="button"
         activeOpacity={0.85}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><AppIcon name="copy" color={c.onPrimary} size={16} /><Text style={[styles.heroBtnText, { color: c.onPrimary }]}>Copy agent setup</Text></View>
-        <Text style={[styles.heroBtnSub, { color: c.onPrimary }]}>Works in ChatGPT, Claude, Gemini — any LLM</Text>
-      </TouchableOpacity>
+        <Text style={[styles.heroBtnSub, { color: c.onPrimary }]}>For agents with HTTP tools</Text>
+      </TouchableOpacity>}
+      {!!copyStatus && <Text accessibilityLiveRegion="polite" style={[styles.hint, { color: c.textMetadata }]}>{copyStatus}</Text>}
 
       {/* Always-visible link to the full guide. */}
       <TouchableOpacity
@@ -198,18 +207,10 @@ export function McpSetupCard({ apiKey }: Props) {
           {/* One-shot prompt for coding agents (Claude Code / Cursor / Codex):
               the agent installs the MCP server itself. */}
           <TouchableOpacity
-            style={[styles.oneShotBtn, { borderColor: c.primary, opacity: apiKey ? 1 : 0.55 }]}
-            onPress={() => {
-              if (!apiKey) {
-                Alert.alert('Reveal your key first', 'Tap "View full key" above so the prompt can include the real key.');
-                return;
-              }
-              Clipboard.setString(agentSetupPrompt(displayedKey, guideUrl));
-              Alert.alert(
-                'One-shot prompt copied',
-                'Paste into Claude Code, Cursor, or any agent CLI — it installs the OpenChat MCP server and verifies the connection.'
-              );
-            }}
+            style={[styles.oneShotBtn, { borderColor: c.primary, opacity: canCopy ? 1 : 0.55 }]}
+            onPress={() => void copyWithKey(key => agentSetupPrompt(key, guideUrl))}
+            disabled={!canCopy || copying}
+            accessibilityRole="button"
             activeOpacity={0.8}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}><AppIcon name="copy" color={c.primary} size={14} /><Text style={[styles.oneShotText, { color: c.primary }]}>Copy one-shot setup prompt (coding agents)</Text></View>
@@ -217,6 +218,7 @@ export function McpSetupCard({ apiKey }: Props) {
           </TouchableOpacity>
 
           <Text style={[styles.snippetsHeader, { color: c.textSecondary }]}>Or paste a config snippet manually</Text>
+          <Text style={[styles.hint, { color: c.textMetadata }]}>First clone IdeaFlowCo/OpenChat, run npm ci, then npm run build --workspace=openchat-mcp-server. Replace /absolute/path/to/OpenChat below with your checkout path. Copy inserts the full key automatically.</Text>
 
           {/* Tab strip */}
           <View style={styles.tabRow}>
@@ -259,10 +261,9 @@ export function McpSetupCard({ apiKey }: Props) {
           <View style={styles.actions}>
             <TouchableOpacity
               style={[styles.btn, { backgroundColor: c.primary }]}
-              onPress={() => {
-                Clipboard.setString(snippet);
-                Alert.alert('Copied', `${TABS.find((t) => t.id === active)!.label} snippet copied.`);
-              }}
+              onPress={() => void copyWithKey(key => snippetFor(active, key))}
+              disabled={!canCopy || copying}
+              accessibilityRole="button"
               activeOpacity={0.8}
             >
               <Text style={[styles.btnText, { color: c.onPrimary }]}>Copy</Text>

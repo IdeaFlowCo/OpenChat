@@ -23,7 +23,7 @@ import { getColors } from '../theme/colors';
 import type { NavProp } from '../navigation/types';
 import { AppIcon } from '../components/AppIcon';
 
-const GUIDE_URL = `${OPENCHAT_URL}/about/connect-your-bot`;
+const GUIDE_URL = `${OPENCHAT_URL}/agents`;
 
 function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -113,9 +113,9 @@ export function AgentKeysScreen() {
     >
       <Text style={styles.guideEmoji}>📖</Text>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.guideTitle, { color: c.textPrimary }]}>Setup guide</Text>
+        <Text style={[styles.guideTitle, { color: c.textPrimary }]}>Agent setup · OpenChat + Unlinked</Text>
         <Text style={[styles.guideHint, { color: c.textSecondary }]}>
-          Claude Desktop, Cursor, Codex CLI, Claude Code — paste-and-go
+          API keys, MCP, context posting, and troubleshooting
         </Text>
       </View>
       <Text style={{ color: c.textMuted, fontSize: 18 }}>↗</Text>
@@ -130,7 +130,7 @@ export function AgentKeysScreen() {
           <View style={{ alignItems: 'center', marginTop: 24 }}>
             <Text style={[styles.emptyTitle, { color: c.textPrimary }]}>No keys yet</Text>
             <Text style={[styles.emptyHint, { color: c.textSecondary }]}>
-              Tap + to create one for your bot or script.{'\n'}
+              Choose New API key to create one for your bot or script.{'\n'}
               Each key gives an agent bi-directional access to your conversations.
             </Text>
           </View>
@@ -156,8 +156,11 @@ export function AgentKeysScreen() {
         style={[styles.fab, { backgroundColor: c.primary }]}
         onPress={() => navigation.navigate('AddAgentKey')}
         activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel="New API key"
       >
-        <AppIcon name="plus" color={c.onPrimary} size={26} strokeWidth={2.2} />
+        <AppIcon name="plus" color={c.onPrimary} size={22} strokeWidth={2.2} />
+        <Text style={{ color: c.onPrimary, fontSize: 15, fontWeight: '600' }}>New API key</Text>
       </TouchableOpacity>
     </View>
   );
@@ -197,7 +200,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 24,
     right: 24,
-    width: 56,
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 20,
     height: 56,
     borderRadius: 28,
     alignItems: 'center',

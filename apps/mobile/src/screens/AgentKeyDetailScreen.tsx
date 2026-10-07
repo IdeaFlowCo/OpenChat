@@ -9,13 +9,14 @@
 import { useState, useCallback } from 'react';
 import {
   Alert,
-  Clipboard,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { buildAgentSetupBlob } from '../utils/agentSetupBlob';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { api, AgentKey, OPENCHAT_URL } from '../api/client';
@@ -44,6 +45,8 @@ export function AgentKeyDetailScreen() {
 
   const [key, setKey] = useState<AgentKey | null>(null);
   const [plainKey, setPlainKey] = useState<string | null>(null);
+  const [copying, setCopying] = useState(false);
+  const [copyStatus, setCopyStatus] = useState('');
   const [revoking, setRevoking] = useState(false);
 
   const load = useCallback(async () => {
@@ -58,33 +61,33 @@ export function AgentKeyDetailScreen() {
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
+  const getPlainKey = async () => plainKey ?? (await api.revealAgentKey(keyId)).key;
+
   const handleReveal = async () => {
-    Alert.alert(
-      'View full key?',
-      'The key will be displayed on screen. Make sure no one is watching.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Show key',
-          onPress: async () => {
-            try {
-              const data = await api.revealAgentKey(keyId);
-              setPlainKey(data.key);
-            } catch (err) {
-              Alert.alert('Error', err instanceof Error ? err.message : 'Failed to reveal key');
-            }
-          },
-        },
-      ]
-    );
+    try {
+      setPlainKey(await getPlainKey());
+    } catch (err) {
+      Alert.alert('Could not reveal key', err instanceof Error ? err.message : 'Please try again.');
+    }
   };
 
-  const handleCopyCurl = () => {
-    if (!key) return;
-    const bearerToken = plainKey ?? `${key.keyPrefix}…`;
-    const snippet = `curl -H "Authorization: Bearer ${bearerToken}" \\\n  ${OPENCHAT_URL}/api/chat/conversations`;
-    Clipboard.setString(snippet);
-    Alert.alert('Copied', 'curl snippet copied to clipboard.');
+  const handleCopy = async (format: 'key' | 'curl' | 'setup') => {
+    if (copying) return;
+    setCopying(true);
+    setCopyStatus('');
+    try {
+      const value = await getPlainKey();
+      const text = format === 'setup' ? buildAgentSetupBlob(value, OPENCHAT_URL)
+        : format === 'curl' ? `curl -H "Authorization: Bearer ${value}" ${OPENCHAT_URL}/api/chat/conversations`
+        : value;
+      const copied = await Clipboard.setStringAsync(text);
+      if (!copied) throw new Error('Clipboard unavailable. Use View full key to select and copy it.');
+      setCopyStatus(format === 'setup' ? 'Setup copied using this existing key.' : 'Copied. You can copy this key again anytime.');
+    } catch (err) {
+      Alert.alert('Could not copy', err instanceof Error ? err.message : 'Please try again.');
+    } finally {
+      setCopying(false);
+    }
   };
 
   const handleRevoke = () => {
@@ -151,7 +154,9 @@ export function AgentKeyDetailScreen() {
             {plainKey}
           </Text>
           <TouchableOpacity
-            onPress={() => { Clipboard.setString(plainKey); Alert.alert('Copied', 'Key copied.'); }}
+            onPress={() => void handleCopy('key')}
+            disabled={copying}
+            accessibilityRole="button"
             style={{ marginTop: 8 }}
           >
             <Text style={{ color: c.primary, fontSize: 13, fontWeight: '600' }}>Copy</Text>
@@ -162,10 +167,29 @@ export function AgentKeyDetailScreen() {
       {/* Actions */}
       {!revoked && (
         <>
+          <Text style={{ color: c.textMetadata }}>Copy this existing key anytime. Copying does not create or replace a key.</Text>
+          <TouchableOpacity
+            style={[styles.actionBtn, { backgroundColor: c.primary, borderColor: c.primary }]}
+            onPress={() => void handleCopy('key')}
+            disabled={copying}
+            accessibilityRole="button"
+          >
+            <Text style={[styles.actionBtnText, { color: c.onPrimary }]}>{copying ? 'Copying…' : 'Copy API key'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, { backgroundColor: c.surface, borderColor: c.border }]}
+            onPress={() => void handleCopy('setup')}
+            disabled={copying}
+            accessibilityRole="button"
+          >
+            <Text style={[styles.actionBtnText, { color: c.textPrimary }]}>Copy setup with this key</Text>
+          </TouchableOpacity>
+          {!!copyStatus && <Text accessibilityLiveRegion="polite" style={{ color: c.textMetadata }}>{copyStatus}</Text>}
           {!plainKey && (
             <TouchableOpacity
               style={[styles.actionBtn, { backgroundColor: c.surface, borderColor: c.border }]}
               onPress={handleReveal}
+              accessibilityRole="button"
               activeOpacity={0.7}
             >
               <Text style={[styles.actionBtnText, { color: c.textPrimary }]}>View full key</Text>
@@ -174,7 +198,9 @@ export function AgentKeyDetailScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, { backgroundColor: c.surface, borderColor: c.border }]}
-            onPress={handleCopyCurl}
+            onPress={() => void handleCopy('curl')}
+            disabled={copying}
+            accessibilityRole="button"
             activeOpacity={0.7}
           >
             <Text style={[styles.actionBtnText, { color: c.textPrimary }]}>Copy curl snippet</Text>
@@ -182,7 +208,7 @@ export function AgentKeyDetailScreen() {
 
           {/* Bi-directional MCP setup snippets. Pre-fills with the real key
               once the user has tapped "View full key", otherwise placeholders. */}
-          <McpSetupCard apiKey={plainKey} />
+          <McpSetupCard apiKey={plainKey} getApiKey={getPlainKey} showQuickSetup={false} />
 
           <TouchableOpacity
             style={[styles.actionBtn, { backgroundColor: c.dangerMuted, borderColor: c.danger }]}

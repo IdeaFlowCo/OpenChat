@@ -336,7 +336,8 @@ function renderConnectBotHtml(): string {
   .nav a { color:var(--text-dim); text-decoration:none; font-weight:500; font-size:14px; }
   .nav a:hover { color:var(--text); }
   .nav .sep { color:var(--text-dim); opacity:0.4; }
-  .doc { padding:8px 0 64px; }
+  .doc { padding:8px 0 64px; overflow-wrap:anywhere; }
+  .doc table { display:block; max-width:100%; overflow-x:auto; }
   h1 { font-size:clamp(28px,4vw,40px); letter-spacing:-0.02em; margin:0 0 24px;
        background:linear-gradient(180deg,#fff 0%,#c8cbff 130%);
        -webkit-background-clip:text; background-clip:text; color:transparent; }
@@ -370,7 +371,7 @@ function renderConnectBotHtml(): string {
     <span class="sep">·</span>
     <a href="/about/connect-your-bot">Connect your agent</a>
     <span class="sep">·</span>
-    <a href="https://github.com/tmad4000/openchat-mcp-server" target="_blank" rel="noopener">MCP Server</a>
+    <a href="https://github.com/IdeaFlowCo/OpenChat/tree/main/apps/mcp-server" target="_blank" rel="noopener">MCP Server</a>
   </nav>
   <article class="doc">
 ${body}
@@ -379,9 +380,15 @@ ${body}
 </body></html>`;
   return connectBotHtmlCache;
 }
-app.get('/about/connect-your-bot', (_req, res) => {
+app.get(['/agents', '/about/connect-your-bot'], (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=300');
   res.type('html').send(renderConnectBotHtml());
+});
+
+// Public machine-readable onboarding uses the same source as the human guide.
+app.get(['/llms.txt', '/AGENTS.md'], (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.type('text/plain').send(readFileSync(connectBotMdPath, 'utf8'));
 });
 
 // One canonical responsive client. The same React Native Web export renders
