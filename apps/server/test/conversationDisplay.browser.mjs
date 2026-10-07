@@ -44,7 +44,7 @@ mock('/services/ideaflowNativeSignIn', `export const markIdeaflowAccountChoiceNa
 mock('/services/ideaflowAutoSignIn', `export const clearIdeaflowSignedOut=()=>{},markIdeaflowSignedOut=()=>{};`);
 for(const name of ['MessageActionSheet','ReactionsBar','ToastMessage','AiDisclosureBanner','BotBadge','NewMessagesPill','VoiceMessageBubble','HashtagAutocomplete','TransformButton','NVCComposerModal','LinkPreviewCard','AgentNetworkCard','AgentOverlayButton','ExportSheet']) mock('/components/'+name, `export const ${name}=()=>null;`);
 mock('/components/InAppMessageBanner', `export const showInAppBanner=()=>{};`);
-mock('@react-navigation/native', `import React from 'react';export const useFocusEffect=f=>React.useEffect(f,[f]),useRoute=()=>({name:'Chat',params:{conversationId:'sailing'}}),useNavigation=()=>({setOptions(){},navigate(){}});`);
+mock('@react-navigation/native', `export {useFocusEffect,useRoute,useNavigation} from './apps/server/test/fixtures/conversationNavigation';`);
 mock('@react-navigation/elements', `export const useHeaderHeight=()=>56;`);
 mock('react-native', `export * from 'react-native-web';export const ActionSheetIOS={showActionSheetWithOptions(){}};`);
 mock('expo-crypto', `export const randomUUID=()=>crypto.randomUUID();`);

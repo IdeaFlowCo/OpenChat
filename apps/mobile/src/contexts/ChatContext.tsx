@@ -235,10 +235,47 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [messageLoadError, setMessageLoadError] = useState<string | null>(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  const retainedSendsRef = useRef(new Map<string, Map<string, Message>>());
+  const messageAccountRef = useRef<string | null>(null);
+  const sendSessionRef = useRef(0);
+  const resetMessageSession = useCallback((accountId: string | null) => {
+    messageAccountRef.current = accountId;
+    ++sendSessionRef.current;
+    retainedSendsRef.current.clear();
+    activeConvIdRef.current = null;
+    ++messageLoadGenerationRef.current;
+    historyLoadingRef.current = false;
+    setActiveConversationIdState(null);
+    setMessages([]);
+    setLoadingMessages(false);
+    setMessageLoadError(null);
+    setHasMoreMessages(false);
+    setLoadingOlderMessages(false);
+  }, []);
+  const mergeMessages = useCallback((id: string, current: Message[], incoming: Message[], history = false) => {
+    const retained = retainedSendsRef.current.get(id);
+    for (const message of incoming) {
+      if (message.conversationId !== id || !retained?.has(message.id)) continue;
+      if (history) retained.delete(message.id);
+      else retained.set(message.id, message);
+    }
+    const retainedMessages = [...(retained?.values() ?? [])];
+    const localIds = new Set(retainedMessages.map(message => message.id));
+    const merged = new Map([...current.filter(message => message.conversationId === id
+      && (!message.id.startsWith('local-') || localIds.has(message.id))),
+    ...retainedMessages, ...incoming.filter(message => message.conversationId === id)]
+      .map(message => [message.id, message]));
+    return [...merged.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  }, []);
   const messagePatchesRef = useRef(new Map<string, (message: Message) => Message>());
   const patchMessage = useCallback((id: string, patch: (message: Message) => Message) => {
     const previous = messagePatchesRef.current.get(id);
     messagePatchesRef.current.set(id, previous ? message => patch(previous(message)) : patch);
+    for (const sends of retainedSendsRef.current.values()) {
+      for (const [clientId, message] of sends) {
+        if (message.id === id) sends.set(clientId, patch(message));
+      }
+    }
     setMessages(current => current.map(message => message.id === id ? patch(message) : message));
   }, []);
   // Pagination state (OpenChat-vjc)
@@ -350,6 +387,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const bootstrapIfAuthed = useCallback(async (): Promise<boolean> => {
     const token = await getToken();
     if (!token) {
+      resetMessageSession(null);
       setIsAuthed(false);
       setAuthInitialized(true);
       return false;
@@ -370,6 +408,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.warn('[ChatContext] current-user refresh failed:', error);
     }
+    const accountId = u?.userId ?? null;
+    if (messageAccountRef.current !== accountId) resetMessageSession(accountId);
     setCurrentUser(u);
     setIsAuthed(true);
     // Signed in again: an earlier explicit sign-out no longer blocks the
@@ -404,7 +444,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setMutedConvs(muted);
     setAuthInitialized(true);
     return true;
-  }, [refreshConversations, refetchMatches]);
+  }, [refreshConversations, refetchMatches, resetMessageSession]);
 
   // Reload history without erasing messages or edits received while REST is in flight.
   const retryMessages = useCallback(() => {
@@ -424,7 +464,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const relevant = current.filter(message => message.conversationId === id
           && (message.id.startsWith('local-')
             || (oldest !== undefined ? message.createdAt >= oldest : !cachedIds.has(message.id))));
-        const merged = new Map([...relevant, ...loaded].map(message => [message.id, message]));
+        const merged = new Map(mergeMessages(id, relevant, loaded, true).map(message => [message.id, message]));
         for (const [messageId, message] of merged) {
           const patch = messagePatchesRef.current.get(messageId);
           if (patch) merged.set(messageId, patch(message));
@@ -443,7 +483,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         setLoadingMessages(false);
       }
     });
-  }, []);
+  }, [mergeMessages]);
 
   // Wire socket listeners exactly ONCE per authed session.
   useEffect(() => {
@@ -476,6 +516,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             return;
           }
           if (missed.length === 0) return;
+          for (const message of missed) mergeMessages(message.conversationId, [], [message]);
 
           const newConvIds = new Set<string>();
 
@@ -489,11 +530,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 const fresh = forActive.filter(m => !existingIds.has(m.id)
                   && (!prev[0] || m.createdAt >= prev[0].createdAt))
                   .map(m => messagePatchesRef.current.get(m.id)?.(m) ?? m);
-                if (fresh.length === 0) return prev;
-                // Insert in chronological order: prev is oldest→newest already.
-                return [...prev, ...fresh].sort((a, b) =>
-                  new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-                );
+                return mergeMessages(activeId, prev, fresh);
               });
             }
           }
@@ -558,9 +595,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     const onMessage = (msg: Message) => {
       // If this is the active conversation, append to message list.
+      mergeMessages(msg.conversationId, [], [msg]);
       if (msg.conversationId === activeConvIdRef.current) {
-        setMessages(prev => (prev.some(m => m.id === msg.id) ? prev
-          : [...prev, messagePatchesRef.current.get(msg.id)?.(msg) ?? msg]));
+        setMessages(prev => mergeMessages(msg.conversationId, prev,
+          [messagePatchesRef.current.get(msg.id)?.(msg) ?? msg]));
       }
       // Update conversation row preview + re-sort.
       setConversations(prev => {
@@ -788,7 +826,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sock.off('read:updated', onReadUpdated);
       sock.off('user:profile-updated', onProfileUpdated);
     };
-  }, [isAuthed, chatSocket, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage, refetchMatches, retryMessages, patchMessage]);
+  }, [isAuthed, chatSocket, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage, refetchMatches, retryMessages, patchMessage, mergeMessages]);
 
   // setActiveConversation: clears unread, joins/leaves rooms, loads messages.
   const setActiveConversation = useCallback((id: string | null, opts?: { lane?: 'chat' | 'context' }) => {
@@ -816,7 +854,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
       if (prev !== id) {
         messagePatchesRef.current.clear();
-        setMessages([]);
+        setMessages(mergeMessages(id, [], []));
       }
       setHasMoreMessages(false);
       setLoadingOlderMessages(false);
@@ -827,7 +865,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setLoadingMessages(false);
       setHasMoreMessages(false);
     }
-  }, [retryMessages]);
+  }, [retryMessages, mergeMessages]);
 
   // Load older messages for the active conversation (OpenChat-vjc).
   // Uses the createdAt of the earliest currently-loaded message as the cursor.
@@ -835,7 +873,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const loadOlderMessages = useCallback(async (conversationId: string) => {
     if (historyLoadingRef.current || loadingOlderMessages || !hasMoreMessages) return;
     // Find the oldest message currently in state (messages are sorted oldest→newest).
-    const oldest = messages.find(message => !message.id.startsWith('local-'));
+    const oldest = messages.find(message => !message.id.startsWith('local-')
+      && !retainedSendsRef.current.get(conversationId)?.has(message.id));
     if (!oldest) return;
     const generation = messageLoadGenerationRef.current;
     setLoadingOlderMessages(true);
@@ -843,10 +882,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       const { messages: older, hasMore } = await api.getMessagesBefore(conversationId, oldest.createdAt);
       if (activeConvIdRef.current === conversationId && generation === messageLoadGenerationRef.current) {
         setMessages(prev => {
-          const existingIds = new Set(prev.map(m => m.id));
-          const newMsgs = older.filter(m => !existingIds.has(m.id))
-            .map(m => messagePatchesRef.current.get(m.id)?.(m) ?? m);
-          return [...newMsgs, ...prev];
+          const patched = older.map(message => messagePatchesRef.current.get(message.id)?.(message) ?? message);
+          return mergeMessages(conversationId, prev, patched, true);
         });
         setHasMoreMessages(hasMore);
       }
@@ -855,7 +892,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } finally {
       if (generation === messageLoadGenerationRef.current) setLoadingOlderMessages(false);
     }
-  }, [loadingOlderMessages, hasMoreMessages, messages]);
+  }, [loadingOlderMessages, hasMoreMessages, messages, mergeMessages]);
 
   // Optimistic send: append a local message immediately, then replace with
   // server canonical on success. Accepts optional replyToId for threaded replies
@@ -878,9 +915,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // the REST fallback, so a lost-ack retry can't persist two rows (the server
     // MERGEs on this id). See OpenChat-60y.
     const clientId = randomUUID();
+    const sendSession = sendSessionRef.current;
 
     const optimistic: Message = {
-      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `local-${clientId}`,
       content,
       conversationId: id,
       senderId: currentUser?.userId || 'me',
@@ -894,55 +932,52 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       replyToId,
       attachments,
     };
-    const updateActiveMessages = (updater: (prev: Message[]) => Message[]) => {
-      if (activeConvIdRef.current === id) setMessages(updater);
+    let retained = retainedSendsRef.current.get(id);
+    if (!retained) {
+      retained = new Map();
+      retainedSendsRef.current.set(id, retained);
+    }
+    retained.set(clientId, optimistic);
+    if (activeConvIdRef.current === id) setMessages(prev => mergeMessages(id, prev, []));
+    const settle = (incoming: Message | null, failed = false) => {
+      if (sendSessionRef.current !== sendSession) return;
+      const real = incoming ? messagePatchesRef.current.get(incoming.id)?.(incoming) ?? incoming : null;
+      const sends = retainedSendsRef.current.get(id);
+      const existing = sends?.get(clientId);
+      if (existing) {
+        if (real) sends!.set(clientId, real);
+        else if (!failed) sends!.delete(clientId);
+        else if (existing.id === optimistic.id) sends!.set(clientId, { ...existing, _failed: true } as Message);
+      }
+      if (activeConvIdRef.current === id) {
+        setMessages(prev => mergeMessages(id, prev.filter(message => message.id !== optimistic.id), real ? [real] : []));
+      }
     };
-    updateActiveMessages(prev => [...prev, optimistic]);
-
-    // If there are attachments, always use REST (socket path doesn't carry them).
     if (hasAttachments) {
       try {
         const real = await api.sendMessage(id, content, attachments, clientId, replyToId);
-        if (isDroppedMessageSend(real)) return;
-        updateActiveMessages(prev => {
-          const filtered = prev.filter(m => m.id !== optimistic.id);
-          return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
-        });
-      } catch (e2) {
-        console.warn('[ChatContext] attachment message send failed:', e2);
-        updateActiveMessages(prev => prev.map(m => m.id === optimistic.id ? { ...m, _failed: true } as Message & { _failed?: boolean } : m));
-        throw e2;
+        settle(isDroppedMessageSend(real) ? null : real);
+      } catch (error) {
+        console.warn('[ChatContext] attachment message send failed:', error);
+        settle(null, true);
+        throw error;
       }
       return;
     }
-
-    // Text-only path: try socket first, fall back to REST.
     try {
-      const real = await wsSend(id, content, replyToId, clientId);
-      if (real === null) return;
-      // Replace the optimistic placeholder with the server message.
-      updateActiveMessages(prev => {
-        const filtered = prev.filter(m => m.id !== optimistic.id);
-        return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
-      });
-    } catch (e) {
-      // Socket path failed (incl. the new 10s ack timeout) — try REST fallback.
+      settle(await wsSend(id, content, replyToId, clientId));
+    } catch {
+      if (sendSessionRef.current !== sendSession) return;
       try {
         const real = await api.sendMessage(id, content, undefined, clientId, replyToId);
-        if (isDroppedMessageSend(real)) return;
-        updateActiveMessages(prev => {
-          const filtered = prev.filter(m => m.id !== optimistic.id);
-          return filtered.some(m => m.id === real.id) ? filtered : [...filtered, real];
-        });
-      } catch (e2) {
-        // Mark optimistic as failed (caller will see it didn't disappear).
-        console.warn('[ChatContext] message send failed:', e2);
-        // Tag the optimistic message; UI can render a retry affordance.
-        updateActiveMessages(prev => prev.map(m => m.id === optimistic.id ? { ...m, _failed: true } as Message & { _failed?: boolean } : m));
-        throw e2;
+        settle(isDroppedMessageSend(real) ? null : real);
+      } catch (error) {
+        console.warn('[ChatContext] message send failed:', error);
+        settle(null, true);
+        throw error;
       }
     }
-  }, [currentUser]);
+  }, [currentUser, mergeMessages]);
 
   const sendMessage = useCallback(async (
     content: string,
@@ -1167,6 +1202,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     try { emitPresenceUpdate('offline'); } catch { /* best effort */ }
     disconnect();
+    resetMessageSession(null);
     activeConvIdRef.current = null;
     ++messageLoadGenerationRef.current;
     historyLoadingRef.current = false;
@@ -1193,7 +1229,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setReconnectNewConvIds(new Set());
     wasEverConnectedRef.current = false;
     lastSyncAtRef.current = new Date().toISOString();
-  }, []);
+  }, [resetMessageSession]);
 
   // 401/403 cascade. Any API call that gets back a token-expired response
   // flips us to Login. Listener is global because requests can fire from

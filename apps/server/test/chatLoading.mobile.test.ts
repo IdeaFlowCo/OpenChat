@@ -4,17 +4,17 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Message } from '../../mobile/src/api/client.js';
 
 const mocks = vi.hoisted(() => ({ getMessages: vi.fn(), getMessagesBefore: vi.fn(),
-  wsSend: vi.fn(), send: vi.fn(),
+  wsSend: vi.fn(), send: vi.fn(), account: 'me', uuid: 0,
   markRead: vi.fn(), edit: vi.fn(), remove: vi.fn(), reaction: vi.fn(),
   handlers: new Map<string, (...args: any[]) => void>(),
 }));
 const socket = { connected: true, on: (event: string, handler: (...args: any[]) => void) => mocks.handlers.set(event, handler), off: (event: string) => mocks.handlers.delete(event) };
 vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn() }));
-vi.mock('expo-crypto', () => ({ randomUUID: () => 'client-message' }));
+vi.mock('expo-crypto', () => ({ randomUUID: () => ++mocks.uuid === 1 ? 'client-message' : `client-message-${mocks.uuid}` }));
 vi.mock('../../mobile/src/services/notifications', () => ({ setUnreadBadgeCount: vi.fn(), loadMutedConvs: async () => ({}) }));
 vi.mock('../../mobile/src/api/client', () => ({
   api: { sendMessage: mocks.send, editMessage: mocks.edit, deleteMessage: mocks.remove, addReaction: mocks.reaction, markRead: mocks.markRead, getMessages: mocks.getMessages, getMessagesBefore: mocks.getMessagesBefore,
-    getMe: async () => ({ id: 'me' }), getConversations: async () => [{ id: 'sailing' }],
+    getMe: async () => ({ id: mocks.account }), getConversations: async () => [{ id: 'sailing' }],
     listMatches: async () => [], getAiDisclosureStatus: async () => ({}), messagesSince: async () => ({ messages: [], truncated: true }),
   }, getToken: async () => 'test', getUser: async () => ({ userId: 'me' }), setSession: vi.fn(), clearSession: vi.fn(),
   onAuthExpired: () => vi.fn(),
@@ -42,6 +42,8 @@ function Probe() { chat = useChat(); return null; }
 beforeEach(async () => {
   vi.resetAllMocks();
   mocks.handlers.clear();
+  mocks.account = 'me';
+  mocks.uuid = 0;
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   await act(async () => { root = create(React.createElement(ChatProvider, null, React.createElement(Probe))); });
 });
@@ -313,4 +315,153 @@ it.each([
   expect(chat.messages.filter(message => message.id === real.id)).toEqual([real]);
   expect(chat.messages.some(message => message.id === local.id)).toBe(false);
   expect(chat.messages).toHaveLength(page.messages.length + 1);
+});
+
+function pendingSend() {
+  let resolve!: (message: Message) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<Message>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+async function failSend(content = 'retained text') {
+  mocks.wsSend.mockRejectedValue(new Error('offline'));
+  mocks.send.mockRejectedValue(new Error('offline'));
+  await act(async () => { await expect(chat.sendMessage(content)).rejects.toThrow('offline'); });
+  return chat.messages.find(message => message.content === content)!;
+}
+
+it('retains failed sends by conversation across blur, other threads and reopen', async () => {
+  await openSendingThread();
+  const sailing = await failSend('sailing text');
+  await act(async () => chat.setActiveConversation(null));
+  expect(chat.messages).toEqual([]);
+  await act(async () => chat.setActiveConversation('other'));
+  expect(chat.messages).toEqual([]);
+  const other = await failSend('other text');
+  await act(async () => chat.setActiveConversation('sailing', { lane: 'context' }));
+  expect(chat.messages).toEqual([sailing]);
+  expect(chat.activeConversationLane).toBe('context');
+  await act(async () => chat.setActiveConversation('other'));
+  expect(chat.messages).toEqual([other]);
+});
+
+it.each(['success', 'failure'] as const)('settles a late send %s in its retained conversation while another thread is selected', async outcome => {
+  await openSendingThread();
+  const response = pendingSend();
+  mocks.wsSend.mockReturnValue(response.promise);
+  mocks.send.mockRejectedValue(new Error('offline'));
+  let sending!: Promise<void>;
+  await act(async () => { sending = chat.sendMessage('late text'); });
+  const local = chat.messages[0];
+  await act(async () => chat.setActiveConversation(null));
+  await act(async () => chat.setActiveConversation('other'));
+  const real = { ...local, id: 'client-message' };
+  await act(async () => {
+    if (outcome === 'success') { response.resolve(real); await sending; }
+    else { response.reject(new Error('offline')); await expect(sending).rejects.toThrow('offline'); }
+  });
+  expect(chat.messages).toEqual([]);
+  await act(async () => chat.setActiveConversation('sailing'));
+  expect(chat.messages).toEqual(outcome === 'success' ? [real] : [{ ...local, _failed: true }]);
+});
+
+it.each(['history', 'socket'] as const)('replaces a failed placeholder from %s when both acknowledgments were lost', async delivery => {
+  await openSendingThread();
+  const local = await failSend();
+  expect(mocks.wsSend).toHaveBeenCalledWith('sailing', 'retained text', undefined, 'client-message');
+  expect(mocks.send).toHaveBeenCalledWith('sailing', 'retained text', undefined, 'client-message', undefined);
+  const real = { ...local, id: 'client-message' } as Message & { _failed?: boolean };
+  delete real._failed;
+  await act(async () => chat.setActiveConversation('other'));
+  if (delivery === 'history') mocks.getMessages.mockImplementation(async id => id === 'sailing' ? { messages: [real], hasMore: false } : emptyPage);
+  else await act(async () => mocks.handlers.get('message:new')!(real));
+  expect(chat.messages).toEqual([]);
+  await act(async () => chat.setActiveConversation('sailing'));
+  expect(chat.messages).toEqual([real]);
+  await act(async () => mocks.handlers.get('message:new')!(real));
+  expect(chat.messages).toEqual([real]);
+});
+
+it.each([
+  ['history', 'socket', 'ack'], ['history', 'ack', 'socket'],
+  ['socket', 'history', 'ack'], ['socket', 'ack', 'history'],
+  ['ack', 'history', 'socket'], ['ack', 'socket', 'history'],
+])('deduplicates canonical delivery in %s → %s → %s order', async (...order) => {
+  await openSendingThread();
+  const response = pendingSend();
+  mocks.wsSend.mockReturnValue(response.promise);
+  let sending!: Promise<void>;
+  await act(async () => { sending = chat.sendMessage('once'); });
+  const real = { ...chat.messages[0], id: 'client-message' };
+  for (const delivery of order) {
+    await act(async () => {
+      if (delivery === 'socket') mocks.handlers.get('message:new')!(real);
+      if (delivery === 'history') {
+        mocks.getMessages.mockResolvedValue({ messages: [real], hasMore: false });
+        chat.retryMessages();
+      }
+      if (delivery === 'ack') { response.resolve(real); await sending; }
+    });
+    expect(chat.messages).toEqual([real]);
+  }
+  await act(async () => chat.setActiveConversation(null));
+  await act(async () => chat.setActiveConversation('sailing'));
+  expect(chat.messages).toEqual([real]);
+});
+
+it.each([
+  { boundary: 'sign-out', outcome: 'success' }, { boundary: 'sign-out', outcome: 'failure' },
+  { boundary: 'account-change', outcome: 'success' }, { boundary: 'account-change', outcome: 'failure' },
+])('clears retained sends and ignores late $outcome across $boundary', async ({ boundary, outcome }) => {
+  await openSendingThread();
+  await failSend('old failed text');
+  const response = pendingSend();
+  mocks.wsSend.mockReturnValue(response.promise);
+  let sending!: Promise<void>;
+  await act(async () => { sending = chat.sendMessage('old pending text'); });
+  const real = { ...chat.messages.find(message => message.content === 'old pending text')!, id: 'client-message-2' };
+  if (boundary === 'sign-out') await act(async () => chat.signOut({ explicit: false }));
+  mocks.account = 'new-account';
+  await act(async () => { await chat.bootstrapIfAuthed(); });
+  await act(async () => chat.setActiveConversation('sailing'));
+  expect(chat.messages).toEqual([]);
+  const fallbacks = mocks.send.mock.calls.length;
+  await act(async () => {
+    if (outcome === 'success') response.resolve(real);
+    else response.reject(new Error('old socket failure'));
+    await sending;
+  });
+  expect(mocks.send).toHaveBeenCalledTimes(fallbacks);
+  expect(chat.messages).toEqual([]);
+  await act(async () => chat.setActiveConversation(null));
+  await act(async () => chat.setActiveConversation('sailing'));
+  expect(chat.messages).toEqual([]);
+});
+
+it('sorts paginated messages around an older retained send using the persisted cursor', async () => {
+  await openSendingThread();
+  const local = await failSend();
+  await reconnectWith(newestPage);
+  const middle = { ...history.messages[0], id: 'middle', createdAt: '2098-01-01T00:00:00Z' };
+  mocks.getMessagesBefore.mockResolvedValue({ messages: [middle, newestPage.messages[0]], hasMore: false });
+  await act(async () => chat.loadOlderMessages('sailing'));
+  expect(mocks.getMessagesBefore).toHaveBeenCalledExactlyOnceWith('sailing', newestPage.messages[0].createdAt);
+  expect(chat.messages).toEqual([local, middle, newestPage.messages[0]]);
+});
+
+it('uses the loaded history anchor while an older acknowledged send awaits history confirmation', async () => {
+  await openSendingThread();
+  const response = pendingSend();
+  mocks.wsSend.mockReturnValue(response.promise);
+  let sending!: Promise<void>;
+  await act(async () => { sending = chat.sendMessage('older acknowledged send'); });
+  const real = { ...chat.messages[0], id: 'client-message' };
+  await reconnectWith(newestPage);
+  await act(async () => { response.resolve(real); await sending; });
+  const middle = { ...history.messages[0], id: 'middle', createdAt: '2098-01-01T00:00:00Z' };
+  mocks.getMessagesBefore.mockResolvedValue({ messages: [real, middle], hasMore: false });
+  await act(async () => chat.loadOlderMessages('sailing'));
+  expect(mocks.getMessagesBefore).toHaveBeenCalledExactlyOnceWith('sailing', newestPage.messages[0].createdAt);
+  expect(chat.messages).toEqual([real, middle, newestPage.messages[0]]);
 });
