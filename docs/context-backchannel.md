@@ -73,6 +73,8 @@ lifecycles remain separate.
 
 From Chats, select **Agent drafts**. The hosted agent is off for every owner until
 that owner enables it. A server availability switch alone never enrolls anyone.
+Screen readers announce the **Hosted Context agent** switch's current on/off
+state on web and native clients.
 The screen explains that enabling hosted drafts takes precedence over that owner's
 key-based request recipient.
 
