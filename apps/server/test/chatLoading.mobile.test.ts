@@ -4,21 +4,23 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Message } from '../../mobile/src/api/client.js';
 
 const mocks = vi.hoisted(() => ({ getMessages: vi.fn(), getMessagesBefore: vi.fn(),
+  wsSend: vi.fn(), send: vi.fn(),
   markRead: vi.fn(), edit: vi.fn(), remove: vi.fn(), reaction: vi.fn(),
   handlers: new Map<string, (...args: any[]) => void>(),
 }));
 const socket = { connected: true, on: (event: string, handler: (...args: any[]) => void) => mocks.handlers.set(event, handler), off: (event: string) => mocks.handlers.delete(event) };
 vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn() }));
-vi.mock('expo-crypto', () => ({ randomUUID: vi.fn() }));
+vi.mock('expo-crypto', () => ({ randomUUID: () => 'client-message' }));
 vi.mock('../../mobile/src/services/notifications', () => ({ setUnreadBadgeCount: vi.fn(), loadMutedConvs: async () => ({}) }));
 vi.mock('../../mobile/src/api/client', () => ({
-  api: { editMessage: mocks.edit, deleteMessage: mocks.remove, addReaction: mocks.reaction, markRead: mocks.markRead, getMessages: mocks.getMessages, getMessagesBefore: mocks.getMessagesBefore,
+  api: { sendMessage: mocks.send, editMessage: mocks.edit, deleteMessage: mocks.remove, addReaction: mocks.reaction, markRead: mocks.markRead, getMessages: mocks.getMessages, getMessagesBefore: mocks.getMessagesBefore,
     getMe: async () => ({ id: 'me' }), getConversations: async () => [{ id: 'sailing' }],
     listMatches: async () => [], getAiDisclosureStatus: async () => ({}), messagesSince: async () => ({ messages: [], truncated: true }),
   }, getToken: async () => 'test', getUser: async () => ({ userId: 'me' }), setSession: vi.fn(), clearSession: vi.fn(),
   onAuthExpired: () => vi.fn(),
+  isDroppedMessageSend: (value: any) => value?.dropped === true,
 }));
-vi.mock('../../mobile/src/api/socket', () => ({ joinConversation: vi.fn(), leaveConversation: vi.fn(), connect: async () => socket, disconnect: vi.fn(), emitPresenceUpdate: vi.fn() }));
+vi.mock('../../mobile/src/api/socket', () => ({ sendMessage: mocks.wsSend, joinConversation: vi.fn(), leaveConversation: vi.fn(), connect: async () => socket, disconnect: vi.fn(), emitPresenceUpdate: vi.fn() }));
 vi.mock('../../mobile/src/components/InAppMessageBanner', () => ({ showInAppBanner: vi.fn() }));
 
 import { ChatProvider, useChat } from '../../mobile/src/contexts/ChatContext.js';
@@ -237,4 +239,78 @@ it.each(['edit', 'delete', 'reaction'])('preserves a successful HTTP %s through 
   if (mutation === 'edit') expect(chat.messages[0].content).toBe('saved edit');
   if (mutation === 'delete') expect(chat.messages[0].deletedAt).toBe('2026-10-07');
   if (mutation === 'reaction') expect(chat.messages[0].reactions).toEqual(reactions);
+});
+
+const newestPage: Page = {
+  messages: [{ ...history.messages[0], id: 'newest', createdAt: '2099-01-01T00:00:00Z' }],
+  hasMore: true,
+};
+const emptyPage: Page = { messages: [], hasMore: false };
+const image = { id: 'image', url: 'https://example.test/image.png', mimeType: 'image/png', size: 10 };
+
+async function openSendingThread() {
+  await act(async () => { await chat.bootstrapIfAuthed(); });
+  mocks.getMessages.mockResolvedValue(emptyPage);
+  await act(async () => chat.setActiveConversation('sailing'));
+  await act(async () => mocks.handlers.get('connect')!());
+}
+
+async function reconnectWith(page: Page) {
+  mocks.getMessages.mockResolvedValue(page);
+  await act(async () => {
+    mocks.handlers.get('disconnect')!();
+    mocks.handlers.get('connect')!();
+  });
+}
+
+it.each([
+  { attachment: false, page: emptyPage }, { attachment: true, page: emptyPage },
+  { attachment: false, page: newestPage }, { attachment: true, page: newestPage },
+])('keeps failed send content after reconnect with attachment=$attachment and page=$page', async ({ attachment, page }) => {
+  await openSendingThread();
+  const offline = new Error('offline');
+  mocks.wsSend.mockRejectedValue(offline);
+  mocks.send.mockRejectedValue(offline);
+  await act(async () => {
+    await expect(chat.sendMessage('unsent text', undefined, attachment ? [image] : undefined)).rejects.toThrow('offline');
+  });
+  expect(mocks.send).toHaveBeenCalledOnce();
+  expect(mocks.wsSend).toHaveBeenCalledTimes(attachment ? 0 : 1);
+  const local = chat.messages[0];
+  expect(local).toMatchObject({ content: 'unsent text', _failed: true });
+  await reconnectWith(page);
+  expect(chat.messages).toEqual([local, ...page.messages]);
+  if (page.hasMore) {
+    mocks.getMessagesBefore.mockResolvedValue(history);
+    await act(async () => chat.loadOlderMessages('sailing'));
+    expect(mocks.getMessagesBefore).toHaveBeenCalledExactlyOnceWith('sailing', page.messages[0].createdAt);
+    expect(chat.messages).toContainEqual(local);
+    expect(chat.messages).toContainEqual(history.messages[0]);
+  }
+});
+
+it.each([
+  { transport: 'socket', page: emptyPage }, { transport: 'socket', page: newestPage },
+  { transport: 'fallback', page: emptyPage }, { transport: 'attachment', page: newestPage },
+])('keeps pending $transport sends through reconnect and deduplicates their acknowledgment', async ({ transport, page }) => {
+  await openSendingThread();
+  let acknowledge!: (message: Message) => void;
+  const response = new Promise<Message>(resolve => { acknowledge = resolve; });
+  if (transport === 'socket') mocks.wsSend.mockReturnValue(response);
+  else {
+    mocks.wsSend.mockRejectedValue(new Error('socket unavailable'));
+    mocks.send.mockReturnValue(response);
+  }
+  let sending!: Promise<void>;
+  await act(async () => { sending = chat.sendMessage('sending text', undefined, transport === 'attachment' ? [image] : undefined); });
+  const local = chat.messages[0];
+  expect(local).toMatchObject({ content: 'sending text' });
+  await reconnectWith(page);
+  expect(chat.messages).toEqual([local, ...page.messages]);
+  const real: Message = { ...local, id: 'client-message' };
+  await act(async () => mocks.handlers.get('message:new')!(real));
+  await act(async () => { acknowledge(real); await sending; });
+  expect(chat.messages.filter(message => message.id === real.id)).toEqual([real]);
+  expect(chat.messages.some(message => message.id === local.id)).toBe(false);
+  expect(chat.messages).toHaveLength(page.messages.length + 1);
 });

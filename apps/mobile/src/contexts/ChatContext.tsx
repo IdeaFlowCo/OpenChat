@@ -422,7 +422,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setMessages(current => {
         const oldest = loaded[0]?.createdAt;
         const relevant = current.filter(message => message.conversationId === id
-          && (oldest !== undefined ? message.createdAt >= oldest : !cachedIds.has(message.id)));
+          && (message.id.startsWith('local-')
+            || (oldest !== undefined ? message.createdAt >= oldest : !cachedIds.has(message.id))));
         const merged = new Map([...relevant, ...loaded].map(message => [message.id, message]));
         for (const [messageId, message] of merged) {
           const patch = messagePatchesRef.current.get(messageId);
@@ -834,7 +835,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const loadOlderMessages = useCallback(async (conversationId: string) => {
     if (historyLoadingRef.current || loadingOlderMessages || !hasMoreMessages) return;
     // Find the oldest message currently in state (messages are sorted oldest→newest).
-    const oldest = messages[0];
+    const oldest = messages.find(message => !message.id.startsWith('local-'));
     if (!oldest) return;
     const generation = messageLoadGenerationRef.current;
     setLoadingOlderMessages(true);
