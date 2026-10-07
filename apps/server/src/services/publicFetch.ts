@@ -4,7 +4,7 @@
 import { lookup } from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
-import { isIP } from 'node:net';
+import { isIP, type TcpNetConnectOpts } from 'node:net';
 import { createGunzip, createInflate, createBrotliDecompress } from 'node:zlib';
 import { isBlockedAddress } from './webhookDispatch.js';
 
@@ -28,14 +28,17 @@ async function resolveTarget(url: URL, signal: AbortSignal) {
 
 function getHop(url: URL, targets: { address: string; family: 4 | 6 }[], signal: AbortSignal, options: Options): Promise<PublicResponse> {
   return new Promise((resolve, reject) => {
-    const req = (url.protocol === 'https:' ? https : http).request(url, {
+    // HTTP forwards connection options to net.connect; its declaration omits
+    // the supported address-family fallback field from RequestOptions.
+    const requestOptions: http.RequestOptions & Pick<TcpNetConnectOpts, 'autoSelectFamily'> = {
       method: 'GET', agent: false, signal, autoSelectFamily: true,
       headers: { ...options.headers, 'Accept-Encoding': 'identity' },
       lookup: (_host, lookupOptions, callback) => {
         if (lookupOptions.all) callback(null, targets);
         else callback(null, targets[0].address, targets[0].family);
       },
-    }, res => {
+    };
+    const req = (url.protocol === 'https:' ? https : http).request(url, requestOptions, res => {
       const status = res.statusCode ?? 0;
       if ([301, 302, 303, 307, 308].includes(status) && res.headers.location) {
         res.destroy();
