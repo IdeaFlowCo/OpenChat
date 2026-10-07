@@ -1,8 +1,9 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ preferences: vi.fn(), setPreferences: vi.fn(), requests: vi.fn(), detail: vi.fn(), revise: vi.fn(), publish: vi.fn(), decline: vi.fn(), cancel: vi.fn(), user: 'alice' }));
+const mocks = vi.hoisted(() => ({ preferences: vi.fn(), setPreferences: vi.fn(), requests: vi.fn(), detail: vi.fn(), revise: vi.fn(), publish: vi.fn(), decline: vi.fn(), cancel: vi.fn(), user: 'alice', platform: 'ios' }));
 vi.mock('react-native', () => ({
+  Platform: { get OS() { return mocks.platform; } },
   StyleSheet: { create: (value: any) => value, hairlineWidth: 1 }, AppState: { currentState: 'active', addEventListener: () => ({ remove: () => {} }) },
   View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', TextInput: 'TextInput', ActivityIndicator: 'ActivityIndicator',
   FlatList: ({ data, renderItem, ListEmptyComponent, ListHeaderComponent }: any) => React.createElement('List', {}, ListHeaderComponent, data.length ? data.map((item: any) => React.createElement(React.Fragment, { key: item.id }, renderItem({ item }))) : ListEmptyComponent),
@@ -33,7 +34,7 @@ const mount = async () => { await act(async () => { tree = create(React.createEl
 beforeEach(() => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   for (const value of Object.values(mocks)) if (typeof value === 'function') value.mockReset();
-  mocks.user = 'alice'; mocks.preferences.mockResolvedValue({ enabled: true, available: true }); mocks.requests.mockResolvedValue({ requests: [request()] });
+  mocks.user = 'alice'; mocks.platform = 'ios'; mocks.preferences.mockResolvedValue({ enabled: true, available: true }); mocks.requests.mockResolvedValue({ requests: [request()] });
   mocks.publish.mockResolvedValue(request({ status: 'published', draft: undefined, privateText: undefined }));
   mocks.decline.mockResolvedValue(request({ status: 'declined', draft: undefined, privateText: undefined }));
   mocks.cancel.mockResolvedValue(request({ status: 'cancelled', draft: undefined, privateText: undefined }));
@@ -134,4 +135,14 @@ it('permission loss clears locally typed private input even before any draft exi
 it('an expired draft cannot be published while awaiting a refresh', async () => {
   mocks.requests.mockResolvedValue({ requests: [request({ expiresAt: '2000-01-01T00:00:00Z' })] });
   await mount(); expect(findButton('Publish to Context')?.props.disabled).toBe(true); expect(mocks.publish).not.toHaveBeenCalled();
+});
+
+it('web exposes on and off switch states while native retains its existing accessibility state', async () => {
+  mocks.platform = 'web'; mocks.preferences.mockResolvedValue({ enabled: false, available: true });
+  mocks.setPreferences.mockResolvedValue({ enabled: true, available: true }); await mount();
+  expect(findButton('Hosted Context agent')!.props['aria-checked']).toBe(false);
+  await press('Hosted Context agent'); expect(findButton('Hosted Context agent')!.props['aria-checked']).toBe(true);
+  mocks.platform = 'ios'; await act(async () => tree.update(React.createElement(ContextReviewScreen)));
+  expect(findButton('Hosted Context agent')!.props['aria-checked']).toBeUndefined();
+  expect(findButton('Hosted Context agent')!.props.accessibilityState.checked).toBe(true);
 });

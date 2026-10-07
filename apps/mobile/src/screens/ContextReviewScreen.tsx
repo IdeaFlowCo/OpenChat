@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, AppState, FlatList, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useChat } from '../contexts/ChatContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -39,7 +39,7 @@ export function ContextReviewSession({ accountId }: { accountId: string }) {
       <Text style={[styles.label, { color: c.textPrimary }]}>Hosted Context agent</Text>
       <Text style={[styles.detail, { color: c.textMetadata }]}>Off by default. When enabled, explicit Ask agents requests prepare drafts privately. Anthropic processes the shared question and any private text you explicitly add. Generation cannot publish or send messages.</Text>
       <Text style={[styles.detail, { color: c.textMetadata }]}>While enabled, this hosted agent handles your Context requests instead of your opted-in API-key agents. Turning off cancels pending requests and clears unpublished drafts.</Text>
-      {review.preferences && <TouchableOpacity accessibilityRole="switch" accessibilityLabel="Hosted Context agent" accessibilityState={{ checked: review.preferences.enabled, disabled: !!review.busy || (!review.preferences.available && !review.preferences.enabled) }}
+      {review.preferences && <TouchableOpacity accessibilityRole="switch" accessibilityLabel="Hosted Context agent" {...(Platform.OS === 'web' ? { 'aria-checked': review.preferences.enabled } : {})} accessibilityState={{ checked: review.preferences.enabled, disabled: !!review.busy || (!review.preferences.available && !review.preferences.enabled) }}
         disabled={!!review.busy || (!review.preferences.available && !review.preferences.enabled)} onPress={() => void review.toggle()} style={[styles.button, { borderColor: c.border }]}>
         <Text style={{ color: c.primary, fontWeight: '600' }}>{review.busy === 'preferences' ? 'Saving…' : review.preferences.enabled ? 'On · Turn off' : 'Off · Turn on'}</Text>
       </TouchableOpacity>}
