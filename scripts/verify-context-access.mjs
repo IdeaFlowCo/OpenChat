@@ -25,7 +25,9 @@ try {
   assert.equal(edited.revision.toNumber?.() ?? edited.revision, 2);
   await assert.rejects(() => updateContextPost(adapter, userId, conversationId, first.id, 'Stale edit', 1, agentKeyId, ['read','write']), /Revision mismatch/);
   await deleteContextPost(adapter, userId, conversationId, first.id, agentKeyId, ['read','write']);
-  assert.equal((await tx.run('MATCH (t:Thought {id:$id}) RETURN t', {id:first.id})).records.length, 0);
+  const tombstone = (await tx.run('MATCH (t:Thought {id:$id}) RETURN t', {id:first.id})).records[0].get('t').properties;
+  assert.equal(tombstone.text, '');
+  assert.ok(tombstone.deletedAt);
   for (const patch of ["k.revokedAt='revoked'", "k.revokedAt=null, k.expiresAt='2000-01-01T00:00:00Z'", "k.expiresAt=null, k.ownerUserId='other-owner'", "k.ownerUserId=$userId, k.scopes=[]"]) {
     await tx.run(`MATCH (k:AgentKey {id:$agentKeyId}) SET ${patch}`, { agentKeyId, userId });
     assert.equal(await checkContextReadAccess(...args), false);

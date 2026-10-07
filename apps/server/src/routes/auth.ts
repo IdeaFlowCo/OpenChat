@@ -1515,6 +1515,14 @@ router.delete('/me', requireAuth, async (req: Request, res: Response) => {
         DETACH DELETE t
       `, { userId });
 
+      // Context request records contain source references, never copies of shared/private text.
+      await tx.run(`
+        MATCH (r:ContextAgentRequest)
+        WHERE r.ownerUserId = $userId OR r.requesterId = $userId
+           OR EXISTS { MATCH (:User {id:$userId})-[:HAS_THOUGHT]->(t:Thought) WHERE t.id=r.postId }
+        DETACH DELETE r
+      `, { userId });
+
       // 2b. Delete ContextResponses pointing to this user's Context posts, their own responses, then delete Thoughts.
       await tx.run(`
         MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(th:Thought)<-[:RESPONDS_TO]-(r:ContextResponse)

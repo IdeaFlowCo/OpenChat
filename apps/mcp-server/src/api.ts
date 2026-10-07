@@ -297,6 +297,10 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       type?: 'direct' | 'group';
     }) => request<ConversationSummary>('POST', '/api/chat/conversations', { body }),
 
+    setContextRequestsEnabled: (enabled: boolean) => request<{ enabled: boolean }>('PUT', '/api/chat/context-agent/preferences', { body: { enabled } }),
+    listContextAgentRequests: () => request<unknown>('GET', '/api/chat/context-agent/requests'),
+    askContextAgents: (conversationId: string, postId: string) => request<unknown>('POST', `/api/chat/conversations/${encodeURIComponent(conversationId)}/context/${encodeURIComponent(postId)}/ask-agents`),
+    respondToContextAgentRequest: (requestId: string, text?: string, decline?: boolean) => request<unknown>('POST', `/api/chat/context-agent/requests/${encodeURIComponent(requestId)}/respond`, { body: { text, decline } }),
     // ---- context lane ----
     listContextPosts: (conversationId: string, limit?: number, cursor?: string, kind?: string, search?: string) =>
       request<ListContextPostsResponse>('GET', `/api/chat/conversations/${encodeURIComponent(conversationId)}/context`, { query: { limit, cursor, kind, search } }),

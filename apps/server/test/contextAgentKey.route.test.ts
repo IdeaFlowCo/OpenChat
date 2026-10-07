@@ -64,4 +64,15 @@ describe('normal OpenChat API keys on Context', () => {
     expect(response.status).toBe(400);
     expect(response.body.error).toBeTruthy();
   });
+  it.each([{text:'',expectedRevision:1},{text:'edit',expectedRevision:'1'},{text:'edit',expectedRevision:0},{}])('rejects malformed edits: %j', async body => {
+    expect((await request(app).patch(`${path}/post`).set(auth()).send(body)).status).toBe(400);
+  });
+  it.each(['limit=-1','limit=2x','limit=0','cursor=nonsense','kind=unknown','search=a&search=b'])('rejects malformed listing query: %s', async query => {
+    expect((await request(app).get(`${path}?${query}`).set(auth())).status).toBe(400);
+  });
+  it('does not let an agent configure another key',async()=>{
+    expect((await request(app).put('/api/chat/context-agent/preferences').set(auth()).send({keyId:'other',enabled:true})).status).toBe(403);
+    expect((await request(app).put('/api/chat/context-agent/preferences').set(auth()).send({enabled:'yes'})).status).toBe(400);
+  });
+
 });
