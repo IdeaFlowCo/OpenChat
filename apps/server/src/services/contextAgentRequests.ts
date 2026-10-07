@@ -33,17 +33,9 @@ export async function contextAgentPreference(session: Session, userId: string, k
   });
 }
 
-export async function askContextAgents(session: Session, userId: string, conversationId: string, postId: string, agentKeyId?: string, agentScopes?: string[]) {
-  return session.executeWrite(async tx => {
-    await acquireContextAclLocks(tx, { userIds: [userId], conversationId, agentKeyId });
-    if (!await checkContextWriteAccess(tx, userId, conversationId, agentKeyId, agentScopes)) throw new ContextLaneError(403, 'Not authorized');
-    const now = new Date().toISOString();
-    const source = await tx.run(`MATCH (t:Thought {id:$postId, conversationId:$conversationId, lane:'context'})
-      WHERE t.deletedAt IS NULL AND coalesce(t.status,'open')<>'closed' AND coalesce(t.intentionState,'open')='open' RETURN t.revision AS revision`, { postId, conversationId });
-    if (!source.records.length) throw new ContextLaneError(404, 'Post not found');
-    const revision = source.records[0].get('revision');
-    const recipients = await tx.run(`MATCH (requester:User {id:$userId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
+const recipientQuery = `MATCH (requester:User {id:$userId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
       MATCH (owner:User)-[:PARTICIPATES_IN]->(c)
+      WHERE $ownerIds IS NULL OR owner.id IN $ownerIds
       OPTIONAL MATCH (w:ContextWebhook {ownerUserId:owner.id,conversationId:$conversationId,enabled:true})
       WITH owner,requester,collect(w) AS subscriptions
       OPTIONAL MATCH (k:AgentKey {ownerUserId:owner.id})
@@ -57,8 +49,22 @@ export async function askContextAgents(session: Session, userId: string, convers
         AND NOT EXISTS { MATCH (owner)-[:BLOCKED]-(:User {id:$userId}) }
       RETURN owner.id AS ownerId,
         CASE WHEN $hostedAvailable AND owner.contextHostedEnabled=true THEN 'hosted' ELSE 'key' END AS recipientType,
-        coalesce(owner.contextHostedGeneration,0) AS generation,k.id AS keyId ORDER BY owner.id LIMIT 10`,
-    { userId, conversationId, agentKeyId: agentKeyId || null, now, hostedAvailable:isHostedContextAvailable() });
+        coalesce(owner.contextHostedGeneration,0) AS generation,k.id AS keyId ORDER BY owner.id LIMIT 10`;
+
+export async function askContextAgents(session: Session, userId: string, conversationId: string, postId: string, agentKeyId?: string, agentScopes?: string[]) {
+  return session.executeWrite(async tx => {
+    const candidates = await tx.run(recipientQuery,
+      { userId, conversationId, agentKeyId: agentKeyId || null, now:new Date().toISOString(), hostedAvailable:isHostedContextAvailable(), ownerIds:null });
+    const ownerIds = candidates.records.map(r => r.get('ownerId') as string);
+    await acquireContextAclLocks(tx, { userIds: [userId, ...ownerIds], conversationId, agentKeyId });
+    if (!await checkContextWriteAccess(tx, userId, conversationId, agentKeyId, agentScopes)) throw new ContextLaneError(403, 'Not authorized');
+    const now = new Date().toISOString();
+    const source = await tx.run(`MATCH (t:Thought {id:$postId, conversationId:$conversationId, lane:'context'})
+      WHERE t.deletedAt IS NULL AND coalesce(t.status,'open')<>'closed' AND coalesce(t.intentionState,'open')='open' RETURN t.revision AS revision`, { postId, conversationId });
+    if (!source.records.length) throw new ContextLaneError(404, 'Post not found');
+    const revision = source.records[0].get('revision');
+    const recipients = await tx.run(recipientQuery,
+      { userId, conversationId, agentKeyId: agentKeyId || null, now, hostedAvailable:isHostedContextAvailable(), ownerIds });
     if (!recipients.records.length) throw new ContextLaneError(409, 'No agents in this conversation have enabled Context requests');
     // One request per owner/source revision, even after changing receiver or hosted preference.
     // The conversation lock serializes concurrent Ask actions; old requests are never reassigned.

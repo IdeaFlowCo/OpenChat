@@ -130,6 +130,64 @@ integration('Context wake durable outbox with fake transport',()=>{
   }finally{if(savedKey===undefined)delete process.env.ANTHROPIC_API_KEY;else process.env.ANTHROPIC_API_KEY=savedKey;}
  });
 
+ it('serializes selected external enqueue with hosted preference cancellation',async()=>{
+  const savedKey=process.env.ANTHROPIC_API_KEY,tag=prefix+'preference-race';
+  let release!:()=>void,selected!:()=>void;
+  const paused=new Promise<void>(resolve=>{selected=resolve;}),resume=new Promise<void>(resolve=>{release=resolve;});
+  let asking:Promise<any>|undefined,toggling:Promise<any>|undefined;
+  try{
+   await setup();const p=await session(s=>createContextPost(s,a,room,{text:'Concurrent request',clientRequestId:crypto.randomUUID()}));
+   process.env.OPENCHAT_CONTEXT_HOSTED_ENABLED='true';process.env.ANTHROPIC_API_KEY='synthetic-provider-never-called';
+   asking=session(s=>askContextAgents({executeWrite:(fn:any)=>s.executeWrite((tx:any)=>fn({run:async(q:string,args:any)=>{
+    const result=await tx.run(q,args);
+    if(Array.isArray(args?.ownerIds)&&result.records[0]?.keys.includes('recipientType')){
+     expect(result.records[0].get('recipientType')).toBe('key');selected();await resume;
+    }
+    return result;
+   }}))} as any,a,room,p.id));
+   await paused;
+   toggling=session(s=>hostedPreference({executeWrite:(fn:any)=>s.executeWrite(fn,{metadata:{contextRace:tag}})} as any,b,true));
+   let blocked=false;const deadline=Date.now()+10000;
+   while(!blocked&&Date.now()<deadline){
+    const transactions=await run(`SHOW TRANSACTIONS YIELD metaData,status WHERE metaData.contextRace=$tag RETURN status`,{tag});
+    blocked=transactions.records.some((r:any)=>r.get('status').startsWith('Blocked'));
+   }
+   expect(blocked).toBe(true);
+   release();expect((await asking).queued).toBe(1);await toggling;
+   const original=(await session(s=>listContextAgentRequests(s,b,key))).requests[0];expect(original).toBeDefined();
+   await session(s=>hostedPreference(s,b,false));
+   expect((await delivery())[0]).toMatchObject({status:'cancelled',requestId:original.id});
+   const fake=vi.fn(async()=>true);expect(await runContextWebhookOnce(driver,fake)).toBe(false);expect(fake).not.toHaveBeenCalled();
+   expect((await session(s=>listContextAgentRequests(s,b,key))).requests).toEqual([original]);
+   expect((await session(s=>askContextAgents(s,a,room,p.id))).queued).toBe(0);
+  }finally{
+   release();await Promise.allSettled([asking,toggling]);
+   if(savedKey===undefined)delete process.env.ANTHROPIC_API_KEY;else process.env.ANTHROPIC_API_KEY=savedKey;
+  }
+ });
+ it('rechecks hosted routing after candidate discovery and before enqueue',async()=>{
+  const savedKey=process.env.ANTHROPIC_API_KEY;
+  let release!:()=>void,discovered!:()=>void;
+  const paused=new Promise<void>(resolve=>{discovered=resolve;}),resume=new Promise<void>(resolve=>{release=resolve;});
+  let asking:Promise<any>|undefined;
+  try{
+   await setup();const p=await session(s=>createContextPost(s,a,room,{text:'Routing changed',clientRequestId:crypto.randomUUID()}));
+   process.env.OPENCHAT_CONTEXT_HOSTED_ENABLED='true';process.env.ANTHROPIC_API_KEY='synthetic-provider-never-called';
+   asking=session(s=>askContextAgents({executeWrite:(fn:any)=>s.executeWrite((tx:any)=>fn({run:async(q:string,args:any)=>{
+    const result=await tx.run(q,args);
+    if(args?.ownerIds===null&&result.records[0]?.keys.includes('recipientType')){discovered();await resume;}
+    return result;
+   }}))} as any,a,room,p.id));
+   await paused;await session(s=>hostedPreference(s,b,true));release();expect((await asking).queued).toBe(1);
+   expect(await delivery()).toEqual([]);
+   const requests=await run(`MATCH (r:ContextAgentRequest {ownerUserId:$b,postId:$postId}) RETURN r.recipientType AS type`,{b,postId:p.id});
+   expect(requests.records.map((r:any)=>r.get('type'))).toEqual(['hosted']);
+  }finally{
+   release();await Promise.allSettled([asking]);
+   if(savedKey===undefined)delete process.env.ANTHROPIC_API_KEY;else process.env.ANTHROPIC_API_KEY=savedKey;
+  }
+ });
+
  for(const state of ['pending','delivering'])it('cancels a '+state+' wake across hosted on/off, preserving original key ownership',async()=>{
   const savedKey=process.env.ANTHROPIC_API_KEY;
   try{
