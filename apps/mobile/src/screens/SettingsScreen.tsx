@@ -1,3 +1,4 @@
+import { ConnectAgentLink } from '../components/ConnectAgentLink';
 /**
  * Settings screen — theme toggle (OpenChat-bji), expo-secure-store status
  * (OpenChat-ghr), notifications permission UI (OpenChat-jzc), and the
@@ -317,51 +318,16 @@ export function SettingsScreen() {
       style={[styles.root, { backgroundColor: c.background }]}
       contentContainerStyle={styles.content}
     >
-      {/*
-       * One-click "Copy agent setup" (openchat-bbr).
-       * TRUE one-tap: mints a key + copies a paste-anywhere setup blob. No
-       * navigation, no reveal step. Sits above the Agent Keys hero (which
-       * remains for managing existing keys).
-       */}
-      <TouchableOpacity
-        style={[styles.copySetupBtn, { backgroundColor: c.primary, opacity: mintingSetup ? 0.6 : 1 }]}
-        onPress={handleCopyAgentSetup}
-        disabled={mintingSetup}
-        activeOpacity={0.85}
-      >
-        {mintingSetup ? (
-          <ActivityIndicator color={c.onPrimary} />
-        ) : (
-          <>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><AppIcon name="copy" color={c.onPrimary} size={16} /><Text style={[styles.copySetupTitle, { color: c.onPrimary }]}>Copy agent setup</Text></View>
-            <Text style={[styles.copySetupSub, { color: c.onPrimary, opacity: 0.88 }]}>
-              Creates a fresh API key and copies setup for an agent with HTTP tools
-            </Text>
-          </>
-        )}
-      </TouchableOpacity>
-
-      {/*
-       * Hero: Agent keys (OpenChat-i9h).
-       * Top-of-settings placement because bi-directional agent access is
-       * OpenChat's main product differentiator. Replaces the buried
-       * "DEVELOPER → Agent keys" row. Kept below the one-click action for
-       * managing (list/reveal/revoke) existing keys.
-       */}
-      <TouchableOpacity
-        style={[styles.agentHero, { backgroundColor: c.primary }]}
-        onPress={() => navigation.navigate('AgentKeys')}
-        activeOpacity={0.88}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.agentHeroEyebrow, { color: c.onPrimary, opacity: 0.85 }]}>OPENCHAT FOR AGENTS</Text>
-          <Text style={[styles.agentHeroTitle, { color: c.onPrimary }]}>Agent keys</Text>
-          <Text style={[styles.agentHeroSubtitle, { color: c.onPrimary, opacity: 0.92 }]}>
-            Create, reveal, or revoke keys · OpenChat + Unlinked setup guide
-          </Text>
-        </View>
-        <Text style={[styles.agentHeroArrow, { color: c.onPrimary }]}>→</Text>
-      </TouchableOpacity>
+      <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, marginBottom: 20 }]}>
+        <ConnectAgentLink detail />
+        <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('AgentKeys')} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 }}>
+          <Text style={{ color: c.textPrimary, fontWeight: '500' }}>API keys</Text>
+          <Text style={{ color: c.textMetadata, fontSize: 13, marginTop: 3 }}>View, copy, create, or revoke existing OpenChat keys</Text>
+        </TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" onPress={handleCopyAgentSetup} disabled={mintingSetup} style={{ minHeight: 44, justifyContent: 'center', padding: 16 }}>
+          {mintingSetup ? <ActivityIndicator color={c.primary} /> : <Text style={{ color: c.primary }}>Copy agent setup with a new API key</Text>}
+        </TouchableOpacity>
+      </View>
 
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>ACCOUNT</Text>

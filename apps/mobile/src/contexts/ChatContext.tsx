@@ -1,3 +1,4 @@
+import { contextLaneManager } from '../services/contextLane';
 import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 /**
  * ChatContext — the single source of truth for socket lifecycle, conversations,
@@ -191,6 +192,7 @@ function withNewestMatch(current: Map<string, AgentMatch>, incoming: AgentMatch)
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  useEffect(() => { contextLaneManager.setAccount(currentUser?.userId ?? null); }, [currentUser?.userId]);
   const [isAuthed, setIsAuthed] = useState(false);
   const [authInitialized, setAuthInitialized] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -1101,6 +1103,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     try { emitPresenceUpdate('offline'); } catch { /* best effort */ }
     disconnect();
+    contextLaneManager.setAccount(null);
     await clearSession();
     setIsAuthed(false);
     setCurrentUser(null);

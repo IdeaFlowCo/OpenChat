@@ -1,5 +1,4 @@
 import { api, ContextPost } from '../api/client';
-import { clearSession } from '../api/client';
 import { logError } from './clientLogger';
 
 export interface ContextLaneState {
@@ -8,128 +7,110 @@ export interface ContextLaneState {
   nextCursor?: string;
   isLoading: boolean;
   isError: boolean;
+  search: string;
 }
-
-const DEFAULT_STATE: ContextLaneState = {
-  posts: [],
-  hasMore: true,
-  isLoading: false,
-  isError: false,
-};
-
+const empty = (): ContextLaneState => ({ posts: [], hasMore: true, isLoading: false, isError: false, search: '' });
 type Subscriber = (state: ContextLaneState) => void;
+const unique = (posts: ContextPost[]) => [...new Map(posts.map(p => [p.id, p])).values()];
 
-class ContextLaneManager {
+export class ContextLaneManager {
+  private account: string | null = null;
+  private generation = 0;
+  private requests = new Map<string, number>();
   private stateByConversation = new Map<string, ContextLaneState>();
   private subscribers = new Map<string, Set<Subscriber>>();
 
+  setAccount(account: string | null) {
+    if (this.account === account) return;
+    this.account = account;
+    this.clearAll();
+  }
   subscribe(conversationId: string, fn: Subscriber) {
-    if (!this.subscribers.has(conversationId)) {
-      this.subscribers.set(conversationId, new Set());
-    }
+    if (!this.subscribers.has(conversationId)) this.subscribers.set(conversationId, new Set());
     this.subscribers.get(conversationId)!.add(fn);
-    return () => {
-      this.subscribers.get(conversationId)?.delete(fn);
-    };
+    fn(this.getState(conversationId));
+    return () => { this.subscribers.get(conversationId)?.delete(fn); };
   }
-
   getState(conversationId: string): ContextLaneState {
-    return this.stateByConversation.get(conversationId) || { ...DEFAULT_STATE };
+    return this.stateByConversation.get(conversationId) || empty();
   }
-
-  private setState(conversationId: string, newState: Partial<ContextLaneState>) {
-    const current = this.getState(conversationId);
-    const updated = { ...current, ...newState };
-    this.stateByConversation.set(conversationId, updated);
-    this.notify(conversationId, updated);
+  private setState(id: string, patch: Partial<ContextLaneState>) {
+    const next = { ...this.getState(id), ...patch };
+    this.stateByConversation.set(id, next);
+    this.subscribers.get(id)?.forEach(fn => fn(next));
   }
-
-  private notify(conversationId: string, state: ContextLaneState) {
-    const subs = this.subscribers.get(conversationId);
-    if (subs) {
-      subs.forEach((fn) => fn(state));
-    }
-  }
-
-  async loadInitial(conversationId: string) {
-    if (this.getState(conversationId).isLoading) return;
-    this.setState(conversationId, { isLoading: true, isError: false, posts: [], hasMore: true, nextCursor: undefined });
+  async loadInitial(id: string, search = this.getState(id).search) {
+    const previous = this.getState(id);
+    const generation = this.generation;
+    const request = (this.requests.get(id) || 0) + 1;
+    this.requests.set(id, request);
+    this.setState(id, { isLoading: true, isError: false, search, ...(search !== previous.search ? { posts: [], nextCursor: undefined } : {}) });
     try {
-      const res = await api.listContextPosts(conversationId);
-      this.setState(conversationId, {
-        isLoading: false,
-        posts: res.posts,
-        hasMore: !!res.nextCursor,
-        nextCursor: res.nextCursor,
-      });
+      const res = await api.listContextPosts(id, undefined, undefined, undefined, search);
+      if (generation !== this.generation || request !== this.requests.get(id)) return;
+      this.setState(id, { isLoading: false, posts: unique(res.posts), hasMore: !!res.nextCursor, nextCursor: res.nextCursor });
     } catch (e: any) {
-      if (e.status === 401 || e.status === 403) {
-        this.clear(conversationId);
-      }
-      logError('Failed to load initial context lane', e, { conversationId });
-      this.setState(conversationId, { isLoading: false, isError: true });
+      if (generation !== this.generation || request !== this.requests.get(id)) return;
+      logError('Failed to refresh context', e, { conversationId: id });
+      this.setState(id, { isLoading: false, isError: true, ...(e.status === 401 || e.status === 403 ? { posts: [], nextCursor: undefined, hasMore: false } : {}) });
     }
   }
-
-  async loadMore(conversationId: string) {
-    const state = this.getState(conversationId);
+  async loadMore(id: string) {
+    const state = this.getState(id);
     if (state.isLoading || !state.hasMore || !state.nextCursor) return;
-    
-    this.setState(conversationId, { isLoading: true, isError: false });
+    const generation = this.generation;
+    const request = (this.requests.get(id) || 0) + 1;
+    this.requests.set(id, request);
+    this.setState(id, { isLoading: true, isError: false });
     try {
-      const res = await api.listContextPosts(conversationId, state.nextCursor);
-      this.setState(conversationId, {
-        isLoading: false,
-        posts: [...state.posts, ...res.posts],
-        hasMore: !!res.nextCursor,
-        nextCursor: res.nextCursor,
-      });
+      const res = await api.listContextPosts(id, state.nextCursor, undefined, undefined, state.search);
+      if (generation !== this.generation || request !== this.requests.get(id)) return;
+      this.setState(id, { isLoading: false, posts: unique([...this.getState(id).posts, ...res.posts]), hasMore: !!res.nextCursor, nextCursor: res.nextCursor });
     } catch (e: any) {
-      if (e.status === 401 || e.status === 403) {
-        this.clear(conversationId);
-      }
-      logError('Failed to load more context posts', e, { conversationId });
-      this.setState(conversationId, { isLoading: false, isError: true });
+      if (generation !== this.generation || request !== this.requests.get(id)) return;
+      logError('Failed to load more context', e, { conversationId: id });
+      this.setState(id, { isLoading: false, isError: true, ...(e.status === 401 || e.status === 403 ? { posts: [], nextCursor: undefined, hasMore: false } : {}) });
     }
   }
-
-  async addPost(conversationId: string, text: string, clientRequestId: string, kind?: string) {
-    const res = await api.createContextPost(conversationId, text, clientRequestId, kind);
-    const state = this.getState(conversationId);
-    this.setState(conversationId, {
-      posts: [res, ...state.posts], // Prepend to list (descending order)
-    });
-    return res;
+  private replace(id: string, post: ContextPost) {
+    // A completed mutation invalidates older reads so they cannot erase its result.
+    this.requests.set(id, (this.requests.get(id) || 0) + 1);
+    const state = this.getState(id);
+    const posts = state.posts.filter(p => p.id !== post.id);
+    if (!state.search || post.text.toLowerCase().includes(state.search.toLowerCase())) posts.push(post);
+    posts.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+    this.setState(id, { posts, isLoading: false });
   }
-
-  async updatePost(conversationId: string, postId: string, text: string, expectedRevision: number) {
-    const res = await api.updateContextPost(conversationId, postId, text, expectedRevision);
-    const state = this.getState(conversationId);
-    this.setState(conversationId, {
-      posts: state.posts.map(p => p.id === postId ? res : p),
-    });
-    return res;
+  async addPost(id: string, text: string, clientRequestId: string, kind?: string, replyToId?: string) {
+    const generation = this.generation;
+    const post = await api.createContextPost(id, text, clientRequestId, kind, replyToId);
+    if (generation === this.generation) this.replace(id, post);
+    return post;
   }
-
-  async deletePost(conversationId: string, postId: string) {
-    await api.deleteContextPost(conversationId, postId);
-    const state = this.getState(conversationId);
-    this.setState(conversationId, {
-      posts: state.posts.filter(p => p.id !== postId),
-    });
+  async updatePost(id: string, postId: string, text: string, expectedRevision: number) {
+    const generation = this.generation;
+    const post = await api.updateContextPost(id, postId, text, expectedRevision);
+    if (generation === this.generation) this.replace(id, post);
+    return post;
   }
-
-  clear(conversationId: string) {
-    this.stateByConversation.delete(conversationId);
-    this.notify(conversationId, { ...DEFAULT_STATE });
+  async deletePost(id: string, postId: string) {
+    const generation = this.generation;
+    await api.deleteContextPost(id, postId);
+    if (generation !== this.generation) return;
+    const old = this.getState(id).posts.find(p => p.id === postId);
+    if (old) this.replace(id, { ...old, text: '', isDeleted: true });
+    await this.loadInitial(id);
   }
-
+  clear(id: string) {
+    this.requests.set(id, (this.requests.get(id) || 0) + 1);
+    this.stateByConversation.delete(id);
+    this.subscribers.get(id)?.forEach(fn => fn(empty()));
+  }
   clearAll() {
+    this.generation++;
     this.stateByConversation.clear();
-    for (const [cid] of this.subscribers) {
-      this.notify(cid, { ...DEFAULT_STATE });
-    }
+    this.requests.clear();
+    this.subscribers.forEach(fns => fns.forEach(fn => fn(empty())));
   }
 }
-
 export const contextLaneManager = new ContextLaneManager();

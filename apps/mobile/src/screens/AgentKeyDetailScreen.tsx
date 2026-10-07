@@ -48,6 +48,22 @@ export function AgentKeyDetailScreen() {
   const [copying, setCopying] = useState(false);
   const [copyStatus, setCopyStatus] = useState('');
   const [revoking, setRevoking] = useState(false);
+  const [contextEnabled, setContextEnabled] = useState<boolean | null>(null);
+  const [contextBusy, setContextBusy] = useState(false);
+  const [contextError, setContextError] = useState('');
+  const loadContextPreference = useCallback(async () => {
+    setContextError('');
+    try { setContextEnabled((await api.getContextAgentPreferences(keyId)).enabled); }
+    catch { setContextError('Could not load Context request preference.'); }
+  }, [keyId]);
+  useFocusEffect(useCallback(() => { void loadContextPreference(); }, [loadContextPreference]));
+  const toggleContext = async () => {
+    if (contextBusy || contextEnabled === null) return;
+    setContextBusy(true); setContextError('');
+    try { setContextEnabled((await api.setContextAgentPreferences(keyId, !contextEnabled)).enabled); }
+    catch (e) { setContextError(e instanceof Error ? e.message : 'Could not update preference.'); }
+    finally { setContextBusy(false); }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -146,6 +162,15 @@ export function AgentKeyDetailScreen() {
         {key.expiresAt && <MetaRow label="Expires" value={timeAgo(key.expiresAt)} c={c} />}
         {key.agentName && <MetaRow label="Agent" value={key.agentName} c={c} />}
       </View>
+
+      {!revoked && <View style={[styles.metaCard, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <Text style={{ color: c.textPrimary, fontWeight: '600', marginBottom: 6 }}>Receive Context requests</Text>
+        <Text style={{ color: c.textMetadata, fontSize: 13 }}>Lets this agent poll requests from your conversations. It does not automatically send messages or share private notes.</Text>
+        <TouchableOpacity accessibilityRole="switch" accessibilityState={{ checked: contextEnabled === true, disabled: contextBusy || contextEnabled === null }} disabled={contextBusy || contextEnabled === null} onPress={() => void toggleContext()} style={{ minHeight: 44, justifyContent: 'center' }}>
+          <Text style={{ color: c.primary }}>{contextBusy ? 'Saving…' : contextEnabled === null ? 'Loading…' : contextEnabled ? 'On · Turn off' : 'Off · Turn on'}</Text>
+        </TouchableOpacity>
+        {!!contextError && <><Text accessibilityRole="alert" style={{ color: c.danger }}>{contextError}</Text><TouchableOpacity accessibilityRole="button" onPress={() => void loadContextPreference()} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: c.primary }}>Retry preference</Text></TouchableOpacity></>}
+      </View>}
 
       {/* Revealed key */}
       {plainKey && (

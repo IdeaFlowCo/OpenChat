@@ -1,3 +1,4 @@
+import { ConnectAgentLink } from './ConnectAgentLink';
 /**
  * ConversationList — the list-of-conversations body, factored out so it can
  * be reused by:
@@ -235,14 +236,14 @@ export function ConversationList({ activeId, onSelect, onStartChat, compact, onC
       style={{ backgroundColor: c.background }}
       data={orderedConversations}
       keyExtractor={item => item.id}
-      ListHeaderComponent={onCreateStory && onOpenStory && onOpenReview ? (
+      ListHeaderComponent={<>{!compact && <ConnectAgentLink />}{onCreateStory && onOpenStory && onOpenReview ? (
         <StoriesStrip
           compact={compact}
           onCreate={onCreateStory}
           onOpenStory={onOpenStory}
           onOpenReview={onOpenReview}
         />
-      ) : null}
+      ) : null}</>}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}

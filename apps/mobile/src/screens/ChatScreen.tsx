@@ -35,7 +35,6 @@ import { useChat } from '../contexts/ChatContext';
 import { ConversationLaneSwitch } from '../components/ConversationLaneSwitch';
 import { HeaderBarButton } from '../components/HeaderBarButton';
 import { ContextLane } from '../components/ContextLane';
-import { ContextComposer } from '../components/ContextComposer';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
 import { useRecording } from '../contexts/RecordingContext';
 import { getColors } from '../theme/colors';
@@ -1589,8 +1588,7 @@ export function ChatScreen({
 
       {activeConversationLane === 'context' ? (
         <View style={{ flex: 1 }}>
-          <ContextLane conversationId={conversationId} />
-          <ContextComposer key={conversationId} conversationId={conversationId} />
+          <ContextLane key={`${currentUser?.userId}:${conversationId}`} conversationId={conversationId} />
         </View>
       ) : (
         <>
