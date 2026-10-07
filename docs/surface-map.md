@@ -68,3 +68,10 @@ Settings → Agent keys exposes the visible **New API key** action and the share
 **Agent setup · OpenChat + Unlinked** guide at `/agents`. The same guide is
 readable at `/llms.txt` and `/AGENTS.md`; the existing `/about/connect-your-bot`
 bookmark remains valid. Copy agent setup explains context and response shapes.
+
+### Landing page session (OpenChat-en7a)
+
+The public `/` page verifies the current browser's OpenChat session. Signed-in
+visitors see **Signed in as [name]** and **Open OpenChat**; signed-out visitors
+see **Sign in**. It refreshes on return and cross-tab sign-out. Agent setup links
+to the shared `/agents` guide instead of maintaining separate MCP snippets.

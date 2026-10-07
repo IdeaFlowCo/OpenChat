@@ -346,9 +346,9 @@
       <a href="#agents">Connect your agent</a>
       <a href="#install">Install</a>
       <a href="#features">Features</a>
-      <a href="/about/connect-your-bot">Docs</a>
+      <a href="/agents">Docs</a>
       <a href="https://github.com/IdeaFlowCo/OpenChat" target="_blank" rel="noopener">GitHub</a>
-      <a class="nav-cta" id="nav-signin" href="/app/">Sign in</a>
+      <a class="nav-cta" id="nav-signin" href="/app/">Open OpenChat</a>
     </nav>
   </header>
 
@@ -363,6 +363,7 @@
       <a class="btn-primary" id="hero-open" href="/app/">Open OpenChat →</a>
       <a class="btn-secondary" href="#agents">Connect your agent</a>
     </div>
+    <p id="session-status" role="status" hidden style="margin:14px 0 0;font-size:15px;color:var(--text-dim);overflow-wrap:anywhere;"></p>
     <!-- Device-aware native-app pointer. Hidden by default; the script below
          fills + reveals it for iOS / Android / desktop visitors so the path to
          the real app is obvious above the fold (not just buried in #install). -->
@@ -437,19 +438,19 @@
   <section id="agents">
     <h2 class="section-eyebrow">For builders</h2>
     <h3 class="section-title">Plug in Claude, Cursor, Codex.</h3>
-    <p class="section-sub">Bi-directional MCP access — your agent reads incoming messages and replies as you. One key, four clients, 30 seconds.</p>
+    <p class="section-sub">Bi-directional MCP access — your agent reads incoming messages and replies as you. Use the same API key for messages and quiet conversation context.</p>
 
     <div class="agents-card">
       <div class="agents-steps">
         <div class="step">
           <span class="step-num">1</span>
           <h4 class="step-title">Mint a key</h4>
-          <p class="step-body">In OpenChat: <strong>Settings → Connect an agent → +</strong>. Re-viewable any time.</p>
+          <p class="step-body">In OpenChat: <strong>Settings → Agent keys → New API key</strong>. Re-viewable any time.</p>
         </div>
         <div class="step">
           <span class="step-num">2</span>
           <h4 class="step-title">Paste the snippet</h4>
-          <p class="step-body">Pick your MCP client below and drop the config in. <code>npx</code> handles install.</p>
+          <p class="step-body">Open the shared setup guide for current MCP configs, API examples, and Unlinked connections.</p>
         </div>
         <div class="step">
           <span class="step-num">3</span>
@@ -458,29 +459,9 @@
         </div>
       </div>
 
-      <div class="tab-row" role="tablist">
-        <button class="tab active" data-tab="claude" role="tab" aria-selected="true">Claude Desktop</button>
-        <button class="tab" data-tab="cursor" role="tab">Cursor</button>
-        <button class="tab" data-tab="codex" role="tab">Codex CLI</button>
-        <button class="tab" data-tab="code" role="tab">Claude Code</button>
-        <button class="tab" data-tab="curl" role="tab">curl</button>
-      </div>
-
-      <p class="tab-hint" id="tab-hint">Paste into <code>~/Library/Application Support/Claude/claude_desktop_config.json</code>, then restart Claude Desktop.</p>
-
-      <pre class="code" id="tab-content"><button class="copy-btn" id="copy-btn" type="button">Copy</button>{
-  "mcpServers": {
-    "openchat": {
-      "command": "npx",
-      "args": ["-y", "github:tmad4000/openchat-mcp-server"],
-      "env": { "OPENCHAT_API_KEY": "oc_your_key_here" }
-    }
-  }
-}</pre>
-
       <div class="agents-actions">
-        <a href="/about/connect-your-bot">📖 Full setup guide</a>
-        <a href="https://github.com/tmad4000/openchat-mcp-server" target="_blank" rel="noopener">⚙️ MCP server source</a>
+        <a href="/agents">📖 Full setup guide</a>
+        <a href="https://github.com/IdeaFlowCo/OpenChat/tree/main/apps/mcp-server" target="_blank" rel="noopener">⚙️ MCP server source</a>
       </div>
     </div>
   </section>
@@ -558,11 +539,11 @@
 
   <footer>
     <div class="links">
-      <a href="/about/connect-your-bot">Connect your agent</a>
+      <a href="/agents">Connect your agent</a>
       <a href="/legal/privacy">Privacy</a>
       <a href="/legal/terms">Terms</a>
       <a href="https://github.com/IdeaFlowCo/OpenChat" target="_blank" rel="noopener">Source</a>
-      <a href="https://github.com/tmad4000/openchat-mcp-server" target="_blank" rel="noopener">MCP server</a>
+      <a href="https://github.com/IdeaFlowCo/OpenChat/tree/main/apps/mcp-server" target="_blank" rel="noopener">MCP server</a>
       <a href="mailto:support@ideaflow.app">Contact</a>
     </div>
     <div class="small">© 2026 OpenChat · Built with Expo, React Native, Express, Neo4j</div>
@@ -626,79 +607,50 @@
     }
   })();
 
-  // MCP setup snippet tabs.
+</script>
+
+<script id="landing-session">
+  // Same-origin web session shared with /app. Verify it before naming an account.
   (function() {
-    var snippets = {
-      claude: {
-        hint: 'Paste into <code>~/Library/Application Support/Claude/claude_desktop_config.json</code>, then restart Claude Desktop.',
-        code: '{\n  "mcpServers": {\n    "openchat": {\n      "command": "npx",\n      "args": ["-y", "github:tmad4000/openchat-mcp-server"],\n      "env": { "OPENCHAT_API_KEY": "oc_your_key_here" }\n    }\n  }\n}'
-      },
-      cursor: {
-        hint: 'Paste into <code>~/.cursor/mcp.json</code> (global) or <code>.cursor/mcp.json</code> (project), then reload.',
-        code: '{\n  "mcpServers": {\n    "openchat": {\n      "command": "npx",\n      "args": ["-y", "github:tmad4000/openchat-mcp-server"],\n      "env": { "OPENCHAT_API_KEY": "oc_your_key_here" }\n    }\n  }\n}'
-      },
-      codex: {
-        hint: 'Append to <code>~/.codex/config.toml</code>.',
-        code: '[mcp_servers.openchat]\ncommand = "npx"\nargs = ["-y", "github:tmad4000/openchat-mcp-server"]\nenv = { OPENCHAT_API_KEY = "oc_your_key_here" }'
-      },
-      code: {
-        hint: 'Run in your terminal — registers the MCP server with Claude Code.',
-        code: 'claude mcp add openchat \\\n  --env OPENCHAT_API_KEY=oc_your_key_here \\\n  -- npx -y github:tmad4000/openchat-mcp-server'
-      },
-      curl: {
-        hint: 'Quick smoke test from any shell — returns your conversations as JSON.',
-        code: 'curl -H "Authorization: Bearer oc_your_key_here" \\\n  https://chat.ideaflow.app/api/chat/conversations'
-      }
-    };
-    var tabs = document.querySelectorAll('.tab');
-    var hintEl = document.getElementById('tab-hint');
-    var codeEl = document.getElementById('tab-content');
-    var copyBtn = document.getElementById('copy-btn');
-    function pick(name) {
-      var s = snippets[name];
-      if (!s) return;
-      tabs.forEach(function(t) {
-        var active = t.getAttribute('data-tab') === name;
-        t.classList.toggle('active', active);
-        t.setAttribute('aria-selected', active ? 'true' : 'false');
-      });
-      hintEl.innerHTML = s.hint;
-      // Preserve the copy button when swapping inner text.
-      codeEl.textContent = s.code;
-      codeEl.prepend(copyBtn);
+    var generation = 0;
+    var nav = document.getElementById('nav-signin');
+    var status = document.getElementById('session-status');
+    function token() {
+      try { return localStorage.getItem('openchat_token'); } catch (_) { return null; }
     }
-    tabs.forEach(function(t) {
-      t.addEventListener('click', function() { pick(t.getAttribute('data-tab')); });
-    });
-    copyBtn.addEventListener('click', function() {
-      var name = document.querySelector('.tab.active').getAttribute('data-tab');
-      var text = snippets[name].code;
-      // navigator.clipboard is available on https; fall back to a textarea.
-      var done = function() {
-        copyBtn.textContent = 'Copied ✓';
-        copyBtn.classList.add('copied');
-        setTimeout(function() {
-          copyBtn.textContent = 'Copy';
-          copyBtn.classList.remove('copied');
-        }, 1500);
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(done).catch(function() {
-          fallbackCopy(text); done();
+    function render(label, detail) {
+      nav.textContent = label;
+      status.textContent = detail || '';
+      status.hidden = !detail;
+    }
+    async function refresh() {
+      var request = ++generation;
+      var credential = token();
+      if (!credential) { render('Sign in'); return; }
+      render('Open OpenChat');
+      try {
+        var response = await fetch('/api/auth/me', {
+          headers: { Authorization: 'Bearer ' + credential },
+          cache: 'no-store'
         });
-      } else {
-        fallbackCopy(text); done();
+        var user = response.ok ? await response.json() : null;
+        // A response from before sign-out/account switching cannot restore old UI.
+        if (request !== generation || credential !== token()) return;
+        if (user && user.id) {
+          render('Open OpenChat', user.name ? 'Signed in as ' + user.name : 'You’re signed in.');
+        } else if (response.status === 401 || response.status === 403 || response.status === 404) {
+          render('Sign in');
+        }
+      } catch (_) {
+        // Offline/temporary failure is not evidence that the user signed out.
       }
-    });
-    function fallbackCopy(text) {
-      var ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); } catch (e) {}
-      document.body.removeChild(ta);
     }
+    window.addEventListener('pageshow', refresh);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('storage', function(event) {
+      if (event.key === 'openchat_token' || event.key === null) refresh();
+    });
+    refresh();
   })();
 </script>
 
