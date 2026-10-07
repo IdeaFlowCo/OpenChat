@@ -15,7 +15,9 @@ export function ChatScreenRouter() {
   useEffect(() => {
     if (!isDesktop) return;
     setActiveConversation(conversationId, { lane });
-    if (navigation.canGoBack()) navigation.popToTop();
+    // Cold entry can create a stack containing only Chat; it still needs the
+    // desktop host screen. popTo replaces the route when that host is absent.
+    navigation.popTo('Conversations');
   }, [isDesktop, conversationId, lane, setActiveConversation, navigation]);
 
   if (isDesktop) return null;

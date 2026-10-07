@@ -231,6 +231,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const messageLoadGenerationRef = useRef(0);
+  const historyLoadingRef = useRef(false);
   const [messageLoadError, setMessageLoadError] = useState<string | null>(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -412,6 +413,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const generation = ++messageLoadGenerationRef.current;
     const cachedIds = new Set(messagesRef.current.map(message => message.id));
     messagePatchesRef.current.clear();
+    historyLoadingRef.current = true;
     setLoadingMessages(true);
     setLoadingOlderMessages(false);
     setMessageLoadError(null);
@@ -435,7 +437,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setMessageLoadError('Could not load messages. Check your connection and try again.');
       if (err?.status === 401 || err?.status === 403 || err?.status === 404) setMessages([]);
     }).finally(() => {
-      if (messageLoadGenerationRef.current === generation) setLoadingMessages(false);
+      if (messageLoadGenerationRef.current === generation) {
+        historyLoadingRef.current = false;
+        setLoadingMessages(false);
+      }
     });
   }, []);
 
@@ -817,6 +822,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       retryMessages();
     } else {
       setMessages([]);
+      historyLoadingRef.current = false;
       setLoadingMessages(false);
       setHasMoreMessages(false);
     }
@@ -826,7 +832,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Uses the createdAt of the earliest currently-loaded message as the cursor.
   // Prepends results to the message list; deduplicates by id in case of overlap.
   const loadOlderMessages = useCallback(async (conversationId: string) => {
-    if (loadingOlderMessages || !hasMoreMessages) return;
+    if (historyLoadingRef.current || loadingOlderMessages || !hasMoreMessages) return;
     // Find the oldest message currently in state (messages are sorted oldest→newest).
     const oldest = messages[0];
     if (!oldest) return;
@@ -994,14 +1000,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const editMessage = useCallback(async (messageId: string, content: string) => {
     const updated = await api.editMessage(messageId, content);
     // Optimistic local update (socket event will also arrive for other clients).
-    setMessages(prev => prev.map(m => m.id === messageId ? { ...m, ...updated } : m));
-  }, []);
+    if (updated.conversationId !== activeConvIdRef.current) return;
+    patchMessage(messageId, message => ({ ...message, content: updated.content,
+      ...(updated.editedAt !== undefined ? { editedAt: updated.editedAt } : {}),
+      ...(updated.deletedAt !== undefined ? { deletedAt: updated.deletedAt, attachments: updated.attachments } : {}),
+    }));
+  }, [patchMessage]);
 
   // Soft-delete own message (OpenChat-q9h). Calls DELETE; server emits message:updated.
   const deleteMessage = useCallback(async (messageId: string) => {
     const updated = await api.deleteMessage(messageId);
-    setMessages(prev => prev.map(m => m.id === messageId ? { ...m, ...updated } : m));
-  }, []);
+    if (updated.conversationId !== activeConvIdRef.current) return;
+    patchMessage(messageId, message => ({ ...message, content: updated.content,
+      ...(updated.editedAt !== undefined ? { editedAt: updated.editedAt } : {}),
+      ...(updated.deletedAt !== undefined ? { deletedAt: updated.deletedAt, attachments: updated.attachments } : {}),
+    }));
+  }, [patchMessage]);
 
   // Toggle reaction (OpenChat-7bd). Adds if not present, removes if byMe already.
   const toggleReaction = useCallback(async (messageId: string, emoji: string) => {
@@ -1014,10 +1028,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } else {
       result = await api.addReaction(messageId, emoji);
     }
-    setMessages(prev => prev.map(m =>
-      m.id === messageId ? { ...m, reactions: result.reactions } : m
-    ));
-  }, [messages]);
+    if (msg?.conversationId !== activeConvIdRef.current) return;
+    patchMessage(messageId, message => ({ ...message, reactions: result.reactions }));
+  }, [messages, patchMessage]);
 
   // Block user (OpenChat-46p). Calls API, then removes the DM conversation
   // with that user from the local list so the UI updates immediately.
@@ -1155,6 +1168,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     disconnect();
     activeConvIdRef.current = null;
     ++messageLoadGenerationRef.current;
+    historyLoadingRef.current = false;
     setLoadingMessages(false);
     setMessageLoadError(null);
     contextLaneManager.setAccount(null);

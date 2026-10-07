@@ -465,13 +465,25 @@ export function ChatScreen({
   // scroll-to-end or unread bump when older messages are prepended (OpenChat-vjc).
   const prependingOlderRef = useRef(false);
 
-  // Activate this conversation in context on mount; clear on unmount.
+  // Activate compact conversations on focus; release them on blur.
   // Also tell the notification service so it can suppress foreground banners
   // for messages arriving in the conversation the user is already viewing.
+  // A mounted compact screen keeps its lane while another screen is on top.
+  // A new route params object is an explicit navigation request, even if its
+  // lane value matches an earlier request (e.g. another notification tap).
+  const destinationParams = embedded ? undefined : routeRaw.params;
+  const laneSelection = useRef<{ conversationId: string; destinationParams: typeof destinationParams; lane: 'chat' | 'context' } | null>(null);
+  if (!laneSelection.current || laneSelection.current.conversationId !== conversationId
+    || laneSelection.current.destinationParams !== destinationParams) {
+    laneSelection.current = { conversationId, destinationParams, lane: laneProp ?? 'chat' };
+  } else if (activeConversationId === conversationId) {
+    laneSelection.current.lane = activeConversationLane;
+  }
+
   useFocusEffect(useCallback(() => {
     // The desktop parent owns selection. Re-activating here resets Context
     // and starts a second load; its cleanup can clear a newer selection.
-    if (!embedded) setActiveConversation(conversationId, { lane: laneProp });
+    if (!embedded) setActiveConversation(conversationId, { lane: laneSelection.current!.lane });
     // Reset scroll bookkeeping whenever the conversation changes — opening
     // a fresh thread should start "at bottom" with no unread badge, regardless
     // of where we were in the previous thread.
@@ -483,7 +495,7 @@ export function ChatScreen({
     return () => {
       if (!embedded) setActiveConversation(null);
     };
-  }, [conversationId, setActiveConversation, laneProp, embedded]));
+  }, [conversationId, setActiveConversation, destinationParams, embedded]));
 
   useFocusEffect(useCallback(() => {
     const showingChat = activeConversationId === conversationId && isChatVisible(conversationId);

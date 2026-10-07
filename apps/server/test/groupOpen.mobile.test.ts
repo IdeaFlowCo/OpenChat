@@ -338,3 +338,17 @@ it('does not mark Chat read when a Context destination starts with stale lane st
     expect(mocks.chat.markConversationRead).not.toHaveBeenCalled();
   } finally { mocks.route.params = { conversationId: 'sailing' }; }
 });
+
+it('preserves Context across focus return but honors a new explicit Chat destination', async () => {
+  await render();
+  mocks.chat.activeConversationLane = 'context'; await render();
+  mocks.focused = false; await render();
+  mocks.chat.activeConversationId = null; mocks.chat.activeConversationLane = 'chat';
+  await render();
+  mocks.focused = true; await render();
+  expect(mocks.chat.setActiveConversation).toHaveBeenLastCalledWith('sailing', { lane: 'context' });
+  mocks.route.params = { conversationId: 'sailing', lane: 'chat' } as any;
+  await render();
+  expect(mocks.chat.setActiveConversation).toHaveBeenLastCalledWith('sailing', { lane: 'chat' });
+  mocks.route.params = { conversationId: 'sailing' };
+});

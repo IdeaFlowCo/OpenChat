@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Message } from '../../mobile/src/api/client.js';
 
 const mocks = vi.hoisted(() => ({ getMessages: vi.fn(), getMessagesBefore: vi.fn(),
-  markRead: vi.fn(),
+  markRead: vi.fn(), edit: vi.fn(), remove: vi.fn(), reaction: vi.fn(),
   handlers: new Map<string, (...args: any[]) => void>(),
 }));
 const socket = { connected: true, on: (event: string, handler: (...args: any[]) => void) => mocks.handlers.set(event, handler), off: (event: string) => mocks.handlers.delete(event) };
@@ -12,7 +12,7 @@ vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn() }))
 vi.mock('expo-crypto', () => ({ randomUUID: vi.fn() }));
 vi.mock('../../mobile/src/services/notifications', () => ({ setUnreadBadgeCount: vi.fn(), loadMutedConvs: async () => ({}) }));
 vi.mock('../../mobile/src/api/client', () => ({
-  api: { markRead: mocks.markRead, getMessages: mocks.getMessages, getMessagesBefore: mocks.getMessagesBefore,
+  api: { editMessage: mocks.edit, deleteMessage: mocks.remove, addReaction: mocks.reaction, markRead: mocks.markRead, getMessages: mocks.getMessages, getMessagesBefore: mocks.getMessagesBefore,
     getMe: async () => ({ id: 'me' }), getConversations: async () => [{ id: 'sailing' }],
     listMatches: async () => [], getAiDisclosureStatus: async () => ({}), messagesSince: async () => ({ messages: [], truncated: true }),
   }, getToken: async () => 'test', getUser: async () => ({ userId: 'me' }), setSession: vi.fn(), clearSession: vi.fn(),
@@ -205,4 +205,36 @@ it('retains a new live message when an empty history response arrives', async ()
   await act(async () => mocks.handlers.get('message:new')!(history.messages[0]));
   await act(async () => read.resolve({ messages: [], hasMore: false }));
   expect(chat.messages).toEqual(history.messages);
+});
+
+it('does not paginate cached history while a reload is in flight, even in the same tick', async () => {
+  mocks.getMessages.mockResolvedValueOnce({ ...history, hasMore: true });
+  await act(async () => chat.setActiveConversation('sailing'));
+  const read = pendingPage(); mocks.getMessages.mockReturnValueOnce(read.promise);
+  mocks.getMessagesBefore.mockResolvedValue({ messages: [], hasMore: false });
+  await act(async () => { chat.retryMessages(); await chat.loadOlderMessages('sailing'); });
+  expect(mocks.getMessagesBefore).not.toHaveBeenCalled();
+  const latest = { ...history.messages[0], id: 'latest', createdAt: '2026-10-07T00:00:00Z' };
+  await act(async () => read.resolve({ messages: [latest], hasMore: true }));
+  await act(async () => chat.loadOlderMessages('sailing'));
+  expect(mocks.getMessagesBefore).toHaveBeenCalledExactlyOnceWith('sailing', latest.createdAt);
+});
+it.each(['edit', 'delete', 'reaction'])('preserves a successful HTTP %s through a stale history response without a socket', async mutation => {
+  mocks.getMessages.mockResolvedValueOnce(history);
+  await act(async () => chat.setActiveConversation('sailing'));
+  const read = pendingPage(); mocks.getMessages.mockReturnValueOnce(read.promise);
+  await act(async () => chat.retryMessages());
+  const reactions = [{ emoji: '👍', count: 1, byMe: true }];
+  mocks.edit.mockResolvedValue({ ...history.messages[0], content: 'saved edit', editedAt: '2026-10-07' });
+  mocks.remove.mockResolvedValue({ ...history.messages[0], content: 'Message deleted', deletedAt: '2026-10-07' });
+  mocks.reaction.mockResolvedValue({ reactions });
+  await act(async () => {
+    if (mutation === 'edit') await chat.editMessage('history', 'saved edit');
+    if (mutation === 'delete') await chat.deleteMessage('history');
+    if (mutation === 'reaction') await chat.toggleReaction('history', '👍');
+  });
+  await act(async () => read.resolve(history));
+  if (mutation === 'edit') expect(chat.messages[0].content).toBe('saved edit');
+  if (mutation === 'delete') expect(chat.messages[0].deletedAt).toBe('2026-10-07');
+  if (mutation === 'reaction') expect(chat.messages[0].reactions).toEqual(reactions);
 });

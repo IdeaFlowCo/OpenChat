@@ -34,3 +34,18 @@ were sent to contacts.
 See [notification delivery limits](../README.md#notifications-and-conversation-links)
 for the browser push follow-up and physical-device verification gap, and
 [Context back-channel](context-backchannel.md) for its refresh contract.
+
+## Follow-up review corrections
+
+The final pass blocks pagination during a history reload, preserves successful
+HTTP edits/deletes/reactions against stale reads without relying on a socket
+echo, and keeps a compact screen's selected lane on focus return. Explicit new
+navigation requests still choose their requested lane. Desktop cold entry
+creates the Conversations host even when Chat is the only stack route.
+Notification and desktop-router regressions are included in the CI workflow.
+Version 1.0.17 carries these changes into the next native build.
+
+Native registration lifecycle and multiple-device support need separate work
+(OpenChat-osr1): the current registration cache is not account-scoped, sign-out
+does not invoke deregistration, and the server stores one token per user/platform.
+This audit's routing fixes do not claim to repair those delivery limitations.
