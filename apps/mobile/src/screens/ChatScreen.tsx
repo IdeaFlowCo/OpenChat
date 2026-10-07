@@ -25,7 +25,7 @@ import {
   View,
 } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { useHeaderHeight, type HeaderOptions } from '@react-navigation/elements';
 import { Attachment, Conversation, ExportRangeKey, Message, api } from '../api/client';
 import { MessageActionSheet, ReplyToData } from '../components/MessageActionSheet';
@@ -303,7 +303,7 @@ export function ChatScreen({
   }, []);
   const kbOffset = embedded ? 0 : Platform.OS === 'ios' ? (measuredTop ?? headerHeight) : 0;
   const {
-    currentUser, conversations, messages: activeMessages, loadingMessages, isConnected,
+    currentUser, conversations, messages: activeMessages, loadingMessages, messageLoadError, retryMessages, isConnected,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     setActiveConversation, sendMessage, editMessage, deleteMessage, toggleReaction,
     presence, typingByConv, reportTyping,
@@ -468,12 +468,10 @@ export function ChatScreen({
   // Activate this conversation in context on mount; clear on unmount.
   // Also tell the notification service so it can suppress foreground banners
   // for messages arriving in the conversation the user is already viewing.
-  useEffect(() => {
-    setActiveConversation(conversationId);
-    if (laneProp) setActiveConversationLane(laneProp);
-    setActiveConversationForNotifications(conversationId);
-    // Mark as read when the user opens the conversation (OpenChat-0nj).
-    if (!laneProp || laneProp === 'chat') markConversationRead(conversationId);
+  useFocusEffect(useCallback(() => {
+    // The desktop parent owns selection. Re-activating here resets Context
+    // and starts a second load; its cleanup can clear a newer selection.
+    if (!embedded) setActiveConversation(conversationId, { lane: laneProp });
     // Reset scroll bookkeeping whenever the conversation changes — opening
     // a fresh thread should start "at bottom" with no unread badge, regardless
     // of where we were in the previous thread.
@@ -483,10 +481,16 @@ export function ChatScreen({
     prevLenRef.current = 0;
     initialScrollDoneRef.current = false;
     return () => {
-      setActiveConversation(null);
-      setActiveConversationForNotifications(null);
+      if (!embedded) setActiveConversation(null);
     };
-  }, [conversationId, setActiveConversation, markConversationRead, laneProp, setActiveConversationLane]);
+  }, [conversationId, setActiveConversation, laneProp, embedded]));
+
+  useFocusEffect(useCallback(() => {
+    const showingChat = activeConversationLane === 'chat';
+    setActiveConversationForNotifications(showingChat && isConnected ? conversationId : null);
+    if (showingChat) markConversationRead(conversationId);
+    return () => setActiveConversationForNotifications(null);
+  }, [conversationId, activeConversationLane, isConnected, markConversationRead]));
 
   const isGroup = conversation?.type === 'group';
   // Resolve self-DMs deliberately: there is no "other" participant, so the
@@ -1592,6 +1596,13 @@ export function ChatScreen({
         </View>
       ) : (
         <>
+        {messageLoadError && <View style={{ padding: 16, gap: 8 }}>
+          <Text accessibilityRole="alert" style={{ color: c.danger }}>{messageLoadError}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading messages"
+            onPress={retryMessages} style={{ minHeight: 44, justifyContent: 'center' }}>
+            <Text style={{ color: c.primary, fontWeight: '600' }}>Retry</Text>
+          </TouchableOpacity>
+        </View>}
         {loadingMessages && messages.length === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator color={c.primary} />
@@ -1626,7 +1637,7 @@ export function ChatScreen({
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           // Empty-state placeholder when the thread has no messages (OpenChat-0kl).
           ListEmptyComponent={
-            !loadingMessages ? (
+            !loadingMessages && !messageLoadError ? (
               <ChatEmptyState conversation={conversation} currentUser={currentUser} />
             ) : null
           }

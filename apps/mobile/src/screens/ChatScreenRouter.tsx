@@ -9,7 +9,7 @@ export function ChatScreenRouter() {
   const isDesktop = useIsDesktop();
   const route = useRoute<RouteProps<'Chat'>>();
   const navigation = useNavigation<NavProp<'Chat'>>();
-  const { setActiveConversation, setActiveConversationLane } = useChat();
+  const { setActiveConversation } = useChat();
   const { conversationId, lane } = route.params;
 
   useEffect(() => {

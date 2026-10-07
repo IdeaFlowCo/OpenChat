@@ -19,10 +19,10 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import { createNavigationContainerRef } from '@react-navigation/native';
 
 import { api } from '../api/client';
-import type { RootStackParamList } from '../navigation/types';
+import { openConversation } from '../navigation/conversationNavigation';
+export { navigationRef } from '../navigation/conversationNavigation';
 
 // Muted conversations: convId → ISO expiry string (or 'always')
 const MUTED_CONVS_KEY = 'openchat_muted_convs';
@@ -102,7 +102,6 @@ export async function setUnreadBadgeCount(count: number): Promise<void> {
 const REGISTERED_TOKEN_KEY = 'openchat_native_push_token_registered';
 
 /** Set by App.tsx, used by the tap-handler to navigate. */
-export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 /**
  * The conversation the user is currently viewing on this device. Used by the
@@ -159,21 +158,32 @@ export function configureNotificationHandlers(): void {
 export function addNotificationTapListener(): { remove: () => void } | null {
   if (Platform.OS === 'web') return null;
 
-  const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+  let disposed = false;
+  let receivedLiveResponse = false;
+  const seen = new Set<string>();
+  const handleResponse = (response: Notifications.NotificationResponse | null) => {
+    if (disposed || !response || response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
+    const identifier = response.notification.request.identifier;
+    if (seen.has(identifier)) return;
     const data = (response.notification.request.content.data || {}) as {
       conversationId?: string;
+      lane?: 'chat' | 'context';
     };
     const conversationId = data.conversationId;
-    if (!conversationId) return;
-    if (!navigationRef.isReady()) return;
-    try {
-      navigationRef.navigate('Chat', { conversationId });
-    } catch (err) {
-      console.warn('[notifications] navigate on tap failed:', err);
-    }
+    if (typeof conversationId !== 'string' || !conversationId.trim()) return;
+    seen.add(identifier);
+    openConversation({ conversationId, lane: data.lane === 'context' ? 'context' : 'chat' });
+    void Notifications.clearLastNotificationResponseAsync().catch(() => {});
+  };
+  const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+    receivedLiveResponse = true;
+    handleResponse(response);
   });
-
-  return sub;
+  // A tap that launched a terminated app predates the listener.
+  void Notifications.getLastNotificationResponseAsync().then(response => {
+    if (!receivedLiveResponse) handleResponse(response);
+  }).catch(err => console.warn('[notifications] initial response failed:', err));
+  return { remove: () => { disposed = true; sub.remove(); } };
 }
 
 /**

@@ -94,6 +94,8 @@ interface ChatContextValue {
   setActiveConversation: (id: string | null, opts?: { lane?: 'chat' | 'context' }) => void;
   messages: Message[]; // for the active conversation
   loadingMessages: boolean;
+  messageLoadError: string | null;
+  retryMessages: () => void;
   loadOlderMessages: (conversationId: string) => Promise<void>;
   hasMoreMessages: boolean;
   loadingOlderMessages: boolean;
@@ -224,6 +226,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const messageLoadGenerationRef = useRef(0);
+  const [messageLoadError, setMessageLoadError] = useState<string | null>(null);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   // Pagination state (OpenChat-vjc)
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
@@ -283,7 +288,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // ── Reconnect catch-up (OpenChat-qz0) ───────────────────────────────────────
   //
   // lastSyncAt: the most recent timestamp at which we were definitively in sync.
-  // Updated on every message:new socket event AND on initial conversation load.
+  // Updated on every message:new socket event and reconnect catch-up.
   // Initialized to the current time at bootstrap so a first-ever connect doesn't
   // try to fetch all messages since epoch.
   const lastSyncAtRef = useRef<string>(new Date().toISOString());
@@ -389,6 +394,36 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return true;
   }, [refreshConversations, refetchMatches]);
 
+  // Reload history without erasing messages or edits received while REST is in flight.
+  const retryMessages = useCallback(() => {
+    const id = activeConvIdRef.current;
+    if (!id) return;
+    const generation = ++messageLoadGenerationRef.current;
+    const snapshot = new Map(messagesRef.current.map(message => [message.id, message]));
+    setLoadingMessages(true);
+    setLoadingOlderMessages(false);
+    setMessageLoadError(null);
+    api.getMessages(id).then(({ messages: loaded, hasMore }) => {
+      if (activeConvIdRef.current !== id || messageLoadGenerationRef.current !== generation) return;
+      setMessages(current => {
+        const relevant = current.filter(message => message.conversationId === id);
+        const merged = new Map([...relevant, ...loaded].map(message => [message.id, message]));
+        for (const message of relevant) {
+          if (snapshot.get(message.id) !== message) merged.set(message.id, message);
+        }
+        return [...merged.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+      });
+      setHasMoreMessages(hasMore);
+    }).catch(err => {
+      if (activeConvIdRef.current !== id || messageLoadGenerationRef.current !== generation) return;
+      console.warn('[ChatContext] loadMessages failed:', err);
+      setMessageLoadError('Could not load messages. Check your connection and try again.');
+      if (err?.status === 401 || err?.status === 403 || err?.status === 404) setMessages([]);
+    }).finally(() => {
+      if (messageLoadGenerationRef.current === generation) setLoadingMessages(false);
+    });
+  }, []);
+
   // Wire socket listeners exactly ONCE per authed session.
   useEffect(() => {
     if (!isAuthed) return;
@@ -399,6 +434,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     const onConnect = () => {
       setIsConnected(true);
+      // Repair failed initial loads and truncated catch-up for the open thread.
+      if (activeConvIdRef.current) {
+        joinConversation(activeConvIdRef.current);
+        retryMessages();
+      }
 
       if (wasEverConnectedRef.current) {
         // Match socket events are best-effort too; repair badge/card state at
@@ -725,12 +765,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sock.off('read:updated', onReadUpdated);
       sock.off('user:profile-updated', onProfileUpdated);
     };
-  }, [isAuthed, chatSocket, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage, refetchMatches]);
+  }, [isAuthed, chatSocket, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage, refetchMatches, retryMessages]);
 
   // setActiveConversation: clears unread, joins/leaves rooms, loads messages.
   const setActiveConversation = useCallback((id: string | null, opts?: { lane?: 'chat' | 'context' }) => {
     // A late response must not finish a newer load, including A → back → A.
-    const generation = ++messageLoadGenerationRef.current;
+    ++messageLoadGenerationRef.current;
+    setMessageLoadError(null);
     const prev = activeConvIdRef.current;
     if (prev && prev !== id) leaveConversation(prev);
 
@@ -750,32 +791,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           return next;
         });
       }
-      setLoadingMessages(true);
+      if (prev !== id) setMessages([]);
       setHasMoreMessages(false);
-      api.getMessages(id)
-        .then(({ messages: msgs, hasMore }) => {
-          if (activeConvIdRef.current === id && messageLoadGenerationRef.current === generation) {
-            setMessages(msgs);
-            setHasMoreMessages(hasMore);
-            // Advance sync cursor to the most recent message in this conversation.
-            if (msgs.length > 0) {
-              const latest = msgs[msgs.length - 1].createdAt;
-              if (latest && latest > lastSyncAtRef.current) {
-                lastSyncAtRef.current = latest;
-              }
-            }
-          }
-        })
-        .catch(err => console.warn('[ChatContext] loadMessages failed:', err))
-        .finally(() => {
-          if (messageLoadGenerationRef.current === generation) setLoadingMessages(false);
-        });
+      setLoadingOlderMessages(false);
+      retryMessages();
     } else {
       setMessages([]);
       setLoadingMessages(false);
       setHasMoreMessages(false);
     }
-  }, []);
+  }, [retryMessages]);
 
   // Load older messages for the active conversation (OpenChat-vjc).
   // Uses the createdAt of the earliest currently-loaded message as the cursor.
@@ -785,10 +810,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // Find the oldest message currently in state (messages are sorted oldest→newest).
     const oldest = messages[0];
     if (!oldest) return;
+    const generation = messageLoadGenerationRef.current;
     setLoadingOlderMessages(true);
     try {
       const { messages: older, hasMore } = await api.getMessagesBefore(conversationId, oldest.createdAt);
-      if (activeConvIdRef.current === conversationId) {
+      if (activeConvIdRef.current === conversationId && generation === messageLoadGenerationRef.current) {
         setMessages(prev => {
           const existingIds = new Set(prev.map(m => m.id));
           const newMsgs = older.filter(m => !existingIds.has(m.id));
@@ -799,7 +825,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.warn('[ChatContext] loadOlderMessages failed:', err);
     } finally {
-      setLoadingOlderMessages(false);
+      if (generation === messageLoadGenerationRef.current) setLoadingOlderMessages(false);
     }
   }, [loadingOlderMessages, hasMoreMessages, messages]);
 
@@ -1103,6 +1129,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     try { emitPresenceUpdate('offline'); } catch { /* best effort */ }
     disconnect();
+    activeConvIdRef.current = null;
+    ++messageLoadGenerationRef.current;
+    setLoadingMessages(false);
+    setMessageLoadError(null);
     contextLaneManager.setAccount(null);
     await clearSession();
     setIsAuthed(false);
@@ -1138,7 +1168,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     currentUser, isAuthed, authInitialized, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
-    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, setActiveConversation, messages, loadingMessages,
+    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, setActiveConversation, messages, loadingMessages, messageLoadError, retryMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     sendMessage, sendMessageToConversation,
     editMessage, deleteMessage,
@@ -1156,7 +1186,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     currentUser, isAuthed, authInitialized, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
-    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, setActiveConversation, messages, loadingMessages,
+    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, setActiveConversation, messages, loadingMessages, messageLoadError, retryMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     sendMessage, sendMessageToConversation,
     editMessage, deleteMessage,

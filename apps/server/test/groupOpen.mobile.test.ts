@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   scroll: vi.fn(),
   privateName: null as string | null,
   platform: 'ios',
+  focused: true,
 }));
 
 // Exercise the real ChatScreen hooks/render tree, with the OS boundary replaced
@@ -40,6 +41,7 @@ vi.mock('react-native', async () => {
   };
 });
 vi.mock('@react-navigation/native', () => ({
+  useFocusEffect: (fn: any) => React.useEffect(() => mocks.focused ? fn() : undefined, [fn, mocks.focused]),
   useNavigation: () => mocks.navigation, useRoute: () => mocks.route,
 }));
 vi.mock('@react-navigation/elements', () => ({ useHeaderHeight: () => 56 }));
@@ -97,6 +99,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.privateName = null;
   mocks.platform = 'ios';
+  mocks.focused = true;
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.chat = {
     currentUser: { userId: 'bob', name: 'Bob' },
@@ -295,4 +298,24 @@ describe('desktop composer input', () => {
     expect(held.message).toEqual(clicked.message);
     expect(held.isOwn).toBe(clicked.isOwn);
   });
+});
+
+it('restores the conversation when returning to an already-mounted chat', async () => {
+  await render();
+  mocks.focused = false; await render();
+  mocks.focused = true; await render();
+  expect(mocks.chat.setActiveConversation.mock.calls.map((call: any[]) => call[0])).toEqual(['sailing', null, 'sailing']);
+});
+it('leaves desktop selection and Context lane ownership with the parent', async () => {
+  await act(async () => { screen = create(React.createElement(ChatScreen, { conversationId: 'sailing', embedded: true })); });
+  await act(async () => screen!.update(React.createElement(ChatScreen, { conversationId: 'other', embedded: true })));
+  expect(mocks.chat.setActiveConversation).not.toHaveBeenCalled();
+});
+it('shows Retry instead of an empty-conversation placeholder after a failed load', async () => {
+  mocks.chat.messageLoadError = 'Could not load messages.'; mocks.chat.retryMessages = vi.fn();
+  await render();
+  expect(renderedText()).toContain('Could not load messages.');
+  expect(renderedText()).not.toContain('Say hello');
+  await act(async () => screen!.root.findByProps({ accessibilityLabel: 'Retry loading messages' }).props.onPress());
+  expect(mocks.chat.retryMessages).toHaveBeenCalledOnce();
 });

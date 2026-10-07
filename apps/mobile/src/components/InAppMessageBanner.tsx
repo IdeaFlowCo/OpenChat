@@ -33,7 +33,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from './Avatar';
 import { getActiveConversationIdForNotifications } from '../services/notifications';
-import { navigationRef } from '../services/notifications';
+import { openConversation } from '../navigation/conversationNavigation';
 
 const BANNER_TTL_MS = 4500;
 
@@ -121,9 +121,7 @@ export function InAppMessageBanner() {
 
   const navigateToConversation = () => {
     hide();
-    try {
-      navigationRef.navigate('Chat', { conversationId: banner.conversationId });
-    } catch { /* ignore */ }
+    openConversation({ conversationId: banner.conversationId, lane: 'chat' });
   };
 
   return (
