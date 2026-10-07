@@ -763,7 +763,8 @@ export interface Thought {
   authorName?: string | null;
 }
 
-export interface ContextWebhookSubscription { id: string; conversationId: string; agentKeyId: string; url: string; enabled: boolean; createdAt: string; generation: number }
+export type ContextWebhookRoutingStatus = 'ready' | 'hosted_precedence' | 'key_ineligible' | 'conversation_unavailable' | 'conflict' | 'server_disabled' | 'disabled';
+export interface ContextWebhookSubscription { routingStatus: ContextWebhookRoutingStatus; id: string; conversationId: string; agentKeyId: string; url: string; enabled: boolean; createdAt: string; generation: number }
 export type IntentionLifecycleState = 'open' | 'fulfilled' | 'withdrawn';
 export interface ContextIntention {
   intentId: string; revision: number; lifecycleState: IntentionLifecycleState;

@@ -46,7 +46,7 @@ export function ContextReviewSession({ accountId }: { accountId: string }) {
       </TouchableOpacity>}
       {review.preferences?.available === false && <Text style={[styles.detail, { color: c.textMetadata }]}>Hosted draft generation is currently unavailable.</Text>}
     </View>
-    <ContextWebhookSetup />
+    <ContextWebhookSetup hostedEnabled={review.preferences?.enabled} />
     <View style={styles.toolbar}>
       <Text style={[styles.label, { color: c.textPrimary }]}>Private requests</Text>
       <TouchableOpacity accessibilityRole="button" disabled={!!review.busy || editingIds.size > 0} onPress={() => void review.load()} style={styles.refresh}><Text style={{ color: c.primary }}>{review.loading ? 'Refreshing…' : 'Refresh'}</Text></TouchableOpacity>
