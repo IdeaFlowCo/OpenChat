@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ reveal: vi.fn(), copy: vi.fn(), addPost: vi.fn(), alert: vi.fn() }));
+const mocks = vi.hoisted(() => ({ reveal: vi.fn(), copy: vi.fn(), addPost: vi.fn(), alert: vi.fn(), setContext: vi.fn() }));
 vi.mock('react-native', () => ({
   Alert: { alert: mocks.alert }, Platform: { select: () => ({}) },
   StyleSheet: { create: (s: any) => s, hairlineWidth: 1 },
@@ -16,13 +16,13 @@ vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ sc
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 vi.mock('../../mobile/src/api/client', () => ({
   OPENCHAT_URL: 'https://chat.globalbr.ai',
-  api: { listAgentKeys: async () => [{ id: 'existing', name: 'Hermes', keyPrefix: 'oc_short', scopes: ['read','write'], createdAt: new Date().toISOString() }], revealAgentKey: mocks.reveal },
+  api: { listAgentKeys: async () => [{ id: 'existing', name: 'Hermes', keyPrefix: 'oc_short', scopes: ['read','write'], createdAt: new Date().toISOString() }], revealAgentKey: mocks.reveal, getContextAgentPreferences: async () => ({ enabled: false }), setContextAgentPreferences: mocks.setContext },
 }));
 vi.mock('../../mobile/src/services/contextLane', () => ({ contextLaneManager: { addPost: mocks.addPost } }));
 import { AgentKeyDetailScreen } from '../../mobile/src/screens/AgentKeyDetailScreen';
 import { ContextComposer } from '../../mobile/src/components/ContextComposer';
 let tree: ReactTestRenderer;
-beforeEach(() => { mocks.reveal.mockReset().mockResolvedValue({ key: 'oc_complete-existing-key' }); mocks.copy.mockReset().mockResolvedValue(true); mocks.addPost.mockReset(); mocks.alert.mockClear(); });
+beforeEach(() => { mocks.reveal.mockReset().mockResolvedValue({ key: 'oc_complete-existing-key' }); mocks.copy.mockReset().mockResolvedValue(true); mocks.addPost.mockReset(); mocks.alert.mockClear(); mocks.setContext.mockReset().mockResolvedValue({ enabled: true }); });
 afterEach(async () => { if (tree) await act(async () => tree.unmount()); });
 const button = (label: string) => tree.root.findAllByType('TouchableOpacity' as any).find(n => n.findAllByType('Text' as any).some(t => t.children.join('') === label))!;
 it('copies an existing full key repeatedly and never copies a truncated curl credential', async () => {
@@ -59,4 +59,14 @@ it('copies maintained MCP setup with the full existing key without a reveal step
   expect(prompt).toContain('https://github.com/IdeaFlowCo/OpenChat.git');
   expect(prompt).not.toContain('tmad4000/openchat-mcp-server');
   expect(mocks.alert).not.toHaveBeenCalled();
+});
+
+it('requires an explicit key-owner toggle before receiving Context requests', async () => {
+  await act(async () => { tree = create(React.createElement(AgentKeyDetailScreen)); });
+  expect(mocks.setContext).not.toHaveBeenCalled();
+  const toggle = tree.root.findByProps({ accessibilityRole: 'switch' });
+  expect(toggle.props.accessibilityState.checked).toBe(false);
+  await act(async () => toggle.props.onPress());
+  expect(mocks.setContext).toHaveBeenCalledWith('existing', true);
+  expect(tree.root.findByProps({ accessibilityRole: 'switch' }).props.accessibilityState.checked).toBe(true);
 });

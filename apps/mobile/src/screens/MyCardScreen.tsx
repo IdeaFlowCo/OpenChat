@@ -1,3 +1,4 @@
+import { ConnectAgentLink } from '../components/ConnectAgentLink';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -403,6 +404,8 @@ export function MyCardScreen() {
             <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
           )}
         </TouchableOpacity>
+
+        <ConnectAgentLink detail />
 
         <TouchableOpacity
           style={[styles.menuRow, { borderBottomWidth: 0 }]}
