@@ -65,7 +65,8 @@ export async function createContextPost(
   conversationId: string,
   input: ContextPostInput,
   agentKeyId?: string,
-  agentScopes?: string[]
+  agentScopes?: string[],
+  authenticatedAgent?: { id: string; name: string }
 ): Promise<ContextPostProjection> {
   const { text, clientRequestId, replyToId } = input;
   const kind = input.kind || 'note';
@@ -75,7 +76,7 @@ export async function createContextPost(
       (replyToId !== undefined && (typeof replyToId !== 'string' || !replyToId.trim()))) {
     throw new ContextLaneError(400, 'Invalid kind, clientRequestId, or replyToId');
   }
-  const requestHash = createHash('sha256').update(JSON.stringify([text, kind, replyToId || null, agentKeyId || null])).digest('hex');
+  const requestHash = createHash('sha256').update(JSON.stringify([text, kind, replyToId || null, agentKeyId || authenticatedAgent?.id || null])).digest('hex');
 
   return await session.executeWrite(async (tx) => {
     // 1. Lock and check access
@@ -184,14 +185,15 @@ export async function createContextPost(
         clientRequestId: $clientRequestId,
         requestHash: $requestHash,
         agentKeyId: $agentKeyId,
-        agentName: CASE WHEN $agentKeyId IS NULL THEN null ELSE coalesce(key.name, 'Agent') END
+        connectorAgentId: $connectorAgentId,
+        agentName: CASE WHEN $agentKeyId IS NULL THEN $connectorAgentName ELSE coalesce(key.name, 'Agent') END
       })
       CREATE (u)-[:HAS_THOUGHT]->(t)
       ${replyClause}
       WITH t
       ${projectionJoins}
       RETURN ${projectionReturn}
-    `, { userId, conversationId, id, text, kind, now, clientRequestId, replyToId: replyToId || null, agentKeyId: agentKeyId || null, requestHash });
+    `, { userId, conversationId, id, text, kind, now, clientRequestId, replyToId: replyToId || null, agentKeyId: agentKeyId || null, connectorAgentId: authenticatedAgent?.id || null, connectorAgentName: authenticatedAgent?.name || null, requestHash });
 
     if (result.records.length === 0) {
       throw new ContextLaneError(500, 'Failed to create context post');
@@ -378,7 +380,7 @@ function projectContextPost(node: any, authorName?: string): ContextPostProjecti
     conversationId: node.properties.conversationId,
     authorId: node.properties.authorId,
     author: { id: node.properties.authorId, name: authorName || 'Former member' },
-    ...(node.properties.agentKeyId ? { agent: { id: node.properties.agentKeyId, name: node.properties.agentName || 'Agent' } } : {}),
+    ...((node.properties.agentKeyId || node.properties.connectorAgentId) ? { agent: { id: node.properties.agentKeyId || node.properties.connectorAgentId, name: node.properties.agentName || 'Agent' } } : {}),
     isDeleted: !!node.properties.deletedAt,
     text: node.properties.deletedAt ? '' : node.properties.text,
     kind: node.properties.kind || 'note',

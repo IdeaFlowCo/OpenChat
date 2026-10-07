@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { getDriver } from '../db.js';
+import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import { resolveActor } from '../middleware/resolveActor.js';
 import { isContextLaneEnabled } from '../config/features.js';
 import {
@@ -93,7 +94,8 @@ router.post('/conversations/:conversationId/context', async (req: Request, res: 
       conversationId,
       { text, kind, clientRequestId, replyToId },
       req.agentKeyId,
-      req.agentScopes
+      req.agentScopes,
+      getConnectorPrincipal(req) ? { id: 'ideaflow-connector', name: 'Ideaflow connector' } : undefined
     );
     res.status(201).json(result);
   } catch (error: any) {

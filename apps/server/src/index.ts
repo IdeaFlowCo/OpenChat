@@ -20,6 +20,7 @@ import aiRoutes from './routes/ai.js';
 import thoughtsRoutes from './routes/thoughts.js';
 import contextRoutes from './routes/context.js';
 import agentKeysRoutes from './routes/agentKeys.js';
+import { handleIdeaflowConnector, connectorOperationGuard } from './routes/ideaflowConnector.js';
 import { createConnectorDelegation } from './routes/connectorDelegation.js';
 import webhooksRoutes from './routes/webhooks.js';
 import feedbackRoutes from './routes/feedback.js';
@@ -97,7 +98,9 @@ app.use(cors({
   },
   credentials: true
 }));
+app.post('/api/connector/mcp', express.raw({ type:'application/json', limit:'1mb' }), handleIdeaflowConnector);
 app.use(express.json());
+app.use('/api', connectorOperationGuard);
 
 // Health check
 app.get('/health', (_req, res) => {

@@ -15,6 +15,7 @@ import { Request, Response, NextFunction } from 'express';
 import crypto from 'node:crypto';
 import { getDriver } from '../db.js';
 import { validateToken } from './auth.js';
+import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 
 interface CacheEntry {
   userId: string;
@@ -155,6 +156,13 @@ export async function resolveActor(
   res: Response,
   next: NextFunction
 ): Promise<void> {
+  const connectorPrincipal = getConnectorPrincipal(req);
+  if (connectorPrincipal) {
+    req.user = { userId: connectorPrincipal.id, email: '' };
+    req.agentScopes = connectorPrincipal.scopes;
+    next();
+    return;
+  }
   // The connector guard already validated this request's exact route, scope,
   // expiry and named user. Never reinterpret its bearer as a legacy API key.
   if (req.connectorDelegation) {
