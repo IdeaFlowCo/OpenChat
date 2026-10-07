@@ -64,14 +64,16 @@ function AsksInventory() {
     setLoading(true);
     setError(null);
     try {
-      const [nextDrafts, nextStories, nextIntentions] = await Promise.all([
+      const [nextDrafts, nextStories, nextIntentions] = await Promise.allSettled([
         api.listIntentDrafts(),
         api.listMyStories(),
         api.getContextIntentions(),
       ]);
-      setDrafts(nextDrafts);
-      setStories(nextStories);
-      setIntentions(nextIntentions.intentions);
+      if (nextDrafts.status === 'fulfilled') setDrafts(nextDrafts.value);
+      if (nextStories.status === 'fulfilled') setStories(nextStories.value);
+      setIntentions(nextIntentions.status === 'fulfilled' ? nextIntentions.value.intentions : []);
+      const failure = [nextDrafts, nextStories].find(result => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load your intentions.');
     } finally {
@@ -190,7 +192,17 @@ function AsksInventory() {
               <Text style={[styles.detail, { color: c.textMetadata }]}>One intention · {item.intention.contextPosts.length} Context post{item.intention.contextPosts.length === 1 ? '' : 's'} · {item.intention.stories.length} Story projection{item.intention.stories.length === 1 ? '' : 's'}</Text>
               <Text style={[styles.detail, { color: c.textMetadata }]}>Agent search · {item.intention.searchStatus}{item.intention.expiresAt ? ` · expires ${new Date(item.intention.expiresAt).toLocaleDateString()}` : ''}</Text>
               {item.intention.contextPosts.map(source => <TouchableOpacity key={source.postId} accessibilityRole="button" onPress={() => navigation.navigate('Chat', { conversationId: source.conversationId, lane: 'context' })} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: c.primary }}>Context · {source.conversationTitle}{source.sourceChanged ? ' · Source edited' : ''}</Text></TouchableOpacity>)}
-              {item.intention.stories.map(story => <Text key={story.id} style={[styles.detail, { color: c.textMetadata }]}>{story.humanVisible ? story.explicitQuietSearch ? 'Stories and agents' : 'Stories only' : 'Agents only'} · {story.status} · {story.audience.conversationIds.length} selected chat{story.audience.conversationIds.length === 1 ? '' : 's'}</Text>)}
+              {item.intention.stories.map(projection => {
+                const story = stories.find(owned => owned.id === projection.id) || projection;
+                return <View key={story.id}>
+                  <Text style={[styles.detail, { color: c.textMetadata }]}>{story.humanVisible ? story.explicitQuietSearch ? 'Stories and agents' : 'Stories only' : 'Agents only'} · {isStoryExpired(story) ? 'expired' : story.status} · {story.audience.conversationIds.length} selected chat{story.audience.conversationIds.length === 1 ? '' : 's'}</Text>
+                  {story.text && <Text style={[styles.detail, { color: c.textPrimary }]}>{story.text}</Text>}
+                  {relevantExpiresAt(story) && <Text style={[styles.detail, { color: c.textMetadata }]}>Expires · {inventoryExpiry(story)}</Text>}
+                  {item.intention.lifecycleState === 'open' && ['active', 'paused'].includes(story.status) && <TouchableOpacity disabled={busyId === story.id} onPress={() => void pauseStory(story)} style={[styles.outlineSmall, { borderColor: c.border, marginTop: 12, alignSelf: 'flex-start' }]}>
+                    <Text style={{ color: c.primary, fontWeight: '700' }}>{story.status === 'paused' ? `Resume ${story.humanVisible ? 'Story' : 'search'}` : `Pause ${story.humanVisible ? 'Story' : 'search'}`}</Text>
+                  </TouchableOpacity>}
+                </View>;
+              })}
               <IntentionLifecycleControls intention={item.intention} onChange={() => void load()} />
             </View>
           ) : (

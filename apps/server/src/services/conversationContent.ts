@@ -32,13 +32,17 @@ export async function listConversationContent(session: Session, userId: string, 
         RETURN t, 'context' AS origin, 'conversation' AS visibility, 'context' AS provenance,
           false AS pinned, null AS pinnedBy, null AS pinnedAt, [t.id] AS aliases, coalesce(t.tags,[]) AS tags
         UNION ALL
-        MATCH (t:Thought)
-        WHERE $filter IN ['all','stream'] AND t.deletedAt IS NULL AND (t.lane IS NULL OR t.lane <> 'context')
-          AND (EXISTS { MATCH (t)-[:PINNED_IN]->(:Conversation {id:$conversationId}) }
-            OR EXISTS { MATCH (t)-[:FROM_MESSAGE]->(:Message {conversationId:$conversationId})
-                        WHERE t.captureMethod IN ['inline-tag','reply-tag'] OR ($includePrivate AND t.userId=$userId) }
-            OR ($includePrivate AND t.userId=$userId AND t.scopeConversationId=$conversationId
-                AND EXISTS { MATCH (:User {id:$userId})-[:HAS_THOUGHT]->(t) }))
+        CALL {
+          MATCH (:Conversation {id:$conversationId})<-[:PINNED_IN]-(t:Thought)
+          WHERE $filter IN ['all','stream'] RETURN t
+          UNION
+          MATCH (source:Message {conversationId:$conversationId})<-[:FROM_MESSAGE]-(t:Thought)
+          WHERE $filter IN ['all','stream'] AND (t.captureMethod IN ['inline-tag','reply-tag'] OR ($includePrivate AND t.userId=$userId)) RETURN t
+          UNION
+          MATCH (:User {id:$userId})-[:HAS_THOUGHT]->(t:Thought {scopeConversationId:$conversationId})
+          WHERE $filter IN ['all','stream'] AND $includePrivate AND t.userId=$userId RETURN t
+        }
+        WITH DISTINCT t WHERE t.deletedAt IS NULL AND (t.lane IS NULL OR t.lane <> 'context')
         OPTIONAL MATCH (t)-[pin:PINNED_IN]->(:Conversation {id:$conversationId})
         OPTIONAL MATCH (t)-[:FROM_MESSAGE]->(source:Message)
         WITH t, pin, source,

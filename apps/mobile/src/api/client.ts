@@ -1720,7 +1720,7 @@ export const api = {
   }>(`/api/thoughts/${encodeURIComponent(id)}/context`),
 
   /** Pin one of my thoughts to a conversation I participate in. */
-  pinThought: (id: string, conversationId: string, expectedText?: string) =>
+  pinThought: (id: string, conversationId: string, expectedText: string) =>
     request<Thought>(`/api/thoughts/${encodeURIComponent(id)}/pin`, {
       method: 'POST',
       body: JSON.stringify({ conversationId, ...(expectedText !== undefined ? { expectedText } : {}) }),

@@ -63,6 +63,7 @@ integration('unified conversation content audience and pagination with real Neo4
     expect((await read({ filter: 'context' })).items).toHaveLength(2);
   });
   it('rejects changed private pin text before sharing and rechecks the destination membership', async () => {
+    await expect(session(s => pinThoughtWithReview(s, a, `${prefix}-mine`, room, new Date().toISOString()))).rejects.toMatchObject({ statusCode: 400 });
     await expect(session(s => pinThoughtWithReview(s, a, `${prefix}-mine`, room, new Date().toISOString(), 'Old reviewed text'))).rejects.toMatchObject({ statusCode: 409 });
     let state = await run('MATCH (t:Thought {id:$id}) RETURN EXISTS { MATCH (t)-[:PINNED_IN]->(:Conversation {id:$room}) } AS shared', { id: `${prefix}-mine`, room });
     expect(state.records[0].get('shared')).toBe(false);

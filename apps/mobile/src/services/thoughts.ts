@@ -31,8 +31,8 @@ export async function fetchConversationThoughts(
   return api.getConversationThoughts(conversationId, opts);
 }
 
-export async function pinThought(id: string, conversationId: string): Promise<Thought> {
-  return api.pinThought(id, conversationId);
+export async function pinThought(id: string, conversationId: string, expectedText: string): Promise<Thought> {
+  return api.pinThought(id, conversationId, expectedText);
 }
 
 export async function unpinThought(id: string, conversationId: string): Promise<void> {

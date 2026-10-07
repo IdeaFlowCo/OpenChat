@@ -1,3 +1,5 @@
+import { acquireContextAclLocks } from './contextAccess.js';
+import { reconcileIntentionLifecycle } from './contextIntentions.js';
 import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
@@ -823,7 +825,9 @@ export async function updateStory(
 ): Promise<OwnedStory | null> {
   const session = getDriver().session();
   try {
-    const result = await session.run(
+    return await session.executeWrite(async tx => {
+    await acquireContextAclLocks(tx,{userIds:[userId]});
+    const result = await tx.run(
       `MATCH (owner:User {id:$userId})
        SET owner.contextAclRevision=coalesce(owner.contextAclRevision,0)+1
        WITH owner
@@ -854,7 +858,7 @@ export async function updateStory(
              ELSE intent.expiresAt
            END,
            intent.updatedAt = datetime($now)
-       RETURN story { .* } AS story`,
+       RETURN story { .* } AS story, intent.id AS intentId, intent.status AS intentStatus, intent.lifecycleState AS lifecycleState`,
       {
         userId,
         storyId,
@@ -863,7 +867,15 @@ export async function updateStory(
         now: new Date().toISOString(),
       },
     );
-    return result.records.length ? ownedStoryFromRecord(result.records[0].get('story')) : null;
+    if(!result.records.length)return null;
+    const row=result.records[0];
+    if(row.get('intentStatus')==='withdrawn'){
+      await reconcileIntentionLifecycle(tx,row.get('intentId'),row.get('lifecycleState')==='fulfilled'?'fulfilled':'withdrawn',new Date().toISOString());
+      const reconciled=await tx.run('MATCH (story:OpenChatStory {id:$storyId}) RETURN story { .* } AS story',{storyId});
+      return ownedStoryFromRecord(reconciled.records[0].get('story'));
+    }
+    return ownedStoryFromRecord(row.get('story'));
+    });
   } finally {
     await session.close();
   }

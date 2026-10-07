@@ -72,7 +72,7 @@ export async function trackContextIntention(session:Session,userId:string,conver
     const i=await owned(tx,userId,intentId),state=lifecycle(i);
     // Linking never copies private goal/seeks/details into the shared projection or changes search consent.
     await tx.run(`MATCH (t:Thought {id:$postId}),(i:AgentIntent {id:$intentId})
-      SET i.lifecycleRevision=coalesce(i.lifecycleRevision,0)+1,i.updatedAt=datetime($now)
+      SET i.lifecycleState=$state,i.lifecycleRevision=coalesce(i.lifecycleRevision,0)+1,i.updatedAt=datetime($now)
       CREATE (t)-[:REPRESENTS_INTENT {sourceRevision:$sourceRevision,sourceDigest:$sourceDigest,createdAt:datetime($now),clientRequestId:$clientRequestId}]->(i)
       SET t.intentId=$intentId,t.intentionState=$state,t.intentionSourceRevision=$sourceRevision,t.intentionSourceChanged=false,
         t.intentionClientRequestId=$clientRequestId,t.status=CASE WHEN $state='open' THEN 'open' ELSE 'closed' END,
@@ -98,17 +98,23 @@ export async function updateContextIntention(session:Session,userId:string,inten
         RETURN count(t) AS count`,{userId,intentId,conversationId:row.get('id')});
       if(number(quota.records[0].get('count'))>50)throw new ContextLaneError(429,'Reopening would exceed 50 open asks/offers in this conversation');
     }
-    if(lifecycle(i)===input.lifecycleState)return {intention:await project(tx,userId,i)};
+    if(lifecycle(i)===input.lifecycleState && input.lifecycleState==='open')return {intention:await project(tx,userId,i)};
     const now=new Date().toISOString();
+    await reconcileIntentionLifecycle(tx,intentId,input.lifecycleState,now);
+    i=await owned(tx,userId,intentId);return {intention:await project(tx,userId,i)};
+  });
+}
+
+export async function reconcileIntentionLifecycle(tx:ManagedTransaction,intentId:string,state:IntentionLifecycle,now:string){
+    const contexts=await tx.run(`MATCH (t:Thought)-[:REPRESENTS_INTENT]->(:AgentIntent {id:$intentId}) RETURN DISTINCT t.conversationId AS id ORDER BY id`,{intentId});
+    for(const row of contexts.records)await acquireContextAclLocks(tx,{conversationId:row.get('id')});
     await tx.run(`MATCH (i:AgentIntent {id:$intentId}) SET i.lifecycleState=$state,i.lifecycleRevision=coalesce(i.lifecycleRevision,0)+1,
       i.status=CASE WHEN $state='open' THEN 'paused' WHEN i.status='connected' THEN 'connected' ELSE 'withdrawn' END,i.updatedAt=datetime($now)
       WITH i OPTIONAL MATCH (t:Thought)-[:REPRESENTS_INTENT]->(i)
       FOREACH (p IN CASE WHEN t IS NULL THEN [] ELSE [t] END | SET p.intentionState=$state,p.intentionRevision=i.lifecycleRevision,
-        p.status=CASE WHEN $state='open' THEN 'open' ELSE 'closed' END,p.revision=p.revision+1,p.updatedAt=datetime($now))`,{intentId,state:input.lifecycleState,now});
-    if(input.lifecycleState!=='open'){
+        p.status=CASE WHEN $state='open' THEN 'open' ELSE 'closed' END,p.revision=p.revision+1,p.updatedAt=datetime($now))`,{intentId,state,now});
+    if(state!=='open'){
       await tx.run(`MATCH (s:OpenChatStory)-[:ACTIVATES]->(:AgentIntent {id:$intentId}) SET s.status='withdrawn',s.updatedAt=datetime($now)`,{intentId,now});
       await tx.run(`MATCH (m:AgentMatch {status:'proposed'})-[:MATCHES]->(:AgentIntent {id:$intentId}) SET m.status='closed',m.updatedAt=datetime($now)`,{intentId,now});
     }
-    i=await owned(tx,userId,intentId);return {intention:await project(tx,userId,i)};
-  });
 }

@@ -1,3 +1,4 @@
+import { reconcileIntentionLifecycle } from './contextIntentions.js';
 import { acquireContextAclLocks } from './contextAccess.js';
 import type { Server as IOServer } from 'socket.io';
 import type AnthropicType from '@anthropic-ai/sdk';
@@ -575,24 +576,11 @@ export async function withdrawIntent(userId: string, intentId: string): Promise<
   try {
     return await session.executeWrite(async tx => {
     await acquireContextAclLocks(tx,{userIds:[userId]});
-    const contexts=await tx.run(`MATCH (:User {id:$userId})-[:OWNS_INTENT]->(i:AgentIntent {id:$intentId})
-      MATCH (t:Thought)-[:REPRESENTS_INTENT]->(i) RETURN DISTINCT t.conversationId AS id ORDER BY id`,{userId,intentId});
-    for(const row of contexts.records)await acquireContextAclLocks(tx,{conversationId:row.get('id')});
-    const result = await tx.run(
-      `
-      MATCH (:User {id: $userId})-[:OWNS_INTENT]->(intent:AgentIntent {id: $intentId})
-      WHERE intent.status <> 'connected'
-      SET intent.status = 'withdrawn', intent.lifecycleState='withdrawn',
-          intent.lifecycleRevision=coalesce(intent.lifecycleRevision,0)+1,intent.updatedAt = datetime($now)
-      WITH intent OPTIONAL MATCH (t:Thought)-[:REPRESENTS_INTENT]->(intent)
-      FOREACH (p IN CASE WHEN t IS NULL THEN [] ELSE [t] END | SET p.status='closed',p.intentionState='withdrawn',
-        p.intentionRevision=intent.lifecycleRevision,p.revision=p.revision+1,p.updatedAt=datetime($now))
-      WITH DISTINCT intent OPTIONAL MATCH (story:OpenChatStory)-[:ACTIVATES]->(intent)
-      FOREACH (s IN CASE WHEN story IS NULL THEN [] ELSE [story] END | SET s.status='withdrawn',s.updatedAt=datetime($now))
-      RETURN DISTINCT intent { .* } AS intent
-      `,
-      { userId, intentId, now: new Date().toISOString() },
-    );
+    const eligible=await tx.run(`MATCH (:User {id:$userId})-[:OWNS_INTENT]->(intent:AgentIntent {id:$intentId})
+      WHERE intent.status <> 'connected' RETURN intent`,{userId,intentId});
+    if(!eligible.records.length)return null;
+    await reconcileIntentionLifecycle(tx,intentId,'withdrawn',new Date().toISOString());
+    const result=await tx.run('MATCH (intent:AgentIntent {id:$intentId}) RETURN intent { .* } AS intent',{intentId});
     return result.records.length
       ? toJS(result.records[0].get('intent')) as AgentIntent
       : null;

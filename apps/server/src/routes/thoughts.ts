@@ -443,7 +443,7 @@ router.post('/:id/pin', requireAuth, async (req: Request, res: Response) => {
     return;
   }
 
-  if (expectedText !== undefined && (typeof expectedText !== 'string' || expectedText.length > 20000)) { res.status(400).json({ error: 'expectedText must be a string of at most 20000 characters' }); return; }
+  if (typeof expectedText !== 'string' || expectedText.length > 20000) { res.status(400).json({ error: 'expectedText must be a string of at most 20000 characters' }); return; }
 
   const session = getDriver().session();
   try {

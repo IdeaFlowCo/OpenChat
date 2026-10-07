@@ -45,6 +45,20 @@ integration('Context canonical intention lifecycle with real Neo4j',()=>{
   const shared=(await session(s=>listContextPosts(s,b,room))).posts[0];expect(shared.text).toBe('Shared ask');expect(JSON.stringify(shared)).not.toContain('Private');
   const node=(await run('MATCH (i:AgentIntent {id:$id}) RETURN i',{id})).records[0].get('i').properties;expect(node.audienceUserIds).toEqual([b]);expect(node.audienceConversationIds).toEqual([]);
  });
+ it('Story withdrawal reconciles a linked legacy intention and repeated closure repairs stale projections',async()=>{
+  const id=prefix+'-existing',story=prefix+'-story';
+  await run(`MATCH (u:User {id:$a}) CREATE (i:AgentIntent {id:$id,ownerUserId:$a,kind:'ask',status:'active',createdAt:datetime()})
+   CREATE (s:OpenChatStory {id:$story,ownerUserId:$a,intentId:$id,text:'Approved Story',status:'active',humanVisible:true,agentSearchEnabled:true,explicitQuietSearch:false})
+   CREATE (u)-[:OWNS_INTENT]->(i),(u)-[:OWNS_STORY]->(s),(s)-[:ACTIVATES]->(i)`,{a,id,story});
+  const p=await post();await track(p,id);
+  await updateStory(a,story,{status:'withdrawn'});
+  let inventory=(await session(s=>listContextIntentions(s,a))).intentions[0];
+  expect(inventory.lifecycleState).toBe('withdrawn');expect(inventory.contextPosts[0].post.status).toBe('closed');
+  await expect(session(s=>askContextAgents(s,a,room,p.id))).rejects.toMatchObject({statusCode:404});
+  await run(`MATCH (t:Thought {id:$postId}) SET t.status='open',t.intentionState='open'`,{postId:p.id});
+  inventory=(await session(s=>updateContextIntention(s,a,id,{expectedRevision:inventory.revision,lifecycleState:'withdrawn'}))).intention;
+  expect(inventory.contextPosts[0].post.status).toBe('closed');expect(inventory.contextPosts[0].post.intention?.lifecycleState).toBe('withdrawn');
+ });
  it('fulfills every linked projection; reopening never resumes matching or a withdrawn Story',async()=>{
   const p=await post(),linked=await track(p),id=linked.intention.intentId;
   await run(`MATCH (u:User {id:$a}),(i:AgentIntent {id:$id}) CREATE (s:OpenChatStory {id:$story,ownerUserId:$a,intentId:$id,status:'active',text:'Approved'}) CREATE (u)-[:OWNS_STORY]->(s),(s)-[:ACTIVATES]->(i)`,{a,id,story:prefix+'-story'});
