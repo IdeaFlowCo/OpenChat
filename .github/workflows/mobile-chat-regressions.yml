@@ -32,7 +32,7 @@ jobs:
           test/conversationDisplay.test.ts test/contactInvite.mobile.test.ts
           test/addMeCard.test.ts test/addMeCard.route.test.ts
           test/privateNames.route.test.ts test/privateNames.mobile.test.ts test/contactProfileDoors.mobile.test.ts
-          test/contextHostedReview.mobile.test.ts test/contextHosted.route.test.ts
+          test/contextHostedReview.mobile.test.ts test/contextHostedApi.mobile.test.ts test/contextHosted.route.test.ts
       - name: Ideaflow-only web sign-in, automatic sign-in, account switch, and native login parity
         working-directory: apps/server
         run: >-
