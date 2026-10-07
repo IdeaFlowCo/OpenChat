@@ -11,7 +11,8 @@ tracking request ID. Existing Stories retain their `ACTIVATES` relationship to t
 same intention. The owner inventory groups these projections by intention ID.
 Linking a private or already active intention never copies its private goal,
 matching terms, details or Story text into Context, and never changes its existing
-approved matching audience. Context readers see only its ID and lifecycle state.
+approved matching audience. The shared intention metadata contains only its ID,
+lifecycle state, revision and source-change flag.
 
 A new Context-only intention is paused, conversation restricted, and permanently
 excluded from the network-matching candidate and decision paths by `contextOnly`.
@@ -19,6 +20,14 @@ Changing its legacy search status to active cannot opt it into matching. It does
 not create a Story, an agent scan, a Message or a notification.
 
 ## Owner controls
+
+In a conversation’s **Context** lane, your Ask/Offer post offers **Track ask** or
+**Track offer**, and **Link existing intention**. Linking shows your private
+inventory and requires **Confirm intention link**. In **Asks**, each intention
+groups its Context sources and Stories, with source links and eligible Story/search
+pause and resume controls. **Mark fulfilled**, **Withdraw intention**, and
+**Reopen intention** first show the affected projections; apply the reviewed
+change with **Confirm intention change**.
 
 - `GET /api/chat/context-intentions` returns grouped owner intentions and their
   currently accessible Context projections plus owned Stories. Private inventory

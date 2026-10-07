@@ -48,8 +48,9 @@ Use `participants[].user.name` to identify a DM. If names repeat, use the ID and
 recent message preview to select the intended conversation.
 
 For OpenChat MCP, use the maintained [MCP adapter and client configurations](https://github.com/IdeaFlowCo/OpenChat/tree/main/apps/mcp-server).
-It runs locally over stdio; there is no live OpenChat-hosted `/mcp` connector.
-Use the same API key as REST and set `OPENCHAT_BASE_URL=https://chat.ideaflow.app`.
+For the local stdio adapter, use the same API key as REST and set
+`OPENCHAT_BASE_URL=https://chat.ideaflow.app`. For the shared hosted connector,
+use the connection hub above; see the [OpenChat adapter contract](https://github.com/IdeaFlowCo/OpenChat/blob/main/docs/ideaflow-unified-connector.md).
 The old standalone repository and unpublished npm package are not setup paths.
 
 For Unlinked MCP, use **https://www.unlinked.ai/mcp** and sign in, or copy the
@@ -67,13 +68,12 @@ browser does not sign the dot in. If your dot asks you to sign in to
 That request is separate from whether your OpenChat API key is valid.
 
 **Copy agent setup** is intended for agents that accept an API key and can make
-HTTP requests, such as Hermes. It does not install a ChatGPT plugin. OpenChat
-currently ships a local MCP adapter, not a hosted OAuth MCP connection for
-dots. Unlinked's hosted MCP connection does not grant OpenChat messaging access.
-
-For a future OpenChat plugin, the intended flow is **Connect OpenChat → Ideaflow
-ID → approve access → connected**, with a read-only account/conversation check.
-That integration still needs implementation; no “one-click dot setup” is live.
+HTTP requests, such as Hermes. It does not install a ChatGPT plugin. For hosted
+access, use the shared connection hub above and the
+[OpenChat adapter contract](https://github.com/IdeaFlowCo/OpenChat/blob/main/docs/ideaflow-unified-connector.md).
+A working connector does not prove directory publication or installation in a
+particular host; verify that host connection with a read-only account/conversation
+call. Unlinked's separate hosted MCP connection does not grant OpenChat messaging access.
 
 References: [Dots computers and apps](https://learn.chatgpt.com/docs/dots/computers-and-apps)
 and [OpenAI plugin authentication](https://developers.openai.com/plugins/build/auth).
@@ -372,17 +372,18 @@ def get_conversations():
 
 ## Scopes
 
-Context enforces the scopes on the same key used for chat:
+Context and unified conversation content enforce the scopes on the same key used for chat:
 
 | Scope | Capability |
 |-------|-----------|
-| `read` | Read conversation Context |
+| `read` | Read conversation Context and [shared conversation content](/agents/conversation-content) |
 | `write` | Create, edit, and delete conversation Context, subject to membership and authorship |
 
 Default: both `read` and `write`. Some older chat endpoints still act with the
 owning user’s permissions rather than enforcing scope labels. Do not treat a
-read-only label as a global restriction on every endpoint. Context checks the
-current stored key on each operation, including revocation and expiration.
+read-only label as a global restriction on every endpoint. Context and unified
+content check the current stored key on each operation, including revocation and
+expiration.
 
 ---
 

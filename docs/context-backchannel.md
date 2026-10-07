@@ -53,6 +53,8 @@ and stores a standard Report without exporting the shared body to a webhook.
    `oc_list_context_agent_requests`. Only the receiving key can read its inbox.
    Each poll checks live membership, block state, scopes, expiry/revocation,
    opt-in, source deletion and exact revision. Edited sources require a fresh ask.
+   Request eligibility also respects the [intention lifecycle](context-intention-lifecycle.md);
+   a closed source cannot accept a new request or a pending response.
 4. The agent may decline with `{decline:true}` or respond with `{text}` at
    `POST /api/chat/context-agent/requests/:requestId/respond` (MCP:
    `oc_respond_to_context_agent_request`). Response and request completion commit
