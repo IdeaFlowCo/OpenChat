@@ -336,7 +336,8 @@ function renderConnectBotHtml(): string {
   .nav a { color:var(--text-dim); text-decoration:none; font-weight:500; font-size:14px; }
   .nav a:hover { color:var(--text); }
   .nav .sep { color:var(--text-dim); opacity:0.4; }
-  .doc { padding:8px 0 64px; }
+  .doc { padding:8px 0 64px; overflow-wrap:anywhere; }
+  .doc table { display:block; max-width:100%; overflow-x:auto; }
   h1 { font-size:clamp(28px,4vw,40px); letter-spacing:-0.02em; margin:0 0 24px;
        background:linear-gradient(180deg,#fff 0%,#c8cbff 130%);
        -webkit-background-clip:text; background-clip:text; color:transparent; }
