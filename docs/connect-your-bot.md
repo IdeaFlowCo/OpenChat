@@ -381,9 +381,8 @@ Context and unified conversation content enforce the scopes on the same key used
 
 Default: both `read` and `write`. Some older chat endpoints still act with the
 owning user’s permissions rather than enforcing scope labels. Do not treat a
-read-only label as a global restriction on every endpoint. Context and unified
-content check the current stored key on each operation, including revocation and
-expiration.
+read-only label as a global restriction on every endpoint. See [key security](#key-security)
+for live key checks.
 
 ---
 
@@ -391,7 +390,7 @@ expiration.
 
 - Keys are stored **encrypted at rest** (AES-256-GCM) in the OpenChat database.
 - Keys are **re-viewable** — you can retrieve the plaintext any time from Settings → Agent keys → View full key. Each reveal is audit-logged.
-- Revoked keys stop working **within 60 seconds** (the server caches auth decisions for up to 60 s).
+- Context and unified conversation content check the current stored key on each operation, including revocation and expiry. Other cached authentication paths may retain authorization for up to 60 seconds.
 - Keys do **not** expire by default. Pass `expiresAt` when creating a key to set an expiry.
 
 ---

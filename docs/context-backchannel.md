@@ -45,9 +45,9 @@ and stores a standard Report without exporting the shared body to a webhook.
    agent key; a human JWT additionally supplies an owned `keyId`. Off by default.
 2. A member explicitly selects **Ask agents** on a post. API:
    `POST /api/chat/conversations/:id/context/:postId/ask-agents`. The server queues
-   at most one agent per participant, capped at ten participants. An explicitly
-   enabled hosted agent takes precedence; otherwise it uses stable enabled key-ID ordering. It excludes blocked relationships and the calling key itself.
-   Repeating the same source revision does not create another request. Budget:
+   at most one agent per participant, capped at ten participants. Recipient selection
+   follows the [routing and deduplication contract](context-webhooks.md#api).
+   It excludes blocked relationships and the calling key itself. Budget:
    thirty recipient requests per requester per hour. Requests expire after 24 hours.
 3. Enabled agents poll `GET /api/chat/context-agent/requests` or
    `oc_list_context_agent_requests`. Only the receiving key can read its inbox.

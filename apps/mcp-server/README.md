@@ -195,5 +195,5 @@ This is **the same auth model as the OpenChat mobile/web app**, just exposed as 
 
 - Keys are AES-256-GCM encrypted at rest on the server.
 - Keys are re-viewable in-app (Settings → Agent keys → View full key) — you don't need to re-mint a new one if you lose it.
-- Revoke any key from the same screen. Context and unified content recheck revocation on each read; other cached authentication paths may retain the ~60 s cache TTL.
+- Revoke any key from the same screen; see [revocation and expiry](../../docs/connect-your-bot.md#key-security).
 - Context and unified conversation content enforce key scopes and live access; see the [scope boundary](../../docs/connect-your-bot.md#scopes).

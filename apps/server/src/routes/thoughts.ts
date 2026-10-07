@@ -427,11 +427,8 @@ router.get('/:id/context', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/thoughts/:id/pin
- * Body: { conversationId }
- * Pins one of the caller's thoughts to a conversation they participate in.
- * Pinning shares the thought with all current participants (it appears in
- * their chat-scoped Thoughts view). Idempotent (MERGE).
+ * Sharing must reject text changed since the owner's review, even on a retry.
+ * The pin API and audience contract live in docs/conversation-content.md.
  */
 router.post('/:id/pin', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
