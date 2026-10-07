@@ -1,9 +1,10 @@
 import { useEffect } from 'react';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { StackActions, useNavigation, useRoute } from '@react-navigation/native';
 import { useChat } from '../contexts/ChatContext';
 import { useIsDesktop } from '../theme/breakpoints';
 import { ChatScreen } from './ChatScreen';
 import type { NavProp, RouteProps } from '../navigation/types';
+import { openConversation } from '../navigation/conversationNavigation';
 
 export function ChatScreenRouter() {
   const isDesktop = useIsDesktop();
@@ -14,11 +15,15 @@ export function ChatScreenRouter() {
 
   useEffect(() => {
     if (!isDesktop) return;
+    const { routeNames } = navigation.getState();
+    if (!routeNames.includes('Conversations')) {
+      navigation.dispatch(StackActions.popTo(routeNames[0]));
+      openConversation(route.params);
+      return;
+    }
     setActiveConversation(conversationId, { lane });
-    // Cold entry can create a stack containing only Chat; it still needs the
-    // desktop host screen. popTo replaces the route when that host is absent.
     navigation.popTo('Conversations');
-  }, [isDesktop, conversationId, lane, setActiveConversation, navigation]);
+  }, [isDesktop, conversationId, lane, route.params, setActiveConversation, navigation]);
 
   if (isDesktop) return null;
   return <ChatScreen />;
