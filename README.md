@@ -26,6 +26,8 @@ on desktop web to open the same menu.
 If message history fails to load, the chat shows an error and **Retry** instead
 of an empty-chat prompt. Tap **Retry** to reload; previously loaded messages stay
 visible during transient failures. Reconnecting also reloads the open thread.
+If access is denied or the conversation is unavailable, cached messages are
+cleared instead.
 
 Open **Stream** from Chats, or **Stream** in a chat's header for **Chat Stream**.
 The search bar filters text and tags. Its visible **Create** action opens an

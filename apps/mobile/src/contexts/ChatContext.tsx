@@ -4,9 +4,8 @@ import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
  * ChatContext — the single source of truth for socket lifecycle, conversations,
  * presence, typing, and unread counts in the mobile app.
  *
- * Mirrors the web ChatContext at flinch-sequel/client/src/contexts/ChatContext.tsx
- * but trimmed for mobile + no DOM. The screens consume `useChat()` for state
- * and actions; they shouldn't subscribe to socket events directly.
+ * The native and responsive-web screens consume `useChat()` for state and
+ * actions; they shouldn't subscribe to socket events directly.
  *
  * Reconnect catch-up (OpenChat-qz0): on socket reconnect (not first connect),
  * we call GET /api/chat/messages/since to fetch messages missed during the
@@ -592,8 +591,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             return sortConversationsByRecent(next);
           });
 
-          // Bump unread counters for non-active conversations where someone
-          // else sent messages.
+          // Context and blurred screens must retain Chat unread counts even
+          // when their conversation remains selected.
           setUnreadByConv(prev => {
             const next = new Map(prev);
             for (const msg of missed) {
@@ -644,8 +643,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
         return next;
       });
-      // Unread bump + in-app banner: only if msg is for a non-active conv and
-      // not from us. The banner component itself further filters muted convs.
+      // A selected conversation only suppresses unread/banner updates while
+      // its Chat lane is visible. The banner also filters muted conversations.
       if (!isChatVisible(msg.conversationId) && msg.senderId !== currentUser?.userId) {
         setUnreadByConv(prev => {
           const next = new Map(prev);

@@ -464,9 +464,8 @@ export function ChatScreen({
   // scroll-to-end or unread bump when older messages are prepended (OpenChat-vjc).
   const prependingOlderRef = useRef(false);
 
-  // Activate compact conversations on focus; release them on blur.
-  // Also tell the notification service so it can suppress foreground banners
-  // for messages arriving in the conversation the user is already viewing.
+  // Blur releases visibility without clearing the parent's conversation
+  // selection; ChatProvider owns notification suppression.
   // A mounted compact screen keeps its lane while another screen is on top.
   // A new route params object is an explicit navigation request, even if its
   // lane value matches an earlier request (e.g. another notification tap).
