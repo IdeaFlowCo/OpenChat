@@ -34,6 +34,7 @@ export type RootStackParamList = {
   StoryComposer: { draftId?: string; initialText?: string; destination?: 'agents_only' | 'both' | 'stories_only' } | undefined;
   StoryViewer: { story: FeedStory };
   SocialReview: undefined;
+  ContextReview: undefined;
   GroupSettings: { conversationId: string };
   Settings: undefined;
   Search: undefined;

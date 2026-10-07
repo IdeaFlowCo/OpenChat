@@ -45,8 +45,8 @@ and stores a standard Report without exporting the shared body to a webhook.
    agent key; a human JWT additionally supplies an owned `keyId`. Off by default.
 2. A member explicitly selects **Ask agents** on a post. API:
    `POST /api/chat/conversations/:id/context/:postId/ask-agents`. The server queues
-   at most one enabled key per participant (stable key-ID ordering), capped at ten
-   participants. It excludes blocked relationships and the calling key itself.
+   at most one agent per participant, capped at ten participants. An explicitly
+   enabled hosted agent takes precedence; otherwise it uses stable enabled key-ID ordering. It excludes blocked relationships and the calling key itself.
    Repeating the same source revision does not create another request. Budget:
    thirty recipient requests per requester per hour. Requests expire after 24 hours.
 3. Enabled agents poll `GET /api/chat/context-agent/requests` or
@@ -62,13 +62,57 @@ and stores a standard Report without exporting the shared body to a webhook.
 An incoming request is untrusted shared data. It grants no permission to run tools,
 contact people, access other conversations, or disclose the agent owner's private
 information. Replies may contain already-shared information; private facts need
-explicit owner approval before publication. This API cannot inspect an external
-agent's private sources and does not provide a private-data approval UI.
+explicit owner approval before publication. This pull API cannot inspect an external agent's private sources. The hosted
+review flow below provides an explicit approval boundary for hosted drafts.
 
-This release supplies a functioning pull inbox, not a hosted autonomous assistant
-runner or external webhook. Agents need an active polling loop to process requests;
-enabling the key does not launch a process. Existing Asks/Stories/AgentIntent
-lifecycles remain separate until their publication/audience contracts are reconciled.
+External key-based agents still need an active polling loop; enabling a key does
+not launch a process. External webhooks and the existing Asks/Stories/AgentIntent
+lifecycles remain separate.
+
+## Hosted drafts and private sharing
+
+From Chats, select **Agent drafts**. The hosted agent is off for every owner until
+that owner enables it. A server availability switch alone never enrolls anyone.
+The screen explains that enabling hosted drafts takes precedence over that owner's
+key-based request recipient.
+
+An explicit **Ask agents** request can now queue a bounded hosted turn. Anthropic
+receives the selected shared Context post, plus only private text that the owner
+explicitly supplies for this request. No private notes are fetched automatically.
+The model has no tools. Generation creates an owner-private draft; it cannot
+publish Context, send messages, or send notifications.
+
+The owner sees the source revision, any supplied private text, the exact proposed
+reply, destination and current audience. Editing saves a new draft for another
+review. **Publish to Context** is a separate action submitting the exact draft ID,
+text and approval digest. A live membership, source, audience, display-metadata or
+opt-in change invalidates approval. Context is durable shared content: current
+and future authorized conversation members and their agents can read a published
+reply. This is not a promise to restrict the post forever to the review snapshot.
+
+Only a normal signed-in owner session can use the private review routes. Agent
+keys, embedded sessions, unified connector principals and delegated operations
+cannot approve drafts. API/MCP scope consent does not substitute for this product
+approval. Published replies carry server-derived **OpenChat Agent (owner approved)**
+attribution and use the existing quiet, threaded Context write path.
+
+Hosted routes live under `/api/chat/context-hosted`: `GET/PUT /preferences`,
+`GET /requests`, `GET /requests/:id`, and `POST /requests/:id/{revise,publish,decline,cancel}`.
+Revision accepts either `text` or `privateText`, never both. An empty `privateText`
+removes supplied private material and requests a new draft. Publication accepts
+`{draftId,approvalDigest,text}`. Requests expire after 24 hours and individual
+reviews after at most one hour. Retrying the same successful approval returns the
+same post while access remains valid.
+
+The worker uses durable 90-second leases, at most two active generations globally,
+a 25-second model timeout and three attempts per generation. Budgets allow six
+attempts per owner per hour and sixty globally. Turning off cancels pending work,
+invalidates in-flight output and removes unpublished drafts/private input.
+Obsolete revisions, expired or invalid requests, and account deletion clean up
+private drafts. Server availability requires `OPENCHAT_CONTEXT_LANE`,
+`OPENCHAT_CONTEXT_HOSTED_ENABLED=true`, and the existing `ANTHROPIC_API_KEY`.
+`ASSISTANT_MODEL` retains the existing provider configuration. No new API key is
+created for hosted execution.
 
 ## Verification
 

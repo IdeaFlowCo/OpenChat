@@ -1,3 +1,4 @@
+import { deleteHostedContextForUser } from '../services/contextHosted.js';
 import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
@@ -1515,13 +1516,8 @@ router.delete('/me', requireAuth, async (req: Request, res: Response) => {
         DETACH DELETE t
       `, { userId });
 
-      // Context request records contain source references, never copies of shared/private text.
-      await tx.run(`
-        MATCH (r:ContextAgentRequest)
-        WHERE r.ownerUserId = $userId OR r.requesterId = $userId
-           OR EXISTS { MATCH (:User {id:$userId})-[:HAS_THOUGHT]->(t:Thought) WHERE t.id=r.postId }
-        DETACH DELETE r
-      `, { userId });
+      // Remove request source snapshots and every associated private draft before deleting Thoughts.
+      await deleteHostedContextForUser(tx,userId);
 
       // 2b. Delete ContextResponses pointing to this user's Context posts, their own responses, then delete Thoughts.
       await tx.run(`

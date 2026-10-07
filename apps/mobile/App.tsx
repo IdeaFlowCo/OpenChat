@@ -93,6 +93,7 @@ import { ConversationThoughtsScreen } from './src/screens/ConversationThoughtsSc
 import { AsksScreen } from './src/screens/AsksScreen';
 import { StoryComposerScreen } from './src/screens/StoryComposerScreen';
 import { StoryViewerScreen } from './src/screens/StoryViewerScreen';
+import { ContextReviewScreen } from './src/screens/ContextReviewScreen';
 import { SocialReviewScreen } from './src/screens/SocialReviewScreen';
 import { AppIcon, AppIconName } from './src/components/AppIcon';
 import { serif } from './src/theme/typography';
@@ -171,6 +172,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         component={StoryViewerScreen}
         options={({ route }) => ({ title: route.params.story.author.name || 'Story' })}
       />
+      <ChatsStack.Screen name="ContextReview" component={ContextReviewScreen} options={{ title: 'Agent drafts' }} />
       <ChatsStack.Screen
         name="SocialReview"
         component={SocialReviewScreen}
