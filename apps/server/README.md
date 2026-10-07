@@ -3,9 +3,10 @@
 Link previews and voice transcription use [publicFetch.ts](src/services/publicFetch.ts) for remote
 GETs. Every URL and redirect must use HTTP(S) without URL credentials. All DNS
 answers must be public; loopback, private, link-local, shared-address and special
-IP ranges (including IPv4-mapped IPv6) are refused. The approved address is pinned
-to the actual connection with a fresh, unpooled request; HTTPS retains the
-original hostname for certificate validation. No app credential is forwarded.
+IP ranges (including IPv4-mapped IPv6) are refused. The full validated address
+set is pinned to a fresh, unpooled connection, allowing fallback among those
+addresses without resolving DNS again; HTTPS retains the original hostname for
+certificate validation. No app credential is forwarded.
 
 Each download has a single deadline (5 seconds for previews, 20 seconds for
 audio), including DNS, up to five redirects and response streaming. Previews are
