@@ -60,6 +60,7 @@ vi.mock('../../mobile/src/services/hashtagSuggestions', () => ({
   fetchHashtagSuggestions: vi.fn(), invalidateHashtagSuggestions: vi.fn(),
 }));
 vi.mock('../../mobile/src/components/MessageActionSheet', () => ({ MessageActionSheet: (props: any) => React.createElement('MessageActionSheet', props) }));
+vi.mock('../../mobile/src/components/ContextLane', () => ({ ContextLane: () => null }));
 vi.mock('../../mobile/src/components/ReactionsBar', () => ({ ReactionsBar: () => null }));
 vi.mock('../../mobile/src/components/ToastMessage', () => ({ ToastMessage: () => null }));
 vi.mock('../../mobile/src/components/AiDisclosureBanner', () => ({ AiDisclosureBanner: () => null }));
@@ -108,6 +109,8 @@ beforeEach(() => {
       { user: { id: 'bob', name: 'Bob' }, role: 'member' },
     ] } satisfies Conversation],
     messages: [], loadingMessages: false, isConnected: true,
+    activeConversationId: 'sailing', activeConversationLane: 'chat',
+    isChatVisible: (id: string) => mocks.chat.activeConversationId === id && mocks.chat.activeConversationLane === 'chat',
     setActiveConversation: vi.fn(), markConversationRead: vi.fn(),
     presence: new Map(), typingByConv: new Map(), readByOthers: new Map(), onlineUsers: new Map(),
     mutedConvs: {}, muteConv: vi.fn(), reportTyping: vi.fn(),
@@ -318,4 +321,20 @@ it('shows Retry instead of an empty-conversation placeholder after a failed load
   expect(renderedText()).not.toContain('Say hello');
   await act(async () => screen!.root.findByProps({ accessibilityLabel: 'Retry loading messages' }).props.onPress());
   expect(mocks.chat.retryMessages).toHaveBeenCalledOnce();
+});
+
+
+it('does not mark Chat read when a Context destination starts with stale lane state', async () => {
+  mocks.route.params = { conversationId: 'sailing', lane: 'context' } as any;
+  mocks.chat.setActiveConversation.mockImplementation((_id: string, opts: any) => {
+    mocks.chat.activeConversationLane = opts?.lane ?? 'chat';
+  });
+  try {
+    await render();
+    expect(mocks.chat.markConversationRead).not.toHaveBeenCalled();
+    mocks.chat.activeConversationId = 'sailing';
+    mocks.chat.activeConversationLane = 'context';
+    await render();
+    expect(mocks.chat.markConversationRead).not.toHaveBeenCalled();
+  } finally { mocks.route.params = { conversationId: 'sailing' }; }
 });

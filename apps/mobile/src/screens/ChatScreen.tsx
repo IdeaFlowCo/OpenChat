@@ -309,7 +309,7 @@ export function ChatScreen({
     presence, typingByConv, reportTyping,
     aiDisclosureAcceptedAt, mutedConvs, muteConv, blockUser,
     readByOthers, onlineUsers, markConversationRead,
-    activeConversationLane, setActiveConversationLane,
+    activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible,
   } = useChat();
 
   const conversation = useMemo<Conversation | undefined>(
@@ -486,11 +486,11 @@ export function ChatScreen({
   }, [conversationId, setActiveConversation, laneProp, embedded]));
 
   useFocusEffect(useCallback(() => {
-    const showingChat = activeConversationLane === 'chat';
+    const showingChat = activeConversationId === conversationId && isChatVisible(conversationId);
     setActiveConversationForNotifications(showingChat && isConnected ? conversationId : null);
     if (showingChat) markConversationRead(conversationId);
     return () => setActiveConversationForNotifications(null);
-  }, [conversationId, activeConversationLane, isConnected, markConversationRead]));
+  }, [conversationId, activeConversationId, activeConversationLane, isConnected, markConversationRead, isChatVisible]));
 
   const isGroup = conversation?.type === 'group';
   // Resolve self-DMs deliberately: there is no "other" participant, so the
@@ -775,7 +775,7 @@ export function ChatScreen({
     const previous = receivedMessagesRef.current;
     receivedMessagesRef.current = { conversationId, latestId: latest?.id, loading: loadingMessages };
     if (latest && (previous?.conversationId !== conversationId || previous.latestId !== latest.id)) {
-      if (activeConversationLane === 'chat') {
+      if (activeConversationId === conversationId && isChatVisible(conversationId)) {
         markConversationRead(conversationId);
       }
     }
@@ -786,7 +786,7 @@ export function ChatScreen({
     // append. The former newest message must still exist in this thread.
     if (previous.latestId && !messages.some(message => message.id === previous.latestId)) return;
     if (latest.senderId && latest.senderId !== currentUser?.userId) hapticReceive();
-  }, [messages, loadingMessages, currentUser?.userId, conversationId, markConversationRead, activeConversationLane]);
+  }, [messages, loadingMessages, currentUser?.userId, conversationId, markConversationRead, activeConversationId, activeConversationLane, isChatVisible]);
 
   // When loadingOlderMessages transitions false→false (completed), flag the
   // next messages update as a prepend so the scroll/unread effect ignores it (OpenChat-vjc).

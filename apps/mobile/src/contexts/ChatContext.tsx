@@ -207,15 +207,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [conversationsLoaded, setConversationsLoaded] = useState(false);
 
   const [activeConversationId, setActiveConversationIdState] = useState<string | null>(null);
-  const [activeConversationLane, setActiveConversationLane] = useState<'chat' | 'context'>('chat');
+  const [activeConversationLane, setActiveConversationLaneState] = useState<'chat' | 'context'>('chat');
   const activeConversationLaneRef = useRef<'chat' | 'context'>('chat');
   useEffect(() => {
     activeConversationLaneRef.current = activeConversationLane;
   }, [activeConversationLane]);
 
+  const setActiveConversationLane = useCallback((lane: 'chat' | 'context') => {
+    activeConversationLaneRef.current = lane;
+    setActiveConversationLaneState(lane);
+  }, []);
+
   const isChatVisible = useCallback((id: string) => {
-    return activeConversationId === id && activeConversationLane === 'chat';
-  }, [activeConversationId, activeConversationLane]);
+    return activeConvIdRef.current === id && activeConversationLaneRef.current === 'chat';
+  }, []);
   // Keep a ref so socket handlers (which close over a stale value) can read the
   // current active conversation without re-subscribing on every change.
   const activeConvIdRef = useRef<string | null>(null);
@@ -229,6 +234,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [messageLoadError, setMessageLoadError] = useState<string | null>(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  const messagePatchesRef = useRef(new Map<string, (message: Message) => Message>());
+  const patchMessage = useCallback((id: string, patch: (message: Message) => Message) => {
+    const previous = messagePatchesRef.current.get(id);
+    messagePatchesRef.current.set(id, previous ? message => patch(previous(message)) : patch);
+    setMessages(current => current.map(message => message.id === id ? patch(message) : message));
+  }, []);
   // Pagination state (OpenChat-vjc)
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
@@ -399,17 +410,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const id = activeConvIdRef.current;
     if (!id) return;
     const generation = ++messageLoadGenerationRef.current;
-    const snapshot = new Map(messagesRef.current.map(message => [message.id, message]));
+    const cachedIds = new Set(messagesRef.current.map(message => message.id));
+    messagePatchesRef.current.clear();
     setLoadingMessages(true);
     setLoadingOlderMessages(false);
     setMessageLoadError(null);
     api.getMessages(id).then(({ messages: loaded, hasMore }) => {
       if (activeConvIdRef.current !== id || messageLoadGenerationRef.current !== generation) return;
       setMessages(current => {
-        const relevant = current.filter(message => message.conversationId === id);
+        const oldest = loaded[0]?.createdAt;
+        const relevant = current.filter(message => message.conversationId === id
+          && (oldest !== undefined ? message.createdAt >= oldest : !cachedIds.has(message.id)));
         const merged = new Map([...relevant, ...loaded].map(message => [message.id, message]));
-        for (const message of relevant) {
-          if (snapshot.get(message.id) !== message) merged.set(message.id, message);
+        for (const [messageId, message] of merged) {
+          const patch = messagePatchesRef.current.get(messageId);
+          if (patch) merged.set(messageId, patch(message));
         }
         return [...merged.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
       });
@@ -465,7 +480,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             if (forActive.length > 0) {
               setMessages(prev => {
                 const existingIds = new Set(prev.map(m => m.id));
-                const fresh = forActive.filter(m => !existingIds.has(m.id));
+                const fresh = forActive.filter(m => !existingIds.has(m.id)
+                  && (!prev[0] || m.createdAt >= prev[0].createdAt))
+                  .map(m => messagePatchesRef.current.get(m.id)?.(m) ?? m);
                 if (fresh.length === 0) return prev;
                 // Insert in chronological order: prev is oldest→newest already.
                 return [...prev, ...fresh].sort((a, b) =>
@@ -536,7 +553,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const onMessage = (msg: Message) => {
       // If this is the active conversation, append to message list.
       if (msg.conversationId === activeConvIdRef.current) {
-        setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
+        setMessages(prev => (prev.some(m => m.id === msg.id) ? prev
+          : [...prev, messagePatchesRef.current.get(msg.id)?.(msg) ?? msg]));
       }
       // Update conversation row preview + re-sort.
       setConversations(prev => {
@@ -691,28 +709,29 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // message:updated — edit or soft-delete (OpenChat-q9h)
     const onMessageUpdated = (msg: Message) => {
       if (msg.conversationId === activeConvIdRef.current) {
-        setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, ...msg } : m));
+        patchMessage(msg.id, message => ({
+          ...message, content: msg.content,
+          ...(msg.editedAt !== undefined ? { editedAt: msg.editedAt } : {}),
+          ...(msg.deletedAt !== undefined ? { deletedAt: msg.deletedAt, attachments: msg.attachments } : {}),
+        }));
       }
     };
 
     // message:reactions-updated — reaction add/remove (OpenChat-7bd)
     const onReactionsUpdated = (payload: { messageId: string; conversationId: string; reactions: ReactionSummary[] }) => {
       if (payload.conversationId === activeConvIdRef.current) {
-        setMessages(prev => prev.map(m =>
-          m.id === payload.messageId ? { ...m, reactions: payload.reactions } : m
-        ));
+        patchMessage(payload.messageId, message => ({ ...message, reactions: payload.reactions }));
       }
     };
 
     // message:preview-ready — link preview fetched server-side (OpenChat-hq2)
     const onPreviewReady = (payload: { messageId: string; preview: LinkPreview }) => {
-      setMessages(prev => prev.map(m => {
-        if (m.id !== payload.messageId) return m;
+      patchMessage(payload.messageId, m => {
         const existing = m.linkPreviews ?? [];
         // Deduplicate by URL
         if (existing.some(p => p.url === payload.preview.url)) return m;
         return { ...m, linkPreviews: [...existing, payload.preview] };
-      }));
+      });
     };
 
     // message:transcript — server-side voice transcription ready (OpenChat-4jn).
@@ -721,9 +740,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // conversation guard keeps stale-conversation events from no-op churning.
     const onTranscript = (payload: { messageId: string; conversationId: string; transcript: string }) => {
       if (payload.conversationId !== activeConvIdRef.current) return;
-      setMessages(prev => prev.map(m =>
-        m.id === payload.messageId ? { ...m, transcript: payload.transcript } : m
-      ));
+      patchMessage(payload.messageId, message => ({ ...message, transcript: payload.transcript }));
     };
 
     sock.on('connect', onConnect);
@@ -765,7 +782,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sock.off('read:updated', onReadUpdated);
       sock.off('user:profile-updated', onProfileUpdated);
     };
-  }, [isAuthed, chatSocket, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage, refetchMatches, retryMessages]);
+  }, [isAuthed, chatSocket, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage, refetchMatches, retryMessages, patchMessage]);
 
   // setActiveConversation: clears unread, joins/leaves rooms, loads messages.
   const setActiveConversation = useCallback((id: string | null, opts?: { lane?: 'chat' | 'context' }) => {
@@ -791,7 +808,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           return next;
         });
       }
-      if (prev !== id) setMessages([]);
+      if (prev !== id) {
+        messagePatchesRef.current.clear();
+        setMessages([]);
+      }
       setHasMoreMessages(false);
       setLoadingOlderMessages(false);
       retryMessages();
@@ -817,7 +837,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (activeConvIdRef.current === conversationId && generation === messageLoadGenerationRef.current) {
         setMessages(prev => {
           const existingIds = new Set(prev.map(m => m.id));
-          const newMsgs = older.filter(m => !existingIds.has(m.id));
+          const newMsgs = older.filter(m => !existingIds.has(m.id))
+            .map(m => messagePatchesRef.current.get(m.id)?.(m) ?? m);
           return [...newMsgs, ...prev];
         });
         setHasMoreMessages(hasMore);
@@ -1051,11 +1072,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Debounced 500ms so we don't hammer the server on every incoming message
   // while the user is actively in the conversation.
   const markConversationRead = useCallback((conversationId: string) => {
+    if (activeConvIdRef.current !== conversationId || activeConversationLaneRef.current !== 'chat') return;
     const timers = markReadTimers.current;
     const existing = timers.get(conversationId);
     if (existing) clearTimeout(existing);
     const t = setTimeout(() => {
       timers.delete(conversationId);
+      if (activeConvIdRef.current !== conversationId || activeConversationLaneRef.current !== 'chat') return;
       api.markRead(conversationId)
         .then(res => {
           // Seed readByOthers from the response's readMap.
@@ -1076,6 +1099,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             return next;
           });
           // Also clear the unread badge for this conversation.
+          if (activeConvIdRef.current !== conversationId || activeConversationLaneRef.current !== 'chat') return;
           setUnreadByConv(curr => {
             if (!curr.has(conversationId)) return curr;
             const next = new Map(curr);

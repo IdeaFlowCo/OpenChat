@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Message } from '../../mobile/src/api/client.js';
 
 const mocks = vi.hoisted(() => ({ getMessages: vi.fn(), getMessagesBefore: vi.fn(),
+  markRead: vi.fn(),
   handlers: new Map<string, (...args: any[]) => void>(),
 }));
 const socket = { connected: true, on: (event: string, handler: (...args: any[]) => void) => mocks.handlers.set(event, handler), off: (event: string) => mocks.handlers.delete(event) };
@@ -11,7 +12,7 @@ vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn() }))
 vi.mock('expo-crypto', () => ({ randomUUID: vi.fn() }));
 vi.mock('../../mobile/src/services/notifications', () => ({ setUnreadBadgeCount: vi.fn(), loadMutedConvs: async () => ({}) }));
 vi.mock('../../mobile/src/api/client', () => ({
-  api: { getMessages: mocks.getMessages, getMessagesBefore: mocks.getMessagesBefore,
+  api: { markRead: mocks.markRead, getMessages: mocks.getMessages, getMessagesBefore: mocks.getMessagesBefore,
     getMe: async () => ({ id: 'me' }), getConversations: async () => [{ id: 'sailing' }],
     listMatches: async () => [], getAiDisclosureStatus: async () => ({}), messagesSince: async () => ({ messages: [], truncated: true }),
   }, getToken: async () => 'test', getUser: async () => ({ userId: 'me' }), setSession: vi.fn(), clearSession: vi.fn(),
@@ -121,4 +122,87 @@ it('discards an older page after closing and reopening the same thread', async (
   await act(async () => { older.resolve(history); await loading; });
   expect(chat.messages).toEqual([]);
   expect(chat.hasMoreMessages).toBe(false);
+});
+
+
+it('replaces disconnected cached history with a contiguous latest page', async () => {
+  await act(async () => { await chat.bootstrapIfAuthed(); });
+  mocks.getMessages.mockResolvedValueOnce({ ...history, hasMore: true });
+  await act(async () => chat.setActiveConversation('sailing'));
+  const latest = { ...history.messages[0], id: 'latest', createdAt: '2026-10-01T00:00:00Z' };
+  mocks.getMessages.mockResolvedValue({ messages: [latest], hasMore: true });
+  await act(async () => { mocks.handlers.get('connect')!(); });
+  expect(chat.messages).toEqual([latest]);
+  mocks.getMessagesBefore.mockResolvedValue({ messages: history.messages, hasMore: false });
+  await act(async () => chat.loadOlderMessages('sailing'));
+  expect(mocks.getMessagesBefore).toHaveBeenCalledWith('sailing', latest.createdAt);
+  expect(chat.messages).toEqual([...history.messages, latest]);
+});
+
+it.each(['edit', 'delete', 'reaction', 'transcript', 'preview'])('preserves an unloaded message %s while history is pending', async event => {
+  await act(async () => { await chat.bootstrapIfAuthed(); });
+  const read = pendingPage(); mocks.getMessages.mockReturnValueOnce(read.promise);
+  await act(async () => chat.setActiveConversation('sailing'));
+  const m = history.messages[0];
+  const reactions = [{ emoji: '👍', count: 1, byMe: false }];
+  const preview = { url: 'https://example.test', title: 'Example' };
+  await act(async () => {
+    if (event === 'edit' || event === 'delete') mocks.handlers.get('message:updated')!({ ...m,
+      content: event === 'edit' ? 'edited' : 'Message deleted',
+      ...(event === 'delete' ? { deletedAt: '2026-10-01', attachments: null } : { editedAt: '2026-10-01' }),
+    });
+    if (event === 'reaction') mocks.handlers.get('message:reactions-updated')!({ messageId: m.id, conversationId: m.conversationId, reactions });
+    if (event === 'transcript') mocks.handlers.get('message:transcript')!({ messageId: m.id, conversationId: m.conversationId, transcript: 'spoken words' });
+    if (event === 'preview') mocks.handlers.get('message:preview-ready')!({ messageId: m.id, preview });
+  });
+  await act(async () => read.resolve(history));
+  const loaded = chat.messages[0];
+  if (event === 'edit') expect(loaded.content).toBe('edited');
+  if (event === 'delete') expect(loaded.deletedAt).toBe('2026-10-01');
+  if (event === 'reaction') expect(loaded.reactions).toEqual(reactions);
+  if (event === 'transcript') expect(loaded.transcript).toBe('spoken words');
+  if (event === 'preview') expect(loaded.linkPreviews).toEqual([preview]);
+});
+
+it('applies reaction fields without restoring content edited offline', async () => {
+  await act(async () => { await chat.bootstrapIfAuthed(); });
+  mocks.getMessages.mockResolvedValueOnce(history);
+  await act(async () => chat.setActiveConversation('sailing'));
+  const read = pendingPage(); mocks.getMessages.mockReturnValueOnce(read.promise);
+  await act(async () => chat.retryMessages());
+  const reactions = [{ emoji: '👍', count: 1, byMe: false }];
+  await act(async () => mocks.handlers.get('message:reactions-updated')!({ messageId: 'history', conversationId: 'sailing', reactions }));
+  await act(async () => read.resolve({ messages: [{ ...history.messages[0], content: 'edited offline' }], hasMore: false }));
+  expect(chat.messages[0]).toMatchObject({ content: 'edited offline', reactions });
+});
+
+it('only emits a read receipt while the selected Chat lane remains visible', async () => {
+  vi.useFakeTimers();
+  try {
+    mocks.getMessages.mockResolvedValue(history);
+    mocks.markRead.mockResolvedValue({ readMap: {}, onlineMap: {} });
+    await act(async () => chat.setActiveConversation('sailing'));
+    await act(async () => { chat.markConversationRead('sailing'); chat.setActiveConversationLane('context'); });
+    await act(async () => vi.advanceTimersByTime(500));
+    expect(mocks.markRead).not.toHaveBeenCalled();
+    await act(async () => chat.markConversationRead('sailing'));
+    await act(async () => vi.advanceTimersByTime(500));
+    expect(mocks.markRead).not.toHaveBeenCalled();
+    await act(async () => { chat.setActiveConversationLane('chat'); chat.markConversationRead('sailing'); });
+    await act(async () => vi.advanceTimersByTime(500));
+    expect(mocks.markRead).toHaveBeenCalledExactlyOnceWith('sailing');
+    await act(async () => { chat.markConversationRead('sailing'); chat.setActiveConversation(null); });
+    await act(async () => vi.advanceTimersByTime(500));
+    expect(mocks.markRead).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});
+
+
+it('retains a new live message when an empty history response arrives', async () => {
+  await act(async () => { await chat.bootstrapIfAuthed(); });
+  const read = pendingPage(); mocks.getMessages.mockReturnValueOnce(read.promise);
+  await act(async () => chat.setActiveConversation('sailing'));
+  await act(async () => mocks.handlers.get('message:new')!(history.messages[0]));
+  await act(async () => read.resolve({ messages: [], hasMore: false }));
+  expect(chat.messages).toEqual(history.messages);
 });
