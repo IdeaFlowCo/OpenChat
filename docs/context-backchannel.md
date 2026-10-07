@@ -10,6 +10,10 @@ The app refreshes Context on focus/foreground and periodically, rather than
 through push events. If refresh fails, **Retry** reloads the feed; cached posts
 remain visible. Pull to refresh is also available.
 
+Returning to a conversation with Back keeps its selected Chat or Context lane.
+Opening a notification, banner or Context link instead selects its destination
+as described in [the user guide](../README.md#notifications-and-conversation-links).
+
 ## Posts
 
 Use the same OpenChat read/write API key and conversation membership as Chat. No

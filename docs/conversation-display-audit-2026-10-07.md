@@ -39,11 +39,11 @@ for the browser push follow-up and physical-device verification gap, and
 
 The final pass blocks pagination during a history reload, preserves successful
 HTTP edits/deletes/reactions against stale reads without relying on a socket
-echo, and keeps a compact screen's selected lane on focus return. Explicit new
-navigation requests still choose their requested lane. Desktop cold entry
+echo, and preserves the [lane-return contract](context-backchannel.md) on focus
+return. Desktop cold entry
 creates the Conversations host even when Chat is the only stack route.
 Notification and desktop-router regressions are included in the CI workflow.
-Version 1.0.17 carries these changes into the next native build.
+The native release version is owned by `apps/mobile/app.config.js`.
 
 Native registration lifecycle and multiple-device support need separate work
 (OpenChat-osr1): the current registration cache is not account-scoped, sign-out

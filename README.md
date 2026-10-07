@@ -50,7 +50,7 @@ not grant source access, and deleted or inaccessible sources are unavailable.
 Native push requires notification permission on a physical device. Tapping a
 notification opens its conversation; in-app message banners open **Chat**, and
 Context links open **Context**. A destination received during startup waits for
-navigation, sign-in and onboarding to finish. Incoming chat alerts are suppressed
+navigation, sign-in and onboarding to finish. Foreground chat alerts are suppressed
 while that chat is focused and connected, or when the conversation is muted;
 viewing Context does not suppress them.
 

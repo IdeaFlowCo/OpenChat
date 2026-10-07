@@ -107,8 +107,8 @@ const REGISTERED_TOKEN_KEY = 'openchat_native_push_token_registered';
  * the conv that's already on screen, the in-app UI will show it; we don't need
  * a system banner on top.
  *
- * ChatScreen tracks focus, the selected Chat lane and socket connectivity via
- * setActiveConversationForNotifications; Context must not suppress Chat alerts.
+ * ChatProvider combines ChatScreen's focus registration with the selected lane
+ * and socket connectivity; Context must not suppress Chat alerts.
  */
 let activeConversationId: string | null = null;
 export function getActiveConversationIdForNotifications(): string | null {

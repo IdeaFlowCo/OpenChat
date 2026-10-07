@@ -52,6 +52,8 @@ function stack(routeNames: string[], cold: boolean) {
     navigation: {
       getState: () => state,
       dispatch,
+      canGoBack: () => state.index > 0,
+      popToTop: () => dispatch(StackActions.popToTop()),
       popTo: (name: string) => dispatch(StackActions.popTo(name)),
     },
     names: () => state.routes.map(route => route.name),
