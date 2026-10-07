@@ -67,7 +67,7 @@ describe('unified OpenChat connector trust boundary',()=>{
   });
   it('dispatches unified reads without private access and rejects attempts to request it',async()=>{
     const read=await (await call('tools/call',{name:'oc_list_conversation_content',arguments:{conversationId:'room',filter:'all'}},{scope:'openchat:read'})).json() as any;
-    expect(JSON.parse(read.result.content[0].text)).toEqual({items:[]});
+    expect(JSON.parse(read.result.content[0].text)).toEqual({items:[],contextAvailable:true});
     expect(state.run.mock.calls.some(([,p])=>p?.includePrivate===false)).toBe(true);
     expect((await call('tools/call',{name:'oc_list_conversation_content',arguments:{conversationId:'room',includePrivate:true}},{scope:'openchat:read'})).status).toBe(400);
     expect((await call('tools/call',{name:'oc_list_conversation_content',arguments:{conversationId:'room'}},{scope:'openchat:write'})).status).toBe(403);

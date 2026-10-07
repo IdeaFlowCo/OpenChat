@@ -2,6 +2,7 @@ import { reconcileIntentionLifecycle } from './contextIntentions.js';
 import { acquireContextAclLocks } from './contextAccess.js';
 import type { Server as IOServer } from 'socket.io';
 import type AnthropicType from '@anthropic-ai/sdk';
+import type { ManagedTransaction, Session } from 'neo4j-driver';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
 import { embedText } from './embeddings.js';
@@ -649,6 +650,17 @@ function isDiscoverableIntent(intent: MatchIntent, now: number): boolean {
     && (intent.expiresAt == null || Date.parse(intent.expiresAt) > now);
 }
 
+async function withMatchOwnerLocks<T>(session: Session, lookup: { intentIds?: string[]; matchId?: string }, write: (tx: ManagedTransaction) => Promise<T>): Promise<T> {
+  return session.executeWrite(async tx => {
+    const owners = await tx.run(`MATCH (owner:User)-[:OWNS_INTENT]->(intent:AgentIntent)
+      WHERE ($intentIds IS NOT NULL AND intent.id IN $intentIds)
+        OR ($matchId IS NOT NULL AND EXISTS { MATCH (:AgentMatch {id:$matchId})-[:MATCHES]->(intent) })
+      RETURN DISTINCT owner.id AS id`, { intentIds: lookup.intentIds ?? null, matchId: lookup.matchId ?? null });
+    await acquireContextAclLocks(tx, { userIds: owners.records.map(record => record.get('id') as string) });
+    return write(tx);
+  });
+}
+
 export async function scanIntentForMatches(
   intentId: string,
   options: { io?: IOServer; scoring?: ScoringPipeline } = {},
@@ -732,7 +744,7 @@ export async function scanIntentForMatches(
       const pairKey = JSON.stringify([pair.source.id, pair.candidate.id].sort());
       const creationToken = nanoid();
       const now = new Date().toISOString();
-      const created = await session.run(
+      const created = await withMatchOwnerLocks(session, { intentIds: [pair.source.id, pair.candidate.id] }, tx => tx.run(
         `
         MATCH (sourceOwner:User)-[:OWNS_INTENT]->(source:AgentIntent {id: $sourceId, status: 'active'})
         MATCH (candidateOwner:User)-[:OWNS_INTENT]->(candidate:AgentIntent {id: $candidateId, status: 'active'})
@@ -801,7 +813,7 @@ export async function scanIntentForMatches(
           matchType: pair.result.matchType,
           now,
         },
-      );
+      ));
       if (created.records.length === 0) continue;
       const record = created.records[0];
       const resolvedMatchId = record.get('resolvedMatchId') as string;
@@ -970,7 +982,7 @@ export async function reconcileAgentDeliveries(io?: IOServer): Promise<void> {
 async function recheckProposedMatchEligibility(matchId: string): Promise<boolean> {
   const session = getDriver().session();
   try {
-    const result = await session.run(
+    const result = await withMatchOwnerLocks(session, { matchId }, tx => tx.run(
       `
       MATCH (ownerA:User)-[:OWNS_INTENT]->(a:AgentIntent)<-[:MATCHES]-(match:AgentMatch {id: $matchId, status: 'proposed'})-[:MATCHES]->(b:AgentIntent)<-[:OWNS_INTENT]-(ownerB:User)
       WHERE a.id < b.id AND ownerA <> ownerB
@@ -1007,7 +1019,7 @@ async function recheckProposedMatchEligibility(matchId: string): Promise<boolean
       RETURN eligible
       `,
       { matchId, now: new Date().toISOString() },
-    );
+    ));
     return result.records.length > 0 && result.records[0].get('eligible') === true;
   } finally {
     await session.close();
@@ -1053,7 +1065,7 @@ export async function respondToMatch(
   const session = getDriver().session();
   let transitionStatus: ProjectionInput['matchStatus'] | null = null;
   try {
-    const transition = await session.run(
+    const transition = await withMatchOwnerLocks(session, { matchId }, tx => tx.run(
       `
       MATCH (owner:User {id: $userId})-[:OWNS_INTENT]->(own:AgentIntent)<-[:MATCHES]-(match:AgentMatch {id: $matchId})-[:MATCHES]->(other:AgentIntent)<-[:OWNS_INTENT]-(otherOwner:User)
       WHERE own <> other AND match.status = 'proposed' AND owner <> otherOwner
@@ -1099,7 +1111,7 @@ export async function respondToMatch(
       RETURN match.status AS matchStatus, eligible
       `,
       { userId, matchId, response, now: new Date().toISOString() },
-    );
+    ));
     transitionStatus = transition.records.length
       ? transition.records[0].get('matchStatus') as ProjectionInput['matchStatus']
       : null;

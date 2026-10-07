@@ -21,7 +21,7 @@ integration('unified conversation content audience and pagination with real Neo4
       (tag2:Thought {id:$prefix+'-tag2',userId:$b,text:'Shared #alpha #beta',captureMethod:'inline-tag',tags:['beta'],kind:'observation',createdAt:datetime('2026-10-07T00:00:00Z')}),
       (pin:Thought {id:$prefix+'-pin',userId:$b,text:'Explicitly pinned text',kind:'fact',createdAt:datetime('2026-10-07T00:00:00Z')})
       CREATE (a)-[:PARTICIPATES_IN {lastReadAt:'before'}]->(c),(b)-[:PARTICIPATES_IN]->(c),(b)-[:PARTICIPATES_IN]->(other),
-        (a)-[:HAS_THOUGHT]->(mine),(b)-[:HAS_THOUGHT]->(theirs),(tag1)-[:FROM_MESSAGE]->(message),(tag2)-[:FROM_MESSAGE]->(message),
+        (a)-[:HAS_THOUGHT]->(mine),(b)-[:HAS_THOUGHT]->(theirs),(tag1)-[:FROM_MESSAGE]->(message),(tag2)-[:FROM_MESSAGE]->(message),(b)-[:HAS_THOUGHT]->(tag1),(b)-[:HAS_THOUGHT]->(tag2),
         (pin)-[:FROM_MESSAGE]->(foreign),(pin)-[:PINNED_IN {pinnedBy:$b,pinnedAt:datetime('2026-10-07T00:00:00Z')}]->(c)`, { prefix, a, b, room, other, key });
     await run(`MATCH (a:User {id:$a}) CREATE (a)-[:HAS_THOUGHT]->(:Thought {id:$prefix+'-deleted',userId:$a,scopeConversationId:$room,text:'DELETED PRIVATE TEXT',deletedAt:datetime(),createdAt:datetime('2026-10-07T00:00:00Z')})`, { a, prefix, room });
     const parent = await session(s => createContextPost(s, a, room, { text: 'Context question', kind: 'ask', clientRequestId: `${prefix}-context` }));
@@ -55,6 +55,22 @@ integration('unified conversation content audience and pagination with real Neo4
     do { const page = await read({ limit: 1, cursor, includePrivate: true }); ids.push(...page.items.map(item => item.id)); cursor = page.nextCursor; } while (cursor);
     expect(ids).toHaveLength(5); expect(new Set(ids).size).toBe(5);
     expect(ids).toEqual([...ids].sort().reverse());
+  });
+  it.each(['tag1', 'tag2'])('merges pinned %s with its capture aliases before pagination', async alias => {
+    const id = `${prefix}-${alias}`;
+    await session(s => pinThoughtWithReview(s, b, id, room, '2026-10-07T01:00:00Z', 'Shared #alpha #beta'));
+    try {
+      const rows = (await read({ filter: 'stream', search: 'Shared' })).items;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ id, visibility: 'conversation', provenance: 'pinned', thought: { id, pinned: true, pinnedBy: b, pinnedAt: '2026-10-07T01:00:00Z' } });
+      expect([...rows[0].sourceAliases].sort()).toEqual([`${prefix}-tag1`, `${prefix}-tag2`]);
+      expect([...rows[0].thought!.tags].sort()).toEqual(['alpha', 'beta']);
+      const ids: string[] = []; let cursor: string | undefined;
+      do { const page = await read({ limit: 1, cursor, filter: 'stream' }); ids.push(...page.items.map(item => item.id)); cursor = page.nextCursor; } while (cursor);
+      expect(ids).toHaveLength(2); expect(ids).toContain(id);
+    } finally {
+      await run('MATCH (:Thought {id:$id})-[pin:PINNED_IN]->(:Conversation {id:$room}) DELETE pin', { id, room });
+    }
   });
   it('redacts cross-conversation source identifiers but retains explicitly shared pinned text', async () => {
     const row = (await read()).items.find(item => item.id === `${prefix}-pin`)!;

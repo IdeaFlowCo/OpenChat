@@ -51,9 +51,9 @@ export async function listConversationContent(session: Session, userId: string, 
           CASE WHEN pin IS NOT NULL OR (source.conversationId=$conversationId AND t.captureMethod IN ['inline-tag','reply-tag']) THEN 'conversation' ELSE 'private' END AS visibility
         // Legacy hashtag fan-out aliases merge before pagination, within identical ownership and audience.
         WITH t, pin, visibility,
-          CASE WHEN source IS NOT NULL AND t.captureMethod IN ['inline-tag','reply-tag'] AND pin IS NULL
+          CASE WHEN source IS NOT NULL AND t.captureMethod IN ['inline-tag','reply-tag']
                THEN [source.id,t.userId,t.text,visibility] ELSE [t.id] END AS identity
-        ORDER BY t.createdAt ASC, t.id ASC
+        ORDER BY pin IS NOT NULL DESC, t.createdAt ASC, t.id ASC
         WITH identity, collect({node:t,pin:pin,visibility:visibility}) AS copies
         WITH head(copies) AS canonical, copies
         RETURN canonical.node AS t, 'stream' AS origin, canonical.visibility AS visibility,
