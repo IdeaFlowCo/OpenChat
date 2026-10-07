@@ -1,3 +1,5 @@
+import { acquireContextAclLocks } from './contextAccess.js';
+import { reconcileIntentionLifecycle } from './contextIntentions.js';
 import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
@@ -823,12 +825,18 @@ export async function updateStory(
 ): Promise<OwnedStory | null> {
   const session = getDriver().session();
   try {
-    const result = await session.run(
-      `MATCH (:User {id: $userId})-[:OWNS_STORY]->(story:OpenChatStory {id: $storyId})-[:ACTIVATES]->(intent:AgentIntent)
+    return await session.executeWrite(async tx => {
+    await acquireContextAclLocks(tx,{userIds:[userId]});
+    const result = await tx.run(
+      `MATCH (owner:User {id:$userId})
+       SET owner.contextAclRevision=coalesce(owner.contextAclRevision,0)+1
+       WITH owner
+       MATCH (owner)-[:OWNS_STORY]->(story:OpenChatStory {id: $storyId})-[:ACTIVATES]->(intent:AgentIntent)
        WITH story, intent,
             coalesce($status, story.status) AS nextStatus,
             CASE WHEN $storyExpiresAt IS NULL THEN story.storyExpiresAt ELSE datetime($storyExpiresAt) END AS nextStoryExpiry
        WHERE NOT (story.status = 'withdrawn' AND nextStatus <> 'withdrawn')
+         AND (nextStatus <> 'active' OR coalesce(intent.lifecycleState,CASE WHEN intent.status='withdrawn' THEN 'withdrawn' ELSE 'open' END)='open')
          AND (nextStatus <> 'active' OR story.humanVisible = false OR nextStoryExpiry > datetime($now))
        SET story.status = nextStatus,
            story.storyExpiresAt = nextStoryExpiry,
@@ -850,7 +858,7 @@ export async function updateStory(
              ELSE intent.expiresAt
            END,
            intent.updatedAt = datetime($now)
-       RETURN story { .* } AS story`,
+       RETURN story { .* } AS story, intent.id AS intentId, intent.status AS intentStatus, intent.lifecycleState AS lifecycleState`,
       {
         userId,
         storyId,
@@ -859,7 +867,15 @@ export async function updateStory(
         now: new Date().toISOString(),
       },
     );
-    return result.records.length ? ownedStoryFromRecord(result.records[0].get('story')) : null;
+    if(!result.records.length)return null;
+    const row=result.records[0];
+    if(row.get('intentStatus')==='withdrawn'){
+      await reconcileIntentionLifecycle(tx,row.get('intentId'),row.get('lifecycleState')==='fulfilled'?'fulfilled':'withdrawn',new Date().toISOString());
+      const reconciled=await tx.run('MATCH (story:OpenChatStory {id:$storyId}) RETURN story { .* } AS story',{storyId});
+      return ownedStoryFromRecord(reconciled.records[0].get('story'));
+    }
+    return ownedStoryFromRecord(row.get('story'));
+    });
   } finally {
     await session.close();
   }

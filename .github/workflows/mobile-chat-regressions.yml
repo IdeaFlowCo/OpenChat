@@ -33,6 +33,8 @@ jobs:
           test/addMeCard.test.ts test/addMeCard.route.test.ts
           test/privateNames.route.test.ts test/privateNames.mobile.test.ts test/contactProfileDoors.mobile.test.ts
           test/contextHostedReview.mobile.test.ts test/contextHostedApi.mobile.test.ts test/contextHosted.route.test.ts
+          test/contextWebhookSetup.mobile.test.ts test/contextWebhooks.route.test.ts test/contextWebhookTransport.test.ts
+          test/conversationContent.route.test.ts test/contextIntentions.mobile.test.ts
       - name: Ideaflow-only web sign-in, automatic sign-in, account switch, and native login parity
         working-directory: apps/server
         run: >-
@@ -77,3 +79,11 @@ jobs:
           NEO4J_TEST_USER: neo4j
           NEO4J_TEST_PASSWORD: private-alias-test-only
         run: npx vitest run test/contextHosted.integration.test.ts
+
+      - name: Context lifecycle, unified reads and webhook outbox on real Neo4j
+        working-directory: apps/server
+        env:
+          NEO4J_TEST_URI: bolt://127.0.0.1:7687
+          NEO4J_TEST_USER: neo4j
+          NEO4J_TEST_PASSWORD: private-alias-test-only
+        run: npx vitest run --no-file-parallelism test/contextIntentions.integration.test.ts test/agentNetwork.lifecycle.integration.test.ts test/conversationContent.integration.test.ts test/contextWebhooks.integration.test.ts

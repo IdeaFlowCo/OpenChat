@@ -1,3 +1,5 @@
+import { useChat } from '../contexts/ChatContext';
+import { IntentionLifecycleControls } from '../components/ContextIntentionControls';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -9,7 +11,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { api, type IntentDraft, type OwnedStory } from '../api/client';
+import { api, type IntentDraft, type OwnedStory, type ContextIntention } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import type { AsksNavProp } from '../navigation/types';
 import { getColors } from '../theme/colors';
@@ -18,7 +20,8 @@ import { AppIcon } from '../components/AppIcon';
 
 type InventoryItem =
   | { key: string; kind: 'draft'; draft: IntentDraft }
-  | { key: string; kind: 'story'; story: OwnedStory };
+  | { key: string; kind: 'story'; story: OwnedStory }
+  | { key: string; kind: 'intention'; intention: ContextIntention };
 
 function draftTitle(draft: IntentDraft): string {
   return draft.goal || draft.seeks[0] || draft.brings[0] || 'Private intention';
@@ -39,6 +42,10 @@ function isStoryExpired(story: OwnedStory): boolean {
 }
 
 export function AsksScreen() {
+  const { currentUser } = useChat();
+  return currentUser ? <AsksInventory key={currentUser.userId} /> : null;
+}
+function AsksInventory() {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   // Phones stack the agent button under the copy; beside it, the title was
@@ -48,6 +55,7 @@ export function AsksScreen() {
   const navigation = useNavigation<AsksNavProp<'AsksList'>>();
   const [drafts, setDrafts] = useState<IntentDraft[]>([]);
   const [stories, setStories] = useState<OwnedStory[]>([]);
+  const [intentions, setIntentions] = useState<ContextIntention[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -56,12 +64,16 @@ export function AsksScreen() {
     setLoading(true);
     setError(null);
     try {
-      const [nextDrafts, nextStories] = await Promise.all([
+      const [nextDrafts, nextStories, nextIntentions] = await Promise.allSettled([
         api.listIntentDrafts(),
         api.listMyStories(),
+        api.getContextIntentions(),
       ]);
-      setDrafts(nextDrafts);
-      setStories(nextStories);
+      if (nextDrafts.status === 'fulfilled') setDrafts(nextDrafts.value);
+      if (nextStories.status === 'fulfilled') setStories(nextStories.value);
+      setIntentions(nextIntentions.status === 'fulfilled' ? nextIntentions.value.intentions : []);
+      const failure = [nextDrafts, nextStories].find(result => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load your intentions.');
     } finally {
@@ -73,8 +85,9 @@ export function AsksScreen() {
 
   const items = useMemo<InventoryItem[]>(() => [
     ...drafts.filter(draft => draft.state === 'pending').map(draft => ({ key: `draft-${draft.id}`, kind: 'draft' as const, draft })),
-    ...stories.filter(story => story.status !== 'withdrawn').map(story => ({ key: `story-${story.id}`, kind: 'story' as const, story })),
-  ], [drafts, stories]);
+    ...intentions.map(intention => ({ key: `intention-${intention.intentId}`, kind: 'intention' as const, intention })),
+    ...stories.filter(story => story.status !== 'withdrawn' && !intentions.some(intention => intention.intentId === story.intentId)).map(story => ({ key: `story-${story.id}`, kind: 'story' as const, story })),
+  ], [drafts, stories, intentions]);
 
   const searchQuietly = async (draft: IntentDraft) => {
     setBusyId(draft.id);
@@ -171,6 +184,26 @@ export function AsksScreen() {
                 <TouchableOpacity onPress={() => navigation.navigate('StoryComposer', { draftId: item.draft.id })} style={[styles.outlineSmall, { borderColor: c.border }]}><Text style={{ color: c.primary, fontWeight: '700' }}>Share…</Text></TouchableOpacity>
                 <TouchableOpacity disabled={busyId === item.draft.id} onPress={() => void dismiss(item.draft)} style={styles.linkSmall}><Text style={{ color: c.textMetadata, fontWeight: '600' }}>Keep private</Text></TouchableOpacity>
               </View>
+            </View>
+          ) : item.kind === 'intention' ? (
+            <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+              <Text style={[styles.state, { color: c.textMetadata }]}>{item.intention.kind === 'offer' ? 'OFFER' : 'ASK'} · {item.intention.lifecycleState.toUpperCase()}</Text>
+              <Text style={[styles.cardTitle, { color: c.textPrimary }]}>{item.intention.goal || item.intention.seeks[0] || item.intention.brings[0] || 'Intention'}</Text>
+              <Text style={[styles.detail, { color: c.textMetadata }]}>One intention · {item.intention.contextPosts.length} Context post{item.intention.contextPosts.length === 1 ? '' : 's'} · {item.intention.stories.length} Story projection{item.intention.stories.length === 1 ? '' : 's'}</Text>
+              <Text style={[styles.detail, { color: c.textMetadata }]}>Agent search · {item.intention.searchStatus}{item.intention.expiresAt ? ` · expires ${new Date(item.intention.expiresAt).toLocaleDateString()}` : ''}</Text>
+              {item.intention.contextPosts.map(source => <TouchableOpacity key={source.postId} accessibilityRole="button" onPress={() => navigation.navigate('Chat', { conversationId: source.conversationId, lane: 'context' })} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: c.primary }}>Context · {source.conversationTitle}{source.sourceChanged ? ' · Source edited' : ''}</Text></TouchableOpacity>)}
+              {item.intention.stories.map(projection => {
+                const story = stories.find(owned => owned.id === projection.id) || projection;
+                return <View key={story.id}>
+                  <Text style={[styles.detail, { color: c.textMetadata }]}>{story.humanVisible ? story.explicitQuietSearch ? 'Stories and agents' : 'Stories only' : 'Agents only'} · {isStoryExpired(story) ? 'expired' : story.status} · {story.audience.conversationIds.length} selected chat{story.audience.conversationIds.length === 1 ? '' : 's'}</Text>
+                  {story.text && <Text style={[styles.detail, { color: c.textPrimary }]}>{story.text}</Text>}
+                  {relevantExpiresAt(story) && <Text style={[styles.detail, { color: c.textMetadata }]}>Expires · {inventoryExpiry(story)}</Text>}
+                  {item.intention.lifecycleState === 'open' && ['active', 'paused'].includes(story.status) && <TouchableOpacity disabled={busyId === story.id} onPress={() => void pauseStory(story)} style={[styles.outlineSmall, { borderColor: c.border, marginTop: 12, alignSelf: 'flex-start' }]}>
+                    <Text style={{ color: c.primary, fontWeight: '700' }}>{story.status === 'paused' ? `Resume ${story.humanVisible ? 'Story' : 'search'}` : `Pause ${story.humanVisible ? 'Story' : 'search'}`}</Text>
+                  </TouchableOpacity>}
+                </View>;
+              })}
+              <IntentionLifecycleControls intention={item.intention} onChange={() => void load()} />
             </View>
           ) : (
             <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>

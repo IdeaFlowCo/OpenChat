@@ -220,6 +220,15 @@ export function buildServer(
     }
   );
 
+  server.registerTool('oc_list_conversation_content', {
+    title:'Read shared conversation content',
+    description:'Read shared Context posts and shared Stream entries in one audience-labeled feed. Agent credentials never include private Stream entries. Does not read ordinary messages.',
+    annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    inputSchema:{conversationId:z.string().min(1),filter:z.enum(['all','context','stream']).optional(),search:z.string().max(200).optional(),cursor:z.string().max(2000).optional(),limit:z.number().int().min(1).max(100).optional()},
+  },async({conversationId,filter,search,cursor,limit})=>{
+    try{requireApiKey(api,'Reading shared conversation content');return textResult(JSON.stringify(await api.listConversationContent(conversationId,filter,search,cursor,limit),null,2));}catch(e){return errorResult(e);}
+  });
+
   // ---- oc_list_context_posts ----
   server.registerTool(
     'oc_list_context_posts',

@@ -1,3 +1,4 @@
+import { deleteContextWebhooksForUser } from '../services/contextWebhooks.js';
 import { deleteHostedContextForUser } from '../services/contextHosted.js';
 import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
@@ -1517,6 +1518,7 @@ router.delete('/me', requireAuth, async (req: Request, res: Response) => {
       `, { userId });
 
       // Remove request source snapshots and every associated private draft before deleting Thoughts.
+      await deleteContextWebhooksForUser(tx,userId);
       await deleteHostedContextForUser(tx,userId);
 
       // 2b. Delete ContextResponses pointing to this user's Context posts, their own responses, then delete Thoughts.

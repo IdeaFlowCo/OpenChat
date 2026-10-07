@@ -1,3 +1,4 @@
+import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import { Router, type Request, type Response } from 'express';
 import type { Server as IOServer } from 'socket.io';
 import { resolveActor } from '../middleware/resolveActor.js';
@@ -146,6 +147,9 @@ router.get('/intents', resolveActor, async (req: Request, res: Response) => {
 });
 
 router.patch('/intents/:id', resolveActor, async (req: Request, res: Response) => {
+  if ((req.agentKeyId || getConnectorPrincipal(req) || req.connectorDelegation) && !req.agentScopes?.includes('write')) {
+    res.status(403).json({ error: 'Write scope is required to withdraw an intention' }); return;
+  }
   if (req.body?.status !== 'withdrawn' || Object.keys(req.body ?? {}).some((key) => key !== 'status')) {
     res.status(400).json({ error: "Only status:'withdrawn' is supported" });
     return;

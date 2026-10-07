@@ -44,6 +44,11 @@ export async function hostedPreference(session:Session,userId:string,enabled?:bo
       ${enabled!==undefined?'SET u.contextHostedGeneration=CASE WHEN previous<>$enabled THEN coalesce(u.contextHostedGeneration,0)+1 ELSE coalesce(u.contextHostedGeneration,0) END,u.contextHostedEnabled=$enabled':''}
       RETURN coalesce(u.contextHostedEnabled,false) AS enabled,previous`,{userId,enabled:enabled??null});
     if(!r.records.length)throw new ContextLaneError(404,'Account not found');
+    if(enabled===true){
+      await tx.run(`MATCH (d:ContextWebhookDelivery {ownerUserId:$userId})
+        WHERE d.status IN ['pending','delivering']
+        SET d.status='cancelled',d.finishedAt=$now REMOVE d.leaseToken,d.leaseUntil`,{userId,now:iso()});
+    }
     if(enabled!==undefined&&r.records[0].get('previous')!==enabled){
       await tx.run(`MATCH (r:ContextAgentRequest {ownerUserId:$userId,recipientType:'hosted'})
         WHERE NOT r.status IN ['published','declined','cancelled','expired']

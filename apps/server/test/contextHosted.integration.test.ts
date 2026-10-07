@@ -74,11 +74,14 @@ integration('hosted Context private review with real Neo4j and fake model',()=>{
   const next=await session(s=>getHostedRequest(s,b,q.id));expect(next.status).toBe('queued');expect(next.draft).toBeUndefined();
   await runHostedContextOnce(driver,async input=>'Fresh '+input.privateText);expect((await session(s=>getHostedRequest(s,b,q.id))).draft!.text).toBe('Fresh New explicit input');
  });
- it('opt-out cancels old generations; re-enable permits a fresh request without reactivating old drafts',async()=>{
+ it('opt-out cancels old generations; re-enable cannot replay the source revision',async()=>{
   await session(s=>hostedPreference(s,b,true));const q=await queued();await runHostedContextOnce(driver,async()=> 'Pending approval');const review=await session(s=>getHostedRequest(s,b,q.id));
   await session(s=>hostedPreference(s,b,false));expect((await session(s=>getHostedRequest(s,b,q.id))).status).toBe('cancelled');
   await expect(session(s=>publishHostedRequest(s,b,q.id,approve(review)))).rejects.toMatchObject({statusCode:409});
-  await session(s=>hostedPreference(s,b,true));expect(await session(s=>askContextAgents(s,a,room,q.postId))).toEqual({queued:1,available:1});
+  await session(s=>hostedPreference(s,b,true));expect(await session(s=>askContextAgents(s,a,room,q.postId))).toEqual({queued:0,available:1});
+  expect((await session(s=>getHostedRequest(s,b,q.id))).status).toBe('cancelled');
+  await session(s=>updateContextPost(s,a,room,q.postId,'New source revision',q.sourceRevision));
+  expect(await session(s=>askContextAgents(s,a,room,q.postId))).toEqual({queued:1,available:1});
   expect((await session(s=>listHostedRequests(s,b))).requests.filter(r=>r.status==='queued')).toHaveLength(1);
  });
  it('source edits, audience changes and blocks invalidate review; inaccessible text is redacted',async()=>{

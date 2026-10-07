@@ -20,6 +20,8 @@ export interface ContextPostProjection {
   text: string;
   kind: string;
   lane: 'context';
+  status?: 'open'|'closed';
+  intention?: {intentId:string;lifecycleState:'open'|'fulfilled'|'withdrawn';revision:number;sourceChanged:boolean};
   revision: number;
   createdAt: string;
   updatedAt: string;
@@ -247,7 +249,8 @@ export async function updateContextPost(
     const now = new Date().toISOString();
     const result = await tx.run(
       `MATCH (t:Thought {id: $postId, conversationId: $conversationId, lane: 'context'})
-       SET t.text = $text, t.revision = t.revision + 1, t.updatedAt = datetime($now)
+       SET t.text = $text, t.revision = t.revision + 1, t.updatedAt = datetime($now),
+           t.intentionSourceChanged = CASE WHEN t.intentId IS NOT NULL THEN true ELSE t.intentionSourceChanged END
        WITH t
        ${projectionJoins}
        RETURN ${projectionReturn}`,
@@ -374,7 +377,7 @@ export async function listContextPosts(
   });
 }
 
-function projectContextPost(node: any, authorName?: string): ContextPostProjection {
+export function projectContextPost(node: any, authorName?: string): ContextPostProjection {
   return {
     id: node.properties.id,
     conversationId: node.properties.conversationId,
@@ -385,6 +388,8 @@ function projectContextPost(node: any, authorName?: string): ContextPostProjecti
     text: node.properties.deletedAt ? '' : node.properties.text,
     kind: node.properties.kind || 'note',
     lane: 'context',
+    ...(node.properties.status?{status:node.properties.status}:{}),
+    ...(!node.properties.deletedAt&&node.properties.intentId?{intention:{intentId:node.properties.intentId,lifecycleState:node.properties.intentionState||'open',revision:Number(node.properties.intentionRevision||0),sourceChanged:node.properties.intentionSourceChanged===true}}:{}),
     revision: node.properties.revision ? (node.properties.revision.toNumber ? node.properties.revision.toNumber() : node.properties.revision) : 1,
     createdAt: node.properties.createdAt.toString(),
     updatedAt: node.properties.updatedAt.toString(),

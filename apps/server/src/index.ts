@@ -1,3 +1,7 @@
+import contextIntentionsRoutes from './routes/contextIntentions.js';
+import conversationContentRoutes from './routes/conversationContent.js';
+import contextWebhooksRoutes from './routes/contextWebhooks.js';
+import { ensureContextWebhookIndexes,startContextWebhookWorker } from './services/contextWebhooks.js';
 import unlinkedMessagingRoutes from './routes/unlinkedMessaging.js';
 import { isContextLaneEnabled } from './config/features.js';
 import dotenv from 'dotenv';
@@ -42,6 +46,7 @@ import { ensureVectorIndex } from './services/embeddings.js';
 import { ensureAgentIntentIndexes, reconcileAgentDeliveries } from './services/agentNetwork.js';
 import { ensureAgentSocialLayerIndexes } from './services/agentSocialLayer.js';
 import { openapiSpec } from './openapi.js';
+import agentDocsRouter from './routes/agentDocs.js';
 import { setupChatSocket } from './websocket/chatHandler.js';
 import { parseCorsOrigins } from './config/cors.js';
 import { LEGACY_CHAT_ORIGIN, NEW_CHAT_ORIGIN, chatOriginForRequestHost } from './config/publicUrl.js';
@@ -385,6 +390,7 @@ ${body}
 </body></html>`;
   return connectBotHtmlCache;
 }
+app.use('/agents', agentDocsRouter);
 app.get(['/agents', '/about/connect-your-bot'], (_req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=300');
   res.type('html').send(renderConnectBotHtml());
@@ -433,6 +439,9 @@ app.use('/api', connectorDelegation.guard);
 app.use('/api/connector-delegations', connectorDelegation.routes);
 app.use('/api/auth', authRoutes);
 app.use('/api/chat/context-hosted', contextHostedRoutes);
+app.use('/api/chat/context-webhooks', contextWebhooksRoutes);
+app.use('/api/chat', contextIntentionsRoutes);
+app.use('/api/chat', conversationContentRoutes);
 app.use('/api/chat', contextRoutes);
 app.use('/api', entryIntentsRoutes);
 app.use('/api', unlinkedMessagingRoutes);
@@ -610,11 +619,14 @@ app.use(errorNotifierMiddleware);
 // Start server
 const PORT = parseInt(process.env.PORT || '41851', 10);
 
+let stopContextWebhookWorker: (()=>void) | undefined;
 let stopHostedContextWorker: (()=>void) | undefined;
 async function start() {
   try {
     await initDatabase();
     console.log('Connected to Neo4j database');
+    await ensureContextWebhookIndexes(getDriver());
+    stopContextWebhookWorker = startContextWebhookWorker(getDriver());
     await ensureHostedContextIndexes(getDriver());
     stopHostedContextWorker = startHostedContextWorker(getDriver());
 
@@ -687,6 +699,7 @@ async function start() {
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('Shutting down...');
+  stopContextWebhookWorker?.();
   stopHostedContextWorker?.();
   await closeDatabase();
   process.exit(0);
@@ -694,6 +707,7 @@ process.on('SIGTERM', async () => {
 
 process.on('SIGINT', async () => {
   console.log('Shutting down...');
+  stopContextWebhookWorker?.();
   stopHostedContextWorker?.();
   await closeDatabase();
   process.exit(0);

@@ -147,6 +147,9 @@ Set the API key one of three ways (checked in this order):
 
 ## Tools
 
+For the additive shared Context/Stream read tool, see
+[conversation content](../../docs/conversation-content.md).
+
 | Tool | Description |
 |---|---|
 | `oc_list_conversations` | List all your conversations (id, title, type, last message preview) |
@@ -192,5 +195,5 @@ This is **the same auth model as the OpenChat mobile/web app**, just exposed as 
 
 - Keys are AES-256-GCM encrypted at rest on the server.
 - Keys are re-viewable in-app (Settings → Agent keys → View full key) — you don't need to re-mint a new one if you lose it.
-- Revoke any key from the same screen; revocations take effect within ~60 s (cache TTL).
-- Scope labels (`read`, `write`, or both) are stored and returned for operator intent. Current server authorization does not enforce those labels; a valid key acts as the owning user.
+- Revoke any key from the same screen; see [revocation and expiry](../../docs/connect-your-bot.md#key-security).
+- Context and unified conversation content enforce key scopes and live access; see the [scope boundary](../../docs/connect-your-bot.md#scopes).

@@ -12,8 +12,10 @@
 >
 > PR146 has now shipped the hosted draft runner and owner-only private-sharing
 > review on the web/server in1.0.18; see the hosted section in the behavior document.
-> External webhooks, Asks/Stories lifecycle reconciliation and unified chat
-> Stream/Context reads remain follow-ups. Custom remote MCP works through the shared connector;
+> For the subsequent implementation contracts, see [Context webhooks](context-webhooks.md),
+> [Context intention lifecycle](context-intention-lifecycle.md), and
+> [conversation content](conversation-content.md). These guides do not constitute
+> deployment receipts. Custom remote MCP works through the shared connector;
 > a published ChatGPT directory listing and actual dot-host acceptance remain
 > separate from the production OAuth/API verification.
 

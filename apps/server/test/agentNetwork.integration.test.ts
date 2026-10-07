@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import neo4j, { type Driver } from 'neo4j-driver';
 
 const uri = process.env.NEO4J_TEST_URI;
@@ -14,6 +14,7 @@ integration('agent-network quiet-match loop', () => {
     'recovery-a', 'recovery-b', 'creator-a', 'creator-b',
     'pause-a', 'pause-b',
     'reciprocal-a', 'reciprocal-b', 'shared-a', 'shared-b',
+    'lifecycle-repair-a', 'lifecycle-repair-b',
   ]
     .map((prefix) => `${prefix}-${suffix}`);
   const [
@@ -404,6 +405,47 @@ integration('agent-network quiet-match loop', () => {
       await check.close();
     }
   });
+
+  it('closes canonically before delivery and never overwrites later lifecycle decisions during repair', async () => {
+    const [a,b]=userIds.slice(-2) as [string,string];
+    const matchId=await propose(a,b,`lifecyclerepair${suffix.replace(/[^a-z0-9]/gi,'')}`,'private a','private b');
+    const [intent]=await service.listIntents(a);
+    await service.respondToMatch(a,matchId,'approve');
+    // Fail after the durable match transition but before any connection delivery.
+    const failedDelivery=vi.spyOn(directService,'ensureDirectConversation').mockRejectedValueOnce(new Error('synthetic delivery interrupted'));
+    try { await expect(service.respondToMatch(b,matchId,'approve')).rejects.toThrow('synthetic delivery interrupted'); }
+    finally { failedDelivery.mockRestore(); }
+    const s=driver.session();
+    try {
+      const persisted=await s.run(`MATCH (m:AgentMatch {id:$matchId})-[:MATCHES]->(i:AgentIntent) RETURN m.status AS matchStatus,m.conversationId AS conversationId,collect(i.status) AS statuses`,{matchId});
+      expect(persisted.records[0].get('matchStatus')).toBe('connected');
+      expect(persisted.records[0].get('conversationId')).toBeNull();
+      expect(persisted.records[0].get('statuses')).toEqual(['connected','connected']);
+      const {updateContextIntention}=await import('../src/services/contextIntentions.js');
+      let revision=0;
+      for(const lifecycleState of ['fulfilled','open','withdrawn','open'] as const){
+        const changed=await updateContextIntention(s,a,intent!.id,{expectedRevision:revision,lifecycleState});
+        revision=changed.intention.revision;
+        const expected=changed.intention.searchStatus;
+        await service.listMatches(a);
+        await service.reconcileAgentDeliveries();
+        await service.respondToMatch(a,matchId,'approve');
+        const row=await s.run(`MATCH (i:AgentIntent {id:$id}) RETURN i.status AS status,i.lifecycleState AS lifecycle,i.lifecycleRevision AS revision`,{id:intent!.id});
+        expect(row.records[0].get('status')).toBe(expected);
+        expect(row.records[0].get('lifecycle')).toBe(lifecycleState);
+        expect(Number(row.records[0].get('revision'))).toBe(revision);
+      }
+      // Simulate an independently approved search resume after reopening. An old match must not close it again.
+      await s.run(`MATCH (i:AgentIntent {id:$id}) SET i.status='active'`,{id:intent!.id});
+      await service.listMatches(a);await service.reconcileAgentDeliveries();
+      expect((await service.listIntents(a)).find(i=>i.id===intent!.id)?.status).toBe('active');
+      const receipts=await s.run(`MATCH (m:Message {matchContextKey:$matchId}) RETURN count(m) AS count`,{matchId});
+      expect(Number(receipts.records[0].get('count'))).toBe(1);
+      const statuses=await s.run(`MATCH (m:Message) WHERE m.agentDeliveryKey IN $keys RETURN count(m) AS count`,{keys:[a,b].map(id=>JSON.stringify(['connected',matchId,id]))});
+      expect(Number(statuses.records[0].get('count'))).toBe(2);
+    }finally{await s.close();}
+    // Four lifecycle transitions replay database-backed delivery repair; allow for slower CI Neo4j.
+  }, 15_000);
 
   it('atomically closes instead of connecting when the second approval is no longer eligible', async () => {
     const token = `pausetoken${suffix.replace(/[^a-z0-9]/gi, '')}`;

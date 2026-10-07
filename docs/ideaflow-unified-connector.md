@@ -38,7 +38,8 @@ through normal Ideaflow sign-in.
 
 The adapter handles JSON-RPC initialization, ping, `tools/list`, and `tools/call`.
 Read scope exposes `oc_list_conversations`, `oc_get_messages`, `oc_search`, and
-`oc_list_context_posts`. Write scope exposes `oc_send_message`,
+`oc_list_context_posts`, plus the additive read-only
+[`oc_list_conversation_content`](conversation-content.md). Write scope exposes `oc_send_message`,
 `oc_create_context_post`, `oc_update_context_post`, `oc_delete_context_post`, and
 `oc_ask_context_agents`. Direct calls enforce the same scopes even when a tool was
 not advertised. Unknown fields and tools are rejected. Write scope does not imply

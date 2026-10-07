@@ -1,3 +1,5 @@
+import { pinThoughtWithReview } from '../services/pinThoughtWithReview.js';
+import { ContextLaneError } from '../services/contextLane.js';
 /**
  * Thoughts Stream API — personal notes feed (OpenChat-zi1)
  *
@@ -425,42 +427,25 @@ router.get('/:id/context', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/thoughts/:id/pin
- * Body: { conversationId }
- * Pins one of the caller's thoughts to a conversation they participate in.
- * Pinning shares the thought with all current participants (it appears in
- * their chat-scoped Thoughts view). Idempotent (MERGE).
+ * Sharing must reject text changed since the owner's review, even on a retry.
+ * The pin API and audience contract live in docs/conversation-content.md.
  */
 router.post('/:id/pin', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const { id } = req.params;
-  const { conversationId } = req.body ?? {};
+  const { conversationId, expectedText } = req.body ?? {};
 
   if (!conversationId || typeof conversationId !== 'string') {
     res.status(400).json({ error: 'conversationId is required' });
     return;
   }
 
+  if (typeof expectedText !== 'string' || expectedText.length > 20000) { res.status(400).json({ error: 'expectedText must be a string of at most 20000 characters' }); return; }
+
   const session = getDriver().session();
   try {
     const now = new Date().toISOString();
-    const result = await session.run(
-      `
-      MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought {id: $id})
-      WHERE t.lane IS NULL OR t.lane <> 'context'
-      MATCH (u)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-      MERGE (t)-[p:PINNED_IN]->(c)
-      ON CREATE SET p.pinnedBy = $userId, p.pinnedAt = datetime($now)
-      WITH u, t
-      OPTIONAL MATCH (t)-[:FROM_MESSAGE]->(m:Message)
-      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt,
-        tags: coalesce(t.tags, []), hasSourceMessage: m IS NOT NULL,
-        sourceMessageId: CASE WHEN EXISTS { MATCH (u)-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.id ELSE null END,
-        sourceConversationId: CASE WHEN EXISTS { MATCH (u)-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.conversationId ELSE null END
-      } AS thought
-      `,
-      { userId, id, conversationId, now }
-    );
+    const result = await pinThoughtWithReview(session, userId, String(id), conversationId, now, expectedText);
 
     if (result.records.length === 0) {
       res.status(404).json({ error: 'Thought or conversation not found (or not yours)' });
@@ -484,6 +469,7 @@ router.post('/:id/pin', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ ...thought, pinned: true });
   } catch (err) {
+    if (err instanceof ContextLaneError) { res.status(err.statusCode).json({ error: err.message }); return; }
     console.error('POST /api/thoughts/:id/pin error:', err);
     res.status(500).json({ error: 'Failed to pin thought' });
   } finally {

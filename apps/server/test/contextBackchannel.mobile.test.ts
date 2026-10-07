@@ -6,13 +6,15 @@ vi.mock('react-native', () => ({
   Platform: { select: () => ({}) }, StyleSheet: { create: (s: any) => s, hairlineWidth: 1 },
   AppState: { currentState: 'active', addEventListener: () => ({ remove: () => {} }) },
   View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', TextInput: 'TextInput', ActivityIndicator: 'ActivityIndicator',
-  FlatList: ({ data, renderItem, ListEmptyComponent, ListFooterComponent }: any) => React.createElement('List', {}, data.length ? data.map((item: any) => React.createElement(React.Fragment, { key: item.post.id }, renderItem({ item }))) : ListEmptyComponent, ListFooterComponent),
+  FlatList: ({ data, renderItem, ListEmptyComponent, ListFooterComponent }: any) => React.createElement('List', {}, data.length ? data.map((item: any) => React.createElement(React.Fragment, { key: item.id ?? item.post?.id }, renderItem({ item }))) : ListEmptyComponent, ListFooterComponent),
 }));
 vi.mock('@react-navigation/native', () => ({ useFocusEffect: (fn: any) => React.useEffect(fn, [fn]) }));
+vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
+vi.mock('../../mobile/src/api/socket', () => ({ getSocket: () => null }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ currentUser: { userId: 'me' } }) }));
 vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn() }));
-vi.mock('../../mobile/src/api/client', () => ({ api: { listContextPosts: mocks.list, createContextPost: mocks.create, updateContextPost: mocks.edit, deleteContextPost: mocks.remove, askContextAgents: mocks.ask, reportContextPost: mocks.report } }));
+vi.mock('../../mobile/src/api/client', () => ({ api: { getConversationContent: async () => ({ items: (await mocks.list()).posts.map((context: any) => ({ id: context.id, origin: 'context', context })) }), listContextPosts: mocks.list, createContextPost: mocks.create, updateContextPost: mocks.edit, deleteContextPost: mocks.remove, askContextAgents: mocks.ask, reportContextPost: mocks.report } }));
 import { ContextLane, contextThreads } from '../../mobile/src/components/ContextLane';
 import { ContextComposer } from '../../mobile/src/components/ContextComposer';
 import { ContextLaneManager, contextLaneManager } from '../../mobile/src/services/contextLane';

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   route: { params: {} as Record<string, any> },
   api: {
     listIntentDrafts: vi.fn(),
+    getContextIntentions: vi.fn().mockResolvedValue({ intentions: [] }),
     createIntentDraft: vi.fn(),
     activateIntentDraft: vi.fn(),
     createStory: vi.fn(),
@@ -91,6 +92,7 @@ beforeEach(() => {
   mocks.route.params = {};
   mocks.api.listIntentDrafts.mockResolvedValue([]);
   mocks.api.listMyStories.mockResolvedValue([]);
+  mocks.api.getContextIntentions.mockResolvedValue({ intentions: [] });
   mocks.api.createIntentDraft.mockResolvedValue({ draft: { id: 'draft-new' } });
   mocks.api.activateIntentDraft.mockResolvedValue({ draft: { id: 'draft-1' } });
   mocks.api.createStory.mockResolvedValue({ story: { id: 'story-new' } });
@@ -432,4 +434,37 @@ describe('AsksScreen after-the-fact visibility', () => {
     expect(findByText('1 selected chat · Stories and agents')).toBeDefined();
     expect(findByText('1 selected chat · Stories only')).toBeDefined();
   });
+});
+
+it('groups linked Story and Context projections under their canonical intention without losing visibility labels', async () => {
+  const story = { id: 'linked-story', intentId: 'shared-intent', status: 'active', humanVisible: true, explicitQuietSearch: true, audience: { userIds: [], conversationIds: ['conv-bob'] } };
+  mocks.api.listIntentDrafts.mockResolvedValue([]); mocks.api.listMyStories.mockResolvedValue([story]);
+  mocks.api.getContextIntentions.mockResolvedValue({ intentions: [{ intentId: 'shared-intent', revision: 2, kind: 'ask', lifecycleState: 'open', searchStatus: 'paused', goal: 'One canonical request', contextPosts: [{ postId: 'linked-post', conversationId: 'conv-bob', conversationTitle: 'Bob', sourceChanged: false }], stories: [story], seeks: [], brings: [] }] });
+  await act(async () => { root = create(React.createElement(AsksScreen)); });
+  expect(root!.root.findAllByType('Text').filter(node => node.children.join('') === 'One canonical request')).toHaveLength(1);
+  expect(JSON.stringify(root!.toJSON())).toContain('Stories and agents'); expect(JSON.stringify(root!.toJSON())).toContain('Context · ');
+});
+
+it('preserves grouped Story text, expiry and pause/resume actions without Context links', async () => {
+  const expiry = new Date(Date.now() + 86400000).toISOString();
+  let story = { id: 'paused-story', intentId: 'story-intent', status: 'paused', text: 'Approved Story text', humanVisible: true, explicitQuietSearch: false, storyExpiresAt: expiry, audience: { userIds: [], conversationIds: [] } };
+  const intention = { intentId: 'story-intent', revision: 0, kind: 'ask', lifecycleState: 'open', searchStatus: 'paused', goal: 'Private goal', contextPosts: [], stories: [story], seeks: [], brings: [] };
+  mocks.api.listMyStories.mockImplementation(async () => [story]);
+  mocks.api.getContextIntentions.mockResolvedValue({ intentions: [intention] });
+  mocks.api.updateStory.mockImplementation(async () => { story = { ...story, status: 'active' }; });
+  await act(async () => { root = create(React.createElement(AsksScreen)); });
+  expect(findByText('Approved Story text')).toBeDefined();
+  expect(findByText(`Expires · ${new Date(expiry).toLocaleDateString()}`)).toBeDefined();
+  await act(async () => { findTouchableWithText('Resume Story')!.props.onPress(); });
+  expect(mocks.api.updateStory).toHaveBeenCalledWith('paused-story', { status: 'active' });
+  expect(findTouchableWithText('Pause Story')).toBeDefined();
+});
+
+it('loads existing drafts and Stories when the Context endpoint is disabled', async () => {
+  mocks.api.getContextIntentions.mockRejectedValue(new Error('404 Context disabled'));
+  mocks.api.listIntentDrafts.mockResolvedValue([{ id: 'draft', state: 'pending', goal: 'Existing draft', seeks: [], brings: [], updatedAt: new Date().toISOString() }]);
+  mocks.api.listMyStories.mockResolvedValue([{ id: 'story', status: 'paused', text: 'Existing Story', humanVisible: true, audience: { conversationIds: [] }, storyExpiresAt: null, searchExpiresAt: null }]);
+  await act(async () => { root = create(React.createElement(AsksScreen)); });
+  expect(findByText('Existing draft')).toBeDefined();expect(findByText('Existing Story')).toBeDefined();
+  expect(findTouchableWithText('Resume Story')).toBeDefined();
 });

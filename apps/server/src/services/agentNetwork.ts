@@ -1,5 +1,8 @@
+import { reconcileIntentionLifecycle } from './contextIntentions.js';
+import { acquireContextAclLocks } from './contextAccess.js';
 import type { Server as IOServer } from 'socket.io';
 import type AnthropicType from '@anthropic-ai/sdk';
+import type { ManagedTransaction, Session } from 'neo4j-driver';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
 import { embedText } from './embeddings.js';
@@ -47,6 +50,8 @@ export interface MatchIntent {
   ownerUserId?: string;
   details?: string | null;
   status?: IntentStatus;
+  contextOnly?: boolean;
+  lifecycleState?: string;
   expiresAt?: string | null;
   goal?: string | null;
   seeks?: string[];
@@ -570,18 +575,17 @@ export async function listIntents(userId: string): Promise<AgentIntent[]> {
 export async function withdrawIntent(userId: string, intentId: string): Promise<AgentIntent | null> {
   const session = getDriver().session();
   try {
-    const result = await session.run(
-      `
-      MATCH (:User {id: $userId})-[:OWNS_INTENT]->(intent:AgentIntent {id: $intentId})
-      WHERE intent.status <> 'connected'
-      SET intent.status = 'withdrawn', intent.updatedAt = datetime($now)
-      RETURN intent { .* } AS intent
-      `,
-      { userId, intentId, now: new Date().toISOString() },
-    );
+    return await session.executeWrite(async tx => {
+    await acquireContextAclLocks(tx,{userIds:[userId]});
+    const eligible=await tx.run(`MATCH (:User {id:$userId})-[:OWNS_INTENT]->(intent:AgentIntent {id:$intentId})
+      WHERE intent.status <> 'connected' RETURN intent`,{userId,intentId});
+    if(!eligible.records.length)return null;
+    await reconcileIntentionLifecycle(tx,intentId,'withdrawn',new Date().toISOString());
+    const result=await tx.run('MATCH (intent:AgentIntent {id:$intentId}) RETURN intent { .* } AS intent',{intentId});
     return result.records.length
       ? toJS(result.records[0].get('intent')) as AgentIntent
       : null;
+    });
   } finally {
     await session.close();
   }
@@ -642,8 +646,19 @@ export async function listMatches(userId: string, io?: IOServer): Promise<AgentM
 }
 
 function isDiscoverableIntent(intent: MatchIntent, now: number): boolean {
-  return intent.status === 'active'
+  return intent.status === 'active' && intent.contextOnly !== true && (!intent.lifecycleState || intent.lifecycleState === 'open')
     && (intent.expiresAt == null || Date.parse(intent.expiresAt) > now);
+}
+
+async function withMatchOwnerLocks<T>(session: Session, lookup: { intentIds?: string[]; matchId?: string }, write: (tx: ManagedTransaction) => Promise<T>): Promise<T> {
+  return session.executeWrite(async tx => {
+    const owners = await tx.run(`MATCH (owner:User)-[:OWNS_INTENT]->(intent:AgentIntent)
+      WHERE ($intentIds IS NOT NULL AND intent.id IN $intentIds)
+        OR ($matchId IS NOT NULL AND EXISTS { MATCH (:AgentMatch {id:$matchId})-[:MATCHES]->(intent) })
+      RETURN DISTINCT owner.id AS id`, { intentIds: lookup.intentIds ?? null, matchId: lookup.matchId ?? null });
+    await acquireContextAclLocks(tx, { userIds: owners.records.map(record => record.get('id') as string) });
+    return write(tx);
+  });
 }
 
 export async function scanIntentForMatches(
@@ -656,7 +671,9 @@ export async function scanIntentForMatches(
       `
       MATCH (sourceOwner:User)-[:OWNS_INTENT]->(source:AgentIntent {id: $intentId, status: 'active'})
       MATCH (candidateOwner:User)-[:OWNS_INTENT]->(candidate:AgentIntent {status: 'active'})
-      WHERE (source.expiresAt IS NULL OR source.expiresAt > datetime($now))
+      WHERE coalesce(source.contextOnly,false)=false AND coalesce(candidate.contextOnly,false)=false
+        AND coalesce(source.lifecycleState,'open')='open' AND coalesce(candidate.lifecycleState,'open')='open'
+        AND (source.expiresAt IS NULL OR source.expiresAt > datetime($now))
         AND (candidate.expiresAt IS NULL OR candidate.expiresAt > datetime($now))
         AND candidateOwner.id <> sourceOwner.id
         AND NOT EXISTS {
@@ -690,11 +707,11 @@ export async function scanIntentForMatches(
           MATCH (existing)-[:MATCHES]->(candidate)
           WHERE existing.status <> 'proposed'
         }
-      RETURN source { .id, .kind, .terms, .ownerUserId, .status, .expiresAt,
+      RETURN source { .contextOnly, .lifecycleState, .id, .kind, .terms, .ownerUserId, .status, .expiresAt,
                       .goal, .seeks, .brings, .matchingMode, .openToCollaborators,
                       .audienceRestricted, .audienceUserIds, .audienceConversationIds,
                       .closeOnConnect } AS source,
-             candidate { .id, .kind, .terms, .ownerUserId, .status, .expiresAt,
+             candidate { .contextOnly, .lifecycleState, .id, .kind, .terms, .ownerUserId, .status, .expiresAt,
                           .goal, .seeks, .brings, .matchingMode, .openToCollaborators,
                           .audienceRestricted, .audienceUserIds, .audienceConversationIds,
                           .closeOnConnect } AS candidate
@@ -727,11 +744,13 @@ export async function scanIntentForMatches(
       const pairKey = JSON.stringify([pair.source.id, pair.candidate.id].sort());
       const creationToken = nanoid();
       const now = new Date().toISOString();
-      const created = await session.run(
+      const created = await withMatchOwnerLocks(session, { intentIds: [pair.source.id, pair.candidate.id] }, tx => tx.run(
         `
         MATCH (sourceOwner:User)-[:OWNS_INTENT]->(source:AgentIntent {id: $sourceId, status: 'active'})
         MATCH (candidateOwner:User)-[:OWNS_INTENT]->(candidate:AgentIntent {id: $candidateId, status: 'active'})
-        WHERE (source.expiresAt IS NULL OR source.expiresAt > datetime($now))
+        WHERE coalesce(source.contextOnly,false)=false AND coalesce(candidate.contextOnly,false)=false
+        AND coalesce(source.lifecycleState,'open')='open' AND coalesce(candidate.lifecycleState,'open')='open'
+        AND (source.expiresAt IS NULL OR source.expiresAt > datetime($now))
           AND (candidate.expiresAt IS NULL OR candidate.expiresAt > datetime($now))
           AND sourceOwner.id <> candidateOwner.id
           AND NOT EXISTS {
@@ -794,7 +813,7 @@ export async function scanIntentForMatches(
           matchType: pair.result.matchType,
           now,
         },
-      );
+      ));
       if (created.records.length === 0) continue;
       const record = created.records[0];
       const resolvedMatchId = record.get('resolvedMatchId') as string;
@@ -887,11 +906,9 @@ async function completeConnectedMatch(
   try {
     await finishSession.run(
       `
-      MATCH (match:AgentMatch {id: $matchId})-[:MATCHES]->(intent:AgentIntent)
+      MATCH (match:AgentMatch {id: $matchId})
       SET match.conversationId = $conversationId,
-          match.updatedAt = datetime($now),
-          intent.status = CASE WHEN coalesce(intent.closeOnConnect, true) THEN 'connected' ELSE intent.status END,
-          intent.updatedAt = datetime($now)
+          match.updatedAt = datetime($now)
       `,
       { matchId, conversationId, now: new Date().toISOString() },
     );
@@ -963,7 +980,7 @@ export async function reconcileAgentDeliveries(io?: IOServer): Promise<void> {
 async function recheckProposedMatchEligibility(matchId: string): Promise<boolean> {
   const session = getDriver().session();
   try {
-    const result = await session.run(
+    const result = await withMatchOwnerLocks(session, { matchId }, tx => tx.run(
       `
       MATCH (ownerA:User)-[:OWNS_INTENT]->(a:AgentIntent)<-[:MATCHES]-(match:AgentMatch {id: $matchId, status: 'proposed'})-[:MATCHES]->(b:AgentIntent)<-[:OWNS_INTENT]-(ownerB:User)
       WHERE a.id < b.id AND ownerA <> ownerB
@@ -971,6 +988,8 @@ async function recheckProposedMatchEligibility(matchId: string): Promise<boolean
       OPTIONAL MATCH (ownerB)-[:HAS_SOCIAL_PREFERENCE]->(prefB:OpenChatSocialPreference)
       WITH match, ownerA, ownerB, a, b,
         a.status = 'active' AND b.status = 'active'
+        AND coalesce(a.contextOnly,false)=false AND coalesce(b.contextOnly,false)=false
+        AND coalesce(a.lifecycleState,'open')='open' AND coalesce(b.lifecycleState,'open')='open'
         AND (a.expiresAt IS NULL OR a.expiresAt > datetime($now))
         AND (b.expiresAt IS NULL OR b.expiresAt > datetime($now))
         AND coalesce(prefA.networkPaused, false) = false
@@ -998,7 +1017,7 @@ async function recheckProposedMatchEligibility(matchId: string): Promise<boolean
       RETURN eligible
       `,
       { matchId, now: new Date().toISOString() },
-    );
+    ));
     return result.records.length > 0 && result.records[0].get('eligible') === true;
   } finally {
     await session.close();
@@ -1044,7 +1063,7 @@ export async function respondToMatch(
   const session = getDriver().session();
   let transitionStatus: ProjectionInput['matchStatus'] | null = null;
   try {
-    const transition = await session.run(
+    const transition = await withMatchOwnerLocks(session, { matchId }, tx => tx.run(
       `
       MATCH (owner:User {id: $userId})-[:OWNS_INTENT]->(own:AgentIntent)<-[:MATCHES]-(match:AgentMatch {id: $matchId})-[:MATCHES]->(other:AgentIntent)<-[:OWNS_INTENT]-(otherOwner:User)
       WHERE own <> other AND match.status = 'proposed' AND owner <> otherOwner
@@ -1053,6 +1072,8 @@ export async function respondToMatch(
       WITH match, owner, otherOwner, own, other,
            CASE WHEN own.id < other.id THEN match.aResponse ELSE match.bResponse END AS ownResponse,
            own.status = 'active' AND other.status = 'active'
+           AND coalesce(own.contextOnly,false)=false AND coalesce(other.contextOnly,false)=false
+           AND coalesce(own.lifecycleState,'open')='open' AND coalesce(other.lifecycleState,'open')='open'
            AND (own.expiresAt IS NULL OR own.expiresAt > datetime($now))
            AND (other.expiresAt IS NULL OR other.expiresAt > datetime($now))
            AND coalesce(ownPref.networkPaused, false) = false
@@ -1085,10 +1106,14 @@ export async function respondToMatch(
         WHEN match.aResponse = 'approved' AND match.bResponse = 'approved' THEN 'connected'
         ELSE 'proposed'
       END
+      // Canonical search closure belongs to this one-time transition, never delivery repair.
+      FOREACH (intent IN CASE WHEN match.status='connected' THEN [own,other] ELSE [] END |
+        SET intent.status=CASE WHEN coalesce(intent.closeOnConnect,true) THEN 'connected' ELSE intent.status END,
+            intent.updatedAt=datetime($now))
       RETURN match.status AS matchStatus, eligible
       `,
       { userId, matchId, response, now: new Date().toISOString() },
-    );
+    ));
     transitionStatus = transition.records.length
       ? transition.records[0].get('matchStatus') as ProjectionInput['matchStatus']
       : null;
