@@ -6,7 +6,7 @@ const dist = process.argv[2];
 if (!dist) throw new Error('Pass the absolute server dist directory');
 const { getDriver } = await import(pathToFileURL(`${dist}/db.js`));
 const { checkContextReadAccess, checkContextWriteAccess } = await import(pathToFileURL(`${dist}/services/contextAccess.js`));
-const { createContextPost } = await import(pathToFileURL(`${dist}/services/contextLane.js`));
+const { createContextPost, updateContextPost, deleteContextPost } = await import(pathToFileURL(`${dist}/services/contextLane.js`));
 const driver = getDriver(), session = driver.session(), tx = session.beginTransaction();
 const suffix = crypto.randomUUID(), userId = `context-check-${suffix}`, conversationId = `context-room-${suffix}`, agentKeyId = `context-key-${suffix}`;
 try {
@@ -20,6 +20,12 @@ try {
   const first = await createContextPost(adapter, userId, conversationId, input, agentKeyId, ['read','write']);
   const retry = await createContextPost(adapter, userId, conversationId, input, agentKeyId, ['read','write']);
   assert.equal(first.id, retry.id);
+  const edited = await updateContextPost(adapter, userId, conversationId, first.id, 'Edited fixture', 1, agentKeyId, ['read','write']);
+  assert.equal(edited.text, 'Edited fixture');
+  assert.equal(edited.revision.toNumber?.() ?? edited.revision, 2);
+  await assert.rejects(() => updateContextPost(adapter, userId, conversationId, first.id, 'Stale edit', 1, agentKeyId, ['read','write']), /Revision mismatch/);
+  await deleteContextPost(adapter, userId, conversationId, first.id, agentKeyId, ['read','write']);
+  assert.equal((await tx.run('MATCH (t:Thought {id:$id}) RETURN t', {id:first.id})).records.length, 0);
   for (const patch of ["k.revokedAt='revoked'", "k.revokedAt=null, k.expiresAt='2000-01-01T00:00:00Z'", "k.expiresAt=null, k.ownerUserId='other-owner'", "k.ownerUserId=$userId, k.scopes=[]"]) {
     await tx.run(`MATCH (k:AgentKey {id:$agentKeyId}) SET ${patch}`, { agentKeyId, userId });
     assert.equal(await checkContextReadAccess(...args), false);
@@ -30,5 +36,5 @@ try {
   assert.equal(await checkContextWriteAccess(...args), false);
   await tx.run('MATCH (:User {id:$userId})-[p:PARTICIPATES_IN]->() DELETE p', {userId});
   assert.equal(await checkContextReadAccess(...args), false);
-  console.log('PASS: same-key context create/retry/read, membership, ownership, scope, expiry and revocation; all fixtures rolled back.');
+  console.log('PASS: same-key context create/retry/read/edit/delete, revision conflicts, membership, ownership, scope, expiry and revocation; all fixtures rolled back.');
 } finally { await tx.rollback(); await session.close(); await driver.close(); }

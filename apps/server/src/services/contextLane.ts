@@ -197,6 +197,7 @@ export async function updateContextPost(
     const result = await tx.run(
       `MATCH (t:Thought {id: $postId, conversationId: $conversationId, lane: 'context'})
        SET t.text = $text, t.revision = t.revision + 1, t.updatedAt = datetime($now)
+       WITH t
        OPTIONAL MATCH (t)-[:REPLIES_TO]->(parent:Thought)
        RETURN t, parent.id AS replyToId`,
       { postId, conversationId, text, now }
