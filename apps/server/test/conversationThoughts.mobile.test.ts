@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Conversation, Thought } from '../../mobile/src/services/thoughts.js';
+import type { Conversation } from '../../mobile/src/services/thoughts.js';
 
 const mocks = vi.hoisted(() => ({
   chat: {} as Record<string, any>,
@@ -121,10 +121,7 @@ vi.mock('../../mobile/src/services/thoughts', () => ({
 }));
 
 import { ConversationThoughtsScreen } from '../../mobile/src/screens/ConversationThoughtsScreen.js';
-import { ThoughtsScreen } from '../../mobile/src/screens/ThoughtsScreen.js';
 import { ThoughtCard } from '../../mobile/src/components/ThoughtCard.js';
-import { StreamEditor } from '../../mobile/src/components/StreamEditor.js';
-import { ThoughtsSearchBar } from '../../mobile/src/components/ThoughtsSearchBar.js';
 import { ChatScreen } from '../../mobile/src/screens/ChatScreen.js';
 
 describe('ConversationThoughtsScreen parity & search', () => {
@@ -199,7 +196,7 @@ describe('ConversationThoughtsScreen parity & search', () => {
     expect(JSON.stringify(screen!.toJSON())).toContain('Private entries are labeled Only you.');
   });
   it('filters tagged entries through the unified server query and refreshes after Stream events', async () => {
-    const listeners: Record<string, Function> = {}; mocks.getSocket.mockReturnValue({ on: vi.fn((name, fn) => { listeners[name] = fn; }), off: vi.fn() });
+    const listeners: Record<string, () => void> = {}; mocks.getSocket.mockReturnValue({ on: vi.fn((name, fn) => { listeners[name] = fn; }), off: vi.fn() });
     mocks.content.mockResolvedValue({ items: [entry('Tagged entry')] }); await mount();
     await act(async () => screen!.root.findByType(ThoughtCard).props.onTagPress('alpha')); await act(async () => vi.advanceTimersByTime(300));
     expect(mocks.content).toHaveBeenLastCalledWith('conv-1', expect.objectContaining({ search: 'alpha' }));

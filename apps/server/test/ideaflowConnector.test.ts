@@ -96,7 +96,7 @@ describe('unified OpenChat connector trust boundary',()=>{
   it('internal operation tokens are one-use, exact route/method/body bound, not JWTs',async()=>{
     const op={method:'GET',path:'/api/probe'};
     let token=issueConnectorOperation('owner',op,['openchat:read']);
-    let response=await fetch(base+op.path,{headers:{Authorization:`Bearer ${token}`}});
+    const response=await fetch(base+op.path,{headers:{Authorization:`Bearer ${token}`}});
     expect(response.status).toBe(200);expect(await response.json()).toEqual({userId:'owner',trusted:true});
     expect((await fetch(base+op.path,{headers:{Authorization:`Bearer ${token}`}})).status).toBe(401);
     token=issueConnectorOperation('owner',op,['openchat:read']);
