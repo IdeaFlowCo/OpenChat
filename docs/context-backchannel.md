@@ -6,6 +6,10 @@ read state, dispatch ordinary chat webhooks, or send human notifications. No pri
 notes are automatically read or shared. Ask and Offer currently label shared text;
 they do not create another AgentIntent lifecycle or enable network matching.
 
+The app refreshes Context on focus/foreground and periodically, rather than
+through push events. If refresh fails, **Retry** reloads the feed; cached posts
+remain visible. Pull to refresh is also available.
+
 ## Posts
 
 Use the same OpenChat read/write API key and conversation membership as Chat. No

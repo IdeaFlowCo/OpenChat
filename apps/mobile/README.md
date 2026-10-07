@@ -15,6 +15,8 @@ for the production cutover and old-host compatibility.
 - Search conversations and messages
 - Send messages via Socket.io (REST fallback)
 - Receive messages live via WebSocket
+- Native push registration and conversation routing; see
+  [notification behavior and delivery limits](../../README.md#notifications-and-conversation-links)
 - System dark mode (follows system appearance)
 - Responsive master-detail layout at desktop/tablet widths
 - iPad landscape support (`orientation: 'default'`)
@@ -35,7 +37,6 @@ for the production cutover and old-host compatibility.
 - Group settings (rename, add/remove member, leave)
 - Presence indicators, typing indicators
 - @-mentions, reactions, media
-- Push notifications (APNs) — depends on `OpenChat-t81` server work
 - Manual theme override (currently follows system only)
 
 ## Running
@@ -175,8 +176,6 @@ This is the bones of the prototype per the success criteria in `OpenChat-dv0`. B
 - [ ] Native module integration (Contacts via expo-contacts) works without ejecting from Expo Managed
 - [ ] EAS Update OTA functional
 - [ ] One platform-only feature works (Android Contacts → "X of your contacts are on OpenChat" UI)
-
-Push notifications (`OpenChat-t81`) are the next big native unlock.
 
 ## Password recovery entry
 

@@ -11,7 +11,7 @@
  *   - Install a response handler so tapping the OS notification navigates to the
  *     right Chat screen.
  *
- * Web platform is a no-op (web push is handled separately via service worker).
+ * Web platform is a no-op. See the repository README's notification delivery limits.
  */
 
 import { Platform } from 'react-native';
@@ -101,15 +101,14 @@ export async function setUnreadBadgeCount(count: number): Promise<void> {
 
 const REGISTERED_TOKEN_KEY = 'openchat_native_push_token_registered';
 
-/** Set by App.tsx, used by the tap-handler to navigate. */
-
 /**
  * The conversation the user is currently viewing on this device. Used by the
  * foreground handler to suppress redundant banners — if a message arrives for
  * the conv that's already on screen, the in-app UI will show it; we don't need
  * a system banner on top.
  *
- * ChatScreen calls setActiveConversation(id) in its mount effect.
+ * ChatScreen tracks focus, the selected Chat lane and socket connectivity via
+ * setActiveConversationForNotifications; Context must not suppress Chat alerts.
  */
 let activeConversationId: string | null = null;
 export function getActiveConversationIdForNotifications(): string | null {
@@ -138,8 +137,7 @@ export function configureNotificationHandlers(): void {
       const muted = convId ? await isConversationMuted(convId) : false;
       // If the user is already viewing the conversation, suppress the banner +
       // sound (the in-app message:new socket event already updated the UI).
-      // We still let it through silently so the system notification center has
-      // a record — but no audible/visual alert.
+      // Suppression also hides it from the system notification list.
       const suppress = inThisConv || muted;
       return {
         shouldShowBanner: !suppress,

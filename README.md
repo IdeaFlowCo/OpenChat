@@ -23,6 +23,10 @@ Shift+Enter still inserts a newline. Native keyboard return inserts a newline;
 use the send button to send. Long-press a message for its actions, or right-click
 on desktop web to open the same menu.
 
+If message history fails to load, the chat shows an error and **Retry** instead
+of an empty-chat prompt. Tap **Retry** to reload; previously loaded messages stay
+visible during transient failures. Reconnecting also reloads the open thread.
+
 Open **Stream** from Chats, or **Stream** in a chat's header for **Chat Stream**.
 The search bar filters text and tags. Its visible **Create** action opens an
 editable entry using your search text, even when nothing matches; with empty
@@ -40,6 +44,20 @@ available actions. Saved-message entries have an **Original message** door:
 it highlights the source with up to five nondeleted messages before and after,
 and offers **Open chat**. Current membership is required; saving an entry does
 not grant source access, and deleted or inaccessible sources are unavailable.
+
+## Notifications and conversation links
+
+Native push requires notification permission on a physical device. Tapping a
+notification opens its conversation; in-app message banners open **Chat**, and
+Context links open **Context**. A destination received during startup waits for
+navigation, sign-in and onboarding to finish. Incoming chat alerts are suppressed
+while that chat is focused and connected, or when the conversation is muted;
+viewing Context does not suppress them.
+
+Browser background push is not implemented (follow-up **OpenChat-7o4h**).
+Physical iPhone APNs/Expo delivery still needs a device smoke check; the mocked
+notification tests do not establish delivery reliability. Context refresh and
+quiet delivery are described in [Context back-channel](docs/context-backchannel.md).
 
 ## Message with OpenChat from Unlinked
 
