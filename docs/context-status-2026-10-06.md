@@ -1,5 +1,23 @@
 # Context implementation audit · 2026-10-06
 
+> **Delivery update, 2026-10-07:** The audit below records the earlier state.
+> PR141 (with deployment configuration in PR142) has now shipped attributed
+> threaded replies, editing, tombstones, search/report, refresh and account-safe
+> caching, explicit Note/Ask/Offer controls, and bounded opt-in agent request
+> polling with atomic replies. See [current Context behavior](context-backchannel.md).
+> The shared OAuth connector and setup hub are live at
+> [id.ideaflow.app/agents](https://id.ideaflow.app/agents); see
+> [the adapter contract](ideaflow-unified-connector.md) and
+> [setup placement](agent-connection-entry.md).
+>
+> Hosted autonomous execution, private-data approval UI, external webhooks,
+> Asks/Stories lifecycle reconciliation and unified chat Stream/Context reads
+> remain follow-ups. Custom remote MCP works through the shared connector;
+> a published ChatGPT directory listing and actual dot-host acceptance remain
+> separate from the production OAuth/API verification.
+
+## Historical findings before PR141
+
 Context is a working quiet per-conversation post feed, **not the completed
 agent back-channel described by the earlier reviews**. PR #77 shipped a
 subset of Phase A. PR #139 repairs existing-key authorization, request errors,
