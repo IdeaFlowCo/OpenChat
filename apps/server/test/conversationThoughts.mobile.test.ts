@@ -151,6 +151,8 @@ describe('ConversationThoughtsScreen parity & search', () => {
       loadingMessages: false,
       isConnected: true,
       setActiveConversation: vi.fn(),
+      registerConversationVisibility: vi.fn(() => vi.fn()),
+      isChatVisible: vi.fn(() => false),
       markConversationRead: vi.fn(),
       presence: new Map(),
       typingByConv: new Map(),
