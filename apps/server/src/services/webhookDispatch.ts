@@ -245,7 +245,8 @@ function isLoopbackIPv6(address: string): boolean {
   return mapped ? isLoopbackIPv4(mapped) : false;
 }
 
-function isBlockedAddress(address: string): boolean {
+// Shared public-address policy; unlike webhook delivery this has no local opt-in.
+export function isBlockedAddress(address: string): boolean {
   const family = net.isIP(address);
   if (family === 4) return !isPublicIPv4(address);
   if (family === 6) return !isPublicIPv6(address);

@@ -21,6 +21,7 @@
  */
 import type { Server as IOServer } from 'socket.io';
 import { getDriver } from '../db.js';
+import { publicGet } from './publicFetch.js';
 import { normalizeSpokenHashtags } from './normalizeSpokenHashtags.js';
 import { createThoughtsFromMessageTags } from './extractThoughtsFromMessage.js';
 
@@ -99,12 +100,13 @@ async function transcribeWithWhisper(buf: ArrayBuffer, mimeType: string): Promis
 /** Transcribe an audio URL — Deepgram first, Whisper fallback. */
 export async function transcribeAudio(url: string, mimeType: string): Promise<string | null> {
   try {
-    const audioRes = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-    if (!audioRes.ok) {
+    // Match the supported upload limit; enforce it on chunked/decompressed bodies too.
+    const audioRes = await publicGet(url, { timeoutMs: 20_000, maxBytes: 10 * 1024 * 1024 });
+    if (audioRes.status < 200 || audioRes.status >= 300) {
       console.warn('[transcribe] fetch audio failed', audioRes.status, url);
       return null;
     }
-    const buf = await audioRes.arrayBuffer();
+    const buf = Uint8Array.from(audioRes.body).buffer;
     const started = Date.now();
     let text = await transcribeWithDeepgram(buf, mimeType);
     let provider = 'deepgram';
