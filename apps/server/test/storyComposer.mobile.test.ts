@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   route: { params: {} as Record<string, any> },
   api: {
     listIntentDrafts: vi.fn(),
+    getContextIntentions: vi.fn().mockResolvedValue({ intentions: [] }),
     createIntentDraft: vi.fn(),
     activateIntentDraft: vi.fn(),
     createStory: vi.fn(),
@@ -432,4 +433,13 @@ describe('AsksScreen after-the-fact visibility', () => {
     expect(findByText('1 selected chat · Stories and agents')).toBeDefined();
     expect(findByText('1 selected chat · Stories only')).toBeDefined();
   });
+});
+
+it('groups linked Story and Context projections under their canonical intention without losing visibility labels', async () => {
+  const story = { id: 'linked-story', intentId: 'shared-intent', status: 'active', humanVisible: true, explicitQuietSearch: true, audience: { userIds: [], conversationIds: ['conv-bob'] } };
+  mocks.api.listIntentDrafts.mockResolvedValue([]); mocks.api.listMyStories.mockResolvedValue([story]);
+  mocks.api.getContextIntentions.mockResolvedValue({ intentions: [{ intentId: 'shared-intent', revision: 2, kind: 'ask', lifecycleState: 'open', searchStatus: 'paused', goal: 'One canonical request', contextPosts: [{ postId: 'linked-post', conversationId: 'conv-bob', conversationTitle: 'Bob', sourceChanged: false }], stories: [story], seeks: [], brings: [] }] });
+  await act(async () => { root = create(React.createElement(AsksScreen)); });
+  expect(root!.root.findAllByType('Text').filter(node => node.children.join('') === 'One canonical request')).toHaveLength(1);
+  expect(JSON.stringify(root!.toJSON())).toContain('Stories and agents'); expect(JSON.stringify(root!.toJSON())).toContain('Context · ');
 });

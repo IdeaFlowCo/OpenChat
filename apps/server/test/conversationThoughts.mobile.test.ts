@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   recording: {} as Record<string, any>,
   navigation: { setOptions: vi.fn(), navigate: vi.fn() },
   route: { name: 'ConversationThoughts', params: { conversationId: 'conv-1', title: 'Team Chat' } },
+  content: vi.fn(),
+  pin: vi.fn(),
   fetchConversationThoughts: vi.fn(),
   fetchThoughts: vi.fn(),
   createThought: vi.fn(),
@@ -20,6 +22,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('react-native', async () => {
   const React = await import('react');
   return {
+    AppState: { currentState: 'active', addEventListener: () => ({ remove: () => {} }) },
     Platform: { OS: 'ios', select: (values: any) => values.ios ?? values.default },
     Appearance: { getColorScheme: () => 'light' },
     StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
@@ -74,7 +77,7 @@ vi.mock('../../mobile/src/contexts/SocialExperienceContext', () => ({
   useSocialExperience: () => ({ enhanced: false }),
 }));
 vi.mock('../../mobile/src/contexts/RecordingContext', () => ({ useRecording: () => mocks.recording }));
-vi.mock('../../mobile/src/api/client', () => ({ api: {} }));
+vi.mock('../../mobile/src/api/client', () => ({ api: { getConversationContent: mocks.content, pinThought: mocks.pin, createThought: mocks.createThought, getHashtagSuggestions: async () => [] } }));
 vi.mock('../../mobile/src/api/socket', () => ({
   getSocket: () => mocks.getSocket(),
   joinConversation: vi.fn(),
@@ -119,6 +122,7 @@ vi.mock('../../mobile/src/services/thoughts', () => ({
 
 import { ConversationThoughtsScreen } from '../../mobile/src/screens/ConversationThoughtsScreen.js';
 import { ThoughtsScreen } from '../../mobile/src/screens/ThoughtsScreen.js';
+import { ThoughtCard } from '../../mobile/src/components/ThoughtCard.js';
 import { StreamEditor } from '../../mobile/src/components/StreamEditor.js';
 import { ThoughtsSearchBar } from '../../mobile/src/components/ThoughtsSearchBar.js';
 import { ChatScreen } from '../../mobile/src/screens/ChatScreen.js';
@@ -129,6 +133,7 @@ describe('ConversationThoughtsScreen parity & search', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    mocks.content.mockResolvedValue({ items: [] });
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     mocks.route = {
       name: 'ConversationThoughts',
@@ -179,230 +184,67 @@ describe('ConversationThoughtsScreen parity & search', () => {
     delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('renders distinct empty states when no thoughts exist yet vs no search results', async () => {
-    mocks.fetchConversationThoughts.mockResolvedValue({
-      pinned: [],
-      fromChat: [],
-    });
-
-    await act(async () => {
-      screen = create(React.createElement(ConversationThoughtsScreen));
-    });
-
-    // When empty without search: shows default explanation for both sections
-    const initialText = JSON.stringify(screen!.toJSON());
-    expect(initialText).toContain('Nothing pinned yet');
-    expect(initialText).toContain('Shared tags from this chat land here');
-    expect(initialText).not.toContain('No Stream entries match');
-
-    // Enter a search query
-    const searchInput = screen!.root.findByProps({ placeholder: "Search or create in this chat's Stream" });
-    await act(async () => {
-      searchInput.props.onChangeText('unmatched query');
-    });
-
-    // Advance debounce timer (250ms)
-    await act(async () => {
-      vi.advanceTimersByTime(300);
-    });
-
-    expect(mocks.fetchConversationThoughts).toHaveBeenCalledWith('conv-1', { q: 'unmatched query' });
-
-    // Under active search with 0 results: shows distinct "No Stream entries match" empty state with Clear search
-    const searchingText = JSON.stringify(screen!.toJSON());
-    expect(searchingText).toContain('No Stream entries match');
-    expect(searchingText).toContain('unmatched query');
-    expect(searchingText).toContain('Clear search');
+  const entry = (text: string) => ({ id: 'entry', origin: 'stream', visibility: 'private', provenance: 'private_note', sourceAliases: ['entry'], createdAt: '2026-10-07T00:00:00Z', thought: { id: 'entry', text, kind: 'observation', status: 'open', createdAt: '2026-10-07T00:00:00Z', updatedAt: '2026-10-07T00:00:00Z', authorId: 'alice', tags: ['alpha'] } });
+  const mount = async () => { await act(async () => { screen = create(React.createElement(ConversationThoughtsScreen)); }); };
+  const button = (label: string) => screen!.root.findAllByType('TouchableOpacity' as any).find(node => node.props.accessibilityLabel === label || node.findAllByType('Text' as any).some(text => text.children.join('') === label))!;
+  it('opens the unified read through the existing Stream door with audience labels and distinct search empty states', async () => {
+    mocks.content.mockResolvedValue({ items: [entry('Private scoped memory')] }); await mount();
+    expect(mocks.content).toHaveBeenCalledWith('conv-1', expect.objectContaining({ filter: 'all' }));
+    expect(JSON.stringify(screen!.toJSON())).toContain('Only you'); expect(JSON.stringify(screen!.toJSON())).toContain('Private scoped memory');
+    mocks.content.mockResolvedValue({ items: [] });
+    await act(async () => screen!.root.findByProps({ accessibilityLabel: 'Search conversation content' }).props.onChangeText('missing'));
+    await act(async () => vi.advanceTimersByTime(300));
+    expect(JSON.stringify(screen!.toJSON())).toContain('No matching conversation content.');
+    await act(async () => button('Clear search').props.onPress()); await act(async () => vi.advanceTimersByTime(1));
+    expect(JSON.stringify(screen!.toJSON())).toContain('Private entries are labeled Only you.');
+  });
+  it('filters tagged entries through the unified server query and refreshes after Stream events', async () => {
+    const listeners: Record<string, Function> = {}; mocks.getSocket.mockReturnValue({ on: vi.fn((name, fn) => { listeners[name] = fn; }), off: vi.fn() });
+    mocks.content.mockResolvedValue({ items: [entry('Tagged entry')] }); await mount();
+    await act(async () => screen!.root.findByType(ThoughtCard).props.onTagPress('alpha')); await act(async () => vi.advanceTimersByTime(300));
+    expect(mocks.content).toHaveBeenLastCalledWith('conv-1', expect.objectContaining({ search: 'alpha' }));
+    mocks.content.mockResolvedValue({ items: [entry('Refreshed shared source')] }); await act(async () => listeners['thought:updated']());
+    expect(JSON.stringify(screen!.toJSON())).toContain('Refreshed shared source');
+  });
+  it('creates only private scoped entries from the private entry action', async () => {
+    mocks.createThought.mockResolvedValue(entry('Saved').thought); await mount();
+    await act(async () => button('Private entry').props.onPress());
+    const input = screen!.root.findAllByType('TextInput' as any).find(node => node.props.accessibilityLabel === 'Stream entry text')!;
+    await act(async () => input.props.onChangeText('Saved'));
+    await act(async () => button('Save entry').props.onPress());
+    expect(mocks.createThought).toHaveBeenCalledWith({ text: 'Saved', scopeConversationId: 'conv-1' });
   });
 
-  it('searches in a chat’s thoughts and restoring search restores the full list', async () => {
-    const fullThoughts = {
-      pinned: [
-        {
-          id: 'p1',
-          text: 'Project roadmap note',
-          kind: 'fact',
-          status: 'none',
-          createdAt: '2026-09-20T10:00:00Z',
-          tags: ['roadmap'],
-          pinned: true,
-          authorId: 'alice',
-        } as Thought,
-      ],
-      fromChat: [
-        {
-          id: 'c1',
-          text: 'Team budget #finance',
-          kind: 'fact',
-          status: 'none',
-          createdAt: '2026-09-21T10:00:00Z',
-          tags: ['finance'],
-          pinned: false,
-          authorId: 'bob',
-        } as Thought,
-      ],
-    };
-
-    const searchResults = {
-      pinned: [
-        {
-          id: 'p1',
-          text: 'Project roadmap note',
-          kind: 'fact',
-          status: 'none',
-          createdAt: '2026-09-20T10:00:00Z',
-          tags: ['roadmap'],
-          pinned: true,
-          authorId: 'alice',
-        } as Thought,
-      ],
-      fromChat: [],
-    };
-
-    mocks.fetchConversationThoughts.mockResolvedValueOnce(fullThoughts);
-
-    await act(async () => {
-      screen = create(React.createElement(ConversationThoughtsScreen));
-    });
-
-    expect(JSON.stringify(screen!.toJSON())).toContain('Project roadmap note');
-    expect(JSON.stringify(screen!.toJSON())).toContain('Team budget #finance');
-
-    // Perform search
-    mocks.fetchConversationThoughts.mockResolvedValueOnce(searchResults);
-    const searchInput = screen!.root.findByProps({ placeholder: "Search or create in this chat's Stream" });
-    await act(async () => {
-      searchInput.props.onChangeText('roadmap');
-    });
-
-    await act(async () => {
-      vi.advanceTimersByTime(300);
-    });
-
-    expect(mocks.fetchConversationThoughts).toHaveBeenCalledWith('conv-1', { q: 'roadmap' });
-    expect(JSON.stringify(screen!.toJSON())).toContain('Project roadmap note');
-    expect(JSON.stringify(screen!.toJSON())).not.toContain('Team budget #finance');
-
-    // Clear search using the clear button
-    mocks.fetchConversationThoughts.mockResolvedValueOnce(fullThoughts);
-    const clearButton = screen!.root.findByProps({ accessibilityLabel: 'Clear search' });
-    await act(async () => {
-      clearButton.props.onPress();
-    });
-
-    await act(async () => {
-      vi.advanceTimersByTime(300);
-    });
-
-    // Restores full list without q
-    expect(mocks.fetchConversationThoughts).toHaveBeenLastCalledWith('conv-1', undefined);
-    expect(JSON.stringify(screen!.toJSON())).toContain('Project roadmap note');
-    expect(JSON.stringify(screen!.toJSON())).toContain('Team budget #finance');
+  it('requires an exact private-entry sharing preview before pinning into the shared chat', async () => {
+    mocks.content.mockResolvedValue({ items: [entry('Private source to share')] }); mocks.pin.mockResolvedValue({}); await mount();
+    await act(async () => button('Share & pin…').props.onPress());
+    expect(mocks.pin).not.toHaveBeenCalled(); expect(JSON.stringify(screen!.toJSON())).toContain('Current and future authorized members');
+    await act(async () => button('Share & pin to this chat').props.onPress()); expect(mocks.pin).toHaveBeenCalledWith('entry', 'conv-1', 'Private source to share');
   });
-
-  it.each([['global', ThoughtsScreen], ['chat', ConversationThoughtsScreen]] as const)('preserves a new draft while %s creation is pending', async (_scope, Screen) => {
-    mocks.fetchThoughts.mockResolvedValue([]);
-    mocks.fetchConversationThoughts.mockResolvedValue({ pinned: [], fromChat: [] });
-    let resolve!: (thought: Thought) => void;
-    mocks.createThought.mockReturnValueOnce(new Promise(r => { resolve = r; }));
-    await act(async () => { screen = create(React.createElement(Screen)); });
-    await act(async () => screen!.root.findByType(ThoughtsSearchBar).props.onCreate('A'));
-    await act(async () => { screen!.root.findByType(StreamEditor).props.onSave(); });
-    expect(mocks.createThought).toHaveBeenCalledWith(_scope === 'global' ? { text: 'A' } : { text: 'A', scopeConversationId: 'conv-1' });
-    await act(async () => screen!.root.findByType(StreamEditor).props.onChangeText('B'));
-    await act(async () => resolve({ id: 'saved-a', text: 'A', tags: [], createdAt: '2026-10-05T00:00:00Z', kind: 'observation', status: 'none' } as Thought));
-    expect(screen!.root.findByType(StreamEditor).props.value).toBe('B');
+  it('a changed private entry cannot be shared using a previous on-screen preview', async () => {
+    mocks.content.mockResolvedValue({ items: [entry('Reviewed private text')] }); await mount();
+    await act(async () => button('Share & pin…').props.onPress());
+    mocks.content.mockResolvedValue({ items: [entry('Changed private text')] }); await act(async () => button('Refresh').props.onPress());
+    expect(button('Share & pin to this chat').props.disabled).toBe(true); expect(mocks.pin).not.toHaveBeenCalled();
+    expect(JSON.stringify(screen!.toJSON())).toContain('Entry changed. Cancel and review');
   });
-
-  it('updates search query when a tag chip is pressed', async () => {
-    const thoughtsWithTag = {
-      pinned: [
-        {
-          id: 'p1',
-          text: 'Project roadmap note #strategy',
-          kind: 'fact',
-          status: 'none',
-          createdAt: '2026-09-20T10:00:00Z',
-          tags: ['strategy'],
-          pinned: true,
-          authorId: 'alice',
-        } as Thought,
-      ],
-      fromChat: [],
-    };
-
-    mocks.fetchConversationThoughts.mockResolvedValueOnce(thoughtsWithTag);
-
-    await act(async () => {
-      screen = create(React.createElement(ConversationThoughtsScreen));
-    });
-
-    // Find the tag chip TouchableOpacity (innermost TouchableOpacity containing the tag text)
-    const matchingTouchables = screen!.root
-      .findAllByType('TouchableOpacity')
-      .filter((node) =>
-        node.findAllByType('Text').some((t) => {
-          const c = t.props.children;
-          return Array.isArray(c) ? c.includes('strategy') : c === '#strategy' || c === 'strategy';
-        })
-      );
-    const tagChip = matchingTouchables[matchingTouchables.length - 1];
-    expect(tagChip).toBeDefined();
-
-    // Tap tag chip
-    mocks.fetchConversationThoughts.mockResolvedValueOnce(thoughtsWithTag);
-    await act(async () => {
-      tagChip.props.onPress();
-    });
-
-    await act(async () => {
-      vi.advanceTimersByTime(300);
-    });
-
-    // Verifies search query was updated to the tag without #
-    expect(mocks.fetchConversationThoughts).toHaveBeenCalledWith('conv-1', { q: 'strategy' });
+  it('reselecting the current content filter keeps loaded entries visible', async () => {
+    mocks.content.mockResolvedValue({ items: [entry('Still visible')] }); await mount();
+    await act(async () => button('All content').props.onPress()); expect(JSON.stringify(screen!.toJSON())).toContain('Still visible');
   });
-
-  it('live socket updates update thoughts live', async () => {
-    const socketHandlers: Record<string, (payload: any) => void> = {};
-    mocks.getSocket.mockReturnValue({
-      on: (event: string, handler: (payload: any) => void) => {
-        socketHandlers[event] = handler;
-      },
-      off: (event: string) => {
-        delete socketHandlers[event];
-      },
-    });
-
-    mocks.fetchConversationThoughts.mockResolvedValueOnce({
-      pinned: [],
-      fromChat: [],
-    });
-
-    await act(async () => {
-      screen = create(React.createElement(ConversationThoughtsScreen));
-    });
-
-    expect(JSON.stringify(screen!.toJSON())).not.toContain('Live incoming thought');
-
-    // Simulate thought:created event for this conversation
-    await act(async () => {
-      socketHandlers['thought:created']?.({
-        thought: {
-          id: 'new-1',
-          text: 'Live incoming thought',
-          kind: 'fact',
-          status: 'none',
-          createdAt: '2026-09-22T10:00:00Z',
-          tags: [],
-          sourceConversationId: 'conv-1',
-          pinned: false,
-          authorId: 'alice',
-        },
-      });
-    });
-
-    expect(JSON.stringify(screen!.toJSON())).toContain('Live incoming thought');
+  it('switching account synchronously removes private rows and ignores the old pending read', async () => {
+    mocks.content.mockResolvedValue({ items: [entry('Alice private')] }); await mount();
+    let complete!: (value: any) => void; mocks.content.mockReturnValueOnce(new Promise(resolve => { complete = resolve; }));
+    await act(async () => button('Refresh').props.onPress());
+    mocks.chat.currentUser = { userId: 'bob', name: 'Bob' }; mocks.content.mockResolvedValue({ items: [] });
+    await act(async () => screen!.update(React.createElement(ConversationThoughtsScreen)));
+    expect(JSON.stringify(screen!.toJSON())).not.toContain('Alice private');
+    await act(async () => complete({ items: [entry('Late Alice private')] })); expect(JSON.stringify(screen!.toJSON())).not.toContain('Late Alice private');
+  });
+  it('permission loss removes private rows instead of retaining cached content', async () => {
+    mocks.content.mockResolvedValue({ items: [entry('Alice private')] }); await mount();
+    mocks.content.mockRejectedValue(Object.assign(new Error('Access removed'), { status: 403 }));
+    await act(async () => button('Refresh').props.onPress()); expect(JSON.stringify(screen!.toJSON())).not.toContain('Alice private'); expect(JSON.stringify(screen!.toJSON())).toContain('Access removed');
   });
 
   it('ChatScreen renders a visible Stream button satisfying the Front-Door Test', async () => {

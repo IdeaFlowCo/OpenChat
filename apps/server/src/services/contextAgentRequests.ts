@@ -1,3 +1,4 @@
+import { enqueueContextWebhook } from './contextWebhooks.js';
 import { Session } from 'neo4j-driver';
 import { nanoid } from 'nanoid';
 import { acquireContextAclLocks, checkContextWriteAccess } from './contextAccess.js';
@@ -14,7 +15,8 @@ const permittedRequest = `MATCH (r:ContextAgentRequest {id:$requestId, agentKeyI
   MATCH (requester:User {id:r.requesterId})-[:PARTICIPATES_IN]->(c)
   MATCH (t:Thought {id:r.postId, conversationId:r.conversationId, lane:'context'})
   WHERE ${activeKey} AND k.contextRequestsEnabled=true
-    AND t.deletedAt IS NULL AND t.revision=r.sourceRevision AND r.expiresAt > $now
+    AND t.deletedAt IS NULL AND coalesce(t.status,'open')<>'closed'
+    AND coalesce(t.intentionState,'open')='open' AND t.revision=r.sourceRevision AND r.expiresAt > $now
     AND NOT (owner)-[:BLOCKED]-(requester)`;
 
 export async function contextAgentPreference(session: Session, userId: string, keyId: string, enabled?: boolean) {
@@ -37,7 +39,7 @@ export async function askContextAgents(session: Session, userId: string, convers
     if (!await checkContextWriteAccess(tx, userId, conversationId, agentKeyId, agentScopes)) throw new ContextLaneError(403, 'Not authorized');
     const now = new Date().toISOString();
     const source = await tx.run(`MATCH (t:Thought {id:$postId, conversationId:$conversationId, lane:'context'})
-      WHERE t.deletedAt IS NULL RETURN t.revision AS revision`, { postId, conversationId });
+      WHERE t.deletedAt IS NULL AND coalesce(t.status,'open')<>'closed' AND coalesce(t.intentionState,'open')='open' RETURN t.revision AS revision`, { postId, conversationId });
     if (!source.records.length) throw new ContextLaneError(404, 'Post not found');
     const revision = source.records[0].get('revision');
     const recipients = await tx.run(`MATCH (requester:User {id:$userId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
@@ -68,11 +70,13 @@ export async function askContextAgents(session: Session, userId: string, convers
       if (existing.records.length) continue;
       const budget = await tx.run(`MATCH (r:ContextAgentRequest {requesterId:$userId}) WHERE r.createdAt > datetime($now)-duration('PT1H') RETURN count(r) AS count`, { userId, now });
       if (Number(budget.records[0]?.get('count') || 0) >= 30) throw new ContextLaneError(429, 'Context agent request limit reached (30 recipients per hour)');
+      const requestId=nanoid();
       await tx.run(`CREATE (r:ContextAgentRequest {id:$id, postId:$postId, sourceRevision:$revision,
         conversationId:$conversationId, agentKeyId:$keyId, ownerUserId:$ownerId, requesterId:$userId,
         status:'pending', createdAt:datetime($now), expiresAt:$expiresAt})`,
-      { id: nanoid(), postId, revision, conversationId, keyId: recipient.get('keyId'), ownerId: recipient.get('ownerId'), userId, now,
+      { id: requestId, postId, revision, conversationId, keyId: recipient.get('keyId'), ownerId: recipient.get('ownerId'), userId, now,
         expiresAt: new Date(Date.now()+24*60*60*1000).toISOString() });
+      await enqueueContextWebhook(tx,requestId);
       queued++;
     }
     return { queued, available: recipients.records.length };

@@ -196,7 +196,7 @@ export function isDroppedMessageSend(value: Message | DroppedMessageSend): value
 }
 
 export type AgentIntentKind = 'ask' | 'offer';
-export type AgentIntentStatus = 'active' | 'withdrawn' | 'connected';
+export type AgentIntentStatus = 'active' | 'paused' | 'withdrawn' | 'connected';
 export type AgentMatchStatus = 'pending' | 'awaiting_other' | 'closed' | 'connected';
 
 export interface AgentIntent {
@@ -763,6 +763,25 @@ export interface Thought {
   authorName?: string | null;
 }
 
+export interface ContextWebhookSubscription { id: string; conversationId: string; agentKeyId: string; url: string; enabled: boolean; createdAt: string; generation: number }
+export type IntentionLifecycleState = 'open' | 'fulfilled' | 'withdrawn';
+export interface ContextIntention {
+  intentId: string; revision: number; lifecycleState: IntentionLifecycleState;
+  searchStatus: AgentIntentStatus; contextOnly: boolean; kind: 'ask' | 'offer'; expiresAt?: string | null;
+  goal: string; seeks: string[]; brings: string[];
+  contextPosts: { postId: string; conversationId: string; conversationTitle: string; sourceRevision: number; sourceChanged: boolean; post: ContextPost }[];
+  stories: OwnedStory[];
+}
+export type ConversationContentFilter = 'all' | 'context' | 'stream';
+export type ConversationContentItem = {
+  id: string;
+  createdAt: string;
+  visibility: 'conversation' | 'private';
+  provenance: 'context' | 'pinned' | 'message_capture' | 'private_note';
+  sourceAliases: string[];
+} & ({ origin: 'context'; context: ContextPost } | { origin: 'stream'; thought: Thought });
+export interface ConversationContentPage { items: ConversationContentItem[]; nextCursor?: string }
+
 /** Chat-scoped thoughts payload (GET /api/thoughts/conversation/:id). */
 export interface ConversationThoughts {
   /** Pinned to this conversation, any participant. */
@@ -852,6 +871,7 @@ async function requestJsonDownload(path: string, fallbackFilename: string): Prom
 }
 
 export interface ContextPost {
+  intention?: { intentId: string; lifecycleState: IntentionLifecycleState; revision: number; sourceChanged: boolean };
   id: string;
   conversationId: string;
   authorId: string;
@@ -970,8 +990,22 @@ export const api = {
   declineHostedContextRequest: (id: string) => request<HostedContextRequest>(`/api/chat/context-hosted/requests/${encodeURIComponent(id)}/decline`, { method: 'POST', body: '{}', expireAuthOnForbidden: false }),
   cancelHostedContextRequest: (id: string) => request<HostedContextRequest>(`/api/chat/context-hosted/requests/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: '{}', expireAuthOnForbidden: false }),
 
-  getContextAgentPreferences: (keyId: string) => request<{ enabled: boolean }>(`/api/chat/context-agent/preferences?keyId=${encodeURIComponent(keyId)}`),
-  setContextAgentPreferences: (keyId: string, enabled: boolean) => request<{ enabled: boolean }>('/api/chat/context-agent/preferences', { method: 'PUT', body: JSON.stringify({ keyId, enabled }) }),
+  getContextWebhooks: () => request<{ available: boolean; subscriptions: ContextWebhookSubscription[] }>('/api/chat/context-webhooks', { expireAuthOnForbidden: false }),
+  createContextWebhook: (input: { url: string; conversationId: string; agentKeyId: string; clientRequestId: string; consent: true }) => request<{ subscription: ContextWebhookSubscription; secret: string }>('/api/chat/context-webhooks', { method: 'POST', body: JSON.stringify(input), expireAuthOnForbidden: false }),
+  deleteContextWebhook: (id: string) => request<{ deleted: boolean }>(`/api/chat/context-webhooks/${encodeURIComponent(id)}`, { method: 'DELETE', expireAuthOnForbidden: false }),
+
+  getContextIntentions: () => request<{ intentions: ContextIntention[] }>('/api/chat/context-intentions', { expireAuthOnForbidden: false }),
+  trackContextIntention: (conversationId: string, postId: string, input: { sourceRevision: number; clientRequestId: string; intentId?: string }) => request<{ intention: ContextIntention }>(`/api/chat/conversations/${encodeURIComponent(conversationId)}/context/${encodeURIComponent(postId)}/intention`, { method: 'POST', body: JSON.stringify(input), expireAuthOnForbidden: false }),
+  updateContextIntention: (intentId: string, input: { expectedRevision: number; lifecycleState: IntentionLifecycleState }) => request<{ intention: ContextIntention }>(`/api/chat/context-intentions/${encodeURIComponent(intentId)}`, { method: 'PATCH', body: JSON.stringify(input), expireAuthOnForbidden: false }),
+
+  getConversationContent: (conversationId: string, options: { filter?: ConversationContentFilter; search?: string; cursor?: string; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(options)) if (value !== undefined && value !== '') query.set(key, String(value));
+    return request<ConversationContentPage>(`/api/chat/conversations/${encodeURIComponent(conversationId)}/content?${query}`, { expireAuthOnForbidden: false });
+  },
+
+  getContextAgentPreferences: (keyId: string) => request<{ enabled: boolean }>(`/api/chat/context-agent/preferences?keyId=${encodeURIComponent(keyId)}`, { expireAuthOnForbidden: false }),
+  setContextAgentPreferences: (keyId: string, enabled: boolean) => request<{ enabled: boolean }>('/api/chat/context-agent/preferences', { method: 'PUT', body: JSON.stringify({ keyId, enabled }), expireAuthOnForbidden: false }),
   askContextAgents: (conversationId: string, postId: string) =>
     request<{ queued: number; available: number }>(`/api/chat/conversations/${conversationId}/context/${postId}/ask-agents`, { method: 'POST' }),
   reportContextPost: (conversationId: string, postId: string, reason: string) =>
@@ -1686,10 +1720,10 @@ export const api = {
   }>(`/api/thoughts/${encodeURIComponent(id)}/context`),
 
   /** Pin one of my thoughts to a conversation I participate in. */
-  pinThought: (id: string, conversationId: string) =>
+  pinThought: (id: string, conversationId: string, expectedText?: string) =>
     request<Thought>(`/api/thoughts/${encodeURIComponent(id)}/pin`, {
       method: 'POST',
-      body: JSON.stringify({ conversationId }),
+      body: JSON.stringify({ conversationId, ...(expectedText !== undefined ? { expectedText } : {}) }),
     }),
 
   /** Unpin a thought from a conversation (owner or pinner only). */

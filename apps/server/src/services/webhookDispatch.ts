@@ -353,6 +353,20 @@ function postPinnedWebhook(
   });
 }
 
+/** Dedicated Context transport: no raw secret, no redirects, public HTTPS only, one attempt. */
+export async function deliverContextWebhookOnce(url:string,headers:Record<string,string>,body:string):Promise<boolean|'blocked'> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const parsed=new URL(url);
+    if(parsed.protocol!=='https:'||parsed.username||parsed.password||parsed.hash)return 'blocked';
+    const target=await Promise.race([resolveWebhookTarget(url),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Context DNS timeout')),2000);})]);
+    clearTimeout(timer);
+    // Context never inherits the legacy loopback testing exception.
+    if(!target||isBlockedAddress(target.address))return 'blocked';
+    return postPinnedWebhook(target,headers,body);
+  } catch {return false;} finally {if(timer)clearTimeout(timer);}
+}
+
 /** POST a signed payload to one webhook, with a timeout and a single retry. */
 async function deliver(webhook: WebhookSubscription, body: string): Promise<void> {
   const headers = buildWebhookHeaders(body, webhook.secret);

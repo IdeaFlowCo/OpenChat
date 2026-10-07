@@ -1,3 +1,7 @@
+import contextIntentionsRoutes from './routes/contextIntentions.js';
+import conversationContentRoutes from './routes/conversationContent.js';
+import contextWebhooksRoutes from './routes/contextWebhooks.js';
+import { ensureContextWebhookIndexes,startContextWebhookWorker } from './services/contextWebhooks.js';
 import unlinkedMessagingRoutes from './routes/unlinkedMessaging.js';
 import { isContextLaneEnabled } from './config/features.js';
 import dotenv from 'dotenv';
@@ -433,6 +437,9 @@ app.use('/api', connectorDelegation.guard);
 app.use('/api/connector-delegations', connectorDelegation.routes);
 app.use('/api/auth', authRoutes);
 app.use('/api/chat/context-hosted', contextHostedRoutes);
+app.use('/api/chat/context-webhooks', contextWebhooksRoutes);
+app.use('/api/chat', contextIntentionsRoutes);
+app.use('/api/chat', conversationContentRoutes);
 app.use('/api/chat', contextRoutes);
 app.use('/api', entryIntentsRoutes);
 app.use('/api', unlinkedMessagingRoutes);
@@ -610,11 +617,14 @@ app.use(errorNotifierMiddleware);
 // Start server
 const PORT = parseInt(process.env.PORT || '41851', 10);
 
+let stopContextWebhookWorker: (()=>void) | undefined;
 let stopHostedContextWorker: (()=>void) | undefined;
 async function start() {
   try {
     await initDatabase();
     console.log('Connected to Neo4j database');
+    await ensureContextWebhookIndexes(getDriver());
+    stopContextWebhookWorker = startContextWebhookWorker(getDriver());
     await ensureHostedContextIndexes(getDriver());
     stopHostedContextWorker = startHostedContextWorker(getDriver());
 
@@ -687,6 +697,7 @@ async function start() {
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('Shutting down...');
+  stopContextWebhookWorker?.();
   stopHostedContextWorker?.();
   await closeDatabase();
   process.exit(0);
@@ -694,6 +705,7 @@ process.on('SIGTERM', async () => {
 
 process.on('SIGINT', async () => {
   console.log('Shutting down...');
+  stopContextWebhookWorker?.();
   stopHostedContextWorker?.();
   await closeDatabase();
   process.exit(0);

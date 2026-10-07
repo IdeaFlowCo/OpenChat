@@ -19,6 +19,6 @@ it('expired authentication still signs out for hosted requests and existing call
   vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response('{}', { status: 401 })).mockResolvedValueOnce(new Response('{}', { status: 403 })));
   try {
     await expect(api.getHostedContextPreferences()).rejects.toMatchObject({ status: 401 }); expect(expired).toHaveBeenCalledTimes(1);
-    await expect(api.getContextAgentPreferences('key')).rejects.toMatchObject({ status: 403 }); expect(expired).toHaveBeenCalledTimes(2);
+    await expect(api.getConversations()).rejects.toMatchObject({ status: 403 }); expect(expired).toHaveBeenCalledTimes(2);
   } finally { off(); }
 });

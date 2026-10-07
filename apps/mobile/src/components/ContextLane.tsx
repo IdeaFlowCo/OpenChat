@@ -7,6 +7,10 @@ import { api, ContextPost } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { ContextComposer } from './ContextComposer';
+import { ContextStreamEntry, ConversationEntryEditor } from './ContextStreamEntry';
+import { useConversationContent } from '../services/useConversationContent';
+import { getSocket } from '../api/socket';
+import { ContextIntentionControls } from './ContextIntentionControls';
 
 /** Group loaded replies below their root, while retaining orphan previews across pages. */
 export function contextThreads(posts: ContextPost[]): { post: ContextPost; reply: boolean }[] {
@@ -25,11 +29,17 @@ export function contextThreads(posts: ContextPost[]): { post: ContextPost; reply
 }
 
 export function ContextLane({ conversationId }: { conversationId: string }) {
+  const { currentUser } = useChat();
+  return currentUser ? <ConversationContentSession key={`${currentUser.userId}:${conversationId}`} accountId={currentUser.userId} conversationId={conversationId} /> : null;
+}
+function ConversationContentSession({ conversationId, accountId }: { conversationId: string; accountId: string }) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const { currentUser } = useChat();
-  const [state, setState] = useState<ReturnType<typeof contextLaneManager.getState>>({ posts: [], hasMore: true, isLoading: true, isError: false, search: '' });
-  const [search, setSearch] = useState('');
+  const feed = useConversationContent(accountId, conversationId);
+  const search = feed.search;
+  const state = { posts: feed.items.flatMap(item => item.origin === 'context' ? [item.context] : []), isLoading: feed.loading, isError: !!feed.error, hasMore: feed.hasMore };
+  const [creatingPrivate, setCreatingPrivate] = useState(false);
   const [replyTo, setReplyTo] = useState<ContextPost>();
   const [editing, setEditing] = useState<ContextPost>();
   const [confirmDelete, setConfirmDelete] = useState<string>();
@@ -37,26 +47,27 @@ export function ContextLane({ conversationId }: { conversationId: string }) {
   const [busy, setBusy] = useState<string>();
   const [feedback, setFeedback] = useState<{ text: string; error: boolean }>();
 
-  useEffect(() => {
-    contextLaneManager.setAccount(currentUser?.userId ?? null);
-    return contextLaneManager.subscribe(conversationId, setState);
-  }, [conversationId, currentUser?.userId]);
+  useEffect(() => { contextLaneManager.setAccount(accountId); }, [accountId]);
+  const load = feed.load;
   useFocusEffect(useCallback(() => {
-    const refresh = () => { if (AppState.currentState === 'active') void contextLaneManager.loadInitial(conversationId); };
-    void contextLaneManager.loadInitial(conversationId);
-    const timer = setInterval(refresh, 30_000);
+    const refresh = () => { if (AppState.currentState === 'active') void load(); };
+    void load(); const timer = setInterval(refresh, 30_000);
     const subscription = AppState.addEventListener('change', status => { if (status === 'active') refresh(); });
     return () => { clearInterval(timer); subscription.remove(); };
-  }, [conversationId]));
+  }, [load]));
+
   useEffect(() => {
-    const timer = setTimeout(() => { if (search.trim() !== contextLaneManager.getState(conversationId).search) void contextLaneManager.loadInitial(conversationId, search.trim()); }, 300);
-    return () => clearTimeout(timer);
-  }, [search, conversationId]);
+    const socket = getSocket();
+    const refresh = () => void load();
+    const events = ['thought:created', 'thought:shared', 'thought:unshared', 'thought:pinned', 'thought:unpinned', 'thought:updated'];
+    events.forEach(event => socket?.on(event, refresh));
+    return () => { events.forEach(event => socket?.off(event, refresh)); };
+  }, [load]);
 
   const action = async (id: string, fn: () => Promise<unknown>, success?: string) => {
     if (busy) return;
     setBusy(id); setFeedback(undefined);
-    try { await fn(); if (success) setFeedback({ text: success, error: false }); setConfirmDelete(undefined); setReporting(undefined); }
+    try { await fn(); void load(); if (success) setFeedback({ text: success, error: false }); setConfirmDelete(undefined); setReporting(undefined); }
     catch (e) { setFeedback({ text: e instanceof Error ? e.message : 'Could not complete this action. Try again.', error: true }); }
     finally { setBusy(undefined); }
   };
@@ -70,7 +81,7 @@ export function ContextLane({ conversationId }: { conversationId: string }) {
         {item.agent && <Text style={{ color: c.textMetadata, fontSize: 12 }}>via {item.agent.name} · Agent</Text>}
         <Text style={{ color: c.textMetadata, fontSize: 12 }}>{item.kind === 'ask' ? 'Ask' : item.kind === 'offer' ? 'Offer' : 'Note'}</Text>
       </View>
-      <Text style={{ color: c.textMetadata, fontSize: 12, marginTop: 3 }}>{new Date(item.createdAt).toLocaleString()}{item.revision > 1 ? ' · Edited' : ''}</Text>
+      <Text style={{ color: c.textMetadata, fontSize: 12, marginTop: 3 }}>Shared with this chat · Context · {new Date(item.createdAt).toLocaleString()}{item.revision > 1 ? ' · Edited' : ''}</Text>
       {item.replyToId && <View style={[styles.quote, { borderLeftColor: c.border }]}><Text numberOfLines={2} style={{ color: c.textMetadata, fontSize: 13 }}>{parent?.isDeleted ? 'Reply to a deleted post' : parent ? `Reply to ${parent.author?.name || 'a participant'}: ${parent.text}` : 'Reply to an earlier post'}</Text></View>}
       <Text selectable style={{ color: item.isDeleted ? c.textMetadata : c.textPrimary, fontSize: 15, lineHeight: 22, marginTop: 8 }}>{item.isDeleted ? 'Post deleted' : item.text}</Text>
       {!item.isDeleted && <View style={styles.actions}>
@@ -78,11 +89,12 @@ export function ContextLane({ conversationId }: { conversationId: string }) {
         {own && button('Edit', () => { setEditing(item); setReplyTo(undefined); })}
         {own && button('Delete', () => setConfirmDelete(item.id), true)}
         {!own && button('Report', () => setReporting(item.id))}
-        {item.kind === 'ask' && button('Ask agents', () => void action(item.id, async () => {
+        {item.kind === 'ask' && (!item.intention || item.intention.lifecycleState === 'open') && button('Ask agents', () => void action(item.id, async () => {
           const result = await api.askContextAgents(conversationId, item.id);
           setFeedback({ text: result.queued ? `Requested help from ${result.queued} agent${result.queued === 1 ? '' : 's'}. Replies will appear here.` : 'These agents have already received this request. Replies will appear here.', error: false });
         }))}
       </View>}
+      {!item.isDeleted && <ContextIntentionControls post={item} conversationId={conversationId} onChange={() => void load()} />}
       {confirmDelete === item.id && <View><Text style={{ color: c.textMetadata }}>Delete this post? Replies will remain.</Text><View style={styles.actions}>{button('Confirm delete', () => void action(item.id, () => contextLaneManager.deletePost(conversationId, item.id)), true)}{button('Cancel', () => setConfirmDelete(undefined))}</View></View>}
       {reporting === item.id && <View><Text style={{ color: c.textMetadata }}>Report this post for review</Text><View style={styles.actions}>{['Spam', 'Harassment', 'Other'].map(reason => <React.Fragment key={reason}>{button(reason, () => void action(item.id, () => api.reportContextPost(conversationId, item.id, reason.toLowerCase()), 'Report submitted.'))}</React.Fragment>)}{button('Cancel', () => setReporting(undefined))}</View></View>}
       {busy === item.id && <ActivityIndicator color={c.primary} accessibilityLabel="Working" />}
@@ -90,18 +102,20 @@ export function ContextLane({ conversationId }: { conversationId: string }) {
   };
   return <View style={styles.container}>
     <View style={[styles.toolbar, { borderBottomColor: c.border }]}>
-      <TextInput accessibilityLabel="Search context" placeholder="Search context" placeholderTextColor={c.textMuted} value={search} onChangeText={setSearch} style={[styles.search, { color: c.textPrimary, backgroundColor: c.surface, borderColor: c.border }]} />
-      {button('Refresh', () => void contextLaneManager.loadInitial(conversationId))}
+      <TextInput accessibilityLabel="Search conversation content" placeholder="Search Context and Stream" placeholderTextColor={c.textMuted} value={search} onChangeText={feed.chooseSearch} style={[styles.search, { color: c.textPrimary, backgroundColor: c.surface, borderColor: c.border }]} />
+      {search ? button('Clear search', () => feed.chooseSearch('')) : null}{button('Refresh', () => void load())}
     </View>
+    <View style={[styles.actions, { paddingHorizontal: 12 }]}>{(['all', 'context', 'stream'] as const).map(filter => <TouchableOpacity key={filter} accessibilityRole="button" accessibilityLabel={`${filter === 'all' ? 'All content' : filter === 'context' ? 'Context posts' : 'Stream entries'}`} accessibilityState={{ selected: feed.filter === filter }} onPress={() => feed.chooseFilter(filter)} style={[styles.action, { backgroundColor: feed.filter === filter ? c.primaryMuted : undefined, borderRadius: 8 }]}><Text style={{ color: c.primary }}>{filter === 'all' ? 'All' : filter === 'context' ? 'Context' : 'Stream'}</Text></TouchableOpacity>)}{button('Private entry', () => setCreatingPrivate(true))}</View>
+    {creatingPrivate && <ConversationEntryEditor conversationId={conversationId} onCancel={() => setCreatingPrivate(false)} onDone={() => { setCreatingPrivate(false); void load(); }} />}
     {feedback && <Text accessibilityRole={feedback.error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={{ color: feedback.error ? c.danger : c.textMetadata, padding: 12 }}>{feedback.text}</Text>}
-    {state.isError && <View style={{ paddingHorizontal: 16 }}><Text accessibilityRole="alert" style={{ color: c.danger }}>Could not refresh Context. {state.posts.length ? 'Showing previously loaded posts.' : ''}</Text>{button('Retry', () => void contextLaneManager.loadInitial(conversationId))}</View>}
-    <FlatList data={contextThreads(state.posts)} keyExtractor={row => row.post.id} renderItem={renderItem}
+    {state.isError && <View style={{ paddingHorizontal: 16 }}><Text accessibilityRole="alert" style={{ color: c.danger }}>{feed.error} {feed.items.length ? 'Showing previously loaded content.' : ''}</Text>{button('Retry', () => void load())}</View>}
+    <FlatList data={feed.items} keyExtractor={item => item.id} renderItem={({ item }) => item.origin === 'context' ? renderItem({ item: { post: item.context, reply: !!item.context.replyToId } }) : <ContextStreamEntry item={item} conversationId={conversationId} onChange={() => void load()} onTagPress={tag => feed.chooseSearch(tag.replace(/^#/, ''))} />}
       contentContainerStyle={{ padding: 12, paddingBottom: 24 }}
-      refreshing={state.isLoading} onRefresh={() => void contextLaneManager.loadInitial(conversationId)}
-      onEndReached={() => { if (!state.isError) void contextLaneManager.loadMore(conversationId); }} onEndReachedThreshold={0.5}
-      ListFooterComponent={state.hasMore && state.posts.length ? button('Load older posts', () => void contextLaneManager.loadMore(conversationId)) : null}
-      ListEmptyComponent={state.isLoading ? <ActivityIndicator color={c.primary} style={{ margin: 24 }} /> : !state.isError ? <Text style={{ color: c.textMetadata, textAlign: 'center', margin: 24 }}>{search ? 'No matching context posts.' : 'A quiet back-channel for this chat. Add a note, ask a question, or share an offer.'}</Text> : null} />
-    <ContextComposer key={`${conversationId}:${editing?.id || replyTo?.id || 'new'}`} conversationId={conversationId} editing={editing} replyTo={replyTo} onDone={() => { setEditing(undefined); setReplyTo(undefined); void contextLaneManager.loadInitial(conversationId); }} />
+      refreshing={state.isLoading} onRefresh={() => void load()}
+      onEndReached={() => { if (!state.isError) void load(true); }} onEndReachedThreshold={0.5}
+      ListFooterComponent={state.hasMore && feed.items.length ? button('Load older content', () => void load(true)) : null}
+      ListEmptyComponent={state.isLoading ? <ActivityIndicator color={c.primary} style={{ margin: 24 }} /> : !state.isError ? <Text style={{ color: c.textMetadata, textAlign: 'center', margin: 24 }}>{search ? 'No matching conversation content.' : 'Context posts and this chat’s Stream entries appear here. Private entries are labeled Only you.'}</Text> : null} />
+    <ContextComposer key={`${conversationId}:${editing?.id || replyTo?.id || 'new'}`} conversationId={conversationId} editing={editing} replyTo={replyTo} onDone={() => { setEditing(undefined); setReplyTo(undefined); void load(); }} />
   </View>;
 }
 const styles = StyleSheet.create({

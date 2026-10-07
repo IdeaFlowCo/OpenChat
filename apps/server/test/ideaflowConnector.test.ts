@@ -9,6 +9,7 @@ import { handleIdeaflowConnector, connectorOperationGuard } from '../src/routes/
 import { resolveActor } from '../src/middleware/resolveActor.js';
 import { verifyConnectorAssertion,issueConnectorOperation,getConnectorPrincipal } from '../src/lib/ideaflowConnector.js';
 import contextRoutes from '../src/routes/context.js';
+import contentRoutes from '../src/routes/conversationContent.js';
 const secret='test-only-connector-secret-32-bytes-minimum';
 function sign(body:string,changes:Record<string,unknown>={},key=secret,headerValues={alg:'HS256',typ:'JWT'}) {
   const now=Math.floor(Date.now()/1000);
@@ -23,6 +24,7 @@ describe('unified OpenChat connector trust boundary',()=>{
     const app=express();
     app.post('/api/connector/mcp',express.raw({type:'application/json'}),handleIdeaflowConnector);
     app.use(express.json());app.use('/api',connectorOperationGuard);
+    app.use('/api/chat',contentRoutes);
     app.use('/api/chat',contextRoutes);
     app.get('/api/chat/conversations',resolveActor,(req,res)=>res.json([{id:'room',userId:req.user!.userId}]));
     app.post('/api/chat/conversations/:id/messages',resolveActor,(req,res)=>{state.mutations++;res.json({conversationId:req.params.id,...req.body,userId:req.user!.userId});});
@@ -62,6 +64,13 @@ describe('unified OpenChat connector trust boundary',()=>{
     const denied=await call('tools/call',{name:'oc_send_message',arguments:{conversationId:'room',content:'test',clientRequestId:'test'}},{scope:'openchat:read'});
     expect(denied.status).toBe(403);expect(state.mutations).toBe(0);
     expect((await call('tools/call',{name:'oc_list_conversations',arguments:{}},{scope:'openchat:write'})).status).toBe(403);
+  });
+  it('dispatches unified reads without private access and rejects attempts to request it',async()=>{
+    const read=await (await call('tools/call',{name:'oc_list_conversation_content',arguments:{conversationId:'room',filter:'all'}},{scope:'openchat:read'})).json() as any;
+    expect(JSON.parse(read.result.content[0].text)).toEqual({items:[]});
+    expect(state.run.mock.calls.some(([,p])=>p?.includePrivate===false)).toBe(true);
+    expect((await call('tools/call',{name:'oc_list_conversation_content',arguments:{conversationId:'room',includePrivate:true}},{scope:'openchat:read'})).status).toBe(400);
+    expect((await call('tools/call',{name:'oc_list_conversation_content',arguments:{conversationId:'room'}},{scope:'openchat:write'})).status).toBe(403);
   });
   it('looks up only the exact linked issuer/subject and refuses missing/ambiguous accounts',async()=>{
     state.linked=false;expect((await call('tools/list')).status).toBe(409);

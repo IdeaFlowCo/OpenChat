@@ -824,11 +824,15 @@ export async function updateStory(
   const session = getDriver().session();
   try {
     const result = await session.run(
-      `MATCH (:User {id: $userId})-[:OWNS_STORY]->(story:OpenChatStory {id: $storyId})-[:ACTIVATES]->(intent:AgentIntent)
+      `MATCH (owner:User {id:$userId})
+       SET owner.contextAclRevision=coalesce(owner.contextAclRevision,0)+1
+       WITH owner
+       MATCH (owner)-[:OWNS_STORY]->(story:OpenChatStory {id: $storyId})-[:ACTIVATES]->(intent:AgentIntent)
        WITH story, intent,
             coalesce($status, story.status) AS nextStatus,
             CASE WHEN $storyExpiresAt IS NULL THEN story.storyExpiresAt ELSE datetime($storyExpiresAt) END AS nextStoryExpiry
        WHERE NOT (story.status = 'withdrawn' AND nextStatus <> 'withdrawn')
+         AND (nextStatus <> 'active' OR coalesce(intent.lifecycleState,CASE WHEN intent.status='withdrawn' THEN 'withdrawn' ELSE 'open' END)='open')
          AND (nextStatus <> 'active' OR story.humanVisible = false OR nextStoryExpiry > datetime($now))
        SET story.status = nextStatus,
            story.storyExpiresAt = nextStoryExpiry,
