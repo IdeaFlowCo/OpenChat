@@ -12,7 +12,6 @@ vi.mock('../src/db.js', () => ({
   }),
 }));
 
-import { CONVERSATIONS_QUERY } from '../src/queries/chatUnread.js';
 import {
   broadcastMessageToParticipants,
   setupChatSocket,
@@ -113,16 +112,4 @@ describe('first inbound message delivery contract', () => {
     });
   });
 
-  it('lists conversations by participation, independent of creator or open state', () => {
-    expect(CONVERSATIONS_QUERY).toContain(
-      'MATCH (u:User {id: $userId})-[myRel:PARTICIPATES_IN]->(c:Conversation)',
-    );
-    expect(CONVERSATIONS_QUERY).not.toMatch(/createdBy|openedAt|joined\/opened/i);
-  });
-
-  it('loads the preview sender through the message conversationId property', () => {
-    expect(CONVERSATIONS_QUERY).toContain('WHERE m.conversationId = c.id');
-    expect(CONVERSATIONS_QUERY).toContain('.senderId');
-    expect(CONVERSATIONS_QUERY).not.toContain('OPTIONAL MATCH (c)<-[:IN_CONVERSATION]-(m:Message)');
-  });
 });

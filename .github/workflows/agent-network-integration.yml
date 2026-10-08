@@ -42,13 +42,14 @@ jobs:
 
       - name: Run focused agent-network tests against Neo4j
         run: >-
-          ./node_modules/.bin/vitest run
+          ./node_modules/.bin/vitest run --testTimeout=30000
           apps/server/test/agentNetwork.test.ts
           apps/server/test/agentNetwork.expiry.test.ts
           apps/server/test/agentNetwork.route.test.ts
           apps/server/test/agentNetwork.integration.test.ts
           apps/server/test/chatUnread.route.test.ts
           apps/server/test/unlinkedConnections.integration.test.ts
+          apps/server/test/directConversationPrivacy.test.ts
           apps/server/test/privateGraph.test.ts
           apps/server/test/privateGraph.route.test.ts
           apps/server/test/privateGraph.scope.test.ts

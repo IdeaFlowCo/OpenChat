@@ -45,3 +45,26 @@ Validation: server route and real Neo4j tests cover authentication, identity
 conflicts, concurrency, DM reuse, suppression, no messages/friend grants; sender
 behavior tests cover recipient authorization, crossed acceptance, lost response,
 persisted retry, restart, removed requests and missing identity bindings.
+
+## Shared Noos boundary
+
+The sync ledger must retain only the `UnlinkedConnectionSync` label. Never add
+`Node`, `File`, `User`, `Person`, or projection labels; expose its properties in
+public node/file/People/WIT/overlay exports; attach generic content/file references;
+or grant generic ownership, sharing, public, or unlisted access to receipts.
+Keep the dedicated authenticated receiver and conversation membership checks.
+Raw Cypher ingress must remain deny-by-default with an empty operator allowlist.
+
+The independent read-only receipt `acl-boundary-receipt.json` from
+`unlinked-sync-noos-acl-20261008` verifies that deployed Noos commit
+`25fe2c59d3cdf7f4592127a7002770e1250b409c` uses label-scoped routes that exclude
+this standalone record. This separation is structural, not a protected-label
+marker. The receipt reports closed raw-query ingress and HTTP 403 on the public
+query route. It involved no production ledger insertion and does not establish
+end-to-end HTTP denial for a deployed ledger, protection from privileged database
+access, or safety of future routes that bypass label selection. It grants no
+release authorization: all merge, deployment, and restart holds remain in force.
+
+Graph CI runs `directConversationPrivacy.test.ts` against its isolated Neo4j
+service to verify returned participant placeholders, real-email non-disclosure,
+member-only visibility, block behavior, and property-linked first-message previews.
