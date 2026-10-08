@@ -31,9 +31,11 @@ posts remain their independently approved text and are marked source-changed.
 Close calls canonical intention fulfillment; remove calls withdrawal plus a
 Story tombstone. Existing Context and Story lifecycle changes also revoke the
 profile projection. Closed intentions cannot be republished. Publication is capped
-at fifty active, unexpired profile asks per owner. Owner reads retain every active
-ask plus up to fifty inactive asks; viewer reads return
-at most fifty active asks. Expiry is limited to 366 days at publication or edit.
+at fifty active, unexpired profile asks per owner, enforced under the canonical
+owner ACL lock on creation, Unlinked edits, and shared Story resume or expiry
+extension. Owner reads retain every active ask plus up to fifty inactive asks;
+history does not displace active asks. Viewer reads return at most fifty active
+asks. Expiry is limited to 366 days at publication or edit.
 
 The public reader DTO is `{id,kind:'ask',text,expiresAt}`. Owner inventory adds
 revision, visibility, status and selected audience IDs; no match/draft/counterparty
@@ -64,10 +66,9 @@ Executable tests:
 
 - `profileAskPublication.integration.test.ts`: real isolated Neo4j, public/private/
   selected/group/anonymous/block/expiry/revocation, canonical lifecycle, old Story
-  compatibility, exact identity and confidential route auth, addressed ask entry.
+  compatibility, exact identity and confidential route auth, addressed ask entry,
+  and quota enforcement across publication, resume and expiry extension.
 - `profileAskEntry.mobile.test.ts`: executed compose + context banner, correct
   owner/thread/account, retained draft, revoked entry and strict URL grammar.
 - The graph cases run in the existing mobile regression graph CI job. All fixtures
   are controlled synthetic personas; tests never post for a real member.
-
-The fifty-active publication quota is serialized under the owner ACL lock on creation, shared Story resume/expiry extension, and Unlinked edits of expired asks. Historical asks cannot consume the owner active inventory.
