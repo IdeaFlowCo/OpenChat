@@ -34,7 +34,12 @@ suite('accepted connection trusted HTTP + real graph',()=>{
   expect(new Set(replies.map(r=>r.body.conversationId)).size).toBe(1);
   const members=await ids(body);expect(members).toHaveLength(2);
   const count=await query('MATCH (u:User)-[p:PARTICIPATES_IN]->(c:Conversation {id:$id}) RETURN count(p) AS n',{id:replies[0].body.conversationId});expect(Number(count.records[0].get('n'))).toBe(2);
-  const effects=await query('OPTIONAL MATCH (m:Message)-[:IN_CONVERSATION]->(c:Conversation {id:$id}) RETURN count(m) AS n',{id:replies[0].body.conversationId});expect(Number(effects.records[0].get('n'))).toBe(0);
+  const effects=await query(`
+   MATCH (m:Message)
+   WHERE m.conversationId = $id
+     OR EXISTS { MATCH (m)-[:IN_CONVERSATION]->(:Conversation {id: $id}) }
+   RETURN count(m) AS n
+  `,{id:replies[0].body.conversationId});expect(Number(effects.records[0].get('n'))).toBe(0);
   const friends=await query('MATCH (c:OpenChatConnection) WHERE c.firstId IN $ids OR c.secondId IN $ids RETURN count(c) AS n',{ids:members});expect(Number(friends.records[0].get('n'))).toBe(0);
   expect((await post({...body,recipient:{...body.recipient,subject:prefix+'different'}})).status).toBe(409);
   expect(await ids({...body,sender:{...body.sender,subject:prefix+'different'},recipient:{...body.recipient,subject:prefix+'different'}})).toEqual([]);
