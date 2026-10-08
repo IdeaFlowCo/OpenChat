@@ -7,7 +7,7 @@ import {randomUUID} from 'node:crypto';
 const state=vi.hoisted(()=>({driver:null as any}));
 vi.mock('../src/db.js',()=>({getDriver:()=>state.driver}));
 import {listProfileAsks,mutateProfileAsk,profileAskAudience,publishProfileAsk} from '../src/services/profileAsks.js';
-import {listStoryFeed,updateStory} from '../src/services/agentSocialLayer.js';
+import {listOwnedStories,listStoryFeed,updateStory} from '../src/services/agentSocialLayer.js';
 import {updateContextIntention} from '../src/services/contextIntentions.js';
 import messagingRoutes from '../src/routes/unlinkedMessaging.js';
 import routes,{PROFILE_ASK_ISSUER} from '../src/routes/profileAsks.js';
@@ -38,6 +38,45 @@ integration('canonical profile asks: real graph permissions and lifecycle',()=>{
   const graph=await run(`MATCH (:User {id:$a})-[:OWNS_STORY]->(s:OpenChatStory)-[:ACTIVATES]->(i:AgentIntent) RETURN count(s) AS count,collect(i.status) AS statuses,collect(i.contextOnly) AS only`,{a});
   expect(graph.records[0].get('count').toNumber()).toBe(2);expect(graph.records[0].get('statuses')).toEqual(['paused','paused']);expect(graph.records[0].get('only')).toEqual([true,true]);
   expect((await read(a)).find(s=>s.id===mine.id)?.visibility).toBe('private');
+ });
+ it('keeps older active asks manageable beyond the bounded history',async()=>{
+  const active=await publish();
+  for(let n=0;n<51;n++){
+   const closed=await publish();
+   await session(s=>mutateProfileAsk(s,a,closed.id,'close',{expectedRevision:closed.revision}));
+  }
+  const inventory=await read(a);
+  expect(inventory).toHaveLength(51);
+  expect(inventory.find(s=>s.id===active.id)).toMatchObject({status:'active',revision:1});
+  await session(s=>mutateProfileAsk(s,a,active.id,'remove',{expectedRevision:1}));
+  expect(await read(null)).toEqual([]);
+ },30000);
+ it('rejects stale profile edits after shared Story and intention mutations',async()=>{
+  const ask=await publish();
+  const expiry=new Date(Date.now()+172800000).toISOString();
+  await updateStory(a,ask.id,{storyExpiresAt:expiry});
+  await expect(edit(ask,input())).rejects.toMatchObject({statusCode:409});
+  const updated=(await read(a,ask.id))[0];
+  expect(Date.parse(updated.expiresAt)).toBe(Date.parse(expiry));
+  expect(updated.revision).toBeGreaterThan(ask.revision!);
+  await updateStory(a,ask.id,{status:'paused'});
+  await expect(edit(updated,input())).rejects.toMatchObject({statusCode:409});
+  const paused=(await read(a,ask.id))[0];
+  const owned=(await listOwnedStories(a)).find(s=>s.id===ask.id)!;
+  await session(s=>updateContextIntention(s,a,owned.intentId,{expectedRevision:0,lifecycleState:'fulfilled'}));
+  await expect(session(s=>mutateProfileAsk(s,a,ask.id,'remove',{expectedRevision:paused.revision}))).rejects.toMatchObject({statusCode:409});
+  const closed=(await read(a,ask.id))[0];
+  expect(closed.revision).toBeGreaterThan(paused.revision!);
+  await session(s=>mutateProfileAsk(s,a,ask.id,'remove',{expectedRevision:closed.revision}));
+ });
+ it('preserves explicit visibility in the canonical owner inventory',async()=>{
+  const publicAsk=await publish();
+  const privateAsk=await publish(input('private'));
+  const selectedAsk=await publish(input('selected',{userIds:[b]}));
+  const inventory=await listOwnedStories(a);
+  for(const [ask,visibility] of [[publicAsk,'public'],[privateAsk,'private'],[selectedAsk,'selected']] as const){
+   expect(inventory.find(s=>s.id===ask.id)).toMatchObject({showOnProfile:true,profileVisibility:visibility});
+  }
  });
  it('checks selected users/groups live, blocks both ways and does not grant permission through an empty DM',async()=>{
   const users=await publish(input('selected',{userIds:[b]}));expect((await read(b)).map(s=>s.id)).toContain(users.id);expect(await read(null)).toEqual([]);expect(await read(outsider)).toEqual([]);

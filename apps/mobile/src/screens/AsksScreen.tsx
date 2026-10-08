@@ -1,3 +1,4 @@
+import { storyAudienceLabel } from '../utils/storyAudience';
 import { useChat } from '../contexts/ChatContext';
 import { IntentionLifecycleControls } from '../components/ContextIntentionControls';
 import { useCallback, useMemo, useState } from 'react';
@@ -195,7 +196,7 @@ function AsksInventory() {
               {item.intention.stories.map(projection => {
                 const story = stories.find(owned => owned.id === projection.id) || projection;
                 return <View key={story.id}>
-                  <Text style={[styles.detail, { color: c.textMetadata }]}>{story.humanVisible ? story.explicitQuietSearch ? 'Stories and agents' : 'Stories only' : 'Agents only'} · {isStoryExpired(story) ? 'expired' : story.status} · {story.audience.conversationIds.length} selected chat{story.audience.conversationIds.length === 1 ? '' : 's'}</Text>
+                  <Text style={[styles.detail, { color: c.textMetadata }]}>{story.humanVisible ? story.explicitQuietSearch ? 'Stories and agents' : 'Stories only' : 'Agents only'} · {isStoryExpired(story) ? 'expired' : story.status} · {storyAudienceLabel(story)}</Text>
                   {story.text && <Text style={[styles.detail, { color: c.textPrimary }]}>{story.text}</Text>}
                   {relevantExpiresAt(story) && <Text style={[styles.detail, { color: c.textMetadata }]}>Expires · {inventoryExpiry(story)}</Text>}
                   {item.intention.lifecycleState === 'open' && ['active', 'paused'].includes(story.status) && <TouchableOpacity disabled={busyId === story.id} onPress={() => void pauseStory(story)} style={[styles.outlineSmall, { borderColor: c.border, marginTop: 12, alignSelf: 'flex-start' }]}>
@@ -216,7 +217,7 @@ function AsksInventory() {
               <Text style={[styles.cardTitle, { color: c.textPrimary }]}>{item.story.humanVisible ? item.story.text : (item.story.goal || item.story.seeks[0] || item.story.brings[0] || 'Agent-only search')}</Text>
               {item.story.humanVisible ? (
                 <Text style={[styles.detail, { color: c.textSecondary }]}>
-                  {item.story.audience.conversationIds.length} selected chat{item.story.audience.conversationIds.length === 1 ? '' : 's'} · {item.story.explicitQuietSearch ? 'Stories and agents' : 'Stories only'}
+                  {storyAudienceLabel(item.story)} · {item.story.explicitQuietSearch ? 'Stories and agents' : 'Stories only'}
                 </Text>
               ) : (
                 <>

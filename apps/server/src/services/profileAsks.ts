@@ -46,14 +46,16 @@ export const PROFILE_STORY_VISIBILITY = `
 export async function listProfileAsks(session: Session, ownerId: string, viewerId: string | null, askId: string | null = null) {
   if (askId !== null && (typeof askId !== 'string' || !ASK_ID.test(askId))) throw new ContextLaneError(400, 'Invalid ask');
   return session.executeRead(async tx => {
-    const rows = await tx.run(`MATCH (owner:User {id:$ownerId})-[:OWNS_STORY]->(story:OpenChatStory)-[:ACTIVATES]->(intent:AgentIntent {kind:'ask'})
+    const owner = ownerId === viewerId;
+    const active = "story.status='active' AND story.storyExpiresAt>datetime($now) AND coalesce(intent.lifecycleState,CASE WHEN intent.status='withdrawn' THEN 'withdrawn' ELSE 'open' END)='open'";
+    const query = `MATCH (owner:User {id:$ownerId})-[:OWNS_STORY]->(story:OpenChatStory)-[:ACTIVATES]->(intent:AgentIntent {kind:'ask'})
       WHERE story.showOnProfile=true AND story.humanVisible=true AND story.profileRemovedAt IS NULL
         AND ($askId IS NULL OR story.id=$askId)
-        AND (owner.id=$viewerId OR (story.status='active' AND story.storyExpiresAt>datetime($now)
-          AND coalesce(intent.lifecycleState,CASE WHEN intent.status='withdrawn' THEN 'withdrawn' ELSE 'open' END)='open'))
-        AND (${PROFILE_STORY_VISIBILITY})
-      RETURN story ORDER BY story.createdAt DESC,story.id DESC LIMIT 50`, { ownerId, viewerId, askId, now: new Date().toISOString() });
-    return rows.records.map(r => projection(r.get('story').properties, ownerId === viewerId));
+        AND (${PROFILE_STORY_VISIBILITY})`;
+    const params = { ownerId, viewerId, askId, now: new Date().toISOString() };
+    const rows = await tx.run(`${query} AND (${active}) RETURN story ORDER BY story.createdAt DESC,story.id DESC${owner ? '' : ' LIMIT 50'}`, params);
+    const history = owner ? await tx.run(`${query} AND NOT coalesce((${active}),false) RETURN story ORDER BY story.createdAt DESC,story.id DESC LIMIT 50`, params) : null;
+    return [...rows.records, ...(history?.records ?? [])].map(r => projection(r.get('story').properties, owner));
   });
 }
 export async function profileAskAudience(session: Session, userId: string) {
@@ -126,8 +128,7 @@ export async function mutateProfileAsk(session: Session, userId: string, id: str
         FOREACH (_ IN CASE WHEN p IS NULL THEN [] ELSE [1] END | SET p.intentionSourceChanged=true,p.intentionRevision=i.lifecycleRevision)`, { ...input, id, now });
     } else {
       await reconcileIntentionLifecycle(tx, i.id, operation === 'close' ? 'fulfilled' : 'withdrawn', now);
-      await tx.run(`MATCH (s:OpenChatStory {id:$id}) SET s.profileRevision=coalesce(s.profileRevision,0)+1,
-        s.profileRemovedAt=CASE WHEN $removed THEN datetime($now) ELSE s.profileRemovedAt END,s.updatedAt=datetime($now)`, { id, removed: operation === 'remove', now });
+      await tx.run(`MATCH (s:OpenChatStory {id:$id}) SET s.profileRemovedAt=CASE WHEN $removed THEN datetime($now) ELSE s.profileRemovedAt END,s.updatedAt=datetime($now)`, { id, removed: operation === 'remove', now });
     }
     const updated = await tx.run('MATCH (s:OpenChatStory {id:$id}) RETURN s', { id });
     return projection(updated.records[0].get('s').properties, true);

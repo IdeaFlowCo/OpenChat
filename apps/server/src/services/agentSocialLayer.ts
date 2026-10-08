@@ -71,6 +71,8 @@ export interface OwnedStory {
   matchingMode: MatchingMode;
   openToCollaborators: boolean;
   text: string | null;
+  showOnProfile?: boolean;
+  profileVisibility?: 'private' | 'selected' | 'public';
   humanVisible: boolean;
   agentSearchEnabled: boolean;
   explicitQuietSearch: boolean;
@@ -239,6 +241,8 @@ function ownedStoryFromRecord(value: unknown): OwnedStory {
     matchingMode: story.matchingMode as MatchingMode ?? 'fulfillment',
     openToCollaborators: story.openToCollaborators === true,
     text: story.text as string | null ?? null,
+    showOnProfile: story.showOnProfile === true,
+    profileVisibility: story.profileVisibility as OwnedStory['profileVisibility'],
     humanVisible: story.humanVisible === true,
     agentSearchEnabled: story.agentSearchEnabled === true,
     explicitQuietSearch: story.explicitQuietSearch === true,
@@ -831,7 +835,8 @@ export async function updateStory(
        WHERE NOT (story.status = 'withdrawn' AND nextStatus <> 'withdrawn')
          AND (nextStatus <> 'active' OR coalesce(intent.lifecycleState,CASE WHEN intent.status='withdrawn' THEN 'withdrawn' ELSE 'open' END)='open')
          AND (nextStatus <> 'active' OR story.humanVisible = false OR nextStoryExpiry > datetime($now))
-       SET story.status = nextStatus,
+       SET story.profileRevision = CASE WHEN story.showOnProfile = true THEN coalesce(story.profileRevision,0)+1 ELSE story.profileRevision END,
+           story.status = nextStatus,
            story.storyExpiresAt = nextStoryExpiry,
            story.updatedAt = datetime($now),
            intent.status = CASE

@@ -121,6 +121,7 @@ export async function reconcileIntentionLifecycle(tx:ManagedTransaction,intentId
       WITH i OPTIONAL MATCH (t:Thought)-[:REPRESENTS_INTENT]->(i)
       FOREACH (p IN CASE WHEN t IS NULL THEN [] ELSE [t] END | SET p.intentionState=$state,p.intentionRevision=i.lifecycleRevision,
         p.status=CASE WHEN $state='open' THEN 'open' ELSE 'closed' END,p.revision=p.revision+1,p.updatedAt=datetime($now))`,{intentId,state,now});
+    await tx.run(`MATCH (s:OpenChatStory)-[:ACTIVATES]->(:AgentIntent {id:$intentId}) WHERE s.showOnProfile=true SET s.profileRevision=coalesce(s.profileRevision,0)+1`,{intentId});
     if(state!=='open'){
       await tx.run(`MATCH (s:OpenChatStory)-[:ACTIVATES]->(:AgentIntent {id:$intentId}) SET s.status='withdrawn',s.updatedAt=datetime($now)`,{intentId,now});
       await tx.run(`MATCH (m:AgentMatch {status:'proposed'})-[:MATCHES]->(:AgentIntent {id:$intentId}) SET m.status='closed',m.updatedAt=datetime($now)`,{intentId,now});

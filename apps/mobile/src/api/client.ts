@@ -262,6 +262,8 @@ export interface OwnedStory {
   matchingMode: MatchingMode;
   openToCollaborators: boolean;
   text: string | null;
+  showOnProfile?: boolean;
+  profileVisibility?: 'private' | 'selected' | 'public';
   humanVisible: boolean;
   agentSearchEnabled: boolean;
   /** True only when a separate, independently expiring quiet search was approved. */
