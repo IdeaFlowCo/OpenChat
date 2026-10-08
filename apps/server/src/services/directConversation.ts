@@ -1,7 +1,6 @@
 import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
 import type { ManagedTransaction } from 'neo4j-driver';
-import { acquireContextAclLocks } from './contextAccess.js';
 import { getDriver } from '../db.js';
 import { legacyEmailProjection } from '../privacy/legacyEmailCompat.js';
 import { joinUserSocketsToConversation } from '../websocket/chatHandler.js';
@@ -76,7 +75,6 @@ export async function ensureDirectConversation(
 export async function ensureDirectConversationInTransaction(
   tx: ManagedTransaction, userId: string, otherId: string, title?: string,
 ): Promise<DirectConversationResult> {
-  await acquireContextAclLocks(tx, { userIds: [userId, otherId] });
   const id = nanoid();
   const now = new Date().toISOString();
   const participantIds = [...new Set([userId, otherId])].sort();
