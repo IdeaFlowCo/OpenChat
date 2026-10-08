@@ -1,11 +1,7 @@
 # Accepted Unlinked connections in OpenChat
 
-When a member accepts an Unlinked connection request, both people get one direct
-chat in OpenChat (also available in Unlinked Messages). Existing chats are reused.
-The chat appears on the next chat-list load; acceptance does not insert a message,
-send push/email, or create an unread notification. A person still presses Send to
-message the other person. This is not an OpenChat friendship grant and does not
-expand friends-only Context access or publish private profile/contact data.
+For the user-facing behavior, see [Message with OpenChat from Unlinked](../README.md#message-with-openchat-from-unlinked).
+This document owns the confidential acceptance synchronization contract.
 
 The confidential POST `/api/unlinked/connections/accepted` uses the existing
 `UNLINKED_MESSAGING_SECRET`, rejects browser Origin headers and ordinary agent
@@ -20,7 +16,9 @@ identity binding. The receipt, inbox resolution and canonical DM creation commit
 in one transaction. Ordered user ACL locks serialize this operation with blocks
 and local relationship changes. An event reused with different identities or
 acceptance time returns 409. Repeated and racing valid events reuse one receipt
-and the same canonical pair DM. Blocked/bot pairs and local declined/removed
+and the same canonical pair DM. A completed receipt returns its stored result
+without reapplying the event or reevaluating suppression. On first processing,
+blocked/bot pairs and local declined/removed
 relationships produce a terminal suppressed receipt, so replay after unblock
 cannot revive that event. A pre-existing OpenChat friendship is not changed.
 

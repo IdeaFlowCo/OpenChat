@@ -68,6 +68,15 @@ quiet delivery are described in [Context back-channel](docs/context-backchannel.
 An Unlinked **Message** link opens the person's normal conversation, reusing
 any existing thread. Write and send in the usual chat box; opening the link
 sends nothing. **New message** opens the standard recipient picker.
+
+Accepting an Unlinked connection request creates or reuses one direct chat for
+both people in OpenChat and Unlinked Messages, visible on the next chat-list
+load. A new chat is empty: acceptance sends no message, push or email and adds
+no unread notification. It does not grant OpenChat friendship or friends-only
+Context access. Existing blocks and local declined/removed connections suppress
+new acceptance synchronization. See the [accepted-connection contract](docs/unlinked-accepted-connections.md)
+for synchronization and privacy rules.
+
 See the [Unlinked compose contract](docs/unlinked-compose-contract.md) for
 accepted profile context, card recipient resolution, and sign-in return rules.
 
