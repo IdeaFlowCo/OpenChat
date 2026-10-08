@@ -75,6 +75,24 @@ integration('canonical profile asks: real graph permissions and lifecycle',()=>{
   await session(s=>mutateProfileAsk(s,a,active.id,'remove',{expectedRevision:1}));
   expect(await read(null)).toEqual([]);
  },30000);
+ it('enforces the active quota on shared resume and both products expiry extensions',async()=>{
+  const paused=await publish();await updateStory(a,paused.id,{status:'paused'});
+  const expired=await publish();await run('MATCH (s:OpenChatStory {id:$id}) SET s.storyExpiresAt=datetime("2020-01-01")',{id:expired.id});
+  await run(`MATCH (a:User {id:$a}) UNWIND range(1,50) AS n
+   CREATE (s:OpenChatStory {id:$prefix+'-quota-'+toString(n),showOnProfile:true,humanVisible:true,profileVisibility:'public',profileRevision:1,
+    status:'active',text:'Synthetic quota ask',storyExpiresAt:datetime($expiry),createdAt:datetime()})
+   CREATE (i:AgentIntent {id:$prefix+'-quota-intent-'+toString(n),ownerUserId:$a,kind:'ask',status:'paused',contextOnly:true,lifecycleState:'open'})
+   CREATE (a)-[:OWNS_STORY]->(s),(a)-[:OWNS_INTENT]->(i),(s)-[:ACTIVATES]->(i)`,{a,prefix,expiry:input().expiresAt});
+  expect(await read(null)).toHaveLength(50);
+  await expect(publish()).rejects.toMatchObject({statusCode:429});
+  await expect(updateStory(a,paused.id,{status:'active'})).rejects.toThrow('Close an ask');
+  await expect(updateStory(a,expired.id,{storyExpiresAt:input().expiresAt})).rejects.toThrow('Close an ask');
+  await expect(edit(expired,input())).rejects.toMatchObject({statusCode:429});
+  expect(await read(null)).toHaveLength(50);
+  const active=(await read(a)).find(s=>s.status==='active'&&s.id!==expired.id)!;
+  await session(s=>mutateProfileAsk(s,a,active.id,'close',{expectedRevision:active.revision}));
+  await updateStory(a,paused.id,{status:'active'});expect(await read(null)).toHaveLength(50);
+ });
  it('rejects stale profile edits after shared Story and intention mutations',async()=>{
   const ask=await publish();
   const expiry=new Date(Date.now()+172800000).toISOString();

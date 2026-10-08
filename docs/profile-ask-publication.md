@@ -69,3 +69,5 @@ Executable tests:
   owner/thread/account, retained draft, revoked entry and strict URL grammar.
 - The graph cases run in the existing mobile regression graph CI job. All fixtures
   are controlled synthetic personas; tests never post for a real member.
+
+The fifty-active publication quota is serialized under the owner ACL lock on creation, shared Story resume/expiry extension, and Unlinked edits of expired asks. Historical asks cannot consume the owner active inventory.

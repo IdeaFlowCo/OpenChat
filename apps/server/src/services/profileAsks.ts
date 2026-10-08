@@ -79,14 +79,19 @@ async function validateAudience(tx: ManagedTransaction, userId: string, input: P
     RETURN size(users) AS users,count(DISTINCT c) AS rooms`, { userId, userIds: input.userIds, conversationIds: input.conversationIds });
   if (result.records.length !== 1 || numeric(result.records[0].get('users')) !== input.userIds.length || numeric(result.records[0].get('rooms')) !== input.conversationIds.length) throw new ContextLaneError(400, 'Audience is no longer available');
 }
+// Callers hold the canonical owner ACL lock before checking an activation.
+export async function profileAskActiveCount(tx: ManagedTransaction, userId: string, excludingId: string | null = null, now = new Date().toISOString()) {
+  const quota = await tx.run(`MATCH (:User {id:$userId})-[:OWNS_STORY]->(s:OpenChatStory)
+    WHERE s.showOnProfile=true AND s.profileRemovedAt IS NULL AND s.status='active' AND s.storyExpiresAt>datetime($now)
+      AND ($excludingId IS NULL OR s.id<>$excludingId) RETURN count(s) AS count`, { userId, excludingId, now });
+  return numeric(quota.records[0].get('count'));
+}
 export async function publishProfileAsk(session: Session, userId: string, raw: unknown) {
   const input = parseProfileAskInput(raw);
   return session.executeWrite(async tx => {
     await acquireContextAclLocks(tx, { userIds: [userId, ...input.userIds] });
     await validateAudience(tx, userId, input);
-    const quota = await tx.run(`MATCH (:User {id:$userId})-[:OWNS_STORY]->(s:OpenChatStory)
-      WHERE s.showOnProfile=true AND s.profileRemovedAt IS NULL AND s.status='active' AND s.storyExpiresAt>datetime() RETURN count(s) AS count`, { userId });
-    if (numeric(quota.records[0].get('count')) >= 50) throw new ContextLaneError(429, 'Close an ask before adding another');
+    if (await profileAskActiveCount(tx, userId) >= 50) throw new ContextLaneError(429, 'Close an ask before adding another');
     const id = nanoid(), intentId = nanoid(), now = new Date().toISOString();
     const rows = await tx.run(`MATCH (owner:User {id:$userId})
       CREATE (intent:AgentIntent {id:$intentId,ownerUserId:$userId,kind:'ask',terms:$text,goal:$text,seeks:[$text],brings:[],
@@ -118,6 +123,7 @@ export async function mutateProfileAsk(session: Session, userId: string, id: str
     if (input) {
       if (s.status !== 'active' || (i.lifecycleState && i.lifecycleState !== 'open') || i.status === 'withdrawn') throw new ContextLaneError(409, 'Closed asks cannot be republished');
       await validateAudience(tx, userId, input);
+      if (await profileAskActiveCount(tx, userId, id, now) >= 50) throw new ContextLaneError(429, 'Close an ask before activating another');
       // Only explicitly approved text changes. Profile-created canonical terms follow
       // the edit; existing private matching terms and Context excerpts stay separate.
       await tx.run(`MATCH (s:OpenChatStory {id:$id}) SET s.text=$text,s.profileVisibility=$visibility,s.audienceUserIds=$userIds,

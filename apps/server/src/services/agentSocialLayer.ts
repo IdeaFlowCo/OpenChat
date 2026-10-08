@@ -1,4 +1,4 @@
-import { PROFILE_STORY_VISIBILITY } from './profileAsks.js';
+import { PROFILE_STORY_VISIBILITY, profileAskActiveCount } from './profileAsks.js';
 import { acquireContextAclLocks } from './contextAccess.js';
 import { reconcileIntentionLifecycle } from './contextIntentions.js';
 import type { Server as IOServer } from 'socket.io';
@@ -824,6 +824,12 @@ export async function updateStory(
   try {
     return await session.executeWrite(async tx => {
     await acquireContextAclLocks(tx,{userIds:[userId]});
+    const publication = await tx.run(`MATCH (:User {id:$userId})-[:OWNS_STORY]->(s:OpenChatStory {id:$storyId}) RETURN s`,{userId,storyId});
+    const current = publication.records[0]?.get('s').properties;
+    const nextStatus = patch.status ?? current?.status;
+    const nextExpiry = patch.storyExpiresAt ?? current?.storyExpiresAt?.toString();
+    if (current?.showOnProfile === true && !current.profileRemovedAt && nextStatus === 'active' && Date.parse(nextExpiry) > Date.now()
+      && await profileAskActiveCount(tx,userId,storyId) >= 50) throw new SocialLayerValidationError('Close an ask before activating another');
     const result = await tx.run(
       `MATCH (owner:User {id:$userId})
        SET owner.contextAclRevision=coalesce(owner.contextAclRevision,0)+1
