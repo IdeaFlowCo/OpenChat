@@ -1,3 +1,4 @@
+import { queueProfileAskContext } from '../services/profileAskContext';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
@@ -15,7 +16,7 @@ export function ComposeScreen() {
 
 function ComposeEntry({ params }: { params: RouteProps<'Compose'>['params'] }) {
   const navigation = useNavigation<NavProp<'Compose'>>();
-  const { createConversation } = useChat();
+  const { createConversation, currentUser } = useChat();
   const c = getColors(useTheme().scheme);
   const [resolution, setResolution] = useState<'loading' | 'unclaimed' | 'unavailable' | 'error'>('loading');
   const [profileName, setProfileName] = useState('This person');
@@ -31,13 +32,16 @@ function ComposeEntry({ params }: { params: RouteProps<'Compose'>['params'] }) {
       }
       const result = params.card
         ? { status: 'ready' as const, recipient: { id: (await api.getCardFriendStatus(params.card)).userId } }
-        : await api.resolveUnlinkedRecipient(params.profile!);
+        : await (params.askId ? api.resolveUnlinkedRecipient(params.profile!, params.askId) : api.resolveUnlinkedRecipient(params.profile!));
       if (!active) return;
       if (result.status === 'ready') {
         // The canonical server path reuses the exact direct conversation,
         // including concurrent/repeated entries. Opening never sends a message.
         const conversation = await createConversation([result.recipient.id], { type: 'direct' });
-        if (active) navigation.replace('Chat', { conversationId: conversation.id });
+        if (active) {
+          if ('ask' in result && result.ask && currentUser) queueProfileAskContext(currentUser.userId, conversation.id, result.ask);
+          navigation.replace('Chat', { conversationId: conversation.id });
+        }
       } else {
         if (result.status === 'unclaimed') setProfileName(result.name);
         setResolution(result.status);
@@ -46,7 +50,7 @@ function ComposeEntry({ params }: { params: RouteProps<'Compose'>['params'] }) {
     void open().catch(() => { if (active) setResolution('error'); });
     // A newer profile link or Back must not be overtaken by an older request.
     return () => { active = false; };
-  }, [params.profile, params.card, attempt, navigation, createConversation]));
+  }, [params.profile, params.card, params.askId, currentUser, attempt, navigation, createConversation]));
 
   const button = { padding: 14, borderRadius: 12, alignItems: 'center' as const };
   return <ScrollView contentContainerStyle={{ padding: 24, gap: 18, backgroundColor: c.background, width: '100%', maxWidth: 640, alignSelf: 'center' }}>

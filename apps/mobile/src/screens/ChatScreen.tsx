@@ -1,3 +1,4 @@
+import { ProfileAskBanner, useProfileAskContext } from '../components/ProfileAskBanner';
 /**
  * Chat thread — read messages, send, see typing indicator. The conversation
  * is identified by route param; we read the conversation metadata from the
@@ -323,6 +324,9 @@ export function ChatScreen({
   );
 
   const [text, setText] = useState('');
+  const askAccount = useChat().currentUser?.userId;
+  const [profileAskContext, dismissProfileAskContext] = useProfileAskContext(askAccount, conversationId);
+
   const [sending, setSending] = useState(false);
 
   // NVC composer modal (OpenChat-3kr.2) — Observation / Feeling / Need /
@@ -1683,6 +1687,7 @@ export function ChatScreen({
         </View>
       )}
 
+      <ProfileAskBanner ask={profileAskContext} onDismiss={dismissProfileAskContext} onInsert={context => setText(value => `${value}${value ? '\n\n' : ''}About your ask: “${context}”\n`)} />
       {/* Edit mode bar — shown above composer when editing (OpenChat-q9h) */}
       {editingMessage && (
         <View style={[styles.replyBar, { backgroundColor: c.surface, borderColor: c.border }]}>

@@ -201,3 +201,5 @@ Keep this file for knowledge useful to almost every future agent session in this
 Do not repeat what the codebase already shows; point to the authoritative file or command instead.
 Prefer rewriting or pruning existing entries over appending new ones.
 When updating this file, preserve this bar for all agents and keep entries concise.
+
+Profile publication extends canonical Stories with explicit owner opt-in and live audiences; Unlinked's confidential adapter adds no independent ask store. Lifecycle, identity, addressed context and coordinated source-only rollout: [docs/profile-ask-publication.md](docs/profile-ask-publication.md).

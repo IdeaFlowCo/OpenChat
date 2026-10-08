@@ -79,3 +79,12 @@ entry opens or creates the direct conversation, without sending anything. Linked
 [linkedin-messaging-plan.md](linkedin-messaging-plan.md).
 
 The embedded receiver accepts the exact `embed=unlinked` presentation flag alongside the compose query. It still rejects unknown/repeated parameters and resolves the public profile on the server before choosing a recipient. Embedded pending compose state stays in memory per frame, separate from standalone compose storage.
+
+## Ask context (coordinated source rollout held)
+
+An optional opaque `askId` is accepted only with `profile` and without `card`.
+It survives the same sign-in/embedded capture flow. Unknown/repeated keys and
+caller-provided ask text/identity are rejected. `/api/unlinked/recipient` rechecks
+that this profile's exact owner authored the currently readable active Story.
+The normal chat shows the verified ask as context; opening sends nothing and
+preserves drafts. See [profile-ask-publication.md](profile-ask-publication.md).

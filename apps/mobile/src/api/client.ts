@@ -1014,10 +1014,10 @@ export const api = {
   reportContextPost: (conversationId: string, postId: string, reason: string) =>
     request<void>(`/api/chat/conversations/${conversationId}/context/${postId}/report`, { method: 'POST', body: JSON.stringify({ reason }) }),
 
-  resolveUnlinkedRecipient: (profile: string) => request<
-    { status: 'ready'; recipient: { id: string; name: string } } |
+  resolveUnlinkedRecipient: (profile: string, askId?: string) => request<
+    { status: 'ready'; recipient: { id: string; name: string }; ask?: {id:string;text:string;expiresAt:string} } |
     { status: 'unclaimed'; name: string } | { status: 'unavailable' }
-  >('/api/unlinked/recipient', { method: 'POST', body: JSON.stringify({ profile }) }),
+  >('/api/unlinked/recipient', { method: 'POST', body: JSON.stringify({ profile, ...(askId ? { askId } : {}) }) }),
   getMe: () => request<User>('/api/auth/me'),
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
   getConversation: (conversationId: string) =>

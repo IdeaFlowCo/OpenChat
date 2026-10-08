@@ -1,3 +1,4 @@
+import { PROFILE_STORY_VISIBILITY } from './profileAsks.js';
 import { acquireContextAclLocks } from './contextAccess.js';
 import { reconcileIntentionLifecycle } from './contextIntentions.js';
 import type { Server as IOServer } from 'socket.io';
@@ -780,16 +781,8 @@ const FEED_STORY_QUERY = `
   MATCH (owner:User)-[:OWNS_STORY]->(story:OpenChatStory {status: 'active', humanVisible: true})
   MATCH (viewer:User {id: $viewerId})
   WHERE story.storyExpiresAt > datetime($now)
-    AND NOT (owner)-[:BLOCKED]->(viewer)
-    AND NOT (viewer)-[:BLOCKED]->(owner)
-    AND (
-      owner.id = viewer.id
-      OR viewer.id IN coalesce(story.audienceUserIds, [])
-      OR EXISTS {
-        MATCH (owner)-[:PARTICIPATES_IN]->(audienceConversation:Conversation)<-[:PARTICIPATES_IN]-(viewer)
-        WHERE audienceConversation.id IN coalesce(story.audienceConversationIds, [])
-      }
-    )
+    AND story.profileRemovedAt IS NULL
+    AND (${PROFILE_STORY_VISIBILITY})
     AND ($storyId IS NULL OR story.id = $storyId)
     AND ($authorId IS NULL OR owner.id = $authorId)
   RETURN story { .* } AS story, owner { .id, .name } AS author

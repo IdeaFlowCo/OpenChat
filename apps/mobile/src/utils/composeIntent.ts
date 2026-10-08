@@ -1,5 +1,5 @@
 /** Profile URLs are context only; never an OpenChat identity proof. */
-export type ComposeIntent = { source: 'unlinked'; profile?: string; card?: string };
+export type ComposeIntent = { source: 'unlinked'; profile?: string; card?: string; askId?: string };
 export function canonicalPublicUnlinkedProfile(value: string): string | null {
   const match = /^https:\/\/www\.unlinked\.ai(\/people\/([A-Za-z0-9._~%-]{1,480})\/?)$/.exec(value);
   if (!match || value.length > 600) return null;
@@ -12,7 +12,7 @@ export function canonicalPublicUnlinkedProfile(value: string): string | null {
 }
 export function parseComposeIntent(url: URL): ComposeIntent | null {
   if (url.searchParams.get('intent') !== 'compose' || url.searchParams.get('source') !== 'unlinked') return null;
-  if ([...url.searchParams.keys()].some(key => !['intent', 'source', 'profile', 'card', 'embed'].includes(key))) return null;
+  if ([...url.searchParams.keys()].some(key => !['intent', 'source', 'profile', 'card', 'embed', 'askId'].includes(key))) return null;
   if ([...url.searchParams.keys()].some(key => url.searchParams.getAll(key).length !== 1)) return null;
   // Unlinked's iframe adds a presentation flag; it is not recipient authority.
   if (url.searchParams.has('embed') && url.searchParams.get('embed') !== 'unlinked') return null;
@@ -20,5 +20,7 @@ export function parseComposeIntent(url: URL): ComposeIntent | null {
   const card = url.searchParams.get('card');
   if (profile !== null && !canonicalPublicUnlinkedProfile(profile)) return null;
   if (card !== null && !/^[A-Za-z0-9]{24}$/.test(card)) return null;
-  return { source: 'unlinked', ...(profile ? { profile } : {}), ...(card ? { card } : {}) };
+  const askId = url.searchParams.get('askId');
+  if (askId !== null && (!/^[A-Za-z0-9_-]{1,80}$/.test(askId) || !profile || card)) return null;
+  return { source: 'unlinked', ...(profile ? { profile } : {}), ...(card ? { card } : {}), ...(askId ? { askId } : {}) };
 }

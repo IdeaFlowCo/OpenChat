@@ -84,3 +84,5 @@ The public `/` page verifies the current browser's OpenChat session. Signed-in
 visitors see **Signed in as [name]** and **Open OpenChat**; signed-out visitors
 see **Sign in**. It refreshes on return and cross-tab sign-out. Agent setup links
 to the shared `/agents` guide instead of maintaining separate MCP snippets.
+
+| Profile ask response | Unlinked profile → Message about this → normal Chat | Verified current ask banner; Add ask to draft / Dismiss; no automatic send. Publication lives in Unlinked Profile → Add an ask. Source rollout held; see [profile-ask-publication.md](profile-ask-publication.md). |
