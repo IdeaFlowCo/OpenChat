@@ -65,6 +65,8 @@ import { TransformButton } from '../components/TransformButton';
 import { NVCComposerModal } from '../components/NVCComposerModal';
 import { LinkPreviewCard } from '../components/LinkPreviewCard';
 import { AgentMarkdown } from '../components/AgentMarkdown';
+import { MessageText } from '../components/MessageText';
+import { preserveBrowserMenu } from '../utils/messageLinks';
 import { dedupeLinkPreviews } from '../utils/linkPreviews';
 import { AgentNetworkCard } from '../components/AgentNetworkCard';
 import type { Participant } from '../api/client';
@@ -283,6 +285,8 @@ export function ChatScreen({
   embedded = false,
   onOpenAgent,
 }: ChatScreenProps = {}) {
+  // A web pressable claims selection gestures and suppresses native link menus.
+  const MessageBubble = Platform.OS === 'web' ? View : TouchableOpacity;
   const navigation = useNavigation<NavProp<'Chat'>>();
   // Read route params defensively: when embedded inside MasterDetailLayout
   // we're under a different route name ('Conversations'), so the Chat
@@ -1558,14 +1562,18 @@ export function ChatScreen({
         <View style={{ flexDirection: 'column', maxWidth: '78%', alignItems: isOwn ? 'flex-end' : 'flex-start' }}
           {...(Platform.OS === 'web' ? {
             onContextMenu: (event: React.MouseEvent) => {
+              if (preserveBrowserMenu(event.target, globalThis.getSelection?.()?.toString() ?? '')) return;
               event.preventDefault();
               handleLongPress(m, isOwn, getUserDisplayName(m.sender));
             },
           } : {})}>
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
-          delayLongPress={350}
+        <MessageBubble
+          {...(Platform.OS === 'web' ? {} : {
+            activeOpacity: 0.85,
+            accessible: false,
+            onLongPress: () => handleLongPress(m, isOwn, getUserDisplayName(m.sender)),
+            delayLongPress: 350,
+          })}
           style={[
             styles.bubble,
             {
@@ -1687,19 +1695,20 @@ export function ChatScreen({
                   ? <AgentMarkdown content={m.content} color={c.bubbleOtherText} linkColor={c.primary} codeBackground={c.surfaceElevated}
                       onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
                       renderText={isGroup && m.content.includes('@') ? text => renderContentWithMentions(text, mentionableParticipants, c.bubbleOtherText, scheme) : undefined} />
-                  : isGroup
-                  ? <Text style={{ fontSize: 16 }}>
-                      {renderContentWithMentions(
-                        m.content,
-                        mentionableParticipants,
-                        isOwn ? c.bubbleOwnText : c.bubbleOtherText,
-                        scheme
-                      )}
-                    </Text>
-                  : <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 16 }}>{m.content}</Text>
+                  : <MessageText content={m.content}
+                      color={isOwn ? c.bubbleOwnText : c.bubbleOtherText}
+                      onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
+                      renderPlain={isGroup ? text => renderContentWithMentions(text, mentionableParticipants,
+                        isOwn ? c.bubbleOwnText : c.bubbleOtherText, scheme) : undefined}
+                    />
               ))
           }
           <View style={styles.bubbleFooter}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Message actions: ${m.deletedAt ? 'Deleted message' : (m.content?.slice(0, 80) || 'Attachment')}`}
+              onPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
+              style={{ minHeight: 44, minWidth: 44, justifyContent: 'center', marginRight: 8 }}>
+              <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 12 }}>More</Text>
+            </TouchableOpacity>
             <Text style={{ color: isOwn ? ownTint(0.7) : c.textMetadata, fontSize: 10, flexShrink: 1 }}>
               {failed
                 ? (m._deliveryDetail ? `Failed to send — ${m._deliveryDetail}` : 'Failed to send')
@@ -1724,7 +1733,7 @@ export function ChatScreen({
               return <Text style={{ color: ownTint(0.5), fontSize: 10, marginLeft: 3 }}>✓</Text>;
             })()}
           </View>
-        </TouchableOpacity>
+        </MessageBubble>
         {isOwn && failed && m.id.startsWith('local-') && (
           <View style={{ flexDirection: 'row', alignSelf: 'flex-end', gap: 8 }}>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry message"
