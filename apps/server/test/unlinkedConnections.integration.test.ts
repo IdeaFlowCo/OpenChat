@@ -117,12 +117,18 @@ suite('accepted connection trusted HTTP + real graph',()=>{
   // Check the same known element, rather than succeeding because an ID lookup
   // missed it. These are the label selectors in the audited Noos routes;
   // this does not claim to exercise the Noos HTTP handlers or operator access.
+  const selections: Record<string, number> = {};
   for (const label of ['Node', 'File']) {
    const selected = await query(`MATCH (r:${label}) WHERE elementId(r) = $elementId RETURN r`, {
     elementId: record.get('elementId'),
    });
    expect(selected.records).toEqual([]);
+   selections[label] = selected.records.length;
   }
+  if (process.env.UNLINKED_RECEIPT_EVIDENCE_PATH) writeFileSync(process.env.UNLINKED_RECEIPT_EVIDENCE_PATH,
+   JSON.stringify({ scenario: 'Authenticated synthetic acceptance receipt graph boundary', acceptance: response.body,
+    elementId: record.get('elementId'), labels: record.get('labels'), properties,
+    links: Number(record.get('links')), selections }, null, 2) + '\n');
  });
  it('reuses an existing DM, including when a fresh accepted request has a different ID',async()=>{
   const body=input('reuse');const first=await post(body);const [a,b]=await ids(body);
