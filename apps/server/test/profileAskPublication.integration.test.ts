@@ -4,6 +4,7 @@ import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import {randomUUID} from 'node:crypto';
+import {writeFileSync} from 'node:fs';
 const state=vi.hoisted(()=>({driver:null as any}));
 vi.mock('../src/db.js',()=>({getDriver:()=>state.driver}));
 import {listProfileAsks,mutateProfileAsk,profileAskAudience,publishProfileAsk} from '../src/services/profileAsks.js';
@@ -31,6 +32,29 @@ integration('canonical profile asks: real graph permissions and lifecycle',()=>{
  (room:Conversation {id:$room,name:'Test group',type:'group'}),(connection:OpenChatConnection {id:$connection,firstId:$a,secondId:$b,state:'accepted'})
  CREATE (a)-[:PARTICIPATES_IN]->(room),(b)-[:PARTICIPATES_IN]->(room)`,{a,b,outsider,room,connection:prefix+'-connection',issuer:PROFILE_ASK_ISSUER,key:PROFILE_ASK_ISSUER+'\u001f'+a,bKey:PROFILE_ASK_ISSUER+'\u001f'+b});});
  afterAll(async()=>{await cleanup();await driver.close();});
+ it('executes the confidential publication lifecycle through HTTP with canonical feed parity',async()=>{
+  const transcript:any[]=[];
+  const call=async(operation:string,extra:any={})=>{
+   const response=await post({operation,owner:identity(a),viewer:identity(a),...extra});
+   transcript.push({operation,status:response.status,body:response.body});
+   expect(response.status).toBe(200);expect(response.headers['cache-control']).toBe('no-store');
+   return response.body;
+  };
+  const {ask}=await call('publish',{input:input('private')});
+  expect((await call('list',{viewer:null})).asks).toEqual([]);
+  const {ask:publicAsk}=await call('edit',{askId:ask.id,input:{...input(),expectedRevision:ask.revision}});
+  const visible=(await call('list',{viewer:null})).asks;
+  expect(visible).toHaveLength(1);expect(visible[0].id).toBe(ask.id);
+  const feed=await listStoryFeed(b,a);
+  expect(feed.map(s=>({id:s.id,text:s.text}))).toEqual(visible.map((s:any)=>({id:s.id,text:s.text})));
+  transcript.push({canonicalFeed:feed.map(s=>({id:s.id,text:s.text}))});
+  const {ask:closed}=await call('close',{askId:ask.id,input:{expectedRevision:publicAsk.revision}});
+  expect((await call('list',{viewer:null})).asks).toEqual([]);
+  expect(await listStoryFeed(b,a)).toEqual([]);
+  await call('remove',{askId:ask.id,input:{expectedRevision:closed.revision}});
+  expect((await call('list')).asks).toEqual([]);
+  if(process.env.PROFILE_ASK_EVIDENCE_PATH) writeFileSync(process.env.PROFILE_ASK_EVIDENCE_PATH,JSON.stringify({fixture:'Synthetic personas only; confidential HTTP adapter and real isolated Neo4j',transcript},null,2));
+ });
  it('requires explicit public permission, exposes a whitelisted DTO, and uses the same OpenChat feed',async()=>{
   const mine=await publish(input('private'));expect(await read(null)).toEqual([]);expect(await read(b)).toEqual([]);expect(await read(a)).toHaveLength(1);
   const shared=await publish();expect(await read(null)).toEqual([{id:shared.id,kind:'ask',text:shared.text,expiresAt:shared.expiresAt}]);

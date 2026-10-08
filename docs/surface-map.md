@@ -49,6 +49,7 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | `OriginalMessage` | Stream | **Original message** | Chats › Stream › Original message; chat Stream entry | 2 | Exact accessible source and nearby messages; unavailable source gives no chat data. |
 | `Compose` | Chats | **Message with OpenChat** | External Unlinked profile CTA or incoming compose link | 2 | See [compose usage](../README.md#message-with-openchat-from-unlinked) and [incoming-link contract](unlinked-compose-contract.md). |
 | *(existing Chat)* Accepted Unlinked connection | Chats | Conversation participant name | Chats › participant's conversation | 1 | See [acceptance behavior](../README.md#message-with-openchat-from-unlinked) and [synchronization contract](unlinked-accepted-connections.md). |
+| `Chat` profile ask context | Asks | **About this ask**, **Add ask to draft**, **Dismiss** | External Unlinked profile › **Message about this** › Chat | — (external entry) | Source rollout held; see [profile ask usage](../README.md#profile-asks-source-rollout-held) and [publication contract](profile-ask-publication.md). |
 | *(action)* `ContextWebhookSetup` | Agents | **External agent webhooks** | Chats › Agent drafts › Set up webhooks | 2 | See [owner consent and availability](context-webhooks.md). |
 | `ContextReview` | Agents | **Agent drafts** | Chats list utility row (including collapsed desktop sidebar) | 1 | Owner-only hosted Context inbox, opt-in off by default. Anthropic processing disclosure, exact source/reply/destination/current audience review, separate explicit Publish to quiet Context. Edits create a new draft for review; current and future authorized conversation members can read published replies. |
 | *(action)* `ConnectAgentLink` | Agents | **Connect an agent** | Chats list utility row; Profile; Settings | 1 | Opens the shared Ideaflow connection hub for OpenChat, Unlinked, and Notestream Vision. No connection status is inferred from API key existence. API keys and repeatable setup copy remain in Settings. |
@@ -84,5 +85,3 @@ The public `/` page verifies the current browser's OpenChat session. Signed-in
 visitors see **Signed in as [name]** and **Open OpenChat**; signed-out visitors
 see **Sign in**. It refreshes on return and cross-tab sign-out. Agent setup links
 to the shared `/agents` guide instead of maintaining separate MCP snippets.
-
-| Profile ask response | Unlinked profile → Message about this → normal Chat | Verified current ask banner; Add ask to draft / Dismiss; no automatic send. Publication lives in Unlinked Profile → Add an ask. Source rollout held; see [profile-ask-publication.md](profile-ask-publication.md). |

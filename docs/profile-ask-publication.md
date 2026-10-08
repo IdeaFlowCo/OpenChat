@@ -23,14 +23,17 @@ selected users and conversations use the existing Story ACL. Both owner and
 viewer must still belong to a selected conversation. Both-way blocks, expiry,
 withdrawal and removed projections fail closed without hidden counts.
 
-Owner operations require `expectedRevision`, serialized owner/story locks and
-live selected audiences. Edit changes the human-approved text and visibility.
+Edit, close and remove require `expectedRevision` and serialized owner/story
+locks. Publish and edit validate the selected audiences. Edit changes the
+human-approved text and visibility.
 For profile-created requests, canonical goal/seeks update too; linked Context
 posts remain their independently approved text and are marked source-changed.
 Close calls canonical intention fulfillment; remove calls withdrawal plus a
 Story tombstone. Existing Context and Story lifecycle changes also revoke the
-profile projection. Closed intentions cannot be republished. Fifty active profile
-asks per owner bound reads and writes; expiry is limited to one year.
+profile projection. Closed intentions cannot be republished. Publication is capped
+at fifty active, unexpired profile asks per owner. Owner reads retain every active
+ask plus up to fifty inactive asks; viewer reads return
+at most fifty active asks. Expiry is limited to 366 days at publication or edit.
 
 The public reader DTO is `{id,kind:'ask',text,expiresAt}`. Owner inventory adds
 revision, visibility, status and selected audience IDs; no match/draft/counterparty
@@ -43,9 +46,11 @@ it rechecks the ask belongs to that exact owner and is active, unexpired and
 readable by the authenticated user. Response adds only `{id,text,expiresAt}`.
 Missing/revoked/foreign asks are unavailable and create no conversation/message.
 The compose client opens the normal verified direct thread and queues context in
-account/thread-scoped memory. **About this ask → Add ask to draft** explicitly
-appends to the current draft; **Dismiss** leaves it alone. Normal Send is still
-required. Account switches clear pending context. Links contain no text or identity.
+account/thread-scoped memory. Account switches clear pending context; reads reject
+expired asks and context captured at least one hour ago. See the
+[compose contract](unlinked-compose-contract.md#profile-entry) for link grammar
+and [profile ask usage](../README.md#profile-asks-source-rollout-held) for
+composer actions.
 
 Existing OpenChat profile/feed Stories show the same approved text, audience and
 lifecycle. The Unlinked owner controls are the publication door for this release;
