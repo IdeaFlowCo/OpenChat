@@ -38,6 +38,7 @@ beforeAll(async () => {
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   vi.stubEnv('WIT_API_BASE', `http://127.0.0.1:${(server.address() as { port: number }).port}`);
+  vi.stubEnv('WIT_PUBLIC_API_BASE', `http://127.0.0.1:${(server.address() as { port: number }).port}`);
   vi.stubEnv('ANTHROPIC_API_KEY', 'test-model-key');
   vi.stubEnv('OPENCHAT_OWNER_USER_ID', OWNER);
   vi.stubEnv('WIT_AGENT_KEY', 'test-owner-key');

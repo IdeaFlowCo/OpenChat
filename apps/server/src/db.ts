@@ -131,6 +131,8 @@ export async function initDatabase(): Promise<void> {
     `);
 
     // One durable lifecycle per unordered pair, independent of conversations.
+    await session.run(`CREATE CONSTRAINT unlinked_connection_sync_request IF NOT EXISTS
+      FOR (receipt:UnlinkedConnectionSync) REQUIRE receipt.requestId IS UNIQUE`);
     await session.run(`
       CREATE CONSTRAINT friend_connection_pair IF NOT EXISTS
       FOR (connection:OpenChatConnection) REQUIRE connection.pairKey IS UNIQUE

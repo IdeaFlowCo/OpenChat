@@ -1,0 +1,47 @@
+# Accepted Unlinked connections in OpenChat
+
+When a member accepts an Unlinked connection request, both people get one direct
+chat in OpenChat (also available in Unlinked Messages). Existing chats are reused.
+The chat appears on the next chat-list load; acceptance does not insert a message,
+send push/email, or create an unread notification. A person still presses Send to
+message the other person. This is not an OpenChat friendship grant and does not
+expand friends-only Context access or publish private profile/contact data.
+
+The confidential POST `/api/unlinked/connections/accepted` uses the existing
+`UNLINKED_MESSAGING_SECRET`, rejects browser Origin headers and ordinary agent
+credentials, and validates the canonical Ideaflow issuer and two distinct opaque
+subjects. The Unlinked server supplies identities resolved from active owner
+bindings and the original accepted request ID/time. Neither names nor email are
+identity evidence. Only display names accompany the identity; request notes,
+private contact details and local Unlinked owner IDs are excluded.
+
+A unique `UnlinkedConnectionSync.requestId` receipt pins the accepted event to its
+identity binding. The receipt, inbox resolution and canonical DM creation commit
+in one transaction. Ordered user ACL locks serialize this operation with blocks
+and local relationship changes. An event reused with different identities or
+acceptance time returns 409. Repeated and racing valid events reuse one receipt
+and the same canonical pair DM. Blocked/bot pairs and local declined/removed
+relationships produce a terminal suppressed receipt, so replay after unblock
+cannot revive that event. A pre-existing OpenChat friendship is not changed.
+
+Unlinked's durable accepted request is its delivery queue. Startup and five-second
+reconciliation select at most ten due unacknowledged rows, resolve active identities
+and recheck acceptance before dispatch. An immediate wake follows acceptance,
+including crossed requests. Failures keep the same request ID and use persisted
+exponential backoff from five seconds to one hour. A lost response is safe to
+retry. Acknowledgement is conditional on the same still-accepted request. Removed,
+withdrawn, ignored, pending or deleted requests are not newly dispatched. Removal
+in Unlinked does not delete an already-created chat or its history; a delivery
+already in flight may finish. OpenChat's own block remains authoritative.
+
+No credential is minted. Deploy the receiver and its additive constraint before
+the sender worker. An absent messaging secret disables delivery; receiver outages
+leave accepted requests retryable. Existing accepted requests without an ack are
+reconciled as well. There is no external-send transport or subscription. Source
+validation uses fictional identities and a disposable database only. Production
+merge/deployment remains subject to the existing release-owner holds.
+
+Validation: server route and real Neo4j tests cover authentication, identity
+conflicts, concurrency, DM reuse, suppression, no messages/friend grants; sender
+behavior tests cover recipient authorization, crossed acceptance, lost response,
+persisted retry, restart, removed requests and missing identity bindings.

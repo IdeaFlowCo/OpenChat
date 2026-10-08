@@ -1,3 +1,4 @@
+vi.mock('../src/services/contextAccess.js', () => ({ acquireContextAclLocks: async () => {} }));
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -7,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../src/db.js', () => ({
   getDriver: () => ({
-    session: () => ({ run: mocks.run, close: mocks.close }),
+    session: () => ({ run: mocks.run, close: mocks.close, executeWrite: (fn: any) => fn({ run: mocks.run }) }),
   }),
 }));
 

@@ -1,5 +1,7 @@
 import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
+import type { ManagedTransaction } from 'neo4j-driver';
+import { acquireContextAclLocks } from './contextAccess.js';
 import { getDriver } from '../db.js';
 import { legacyEmailProjection } from '../privacy/legacyEmailCompat.js';
 import { joinUserSocketsToConversation } from '../websocket/chatHandler.js';
@@ -64,78 +66,85 @@ export async function ensureDirectConversation(
 ): Promise<DirectConversationResult> {
   const session = getDriver().session();
   try {
-    const id = nanoid();
-    const now = new Date().toISOString();
-    const participantIds = [...new Set([userId, otherId])].sort();
-    const directPairKey = JSON.stringify(participantIds);
-    const creationToken = nanoid();
-    if (userId !== otherId) {
-      const permission = await session.run(`
-        MATCH (first:User {id: $userId}), (second:User {id: $otherId})
-        RETURN NOT (first)-[:BLOCKED]->(second)
-          AND NOT (second)-[:BLOCKED]->(first) AS allowed
-      `, { userId, otherId });
-      if (permission.records.length === 0) {
-        throw new Error('Direct conversation participants not found');
-      }
-      if (permission.records[0].get('allowed') !== true) {
-        throw new DirectConversationNotAllowedError();
-      }
-    }
-    const result = await session.run(
-      `
-      MATCH (first:User {id: $firstId}), (second:User {id: $secondId})
-      OPTIONAL MATCH (first)-[:PARTICIPATES_IN]->(existing:Conversation {type: 'direct'})
-      WHERE ($firstId = $secondId AND NOT EXISTS {
-        MATCH (other:User)-[:PARTICIPATES_IN]->(existing)
-        WHERE other.id <> $firstId
-      }) OR ($firstId <> $secondId
-        AND EXISTS { MATCH (second)-[:PARTICIPATES_IN]->(existing) }
-        AND NOT EXISTS {
-          MATCH (other:User)-[:PARTICIPATES_IN]->(existing)
-          WHERE NOT other.id IN [$firstId, $secondId]
-        })
-      WITH first, second, head(collect(existing)) AS existing
-      FOREACH (_ IN CASE WHEN existing IS NULL THEN [] ELSE [1] END |
-        SET existing.directPairKey = $directPairKey
-      )
-      MERGE (c:Conversation {directPairKey: $directPairKey})
-      ON CREATE SET c.id = $id, c.title = $title, c.type = 'direct',
-                    c.containsBot = coalesce(first.isBot, false) OR coalesce(second.isBot, false),
-                    c.createdAt = datetime($now),
-                    c.updatedAt = datetime($now), c.lastMessageAt = datetime($now),
-                    c.creationToken = $creationToken
-      WITH c, c.creationToken = $creationToken AS created
-      REMOVE c.creationToken
-      WITH c, created
-      UNWIND $participantIds AS participantId
-      MATCH (user:User {id: participantId})
-      MERGE (user)-[rel:PARTICIPATES_IN]->(c)
-      ON CREATE SET rel.joinedAt = datetime($now),
-                    rel.role = CASE WHEN participantId = $userId THEN 'owner' ELSE 'member' END
-      WITH c, created,
-           collect({user: user {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, profileStatus: CASE WHEN user.profileStatusText IS NOT NULL OR user.profileStatusEmoji IS NOT NULL THEN { text: user.profileStatusText, emoji: user.profileStatusEmoji, updatedAt: user.profileStatusUpdatedAt } ELSE null END, .lastSeenAt, .isBot, ${legacyEmailProjection('user')}}, role: rel.role}) AS participants
-      RETURN c { .*, participants: participants } AS conversation, created
-      `,
-      {
-        id,
-        now,
-        participantIds,
-        userId,
-        firstId: participantIds[0],
-        secondId: participantIds.at(-1),
-        directPairKey,
-        creationToken,
-        title: title || null,
-      },
-    );
-    if (result.records.length === 0) throw new Error('Direct conversation participants not found');
+    const result = await session.executeWrite(tx => ensureDirectConversationInTransaction(tx, userId, otherId, title));
+    notifyParticipants(io, result.conversation, [...new Set([userId, otherId])].sort(), result.created);
+    return result;
+  } finally { await session.close(); }
+}
 
-    const conversation = toJS(result.records[0].get('conversation')) as Record<string, unknown>;
-    const created = result.records[0].get('created') as boolean;
-    notifyParticipants(io, conversation, participantIds, created);
-    return { conversation, created };
-  } finally {
-    await session.close();
+/** Same canonical pair write, usable atomically with a trusted integration receipt. */
+export async function ensureDirectConversationInTransaction(
+  tx: ManagedTransaction, userId: string, otherId: string, title?: string,
+): Promise<DirectConversationResult> {
+  await acquireContextAclLocks(tx, { userIds: [userId, otherId] });
+  const id = nanoid();
+  const now = new Date().toISOString();
+  const participantIds = [...new Set([userId, otherId])].sort();
+  const directPairKey = JSON.stringify(participantIds);
+  const creationToken = nanoid();
+  if (userId !== otherId) {
+    const permission = await tx.run(`
+      MATCH (first:User {id: $userId}), (second:User {id: $otherId})
+      RETURN NOT (first)-[:BLOCKED]->(second)
+        AND NOT (second)-[:BLOCKED]->(first) AS allowed
+    `, { userId, otherId });
+    if (permission.records.length === 0) {
+      throw new Error('Direct conversation participants not found');
+    }
+    if (permission.records[0].get('allowed') !== true) {
+      throw new DirectConversationNotAllowedError();
+    }
   }
+  const result = await tx.run(
+    `
+    MATCH (first:User {id: $firstId}), (second:User {id: $secondId})
+    OPTIONAL MATCH (first)-[:PARTICIPATES_IN]->(existing:Conversation {type: 'direct'})
+    WHERE ($firstId = $secondId AND NOT EXISTS {
+      MATCH (other:User)-[:PARTICIPATES_IN]->(existing)
+      WHERE other.id <> $firstId
+    }) OR ($firstId <> $secondId
+      AND EXISTS { MATCH (second)-[:PARTICIPATES_IN]->(existing) }
+      AND NOT EXISTS {
+        MATCH (other:User)-[:PARTICIPATES_IN]->(existing)
+        WHERE NOT other.id IN [$firstId, $secondId]
+      })
+    WITH first, second, head(collect(existing)) AS existing
+    FOREACH (_ IN CASE WHEN existing IS NULL THEN [] ELSE [1] END |
+      SET existing.directPairKey = $directPairKey
+    )
+    MERGE (c:Conversation {directPairKey: $directPairKey})
+    ON CREATE SET c.id = $id, c.title = $title, c.type = 'direct',
+                  c.containsBot = coalesce(first.isBot, false) OR coalesce(second.isBot, false),
+                  c.createdAt = datetime($now),
+                  c.updatedAt = datetime($now), c.lastMessageAt = datetime($now),
+                  c.creationToken = $creationToken
+    WITH c, coalesce(c.creationToken = $creationToken, false) AS created
+    REMOVE c.creationToken
+    WITH c, created
+    UNWIND $participantIds AS participantId
+    MATCH (user:User {id: participantId})
+    MERGE (user)-[rel:PARTICIPATES_IN]->(c)
+    ON CREATE SET rel.joinedAt = datetime($now),
+                  rel.role = CASE WHEN participantId = $userId THEN 'owner' ELSE 'member' END
+    WITH c, created,
+         collect({user: user {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, profileStatus: CASE WHEN user.profileStatusText IS NOT NULL OR user.profileStatusEmoji IS NOT NULL THEN { text: user.profileStatusText, emoji: user.profileStatusEmoji, updatedAt: user.profileStatusUpdatedAt } ELSE null END, .lastSeenAt, .isBot, ${legacyEmailProjection('user')}}, role: rel.role}) AS participants
+    RETURN c { .*, participants: participants } AS conversation, created
+    `,
+    {
+      id,
+      now,
+      participantIds,
+      userId,
+      firstId: participantIds[0],
+      secondId: participantIds.at(-1),
+      directPairKey,
+      creationToken,
+      title: title || null,
+    },
+  );
+  if (result.records.length === 0) throw new Error('Direct conversation participants not found');
+
+  const conversation = toJS(result.records[0].get('conversation')) as Record<string, unknown>;
+  const created = result.records[0].get('created') as boolean;
+  return { conversation, created };
 }
