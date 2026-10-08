@@ -7,7 +7,9 @@
  */
 
 import React from 'react';
-import { Image, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { safeMessageUrl } from '../utils/messageLinks';
+import { openMessageLink } from './MessageText';
 import type { LinkPreview } from '../api/client';
 import { getColors } from '../theme/colors';
 
@@ -20,11 +22,9 @@ interface Props {
 export function LinkPreviewCard({ preview, isOwn, scheme }: Props) {
   const c = getColors(scheme);
 
-  const handlePress = () => {
-    Linking.openURL(preview.url).catch(() => {
-      // Silently fail — URL may be malformed or unavailable.
-    });
-  };
+  const url = safeMessageUrl(preview.url);
+  if (!url) return null;
+  const handlePress = () => { void openMessageLink(url); };
 
   /**
    * Own-bubble foreground tint. The own bubble is ink in light mode but PAPER

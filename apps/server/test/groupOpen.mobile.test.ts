@@ -293,17 +293,21 @@ describe('desktop composer input', () => {
     mocks.chat.messages = [message('context-target')];
     await render();
     expect(screen!.root.findByType('TextInput').props.onKeyDownCapture).toBeUndefined();
+    const nativeBubble = screen!.root.findAllByType('TouchableOpacity').find(node => node.props.onLongPress)!;
+    await act(async () => nativeBubble.props.onLongPress());
+    expect(screen!.root.findByType('MessageActionSheet').props.message.id).toBe('context-target');
+    await act(async () => screen!.root.findByType('MessageActionSheet').props.onDismiss());
     mocks.platform = 'web';
     await render();
     const wrapper = screen!.root.findAllByType('View').find(node => node.props.onContextMenu)!;
-    const bubble = wrapper.findAllByType('TouchableOpacity').find(node => node.props.onLongPress)!;
+    expect(wrapper.findAllByType('TouchableOpacity').some(node => node.props.onLongPress)).toBe(false);
     const event = { preventDefault: vi.fn() };
     await act(async () => wrapper.props.onContextMenu(event));
     expect(event.preventDefault).toHaveBeenCalledOnce();
     const clicked = screen!.root.findByType('MessageActionSheet').props;
     expect(clicked.visible).toBe(true);
     expect(clicked.message.id).toBe('context-target');
-    await act(async () => bubble.props.onLongPress());
+    await act(async () => screen!.root.findByProps({ accessibilityLabel: 'Message actions: Message context-target' }).props.onPress());
     const held = screen!.root.findByType('MessageActionSheet').props;
     expect(held.message).toEqual(clicked.message);
     expect(held.isOwn).toBe(clicked.isOwn);
@@ -376,4 +380,18 @@ it.each([
   }
   expect(release).toHaveBeenCalledOnce();
   expect(mocks.chat.setActiveConversation).not.toHaveBeenCalledWith(null);
+});
+
+it('renders actionable links in the real message body and preserves link context menus', async () => {
+  mocks.platform = 'web';
+  mocks.chat.messages = [message('links', { content: 'Hi @Alice (https://example.com/a(b)). javascript:alert(1)' })];
+  await render();
+  const link = screen!.root.findByProps({ accessibilityRole: 'link' });
+  expect(link.props.href).toBe('https://example.com/a(b)');
+  expect(renderedText()).toContain('javascript:alert(1)');
+  const wrapper = screen!.root.findAllByType('View').find(node => node.props.onContextMenu)!;
+  const event = { target: { closest: () => ({}) }, preventDefault: vi.fn() };
+  await act(async () => wrapper.props.onContextMenu(event));
+  expect(event.preventDefault).not.toHaveBeenCalled();
+  expect(screen!.root.findByType('MessageActionSheet').props.visible).toBe(false);
 });

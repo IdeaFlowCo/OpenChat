@@ -1,3 +1,5 @@
+import { MessageLinkActions } from './MessageLinkActions';
+import { messageLinks } from '../utils/messageLinks';
 /**
  * MessageActionSheet — modal bottom sheet that appears on long-press of a
  * message bubble in ChatScreen.
@@ -19,6 +21,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -102,7 +105,7 @@ export function MessageActionSheet({
 
   // Sub-sheet state: null = main, 'report' = report picker, 'other' = freeform,
   // 'react' = emoji picker, 'assistant' = "ask about this" question prompt.
-  const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react' | 'assistant'>(null);
+  const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react' | 'assistant' | 'links'>(null);
   const [freeformText, setFreeformText] = useState('');
   // Separate state for the assistant-question input so it doesn't collide with
   // the report freeform field.
@@ -253,6 +256,25 @@ export function MessageActionSheet({
     },
   ];
 
+  if (subSheet === 'links') {
+    return <Modal transparent animationType="fade" visible={visible} onRequestClose={handleDismiss}>
+      <Pressable style={overlayStyle} onPress={handleDismiss}>
+        <Pressable style={{ maxHeight: '90%' }} onPress={() => { /* retain sheet interaction */ }}>
+          <View style={[sheetStyle, { flexShrink: 1 }]}>
+            <Text style={[styles.title, { color: c.textPrimary }]}>Links</Text>
+            <MessageLinkActions content={message.deletedAt ? '' : message.content} color={c.textPrimary} borderColor={c.divider} />
+            <TouchableOpacity accessibilityRole="button" style={styles.cancelRow} onPress={() => setSubSheet(null)}>
+              <Text style={{ color: c.textPrimary }}>Back to message actions</Text>
+            </TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" style={styles.cancelRow} onPress={handleDismiss}>
+              <Text style={{ color: c.textPrimary }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>;
+  }
+
   // ── Report sub-sheet ───────────────────────────────────────────────────────
   if (subSheet === 'report') {
     return (
@@ -383,7 +405,8 @@ export function MessageActionSheet({
   return (
     <Modal transparent animationType="fade" visible={visible} onRequestClose={handleDismiss}>
       <Pressable style={overlayStyle} onPress={handleDismiss}>
-        <Pressable onPress={() => { /* stop propagation */ }}>
+        <Pressable style={{ maxHeight: '90%' }} onPress={() => { /* stop propagation */ }}>
+          <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled">
           <View style={sheetStyle}>
             <View style={styles.handle} />
 
@@ -399,6 +422,13 @@ export function MessageActionSheet({
 
             {/* Inline emoji reaction picker — always shown (OpenChat-7bd) */}
             <ReactionPicker myReactions={myReactions} onPick={handleReactPick} />
+
+            {!message.deletedAt && messageLinks(message.content).length > 0 && (
+              <TouchableOpacity accessibilityRole="button" style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={() => setSubSheet('links')}>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Links · Open or copy</Text>
+              </TouchableOpacity>
+            )}
 
             {/* Copy — always shown (even for deleted, harmless) (openchat-651) */}
             {!message.deletedAt && (
@@ -556,6 +586,7 @@ export function MessageActionSheet({
               <Text style={[styles.cancelLabel, { color: c.textSecondary }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
+          </ScrollView>
         </Pressable>
       </Pressable>
     </Modal>
