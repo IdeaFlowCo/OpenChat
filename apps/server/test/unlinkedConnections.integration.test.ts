@@ -91,6 +91,39 @@ suite('accepted connection trusted HTTP + real graph',()=>{
   if (process.env.UNLINKED_ACCEPTANCE_EVIDENCE_PATH) writeFileSync(process.env.UNLINKED_ACCEPTANCE_EVIDENCE_PATH,
    JSON.stringify({ scenario: 'Receiver HTTP acceptance, ignored first acknowledgement, retry, then both authenticated chat journeys', acceptance: first.body, retry: retry.body, identities, receiptCount: 1, friendshipCount: 0, responses, outsider: { status: outsider.status, body: outsider.body } }, null, 2) + '\n');
  });
+ it('keeps a known receipt outside generic Node/File selection and sharing projections', async () => {
+  const body = input('ledger-boundary');
+  const response = await post(body);
+  expect(response.status).toBe(200);
+  expect(response.body.status).toBe('synced');
+  const result = await query(`
+   MATCH (r:UnlinkedConnectionSync {requestId: $requestId})
+   OPTIONAL MATCH (r)-[link]-()
+   RETURN elementId(r) AS elementId, labels(r) AS labels,
+          properties(r) AS properties, count(link) AS links
+  `, { requestId: body.requestId });
+  expect(result.records).toHaveLength(1);
+  const record = result.records[0];
+  expect(record.get('labels')).toEqual(['UnlinkedConnectionSync']);
+  expect(Number(record.get('links'))).toBe(0);
+  // This operational receipt has no raw identity, content, visibility,
+  // ownership or sharing properties that a generic projection could export.
+  const properties = record.get('properties');
+  expect(Object.keys(properties).sort()).toEqual([
+   'binding', 'completedAt', 'conversationId', 'createdAt', 'lockVersion', 'requestId', 'status',
+  ]);
+  expect(properties).toMatchObject({ requestId: body.requestId, status: 'synced', conversationId: response.body.conversationId });
+  expect(properties.binding).toMatch(/^[a-f0-9]{64}$/);
+  // Check the same known element, rather than succeeding because an ID lookup
+  // missed it. These are the label selectors in the audited Noos routes;
+  // this does not claim to exercise the Noos HTTP handlers or operator access.
+  for (const label of ['Node', 'File']) {
+   const selected = await query(`MATCH (r:${label}) WHERE elementId(r) = $elementId RETURN r`, {
+    elementId: record.get('elementId'),
+   });
+   expect(selected.records).toEqual([]);
+  }
+ });
  it('reuses an existing DM, including when a fresh accepted request has a different ID',async()=>{
   const body=input('reuse');const first=await post(body);const [a,b]=await ids(body);
   const ordinary=await ensureDirectConversation(a,b);expect(ordinary.created).toBe(false);expect(ordinary.conversation.id).toBe(first.body.conversationId);

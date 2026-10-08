@@ -62,6 +62,14 @@ query route. It involved no production ledger insertion and does not establish
 end-to-end HTTP denial for a deployed ledger, protection from privileged database
 access, or safety of future routes that bypass label selection. It grants no
 release authorization: all merge, deployment, and restart holds remain in force.
+The `Unlinked` prefix is not an ACL, and `OperationalResource` must not be added
+as a security marker.
+
+`unlinkedConnections.integration.test.ts` creates a synthetic receipt through
+the authenticated receiver, then checks its exact operational label, absence of
+relationships and generic sharing/content properties, and nonselection of that
+known graph element by the audited `Node` and `File` selectors. This regression
+checks the stored graph boundary, not the Noos HTTP handlers or privileged access.
 
 Graph CI runs `directConversationPrivacy.test.ts` against its isolated Neo4j
 service to verify returned participant placeholders, real-email non-disclosure,
