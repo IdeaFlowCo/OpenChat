@@ -48,7 +48,7 @@ read scope.
 ### Private people knowledge
 
 The owner's [private graph](private-graph.md) (the shared Noos people overlay,
-shown in OpenChat; an Unlinked view is coming) is exposed with the same scope
+shown in OpenChat and, read-only, on Unlinked person and contact pages) is exposed with the same scope
 split. Read scope adds `oc_get_person_private`, `oc_get_unlinked_person_private`,
 `oc_list_private_links`, `oc_search_private` (people, things and relations by
 text, `relationType` or kind), `oc_get_neighbourhood` (a subject and what is one

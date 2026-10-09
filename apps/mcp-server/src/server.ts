@@ -1119,7 +1119,7 @@ export function buildServer(
   );
 
   // ---- private graph: the owner's own notes and links about people ----
-  const PRIVATE_PEOPLE = "Private people knowledge: only the owner sees it, shown in OpenChat (an Unlinked view is coming); it never notifies anyone or changes a public profile.";
+  const PRIVATE_PEOPLE = "Private people knowledge: only the owner sees it, shown in OpenChat and on the owner's Unlinked person and contact pages; it never notifies anyone or changes a public profile.";
   const PROVENANCE = "Notes and relations carry author ('owner' or 'agent:<name>'), source ('app', 'connector', 'direct-key' or 'suggestion') and assertion ('stated' or 'inferred'), null on records made before provenance was kept; relations also carry relationType.";
   const RELATION_TYPES = ['knows', 'family', 'works_at', 'worked_with', 'works_on', 'attended', 'interested_in', 'other'] as const;
   const assertionSchema = z.enum(['stated', 'inferred']).optional().describe("'stated' (default) when the owner said it; 'inferred' when you concluded it yourself");

@@ -8,8 +8,8 @@ Stories or anyone else's profile.
 ## What it holds
 
 Storage is the people overlay, a layout owned by Noos and kept in the graph
-database OpenChat shares with it. OpenChat is one view of it today; Unlinked
-will show the same owner the same notes (its view is coming).
+database OpenChat shares with it. OpenChat is one view of it; Unlinked shows the same owner the same notes,
+read-only, on person and contact pages (Unlinked `docs/private-context.md`).
 
 | Stored as | Meaning |
 |---|---|
