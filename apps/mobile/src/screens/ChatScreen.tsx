@@ -341,6 +341,8 @@ export function ChatScreen({
   const [hashtagSuggestions, setHashtagSuggestions] = useState<HashtagSuggestion[]>([]);
   const [hashtagSelectedIndex, setHashtagSelectedIndex] = useState(0);
   const [hashtagDismissed, setHashtagDismissed] = useState(false);
+  // Drives the composer's hide-keyboard button (native only).
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const textInputRef = useRef<TextInput>(null);
   const sendInFlightRef = useRef(false);
   const listRef = useRef<FlatList<RenderRow>>(null);
@@ -849,10 +851,17 @@ export function ChatScreen({
       setMentionQuery(null);
       setHashtagDismissed(true);
     });
+    // iOS fires the Will* events, Android only the Did* ones.
+    const visibleSubs = Platform.OS === 'ios'
+      ? [Keyboard.addListener('keyboardWillShow', () => setKeyboardVisible(true)),
+        Keyboard.addListener('keyboardWillHide', () => setKeyboardVisible(false))]
+      : [Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true)),
+        Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false))];
     return () => {
       willShowSub.remove();
       showSub.remove();
       hideSub.remove();
+      visibleSubs.forEach((sub) => sub.remove());
     };
   }, [measureTop]);
 
@@ -1833,6 +1842,20 @@ export function ChatScreen({
       )}
 
       <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
+        {/* Hide-keyboard button: a visible way out while typing, beyond the
+            swipe-down-on-the-list gesture. Native only; web has no
+            on-screen keyboard to dismiss. */}
+        {keyboardVisible && Platform.OS !== 'web' && (
+          <TouchableOpacity
+            onPress={() => Keyboard.dismiss()}
+            style={styles.attachBtn}
+            hitSlop={{ top: 8, right: 4, bottom: 8, left: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Hide keyboard"
+          >
+            <AppIcon name="chevron-down" color={c.textSecondary} size={22} />
+          </TouchableOpacity>
+        )}
         {/* Attachment pick button (OpenChat-6bg) — hidden in edit mode or while recording */}
         {!editingMessage && !isRecording && (
           <TouchableOpacity

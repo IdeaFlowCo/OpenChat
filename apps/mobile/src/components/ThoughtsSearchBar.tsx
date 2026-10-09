@@ -1,5 +1,5 @@
-import React from 'react';
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { Keyboard, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { AppIcon } from './AppIcon';
@@ -31,45 +31,68 @@ export function ThoughtsSearchBar({
   const { scheme } = useTheme();
   const c = getColors(scheme);
 
+  const [focused, setFocused] = useState(false);
+
   const handleClear = () => {
     onChangeText('');
     onClear?.();
   };
 
+  // iOS search-bar convention: Cancel clears the query and ends editing.
+  const handleCancel = () => {
+    handleClear();
+    Keyboard.dismiss();
+  };
+
   return (
     <View style={[styles.searchWrap, { backgroundColor: c.surface, borderColor: c.border }]}>
-      <View style={styles.inputContainer}>
-        <StreamTextInput
-          conversationId={conversationId}
-          testID={testID}
-          style={[
-            styles.searchInput,
-            {
-              backgroundColor: c.surfaceElevated,
-              color: c.textPrimary,
-              borderColor: c.border,
-              paddingRight: value ? 34 : 12,
-            },
-          ]}
-          value={value}
-          onChangeText={onChangeText}
-          placeholder={placeholder}
-          accessibilityLabel={placeholder}
-          placeholderTextColor={c.textMuted}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-          clearButtonMode="while-editing"
-        />
-        {value.length > 0 && (
+      <View style={styles.row}>
+        <View style={styles.inputContainer}>
+          <StreamTextInput
+            conversationId={conversationId}
+            testID={testID}
+            style={[
+              styles.searchInput,
+              {
+                backgroundColor: c.surfaceElevated,
+                color: c.textPrimary,
+                borderColor: c.border,
+                paddingRight: value ? 34 : 12,
+              },
+            ]}
+            value={value}
+            onChangeText={onChangeText}
+            placeholder={placeholder}
+            accessibilityLabel={placeholder}
+            placeholderTextColor={c.textMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+          />
+          {value.length > 0 && (
+            <TouchableOpacity
+              onPress={handleClear}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              style={styles.clearBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <AppIcon name="x" color={c.textMuted} size={15} />
+            </TouchableOpacity>
+          )}
+        </View>
+        {focused && Platform.OS !== 'web' && (
           <TouchableOpacity
-            onPress={handleClear}
+            onPress={handleCancel}
             accessibilityRole="button"
-            accessibilityLabel="Clear search"
-            style={styles.clearBtn}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel="Cancel search"
+            style={styles.cancelBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
           >
-            <AppIcon name="x" color={c.textMuted} size={15} />
+            <Text style={{ color: c.primary, fontSize: 15 }}>Cancel</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -86,7 +109,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   inputContainer: {
+    flex: 1,
     position: 'relative',
     justifyContent: 'center',
   },
@@ -96,6 +124,11 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     paddingLeft: 12,
     fontSize: 14,
+  },
+  cancelBtn: {
+    paddingLeft: 12,
+    height: 38,
+    justifyContent: 'center',
   },
   clearBtn: {
     position: 'absolute',
