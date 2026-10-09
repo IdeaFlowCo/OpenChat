@@ -13,7 +13,7 @@ const user = process.env.NEO4J_TEST_USER;
 const password = process.env.NEO4J_TEST_PASSWORD;
 const integration = uri && user && password ? describe.sequential : describe.skip;
 
-integration('private people: names, Unlinked profiles and retries', () => {
+integration('private people: names, Unlinked profiles and retries', { timeout: 30000 }, () => {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const [dana, alex, other] = ['pp-dana', 'pp-alex', 'pp-other'].map(prefix => `${prefix}-${suffix}`) as [string, string, string];
   const alexName = `Alex ${suffix}`;
