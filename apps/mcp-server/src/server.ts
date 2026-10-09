@@ -510,20 +510,26 @@ export function buildServer(
       title: 'Submit feedback',
       description:
         'File feedback (bug report, feature request, or note) about OpenChat. Maps to POST /api/feedback. ' +
-        'Returns a URL/id for the created feedback item when available.',
+        "Posts a public World Issue Tracker issue under the key owner's Ideaflow account unless anonymous is true. " +
+        'Returns the issue URL and how it was posted.',
       inputSchema: {
         message: z.string().min(1).describe('The feedback message'),
         context: z
           .string()
           .optional()
           .describe('Optional extra context, e.g. page, conversation id, or steps to reproduce'),
+        anonymous: z
+          .boolean()
+          .optional()
+          .describe('Only true when the user explicitly asks to post anonymously'),
       },
     },
-    async ({ message, context }) => {
+    async ({ message, context, anonymous }) => {
       try {
         requireApiKey(api, 'Submitting feedback');
-        const result = await api.submitFeedback({ message, context });
+        const result = await api.submitFeedback({ message, context, anonymous });
         const lines = ['Feedback submitted.'];
+        if (result?.postedAs) lines.push(`posted as: ${result.postedAs === 'anonymous' ? 'Anonymous' : result.displayName ?? result.postedAs}`);
         if (result?.id) lines.push(`id: ${result.id}`);
         if (result?.url) lines.push(`url: ${result.url}`);
         return textResult(lines.join('\n'));

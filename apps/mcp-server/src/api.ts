@@ -344,8 +344,8 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<Contact[]>('GET', '/api/chat/contacts', { query: { q } }),
 
     // ---- feedback ----
-    submitFeedback: (body: { message: string; context?: string }) =>
-      request<{ url?: string; id?: string }>('POST', '/api/feedback', { body }),
+    submitFeedback: (body: { message: string; context?: string; anonymous?: boolean }) =>
+      request<{ url?: string; id?: string; postedAs?: string; displayName?: string }>('POST', '/api/feedback', { body }),
 
     // ---- reactions ----
     // `kind` + `href` tag a semantic reaction, e.g. a 'filed' receipt linking
