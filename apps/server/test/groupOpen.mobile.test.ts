@@ -67,7 +67,7 @@ vi.mock('../../mobile/src/components/ToastMessage', () => ({ ToastMessage: () =>
 vi.mock('../../mobile/src/components/AiDisclosureBanner', () => ({ AiDisclosureBanner: () => null }));
 vi.mock('../../mobile/src/components/BotBadge', () => ({ BotBadge: () => null }));
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
-vi.mock('../../mobile/src/components/NewMessagesPill', () => ({ NewMessagesPill: () => null }));
+vi.mock('../../mobile/src/components/JumpToBottomButton', () => ({ JumpToBottomButton: () => null }));
 vi.mock('../../mobile/src/components/VoiceMessageBubble', () => ({ VoiceMessageBubble: () => null }));
 vi.mock('../../mobile/src/components/HashtagAutocomplete', () => ({ HashtagAutocomplete: () => null }));
 vi.mock('../../mobile/src/components/TransformButton', () => ({ TransformButton: () => null }));
