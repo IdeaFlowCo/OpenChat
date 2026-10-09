@@ -429,6 +429,8 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<unknown>('GET', '/api/private/things', { query: { q: query, kind } }),
     getPrivateThing: (thingId: string) =>
       request<unknown>('GET', `/api/private/things/${encodeURIComponent(thingId)}`),
+    deletePrivateThing: (thingId: string) =>
+      request<unknown>('DELETE', `/api/private/things/${encodeURIComponent(thingId)}`),
     listCatchUp: () => request<unknown>('GET', '/api/private/due'),
 
     updateIntentDraft: (id: string, body: Record<string, unknown>) =>

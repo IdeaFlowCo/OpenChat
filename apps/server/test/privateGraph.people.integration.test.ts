@@ -150,4 +150,60 @@ integration('private people: names, Unlinked profiles and retries', { timeout: 3
     expect((await graph.getUnlinkedPersonOverlay(dana, 'maya-1')).notes).toEqual([]);
     expect(await failure(() => graph.deleteLink(other, card.links[0]!.id))).toMatchObject({ status: 404 });
   });
+  it('deletes a saved thing with its notes, links in both directions and refs, for its owner only', async () => {
+    const count = async (query: string, params: Record<string, unknown>) => {
+      const session = driver.session();
+      try { return (await session.run(query, params)).records[0]!.get('total').toNumber() as number; } finally { await session.close(); }
+    };
+    const kept = await graph.resolvePrivateThing(dana, { kind: 'person', name: `Kept ${suffix}` });
+    const doomed = await graph.resolvePrivateThing(dana, { kind: 'person', name: `Doomed ${suffix}`, createNew: true, clientRequestId: `doomed-${suffix}` });
+    await graph.addNote(dana, { kind: 'thing', id: doomed.id }, 'First note');
+    await graph.addNote(dana, { kind: 'thing', id: doomed.id }, 'Second note');
+    const outgoing = await graph.addLink(dana, { kind: 'thing', id: doomed.id }, 'knows', { kind: 'person', id: kept.id });
+    const incoming = await graph.addLink(dana, { kind: 'user', id: alex }, 'worked with', { kind: 'person', id: doomed.id });
+    const unrelated = await graph.addLink(dana, { kind: 'user', id: alex }, 'mentors', { kind: 'person', id: kept.id });
+    const session = driver.session();
+    try {
+      await session.run("CREATE (:OpenChatNoteReview {id: $id, ownerKey: 'x', entityId: $entityId})", { id: `foreign-review-${suffix}`, entityId: doomed.id });
+      await session.run('MATCH (e:OverlayEntity {id: $entityId}) CREATE (:OpenChatPrivateAsk {id: $id, ownerKey: e.ownerKey, entityId: e.id, text: "ask"})', { id: `ask-${suffix}`, entityId: doomed.id });
+    } finally { await session.close(); }
+
+    // Another owner cannot see or delete it, and an OpenChat person's card is not a saved thing.
+    expect(await failure(() => graph.deletePrivateThing(other, doomed.id))).toMatchObject({ status: 404 });
+    expect((await graph.getThing(dana, doomed.id)).notes).toHaveLength(2);
+    const alexCard = await graph.getPersonOverlay(dana, alex);
+    const lookup = driver.session();
+    let alexIds: string[];
+    try { alexIds = (await lookup.run('MATCH (r:OverlayRef {ref: $ref})-[:REF_OF]->(e) RETURN e.id AS id', { ref: `openchat:user:${alex}` })).records.map(record => record.get('id') as string); }
+    finally { await lookup.close(); }
+    expect(alexIds.length).toBeGreaterThan(0);
+    for (const id of alexIds) expect(await failure(() => graph.deletePrivateThing(dana, id))).toMatchObject({ status: 404 });
+    expect((await graph.getPersonOverlay(dana, alex)).notes).toEqual(alexCard.notes);
+
+    expect(await graph.deletePrivateThing(dana, doomed.id)).toEqual({ deleted: true, id: doomed.id, notesRemoved: 2, linksRemoved: 2 });
+    expect(await failure(() => graph.getThing(dana, doomed.id))).toMatchObject({ status: 404 });
+    expect(await count('MATCH (n) WHERE (n:OverlayEntity AND n.id = $id) OR ((n:OverlayNote OR n:OverlayRef) AND n.entityId = $id) RETURN count(n) AS total', { id: doomed.id })).toBe(0);
+    expect(await count('MATCH ()-[l:OVERLAY_LINK]-() WHERE l.id IN $ids RETURN count(l) AS total', { ids: [outgoing.id, incoming.id] })).toBe(0);
+    expect(await count('MATCH (a:OpenChatPrivateAsk {id: $id}) RETURN count(a) AS total', { id: `ask-${suffix}` })).toBe(0);
+    // Only the owner's own records go: another owner's row naming the same id stays.
+    expect(await count('MATCH (r:OpenChatNoteReview {id: $id}) RETURN count(r) AS total', { id: `foreign-review-${suffix}` })).toBe(1);
+    // What it was linked to stays, with its other links.
+    const keptAfter = await graph.getThing(dana, kept.id);
+    expect(keptAfter.links.map(value => value.id)).toEqual([unrelated.id]);
+    expect((await graph.getPersonOverlay(dana, alex)).links.some(value => value.id === incoming.id)).toBe(false);
+    expect((await graph.listOwnerLinks(dana, `Doomed ${suffix}`)).links).toEqual([]);
+    // The name is free again: saving it now makes a new entity.
+    expect((await graph.resolvePrivateThing(dana, { kind: 'person', name: `Doomed ${suffix}`, createNew: true, clientRequestId: `doomed-${suffix}` })).id).not.toBe(doomed.id);
+    // Deleting again, or an id that never existed, is consistently 404.
+    expect(await failure(() => graph.deletePrivateThing(dana, doomed.id))).toMatchObject({ status: 404 });
+    expect(await failure(() => graph.deletePrivateThing(dana, 'no-such-thing-id'))).toMatchObject({ status: 404 });
+
+    // An Unlinked profile's saved thing can be deleted too, freeing its ref.
+    const maya = await graph.getUnlinkedPersonOverlay(dana, 'maya-1');
+    expect(maya.thingId).not.toBeNull();
+    expect((await graph.deletePrivateThing(dana, maya.thingId!)).deleted).toBe(true);
+    expect((await graph.getUnlinkedPersonOverlay(dana, 'maya-1')).thingId).toBeNull();
+    const session2 = driver.session();
+    try { await session2.run('MATCH (r:OpenChatNoteReview {id: $id}) DETACH DELETE r', { id: `foreign-review-${suffix}` }); } finally { await session2.close(); }
+  });
 });

@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  addLink: vi.fn(), addNote: vi.fn(), createPrivateThing: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
+  addLink: vi.fn(), addNote: vi.fn(), createPrivateThing: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), deletePrivateThing: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
   listDue: vi.fn(), listThings: vi.fn(), updateNote: vi.fn(), updatePersonCard: vi.fn(),
 }));
 vi.mock('../src/services/privateGraph.js', async () => {
@@ -36,7 +36,7 @@ describe('private graph routes', () => {
   });
 
   it('requires sign-in on every route', async () => {
-    for (const [method, path] of [['GET', '/due'], ['GET', '/people/bob'], ['PATCH', '/people/bob'], ['POST', '/people/bob/notes'], ['POST', '/people/bob/links'], ['GET', '/things'], ['POST', '/things'], ['GET', '/things/t1'], ['POST', '/things/t1/notes'], ['POST', '/things/t1/links'], ['PATCH', '/notes/n1'], ['DELETE', '/notes/n1'], ['DELETE', '/links/l1']]) {
+    for (const [method, path] of [['GET', '/due'], ['GET', '/people/bob'], ['PATCH', '/people/bob'], ['POST', '/people/bob/notes'], ['POST', '/people/bob/links'], ['GET', '/things'], ['POST', '/things'], ['GET', '/things/t1'], ['POST', '/things/t1/notes'], ['POST', '/things/t1/links'], ['PATCH', '/notes/n1'], ['DELETE', '/notes/n1'], ['DELETE', '/links/l1'], ['DELETE', '/things/t1']]) {
       expect((await fetch(`${baseUrl}/api/private${path}`, { method })).status, `${method} ${path}`).toBe(401);
     }
     expect(Object.values(mocks).every(mock => mock.mock.calls.length === 0)).toBe(true);
@@ -65,6 +65,18 @@ describe('private graph routes', () => {
     expect(response.status).toBe(201);
     expect(await response.json()).toEqual({id:'saved-person',kind:'person',name:'Chet'});
     expect(mocks.createPrivateThing).toHaveBeenCalledWith('alice','person','Chet');
+  });
+
+  it('deletes a saved thing only for the signed-in owner, and reports a missing one as not found', async () => {
+    mocks.deletePrivateThing.mockResolvedValueOnce({ deleted: true, id: 't1', notesRemoved: 2, linksRemoved: 1 });
+    const response = await call('/things/t1', { method: 'DELETE', body: JSON.stringify({ ownerId: 'mallory' }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ deleted: true, id: 't1', notesRemoved: 2, linksRemoved: 1 });
+    expect(mocks.deletePrivateThing).toHaveBeenCalledWith('alice', 't1');
+    mocks.deletePrivateThing.mockRejectedValueOnce(new PrivateGraphError(404, 'Not found'));
+    const again = await call('/things/t1', { method: 'DELETE' });
+    expect(again.status).toBe(404);
+    expect(await again.json()).toEqual({ error: 'Not found' });
   });
 
   it('reports a missing or unavailable person as not found, never as a sign-in failure', async () => {

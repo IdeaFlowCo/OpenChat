@@ -47,6 +47,7 @@ these routes never return it.
 | `POST /people/:userId/links`, `POST /things/:thingId/links` | `{ relation, to }` where `to` is `{kind:'user', id}` or `{kind:'person'\|'company'\|'idea'\|'project', id \| name}`; a name creates or reuses the saved thing |
 | `DELETE /links/:linkId` | Remove a link |
 | `GET /things?q=&kind=`, `GET /things/:thingId` | Saved things, and one with its notes and links |
+| `DELETE /things/:thingId` | Delete (undo) a saved thing: the entity, its notes, its links in both directions and its refs, plus OpenChat's note reviews and asks about it, in one transaction. Answers `{deleted: true, id, notesRemoved, linksRemoved}`; a missing, already-deleted or foreign id, or an OpenChat person's card, answers 404 |
 | `POST /things/resolve` | `{kind, name, createNew?, clientRequestId?}`: find or save by name under the no-merge rules below |
 | `GET /due` | People whose catch-up date has passed |
 | `GET /links?q=` | Every link the owner recorded, newest first, filtered by a name or relation |
@@ -78,7 +79,9 @@ with the `to` to use; nothing is created. `createNew: true` with a
 `openchat:private:<hash>`); repeating that request returns the same entity.
 The same subject, relation and target is always one link, and the same note text
 on a card is one note, so retried calls do not duplicate. Deleting a note or link
-is the undo.
+is the undo; deleting a saved thing (`DELETE /things/:thingId`,
+`oc_delete_private_thing`) is the undo for saving one, and takes its notes and
+links with it. Deleting again answers 404.
 
 The overlay stores `createdAt` on notes and links but no separate provenance
 (which agent or connector wrote it). Adding that is a change to the Noos-owned
@@ -100,12 +103,13 @@ side and is not part of the private graph. A linked thing
 opens its own page, where more links and notes can be added. **Catch up**, on
 the People screen, lists who is due. Agent tools: `oc_get_person` (name, shared asks and the private card in one read), `oc_get_person_private`, `oc_get_unlinked_person_private`, `oc_list_private_links`, `oc_save_private_thing`,
 `oc_set_person_private`, `oc_add_private_note`, `oc_delete_private_note`,
-`oc_add_private_link`, `oc_delete_private_link`, `oc_list_private_things`,
+`oc_add_private_link`, `oc_delete_private_link`, `oc_delete_private_thing`, `oc_list_private_things`,
 `oc_get_private_thing`, `oc_list_catch_up`.
 
 ## Tests
 
 `privateGraph.test.ts` (rules), `privateGraph.route.test.ts` and
 `privateGraph.scope.test.ts` (routes), `privateGraph.mobile.test.ts` (card),
-and `privateGraph.integration.test.ts`, which runs against a real Neo4j when
+and `privateGraph.integration.test.ts` and `privateGraph.people.integration.test.ts`
+(including saved-thing deletion), which run against a real Neo4j when
 `NEO4J_TEST_URI`, `NEO4J_TEST_USER` and `NEO4J_TEST_PASSWORD` are set.

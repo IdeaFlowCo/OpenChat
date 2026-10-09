@@ -1124,8 +1124,9 @@ export function buildServer(
     subjectKind: z.enum(['user', 'thing', 'unlinked']).describe("'user' for a person on OpenChat (use their user id), 'thing' for one of the owner's saved companies, ideas, projects or people (use its id), 'unlinked' for an Unlinked profile (use the profile id from an Unlinked tool result)"),
     subjectId: z.string().min(1).max(200).describe('The user id, saved-thing id or Unlinked profile id'),
   };
+  const DESTRUCTIVE_PRIVATE = new Set(['oc_delete_private_note', 'oc_delete_private_link', 'oc_delete_private_thing']);
   const privateTool = (name: string, title: string, description: string, inputSchema: Record<string, z.ZodTypeAny>, run: (input: any) => Promise<unknown>) =>
-    server.registerTool(name, { title, description, inputSchema }, async (input: any) => {
+    server.registerTool(name, { title, description, inputSchema, ...(DESTRUCTIVE_PRIVATE.has(name) ? { annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } } : {}) }, async (input: any) => {
       try { requireApiKey(api, title); return jsonResult(await run(input)); } catch (e) { return errorResult(e); }
     });
 
@@ -1191,6 +1192,10 @@ export function buildServer(
 
   privateTool('oc_delete_private_link', 'Remove a private link', "Remove one of the owner's private links by id.",
     { linkId: z.string().min(1).max(64) }, ({ linkId }) => api.deletePrivateLink(linkId));
+
+  privateTool('oc_delete_private_thing', 'Delete a saved person, company, idea or project',
+    `Delete (undo) one of the owner's saved things by id: removes it together with its private notes and every private relation to or from it. This is the undo for oc_save_private_thing and cannot be reversed. OpenChat people (user ids) are not saved things. ${PRIVATE_PEOPLE}`,
+    { thingId: z.string().min(1).max(64) }, ({ thingId }) => api.deletePrivateThing(thingId));
 
   privateTool('oc_list_private_things', "List the owner's saved companies, ideas, projects and people",
     "List the owner's saved things, optionally filtered by name and kind. Use an id with oc_get_private_thing to see who and what is linked to it.",

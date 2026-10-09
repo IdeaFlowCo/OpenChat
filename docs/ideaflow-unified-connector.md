@@ -52,7 +52,9 @@ also shown in Unlinked) is exposed with the same scope split. Read scope adds
 `oc_get_person_private`, `oc_get_unlinked_person_private`, `oc_list_private_links`,
 `oc_list_private_things`, `oc_get_private_thing` and `oc_list_catch_up`. Write
 scope adds `oc_set_person_private`, `oc_add_private_note`, `oc_delete_private_note`,
-`oc_add_private_link`, `oc_delete_private_link` and `oc_save_private_thing`. Through the hub they appear as
+`oc_add_private_link`, `oc_delete_private_link`, `oc_save_private_thing` and
+`oc_delete_private_thing` (the undo for saving a thing; removes it with its notes
+and relations). Through the hub they appear as
 `openchat__oc_…`. A subject or link target can be an OpenChat person (`user`), a
 saved thing, or an Unlinked profile (`unlinked`, stored as the overlay ref
 `unlinked:person:<profileId>`). Connector requests reach `/api/private` with the
