@@ -55,6 +55,9 @@ import {
 import { consumePublicationApproval, issuePublicationApproval } from './publicationApproval.js';
 import { assistantTextForMessage } from './assistantContext.js';
 import { fileFeedback } from './witFeedback.js';
+import { ContextLaneError, createContextPost, listContextPosts } from './contextLane.js';
+import { askContextAgents } from './contextAgentRequests.js';
+import { createHash } from 'node:crypto';
 import {
   isOwnerUser,
   resolveWitTrackerCreationMode,
@@ -597,29 +600,40 @@ export async function resolvePeople(userId: string, query: string): Promise<Reso
   if (!q) return [];
   const s = getDriver().session();
   try {
+    // People the user has actually talked to come first: direct chats, then
+    // most recent shared activity (OpenChat-lfua). Directory browsing only
+    // widens the search when nobody they know matches.
     const result = await s.run(
       `
       MATCH (actor:User {id: $userId})
       WITH coalesce(actor.canBrowseUserDirectory, false) AS directoryAccess
       MATCH (u:User)
       WHERE u.id <> $userId AND coalesce(u.isBot, false) = false
-      OPTIONAL MATCH (me:User {id: $userId})-[:PARTICIPATES_IN]->(shared:Conversation)<-[:PARTICIPATES_IN]-(u)
-      WITH u, directoryAccess, count(shared) > 0 AS known
-      WHERE toLower(coalesce(u.email, '')) = $q
-         OR ((known OR directoryAccess) AND (
-              toLower(coalesce(u.name, '')) CONTAINS $q
-              OR toLower(coalesce(u.email, '')) CONTAINS $q
-            ))
-      RETURN u { .id, .name, .email } AS user, known
-      ORDER BY known DESC, u.name
+        AND (toLower(coalesce(u.name, '')) CONTAINS $q OR toLower(coalesce(u.email, '')) CONTAINS $q)
+      OPTIONAL MATCH (:User {id: $userId})-[:PARTICIPATES_IN]->(shared:Conversation)<-[:PARTICIPATES_IN]-(u)
+      WITH u, directoryAccess, count(shared) AS sharedCount,
+           sum(CASE WHEN shared.type = 'direct' THEN 1 ELSE 0 END) AS directCount,
+           max(shared.lastMessageAt) AS lastActive
+      WHERE toLower(coalesce(u.email, '')) = $q OR sharedCount > 0 OR directoryAccess
+      RETURN u { .id, .name, .email } AS user, sharedCount > 0 AS known
+      ORDER BY known DESC, directCount > 0 DESC,
+               coalesce(lastActive, datetime('1970-01-01T00:00:00Z')) DESC, u.name
       LIMIT 10
       `,
       { userId, q }
     );
-    return result.records.map((r) => {
+    const people = result.records.map((r) => {
       const u = toJS(r.get('user')) as { id: string; name: string | null; email: string | null };
       return { ...u, known: r.get('known') as boolean };
     });
+    // Like every messenger: a name that matches someone you already talk to
+    // means that person, not a stranger with the same name.
+    const byEmail = people.filter((p) => (p.email ?? '').toLowerCase() === q);
+    if (byEmail.length === 1) return byEmail;
+    const known = people.filter((p) => p.known);
+    const pool = known.length ? known : people;
+    const exact = pool.filter((p) => (p.name ?? '').trim().toLowerCase() === q);
+    return exact.length === 1 ? exact : pool;
   } finally {
     await s.close();
   }
@@ -634,6 +648,149 @@ async function toolFindPerson(userId: string, query: string): Promise<unknown> {
     };
   }
   return { people };
+}
+
+// ─── Context back-channel (OpenChat-oppa) ─────────────────────────────────────
+// The quiet lane of a conversation: every member (and their agents) can read
+// it, nobody is notified. Posts the Assistant makes after the user's explicit
+// OK carry server-derived attribution, never a model-supplied name.
+const ASSISTANT_CONTEXT_AGENT = { id: 'openchat-assistant', name: 'OpenChat Agent (owner approved)' };
+const CONTEXT_KINDS = new Set(['note', 'ask', 'offer']);
+
+type ContextTarget =
+  | { conversationId: string; destination: string }
+  | { error: string }
+  | { ambiguous: true; candidates: Array<{ name: string | null; email: string | null }>; note: string };
+
+async function resolveContextTarget(
+  io: IOServer | undefined,
+  userId: string,
+  input: Record<string, unknown>,
+  createDirect: boolean
+): Promise<ContextTarget> {
+  const conversationId = typeof input.conversationId === 'string' ? input.conversationId.trim() : '';
+  if (conversationId) {
+    const s = getDriver().session();
+    try {
+      const r = await s.run(
+        `MATCH (:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+         OPTIONAL MATCH (c)<-[:PARTICIPATES_IN]-(o:User) WHERE o.id <> $userId AND coalesce(o.isBot, false) = false
+         RETURN c.title AS title, collect(o.name)[0..4] AS names`,
+        { userId, conversationId }
+      );
+      if (!r.records.length) return { error: 'You are not in that conversation.' };
+      const title = r.records[0]!.get('title') as string | null;
+      const names = (r.records[0]!.get('names') as Array<string | null>).filter(Boolean) as string[];
+      return { conversationId, destination: title?.trim() || names.join(', ') || 'that conversation' };
+    } finally {
+      await s.close();
+    }
+  }
+  const person = typeof input.person === 'string' ? input.person.trim() : '';
+  if (!person) return { error: 'Say which person (or group conversation) this is for.' };
+  const people = await resolvePeople(userId, person);
+  if (people.length === 0) return { error: `No one matching "${person}" is reachable. Ask the user who they mean.` };
+  if (people.length > 1) {
+    return {
+      ambiguous: true,
+      candidates: people.map((p) => ({ name: p.name, email: p.email })),
+      note: 'Ask the user which person they mean, then call again with their full name or email.',
+    };
+  }
+  const target = people[0]!;
+  const destination = target.name?.trim() || target.email || 'them';
+  if (createDirect) {
+    const { conversation } = await ensureDirectConversation(userId, target.id, io);
+    return { conversationId: conversation.id as string, destination };
+  }
+  const s = getDriver().session();
+  try {
+    const r = await s.run(
+      `MATCH (:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {type: 'direct'})<-[:PARTICIPATES_IN]-(:User {id: $otherId})
+       RETURN c.id AS id LIMIT 1`,
+      { userId, otherId: target.id }
+    );
+    if (!r.records.length) return { error: `You don't have a conversation with ${destination} yet, so there is no Context to read.` };
+    return { conversationId: r.records[0]!.get('id') as string, destination };
+  } finally {
+    await s.close();
+  }
+}
+
+export async function toolPostContext(
+  io: IOServer | undefined,
+  userId: string,
+  input: Record<string, unknown>
+): Promise<unknown> {
+  const text = typeof input.text === 'string' ? input.text.trim() : '';
+  const kind = typeof input.kind === 'string' ? input.kind : 'note';
+  const askAgents = input.askAgents === true;
+  if (!text) return { error: 'text is required' };
+  if (!CONTEXT_KINDS.has(kind)) return { error: 'kind must be note, ask or offer' };
+  const target = await resolveContextTarget(io, userId, input, input.confirm === true);
+  if (!('conversationId' in target)) return target;
+  if (input.confirm !== true) {
+    return {
+      needsConfirmation: true,
+      destination: target.destination,
+      kind,
+      preview: text.slice(0, 500),
+      askAgents,
+      note: "Context is this conversation's quiet back-channel: everyone in it, and their agents, can read it, but nobody is notified.",
+    };
+  }
+  if (sendRateLimited(userId)) return { error: 'Rate limit reached — please try again shortly.' };
+  const day = new Date().toISOString().slice(0, 10);
+  const clientRequestId = 'assistant-context:' + createHash('sha256')
+    .update(JSON.stringify([userId, target.conversationId, kind, text, day])).digest('hex').slice(0, 32);
+  const s = getDriver().session();
+  try {
+    const post = await createContextPost(s, userId, target.conversationId, { text, kind, clientRequestId } as never,
+      undefined, undefined, ASSISTANT_CONTEXT_AGENT);
+    let agents: { queued: number } | { note: string } | undefined;
+    if (askAgents) {
+      try {
+        const asked = await askContextAgents(s, userId, target.conversationId, post.id);
+        agents = { queued: asked.queued };
+      } catch (err) {
+        agents = { note: err instanceof ContextLaneError ? err.message : 'Could not ask agents.' };
+      }
+    }
+    return { ok: true, posted: { destination: target.destination, kind, text }, ...(agents ? { agents } : {}) };
+  } catch (err) {
+    return { error: err instanceof ContextLaneError ? err.message : 'Could not post to Context.' };
+  } finally {
+    await s.close();
+  }
+}
+
+export async function toolReadContext(
+  io: IOServer | undefined,
+  userId: string,
+  input: Record<string, unknown>
+): Promise<unknown> {
+  const target = await resolveContextTarget(io, userId, input, false);
+  if (!('conversationId' in target)) return target;
+  const limit = typeof input.limit === 'number' && input.limit > 0 ? Math.min(input.limit, 30) : 15;
+  const s = getDriver().session();
+  try {
+    const result = await listContextPosts(s, userId, target.conversationId, { limit });
+    const posts = ((result as { posts?: Array<Record<string, any>> }).posts ?? [])
+      .filter((p) => !p.isDeleted)
+      .map((p) => ({
+        kind: p.kind,
+        author: p.author?.name,
+        ...(p.agent ? { viaAgent: p.agent.name } : {}),
+        ...(p.replyTo ? { replyingTo: String(p.replyTo.text ?? '').slice(0, 120) } : {}),
+        text: String(p.text ?? '').slice(0, 1500),
+        at: p.createdAt,
+      }));
+    return { destination: target.destination, posts };
+  } catch (err) {
+    return { error: err instanceof ContextLaneError ? err.message : 'Could not read Context.' };
+  } finally {
+    await s.close();
+  }
 }
 
 export async function toolSendMessageToPerson(
@@ -837,7 +994,7 @@ function buildTools(): AnthropicType.Tool[] {
     {
       name: 'find_person',
       description:
-        "Look up a person the user can message, by name or email. Returns matching people with their name and email. Use this when the user names someone (\"message Robert\") and you need to know who they mean. Only returns people the user already shares a conversation with, plus anyone matched by a complete email address.",
+        "Look up a person the user can message, by name or email. Returns matching people with their name and email, people the user actually talks to first (a first name that matches one of them returns just that person). Use this when the user names someone (\"message Robert\") and you need to know who they mean.",
       input_schema: {
         type: 'object',
         properties: {
@@ -862,6 +1019,36 @@ function buildTools(): AnthropicType.Tool[] {
           },
         },
         required: ['person', 'content'],
+      },
+    },
+    {
+      name: 'post_context',
+      description:
+        "Post to the quiet Context back-channel of a conversation (the \"Context\" tab next to \"Chat\"; users also call it the back channel or agent channel). Everyone in that conversation and their agents can read it, but nobody gets notified and it is not a chat message. Use for notes, asks and offers the user wants to leave quietly, e.g. \"put 'hi test' on the back channel with Claire\". Give `person` (name or email, preferred for one-to-one) or a `conversationId` you just got from list_conversations for a group. The first call returns { needsConfirmation, destination, kind, preview } and posts nothing: tell the user what will be posted where, wait for an explicit yes, then call again with the same arguments and confirm:true. Set askAgents:true only when the user wants the other participants' agents to respond.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          person: { type: 'string', description: "The other person's name or email (for a one-to-one conversation)" },
+          conversationId: { type: 'string', description: 'A group conversation id from list_conversations (never shown to the user)' },
+          text: { type: 'string', description: 'Exactly what to post — the content only, never the instruction words around it' },
+          kind: { type: 'string', enum: ['note', 'ask', 'offer'], description: 'note (default), ask (the user needs something), offer (the user can give something)' },
+          askAgents: { type: 'boolean', description: "Also ask the participants' opted-in agents to reply in Context" },
+          confirm: { type: 'boolean', description: 'true ONLY after the user explicitly approved this exact post' },
+        },
+        required: ['text'],
+      },
+    },
+    {
+      name: 'read_context',
+      description:
+        "Read recent posts in a conversation's quiet Context back-channel (notes, asks, offers, and agent replies). Give `person` for a one-to-one conversation or a `conversationId` from list_conversations for a group.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          person: { type: 'string' },
+          conversationId: { type: 'string' },
+          limit: { type: 'number', description: 'Max posts (default 15, max 30)' },
+        },
       },
     },
     {
@@ -1252,6 +1439,10 @@ async function executeTool(
         if (participantIds.length === 0) return { error: 'participantIds is required' };
         return await createConversationForAssistant(io, userId, participantIds, title);
       }
+      case 'post_context':
+        return await toolPostContext(io, userId, input);
+      case 'read_context':
+        return await toolReadContext(io, userId, input);
       case 'submit_feedback': {
         const message = typeof input.message === 'string' ? input.message : '';
         const context = typeof input.context === 'string' ? input.context : undefined;
@@ -1590,11 +1781,25 @@ async function loadConversationContext(
   }
 }
 
+/** Chat bubbles render plain text: drop markdown emphasis/heading/code markers the model may still emit. */
+export function plainChatText(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/gs, '$1')
+    .replace(/__(.+?)__/gs, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/`([^`\n]+)`/g, '$1');
+}
+
 const SYSTEM_PROMPT = `You are Assistant, an in-app helper inside OpenChat (a chat application).
-You are talking with a user inside a direct-message conversation. You can search the user's messages, list and read their conversations, look up people, send messages on their behalf, create conversations, privately capture asks/offers/collaboration drafts, manage quiet matching and Stories, and file feedback about OpenChat — all via tools. All tools act on behalf of THIS user only.
+You are talking with a user inside a direct-message conversation. You can search the user's messages, list and read their conversations, look up people, send messages on their behalf, read and post to a conversation's quiet Context back-channel, create conversations, privately capture asks/offers/collaboration drafts, manage quiet matching and Stories, and file feedback about OpenChat — all via tools. All tools act on behalf of THIS user only.
 
 Guidelines:
-- Be concise and conversational; this is a chat, not an essay.
+- Be concise and conversational; this is a chat, not an essay. Write plain text: chat bubbles do not render markdown, so no **bold**, headings, or backticks.
+- Never show internal identifiers (conversation ids, user ids, request ids) to the user. Refer to people and conversations by name.
+- Separate the instruction from the content. "Tell Claire I'm running late" sends "I'm running late"; "on the back channel just say hi test" posts "hi test". Never include the user's instruction words in what you send or post. If the content is genuinely unclear, ask.
+- Every conversation has two lanes: Chat (ordinary messages that notify people) and Context (a quiet back-channel shown in the Context tab; users may call it the back channel, agent channel or context channel). Context posts are notes, asks or offers that members and their agents can read without anyone being notified. Use post_context / read_context for Context, and send_message_to_person / send_message only for Chat. When the user mentions the back channel or Context, never send a chat message instead.
+- You cannot see tool results from earlier turns, only the chat. Your earlier messages saying something was posted or sent are accurate records; never retract or "correct" them from memory. If you need to know, check with read_context or read_messages first.
+- People: a first name means the person the user already talks to. find_person and the person tools already rank people the user has conversations with first; only ask "which one?" when the tool returns more than one candidate.
 - Use tools to ground your answers in the user's actual messages/conversations rather than guessing.
 - Only use send_message / send_message_to_person / create_conversation when the user clearly asks you to act.
 - To message a PERSON ("text Robert", "tell Sam I'm running late"), use send_message_to_person with their name — it resolves the person and their DM for you. Do NOT hunt for a conversationId in list_conversations and do NOT invent one; conversation ids are opaque and you will get them wrong. Reserve send_message for when you are already working with a specific conversation you just read.
@@ -1733,7 +1938,7 @@ If the user's latest message approves it, call send_message with exactly that co
     if (!finalText) {
       finalText = "I couldn’t put together a response — mind rephrasing or trying again?";
     }
-    await persistMessage(io, ASSISTANT_USER_ID, conversationId, finalText);
+    await persistMessage(io, ASSISTANT_USER_ID, conversationId, plainChatText(finalText));
   } catch (err) {
     console.error('[assistant] runAssistantTurn failed:', err);
     // Report errors intelligently: surface a friendly message in the chat

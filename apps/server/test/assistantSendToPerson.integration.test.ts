@@ -18,7 +18,10 @@ integration('assistant send_message_to_person', () => {
   const strangerId = `stranger-${suffix}`;
   const twinAId = `twin-a-${suffix}`;
   const twinBId = `twin-b-${suffix}`;
-  const userIds = [senderId, knownId, strangerId, twinAId, twinBId];
+  const ownerId = `owner-${suffix}`;
+  const claireKnownId = `claire-known-${suffix}`;
+  const claireOtherId = `claire-other-${suffix}`;
+  const userIds = [senderId, knownId, strangerId, twinAId, twinBId, ownerId, claireKnownId, claireOtherId];
 
   let driver: Driver;
   let database: typeof import('../src/db.js');
@@ -47,6 +50,8 @@ integration('assistant send_message_to_person', () => {
             { id: strangerId, name: 'Robert Stranger', email: `${strangerId}@example.test` },
             { id: twinAId, name: 'Sam Twin', email: `${twinAId}@example.test` },
             { id: twinBId, name: 'Sam Twin', email: `${twinBId}@example.test` },
+            { id: claireKnownId, name: 'Claire Dubois', email: `${claireKnownId}@example.test` },
+            { id: claireOtherId, name: 'Claire Unmet', email: `${claireOtherId}@example.test` },
           ],
         },
       );
@@ -59,6 +64,19 @@ integration('assistant send_message_to_person', () => {
     await directService.ensureDirectConversation(senderId, knownId);
     await directService.ensureDirectConversation(senderId, twinAId);
     await directService.ensureDirectConversation(senderId, twinBId);
+
+    // OpenChat-lfua: a directory-browsing account (like the owner's) that has
+    // only ever messaged one Claire.
+    const ownerSession = driver.session();
+    try {
+      await ownerSession.run(
+        `CREATE (:User {id: $ownerId, name: 'Directory Owner', email: $email, canBrowseUserDirectory: true})`,
+        { ownerId, email: `${ownerId}@example.test` },
+      );
+    } finally {
+      await ownerSession.close();
+    }
+    await directService.ensureDirectConversation(ownerId, claireKnownId);
   });
 
   afterAll(async () => {
@@ -96,6 +114,44 @@ integration('assistant send_message_to_person', () => {
 
     const byEmail = await assistant.resolvePeople(senderId, `${strangerId}@example.test`);
     expect(byEmail.map(p => p.id)).toEqual([strangerId]);
+  });
+
+  it('with directory access, a first name means the person you already message', async () => {
+    const people = await assistant.resolvePeople(ownerId, 'Claire');
+    expect(people.map(p => p.id)).toEqual([claireKnownId]);
+  });
+
+  it('with directory access, falls back to the directory when nobody known matches', async () => {
+    const people = await assistant.resolvePeople(ownerId, 'Claire Unmet');
+    expect(people.map(p => p.id)).toEqual([claireOtherId]);
+  });
+
+  it('post_context asks for confirmation first, then posts quietly with agent attribution (OpenChat-oppa)', async () => {
+    const preview = await assistant.toolPostContext(undefined, ownerId, { person: 'Claire', text: 'hi test' }) as Record<string, unknown>;
+    expect(preview).toMatchObject({ needsConfirmation: true, destination: 'Claire Dubois', kind: 'note', preview: 'hi test' });
+
+    const posted = await assistant.toolPostContext(undefined, ownerId, { person: 'Claire', text: 'hi test', confirm: true }) as Record<string, unknown>;
+    expect(posted).toMatchObject({ ok: true, posted: { destination: 'Claire Dubois', kind: 'note', text: 'hi test' } });
+
+    const read = await assistant.toolReadContext(undefined, ownerId, { person: 'Claire' }) as { posts: Array<Record<string, unknown>> };
+    expect(read.posts.map(p => [p.text, p.viaAgent])).toEqual([['hi test', 'OpenChat Agent (owner approved)']]);
+
+    // Quiet: nothing was added to the chat lane.
+    const session = driver.session();
+    try {
+      const messages = await session.run(
+        `MATCH (:User {id: $ownerId})-[:PARTICIPATES_IN]->(c:Conversation {type: 'direct'})<-[:PARTICIPATES_IN]-(:User {id: $claireKnownId})
+         OPTIONAL MATCH (m:Message {conversationId: c.id}) RETURN count(m) AS n`,
+        { ownerId, claireKnownId },
+      );
+      expect(Number(messages.records[0]?.get('n'))).toBe(0);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('strips markdown the chat bubble cannot render', () => {
+    expect(assistant.plainChatText('Found **Claire** in `TF8B`\n## Done')).toBe('Found Claire in TF8B\nDone');
   });
 
   it('never resolves the user themselves', async () => {
