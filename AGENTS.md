@@ -83,6 +83,10 @@ When you finish a chunk of work, **deploy both** without asking each time:
    ```bash
    cd ~/code/OpenChat && bash infra/deploy.sh
    ```
+   On a memory-constrained host, skip the local `expo export`: download the
+   `web-bundle-<sha>` artifact that `.github/workflows/web-bundle.yml` builds
+   for every push to `main` (`gh run download <run-id> -n web-bundle-<sha> -D <dir>`),
+   then run `CLIENT_DIST_DIR=<dir> bash infra/deploy.sh` from that same commit.
    This targets GCE instance `noos` in project `lightsail-migration`, zone
    `us-central1-a`. See `docs/gcp-production.md`. Never use the retired
    Lightsail IP or the unrelated `boreal-conquest-464203-v2/noos-gcp-1` VM.
