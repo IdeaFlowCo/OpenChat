@@ -64,7 +64,7 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
       expect(entry.annotations.readOnlyHint).toBe(PRIVATE_READS.includes(name));
       expect(entry.securitySchemes[0].scopes).toEqual([PRIVATE_READS.includes(name) ? 'openchat:read' : 'openchat:write']);
       expect(entry.description).toMatch(/visible only to the owner/);
-      expect(entry.description).toMatch(/shown in OpenChat \(an Unlinked view is coming\)/);
+      expect(entry.description).toMatch(/shown in OpenChat and on the owner's Unlinked person and contact pages/);
       expect(entry.description).not.toMatch(/OpenChat and Unlinked/);
     }
     for (const name of ['oc_search_private', 'oc_get_neighbourhood', 'oc_get_person_private', 'oc_list_private_links', 'oc_get_private_thing']) {

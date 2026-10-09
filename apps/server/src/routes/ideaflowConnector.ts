@@ -16,8 +16,8 @@ const query = (path:string,args:Record<string,any>) => {
   const params = new URLSearchParams(Object.entries(args).filter(([,v])=>v!==undefined).map(([k,v])=>[k,String(v)]));
   return params.size ? `${path}?${params}` : path;
 };
-// The owner's private people knowledge: the Noos people overlay. OpenChat shows it today; the Unlinked view is coming.
-const PRIVATE = "Private people knowledge: visible only to the owner (never to the person it is about), stored in the owner's Ideaflow people overlay and shown in OpenChat (an Unlinked view is coming). Never notifies anyone, sends a connection request or changes a public profile.";
+// The owner's private people knowledge: the Noos people overlay. OpenChat and Unlinked (person and contact pages, since Unlinked 0.6.3) show it.
+const PRIVATE = "Private people knowledge: visible only to the owner (never to the person it is about), stored in the owner's Ideaflow people overlay and shown in OpenChat and on the owner's Unlinked person and contact pages. Never notifies anyone, sends a connection request or changes a public profile.";
 const PROVENANCE = "Notes and relations carry author ('owner' or 'agent:<client>'), source ('app', 'connector', 'direct-key' or 'suggestion') and assertion ('stated' or 'inferred'); these are null on records made before provenance was kept. Relations also carry relationType.";
 const RELATION_TYPES = ['knows','family','works_at','worked_with','works_on','attended','interested_in','other'];
 const assertion: Argument = {type:'string',enum:['stated','inferred'],description:"'stated' (default) when the user said it; 'inferred' when you concluded it yourself"};
