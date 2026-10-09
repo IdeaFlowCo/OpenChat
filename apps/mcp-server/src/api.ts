@@ -20,6 +20,10 @@ const CREDENTIALS_PATH = join(homedir(), '.openchat', 'credentials.json');
 
 // ---- types ----
 
+/** The private-graph route for a subject: an OpenChat person, a saved thing, or an Unlinked profile. */
+const privateSubjectPath = (subject: { kind: 'user' | 'thing' | 'unlinked'; id: string }) =>
+  `/api/private/${subject.kind === 'user' ? 'people' : subject.kind === 'unlinked' ? 'unlinked-people' : 'things'}/${encodeURIComponent(subject.id)}`;
+
 export interface OpenChatConfig {
   baseUrl: string;
   apiKey?: string;
@@ -407,12 +411,16 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<unknown>('GET', `/api/private/people/${encodeURIComponent(userId)}`),
     updatePrivatePerson: (userId: string, body: Record<string, unknown>) =>
       request<unknown>('PATCH', `/api/private/people/${encodeURIComponent(userId)}`, { body }),
-    addPrivateNote: (subject: { kind: 'user' | 'thing'; id: string }, text: string) =>
-      request<unknown>('POST', `/api/private/${subject.kind === 'user' ? 'people' : 'things'}/${encodeURIComponent(subject.id)}/notes`, { body: { text } }),
+    addPrivateNote: (subject: { kind: 'user' | 'thing' | 'unlinked'; id: string }, text: string) =>
+      request<unknown>('POST', `${privateSubjectPath(subject)}/notes`, { body: { text } }),
     deletePrivateNote: (noteId: string) =>
       request<unknown>('DELETE', `/api/private/notes/${encodeURIComponent(noteId)}`),
-    addPrivateLink: (subject: { kind: 'user' | 'thing'; id: string }, relation: string, to: Record<string, unknown>) =>
-      request<unknown>('POST', `/api/private/${subject.kind === 'user' ? 'people' : 'things'}/${encodeURIComponent(subject.id)}/links`, { body: { relation, to } }),
+    addPrivateLink: (subject: { kind: 'user' | 'thing' | 'unlinked'; id: string }, relation: string, to: Record<string, unknown>) =>
+      request<unknown>('POST', `${privateSubjectPath(subject)}/links`, { body: { relation, to } }),
+    getUnlinkedPersonPrivate: (profileId: string) =>
+      request<unknown>('GET', `/api/private/unlinked-people/${encodeURIComponent(profileId)}`),
+    listPrivateLinks: (query?: string) =>
+      request<unknown>('GET', '/api/private/links', { query: { q: query } }),
     deletePrivateLink: (linkId: string) =>
       request<unknown>('DELETE', `/api/private/links/${encodeURIComponent(linkId)}`),
     listPrivateThings: (query?: string, kind?: string) =>

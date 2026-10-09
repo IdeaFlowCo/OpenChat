@@ -48,6 +48,40 @@ these routes never return it.
 | `DELETE /links/:linkId` | Remove a link |
 | `GET /things?q=&kind=`, `GET /things/:thingId` | Saved things, and one with its notes and links |
 | `GET /due` | People whose catch-up date has passed |
+| `GET /links?q=` | Every link the owner recorded, newest first, filtered by a name or relation |
+| `GET /unlinked-people/:profileId` | Card, notes and links for an Unlinked profile (never creates, never calls Unlinked) |
+| `POST /unlinked-people/:profileId/notes`, `POST /unlinked-people/:profileId/links` | Note or link about an Unlinked profile |
+
+## People from Unlinked
+
+An Unlinked profile is the overlay entity named by `unlinked:person:<profileId>`,
+the ref Unlinked itself uses, so Unlinked's own view of the same owner reads the
+same entity. The first write about a profile confirms it with the owner's own
+read-only Unlinked grant (the identity-scoped provisioning OpenChat already uses
+for Unlinked search): only an id Unlinked's published People index answers for
+becomes a person here, under the canonical id when a profile was merged. Later
+writes and every read use the stored ref and do not call Unlinked. Profiles that
+exist only in the owner's private Unlinked import are not published, so they
+cannot be confirmed and are refused; record them as a saved person by name.
+A link `to` may be `{kind:'unlinked', id}`; link ends that are Unlinked profiles
+carry `unlinkedProfileId` next to their saved-thing `id`.
+
+## Names, retries and undo
+
+A link to a saved thing by name reuses it only when exactly one of the owner's
+entities of that kind has that name and it is a saved-by-name thing. When the
+name is shared (two people called Alex, or an OpenChat contact with the same
+name), the call answers 409 with `code: "ambiguous_name"` and `candidates`, each
+with the `to` to use; nothing is created. `createNew: true` with a
+`clientRequestId` keeps a deliberately different person apart (overlay ref
+`openchat:private:<hash>`); repeating that request returns the same entity.
+The same subject, relation and target is always one link, and the same note text
+on a card is one note, so retried calls do not duplicate. Deleting a note or link
+is the undo.
+
+The overlay stores `createdAt` on notes and links but no separate provenance
+(which agent or connector wrote it). Adding that is a change to the Noos-owned
+layout and is not done here.
 
 Account export includes the owner's private graph under `privateGraph`
 (entities, notes and links). Account deletion removes everything the person
@@ -63,7 +97,7 @@ tap), and the add-link form appears only after **+ Add link**. Above the card,
 or `oc_list_story_feed` with `authorId` for agents); that is their public-to-you
 side and is not part of the private graph. A linked thing
 opens its own page, where more links and notes can be added. **Catch up**, on
-the People screen, lists who is due. Agent tools: `oc_get_person` (name, shared asks and the private card in one read), `oc_get_person_private`,
+the People screen, lists who is due. Agent tools: `oc_get_person` (name, shared asks and the private card in one read), `oc_get_person_private`, `oc_get_unlinked_person_private`, `oc_list_private_links`,
 `oc_set_person_private`, `oc_add_private_note`, `oc_delete_private_note`,
 `oc_add_private_link`, `oc_delete_private_link`, `oc_list_private_things`,
 `oc_get_private_thing`, `oc_list_catch_up`.

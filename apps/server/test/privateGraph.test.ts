@@ -32,6 +32,15 @@ describe('private graph input rules', () => {
       expect(status(() => parseLinkTarget(target))).toBe(400);
     }
   });
+  it('links to an Unlinked profile by its id, and to a deliberately separate same-named thing only with a request id', () => {
+    expect(parseLinkTarget({ kind: 'unlinked', id: 'member-import-ab12' })).toEqual({ kind: 'unlinked', id: 'member-import-ab12' });
+    expect(parseLinkTarget({ kind: 'person', name: 'Alex', createNew: true, clientRequestId: 'req-1' })).toEqual({ kind: 'person', name: 'Alex', createNew: { requestId: 'req-1' } });
+    expect(parseLinkTarget({ kind: 'person', name: 'Alex', createNew: false })).toEqual({ kind: 'person', name: 'Alex' });
+    for (const target of [{ kind: 'unlinked' }, { kind: 'unlinked', id: 'has space' }, { kind: 'unlinked', id: 'x'.repeat(161) }, { kind: 'unlinked', name: 'Maya' },
+      { kind: 'person', name: 'Alex', createNew: true }, { kind: 'person', name: 'Alex', createNew: 'yes', clientRequestId: 'r' }, { kind: 'person', name: 'Alex', createNew: true, clientRequestId: 'bad id' }]) {
+      expect(status(() => parseLinkTarget(target)), JSON.stringify(target)).toBe(400);
+    }
+  });
 });
 
 describe('catch-up cadence', () => {
