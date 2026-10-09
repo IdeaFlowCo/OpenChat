@@ -1,3 +1,4 @@
+import cases from '../../../scripts/message-companion/test_privacy_cases.json' with { type: 'json' };
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { isLocalOnlyCapture } from '../src/utils/captureConfidentiality.ts';
@@ -21,5 +22,15 @@ test('identifier-like content is blocked before sending', () => {
 test('ordinary contact details, links, notes and tags remain writable', () => {
   for (const [text, label] of [['42 Example Lane', 'Mailing address'], ['Apartment 3', 'Address'], ['555-0100', 'Phone'], ['October 9', 'Birthday'], ['https://example.test/article #reading', ''], ['A new idea #longevity', '']]) {
     assert.equal(isLocalOnlyCapture(text, label), false);
+  }
+});
+
+test('shared explicit-label policy blocks drafts and fields consistently', () => {
+  for (const label of cases.labels) {
+    assert.equal(isLocalOnlyCapture(`${label}: 12345678 #remember`), true);
+    assert.equal(isLocalOnlyCapture('synthetic value', label), true);
+  }
+  for (const item of cases.ordinary) {
+    assert.equal(isLocalOnlyCapture(item.text, item.label), false);
   }
 });

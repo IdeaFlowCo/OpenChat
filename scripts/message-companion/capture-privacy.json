@@ -1,0 +1,5 @@
+{
+  "normalization": "NFKC",
+  "labelSeparators": "[\\s_’'‘‐‑‒–—-]+",
+  "explicitLabelPattern": "(^|[^a-z0-9])(?:confidential|ssn|social security|passport|driver(?: s|s)? licen[cs]e|tax ?(?:id|identifier|identification)|national ?id|government ?id|account|routing|iban|card number|credit card|debit card|payment card)(?=$|[^a-z0-9])"
+}

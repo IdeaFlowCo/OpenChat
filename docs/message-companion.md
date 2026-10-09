@@ -174,3 +174,11 @@ pre-launch operation to launchd. Local logs plus the already-authorized Homebrew
 Python realpath have been proven to run archive-only. This is separate from
 Python needing permission to read Messages and the external archive; no TCC
 changes or live-service actions belong to pipeline review.
+
+Explicit confidentiality labels use the shared `scripts/message-companion/capture-privacy.json`
+policy in mobile drafts, companion message/trigger screening, and contact fields.
+Matching normalizes a temporary copy (NFKC, lowercase, label separators); source
+text remains exact. Broad matches such as account, routing, IBAN, social security,
+tax ID, passport, driver license, and card number stay local even when no numeric
+pattern matches. These are conservative heuristics, not detection of every kind
+of sensitive information. The installer copies the policy with the companion.

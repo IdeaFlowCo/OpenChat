@@ -3,6 +3,7 @@ import io
 import json
 from pathlib import Path
 import plistlib
+import runpy
 import subprocess
 import tempfile
 import unittest
@@ -163,6 +164,14 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.invoke('install','--log-dir',str(local))[0],0)
         self.assertEqual(Path(self.launches[-1]['StandardOutPath']).parent,local)
         self.assertEqual(self.launches[-1]['ProgramArguments'],config['ProgramArguments'])
+
+    def test_installed_companion_loads_shared_privacy_policy(self):
+        self.assertEqual(self.invoke('install','--archive-only')[0],0)
+        companion=Path(self.launches[-1]['ProgramArguments'][1])
+        installed=runpy.run_path(str(companion))
+        self.assertTrue(installed['confidential']('Bank account: 12345678 #remember'))
+        self.assertTrue(installed['confidential_contact_field']('IBAN','synthetic value'))
+        self.assertFalse(installed['confidential']('Apartment 3 #address'))
 
 
 if __name__ == '__main__':

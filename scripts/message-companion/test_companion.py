@@ -8,6 +8,8 @@ from pathlib import Path
 from unittest.mock import patch
 import companion as app
 
+PRIVACY_CASES=json.loads(Path(__file__).with_name('test_privacy_cases.json').read_text())
+
 
 class CaptureTests(unittest.TestCase):
     def setUp(self):
@@ -326,6 +328,48 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(capture['triggerText'],text)
         self.assertEqual(capture['tags'],['café','किताब','élan','_'])
         self.assertEqual(app.tags_in('word#hidden e\u0301#hidden /#hidden #valid'),['valid'])
+
+    def test_shared_explicit_labels_block_inline_reply_and_manual_captures(self):
+        originals=[]
+        for index,label in enumerate(PRIVACY_CASES['labels']):
+            text=label+': 12345678 #remember'
+            guid='private-'+str(index)
+            originals.append((guid,text))
+            self.message(guid,text)
+            self.message('reply-'+str(index),'#reading',parent=guid)
+        self.archive()
+        self.assertEqual(self.rows(),[])
+        self.assertEqual(app.status(self.args)['review'],{'local-only-confidential':2*len(originals)})
+        for guid,text in originals:
+            self.args.guid=guid;self.args.tag=['reading']
+            with patch.object(app,'contact_names',return_value={}):
+                with self.assertRaisesRegex(ValueError,'local-only-confidential'):app.save(self.args)
+            with sqlite3.connect(self.messages) as db:
+                self.assertEqual(db.execute('SELECT text FROM message WHERE guid=?',(guid,)).fetchone()[0],text)
+        self.assertEqual(self.rows(),[])
+
+    def test_shared_explicit_labels_block_existing_source_and_trigger_uploads(self):
+        self.prepare_uploads(1)
+        with sqlite3.connect(self.state) as db:
+            key,payload=db.execute('SELECT id,payload FROM outbox').fetchone()
+        for label in PRIVACY_CASES['labels']:
+            for field in ('text','triggerText'):
+                with self.subTest(label=label,field=field):
+                    value=json.loads(payload);value[field]=label+': 12345678 #remember'
+                    with sqlite3.connect(self.state) as db:
+                        db.execute('INSERT OR REPLACE INTO outbox(id,payload,uploaded) VALUES (?,?,0)',(key,json.dumps(value)))
+                    with patch.object(app,'api_call') as call:
+                        self.assertEqual(app.sync(self.args),{'uploaded':0})
+                        call.assert_not_called()
+                    self.assertEqual(self.rows(),[])
+
+    def test_shared_explicit_labels_screen_contact_labels_and_values(self):
+        for label in PRIVACY_CASES['labels']:
+            self.assertTrue(app.confidential_contact_field(label,'synthetic value'))
+            self.assertTrue(app.confidential_contact_field('Other',label+': 12345678'))
+        for case in PRIVACY_CASES['ordinary']:
+            self.assertFalse(app.confidential(case['text']))
+            self.assertFalse(app.confidential_contact_field(case['label'],case['text']))
 
 
 class ContactSnapshotTests(unittest.TestCase):

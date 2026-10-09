@@ -48,7 +48,7 @@ def main():
         stderr=log_dir/'companion-error.log' if args.log_dir else Path(previous_config.get('StandardErrorPath',log_dir/'companion-error.log'))
         for directory in {stdout.parent,stderr.parent}:directory.mkdir(parents=True,exist_ok=True,mode=0o700)
         library=Path.home()/'.local/lib/openchat-companion';library.mkdir(parents=True,exist_ok=True)
-        for name in ('companion.py','service.py','add-address.applescript'):
+        for name in ('companion.py','service.py','add-address.applescript','capture-privacy.json'):
             source=Path(__file__).resolve().parent/name;dest=library/name
             if source!=dest:shutil.copy2(source,dest)
         command=[str(executable),str(library/'companion.py'),'--state',str(state),'watch']

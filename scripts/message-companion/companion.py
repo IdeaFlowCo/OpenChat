@@ -25,16 +25,27 @@ APPLE_EPOCH = 978307200
 SAVE_EMOJI = '🔖'
 PIN_EMOJI = '📌'
 URL = re.compile(r'https?://\S+', re.I)
+PRIVACY_POLICY = json.loads(Path(__file__).with_name('capture-privacy.json').read_text())
+LABEL_SEPARATORS = re.compile(PRIVACY_POLICY['labelSeparators'])
+EXPLICIT_LABEL = re.compile(PRIVACY_POLICY['explicitLabelPattern'])
+
+
+def privacy_normalize(text):
+    return unicodedata.normalize(PRIVACY_POLICY['normalization'], text).lower()
+
+
+def has_confidential_label(text):
+    return bool(EXPLICIT_LABEL.search(LABEL_SEPARATORS.sub(' ', privacy_normalize(text))))
 
 
 def confidential(text, tags=()):
     """Keep explicitly confidential/identifier-like values in their canonical local source.
     This is a conservative routing rule, not a guarantee of semantic detection.
     """
-    text = unicodedata.normalize('NFKC', text)
-    if any(unicodedata.normalize('NFKC', tag).lower() == 'confidential' for tag in tags if isinstance(tag, str)):
+    text = privacy_normalize(text)
+    if any(privacy_normalize(tag).removeprefix('#') == 'confidential' for tag in tags if isinstance(tag, str)):
         return True
-    if re.search(r'#confidential\b|(?:ssn|social security|passport|driver.?s? licen[cs]e|tax.?id|account number|routing number|card number|confidential)\s*[:#=-]?\s*[A-Z0-9 -]{5,}', text, re.I):
+    if has_confidential_label(text):
         return True
     if re.search(r'(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)',text):
         return True
@@ -47,10 +58,7 @@ def confidential(text, tags=()):
 
 
 def confidential_contact_field(label, value):
-    label = unicodedata.normalize('NFKC', label).lower().replace('_', ' ')
-    if re.search(r'\b(?:confidential|ssn|social security|passport|driver.?s? licen[cs]e|tax[ -]?(?:id|identifier|identification)|national[ -]?id|government[ -]?id|account|routing|card number|credit card|debit card)\b', label):
-        return True
-    return confidential(label) or confidential(unicodedata.normalize('NFKC', value))
+    return confidential(label) or confidential(value)
 
 
 def scrub_contact_details(details):
