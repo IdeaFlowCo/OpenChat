@@ -21,7 +21,9 @@ const ids = async (body: any) => (await query('MATCH (u:User) WHERE u.ideaflowSu
 beforeAll(async()=>{
  if(!process.env.NEO4J_TEST_URI)return;
  driver=neo4j.driver(process.env.NEO4J_TEST_URI,neo4j.auth.basic(process.env.NEO4J_TEST_USER || 'neo4j',process.env.NEO4J_TEST_PASSWORD!));state.driver=driver;vi.stubEnv('UNLINKED_MESSAGING_SECRET',secret);
- for(const q of ['CREATE CONSTRAINT acceptance_user_id IF NOT EXISTS FOR (u:User) REQUIRE u.id IS UNIQUE','CREATE CONSTRAINT acceptance_identity IF NOT EXISTS FOR (u:User) REQUIRE u.ideaflowIdentityKey IS UNIQUE','CREATE CONSTRAINT acceptance_dm IF NOT EXISTS FOR (c:Conversation) REQUIRE c.directPairKey IS UNIQUE','CREATE CONSTRAINT acceptance_receipt IF NOT EXISTS FOR (r:UnlinkedConnectionSync) REQUIRE r.requestId IS UNIQUE'])await query(q);
+ // Match production's additive schema: legacy shared User IDs are not globally unique.
+ // Other integration suites can leave duplicate synthetic assistant IDs.
+ for(const q of ['CREATE CONSTRAINT acceptance_identity IF NOT EXISTS FOR (u:User) REQUIRE u.ideaflowIdentityKey IS UNIQUE','CREATE CONSTRAINT acceptance_dm IF NOT EXISTS FOR (c:Conversation) REQUIRE c.directPairKey IS UNIQUE','CREATE CONSTRAINT acceptance_receipt IF NOT EXISTS FOR (r:UnlinkedConnectionSync) REQUIRE r.requestId IS UNIQUE'])await query(q);
 });
 afterAll(async()=>{if(!driver)return;await query('MATCH (r:UnlinkedConnectionSync) WHERE r.requestId IN $ids DETACH DELETE r',{ids:[...requestIds]});await query('MATCH (r:OpenChatConnection) WHERE r.pairKey CONTAINS $prefix DETACH DELETE r',{prefix});await query('MATCH (u:User) WHERE u.ideaflowSub STARTS WITH $prefix OPTIONAL MATCH (u)-[:PARTICIPATES_IN]->(c:Conversation) DETACH DELETE c,u',{prefix});await driver.close();vi.unstubAllEnvs();});
 const suite=process.env.NEO4J_TEST_URI?describe:describe.skip;
