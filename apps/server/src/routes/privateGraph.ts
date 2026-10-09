@@ -8,7 +8,7 @@ import { Router, type Request, type Response } from 'express';
 import { resolveActor } from '../middleware/resolveActor.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import {
-  addLink, addNote, createPrivateThing, deleteLink, deleteNote, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, listOwnerLinks, listThings,
+  addLink, addNote, createPrivateThing, deleteLink, deleteNote, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
   parseCardPatch, PrivateGraphError, updateNote, updatePersonCard,
 } from '../services/privateGraph.js';
 
@@ -73,6 +73,11 @@ router.post('/unlinked-people/:profileId/links', async (req: Request, res: Respo
 
 router.post('/things', async (req: Request, res: Response) => {
   try { res.status(201).json(await createPrivateThing(owner(req), req.body?.kind, req.body?.name)); } catch (error) { fail(error, res); }
+});
+
+// Agent path: find or save by name without merging same-named people.
+router.post('/things/resolve', async (req: Request, res: Response) => {
+  try { res.json(await resolvePrivateThing(owner(req), req.body)); } catch (error) { fail(error, res); }
 });
 
 router.get('/things', async (req: Request, res: Response) => {

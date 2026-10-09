@@ -480,6 +480,21 @@ export async function createPrivateThing(ownerId: string, rawKind: unknown, rawN
   return { id: entity.id, kind: entity.kind, name: entity.name };
 }
 
+/**
+ * Find or save a person, company, idea or project by name with the same rules
+ * as a link target: a shared name is never merged (409 ambiguous_name with
+ * candidates), and createNew with a clientRequestId saves a separate one
+ * idempotently. Never binds or creates an account.
+ */
+export async function resolvePrivateThing(ownerId: string, raw: unknown): Promise<Thing> {
+  const target = parseLinkTarget(raw);
+  if (!('name' in target)) return fail(400, 'Give a kind and a name');
+  const principal = await ownerPrincipal(ownerId);
+  const entityId = await namedEntity(principal, target);
+  const entity = await overlayCall(overlay => overlay.get(principal, entityId));
+  return { id: entity.id, kind: entity.kind, name: entity.name };
+}
+
 /** Saved companies, ideas, projects and people-by-name. People on OpenChat are reached through their profile instead. */
 export async function listThings(ownerId: string, query: unknown, kind: unknown): Promise<{ things: Thing[] }> {
   if (kind !== undefined && !THING_KINDS.includes(kind as ThingKind)) fail(400, 'Unknown kind');
