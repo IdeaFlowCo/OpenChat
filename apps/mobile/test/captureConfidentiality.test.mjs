@@ -1,6 +1,6 @@
 import cases from '../../../scripts/message-companion/test_privacy_cases.json' with { type: 'json' };
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { isLocalOnlyCapture } from '../src/utils/captureConfidentiality.ts';
 
 test('explicit confidential labels and normalized tags remain local', () => {
