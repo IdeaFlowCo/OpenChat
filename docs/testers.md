@@ -212,22 +212,29 @@ Feedback from inside OpenChat creates a **WorldIssueTracker** issue
 (`worldissuetracker.com`) labeled `openchat-feedback`, so the team sees it in
 one place.
 
-Two in-app entry points (both hit the same backend, same `WIT_AGENT_KEY`):
+Three entry points share one filing path (`apps/server/src/services/witFeedback.ts`):
 
 1. **Settings → "Send feedback"** — type what's working/broken/missing; on
-   submit the app confirms with a link to the created issue.
+   submit the app confirms who it was posted as and links to the issue.
    (`SettingsScreen.tsx` → `api.submitFeedback` → `POST /api/feedback`.)
-2. **Assistant → "file feedback"** — just tell the in-app Assistant you want to
-   file feedback and it creates the issue for you (rate-limited to 5/hour/user).
-   (`apps/server/src/services/assistant.ts`, openchat-1ny.)
+2. **Assistant → "file feedback"** — tell the in-app Assistant and it files the
+   issue for you (rate-limited to 50/hour/user). (`assistant.ts`, openchat-1ny.)
+3. **Agents** — the `oc_submit_feedback` MCP tool (`POST /api/feedback`).
 
-Both create an issue via `POST /api/feedback` (`apps/server/src/routes/feedback.ts`),
-which calls the WIT `create-issue` function with the server's `X-Agent-Key`.
-The created issue's URL is returned to the client so the tester can follow up.
+**Attribution (OpenChat-0xjt).** Issues are public, so who they show matters:
 
-**Server config:** feedback requires `WIT_AGENT_KEY` in the server env. If it's
-missing the API returns `503` and the app shows a "feedback not configured"
-message — operators should ensure that secret is set in the prod `.env`.
+| Case | Shown publicly as | How |
+| --- | --- | --- |
+| Default | The filer's name, under their own WIT account | Ideaflow ID mints a short-lived, create-issue-only WIT token for the filer (`/builtin-agent/delegated-token`); WIT records the issue under that account. |
+| "Post anonymously" (modal switch, or ask the Assistant) | Anonymous | Same token with `post_anonymously: true`; WIT keeps the author privately so the filer can still edit it. |
+| No Ideaflow identity yet, or delegation unavailable | `<OpenChat name> (via OpenChat)` | Server `WIT_AGENT_KEY` with an explicit reporter name. Never filed silently as the key owner. |
+
+Responses include `postedAs` (`account` / `name_only` / `anonymous`).
+
+**Server config:** `WIT_API_BASE` defaults to the GCP API
+(`https://api.worldissuetracker.com/functions/v1`; the old Supabase project is
+frozen read-only). Delegation uses `IDEAFLOW_BUILTIN_CLIENT_ID`/`SECRET`. With
+neither delegation nor `WIT_AGENT_KEY` available the API returns `503`.
 
 Testers can also use TestFlight's built-in **screenshot → Share Beta Feedback**
 flow, which lands in App Store Connect; the in-app paths above are preferred

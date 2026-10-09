@@ -69,7 +69,7 @@ services:
       # WIT issues via this agent key. Unset = /api/feedback returns 503.
       # Set: echo 'WIT_AGENT_KEY=wit_...' >> /opt/openchat/.env
       - WIT_AGENT_KEY=${WIT_AGENT_KEY:-}
-      - WIT_API_BASE=${WIT_API_BASE:-https://qmzopiburflputowkuhu.supabase.co/functions/v1}
+      - WIT_API_BASE=${WIT_API_BASE:-https://api.worldissuetracker.com/functions/v1}
       - WIT_SITE_URL=${WIT_SITE_URL:-https://worldissuetracker.com}
       # Assistant external tools (OpenChat-1fwa). OPENCHAT_OWNER_USER_ID gates
       # the owner-credentialed ("as Jacob") WIT writes + unlinked.ai search to

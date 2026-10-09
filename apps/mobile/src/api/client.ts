@@ -1233,14 +1233,20 @@ export const api = {
     request<{ ok: boolean }>('/api/auth/me', { method: 'DELETE' }),
 
   /**
-   * Submit user feedback. Server creates a WorldIssueTracker issue (oc8.3) and
-   * returns its URL. Requires the server /api/feedback route (gated on the
-   * WIT_AGENT_KEY env var); returns 503 until that's configured/deployed.
+   * Submit user feedback. Server creates a World Issue Tracker issue under the
+   * user's Ideaflow account (or anonymously when asked) and returns its URL
+   * plus how it was posted (OpenChat-0xjt).
    */
-  submitFeedback: (message: string, context?: string) =>
-    request<{ url: string; id?: string }>('/api/feedback', {
+  submitFeedback: (message: string, context?: string, anonymous = false) =>
+    request<{
+      url: string;
+      id?: string;
+      postedAs?: 'account' | 'name_only' | 'anonymous';
+      displayName?: string;
+      note?: string;
+    }>('/api/feedback', {
       method: 'POST',
-      body: JSON.stringify({ message, context }),
+      body: JSON.stringify({ message, context, anonymous }),
     }),
 
   /**

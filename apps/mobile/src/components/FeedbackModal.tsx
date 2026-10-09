@@ -14,6 +14,8 @@
  *   - Modal slides in from below, matching NVCComposerModal
  *   - Send is disabled until the message is non-empty, and while sending
  *   - A subtle "Open issue tracker" link stays available as a fallback
+ *   - Filed publicly under the person's own account by default; "Post
+ *     anonymously" is an explicit opt-in (OpenChat-0xjt)
  */
 
 import { useState } from 'react';
@@ -25,6 +27,7 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -35,26 +38,30 @@ import { getColors } from '../theme/colors';
 interface Props {
   visible: boolean;
   sending: boolean;
-  onSubmit: (message: string) => void;
+  /** The filer's display name, shown in the attribution line. */
+  filerName?: string;
+  onSubmit: (message: string, anonymous: boolean) => void;
   onCancel: () => void;
 }
 
-export function FeedbackModal({ visible, sending, onSubmit, onCancel }: Props) {
+export function FeedbackModal({ visible, sending, filerName, onSubmit, onCancel }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
 
   const [message, setMessage] = useState('');
+  const [anonymous, setAnonymous] = useState(false);
 
   const canSubmit = message.trim().length > 0 && !sending;
 
   const handleSend = () => {
     if (!canSubmit) return;
-    onSubmit(message.trim());
+    onSubmit(message.trim(), anonymous);
   };
 
   const handleCancel = () => {
     if (sending) return;
     setMessage('');
+    setAnonymous(false);
     onCancel();
   };
 
@@ -101,6 +108,20 @@ export function FeedbackModal({ visible, sending, onSubmit, onCancel }: Props) {
               editable={!sending}
               autoFocus
             />
+            <View style={styles.anonRow}>
+              <Text style={[styles.anonLabel, { color: c.textPrimary }]}>Post anonymously</Text>
+              <Switch
+                value={anonymous}
+                onValueChange={setAnonymous}
+                disabled={sending}
+                accessibilityLabel="Post anonymously"
+              />
+            </View>
+            <Text style={[styles.attribution, { color: c.textSecondary }]}>
+              {anonymous
+                ? 'Shown publicly as Anonymous on World Issue Tracker. Only you can edit it later.'
+                : `Shown publicly as ${filerName?.trim() || 'you'} on World Issue Tracker, under your Ideaflow account.`}
+            </Text>
             <Pressable onPress={() => void Linking.openURL('https://worldissuetracker.com')} hitSlop={8}>
               <Text style={[styles.trackerLink, { color: c.textMetadata }]}>Open issue tracker</Text>
             </Pressable>
@@ -147,6 +168,15 @@ const styles = StyleSheet.create({
     minHeight: 120,
     textAlignVertical: 'top',
   },
+  anonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 14,
+    minHeight: 44,
+  },
+  anonLabel: { fontSize: 15 },
+  attribution: { fontSize: 13, lineHeight: 18, marginTop: 2 },
   trackerLink: {
     fontSize: 12,
     marginTop: 12,

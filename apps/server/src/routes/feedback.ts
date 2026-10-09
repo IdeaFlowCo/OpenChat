@@ -2,9 +2,9 @@
  * Feedback API (oc8.3 / openchat-aec.3) — user feedback -> WorldIssueTracker.
  *
  * POST /api/feedback { message, context? }
- *   Creates an issue on worldissuetracker.com via the WIT agent key
- *   (server env WIT_AGENT_KEY). Returns { url } to the created issue so the
- *   client can confirm + link to it.
+ *   Creates an issue on worldissuetracker.com, attributed to the filer's
+ *   unified Ideaflow account unless { anonymous: true } (see
+ *   services/witFeedback.ts). Returns { url, id, postedAs, displayName }.
  *
  * v1 is one-way (creates a WIT issue). Future: route feedback to an
  * OpenChat-native agent that can converse back in-app (agent-sidebar epic).
@@ -13,88 +13,50 @@
  */
 import { Router, Request, Response } from 'express';
 import { resolveActor } from '../middleware/resolveActor.js';
+import { FEEDBACK_MAX_MESSAGE, fileFeedback } from '../services/witFeedback.js';
 
 const router = Router();
 
-// WIT's Supabase project moved. The old `sthqnyjniclvnflfkyio` project is
-// PAUSED — requests to it fail at connect, which surfaced to users as
-// "Feedback service is down right now". `worldissuetracker.com/llms.txt` is the
-// authoritative source for this base if it ever moves again.
-const WIT_BASE =
-  process.env.WIT_API_BASE ||
-  'https://qmzopiburflputowkuhu.supabase.co/functions/v1';
-const WIT_SITE = process.env.WIT_SITE_URL || 'https://worldissuetracker.com';
-// File feedback onto the OpenChat board/tracker by default. Previously omitted,
-// so every feedback issue was created ORPHAN (tracker_id null). Override via env.
-const WIT_TRACKER_SLUG = process.env.WIT_FEEDBACK_TRACKER_SLUG || 'openchat';
-const MAX_MESSAGE = 5000;
-
 // POST /api/feedback — create a WIT issue from a user's feedback message.
+// Filed under the filer's unified Ideaflow account unless anonymous:true.
 router.post('/', resolveActor, async (req: Request, res: Response) => {
   const userId = req.user?.userId;
-  const { message, context } = req.body as {
+  const { message, context, anonymous } = req.body as {
     message?: string;
     context?: string;
+    anonymous?: boolean;
   };
 
+  if (!userId) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
   if (!message || typeof message !== 'string' || !message.trim()) {
     res.status(400).json({ error: 'message is required' });
     return;
   }
-  if (message.length > MAX_MESSAGE) {
-    res.status(400).json({ error: `message too long (max ${MAX_MESSAGE})` });
+  if (message.length > FEEDBACK_MAX_MESSAGE) {
+    res.status(400).json({ error: `message too long (max ${FEEDBACK_MAX_MESSAGE})` });
+    return;
+  }
+  if (anonymous !== undefined && typeof anonymous !== 'boolean') {
+    res.status(400).json({ error: 'anonymous must be a boolean' });
     return;
   }
 
-  const key = process.env.WIT_AGENT_KEY;
-  if (!key) {
-    // Fail loudly but gracefully so the client can show a useful message.
-    res.status(503).json({
-      error: 'Feedback is not configured on the server (WIT_AGENT_KEY missing).',
-    });
+  const result = await fileFeedback({
+    userId,
+    message,
+    context: typeof context === 'string' ? context : undefined,
+    anonymous: anonymous === true,
+    source: req.agentScopes !== undefined ? 'agent' : 'app',
+  });
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
     return;
   }
-
-  const firstLine = message.trim().split('\n')[0]!.slice(0, 80);
-  const title = `[OpenChat] ${firstLine || 'feedback'}`;
-  const description = [
-    message.trim(),
-    '',
-    '---',
-    `Submitted via OpenChat by user ${userId ?? 'unknown'}.`,
-    context ? `Context: ${context}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  try {
-    const r = await fetch(`${WIT_BASE}/create-issue`, {
-      method: 'POST',
-      headers: { 'X-Agent-Key': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title,
-        description,
-        labels: ['openchat-feedback'],
-        tracker_slug: WIT_TRACKER_SLUG, // file on the OpenChat board, not orphan
-      }),
-    });
-    const data = (await r.json().catch(() => null)) as
-      | { success?: boolean; issue?: { id?: string; slug?: string } }
-      | null;
-
-    if (!r.ok || !data?.success) {
-      res
-        .status(502)
-        .json({ error: 'Failed to create feedback issue', detail: data });
-      return;
-    }
-
-    const slug = data.issue?.slug;
-    const url = slug ? `${WIT_SITE}/issue/${slug}` : WIT_SITE;
-    res.status(201).json({ url, id: data.issue?.id });
-  } catch {
-    res.status(502).json({ error: 'Failed to reach feedback service' });
-  }
+  const { ok: _ok, ...payload } = result;
+  res.status(201).json(payload);
 });
 
 export default router;

@@ -1,4 +1,5 @@
 import { getDriver } from '../db.js';
+import { witApiBase } from './witFeedback.js';
 import { searchUnlinkedForIdentity, unlinkedProvisionConfigured } from './unlinkedProvision.js';
 // External actions for the in-app Assistant (OpenChat-1fwa):
 //  - World Issue Tracker (worldissuetracker.com) — search/read/create/update
@@ -60,8 +61,9 @@ function writeRateLimited(userId: string): boolean {
 // Anonymous trackers are public, listed, ownerless, and rate-limited by WIT
 // (world-issue-tracker-wkn4); WIT refuses exact duplicates with 409.
 
-const WIT_BASE =
-  process.env.WIT_API_BASE || 'https://qmzopiburflputowkuhu.supabase.co/functions/v1';
+// WIT moved to GCP on 2026-10-04; the Supabase project is frozen read-only.
+// The GCP API ignores the legacy anon bearer, so the headers stay compatible.
+const WIT_BASE = witApiBase();
 const WIT_SITE = process.env.WIT_SITE_URL || 'https://worldissuetracker.com';
 const WIT_TIMEOUT_MS = 15_000;
 
