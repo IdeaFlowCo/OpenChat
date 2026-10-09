@@ -87,6 +87,10 @@ export async function ingestCaptures(session: Session, ownerId: string, raw: unk
         FOREACH (_ IN CASE WHEN capture.deletedAt IS NULL AND NOT $eventId IN capture.events THEN [1] ELSE [] END |
           SET capture.tags=reduce(tags=capture.tags,tag IN $tags | CASE WHEN tag IN tags THEN tags ELSE tags+tag END),
             capture.pinned=CASE WHEN $pinned THEN true ELSE capture.pinned END,
+            capture.destination=CASE
+              WHEN capture.destination='contact' OR $destination='contact' THEN 'contact'
+              WHEN capture.destination='note' OR $destination='note' THEN 'note'
+              ELSE 'stream' END,
             capture.events=capture.events+$eventId, capture.updatedAt=$now,
             capture.triggerText=$triggerText, capture.triggerMessageId=$triggerMessageId,
             capture.captureMethod=$captureMethod)

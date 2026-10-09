@@ -1,6 +1,7 @@
 import argparse
 import json
 import sqlite3
+import urllib.error
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,7 +12,7 @@ import companion as app
 class CaptureTests(unittest.TestCase):
     def setUp(self):
         cards=patch.object(app,"contact_cards",return_value={});cards.start();self.addCleanup(cards.stop)
-        self.temp=tempfile.TemporaryDirectory()
+        self.temp=tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
         self.root=Path(self.temp.name)
         self.messages=self.root/'messages.sqlite3'
         self.state=self.root/'archive.sqlite3'
@@ -96,6 +97,96 @@ class CaptureTests(unittest.TestCase):
         with sqlite3.connect(self.state) as c:
             review=json.loads(c.execute('SELECT snapshot FROM review').fetchone()[0])
         self.assertEqual(review,{'messageGuid':'sensitive','chatGuid':'chat-roger'})
+
+    def test_manual_tags_validate_before_enqueue_and_normalize_routing(self):
+        self.message('source','An ordinary message',False)
+        self.args.guid='source'
+        for tags in (['two words'], ['#address'], ['-bad'], ['a'*257], ['x']*51, ['😀']):
+            self.args.tag=tags
+            with self.assertRaises(ValueError):app.save(self.args)
+        self.assertFalse(self.state.exists())
+        self.args.tag=['ＡＤＤＲＥＳＳ', 'Cafe\u0301', 'Straße', 'a\u0301b']
+        with patch.object(app,'contact_names',return_value={}):app.save(self.args)
+        self.assertEqual(self.rows()[0]['tags'],['address','café','straße','áb'])
+        self.assertEqual(self.rows()[0]['destination'],'contact')
+
+    def test_archive_validates_metadata_before_enqueue(self):
+        self.message('source','An ordinary message #tag')
+        self.args.account='a'*201
+        self.archive()
+        self.assertEqual(self.rows(),[])
+        self.assertEqual(app.status(self.args)['review'],{'invalid-capture':1})
+
+    def prepare_uploads(self, count=3):
+        for i in range(count):self.message(str(i),'Ordinary message #tag')
+        self.archive()
+        cfg=patch.object(app,'config',return_value={'url':'https://example.test','token':'dummy'})
+        cfg.start();self.addCleanup(cfg.stop)
+
+    def upload_states(self):
+        with sqlite3.connect(self.state) as c:
+            return [r[0] for r in c.execute('SELECT uploaded FROM outbox ORDER BY rowid')]
+
+    def test_invalid_legacy_rows_are_quarantined_without_blocking_later_batches(self):
+        self.prepare_uploads(27)
+        with sqlite3.connect(self.state) as c:
+            key,payload=c.execute('SELECT id,payload FROM outbox ORDER BY rowid LIMIT 1').fetchone()
+            value=json.loads(payload);value['tags']=['two words']
+            c.execute('UPDATE outbox SET payload=? WHERE id=?',(json.dumps(value),key))
+        with patch.object(app,'api_call',side_effect=lambda cfg,path,body:{'accepted':len(body['captures'])}) as call:
+            self.assertEqual(app.sync(self.args),{'uploaded':26})
+            self.assertEqual(app.sync(self.args),{'uploaded':0})
+            self.assertEqual(call.call_count,2)
+        self.assertEqual(self.upload_states(),[-1]+[1]*26)
+        self.assertEqual(app.status(self.args)['review'],{'invalid-capture':1})
+        self.assertEqual(self.rows()[0]['tags'],['two words'])
+
+    def test_server_permanent_rejection_is_isolated_and_retained(self):
+        self.prepare_uploads()
+        def upload(cfg,path,body):
+            if any(c['sourceMessageId']=='1' for c in body['captures']):
+                raise urllib.error.HTTPError('https://example.test',400,'Invalid capture',{},None)
+            return {'accepted':len(body['captures'])}
+        with patch.object(app,'api_call',side_effect=upload) as call:
+            self.assertEqual(app.sync(self.args),{'uploaded':2})
+            count=call.call_count
+            self.assertEqual(app.sync(self.args),{'uploaded':0})
+            self.assertEqual(call.call_count,count)
+        self.assertEqual(self.upload_states(),[1,-1,1])
+        self.assertEqual(app.status(self.args)['review'],{'server-rejected-400':1})
+        self.assertEqual(len(self.rows()),3)
+        self.archive()
+        self.assertEqual(app.status(self.args)['review'],{'server-rejected-400':1})
+        self.assertEqual(self.upload_states(),[1,-1,1])
+
+    def test_transient_and_auth_failures_remain_pending_for_retry(self):
+        self.prepare_uploads()
+        for code in (401,403,429,500,503):
+            with patch.object(app,'api_call',side_effect=urllib.error.HTTPError('https://example.test',code,'Retry',{},None)):
+                with self.assertRaises(urllib.error.HTTPError):app.sync(self.args)
+            self.assertEqual(self.upload_states(),[0,0,0])
+            self.assertEqual(app.status(self.args)['review'],{})
+        with patch.object(app,'api_call',return_value={'accepted':3}):
+            self.assertEqual(app.sync(self.args),{'uploaded':3})
+
+    def test_partial_progress_survives_transient_failure_during_isolation(self):
+        self.prepare_uploads()
+        def upload(cfg,path,body):
+            ids=[c['sourceMessageId'] for c in body['captures']]
+            if '1' in ids:raise urllib.error.HTTPError('https://example.test',400,'Invalid',{},None)
+            if '2' in ids:raise urllib.error.HTTPError('https://example.test',503,'Retry',{},None)
+            return {'accepted':len(ids)}
+        with patch.object(app,'api_call',side_effect=upload):
+            with self.assertRaises(urllib.error.HTTPError):app.sync(self.args)
+        self.assertEqual(self.upload_states(),[1,-1,0])
+        with patch.object(app,'api_call',return_value={'accepted':1}):
+            self.assertEqual(app.sync(self.args),{'uploaded':1})
+
+    def test_incomplete_acknowledgement_remains_pending(self):
+        self.prepare_uploads()
+        with patch.object(app,'api_call',return_value={'accepted':1}):
+            with self.assertRaises(ValueError):app.sync(self.args)
+        self.assertEqual(self.upload_states(),[0,0,0])
 
 
 if __name__=='__main__': unittest.main()

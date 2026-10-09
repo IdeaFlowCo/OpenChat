@@ -17,6 +17,8 @@ import subprocess
 import sys
 import time
 import urllib.request
+import urllib.error
+import unicodedata
 from datetime import datetime, timezone
 
 APPLE_EPOCH = 978307200
@@ -44,7 +46,66 @@ def confidential(text):
 
 def tags_in(text):
     # A URL fragment is not a capture gesture. Preserve case in source, normalize tags.
-    return list(dict.fromkeys(m.group(1).casefold() for m in TAG.finditer(URL.sub('', text))))
+    return list(dict.fromkeys(m.group(1) for m in TAG.finditer(URL.sub('', text))))
+
+
+def utf16_length(value):
+    return len(value.encode('utf-16-le')) // 2
+
+
+def validate_tags(tags):
+    if not isinstance(tags, list) or len(tags) > 50:
+        raise ValueError('Invalid tags')
+    normalized = []
+    for tag in tags:
+        if not isinstance(tag, str) or not tag or utf16_length(tag) > 256:
+            raise ValueError('Invalid tag')
+        tag = unicodedata.normalize('NFKC', tag).lower()
+        if not tag or not (tag[0] == '_' or unicodedata.category(tag[0])[0] in 'LN'):
+            raise ValueError('Invalid tag')
+        if any(c not in '_-' and unicodedata.category(c)[0] not in 'LMN' for c in tag):
+            raise ValueError('Invalid tag')
+        if tag not in normalized:
+            normalized.append(tag)
+    return normalized
+
+
+def validate_capture(value):
+    if not isinstance(value, dict):
+        raise ValueError('Invalid capture')
+    def string(text, maximum, empty=False):
+        if not isinstance(text, str) or (not empty and not text.strip()) or utf16_length(text) > maximum:
+            raise ValueError('Invalid capture field')
+    def date(text):
+        string(text, 40)
+        if not re.match(r'^\d{4}-\d\d-\d\dT', text):
+            raise ValueError('Invalid capture date')
+        datetime.fromisoformat(text.replace('Z', '+00:00'))
+    if value.get('channel') != 'imessage' or not isinstance(value.get('pinned'), bool):
+        raise ValueError('Invalid capture')
+    if value.get('destination') not in ('stream', 'note', 'contact') or value.get('captureMethod') not in ('inline', 'reply', 'reaction', 'manual'):
+        raise ValueError('Invalid capture')
+    for field, maximum in (('sourceAccount',200),('sourceThreadId',400),('threadTitle',200),('sourceMessageId',400),('triggerMessageId',1000),('text',256000)):
+        string(value.get(field), maximum)
+    string(value.get('triggerText'), 256000, empty=True)
+    participants = value.get('participants')
+    if not isinstance(participants, list) or len(participants) > 100:
+        raise ValueError('Invalid participants')
+    for participant in participants:
+        string(participant, 200)
+    validate_tags(value.get('tags'))
+    for field in ('sourceAt', 'capturedAt'):
+        date(value.get(field))
+    if 'contactDetails' in value:
+        details = value['contactDetails']
+        if not isinstance(details, dict) or not isinstance(details.get('fields'), list) or len(details['fields']) > 40 or utf16_length(json.dumps(details, ensure_ascii=False, separators=(',', ':'))) > 16000:
+            raise ValueError('Invalid contact details')
+        date(details.get('modifiedAt'))
+        for field in details['fields']:
+            if not isinstance(field, dict):
+                raise ValueError('Invalid contact field')
+            string(field.get('label'), 80)
+            string(field.get('value'), 2000)
 
 
 def body_text(row):
@@ -173,7 +234,10 @@ def capture_payload(source, row, chat, account, names, manual_tags=None):
     text, decoded = body_text(row)
     if not decoded:
         return None, 'unsupported-body'
-    tags = manual_tags if manual_tags is not None else tags_in(text)
+    try:
+        tags = validate_tags(manual_tags if manual_tags is not None else tags_in(text))
+    except ValueError:
+        return None, 'invalid-tags'
     reaction = row.get('associated_message_type') or 0
     emoji = row.get('associated_message_emoji') or ''
     is_reaction = bool(reaction)
@@ -240,13 +304,20 @@ def archive(args):
                     if len(payload['participants'])==1:
                         card=cards.get(normalize_handle(payload['participants'][0]))
                         if card:payload['contactDetails']=card
-                    prior_payload=out.execute('SELECT payload FROM outbox WHERE id=?',(key,)).fetchone()
+                    try:
+                        validate_capture(payload)
+                    except ValueError:
+                        out.execute('INSERT OR REPLACE INTO review VALUES (?,?,?)', (key, 'invalid-capture', json.dumps({'messageGuid':row['guid'],'chatGuid':chat['guid']})))
+                        pending += 1
+                        continue
+                    prior_payload=out.execute('SELECT payload,uploaded FROM outbox WHERE id=?',(key,)).fetchone()
                     serialized=json.dumps(payload,ensure_ascii=False)
                     if not prior_payload:
                         out.execute('INSERT INTO outbox(id,payload) VALUES (?,?)',(key,serialized));saved+=1
                     elif prior_payload[0]!=serialized:
                         out.execute('UPDATE outbox SET payload=?,uploaded=0 WHERE id=?',(serialized,key))
-                    out.execute('DELETE FROM review WHERE id=?', (key,))
+                    if not prior_payload or prior_payload[0]!=serialized or prior_payload[1]!=-1:
+                        out.execute('DELETE FROM review WHERE id=?', (key,))
                 elif reason:
                     # Review metadata points back to the canonical local message.
                     # Do not create an extra export of confidential/unknown values.
@@ -284,35 +355,64 @@ def sync(args):
     cfg = config(args)
     sent = 0
     with private_db(args.state) as out:
+        def quarantine(key, reason):
+            out.execute('UPDATE outbox SET uploaded=-1 WHERE id=?', (key,))
+            out.execute('INSERT OR REPLACE INTO review VALUES (?,?,?)', (key, reason, json.dumps({'outboxId':key})))
+            out.commit()
+
+        def upload(batch):
+            nonlocal sent
+            body = {'captures':[json.loads(r[1]) for r in batch]}
+            if len(json.dumps(body).encode()) > 1900000:
+                if len(batch) == 1:
+                    quarantine(batch[0][0], 'capture-exceeds-upload-limit')
+                    return
+                middle = len(batch) // 2
+                upload(batch[:middle])
+                upload(batch[middle:])
+                return
+            try:
+                response = api_call(cfg, '/ingest', body)
+            except urllib.error.HTTPError as error:
+                if error.code not in (400, 413, 422):
+                    raise
+                if len(batch) == 1:
+                    quarantine(batch[0][0], 'server-rejected-' + str(error.code))
+                    return
+                middle = len(batch) // 2
+                upload(batch[:middle])
+                upload(batch[middle:])
+                return
+            if response.get('accepted') != len(batch):
+                raise ValueError('Server did not acknowledge the whole batch; checkpoint retained.')
+            out.executemany('UPDATE outbox SET uploaded=1 WHERE id=?', [(r[0],) for r in batch])
+            out.commit()
+            sent += len(batch)
+
         while True:
             batch = out.execute('SELECT id,payload FROM outbox WHERE uploaded=0 ORDER BY rowid LIMIT 25').fetchall()
             if not batch:
                 break
             safe=[]
             for key,payload in batch:
-                value=json.loads(payload)
+                try:
+                    value=json.loads(payload)
+                    validate_capture(value)
+                except (ValueError, TypeError):
+                    quarantine(key, 'invalid-capture')
+                    continue
                 if confidential(value['text']) or confidential(value['triggerText']):
                     out.execute('INSERT OR REPLACE INTO review VALUES (?,?,?)',(key,'local-only-confidential',json.dumps({'messageGuid':value['sourceMessageId'],'chatGuid':value['sourceThreadId']})))
                     out.execute('DELETE FROM outbox WHERE id=?',(key,))
                 else:safe.append((key,payload))
             out.commit()
-            batch=safe
-            if not batch:continue
-            # Express's normal JSON limit remains intact, including Unicode bytes.
-            while len(json.dumps({'captures':[json.loads(r[1]) for r in batch]}).encode())>1900000:
-                if len(batch)==1:
-                    raise ValueError('Capture exceeds upload size; original retained in outbox.')
-                batch=batch[:len(batch)//2]
-            response = api_call(cfg, '/ingest', {'captures':[json.loads(r[1]) for r in batch]})
-            if response.get('accepted') != len(batch):
-                raise ValueError('Server did not acknowledge the whole batch; checkpoint retained.')
-            out.executemany('UPDATE outbox SET uploaded=1 WHERE id=?', [(r[0],) for r in batch])
-            out.commit()
-            sent += len(batch)
+            if safe:
+                upload(safe)
     return {'uploaded': sent}
 
 
 def save(args):
+    tags = validate_tags(args.tag)
     with readonly(args.messages) as source, private_db(args.state) as out:
         row = source.execute('SELECT ROWID AS local_rowid,* FROM message WHERE guid=?', (args.guid,)).fetchone()
         if not row:
@@ -320,7 +420,7 @@ def save(args):
         chats = source.execute('SELECT c.ROWID AS ROWID,c.* FROM chat c JOIN chat_message_join j ON j.chat_id=c.ROWID WHERE j.message_id=?', (row['local_rowid'],)).fetchall()
         if len(chats) != 1:
             raise ValueError('Message must resolve to one source conversation.')
-        payload, reason = capture_payload(source, dict(row), dict(chats[0]), args.account, contact_names(), args.tag)
+        payload, reason = capture_payload(source, dict(row), dict(chats[0]), args.account, contact_names(), tags)
         if not payload:
             raise ValueError(reason or 'At least one tag is required.')
         # Manual save captures the selected message itself, not its reply parent.
@@ -331,8 +431,9 @@ def save(args):
         if len(payload['participants'])==1:
             card=contact_cards().get(normalize_handle(payload['participants'][0]))
             if card:payload['contactDetails']=card
-        key = event_id(args.account, chats[0]['guid'], row['guid']+':manual:'+','.join(sorted(args.tag)))
-        payload['triggerMessageId'] = row['guid']+':manual:'+','.join(sorted(args.tag))
+        key = event_id(args.account, chats[0]['guid'], row['guid']+':manual:'+','.join(sorted(tags)))
+        payload['triggerMessageId'] = row['guid']+':manual:'+','.join(sorted(tags))
+        validate_capture(payload)
         out.execute('INSERT OR IGNORE INTO outbox(id,payload) VALUES (?,?)', (key,json.dumps(payload,ensure_ascii=False)))
         return {'saved':out.execute('SELECT changes()').fetchone()[0]}
 

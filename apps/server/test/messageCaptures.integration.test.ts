@@ -53,4 +53,31 @@ integration('private capture persistence',()=>{
     await use(s=>s.run('MATCH (d:OpenChatCaptureDevice {id:$id}) SET d.revokedAt=$now',{id:d.id,now:new Date().toISOString()}));
     await expect(use(s=>authenticateCaptureDevice(s,d.token))).rejects.toMatchObject({status:401});
   });
+  it('promotes destinations deterministically without downgrading or replaying events',async()=>{
+    const orders = [
+      ['stream','note','contact'], ['stream','contact','note'],
+      ['note','stream','contact'], ['note','contact','stream'],
+      ['contact','stream','note'], ['contact','note','stream'],
+    ];
+    for (const [index, order] of orders.entries()) {
+      const sourceMessageId=`routing-${index}`;
+      const rank:Record<string,number>={stream:0,note:1,contact:2};
+      let expected='stream';
+      const events=order.map((destination,i)=>({...example,sourceMessageId,triggerMessageId:`routing-${index}-${i}`,destination,tags:[destination]}));
+      for (const event of events) {
+        if(rank[event.destination]>rank[expected]) expected=event.destination;
+        await use(s=>ingestCaptures(s,owner,[event]));
+        expect((await read()).items.find(c=>c.sourceMessageId===sourceMessageId)?.destination).toBe(expected);
+      }
+      const id=captureKeys(owner,parseCapture(events[0])).id;
+      const details=await use(s=>listCaptures(s,owner,{destination:'contact'}));
+      expect(details.items.some(c=>c.id===id)).toBe(true);
+      await use(s=>updateCapture(s,owner,id,{pinned:false,tags:['edited']}));
+      await use(s=>ingestCaptures(s,owner,[...events,...events]));
+      expect((await read()).items.find(c=>c.id===id)).toMatchObject({destination:'contact',tags:['edited'],pinned:false});
+      await use(s=>ingestCaptures(s,owner,[{...example,sourceMessageId,triggerMessageId:`pin-${index}`,pinned:true}]));
+      expect((await read()).items.find(c=>c.id===id)).toMatchObject({destination:'contact',pinned:true});
+    }
+  });
+
 });

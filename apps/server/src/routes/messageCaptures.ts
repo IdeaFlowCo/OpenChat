@@ -1,6 +1,6 @@
-import { Router, type Request, type Response, type NextFunction } from 'express';
+import { Router, type Response } from 'express';
 import { getDriver } from '../db.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireDirectHumanSession } from '../middleware/auth.js';
 import { ensureCapturedPerson } from '../services/privateGraph.js';
 import { createHash } from 'node:crypto';
 import { CaptureError, addCapture, authenticateCaptureDevice, createCaptureDevice, forgetCapture, ingestCaptures, listCaptures, listCaptureThreads, updateCapture } from '../services/messageCaptures.js';
@@ -23,10 +23,7 @@ router.post('/ingest',async(req,res)=>{
   }catch(error){fail(error,res);}finally{await session.close();}
 });
 router.use(requireAuth);
-router.use((req:Request,res:Response,next:NextFunction)=>{
-  if(req.user?.embedded || req.agentKeyId || req.connectorDelegation){res.status(404).json({error:'Open this in your signed-in OpenChat app'});return;}
-  next();
-});
+router.use(requireDirectHumanSession);
 router.get('/',async(req,res)=>{
   const session=getDriver().session();
   try{

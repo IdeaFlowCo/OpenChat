@@ -36,7 +36,12 @@ def main():
         run('launchctl','bootout',target)
         plist.write_bytes(plistlib.dumps(config));os.chmod(plist,0o600)
         result=run('launchctl','bootstrap',f'gui/{os.getuid()}',str(plist))
-    elif args.action=='start':result=run('launchctl','kickstart',target)
+    elif args.action=='start':
+        result=run('launchctl','print',target)
+        if result.returncode!=0:
+            result=run('launchctl','bootstrap',f'gui/{os.getuid()}',str(plist))
+        if result.returncode==0:
+            result=run('launchctl','kickstart',target)
     elif args.action=='stop':result=run('launchctl','bootout',target)
     else:
         result=run('launchctl','print',target)
