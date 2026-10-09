@@ -6,6 +6,7 @@ export type AppIconName =
   | 'bot'
   | 'camera'
   | 'chat'
+  | 'chevron-down'
   | 'chevron-left'
   | 'chevron-right'
   | 'copy'
@@ -89,6 +90,9 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
           <Line x1="4" y1="17" x2="20" y2="17" {...common} />
           <Circle cx="8" cy="17" r="2" {...common} fill="none" />
         </>
+      )}
+      {name === 'chevron-down' && (
+        <Polyline points="6 9 12 15 18 9" {...common} />
       )}
       {name === 'chevron-left' && (
         <Polyline points="15 18 9 12 15 6" {...common} />
