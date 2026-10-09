@@ -1,3 +1,5 @@
+import { MessageText } from '../components/MessageText';
+import { preserveBrowserMenu } from '../utils/messageLinks';
 /**
  * Chat thread — read messages, send, see typing indicator. The conversation
  * is identified by route param; we read the conversation metadata from the
@@ -267,6 +269,8 @@ export function ChatScreen({
   embedded = false,
   onOpenAgent,
 }: ChatScreenProps = {}) {
+  // A web pressable claims selection gestures and suppresses native link menus.
+  const MessageBubble = Platform.OS === 'web' ? View : TouchableOpacity;
   const navigation = useNavigation<NavProp<'Chat'>>();
   // Read route params defensively: when embedded inside MasterDetailLayout
   // we're under a different route name ('Conversations'), so the Chat
@@ -1325,14 +1329,18 @@ export function ChatScreen({
         <View style={{ flexDirection: 'column', maxWidth: '78%', alignItems: isOwn ? 'flex-end' : 'flex-start' }}
           {...(Platform.OS === 'web' ? {
             onContextMenu: (event: React.MouseEvent) => {
+              if (preserveBrowserMenu(event.target, globalThis.getSelection?.()?.toString() ?? '')) return;
               event.preventDefault();
               handleLongPress(m, isOwn, getUserDisplayName(m.sender));
             },
           } : {})}>
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
-          delayLongPress={350}
+        <MessageBubble
+          {...(Platform.OS === 'web' ? {} : {
+            activeOpacity: 0.85,
+            accessible: false,
+            onLongPress: () => handleLongPress(m, isOwn, getUserDisplayName(m.sender)),
+            delayLongPress: 350,
+          })}
           style={[
             styles.bubble,
             {
@@ -1453,19 +1461,20 @@ export function ChatScreen({
           {m.deletedAt
             ? <Text style={{ color: isOwn ? ownTint(0.55) : c.textMetadata, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
             : (!!m.content && (
-                isGroup
-                  ? <Text style={{ fontSize: 16 }}>
-                      {renderContentWithMentions(
-                        m.content,
-                        mentionableParticipants,
-                        isOwn ? c.bubbleOwnText : c.bubbleOtherText,
-                        scheme
-                      )}
-                    </Text>
-                  : <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 16 }}>{m.content}</Text>
+                <MessageText content={m.content}
+                  color={isOwn ? c.bubbleOwnText : c.bubbleOtherText}
+                  onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
+                  renderPlain={isGroup ? text => renderContentWithMentions(text, mentionableParticipants,
+                    isOwn ? c.bubbleOwnText : c.bubbleOtherText, scheme) : undefined}
+                />
               ))
           }
           <View style={styles.bubbleFooter}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Message actions: ${m.deletedAt ? 'Deleted message' : (m.content?.slice(0, 80) || 'Attachment')}`}
+              onPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
+              style={{ minHeight: 44, minWidth: 44, justifyContent: 'center', marginRight: 8 }}>
+              <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 12 }}>More</Text>
+            </TouchableOpacity>
             <Text style={{ color: isOwn ? ownTint(0.7) : c.textMetadata, fontSize: 10 }}>
               {failed ? 'Failed to send' : formatTime(m.createdAt)}
             </Text>
@@ -1486,7 +1495,7 @@ export function ChatScreen({
               return <Text style={{ color: ownTint(0.5), fontSize: 10, marginLeft: 3 }}>✓</Text>;
             })()}
           </View>
-        </TouchableOpacity>
+        </MessageBubble>
         {/* Reactions bar below bubble (OpenChat-7bd) */}
         {!!(m.reactions && m.reactions.length > 0) && (
           <ReactionsBar reactions={m.reactions!} isOwn={isOwn} onToggle={(emoji) => void handleReact(m.id, emoji)} />
