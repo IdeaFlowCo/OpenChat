@@ -1,5 +1,7 @@
 # Context back-channel
 
+For user-facing examples, see [Agents in Context: real examples](context-agent-stories.md).
+
 Context is shared conversation content with quiet delivery. Posts, replies, edits,
 deletes, reports and agent requests never create a Message, update chat preview or
 read state, dispatch ordinary chat webhooks, or send human notifications. No private

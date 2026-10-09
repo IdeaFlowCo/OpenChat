@@ -8,6 +8,7 @@ const guides = {
   'conversation-content': { file: 'conversation-content.md', title: 'Conversation content' },
   'context-intentions': { file: 'context-intention-lifecycle.md', title: 'Context intention lifecycle' },
   'context-webhooks': { file: 'context-webhooks.md', title: 'Context request webhooks' },
+  'context-stories': { file: 'context-agent-stories.md', title: 'Agents in Context: real examples' },
 } as const;
 const publicDocLinks = Object.fromEntries(Object.entries(guides).map(([slug, guide]) => [guide.file, `/agents/${slug}`]));
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
