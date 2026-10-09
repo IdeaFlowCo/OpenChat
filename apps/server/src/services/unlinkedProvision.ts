@@ -39,18 +39,44 @@ export async function searchUnlinkedForIdentity(identity: UnlinkedIdentity | nul
   }
 }
 
-export type UnlinkedProfileResult =
-  | { ok: true; profile: { id: string; name: string } }
-  | { ok: false; code: "not_linked" | "not_configured" | "not_found" | "grant_revoked" | "scope_not_granted" | "upstream_unavailable" };
+/** One of the owner's own Unlinked contacts, as `unlinked_lookup_contact` answers it. */
+export interface UnlinkedContact {
+  connectionId: string | null;
+  name: string;
+  headline?: string;
+  company?: string;
+  /** SHA-256 hex of the canonical LinkedIn slug: the overlay ref `linkedin:in:<hash>`. */
+  linkedinRefHash: string | null;
+  publishedProfileId: string | null;
+}
+type LookupFailure = "not_linked" | "not_configured" | "not_found" | "grant_revoked" | "scope_not_granted" | "upstream_unavailable";
+export type UnlinkedContactResult = { ok: true; contact: UnlinkedContact } | { ok: false; code: LookupFailure };
+export type UnlinkedContactsResult = { ok: true; contacts: UnlinkedContact[] } | { ok: false; code: LookupFailure };
+export type UnlinkedContactQuery = { profileId: string } | { connectionId: string } | { linkedinUrl: string } | { refHashes: string[] };
+
+const HASH = /^[a-f0-9]{64}$/;
+const text = (value: unknown, max: number): string | undefined => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined;
+function contactOf(value: unknown): UnlinkedContact | null {
+  if (!value || typeof value !== "object") return null;
+  const input = value as Record<string, unknown>;
+  const name = text(input.name, 120) ?? "";
+  const connectionId = typeof input.connectionId === "string" && /^[A-Za-z0-9._-]{1,160}$/.test(input.connectionId) ? input.connectionId : null;
+  const linkedinRefHash = typeof input.linkedinRefHash === "string" && HASH.test(input.linkedinRefHash) ? input.linkedinRefHash : null;
+  const publishedProfileId = typeof input.publishedProfileId === "string" && /^[A-Za-z0-9._-]{1,160}$/.test(input.publishedProfileId) ? input.publishedProfileId : null;
+  if (!connectionId && !linkedinRefHash && !publishedProfileId) return null;
+  const headline = text(input.headline, 256), company = text(input.company, 256);
+  return { connectionId, name, ...(headline ? { headline } : {}), ...(company ? { company } : {}), linkedinRefHash, publishedProfileId };
+}
 
 /**
- * Confirm that a profile id names a published Unlinked profile, read with the
- * owner's own identity-scoped, read-only grant. Returns the canonical id (a
- * merged profile answers with the one it moved to) and its public name.
- * Profiles that exist only in the owner's private import are not published
- * and are not confirmed here.
+ * Ask Unlinked's owner-scoped contact lookup (`unlinked_lookup_contact`) with
+ * the owner's own identity-scoped, read-only grant. It answers only the
+ * owner's own imported contacts and published (public) profiles: a published
+ * profile id resolves to its canonical id (a merged profile answers with the
+ * one it moved to), and either way the answer carries the LinkedIn ref hash
+ * and the published profile id when they exist.
  */
-export async function readUnlinkedProfileForIdentity(identity: UnlinkedIdentity | null, profileId: string): Promise<UnlinkedProfileResult> {
+async function lookup(identity: UnlinkedIdentity | null, query: UnlinkedContactQuery): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; code: LookupFailure }> {
   if (!identity || identity.issuer !== "https://id.ideaflow.app/api/auth" || !identity.subject) return { ok: false, code: "not_linked" };
   if (!unlinkedProvisionConfigured()) return { ok: false, code: "not_configured" };
   const base = (process.env.UNLINKED_API_BASE || "https://www.unlinked.ai").replace(/\/+$/, "");
@@ -65,18 +91,36 @@ export async function readUnlinkedProfileForIdentity(identity: UnlinkedIdentity 
       const code = grant.error?.code;
       return { ok: false, code: code === "not_linked" || code === "grant_revoked" ? code : "upstream_unavailable" };
     }
-    const response = await fetch(base + "/api/agent/v1/people/" + encodeURIComponent(profileId), {
-      method: "GET", redirect: "error", signal: AbortSignal.timeout(15000), headers: { Authorization: "Bearer " + grant.accessToken },
+    const response = await fetch(base + "/api/agent/v1/contacts/lookup", {
+      method: "POST", redirect: "error", signal: AbortSignal.timeout(30000),
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + grant.accessToken },
+      body: JSON.stringify(query),
     });
-    const result = await response.json() as { profile?: { id?: unknown; name?: unknown }; error?: { code?: string } };
+    const result = await response.json() as Record<string, unknown> & { error?: { code?: string } };
     if (!response.ok || result.error) {
       const code = result.error?.code;
       return { ok: false, code: code === "not_found" || code === "invalid_input" ? "not_found" : code === "scope_not_granted" ? "scope_not_granted" : code === "grant_revoked" ? "grant_revoked" : "upstream_unavailable" };
     }
-    const id = result.profile?.id, name = result.profile?.name;
-    if (typeof id !== "string" || !id || typeof name !== "string" || !name.trim()) return { ok: false, code: "not_found" };
-    return { ok: true, profile: { id, name: name.trim().slice(0, 120) } };
+    return { ok: true, body: result };
   } catch {
     return { ok: false, code: "upstream_unavailable" };
   }
+}
+
+/** One contact by published profile id, owner connection id or LinkedIn address. */
+export async function lookupUnlinkedContactForIdentity(identity: UnlinkedIdentity | null, query: { profileId: string } | { connectionId: string } | { linkedinUrl: string }): Promise<UnlinkedContactResult> {
+  const result = await lookup(identity, query);
+  if (!result.ok) return result;
+  const contact = contactOf(result.body.contact);
+  return contact ? { ok: true, contact } : { ok: false, code: "not_found" };
+}
+
+/** The owner's imported contacts among these LinkedIn ref hashes (at most 100), in one call. */
+export async function lookupUnlinkedContactsByHash(identity: UnlinkedIdentity | null, refHashes: string[]): Promise<UnlinkedContactsResult> {
+  const hashes = [...new Set(refHashes.filter(value => HASH.test(value)))].slice(0, 100);
+  if (!hashes.length) return { ok: true, contacts: [] };
+  const result = await lookup(identity, { refHashes: hashes });
+  if (!result.ok) return result;
+  const contacts = Array.isArray(result.body.contacts) ? result.body.contacts.map(contactOf).filter((value): value is UnlinkedContact => value !== null) : [];
+  return { ok: true, contacts };
 }

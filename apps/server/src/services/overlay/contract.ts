@@ -91,11 +91,36 @@ export function ownerKeyFor(issuer: string, subject: string): string {
 export const isOwnerKey = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 export const isId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(value);
 
-/** `<app>:<type>:<value>`, for example `openchat:user:abc123`. */
+/**
+ * `<app>:<type>:<value>`, for example `openchat:user:abc123`. A `linkedin:`
+ * ref is only ever the hashed form (see `linkedinRef`): a plaintext LinkedIn
+ * address is never stored in the overlay.
+ */
 export function cleanRef(value: unknown): string {
   if (typeof value !== 'string' || !/^[a-z][a-z0-9-]{1,30}:[a-z][a-z0-9-]{0,30}:[A-Za-z0-9._@%+-]{1,200}$/.test(value)) return fail(400, 'invalid_ref');
+  if (value.startsWith('linkedin:') && !LINKEDIN_REF.test(value)) return fail(400, 'invalid_ref');
   return value;
 }
+
+/**
+ * An imported LinkedIn contact: `linkedin:in:<sha256 hex of the canonical
+ * slug>`. The slug is canonical as Unlinked defines it (`linkedinSlug()` in its
+ * `src/utils/public-people/url-identity.mjs`: the `/in/<slug>` part, decoded
+ * and lowercased); Unlinked's owner-scoped contact lookup returns the hash.
+ * The ref survives re-import and later publication (the entity then also
+ * carries `unlinked:person:<id>`); a changed vanity address is a new ref.
+ * Which app may confirm one is the app's concern (OpenChat asks Unlinked).
+ */
+export const LINKEDIN_REF_PREFIX = 'linkedin:in:';
+const LINKEDIN_REF = /^linkedin:in:[a-f0-9]{64}$/;
+export function linkedinRef(hash: unknown): string {
+  return typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash) ? `${LINKEDIN_REF_PREFIX}${hash}` : fail(400, 'invalid_ref');
+}
+/** The slug hash an entity's LinkedIn ref carries, or null. */
+export const linkedinHashOf = (refs: string[]): string | null => {
+  const ref = refs.find(value => LINKEDIN_REF.test(value));
+  return ref ? ref.slice(LINKEDIN_REF_PREFIX.length) : null;
+};
 
 export function cleanText(value: unknown, max: number, code: string): string {
   if (typeof value !== 'string') return fail(400, code);

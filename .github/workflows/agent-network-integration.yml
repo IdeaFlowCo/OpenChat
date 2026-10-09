@@ -55,6 +55,7 @@ jobs:
           apps/server/test/ideaflowConnector.privateGraph.test.ts
           apps/server/test/privateNoteReview.test.ts
           apps/server/test/overlayVendor.test.ts
+          apps/server/test/unlinkedProvision.test.ts
 
       # The overlay suites create schema on start; one file at a time avoids lock contention.
       - name: Run private-graph overlay suites against Neo4j

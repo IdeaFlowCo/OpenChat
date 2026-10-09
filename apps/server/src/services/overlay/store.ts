@@ -88,6 +88,23 @@ export class OverlayStore {
   }
 
   /**
+   * Find or create one entity named by several refs of the same thing, such as
+   * an imported LinkedIn contact (`linkedin:in:<hash>`) who also has a
+   * published Unlinked profile (`unlinked:person:<id>`). The first ref, in the
+   * given order, that already names an entity decides which entity it is; the
+   * other refs are attached to it, so a later write through any of them reaches
+   * the same entity. A ref that already names a different entity stays where it
+   * is (joining two entities is a separate, explicit act) and is returned in
+   * `unattached`, as is any ref beyond the per-entity ref limit.
+   */
+  async ensureRefs(principal: OverlayPrincipal | null, input: { kind?: unknown; name?: unknown; refs?: unknown }): Promise<{ entity: Entity; created: boolean; unattached: string[] }> {
+    const ownerKey = this.owner(principal), kind = cleanKind(input?.kind), name = cleanName(input?.name);
+    if (!Array.isArray(input.refs) || !input.refs.length || input.refs.length > LIMITS.refsPerEntity) return fail(400, 'invalid_ref');
+    const refs = [...new Set(input.refs.map(cleanRef))];
+    return retryOnce(() => this.write(tx => ensureRefsIn(tx, ownerKey, { kind, name, refs })));
+  }
+
+  /**
    * Find or save by name, the way a person names something ("Maya from
    * dinner"). A name is reused only when it names exactly one of the owner's
    * entities of that kind and that one has no ref; two people called Alex are
@@ -412,6 +429,28 @@ export async function ensureIn(tx: Runner, ownerKey: string, input: { kind: Enti
       CREATE (:OverlayRef {ownerKey: $ownerKey, ref: value, entityId: $id})-[:REF_OF]->(e))`,
   { id, ownerKey, kind, name, nameKey: nameKey(name), slot: ref ? null : nameSlot(kind, name), ref, now });
   return { entity: { id, kind, name, refs: ref ? [ref] : [], card: { ...EMPTY_CARD } }, created: true };
+}
+
+/** `ensureRefs` inside the caller's transaction. Inputs must already be cleaned (refs deduplicated, at least one). */
+export async function ensureRefsIn(tx: Runner, ownerKey: string, input: { kind: EntityKind; name: string; refs: string[] }): Promise<{ entity: Entity; created: boolean; unattached: string[] }> {
+  if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
+  const { kind, name, refs } = input;
+  const found = await tx.run('UNWIND $refs AS ref OPTIONAL MATCH (r:OverlayRef {ownerKey: $ownerKey, ref: ref}) RETURN ref, r.entityId AS id', { ownerKey, refs });
+  const boundTo = new Map(found.records.map(record => [String(record.get('ref')), (record.get('id') as string | null) ?? null]));
+  const primary = refs.find(ref => boundTo.get(ref)) ?? refs[0]!;
+  const { entity: current, created } = await ensureIn(tx, ownerKey, { kind, name, ref: primary });
+  const unattached: string[] = [], now = new Date().toISOString();
+  let count = current.refs.length;
+  for (const ref of refs) {
+    const owner = boundTo.get(ref);
+    if (ref === primary || owner === current.id) continue;
+    if (owner || count >= LIMITS.refsPerEntity) { unattached.push(ref); continue; }
+    await tx.run(`MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey})
+      CREATE (:OverlayRef {ownerKey: $ownerKey, ref: $ref, entityId: $id})-[:REF_OF]->(e)
+      SET e.nameSlot = null, e.updatedAt = $now`, { id: current.id, ownerKey, ref, now });
+    count++;
+  }
+  return { entity: await entity(tx, ownerKey, current.id), created, unattached };
 }
 
 export interface ResolveTarget { kind: EntityKind; name: string; requestId: string | null }
