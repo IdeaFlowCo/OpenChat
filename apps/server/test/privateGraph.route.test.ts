@@ -6,7 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 const mocks = vi.hoisted(() => ({
   addLink: vi.fn(), addNote: vi.fn(), createPrivateThing: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), deletePrivateThing: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
-  listDue: vi.fn(), listThings: vi.fn(), updateNote: vi.fn(), updatePersonCard: vi.fn(),
+  listDue: vi.fn(), listThings: vi.fn(), updateNote: vi.fn(), updatePersonCard: vi.fn(), updateLink: vi.fn(), searchPrivate: vi.fn(), getNeighbourhood: vi.fn(),
 }));
 vi.mock('../src/services/privateGraph.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/privateGraph.js')>('../src/services/privateGraph.js');
@@ -50,13 +50,37 @@ describe('private graph routes', () => {
     expect((await call('/people/bob')).status).toBe(200);
     expect(mocks.getPersonOverlay).toHaveBeenCalledWith('alice', 'bob');
     expect((await call('/people/bob/notes', { method: 'POST', body: JSON.stringify({ text: 'hi', ownerId: 'mallory' }) })).status).toBe(201);
-    expect(mocks.addNote).toHaveBeenCalledWith('alice', { kind: 'user', id: 'bob' }, 'hi');
+    expect(mocks.addNote).toHaveBeenCalledWith('alice', { kind: 'user', id: 'bob' }, 'hi', { author: 'owner', source: 'app', assertion: 'stated' });
     expect((await call('/people/bob', { method: 'PATCH', body: JSON.stringify({ important: true, ownerId: 'mallory' }) })).status).toBe(200);
     expect(mocks.updatePersonCard).toHaveBeenCalledWith('alice', 'bob', { important: true });
     expect((await call('/people/bob', { method: 'PATCH', body: JSON.stringify({ ownerId: 'mallory' }) })).status).toBe(400);
     expect(mocks.updatePersonCard).toHaveBeenCalledTimes(1);
     expect((await call('/things/t1/links', { method: 'POST', body: JSON.stringify({ relation: 'part of', to: { kind: 'project', name: 'Atlas' } }) })).status).toBe(201);
-    expect(mocks.addLink).toHaveBeenCalledWith('alice', { kind: 'thing', id: 't1' }, 'part of', { kind: 'project', name: 'Atlas' });
+    expect(mocks.addLink).toHaveBeenCalledWith('alice', { kind: 'thing', id: 't1' }, 'part of', { kind: 'project', name: 'Atlas' }, { author: 'owner', source: 'app', assertion: 'stated' });
+  });
+
+  it('records the signed-in owner as author whatever the body claims', async () => {
+    mocks.addLink.mockResolvedValue({ id: 'l1' });
+    expect((await call('/people/bob/links', { method: 'POST', body: JSON.stringify({ relation: 'knows', to: { kind: 'user', id: 'carol' }, author: 'agent:Spoof', source: 'connector', assertion: 'inferred' }) })).status).toBe(201);
+    expect(mocks.addLink).toHaveBeenCalledWith('alice', { kind: 'user', id: 'bob' }, 'knows', { kind: 'user', id: 'carol' }, { author: 'owner', source: 'app', assertion: 'stated' });
+  });
+
+  it('edits a relation, searches and reads a neighbourhood for the signed-in owner only', async () => {
+    mocks.updateLink.mockResolvedValue({ link: { id: 'l1', relation: 'cousin of' }, merged: false });
+    const edited = await call('/links/l1', { method: 'PATCH', body: JSON.stringify({ relation: 'cousin of', ownerId: 'mallory' }) });
+    expect([edited.status, await edited.json()]).toEqual([200, { link: { id: 'l1', relation: 'cousin of' }, merged: false }]);
+    expect(mocks.updateLink).toHaveBeenCalledWith('alice', 'l1', 'cousin of', { author: 'owner', source: 'app', assertion: 'stated' });
+
+    mocks.searchPrivate.mockResolvedValue({ things: [], links: [], truncated: false });
+    expect((await call('/search?q=maya&relationType=family&kind=person&limit=5')).status).toBe(200);
+    expect(mocks.searchPrivate).toHaveBeenCalledWith('alice', { q: 'maya', relationType: 'family', kind: 'person', limit: '5' });
+
+    mocks.getNeighbourhood.mockResolvedValue({ center: { kind: 'user', id: 'bob', name: 'Bob' }, depth: 2, nodes: [], links: [], truncated: false });
+    expect((await call('/neighbourhood?subjectKind=user&subjectId=bob&depth=2')).status).toBe(200);
+    expect(mocks.getNeighbourhood).toHaveBeenCalledWith('alice', { kind: 'user', id: 'bob' }, '2');
+    for (const bad of ['/neighbourhood', '/neighbourhood?subjectKind=planet&subjectId=x', '/neighbourhood?subjectKind=user']) expect((await call(bad)).status, bad).toBe(400);
+    expect(mocks.getNeighbourhood).toHaveBeenCalledTimes(1);
+    for (const [method, path] of [['PATCH', '/links/l1'], ['GET', '/search'], ['GET', '/neighbourhood']]) expect((await fetch(`${baseUrl}/api/private${path}`, { method })).status, `${method} ${path}`).toBe(401);
   });
 
   it('creates a saved person only for the signed-in owner without account binding', async () => {

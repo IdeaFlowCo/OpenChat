@@ -7,6 +7,8 @@ export type ConnectorIdentity = {
   identity_issuer: string;
   scope: string;
   jti: string;
+  /** The agent client's registered name, from the hub's grant (optional; older hubs omit it). */
+  client?: string;
 };
 /** This assertion is only accepted by /connector/mcp, never by REST auth. */
 export function verifyConnectorAssertion(
@@ -54,13 +56,16 @@ export function verifyConnectorAssertion(
     for (const [id, expiry] of seen) if (expiry <= now) seen.delete(id);
     if (seen.has(p.jti) || seen.size >= 10000) return null;
     seen.set(p.jti, p.exp);
-    return p;
+    // A client name is provenance only, never authority: keep it when well formed, otherwise drop it.
+    // eslint-disable-next-line no-control-regex -- deliberate control-character check
+    const client = typeof p.client === "string" && p.client.trim() && p.client.length <= 100 && !/[\u0000-\u001f\u007f]/.test(p.client) ? p.client.trim() : undefined;
+    return { sub: p.sub, identity_issuer: p.identity_issuer, scope: p.scope, jti: p.jti, ...(client ? { client } : {}) };
   } catch {
     return null;
   }
 }
 
-type Principal = { id: string; scopes: string[] };
+type Principal = { id: string; scopes: string[]; client?: string };
 const principals = new WeakMap<Request, Principal>();
 function markConnectorRequest(request: Request, principal: Principal): void {
   principals.set(request, principal);
@@ -74,7 +79,7 @@ export function getConnectorPrincipal(request: Request): Principal | undefined {
 // by the MCP controller; an arbitrary REST path/body cannot reuse it.
 const pending = new Map<
   string,
-  { id: string; scopes: string[]; method: string; path: string; hash: string; expiry: number }
+  { id: string; scopes: string[]; client?: string; method: string; path: string; hash: string; expiry: number }
 >();
 const bodyHash = (body: unknown): string =>
   createHash("sha256")
@@ -84,6 +89,7 @@ export function issueConnectorOperation(
   id: string,
   operation: { method: string; path: string; body?: unknown },
   scopes: string[],
+  client?: string,
 ): string {
   const now = Date.now();
   for (const [key, value] of pending) if (value.expiry <= now) pending.delete(key);
@@ -92,6 +98,7 @@ export function issueConnectorOperation(
   pending.set(token, {
     id,
     scopes,
+    ...(client ? { client } : {}),
     method: operation.method,
     path: operation.path,
     hash: bodyHash(operation.body),
@@ -111,7 +118,7 @@ export function consumeConnectorOperation(token: string, request: Request): { id
     op.hash !== bodyHash(request.body)
   )
     return null;
-  markConnectorRequest(request, { id: op.id, scopes: op.scopes });
+  markConnectorRequest(request, { id: op.id, scopes: op.scopes, ...(op.client ? { client: op.client } : {}) });
   return { id: op.id };
 }
 

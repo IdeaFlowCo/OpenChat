@@ -8,9 +8,10 @@ import { Router, type Request, type Response } from 'express';
 import { resolveActor } from '../middleware/resolveActor.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import {
-  addLink, addNote, createPrivateThing, deleteLink, deleteNote, deletePrivateThing, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
-  parseCardPatch, PrivateGraphError, updateNote, updatePersonCard,
+  addLink, addNote, createPrivateThing, deleteLink, deleteNote, deletePrivateThing, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
+  parseCardPatch, PrivateGraphError, searchPrivate, updateLink, updateNote, updatePersonCard,
 } from '../services/privateGraph.js';
+import type { Provenance } from '../services/privateGraph.js';
 
 import { captureNoteReview, listNoteReviews, suggestNoteReview, applyNoteReview, undoNoteReview, updatePrivateAsk } from '../services/privateNoteReview.js';
 
@@ -34,6 +35,23 @@ function fail(error: unknown, res: Response): void {
 const owner = (req: Request) => req.user!.userId;
 const id = (req: Request, key: string) => req.params[key] as string;
 
+/**
+ * Who is writing, from how the request authenticated, never from its body:
+ * the owner in the app; an agent through the shared Ideaflow connector (named
+ * by the client it registered); or an agent holding one of the owner's
+ * OpenChat keys. An agent may mark what it writes as inferred.
+ */
+export function provenanceFor(req: Request): Provenance {
+  const assertion = req.body?.assertion;
+  if (assertion !== undefined && assertion !== 'stated' && assertion !== 'inferred') throw new PrivateGraphError(400, 'assertion must be stated or inferred');
+  const connector = getConnectorPrincipal(req);
+  const agentName = (name: string) => `agent:${name.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Agent'}`;
+  if (connector) return { author: agentName(connector.client ?? 'Ideaflow connector'), source: 'connector', assertion: assertion ?? 'stated' };
+  if (req.connectorDelegation) return { author: agentName('Ideaflow connector'), source: 'connector', assertion: assertion ?? 'stated' };
+  if (req.agentKeyId) return { author: agentName(req.agentKeyLabel ?? 'OpenChat agent key'), source: 'direct-key', assertion: assertion ?? 'stated' };
+  return { author: 'owner', source: 'app', assertion: 'stated' };
+}
+
 router.get('/due', async (req: Request, res: Response) => {
   try { res.json(await listDue(owner(req))); } catch (error) { fail(error, res); }
 });
@@ -47,15 +65,29 @@ router.patch('/people/:userId', async (req: Request, res: Response) => {
 });
 
 router.post('/people/:userId/notes', async (req: Request, res: Response) => {
-  try { res.status(201).json(await addNote(owner(req), { kind: 'user', id: id(req, 'userId') }, req.body?.text)); } catch (error) { fail(error, res); }
+  try { res.status(201).json(await addNote(owner(req), { kind: 'user', id: id(req, 'userId') }, req.body?.text, provenanceFor(req))); } catch (error) { fail(error, res); }
 });
 
 router.post('/people/:userId/links', async (req: Request, res: Response) => {
-  try { res.status(201).json(await addLink(owner(req), { kind: 'user', id: id(req, 'userId') }, req.body?.relation, req.body?.to)); } catch (error) { fail(error, res); }
+  try { res.status(201).json(await addLink(owner(req), { kind: 'user', id: id(req, 'userId') }, req.body?.relation, req.body?.to, provenanceFor(req))); } catch (error) { fail(error, res); }
 });
 
 router.get('/links', async (req: Request, res: Response) => {
   try { res.json(await listOwnerLinks(owner(req), req.query.q)); } catch (error) { fail(error, res); }
+});
+
+// Search saved things, people written about, and relations by text, relation type or kind.
+router.get('/search', async (req: Request, res: Response) => {
+  try { res.json(await searchPrivate(owner(req), { q: req.query.q, relationType: req.query.relationType, kind: req.query.kind, limit: req.query.limit })); } catch (error) { fail(error, res); }
+});
+
+// One subject and what is one or two private relations away from it. Never creates anything.
+router.get('/neighbourhood', async (req: Request, res: Response) => {
+  try {
+    const kind = req.query.subjectKind, subjectId = req.query.subjectId;
+    if ((kind !== 'user' && kind !== 'thing' && kind !== 'unlinked') || typeof subjectId !== 'string' || !subjectId || subjectId.length > 200) throw new PrivateGraphError(400, 'Choose a subject: subjectKind user, thing or unlinked, and its id');
+    res.json(await getNeighbourhood(owner(req), { kind, id: subjectId }, req.query.depth));
+  } catch (error) { fail(error, res); }
 });
 
 // An Unlinked profile as the subject: the overlay ref `unlinked:person:<profileId>`.
@@ -64,11 +96,11 @@ router.get('/unlinked-people/:profileId', async (req: Request, res: Response) =>
 });
 
 router.post('/unlinked-people/:profileId/notes', async (req: Request, res: Response) => {
-  try { res.status(201).json(await addNote(owner(req), { kind: 'unlinked', id: id(req, 'profileId') }, req.body?.text)); } catch (error) { fail(error, res); }
+  try { res.status(201).json(await addNote(owner(req), { kind: 'unlinked', id: id(req, 'profileId') }, req.body?.text, provenanceFor(req))); } catch (error) { fail(error, res); }
 });
 
 router.post('/unlinked-people/:profileId/links', async (req: Request, res: Response) => {
-  try { res.status(201).json(await addLink(owner(req), { kind: 'unlinked', id: id(req, 'profileId') }, req.body?.relation, req.body?.to)); } catch (error) { fail(error, res); }
+  try { res.status(201).json(await addLink(owner(req), { kind: 'unlinked', id: id(req, 'profileId') }, req.body?.relation, req.body?.to, provenanceFor(req))); } catch (error) { fail(error, res); }
 });
 
 router.post('/things', async (req: Request, res: Response) => {
@@ -94,11 +126,11 @@ router.delete('/things/:thingId', async (req: Request, res: Response) => {
 });
 
 router.post('/things/:thingId/notes', async (req: Request, res: Response) => {
-  try { res.status(201).json(await addNote(owner(req), { kind: 'thing', id: id(req, 'thingId') }, req.body?.text)); } catch (error) { fail(error, res); }
+  try { res.status(201).json(await addNote(owner(req), { kind: 'thing', id: id(req, 'thingId') }, req.body?.text, provenanceFor(req))); } catch (error) { fail(error, res); }
 });
 
 router.post('/things/:thingId/links', async (req: Request, res: Response) => {
-  try { res.status(201).json(await addLink(owner(req), { kind: 'thing', id: id(req, 'thingId') }, req.body?.relation, req.body?.to)); } catch (error) { fail(error, res); }
+  try { res.status(201).json(await addLink(owner(req), { kind: 'thing', id: id(req, 'thingId') }, req.body?.relation, req.body?.to, provenanceFor(req))); } catch (error) { fail(error, res); }
 });
 
 router.patch('/notes/:noteId', async (req: Request, res: Response) => {
@@ -109,13 +141,18 @@ router.delete('/notes/:noteId', async (req: Request, res: Response) => {
   try { res.json(await deleteNote(owner(req), id(req, 'noteId'))); } catch (error) { fail(error, res); }
 });
 
+// Edit a relation's text in place; merging into an identical existing relation returns it with merged: true.
+router.patch('/links/:linkId', async (req: Request, res: Response) => {
+  try { res.json(await updateLink(owner(req), id(req, 'linkId'), req.body?.relation, provenanceFor(req))); } catch (error) { fail(error, res); }
+});
+
 router.delete('/links/:linkId', async (req: Request, res: Response) => {
   try { res.json(await deleteLink(owner(req), id(req, 'linkId'))); } catch (error) { fail(error, res); }
 });
 
 for (const [path, kind, key] of [['people', 'user', 'userId'], ['things', 'thing', 'thingId']] as const) {
   router.post(`/${path}/:${key}/note-reviews`, async (req: Request, res: Response) => {
-    try { res.status(201).json(await captureNoteReview(owner(req), { kind, id: id(req, key) }, req.body)); } catch (error) { fail(error, res); }
+    try { res.status(201).json(await captureNoteReview(owner(req), { kind, id: id(req, key) }, req.body, provenanceFor(req))); } catch (error) { fail(error, res); }
   });
   router.get(`/${path}/:${key}/note-reviews`, async (req: Request, res: Response) => {
     try { res.json(await listNoteReviews(owner(req), { kind, id: id(req, key) })); } catch (error) { fail(error, res); }
@@ -125,7 +162,7 @@ router.post('/note-reviews/:reviewId/suggest', async (req: Request, res: Respons
   try { res.json(await suggestNoteReview(owner(req), id(req, 'reviewId'))); } catch (error) { fail(error, res); }
 });
 router.post('/note-reviews/:reviewId/apply', async (req: Request, res: Response) => {
-  try { res.json(await applyNoteReview(owner(req), id(req, 'reviewId'), req.body)); } catch (error) { fail(error, res); }
+  try { res.json(await applyNoteReview(owner(req), id(req, 'reviewId'), req.body, provenanceFor(req))); } catch (error) { fail(error, res); }
 });
 router.post('/note-reviews/:reviewId/undo', async (req: Request, res: Response) => {
   try { res.json(await undoNoteReview(owner(req), id(req, 'reviewId'))); } catch (error) { fail(error, res); }

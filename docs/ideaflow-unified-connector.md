@@ -48,13 +48,20 @@ read scope.
 ### Private people knowledge
 
 The owner's [private graph](private-graph.md) (the shared Noos people overlay,
-also shown in Unlinked) is exposed with the same scope split. Read scope adds
-`oc_get_person_private`, `oc_get_unlinked_person_private`, `oc_list_private_links`,
-`oc_list_private_things`, `oc_get_private_thing` and `oc_list_catch_up`. Write
-scope adds `oc_set_person_private`, `oc_add_private_note`, `oc_delete_private_note`,
-`oc_add_private_link`, `oc_delete_private_link`, `oc_save_private_thing` and
-`oc_delete_private_thing` (the undo for saving a thing; removes it with its notes
-and relations). Through the hub they appear as
+shown in OpenChat; an Unlinked view is coming) is exposed with the same scope
+split. Read scope adds `oc_get_person_private`, `oc_get_unlinked_person_private`,
+`oc_list_private_links`, `oc_search_private` (people, things and relations by
+text, `relationType` or kind), `oc_get_neighbourhood` (a subject and what is one
+or two relations away), `oc_list_private_things`, `oc_get_private_thing` and
+`oc_list_catch_up`. Write scope adds `oc_set_person_private`, `oc_add_private_note`,
+`oc_delete_private_note`, `oc_add_private_link`, `oc_update_private_link`
+(correct a relation's text in place), `oc_delete_private_link`,
+`oc_save_private_thing` and `oc_delete_private_thing` (the undo for saving a
+thing; removes it with its notes and relations). Notes and relations written
+through the connector are recorded with `author` `agent:<client name>` (the
+`client` claim the hub adds from the grant; `agent:Ideaflow connector` when an
+older hub omits it), `source` `connector`, and `assertion` `stated` unless the
+agent passes `inferred`. Read results include these fields and `relationType`. Through the hub they appear as
 `openchat__oc_…`. A subject or link target can be an OpenChat person (`user`), a
 saved thing, or an Unlinked profile (`unlinked`, stored as the overlay ref
 `unlinked:person:<profileId>`). Connector requests reach `/api/private` with the
@@ -84,5 +91,6 @@ replay protection, identity lookup, separately enforced scopes, schema restricti
 normal-route assertion rejection, one-use operation binding, membership denial,
 and connector attribution without sending any real messages.
 `apps/server/test/ideaflowConnector.privateGraph.test.ts` checks the private-graph
-tool catalog, scope split, dispatch as the linked owner and ambiguous-name results. The Context graph
+tool catalog, scope split, dispatch as the linked owner, connector provenance
+(including a malformed `client` claim being ignored) and ambiguous-name results. The Context graph
 suite runs separately against an isolated Neo4j database.

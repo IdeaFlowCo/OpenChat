@@ -8,6 +8,7 @@ vi.mock('../src/middleware/resolveActor.js', () => ({
   resolveActor: (req: express.Request, _res: express.Response, next: express.NextFunction) => {
     req.user = { userId: 'alice', email: '' };
     req.agentScopes = mocks.scopes;
+    if (mocks.scopes) { req.agentKeyId = 'key-1'; req.agentKeyLabel = 'Hermes'; }
     next();
   },
 }));
@@ -71,7 +72,16 @@ describe('private graph agent-key scopes', () => {
       mocks.scopes = scopes;
       expect((await call('GET', '/people/bob')).status).toBe(200);
       expect((await call('POST', '/people/bob/notes', { text: 'x' })).status).toBe(201);
-      expect(mocks.addNote).toHaveBeenLastCalledWith('alice', { kind: 'user', id: 'bob' }, 'x');
+      expect(mocks.addNote).toHaveBeenLastCalledWith('alice', { kind: 'user', id: 'bob' }, 'x',
+        scopes ? { author: 'agent:Hermes', source: 'direct-key', assertion: 'stated' } : { author: 'owner', source: 'app', assertion: 'stated' });
     }
+  });
+
+  it('lets an agent key mark what it writes as inferred, and refuses other assertions', async () => {
+    mocks.scopes = ['read', 'write'];
+    expect((await call('POST', '/people/bob/notes', { text: 'x', assertion: 'inferred' })).status).toBe(201);
+    expect(mocks.addNote).toHaveBeenLastCalledWith('alice', { kind: 'user', id: 'bob' }, 'x', { author: 'agent:Hermes', source: 'direct-key', assertion: 'inferred' });
+    expect((await call('POST', '/people/bob/notes', { text: 'x', assertion: 'certain' })).status).toBe(400);
+    expect(mocks.addNote).toHaveBeenCalledTimes(1);
   });
 });

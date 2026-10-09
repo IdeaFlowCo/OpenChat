@@ -12,16 +12,17 @@
  * people's profiles.
  *
  * This file is OpenChat's side of that: who may be written about (no bots, no
- * blocks, not yourself), which identity names the owner, and the response
- * shapes the app and agent tools already use.
+ * blocks, not yourself), which identity names the owner, how Unlinked refs are
+ * confirmed, and the response shapes the app and agent tools already use. The
+ * overlay's rules themselves (name ambiguity, idempotency, provenance,
+ * relation types and edits) live only in the vendored Noos store.
  */
 
-import { createHash } from 'node:crypto';
 import { getDriver } from '../db.js';
 import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
-import { OverlayError, ownerKeyFor } from './overlay/contract.js';
-import type { EntityDetail, Link as OverlayLink, OverlayPrincipal } from './overlay/contract.js';
-import { deleteEntityIn, deleteOwnerIn, OverlayStore, purgeRefIn } from './overlay/store.js';
+import { OverlayError, OWNER_PROVENANCE, ownerKeyFor, RELATION_TYPES } from './overlay/contract.js';
+import type { Candidate, Edge, Entity, EntityDetail, Link as OverlayLink, OverlayPrincipal, Provenance, RelationType } from './overlay/contract.js';
+import { deleteEntityIn, deleteNoteIn, deleteOwnerIn, OverlayStore, purgeRefIn } from './overlay/store.js';
 import { readUnlinkedProfileForIdentity } from './unlinkedProvision.js';
 
 export class PrivateGraphError extends Error {
@@ -42,16 +43,21 @@ export interface PersonCard {
   lastContactAt: string | null;
   nextDueAt: string | null;
 }
-export interface PrivateNote { id: string; text: string; createdAt: string; updatedAt: string }
+export type { Provenance, RelationType };
+export { RELATION_TYPES, OWNER_PROVENANCE };
+/** author, source and assertion are null on notes and links written before provenance existed. */
+export interface PrivateNote extends Provenance { id: string; text: string; createdAt: string; updatedAt: string }
 /** `unlinkedProfileId` is set when the end is an Unlinked profile (overlay ref `unlinked:person:<id>`); `id` is then its saved-thing id. */
 export interface LinkEnd { kind: NodeKind; id: string; name: string; unlinkedProfileId?: string }
-export interface PrivateLink { id: string; relation: string; direction: 'out' | 'in'; other: LinkEnd; createdAt: string }
+export interface PrivateLink extends Provenance { id: string; relation: string; relationType: RelationType; direction: 'out' | 'in'; other: LinkEnd; createdAt: string; updatedAt: string | null }
 export interface PersonBasics { id: string; name: string; avatarUrl: string | null }
 export interface PersonOverlay { userId: string; person: PersonBasics; card: PersonCard; notes: PrivateNote[]; links: PrivateLink[] }
 export interface Thing { id: string; kind: ThingKind; name: string }
 export interface ThingDetail extends Thing { notes: PrivateNote[]; links: PrivateLink[]; unlinkedProfileId?: string }
 export interface UnlinkedPersonOverlay { profileId: string; thingId: string | null; name: string | null; card: PersonCard; notes: PrivateNote[]; links: PrivateLink[] }
-export interface OwnerLink { id: string; relation: string; from: LinkEnd; to: LinkEnd; createdAt: string }
+export interface OwnerLink extends Provenance { id: string; relation: string; relationType: RelationType; from: LinkEnd; to: LinkEnd; createdAt: string; updatedAt: string | null }
+export interface PrivateSearch { things: Array<LinkEnd & { matched: Array<'name' | 'note'> }>; links: OwnerLink[]; truncated: boolean }
+export interface PrivateNeighbourhood { center: LinkEnd; depth: 1 | 2; nodes: LinkEnd[]; links: OwnerLink[]; truncated: boolean }
 /** Who a link or note is about: an OpenChat person, a saved thing, or an Unlinked profile. */
 export type Subject = { kind: 'user' | 'thing' | 'unlinked'; id: string };
 export interface DuePerson { userId: string; name: string; avatarUrl: string | null; important: boolean; nextDueAt: string; lastContactAt: string | null }
@@ -179,14 +185,27 @@ const MESSAGES: Record<string, string> = {
   not_found: 'Not found', note_limit: 'This card has reached its note limit', link_limit: 'You have reached the limit for links',
   entity_limit: 'You have reached the limit for saved items', self_link: 'Choose something else to link to',
   kind_conflict: 'That item is a different kind', name_conflict: 'You already have something with that name',
+  invalid_provenance: 'Unknown author, source or assertion', invalid_relation_type: `relationType must be one of ${RELATION_TYPES.join(', ')}`,
+  invalid_query: 'Give a search text, a relation type or a kind', invalid_depth: 'depth must be 1 or 2',
+  invalid_request_id: 'createNew needs a clientRequestId to keep retries from duplicating', invalid_create_new: 'createNew must be true or false',
+  invalid_relation: 'Relation is required (60 characters or fewer)', invalid_note: 'Note is required (4000 characters or fewer)',
 };
 /** Overlay refusals become the app's own wording; anything else stays an unexpected error. */
 async function overlayCall<T>(work: (overlay: OverlayStore) => Promise<T>): Promise<T> {
   try { return await work(await store()); }
   catch (error) {
+    if (error instanceof OverlayError && error.code === 'ambiguous_name') fail(409, String(error.details?.message ?? 'More than one saved item has that name. Choose one by id, or set createNew with a clientRequestId for a different one.'), { code: 'ambiguous_name', candidates: candidatesFor(error.details?.candidates) });
     if (error instanceof OverlayError && error.status < 500) fail(error.status, MESSAGES[error.code] ?? 'Check what you entered and try again');
     throw error;
   }
+}
+
+/** The overlay's candidates for an ambiguous name, as the app names them, with the arguments that pick each one. */
+function candidatesFor(raw: unknown): Array<LinkEnd & { use: { toKind: string; toId: string } }> {
+  return (Array.isArray(raw) ? raw as Candidate[] : []).map(candidate => {
+    const end = endOf(candidate);
+    return { ...end, use: end.kind === 'user' ? { toKind: 'user', toId: end.id } : end.unlinkedProfileId ? { toKind: 'unlinked', toId: end.unlinkedProfileId } : { toKind: candidate.kind, toId: end.id } };
+  });
 }
 
 /**
@@ -252,9 +271,8 @@ const unlinkedIdOf = (refs: string[]): string | null => {
   const ref = refs.find(value => value.startsWith(UNLINKED_REF));
   return ref ? decodeURIComponent(ref.slice(UNLINKED_REF.length)) : null;
 };
-/** A person the owner deliberately kept apart from a same-named one; never an account. */
-const SEPARATE_REF = 'openchat:private:';
-const separateRef = (requestId: string) => `${SEPARATE_REF}${createHash('sha256').update(requestId).digest('hex').slice(0, 32)}`;
+/* A person the owner deliberately kept apart from a same-named one (createNew) is
+   named by the overlay's own separate ref, `openchat:private:<hash>`; never an account. */
 
 const displayName = `CASE WHEN subject.name IS NULL OR trim(subject.name) = '' OR subject.name CONTAINS '@' THEN $fallbackName ELSE subject.name END`;
 
@@ -290,16 +308,24 @@ async function personEntity(ownerId: string, userId: string): Promise<{ principa
 
 /** Link ends as the app knows them: an OpenChat person by user id and current name, anything else by entity id. */
 async function linksFor(links: OverlayLink[]): Promise<PrivateLink[]> {
-  const userIds = [...new Set(links.map(link => userIdOf(link.other.refs)).filter((id): id is string => id !== null))];
+  const names = await userNames(links.map(link => link.other));
+  return links.map(link => ({ ...provenanceOf(link), id: link.id, relation: link.relation, relationType: link.relationType, direction: link.direction, other: endOf(link.other, names), createdAt: link.createdAt, updatedAt: link.updatedAt }));
+}
+const provenanceOf = (value: Provenance): Provenance => ({ author: value.author, source: value.source, assertion: value.assertion });
+function noteOf(note: PrivateNote): PrivateNote {
+  return { id: note.id, text: note.text, createdAt: note.createdAt, updatedAt: note.updatedAt, ...provenanceOf(note) };
+}
+/** Current display names for the OpenChat people among these ends. */
+async function userNames(ends: Array<{ refs: string[] }>): Promise<Map<string, string>> {
+  const userIds = [...new Set(ends.map(end => userIdOf(end.refs)).filter((id): id is string => id !== null))];
   const names = new Map<string, string>();
-  if (userIds.length) {
-    const session = getDriver().session();
-    try {
-      const result = await session.run(`MATCH (subject:User) WHERE subject.id IN $userIds RETURN subject.id AS id, ${displayName} AS name`, { userIds, fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME });
-      for (const record of result.records) names.set(String(record.get('id')), String(record.get('name')));
-    } finally { await session.close(); }
-  }
-  return links.map(link => ({ id: link.id, relation: link.relation, direction: link.direction, other: endOf(link.other, names), createdAt: link.createdAt }));
+  if (!userIds.length) return names;
+  const session = getDriver().session();
+  try {
+    const result = await session.run(`MATCH (subject:User) WHERE subject.id IN $userIds RETURN subject.id AS id, ${displayName} AS name`, { userIds, fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME });
+    for (const record of result.records) names.set(String(record.get('id')), String(record.get('name')));
+  } finally { await session.close(); }
+  return names;
 }
 function endOf(entity: { id: string; kind: ThingKind; name: string; refs: string[] }, names: Map<string, string> = new Map()): LinkEnd {
   const userId = userIdOf(entity.refs);
@@ -331,28 +357,19 @@ async function unlinkedPersonEntity(ownerId: string, rawProfileId: string): Prom
 }
 
 /**
- * A saved thing named in a link. A name is reused only when it names exactly
- * one of the owner's saved things and nothing else of that kind shares it;
- * two people called Alex are never merged by name. Otherwise the caller gets
- * the candidates and picks one by id, or asks for a separate new entity.
+ * A saved thing named in a link. The overlay decides (Noos owns the rule): a
+ * name is reused only when it names exactly one of the owner's saved things
+ * of that kind and that one has no ref; two people called Alex are never
+ * merged by name. Otherwise the caller gets the candidates and picks one by
+ * id, or asks for a separate new entity (createNew + clientRequestId).
  */
 async function namedEntity(principal: OverlayPrincipal, target: { kind: ThingKind; name: string; createNew?: { requestId: string } }): Promise<string> {
-  if (target.createNew) return (await overlayCall(overlay => overlay.ensure(principal, { kind: target.kind, name: target.name, ref: separateRef(target.createNew!.requestId) }))).entity.id;
-  const session = getDriver().session();
-  let matches: Array<{ id: string; name: string; refs: string[] }>;
   try {
-    const result = await session.run(`MATCH (e:OverlayEntity {ownerKey: $ownerKey, kind: $kind, nameKey: $nameKey})
-      RETURN e.id AS id, e.name AS name, [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] AS refs ORDER BY e.createdAt LIMIT 20`,
-    { ownerKey: principal.ownerKey, kind: target.kind, nameKey: nameKey(target.name) });
-    matches = result.records.map(record => ({ id: String(record.get('id')), name: String(record.get('name')), refs: (record.get('refs') as string[]) ?? [] }));
-  } finally { await session.close(); }
-  if (matches.length === 1 && matches[0]!.refs.length === 0) return matches[0]!.id;
-  if (!matches.length) return (await overlayCall(overlay => overlay.ensure(principal, { kind: target.kind, name: target.name }))).entity.id;
-  const candidates = matches.map(match => {
-    const end = endOf({ ...match, kind: target.kind });
-    return { ...end, ...(end.kind === 'user' ? { use: { toKind: 'user', toId: end.id } } : end.unlinkedProfileId ? { use: { toKind: 'unlinked', toId: end.unlinkedProfileId } } : { use: { toKind: target.kind, toId: end.id } }) };
-  });
-  return fail(409, `More than one ${target.kind} is called ${target.name}. Choose one by id, or set createNew with a clientRequestId for a different one.`, { code: 'ambiguous_name', candidates });
+    return (await overlayCall(overlay => overlay.resolve(principal, { kind: target.kind, name: target.name, ...(target.createNew ? { createNew: true, clientRequestId: target.createNew.requestId } : {}) }))).entity.id;
+  } catch (error) {
+    if (error instanceof PrivateGraphError && error.details?.code === 'ambiguous_name') fail(409, `More than one ${target.kind} is called ${target.name}. Choose one by id, or set createNew with a clientRequestId for a different one.`, error.details);
+    throw error;
+  }
 }
 
 /** The entity a note or link starts from. */
@@ -368,7 +385,7 @@ export async function getPersonOverlay(ownerId: string, userId: string): Promise
   // Reading never creates anything: a person nobody has written about has an empty card.
   const { person, principal } = await assertPerson(ownerId, userId);
   const found = await overlayCall(overlay => overlay.lookup(principal, userRef(userId)));
-  return { userId, person, card: found?.card ?? { ...EMPTY_CARD }, notes: found?.notes ?? [], links: await linksFor(found?.links ?? []) };
+  return { userId, person, card: found?.card ?? { ...EMPTY_CARD }, notes: (found?.notes ?? []).map(noteOf), links: await linksFor(found?.links ?? []) };
 }
 
 export async function updatePersonCard(ownerId: string, userId: string, patch: CardPatch): Promise<PersonCard> {
@@ -376,20 +393,17 @@ export async function updatePersonCard(ownerId: string, userId: string, patch: C
   return (await overlayCall(overlay => overlay.update(principal, entityId, { card: patch }))).card;
 }
 
-export async function addNote(ownerId: string, subject: Subject, rawText: unknown): Promise<PrivateNote> {
+/** The same text already on this card is the same note (the overlay dedupes): a retried request never doubles it. */
+export async function addNote(ownerId: string, subject: Subject, rawText: unknown, by: Provenance = OWNER_PROVENANCE): Promise<PrivateNote> {
   const text = cleanText(rawText, LIMITS.noteLength, 'Note');
   const { principal, entityId } = await subjectEntity(ownerId, subject);
-  // The same text already on this card is the same note: a retried request never doubles it.
-  const current = await overlayCall(overlay => overlay.get(principal, entityId));
-  const existing = current.notes.find(note => note.text === text);
-  if (existing) return existing;
-  return overlayCall(overlay => overlay.addNote(principal, entityId, text));
+  return noteOf((await overlayCall(overlay => overlay.addNote(principal, entityId, text, by))).note);
 }
 
 export async function updateNote(ownerId: string, noteId: string, rawText: unknown): Promise<PrivateNote> {
   const text = cleanText(rawText, LIMITS.noteLength, 'Note');
   const principal = await ownerPrincipal(ownerId);
-  return overlayCall(overlay => overlay.updateNote(principal, noteId, text));
+  return noteOf(await overlayCall(overlay => overlay.updateNote(principal, noteId, text)));
 }
 
 export async function deleteNote(ownerId: string, noteId: string): Promise<{ deleted: true }> {
@@ -407,19 +421,20 @@ export async function deleteNote(ownerId: string, noteId: string): Promise<{ del
         current.suggestions = [];
         await tx.run('MATCH (r:OpenChatNoteReview {id:$id,ownerKey:$ownerKey}) SET r.payload=$payload', { id: row.get('id'), ownerKey: principal.ownerKey, payload: JSON.stringify(current) });
       }
-      const result = await tx.run('MATCH (n:OverlayNote {id:$noteId,ownerKey:$ownerKey}) DETACH DELETE n RETURN count(*) AS removed', { noteId, ownerKey: principal.ownerKey });
-      if (!Number(result.records[0]?.get('removed') ?? 0)) fail(404, 'Not found');
+      await deleteNoteIn(tx, principal.ownerKey, noteId);
     });
+  } catch (error) {
+    if (error instanceof OverlayError && error.status < 500) fail(error.status, MESSAGES[error.code] ?? 'Not found');
+    throw error;
   } finally { await db.close(); }
   return { deleted: true };
 }
 
-/** Link a person or one of your saved items to another person, company, idea or project. */
 /**
  * Link a person, saved thing or Unlinked profile to another. The same subject,
  * relation and target is one link: repeating it returns the existing link.
  */
-export async function addLink(ownerId: string, from: Subject, rawRelation: unknown, rawTarget: unknown): Promise<PrivateLink> {
+export async function addLink(ownerId: string, from: Subject, rawRelation: unknown, rawTarget: unknown, by: Provenance = OWNER_PROVENANCE): Promise<PrivateLink> {
   const relation = cleanRelation(rawRelation), target = parseLinkTarget(rawTarget);
   const { principal, entityId: fromId } = await subjectEntity(ownerId, from);
   let toId: string;
@@ -430,8 +445,20 @@ export async function addLink(ownerId: string, from: Subject, rawRelation: unkno
     if (existing.kind !== target.kind) fail(400, 'That item is a different kind');
     toId = existing.id;
   } else toId = await namedEntity(principal, target);
-  const link = await overlayCall(overlay => overlay.addLink(principal, fromId, relation, toId));
+  const { link } = await overlayCall(overlay => overlay.addLink(principal, fromId, relation, toId, by));
   return (await linksFor([link]))[0]!;
+}
+
+/**
+ * Change a link's relation text in place ("sister of" to "cousin of"). When
+ * the owner already has the edited link, the two become one and the existing
+ * link is returned with merged: true.
+ */
+export async function updateLink(ownerId: string, linkId: string, rawRelation: unknown, by: Provenance = OWNER_PROVENANCE): Promise<{ link: PrivateLink; merged: boolean }> {
+  const relation = cleanRelation(rawRelation);
+  const principal = await ownerPrincipal(ownerId);
+  const { link, merged } = await overlayCall(overlay => overlay.updateLink(principal, linkId, relation, by));
+  return { link: (await linksFor([link]))[0]!, merged };
 }
 
 /** Read the owner's private card for an Unlinked profile. Never creates anything and never calls Unlinked. */
@@ -439,30 +466,105 @@ export async function getUnlinkedPersonOverlay(ownerId: string, rawProfileId: st
   const profileId = cleanUnlinkedProfileId(rawProfileId);
   const principal = await ownerPrincipal(ownerId);
   const found = await overlayCall(overlay => overlay.lookup(principal, unlinkedRef(profileId)));
-  return { profileId, thingId: found?.id ?? null, name: found?.name ?? null, card: found?.card ?? { ...EMPTY_CARD }, notes: found?.notes ?? [], links: await linksFor(found?.links ?? []) };
+  return { profileId, thingId: found?.id ?? null, name: found?.name ?? null, card: found?.card ?? { ...EMPTY_CARD }, notes: (found?.notes ?? []).map(noteOf), links: await linksFor(found?.links ?? []) };
 }
 
 /** Every private link the owner has recorded, newest first, optionally filtered by a name or relation. */
 export async function listOwnerLinks(ownerId: string, rawQuery: unknown): Promise<{ links: OwnerLink[]; total: number }> {
   const query = typeof rawQuery === 'string' ? nameKey(rawQuery).slice(0, LIMITS.nameLength) : '';
   const principal = await ownerPrincipal(ownerId);
-  const exported = await overlayCall(overlay => overlay.exportOwner(principal)) as { entities: Array<{ id: string; kind: ThingKind; name: string; refs: string[] }>; links: Array<{ id: string; fromId: string; relation: string; toId: string; createdAt: string }> };
+  const exported = await overlayCall(overlay => overlay.exportOwner(principal)) as { entities: Array<{ id: string; kind: ThingKind; name: string; refs: string[] }>; links: Array<Edge & { fromId: string; toId: string }> };
   const entities = new Map(exported.entities.map(entity => [entity.id, entity]));
-  const userIds = [...new Set(exported.entities.map(entity => userIdOf(entity.refs)).filter((id): id is string => id !== null))];
-  const names = new Map<string, string>();
-  if (userIds.length) {
-    const session = getDriver().session();
-    try {
-      const result = await session.run(`MATCH (subject:User) WHERE subject.id IN $userIds RETURN subject.id AS id, ${displayName} AS name`, { userIds, fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME });
-      for (const record of result.records) names.set(String(record.get('id')), String(record.get('name')));
-    } finally { await session.close(); }
-  }
+  const names = await userNames(exported.entities);
   const links = exported.links.flatMap(link => {
     const from = entities.get(link.fromId), to = entities.get(link.toId);
-    return from && to ? [{ id: link.id, relation: link.relation, from: endOf(from, names), to: endOf(to, names), createdAt: link.createdAt }] : [];
+    return from && to ? [ownerLink(link, from, to, names)] : [];
   }).filter(link => !query || [link.relation, link.from.name, link.to.name].some(value => nameKey(value).includes(query)))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
   return { links: links.slice(0, 200), total: links.length };
+}
+function ownerLink(link: Edge, from: { id: string; kind: ThingKind; name: string; refs: string[] }, to: { id: string; kind: ThingKind; name: string; refs: string[] }, names: Map<string, string>): OwnerLink {
+  return {
+    id: link.id, relation: link.relation, relationType: link.relationType, from: endOf(from, names), to: endOf(to, names), createdAt: link.createdAt,
+    updatedAt: link.updatedAt ?? null, author: link.author ?? null, source: link.source ?? null, assertion: link.assertion ?? null,
+  };
+}
+
+/**
+ * Search the owner's private knowledge: saved people, companies, ideas and
+ * projects, OpenChat people and Unlinked people they wrote about (by name or
+ * note text), and private relations by relation text, relation type or either
+ * end's name. Read-only and owner-only; blocked people are left out.
+ */
+export async function searchPrivate(ownerId: string, input: { q?: unknown; relationType?: unknown; kind?: unknown; limit?: unknown }): Promise<PrivateSearch> {
+  const principal = await ownerPrincipal(ownerId);
+  const kind = input.kind === 'user' ? 'person' : input.kind;
+  if (kind !== undefined && kind !== '' && !THING_KINDS.includes(kind as ThingKind)) fail(400, 'Unknown kind');
+  const found = await overlayCall(overlay => overlay.search(principal, { q: input.q, relationType: input.relationType, kind, limit: input.limit }));
+  const hidden = await blockedUserIds(ownerId, [...found.entities, ...found.links.flatMap(link => [link.from, link.to])]);
+  const names = await userNames([...found.entities, ...found.links.flatMap(link => [link.from, link.to])]);
+  const visible = (end: { refs: string[] }) => { const userId = userIdOf(end.refs); return userId === null || !hidden.has(userId); };
+  return {
+    things: found.entities.filter(visible).map(entity => ({ ...endOf(entity, names), matched: entity.matched.filter((value): value is 'name' | 'note' => value !== 'link') })),
+    links: found.links.filter(link => visible(link.from) && visible(link.to)).map(link => ownerLink(link, link.from, link.to, names)),
+    truncated: found.truncated,
+  };
+}
+
+/**
+ * One subject and what surrounds it: the people, companies, ideas and
+ * projects one or two private relations away, and those relations. Never
+ * creates anything: a subject nobody has written about has an empty
+ * neighbourhood. Blocked people are left out.
+ */
+export async function getNeighbourhood(ownerId: string, subject: Subject, rawDepth: unknown): Promise<PrivateNeighbourhood> {
+  const principal = await ownerPrincipal(ownerId);
+  const depth = rawDepth === undefined || rawDepth === null || rawDepth === '' || String(rawDepth) === '1' ? 1 : String(rawDepth) === '2' ? 2 : fail(400, 'depth must be 1 or 2');
+  let entityId: string | null;
+  let fallback: LinkEnd;
+  if (subject.kind === 'user') {
+    const { person } = await assertPerson(ownerId, subject.id);
+    entityId = (await overlayCall(overlay => overlay.lookup(principal, userRef(subject.id))))?.id ?? null;
+    fallback = { kind: 'user', id: subject.id, name: person.name };
+  } else if (subject.kind === 'unlinked') {
+    const profileId = cleanUnlinkedProfileId(subject.id);
+    entityId = (await overlayCall(overlay => overlay.lookup(principal, unlinkedRef(profileId))))?.id ?? null;
+    fallback = { kind: 'person', id: '', name: '', unlinkedProfileId: profileId };
+  } else {
+    entityId = subject.id;
+    fallback = { kind: 'person', id: subject.id, name: '' };
+  }
+  if (!entityId) return { center: fallback, depth, nodes: [], links: [], truncated: false };
+  const around = await overlayCall(overlay => overlay.neighbourhood(principal, entityId, depth));
+  if (subject.kind === 'thing' && userIdOf(around.center.refs) !== null) fail(404, 'Not found');
+  const all: Entity[] = [around.center, ...around.entities];
+  const hidden = await blockedUserIds(ownerId, all);
+  const names = await userNames(all);
+  const byId = new Map(all.map(entity => [entity.id, entity]));
+  const visible = (entity: Entity | undefined): entity is Entity => { const userId = entity ? userIdOf(entity.refs) : null; return !!entity && (userId === null || !hidden.has(userId)); };
+  return {
+    center: endOf(around.center, names), depth,
+    nodes: around.entities.filter(visible).map(entity => endOf(entity, names)),
+    links: around.links.flatMap(link => {
+      const from = byId.get(link.fromId), to = byId.get(link.toId);
+      return visible(from) && visible(to) ? [ownerLink(link, from, to, names)] : [];
+    }),
+    truncated: around.truncated,
+  };
+}
+
+/** OpenChat people among these ends who are blocked in either direction, or gone. */
+async function blockedUserIds(ownerId: string, ends: Array<{ refs: string[] }>): Promise<Set<string>> {
+  const userIds = [...new Set(ends.map(end => userIdOf(end.refs)).filter((id): id is string => id !== null))];
+  if (!userIds.length) return new Set();
+  const session = getDriver().session();
+  try {
+    const result = await session.run(`MATCH (owner:User {id: $ownerId}) UNWIND $userIds AS userId
+      OPTIONAL MATCH (subject:User {id: userId})
+      WITH owner, userId, subject WHERE subject IS NULL OR (owner)-[:BLOCKED]->(subject) OR (subject)-[:BLOCKED]->(owner) OR coalesce(subject.isBot, false)
+      RETURN collect(userId) AS hidden`, { ownerId, userIds });
+    return new Set((result.records[0]?.get('hidden') as string[] | undefined) ?? []);
+  } finally { await session.close(); }
 }
 
 export async function deleteLink(ownerId: string, linkId: string): Promise<{ deleted: true }> {
@@ -534,7 +636,7 @@ export async function getThing(ownerId: string, thingId: string): Promise<ThingD
   const found: EntityDetail = await overlayCall(overlay => overlay.get(principal, thingId));
   if (userIdOf(found.refs) !== null) fail(404, 'Not found');
   const unlinkedProfileId = unlinkedIdOf(found.refs);
-  return { id: found.id, kind: found.kind, name: found.name, ...(unlinkedProfileId !== null ? { unlinkedProfileId } : {}), notes: found.notes, links: await linksFor(found.links) };
+  return { id: found.id, kind: found.kind, name: found.name, ...(unlinkedProfileId !== null ? { unlinkedProfileId } : {}), notes: found.notes.map(noteOf), links: await linksFor(found.links) };
 }
 
 /** People whose catch-up date has passed, soonest first; starred people lead ties. */
