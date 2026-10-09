@@ -40,9 +40,10 @@ jobs:
 
       - run: npm ci
 
+      # These suites share Neo4j schema; serialize files to avoid constraint-creation deadlocks.
       - name: Run focused agent-network tests against Neo4j
         run: >-
-          ./node_modules/.bin/vitest run --testTimeout=30000
+          ./node_modules/.bin/vitest run --no-file-parallelism --testTimeout=30000
           apps/server/test/agentNetwork.test.ts
           apps/server/test/agentNetwork.expiry.test.ts
           apps/server/test/agentNetwork.route.test.ts
