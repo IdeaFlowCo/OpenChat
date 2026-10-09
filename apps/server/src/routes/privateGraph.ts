@@ -8,7 +8,7 @@ import { Router, type Request, type Response } from 'express';
 import { resolveActor } from '../middleware/resolveActor.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import {
-  addLink, addNote, createPrivateThing, deleteLink, deleteNote, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
+  addLink, addNote, createPrivateThing, deleteLink, deleteNote, deletePrivateThing, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
   parseCardPatch, PrivateGraphError, updateNote, updatePersonCard,
 } from '../services/privateGraph.js';
 
@@ -86,6 +86,11 @@ router.get('/things', async (req: Request, res: Response) => {
 
 router.get('/things/:thingId', async (req: Request, res: Response) => {
   try { res.json(await getThing(owner(req), id(req, 'thingId'))); } catch (error) { fail(error, res); }
+});
+
+// Undo for a saved thing: removes it with its notes and links.
+router.delete('/things/:thingId', async (req: Request, res: Response) => {
+  try { res.json(await deletePrivateThing(owner(req), id(req, 'thingId'))); } catch (error) { fail(error, res); }
 });
 
 router.post('/things/:thingId/notes', async (req: Request, res: Response) => {

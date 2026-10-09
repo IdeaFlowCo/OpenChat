@@ -21,7 +21,7 @@ import { getDriver } from '../db.js';
 import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
 import { OverlayError, ownerKeyFor } from './overlay/contract.js';
 import type { EntityDetail, Link as OverlayLink, OverlayPrincipal } from './overlay/contract.js';
-import { deleteOwnerIn, OverlayStore, purgeRefIn } from './overlay/store.js';
+import { deleteEntityIn, deleteOwnerIn, OverlayStore, purgeRefIn } from './overlay/store.js';
 import { readUnlinkedProfileForIdentity } from './unlinkedProvision.js';
 
 export class PrivateGraphError extends Error {
@@ -469,6 +469,32 @@ export async function deleteLink(ownerId: string, linkId: string): Promise<{ del
   const principal = await ownerPrincipal(ownerId);
   await overlayCall(overlay => overlay.deleteLink(principal, linkId));
   return { deleted: true };
+}
+
+/**
+ * Delete (undo) a saved person, company, idea or project: the entity, its
+ * notes, its links in both directions and its refs, plus OpenChat's own note
+ * reviews and asks about it, in one transaction. An OpenChat person's card is
+ * not a saved thing and answers 404, as does a missing or foreign id.
+ */
+export async function deletePrivateThing(ownerId: string, thingId: string): Promise<{ deleted: true; id: string; notesRemoved: number; linksRemoved: number }> {
+  const principal = await ownerPrincipal(ownerId);
+  await store();
+  const ownerKey = principal.ownerKey;
+  const db = getDriver().session();
+  try {
+    const removed = await db.executeWrite(async tx => {
+      const found = await tx.run('MATCH (e:OverlayEntity {id: $thingId, ownerKey: $ownerKey}) RETURN [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] AS refs', { thingId, ownerKey });
+      const refs = found.records[0]?.get('refs') as string[] | undefined;
+      if (!refs || userIdOf(refs) !== null) return fail(404, 'Not found');
+      for (const label of ['OpenChatNoteReview', 'OpenChatPrivateAsk']) await tx.run(`MATCH (n:${label} {ownerKey: $ownerKey, entityId: $thingId}) DETACH DELETE n`, { ownerKey, thingId });
+      return deleteEntityIn(tx, ownerKey, thingId);
+    });
+    return { deleted: true, id: thingId, notesRemoved: removed.notesRemoved, linksRemoved: removed.linksRemoved };
+  } catch (error) {
+    if (error instanceof OverlayError && error.status < 500) fail(error.status, MESSAGES[error.code] ?? 'Check what you entered and try again');
+    throw error;
+  } finally { await db.close(); }
 }
 
 /** Save a private named subject; this never binds or creates an OpenChat account. */

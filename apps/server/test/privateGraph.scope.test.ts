@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ scopes: undefined as string[] | undefined, getPersonOverlay: vi.fn(), createPrivateThing: vi.fn(), addNote: vi.fn(), deleteNote: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scopes: undefined as string[] | undefined, getPersonOverlay: vi.fn(), createPrivateThing: vi.fn(), addNote: vi.fn(), deleteNote: vi.fn(), deletePrivateThing: vi.fn() }));
 vi.mock('../src/middleware/resolveActor.js', () => ({
   resolveActor: (req: express.Request, _res: express.Response, next: express.NextFunction) => {
     req.user = { userId: 'alice', email: '' };
@@ -13,7 +13,7 @@ vi.mock('../src/middleware/resolveActor.js', () => ({
 }));
 vi.mock('../src/services/privateGraph.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/privateGraph.js')>('../src/services/privateGraph.js');
-  return { ...actual, getPersonOverlay: mocks.getPersonOverlay, createPrivateThing: mocks.createPrivateThing, addNote: mocks.addNote, deleteNote: mocks.deleteNote };
+  return { ...actual, getPersonOverlay: mocks.getPersonOverlay, createPrivateThing: mocks.createPrivateThing, addNote: mocks.addNote, deleteNote: mocks.deleteNote, deletePrivateThing: mocks.deletePrivateThing };
 });
 import privateGraphRoutes from '../src/routes/privateGraph.js';
 
@@ -44,9 +44,14 @@ describe('private graph agent-key scopes', () => {
     expect((await call('POST', '/people/bob/notes', { text: 'x' })).status).toBe(404);
     expect((await call('DELETE', '/notes/n1')).status).toBe(404);
     expect(mocks.addNote).not.toHaveBeenCalled();
+    expect((await call('DELETE', '/things/t1')).status).toBe(404);
     expect(mocks.deleteNote).not.toHaveBeenCalled();
+    expect(mocks.deletePrivateThing).not.toHaveBeenCalled();
     mocks.scopes = ['write'];
     expect((await call('GET', '/people/bob')).status).toBe(404);
+    mocks.deletePrivateThing.mockResolvedValue({ deleted: true, id: 't1', notesRemoved: 0, linksRemoved: 0 });
+    expect((await call('DELETE', '/things/t1')).status).toBe(200);
+    expect(mocks.deletePrivateThing).toHaveBeenCalledWith('alice', 't1');
     expect((await call('POST', '/people/bob/notes', { text: 'x' })).status).toBe(201);
     mocks.scopes = [];
     expect((await call('GET', '/people/bob')).status).toBe(404);

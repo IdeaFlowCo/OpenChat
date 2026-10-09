@@ -206,6 +206,16 @@ export class OverlayStore {
     });
   }
 
+  /**
+   * An owner action: forget one entity entirely, with its notes, its links in
+   * both directions and its refs. Missing and someone else's are both 404.
+   */
+  async deleteEntity(principal: OverlayPrincipal | null, id: unknown): Promise<{ notesRemoved: number; linksRemoved: number; refsRemoved: number }> {
+    const ownerKey = this.owner(principal);
+    if (!isId(id)) return fail(404, 'not_found');
+    return this.write(tx => deleteEntityIn(tx, ownerKey, id));
+  }
+
   async list(principal: OverlayPrincipal | null, filter: { q?: unknown; kind?: unknown } = {}): Promise<Entity[]> {
     const ownerKey = this.owner(principal);
     const q = typeof filter.q === 'string' ? nameKey(filter.q).slice(0, LIMITS.nameLength) : '';
@@ -287,6 +297,20 @@ export class OverlayStore {
 export async function deleteOwnerIn(tx: Pick<ManagedTransaction, 'run'>, ownerKey: string): Promise<void> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
   for (const label of ['OverlayNote', 'OverlayRef', 'OverlayEntity']) await tx.run(`MATCH (n:${label} {ownerKey: $ownerKey}) DETACH DELETE n`, { ownerKey });
+}
+
+/** For callers that remove an entity together with their own records about it, in one transaction. */
+export async function deleteEntityIn(tx: Pick<ManagedTransaction, 'run'>, ownerKey: string, id: string): Promise<{ notesRemoved: number; linksRemoved: number; refsRemoved: number }> {
+  if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
+  if (!isId(id)) return fail(404, 'not_found');
+  // Locks the entity so a concurrent note or link cannot land on it mid-delete.
+  const found = await tx.run(`MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey}) SET e._lock = true REMOVE e._lock
+    RETURN size([(e)-[l:OVERLAY_LINK]-(:OverlayEntity {ownerKey: $ownerKey}) | l]) AS links`, { id, ownerKey });
+  if (!found.records.length) return fail(404, 'not_found');
+  const notes = await tx.run('MATCH (n:OverlayNote {ownerKey: $ownerKey, entityId: $id}) DETACH DELETE n RETURN count(*) AS removed', { id, ownerKey });
+  const refs = await tx.run('MATCH (r:OverlayRef {ownerKey: $ownerKey, entityId: $id}) DETACH DELETE r RETURN count(*) AS removed', { id, ownerKey });
+  await tx.run('MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey}) DETACH DELETE e', { id, ownerKey });
+  return { notesRemoved: number(notes.records[0]?.get('removed')), linksRemoved: number(found.records[0]?.get('links')), refsRemoved: number(refs.records[0]?.get('removed')) };
 }
 
 export async function purgeRefIn(tx: Pick<ManagedTransaction, 'run'>, rawRef: unknown): Promise<{ entitiesRemoved: number; refsRemoved: number }> {

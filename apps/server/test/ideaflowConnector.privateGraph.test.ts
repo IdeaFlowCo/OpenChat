@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const state = vi.hoisted(() => ({ run: vi.fn() }));
 vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({ run: state.run, close: async () => {} }) }) }));
 const graph = vi.hoisted(() => ({
-  addLink: vi.fn(), addNote: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
+  addLink: vi.fn(), addNote: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), deletePrivateThing: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
   getUnlinkedPersonOverlay: vi.fn(), listDue: vi.fn(), resolvePrivateThing: vi.fn(), listOwnerLinks: vi.fn(), listThings: vi.fn(), updatePersonCard: vi.fn(),
 }));
 vi.mock('../src/services/privateGraph.js', async () => {
@@ -26,7 +26,7 @@ function sign(body: string, scope: string) {
   return `${header}.${payload}.${createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url')}`;
 }
 const PRIVATE_READS = ['oc_get_person_private', 'oc_get_unlinked_person_private', 'oc_list_private_links', 'oc_list_private_things', 'oc_get_private_thing', 'oc_list_catch_up'];
-const PRIVATE_WRITES = ['oc_set_person_private', 'oc_add_private_note', 'oc_delete_private_note', 'oc_add_private_link', 'oc_delete_private_link', 'oc_save_private_thing'];
+const PRIVATE_WRITES = ['oc_set_person_private', 'oc_add_private_note', 'oc_delete_private_note', 'oc_add_private_link', 'oc_delete_private_link', 'oc_save_private_thing', 'oc_delete_private_thing'];
 
 describe('private people knowledge through the shared Ideaflow connector', () => {
   let server: Server, base: string;
@@ -65,6 +65,11 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
       expect(entry.description).toMatch(/OpenChat and Unlinked/);
     }
     expect(all.find((value: any) => value.name === 'oc_delete_private_link').annotations.destructiveHint).toBe(true);
+    const remove = all.find((value: any) => value.name === 'oc_delete_private_thing');
+    expect(remove.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(remove.description).toMatch(/undo for oc_save_private_thing/);
+    expect(remove.description).toMatch(/private notes and every private relation/);
+    expect(all.find((value: any) => value.name === 'oc_save_private_thing').annotations.destructiveHint).toBe(false);
   });
 
   it('dispatches reads and writes to the private routes as the linked owner', async () => {
@@ -98,6 +103,16 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     graph.deleteLink.mockResolvedValue({ deleted: true });
     await tool('oc_delete_private_link', { linkId: 'link-1' });
     expect(graph.deleteLink).toHaveBeenCalledWith('owner', 'link-1');
+
+    graph.deletePrivateThing.mockResolvedValue({ deleted: true, id: 'thing-1', notesRemoved: 1, linksRemoved: 2 });
+    const removed = await tool('oc_delete_private_thing', { thingId: 'thing-1' });
+    expect(JSON.parse(removed.result.content[0].text)).toEqual({ deleted: true, id: 'thing-1', notesRemoved: 1, linksRemoved: 2 });
+    expect(graph.deletePrivateThing).toHaveBeenCalledWith('owner', 'thing-1');
+
+    graph.deletePrivateThing.mockRejectedValue(new PrivateGraphError(404, 'Not found'));
+    const missing = await tool('oc_delete_private_thing', { thingId: 'someone-elses' });
+    expect(missing.result.isError).toBe(true);
+    expect(JSON.parse(missing.result.content[0].text)).toEqual({ error: 'Not found' });
   });
 
   it('returns ambiguous-name candidates to the agent instead of guessing', async () => {
@@ -116,6 +131,10 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     ]) expect((await call('tools/call', { name: 'oc_add_private_note', arguments: args })).status).toBe(400);
     expect((await call('tools/call', { name: 'oc_set_person_private', arguments: { userId: 'bob', important: 'yes' } })).status).toBe(400);
     expect((await call('tools/call', { name: 'oc_add_private_link', arguments: { subjectKind: 'user', subjectId: 'bob', relation: 'knows', toKind: 'planet' } })).status).toBe(400);
+    expect((await call('tools/call', { name: 'oc_delete_private_thing', arguments: { thingId: 't1' } }, 'openchat:read')).status).toBe(403);
+    expect((await call('tools/call', { name: 'oc_delete_private_thing', arguments: { thingId: 'x'.repeat(65) } })).status).toBe(400);
+    expect((await call('tools/call', { name: 'oc_delete_private_thing', arguments: {} })).status).toBe(400);
+    expect(graph.deletePrivateThing).not.toHaveBeenCalled();
     expect(graph.addNote).not.toHaveBeenCalled();
     expect(graph.updatePersonCard).not.toHaveBeenCalled();
     expect(graph.addLink).not.toHaveBeenCalled();
