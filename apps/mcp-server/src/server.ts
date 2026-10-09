@@ -1124,8 +1124,8 @@ export function buildServer(
   const RELATION_TYPES = ['knows', 'family', 'works_at', 'worked_with', 'works_on', 'attended', 'interested_in', 'other'] as const;
   const assertionSchema = z.enum(['stated', 'inferred']).optional().describe("'stated' (default) when the owner said it; 'inferred' when you concluded it yourself");
   const subjectSchema = {
-    subjectKind: z.enum(['user', 'thing', 'unlinked']).describe("'user' for a person on OpenChat (use their user id), 'thing' for one of the owner's saved companies, ideas, projects or people (use its id), 'unlinked' for an Unlinked profile (use the profile id from an Unlinked tool result)"),
-    subjectId: z.string().min(1).max(200).describe('The user id, saved-thing id or Unlinked profile id'),
+    subjectKind: z.enum(['user', 'thing', 'unlinked']).describe("'user' for a person on OpenChat (use their user id), 'thing' for one of the owner's saved companies, ideas, projects or people (use its id), 'unlinked' for an Unlinked person (a published profile id, a connection id from unlinked_list_connections for an imported LinkedIn contact, or a linkedin.com/in/ address)"),
+    subjectId: z.string().min(1).max(200).describe('The user id, saved-thing id, or Unlinked profile id / connection id / LinkedIn address'),
   };
   const DESTRUCTIVE_PRIVATE = new Set(['oc_delete_private_note', 'oc_delete_private_link', 'oc_delete_private_thing']);
   const READ_ONLY_PRIVATE = new Set(['oc_search_private', 'oc_get_neighbourhood']);
@@ -1168,7 +1168,7 @@ export function buildServer(
     { noteId: z.string().min(1).max(64) }, ({ noteId }) => api.deletePrivateNote(noteId));
 
   privateTool('oc_add_private_link', 'Link a person or thing to another',
-    `Record a private relation in the owner's own words ('knows', 'sister of', 'worked with', 'works at') from a person, Unlinked profile or saved thing to another. toKind 'user' with toId for a person on OpenChat; toKind 'unlinked' with toId for an Unlinked profile id; otherwise toId for a saved thing or toName. A name is reused only when it names exactly one saved thing; if several people share it the call fails with code ambiguous_name and candidates, so ask which one and pass its id. createNew with a clientRequestId saves a different person with an existing name. Repeating the same relation returns the same link. Recorded as written by this agent key, with a relationType derived from its words. ${PRIVATE_PEOPLE}`,
+    `Record a private relation in the owner's own words ('knows', 'sister of', 'worked with', 'works at') from a person, Unlinked profile or saved thing to another. toKind 'user' with toId for a person on OpenChat; toKind 'unlinked' with toId for an Unlinked profile id, or a connection id from unlinked_list_connections or a linkedin.com/in/ address for an imported LinkedIn contact (one entity either way); otherwise toId for a saved thing or toName. A name is reused only when it names exactly one saved thing; if several people share it the call fails with code ambiguous_name and candidates, so ask which one and pass its id. createNew with a clientRequestId saves a different person with an existing name. Repeating the same relation returns the same link. Recorded as written by this agent key, with a relationType derived from its words. ${PRIVATE_PEOPLE}`,
     {
       ...subjectSchema,
       relation: z.string().min(1).max(60),
@@ -1197,9 +1197,9 @@ export function buildServer(
     { ...subjectSchema, depth: z.number().int().min(1).max(2).optional() },
     ({ subjectKind, subjectId, depth }) => api.getPrivateNeighbourhood({ kind: subjectKind, id: subjectId }, depth));
 
-  privateTool('oc_get_unlinked_person_private', 'Read private card for an Unlinked profile',
-    `Read the owner's private notes and relations about an Unlinked profile (profile id from an Unlinked tool result). ${PRIVATE_PEOPLE}`,
-    { profileId: z.string().min(1).max(160) }, ({ profileId }) => api.getUnlinkedPersonPrivate(profileId));
+  privateTool('oc_get_unlinked_person_private', 'Read private card for an Unlinked person',
+    `Read the owner's private notes and relations about an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address. ${PRIVATE_PEOPLE}`,
+    { profileId: z.string().min(1).max(512) }, ({ profileId }) => api.getUnlinkedPersonPrivate(profileId));
 
   privateTool('oc_save_private_thing', 'Find or save a private person, company, idea or project',
     `Find or save a saved thing by name for someone with no OpenChat account or Unlinked profile. A shared name fails with code ambiguous_name and candidates; createNew with a clientRequestId saves a separate one, and retries return the same entity. ${PRIVATE_PEOPLE}`,

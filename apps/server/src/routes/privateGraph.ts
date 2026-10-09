@@ -85,12 +85,12 @@ router.get('/search', async (req: Request, res: Response) => {
 router.get('/neighbourhood', async (req: Request, res: Response) => {
   try {
     const kind = req.query.subjectKind, subjectId = req.query.subjectId;
-    if ((kind !== 'user' && kind !== 'thing' && kind !== 'unlinked') || typeof subjectId !== 'string' || !subjectId || subjectId.length > 200) throw new PrivateGraphError(400, 'Choose a subject: subjectKind user, thing or unlinked, and its id');
+    if ((kind !== 'user' && kind !== 'thing' && kind !== 'unlinked') || typeof subjectId !== 'string' || !subjectId || subjectId.length > 512) throw new PrivateGraphError(400, 'Choose a subject: subjectKind user, thing or unlinked, and its id');
     res.json(await getNeighbourhood(owner(req), { kind, id: subjectId }, req.query.depth));
   } catch (error) { fail(error, res); }
 });
 
-// An Unlinked profile as the subject: the overlay ref `unlinked:person:<profileId>`.
+// An Unlinked person as the subject: a published profile id (ref `unlinked:person:<id>`), or one of the owner's imported contacts by connection id or LinkedIn address (ref `linkedin:in:<hash>`).
 router.get('/unlinked-people/:profileId', async (req: Request, res: Response) => {
   try { res.json(await getUnlinkedPersonOverlay(owner(req), id(req, 'profileId'))); } catch (error) { fail(error, res); }
 });

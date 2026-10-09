@@ -71,17 +71,43 @@ these routes never return it.
 
 ## People from Unlinked
 
-An Unlinked profile is the overlay entity named by `unlinked:person:<profileId>`,
-the ref Unlinked itself uses, so Unlinked's own view of the same owner reads the
-same entity. The first write about a profile confirms it with the owner's own
-read-only Unlinked grant (the identity-scoped provisioning OpenChat already uses
-for Unlinked search): only an id Unlinked's published People index answers for
-becomes a person here, under the canonical id when a profile was merged. Later
-writes and every read use the stored ref and do not call Unlinked. Profiles that
-exist only in the owner's private Unlinked import are not published, so they
-cannot be confirmed and are refused; record them as a saved person by name.
-A link `to` may be `{kind:'unlinked', id}`; link ends that are Unlinked profiles
-carry `unlinkedProfileId` next to their saved-thing `id`.
+An Unlinked person is one of two things, and both are confirmed with the
+owner's own read-only Unlinked grant (the identity-scoped provisioning OpenChat
+already uses for Unlinked search) through Unlinked's owner-scoped
+`POST /api/agent/v1/contacts/lookup` (`unlinked_lookup_contact`), which only
+ever answers the owner's own imports and published profiles:
+
+- **A published profile** is the overlay entity named by
+  `unlinked:person:<profileId>`, the ref Unlinked itself uses. Only an id
+  Unlinked's published People index answers for becomes a person here, under
+  the canonical id when a profile was merged. Once stored, writes and reads by
+  that profile id use the ref and do not call Unlinked.
+- **An imported LinkedIn contact** (an `owner_import` row from
+  `unlinked_list_connections`) is named by `linkedin:in:<sha256 of the canonical
+  slug>` (Noos `docs/PEOPLE_OVERLAY.md`, "Imported LinkedIn contacts"). The
+  agent passes the connection id or the contact's `linkedin.com/in/` address;
+  Unlinked returns the hash, so no LinkedIn address is stored in the overlay.
+  The ref survives re-import (Unlinked's connection ids may change), and
+  another owner's import of the same person is that owner's own entity.
+
+`toKind 'unlinked'` (and `subjectKind 'unlinked'`, and
+`GET /api/private/unlinked-people/:id`) accepts either: a 64-hex id is an owner
+connection id, a LinkedIn address is looked up by address, anything else is a
+published profile id. When the same person is both (imported, and published
+on Unlinked), the one entity carries both refs (`ensureRefs` in the vendored
+store): imported first and published later, or the reverse, still reach one
+entity. A published-profile entity written before this change gains the
+LinkedIn ref the next time the contact is written by connection id. A contact
+with neither a LinkedIn address nor a published profile is refused (409); save
+them by name. People saved by name only stay separate unless the owner links
+them explicitly — nothing is merged by name.
+
+Reads show who an end is: `unlinkedProfileId` for a published profile,
+`linkedinRefHash` for an imported contact plus `unlinkedConnectionId` when
+Unlinked names it (one batched lookup per read; omitted when Unlinked cannot
+answer). `oc_get_unlinked_person_private` returns `profileId`, `connectionId`
+and `linkedinRefHash`. Reading by a connection id or address asks Unlinked
+which contact it is, read-only; reading by a published profile id does not.
 
 ## Names, retries and undo
 
@@ -137,7 +163,8 @@ the People screen, lists who is due. Agent tools: `oc_get_person` (name, shared 
 `oc_add_private_link`, `oc_update_private_link`, `oc_delete_private_link`, `oc_delete_private_thing`, `oc_list_private_things`,
 `oc_get_private_thing`, `oc_list_catch_up`. Read results include provenance and
 `relationType`. Unlinked does not show this knowledge yet; tool descriptions say
-so.
+so. Unlinked people, including imported LinkedIn contacts, are reached with
+`toKind`/`subjectKind` `unlinked` (see [People from Unlinked](#people-from-unlinked)).
 
 ## Tests
 
