@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
   return {
     state,
     sessionRun: vi.fn(async (query: string, params: Record<string, unknown>) => {
+      if(query.includes('OpenChatCapture'))return {records:[{get:(key:string)=>key==='c'?({properties:{id:'saved-1',ownerId:params.userId,text:'Private saved message',events:['internal-event']}}):null}]};
       if (query.includes('CREATE (u)-[:OWNS_KEY]->(k)')) {
         state.agentKeys.push({
           id: params.id as string,

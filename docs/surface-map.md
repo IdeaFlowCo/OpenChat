@@ -83,3 +83,13 @@ The public `/` page verifies the current browser's OpenChat session. Signed-in
 visitors see **Signed in as [name]** and **Open OpenChat**; signed-out visitors
 see **Sign in**. It refreshes on return and cross-tab sign-out. Agent setup links
 to the shared `/agents` guide instead of maintaining separate MCP snippets.
+# Saved-message streams (OpenChat-ri8z)
+
+| Noun / feature | Visible door | Behavior |
+| --- | --- | --- |
+| Saved messages | Chats → **Streams** | All saved captures across source conversations; Search and Add visible. |
+| Person stream | Streams → named person/conversation | Private saved and directly written entries; source threads stay separate. |
+| Contact details | Click a saved item's person name, or person → **Contact details** | Apple Contacts fields plus private source-backed details; pinning remains independent. |
+| Connections | Contact details → **Connections and notes** | Existing shared Noos private people overlay, not a new graph. |
+| New entry | Streams → **＋ Add** | Writes in the selected context; does not require an external message. |
+| Mac companion | Streams → **Mac companion** | Pair or disconnect an always-on source Mac; existing personal notes remain under My notes. |

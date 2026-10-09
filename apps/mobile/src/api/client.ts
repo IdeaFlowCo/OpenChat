@@ -1,4 +1,5 @@
 import type { HostedContextPreferences, HostedContextRequest } from '../types/contextHosted';
+import type { CapturePage, CaptureThread } from '../types/messageCaptures';
 import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 /**
  * OpenChat API client for React Native.
@@ -963,6 +964,19 @@ export function addMeCardUrl(token: string): string {
 }
 
 export const api = {
+  getMessageCaptures: (options: { threadId?: string; search?: string; cursor?: string; destination?: string } = {}) => {
+    const params = new URLSearchParams();
+    for (const [key,value] of Object.entries(options)) if(value) params.set(key,value);
+    return request<CapturePage>(`/api/captures?${params}`, { expireAuthOnForbidden: false });
+  },
+  getCaptureThreads: () => request<{threads: CaptureThread[]}>('/api/captures/threads', { expireAuthOnForbidden: false }),
+  getCapturedPerson: (threadId:string) => request<{person:{id:string;name:string}}>(`/api/captures/threads/${encodeURIComponent(threadId)}/person`,{method:'POST',body:'{}',expireAuthOnForbidden:false}),
+  addMessageCapture: (entry: {text:string;threadId?:string;destination:'stream'|'contact';contactLabel?:string;tags:string[];pinned:boolean}) => request<{id:string;threadId:string}>('/api/captures',{method:'POST',body:JSON.stringify(entry),expireAuthOnForbidden:false}),
+  updateMessageCapture: (id: string, patch: {pinned?: boolean; tags?: string[]}) => request<{updated: boolean}>(`/api/captures/${encodeURIComponent(id)}`, {method:'PATCH',body:JSON.stringify(patch),expireAuthOnForbidden:false}),
+  forgetMessageCapture: (id: string) => request<{forgotten: boolean}>(`/api/captures/${encodeURIComponent(id)}`, {method:'DELETE',expireAuthOnForbidden:false}),
+  createCaptureDevice: (name: string) => request<{id:string;name:string;token:string}>('/api/captures/devices',{method:'POST',body:JSON.stringify({name}),expireAuthOnForbidden:false}),
+  getCaptureDevices: () => request<{devices: {id:string;name:string;lastSeenAt:string|null}[]}>('/api/captures/devices',{expireAuthOnForbidden:false}),
+  revokeCaptureDevice: (id: string) => request<{revoked:boolean}>(`/api/captures/devices/${encodeURIComponent(id)}`,{method:'DELETE',expireAuthOnForbidden:false}),
   // ── Context Lane ──────────────────────────────────────────────────────────
   listContextPosts: (conversationId: string, cursor?: string, limit?: number, kind?: string, search?: string) => {
     const params = new URLSearchParams();

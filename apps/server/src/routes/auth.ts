@@ -880,6 +880,11 @@ router.get('/export', requireAuth, requireDirectSession, async (req: Request, re
 
     // Private notes, importance, cadence and links are the owner's data too.
     const privateGraph = await exportPrivateGraph(userId).catch(() => ({ cards: [], notes: [], things: [], links: [], unavailable: true }));
+    const captureExport = await session.run(`MATCH (c:OpenChatCapture {ownerId:$userId}) WHERE c.deletedAt IS NULL AND ($since IS NULL OR c.createdAt >= $since) OPTIONAL MATCH (c)-[:IN_CAPTURE_THREAD]->(t:OpenChatCaptureThread {ownerId:$userId}) RETURN c,t{.id,.title,.participants,.contactDetailsJson,.contactModifiedAt} AS sourceThread`, {userId,since});
+    const savedMessages = captureExport.records.map(r => {
+      const {events: _events,...capture} = r.get('c').properties;
+      return {...capture,sourceThread:r.get('sourceThread')??null};
+    });
 
     const exportedAt = new Date().toISOString();
     sendJsonDownload(res, `openchat-account-${range}.json`, {
@@ -902,6 +907,7 @@ router.get('/export', requireAuth, requireDirectSession, async (req: Request, re
       stories: ((toJS(record.get('stories')) as unknown[] | undefined) ?? []).filter(Boolean),
       intents: ((toJS(record.get('intents')) as unknown[] | undefined) ?? []).filter(Boolean),
       privateGraph,
+      savedMessages,
       socialPreferences: (toJS(record.get('socialPreferences')) as Record<string, unknown> | null) ?? {
         experienceMode: 'enhanced',
         networkPaused: false,
@@ -1502,6 +1508,9 @@ router.delete('/me', requireAuth, requireDirectSession, async (req: Request, res
 
     // Run everything in a single write transaction for atomicity.
     await session.executeWrite(async (tx) => {
+      for (const label of ['OpenChatCapture', 'OpenChatCaptureThread', 'OpenChatCaptureDevice']) {
+        await tx.run(`MATCH (n:${label} {ownerId:$userId}) DETACH DELETE n`,{userId});
+      }
       // 1. Redact messages authored by this user.
       await tx.run(`
         MATCH (m:Message {senderId: $userId})

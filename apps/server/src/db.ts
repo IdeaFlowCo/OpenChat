@@ -25,6 +25,11 @@ export async function initDatabase(): Promise<void> {
   const session = getDriver().session();
 
   try {
+    for (const label of ['OpenChatCapture', 'OpenChatCaptureThread', 'OpenChatCaptureDevice']) {
+      await session.run(`CREATE CONSTRAINT ${label.toLowerCase()}_id IF NOT EXISTS FOR (n:${label}) REQUIRE n.id IS UNIQUE`);
+      await session.run(`CREATE INDEX ${label.toLowerCase()}_owner IF NOT EXISTS FOR (n:${label}) ON (n.ownerId)`);
+    }
+    await session.run('CREATE CONSTRAINT openchatcapturedevice_token IF NOT EXISTS FOR (d:OpenChatCaptureDevice) REQUIRE d.tokenHash IS UNIQUE');
     // Create constraints for Conversation
     await session.run(`
       CREATE CONSTRAINT conversation_id IF NOT EXISTS

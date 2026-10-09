@@ -728,6 +728,14 @@ export async function resolvePrivateThing(ownerId: string, raw: unknown): Promis
   return { id: entity.id, kind: entity.kind, name: entity.name };
 }
 
+/** Bind a source identity to the shared private people graph. A ref, not a name,
+ * is the join key; this never merges same-named people or creates an account. */
+export async function ensureCapturedPerson(ownerId: string, name: string, sourceRef: string): Promise<Thing> {
+  const principal=await ownerPrincipal(ownerId);
+  const {entity}=await overlayCall(overlay=>overlay.ensure(principal,{kind:'person',name:cleanText(name,120,'Name'),ref:`openchat:source-person:${refValue(sourceRef)}`}));
+  return {id:entity.id,kind:'person',name:entity.name};
+}
+
 /** Saved companies, ideas, projects and people-by-name. People on OpenChat are reached through their profile instead. */
 export async function listThings(ownerId: string, query: unknown, kind: unknown): Promise<{ things: Thing[] }> {
   if (kind !== undefined && !THING_KINDS.includes(kind as ThingKind)) fail(400, 'Unknown kind');
