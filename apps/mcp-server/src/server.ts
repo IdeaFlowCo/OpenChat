@@ -1119,14 +1119,18 @@ export function buildServer(
   );
 
   // ---- private graph: the owner's own notes and links about people ----
-  const PRIVATE_PEOPLE = "Private people knowledge: only the owner sees it, in OpenChat and Unlinked; it never notifies anyone or changes a public profile.";
+  const PRIVATE_PEOPLE = "Private people knowledge: only the owner sees it, shown in OpenChat (an Unlinked view is coming); it never notifies anyone or changes a public profile.";
+  const PROVENANCE = "Notes and relations carry author ('owner' or 'agent:<name>'), source ('app', 'connector', 'direct-key' or 'suggestion') and assertion ('stated' or 'inferred'), null on records made before provenance was kept; relations also carry relationType.";
+  const RELATION_TYPES = ['knows', 'family', 'works_at', 'worked_with', 'works_on', 'attended', 'interested_in', 'other'] as const;
+  const assertionSchema = z.enum(['stated', 'inferred']).optional().describe("'stated' (default) when the owner said it; 'inferred' when you concluded it yourself");
   const subjectSchema = {
     subjectKind: z.enum(['user', 'thing', 'unlinked']).describe("'user' for a person on OpenChat (use their user id), 'thing' for one of the owner's saved companies, ideas, projects or people (use its id), 'unlinked' for an Unlinked profile (use the profile id from an Unlinked tool result)"),
     subjectId: z.string().min(1).max(200).describe('The user id, saved-thing id or Unlinked profile id'),
   };
   const DESTRUCTIVE_PRIVATE = new Set(['oc_delete_private_note', 'oc_delete_private_link', 'oc_delete_private_thing']);
+  const READ_ONLY_PRIVATE = new Set(['oc_search_private', 'oc_get_neighbourhood']);
   const privateTool = (name: string, title: string, description: string, inputSchema: Record<string, z.ZodTypeAny>, run: (input: any) => Promise<unknown>) =>
-    server.registerTool(name, { title, description, inputSchema, ...(DESTRUCTIVE_PRIVATE.has(name) ? { annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } } : {}) }, async (input: any) => {
+    server.registerTool(name, { title, description, inputSchema, ...(DESTRUCTIVE_PRIVATE.has(name) ? { annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } } : READ_ONLY_PRIVATE.has(name) ? { annotations: { readOnlyHint: true, openWorldHint: false } } : {}) }, async (input: any) => {
       try { requireApiKey(api, title); return jsonResult(await run(input)); } catch (e) { return errorResult(e); }
     });
 
@@ -1140,7 +1144,7 @@ export function buildServer(
     });
 
   privateTool('oc_get_person_private', 'Read private card for a person',
-    "Read the owner's private card about a person: importance, catch-up cadence and next due date, private notes, and private links to people, companies, ideas and projects. Only the owner ever sees this; the person it is about does not.",
+    `Read the owner's private card about a person: importance, catch-up cadence and next due date, private notes, and private links to people, companies, ideas and projects. Only the owner ever sees this; the person it is about does not. ${PROVENANCE}`,
     { userId: z.string().min(1).max(200).describe('The OpenChat user id of the person') },
     ({ userId }) => api.getPrivatePerson(userId));
 
@@ -1156,15 +1160,15 @@ export function buildServer(
     ({ userId, ...patch }) => api.updatePrivatePerson(userId, patch));
 
   privateTool('oc_add_private_note', 'Add a private note',
-    `Add a note that only the owner can see, about a person, an Unlinked profile, or one of the owner's saved companies, ideas, projects or people. The same text again returns the existing note. ${PRIVATE_PEOPLE}`,
-    { ...subjectSchema, text: z.string().min(1).max(4000) },
-    ({ subjectKind, subjectId, text }) => api.addPrivateNote({ kind: subjectKind, id: subjectId }, text));
+    `Add a note that only the owner can see, about a person, an Unlinked profile, or one of the owner's saved companies, ideas, projects or people. The same text again returns the existing note. Recorded as written by this agent key. ${PRIVATE_PEOPLE}`,
+    { ...subjectSchema, text: z.string().min(1).max(4000), assertion: assertionSchema },
+    ({ subjectKind, subjectId, text, assertion }) => api.addPrivateNote({ kind: subjectKind, id: subjectId }, text, assertion));
 
   privateTool('oc_delete_private_note', 'Delete a private note', "Delete one of the owner's private notes by id.",
     { noteId: z.string().min(1).max(64) }, ({ noteId }) => api.deletePrivateNote(noteId));
 
   privateTool('oc_add_private_link', 'Link a person or thing to another',
-    `Record a private relation in the owner's own words ('knows', 'sister of', 'worked with', 'works at') from a person, Unlinked profile or saved thing to another. toKind 'user' with toId for a person on OpenChat; toKind 'unlinked' with toId for an Unlinked profile id; otherwise toId for a saved thing or toName. A name is reused only when it names exactly one saved thing; if several people share it the call fails with code ambiguous_name and candidates, so ask which one and pass its id. createNew with a clientRequestId saves a different person with an existing name. Repeating the same relation returns the same link. ${PRIVATE_PEOPLE}`,
+    `Record a private relation in the owner's own words ('knows', 'sister of', 'worked with', 'works at') from a person, Unlinked profile or saved thing to another. toKind 'user' with toId for a person on OpenChat; toKind 'unlinked' with toId for an Unlinked profile id; otherwise toId for a saved thing or toName. A name is reused only when it names exactly one saved thing; if several people share it the call fails with code ambiguous_name and candidates, so ask which one and pass its id. createNew with a clientRequestId saves a different person with an existing name. Repeating the same relation returns the same link. Recorded as written by this agent key, with a relationType derived from its words. ${PRIVATE_PEOPLE}`,
     {
       ...subjectSchema,
       relation: z.string().min(1).max(60),
@@ -1173,9 +1177,25 @@ export function buildServer(
       toName: z.string().min(1).max(120).optional(),
       createNew: z.boolean().optional(),
       clientRequestId: z.string().min(1).max(200).optional(),
+      assertion: assertionSchema,
     },
-    ({ subjectKind, subjectId, relation, toKind, toId, toName, createNew, clientRequestId }) =>
-      api.addPrivateLink({ kind: subjectKind, id: subjectId }, relation, { kind: toKind, ...(toId ? { id: toId } : {}), ...(toName ? { name: toName } : {}), ...(createNew !== undefined ? { createNew } : {}), ...(clientRequestId ? { clientRequestId } : {}) }));
+    ({ subjectKind, subjectId, relation, toKind, toId, toName, createNew, clientRequestId, assertion }) =>
+      api.addPrivateLink({ kind: subjectKind, id: subjectId }, relation, { kind: toKind, ...(toId ? { id: toId } : {}), ...(toName ? { name: toName } : {}), ...(createNew !== undefined ? { createNew } : {}), ...(clientRequestId ? { clientRequestId } : {}) }, assertion));
+
+  privateTool('oc_update_private_link', 'Correct a private relation',
+    `Correct one of the owner's private relations in place by link id, for example 'sister of' to 'cousin of'. The relation text, its relationType and the link's identity change together; if the owner already has that exact relation between the same two ends, the two become one and the existing link is returned with merged true. ${PRIVATE_PEOPLE}`,
+    { linkId: z.string().min(1).max(64), relation: z.string().min(1).max(60), assertion: assertionSchema },
+    ({ linkId, relation, assertion }) => api.updatePrivateLink(linkId, relation, assertion));
+
+  privateTool('oc_search_private', "Search the owner's private people knowledge",
+    `Search saved people, companies, ideas and projects, plus OpenChat people and Unlinked people the owner has written about, by name or private note text; and private relations by relation text, either end's name, or relationType (${RELATION_TYPES.join(', ')}). Give at least one of query, relationType or kind. Bounded; truncated says more matched. ${PROVENANCE} ${PRIVATE_PEOPLE}`,
+    { query: z.string().max(120).optional(), relationType: z.enum(RELATION_TYPES).optional(), kind: z.enum(['person', 'company', 'idea', 'project']).optional(), limit: z.number().int().min(1).max(50).optional() },
+    ({ query, relationType, kind, limit }) => api.searchPrivate({ q: query, relationType, kind, limit }));
+
+  privateTool('oc_get_neighbourhood', 'Read what surrounds a person or thing',
+    `Read one person or thing and everything one (default) or two private relations away, with those relations (fromId/toId). Never creates anything; empty when nothing is recorded. Bounded; truncated says it was cut. ${PROVENANCE} ${PRIVATE_PEOPLE}`,
+    { ...subjectSchema, depth: z.number().int().min(1).max(2).optional() },
+    ({ subjectKind, subjectId, depth }) => api.getPrivateNeighbourhood({ kind: subjectKind, id: subjectId }, depth));
 
   privateTool('oc_get_unlinked_person_private', 'Read private card for an Unlinked profile',
     `Read the owner's private notes and relations about an Unlinked profile (profile id from an Unlinked tool result). ${PRIVATE_PEOPLE}`,

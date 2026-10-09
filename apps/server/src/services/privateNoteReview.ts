@@ -1,17 +1,38 @@
-/** OpenChat review metadata extends, rather than changes, the Noos-owned overlay. */
+/**
+ * OpenChat review metadata extends, rather than changes, the Noos-owned
+ * overlay. Every overlay write here (the captured note, and the entities and
+ * links an applied suggestion creates) goes through the vendored Noos store's
+ * transaction forms, so the overlay's rules (note dedupe, names never merging,
+ * link identity, provenance) have one implementation. Applied suggestions are
+ * recorded as source `suggestion`, assertion `inferred`.
+ */
 import { nanoid } from 'nanoid';
 import type Anthropic from '@anthropic-ai/sdk';
 import { getDriver } from '../db.js';
-import { cleanText, cleanRelation, nameKey, LIMITS, THING_KINDS, privateReviewSubject, privateReviewPrincipal, PrivateGraphError } from './privateGraph.js';
-import type { PrivateNote, ThingKind } from './privateGraph.js';
+import { cleanText, cleanRelation, nameKey, LIMITS, THING_KINDS, OWNER_PROVENANCE, privateReviewSubject, privateReviewPrincipal, PrivateGraphError } from './privateGraph.js';
+import type { PrivateNote, Provenance, ThingKind } from './privateGraph.js';
+import { OverlayError } from './overlay/contract.js';
+import { addLinkIn, addNoteIn, deleteLinkIn, resolveIn } from './overlay/store.js';
 
 export type ReviewSubject = { kind: 'user' | 'thing'; id: string };
-export interface Suggestion { id: string; kind: 'ask' | 'connection'; text: string; relation?: string; target?: { kind: ThingKind; name: string }; evidence: string; duplicate?: boolean; similar?: boolean }
+/** `target.id` (set only by an owner's edit) picks one of the owner's existing saved things when a name is shared. */
+export interface Suggestion { id: string; kind: 'ask' | 'connection'; text: string; relation?: string; target?: { kind: ThingKind; name: string; id?: string }; evidence: string; duplicate?: boolean; similar?: boolean }
 export interface PrivateAsk { id: string; text: string; sourceNoteId: string; createdAt: string; reviewId: string; status: 'active' | 'paused' | 'closed' }
 export interface NoteReview { id: string; subject: ReviewSubject; note: PrivateNote; status: 'saved' | 'ready' | 'unavailable' | 'failed' | 'applied' | 'undone'; suggestions: Suggestion[]; appliedIds: string[]; createdAt: string; appliedAt?: string; sourceNoteAvailable?: boolean; asStandingAsk?: boolean; createdRecords?: {id: string; kind: 'ask' | 'connection'; suggestionId: string}[] }
 const fail = (status: number, message: string): never => { throw new PrivateGraphError(status, message); };
 const session = () => getDriver().session({ database: process.env.NEO4J_DATABASE || 'neo4j' });
 const decode = (value: unknown): NoteReview => JSON.parse(String(value)) as NoteReview;
+/** Overlay refusals inside a review transaction, in the app's own words; the transaction rolls back. */
+function overlayRefusal(error: unknown): never {
+  if (error instanceof OverlayError && error.code === 'ambiguous_name') {
+    throw new PrivateGraphError(409, 'More than one saved item has that name. Edit the suggestion to choose one, or save it by hand.', { code: 'ambiguous_name', candidates: error.details?.candidates ?? [] });
+  }
+  if (error instanceof OverlayError && error.status < 500) {
+    const messages: Record<string, string> = { note_limit: 'This card has reached its note limit', link_limit: 'Link limit reached', entity_limit: 'Saved item limit reached', self_link: 'Choose something else to link to', not_found: 'Not found' };
+    throw new PrivateGraphError(error.status, messages[error.code] ?? 'Check what you entered and try again');
+  }
+  throw error;
+}
 
 export function parseSuggestions(raw: unknown, source: string): Suggestion[] {
   if (!Array.isArray(raw) || raw.length > 20) return fail(400, 'Invalid suggestions');
@@ -27,6 +48,10 @@ export function parseSuggestions(raw: unknown, source: string): Suggestion[] {
       if (!target || !THING_KINDS.includes(target.kind as ThingKind)) return fail(400, 'Choose a saved item type');
       result.relation = cleanRelation(v.relation);
       result.target = { kind: target.kind as ThingKind, name: cleanText(target.name, LIMITS.nameLength, 'Name') };
+      if (target.id !== undefined) {
+        if (typeof target.id !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(target.id)) return fail(400, 'Unknown saved item');
+        result.target.id = target.id;
+      }
     }
     return result;
   });
@@ -69,7 +94,7 @@ export async function extractNoteSuggestions(text: string, name: string): Promis
   throw new Error('No valid extraction result');
 }
 
-export async function captureNoteReview(ownerId: string, subject: ReviewSubject, body: unknown): Promise<NoteReview> {
+export async function captureNoteReview(ownerId: string, subject: ReviewSubject, body: unknown, by: Provenance = OWNER_PROVENANCE): Promise<NoteReview> {
   const input = body as { text?: unknown; requestId?: unknown; asStandingAsk?: unknown };
   if (input?.asStandingAsk !== undefined && typeof input.asStandingAsk !== 'boolean') return fail(400, 'asStandingAsk must be true or false');
   const asStandingAsk = input?.asStandingAsk === true;
@@ -87,10 +112,9 @@ export async function captureNoteReview(ownerId: string, subject: ReviewSubject,
         if (existing.note.text !== text || (existing.asStandingAsk === true) !== asStandingAsk) return fail(409, 'This request ID was already used for another note or capture mode');
         return existing;
       }
-      const count = await tx.run('MATCH (n:OverlayNote {ownerKey:$ownerKey,entityId:$entityId}) RETURN count(n) AS total', { ownerKey: principal.ownerKey, entityId });
-      if (Number(count.records[0]?.get('total') ?? 0) >= LIMITS.notesPerSubject) return fail(409, 'This card has reached its note limit');
+      // The note goes through the overlay (limit, dedupe, provenance); its ledger commits with it.
+      const { note } = await addNoteIn(tx, principal.ownerKey, entityId, text, by).catch(overlayRefusal) as { note: PrivateNote };
       const now = new Date().toISOString();
-      const note: PrivateNote = { id: nanoid(), text, createdAt: now, updatedAt: now };
       const review: NoteReview = { id: nanoid(), subject, note, status: asStandingAsk ? 'ready' : 'saved', suggestions: asStandingAsk ? [{ id: nanoid(), kind: 'ask', text, evidence: text }] : [], appliedIds: [], createdAt: now, asStandingAsk };
       if (asStandingAsk) {
         const asks = await tx.run('MATCH (a:OpenChatPrivateAsk {ownerKey:$ownerKey,entityId:$entityId}) RETURN a.text AS text', { ownerKey: principal.ownerKey, entityId });
@@ -98,8 +122,6 @@ export async function captureNoteReview(ownerId: string, subject: ReviewSubject,
         review.suggestions[0]!.duplicate = existing.some(t => nameKey(t) === nameKey(text));
         review.suggestions[0]!.similar = !review.suggestions[0]!.duplicate && existing.some(t => similarAsk(t, text));
       }
-      // Same canonical OverlayNote shape as OverlayStore.addNote. Both note and ledger commit together.
-      await tx.run('MATCH (e:OverlayEntity {id:$entityId,ownerKey:$ownerKey}) CREATE (:OverlayNote {id:$id,ownerKey:$ownerKey,entityId:$entityId,text:$text,audience:"owner",createdAt:$createdAt,updatedAt:$updatedAt})-[:NOTE_ABOUT]->(e)', { ...note, entityId, ownerKey: principal.ownerKey });
       await tx.run('CREATE (r:OpenChatNoteReview {id:$id,ownerKey:$ownerKey,entityId:$entityId,requestId:$requestId,audience:"owner",payload:$payload})', { id: review.id, ownerKey: principal.ownerKey, entityId, requestId, payload: JSON.stringify(review) });
       return review;
     });
@@ -158,7 +180,7 @@ export async function suggestNoteReview(ownerId: string, reviewId: string): Prom
   } finally { await db.close(); }
 }
 
-export async function applyNoteReview(ownerId: string, reviewId: string, raw: unknown): Promise<NoteReview> {
+export async function applyNoteReview(ownerId: string, reviewId: string, raw: unknown, by: Provenance = OWNER_PROVENANCE): Promise<NoteReview> {
   const input = raw as { suggestionIds?: unknown; edits?: unknown };
   if (!Array.isArray(input?.suggestionIds) || input.suggestionIds.length > 20 || input.suggestionIds.some(id => typeof id !== 'string')) return fail(400, 'Choose suggestions to save');
   const selected = new Set(input.suggestionIds as string[]);
@@ -197,23 +219,18 @@ export async function applyNoteReview(ownerId: string, reviewId: string, raw: un
           await tx.run('CREATE (a:OpenChatPrivateAsk {id:$id,ownerKey:$ownerKey,entityId:$entityId,text:$text,textKey:$textKey,audience:"owner",status:"active",revision:0,sourceNoteId:$sourceNoteId,reviewId:$reviewId,createdAt:$now,updatedAt:$now})', { id, ownerKey, entityId, text: suggestion.text, textKey: nameKey(suggestion.text), sourceNoteId: review.note.id, reviewId, now });
         } else {
           const target = suggestion.target!, relation = suggestion.relation!;
-          // Canonical Noos overlay entity name-slot and link identity; never add new contract fields.
-          const nameSlot = `${target.kind}\n${nameKey(target.name)}`;
-          const count = await tx.run('MATCH (e:OverlayEntity {ownerKey:$ownerKey}) RETURN count(e) AS total', { ownerKey });
-          const targetRow = await tx.run('MATCH (e:OverlayEntity {ownerKey:$ownerKey,nameSlot:$nameSlot}) RETURN e.id AS id', { ownerKey, nameSlot });
-          let targetId = targetRow.records[0]?.get('id') as string | undefined;
-          if (!targetId) {
-            if (Number(count.records[0]?.get('total')) >= LIMITS.thingsPerOwner) return fail(409, 'Saved item limit reached');
-            targetId = nanoid();
-            await tx.run('CREATE (e:OverlayEntity {id:$id,ownerKey:$ownerKey,kind:$kind,name:$name,nameKey:$nameKey,nameSlot:$nameSlot,audience:"owner",important:false,cadenceMode:"fixed",createdAt:$now,updatedAt:$now})', { id: targetId, ownerKey, kind: target.kind, name: target.name, nameKey: nameKey(target.name), nameSlot, now });
-          }
+          // The overlay resolves the name (never merging same-named people) and owns link identity.
+          let targetId: string;
+          if (target.id) {
+            const chosen = await tx.run('MATCH (e:OverlayEntity {id:$id,ownerKey:$ownerKey,kind:$kind}) WHERE NOT EXISTS { MATCH (r:OverlayRef)-[:REF_OF]->(e) WHERE r.ref STARTS WITH "openchat:user:" } RETURN e.id AS id', { id: target.id, ownerKey, kind: target.kind });
+            if (!chosen.records.length) return fail(404, 'Not found');
+            targetId = target.id;
+          } else targetId = (await resolveIn(tx, ownerKey, principal.app, { kind: target.kind, name: target.name, requestId: null }).catch(overlayRefusal)).entity.id;
           if (targetId === entityId) return fail(400, 'Choose something else to link to');
-          const linkKey = JSON.stringify([entityId, relation, targetId]);
-          const existing = await tx.run('MATCH (:OverlayEntity {id:$entityId,ownerKey:$ownerKey})-[l:OVERLAY_LINK {linkKey:$linkKey}]->(:OverlayEntity {id:$targetId,ownerKey:$ownerKey}) RETURN l.id AS id', { entityId, ownerKey, targetId, linkKey });
-          if (existing.records.length) continue;
-          const links = await tx.run('MATCH (:OverlayEntity {ownerKey:$ownerKey})-[l:OVERLAY_LINK]->() RETURN count(l) AS total', { ownerKey });
-          if (Number(links.records[0]?.get('total')) >= LIMITS.linksPerOwner) return fail(409, 'Link limit reached');
-          await tx.run('MATCH (a:OverlayEntity {id:$entityId,ownerKey:$ownerKey}), (b:OverlayEntity {id:$targetId,ownerKey:$ownerKey}) CREATE (a)-[:OVERLAY_LINK {id:$id,ownerKey:$ownerKey,relation:$relation,linkKey:$linkKey,audience:"owner",createdAt:$now}]->(b)', { id, ownerKey, entityId, targetId, relation, linkKey, now });
+          const added = await addLinkIn(tx, ownerKey, entityId, relation, targetId, { author: by.author, source: 'suggestion', assertion: 'inferred' }).catch(overlayRefusal);
+          if (!added.created) continue;
+          review.createdRecords.push({ id: added.link.id, kind: suggestion.kind, suggestionId: suggestion.id });
+          continue;
         }
         review.createdRecords.push({ id, kind: suggestion.kind, suggestionId: suggestion.id });
       }
@@ -238,7 +255,8 @@ export async function undoNoteReview(ownerId: string, reviewId: string): Promise
       if (Number(changed.records[0]?.get('total') ?? 0)) return fail(409, 'An ask in this batch was edited after import. Undo would erase that edit.');
       for (const record of review.createdRecords ?? []) {
         if (record.kind === 'ask') await tx.run('MATCH (a:OpenChatPrivateAsk {id:$id,ownerKey:$ownerKey,reviewId:$reviewId}) DETACH DELETE a', { id: record.id, ownerKey: principal.ownerKey, reviewId });
-        else await tx.run('MATCH ()-[l:OVERLAY_LINK {id:$id,ownerKey:$ownerKey}]->() DELETE l', { id: record.id, ownerKey: principal.ownerKey });
+        // Already removed by hand is fine: undo removes what is still there.
+        else await deleteLinkIn(tx, principal.ownerKey, record.id).catch(error => { if (!(error instanceof OverlayError && error.status === 404)) throw error; });
       }
       review.status = 'undone';
       await tx.run('MATCH (r:OpenChatNoteReview {id:$id,ownerKey:$ownerKey}) SET r.payload=$payload', { id: reviewId, ownerKey: principal.ownerKey, payload: JSON.stringify(review) });

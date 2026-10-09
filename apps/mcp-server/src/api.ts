@@ -411,12 +411,18 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<unknown>('GET', `/api/private/people/${encodeURIComponent(userId)}`),
     updatePrivatePerson: (userId: string, body: Record<string, unknown>) =>
       request<unknown>('PATCH', `/api/private/people/${encodeURIComponent(userId)}`, { body }),
-    addPrivateNote: (subject: { kind: 'user' | 'thing' | 'unlinked'; id: string }, text: string) =>
-      request<unknown>('POST', `${privateSubjectPath(subject)}/notes`, { body: { text } }),
+    addPrivateNote: (subject: { kind: 'user' | 'thing' | 'unlinked'; id: string }, text: string, assertion?: 'stated' | 'inferred') =>
+      request<unknown>('POST', `${privateSubjectPath(subject)}/notes`, { body: { text, ...(assertion ? { assertion } : {}) } }),
     deletePrivateNote: (noteId: string) =>
       request<unknown>('DELETE', `/api/private/notes/${encodeURIComponent(noteId)}`),
-    addPrivateLink: (subject: { kind: 'user' | 'thing' | 'unlinked'; id: string }, relation: string, to: Record<string, unknown>) =>
-      request<unknown>('POST', `${privateSubjectPath(subject)}/links`, { body: { relation, to } }),
+    addPrivateLink: (subject: { kind: 'user' | 'thing' | 'unlinked'; id: string }, relation: string, to: Record<string, unknown>, assertion?: 'stated' | 'inferred') =>
+      request<unknown>('POST', `${privateSubjectPath(subject)}/links`, { body: { relation, to, ...(assertion ? { assertion } : {}) } }),
+    updatePrivateLink: (linkId: string, relation: string, assertion?: 'stated' | 'inferred') =>
+      request<unknown>('PATCH', `/api/private/links/${encodeURIComponent(linkId)}`, { body: { relation, ...(assertion ? { assertion } : {}) } }),
+    searchPrivate: (query: { q?: string; relationType?: string; kind?: string; limit?: number }) =>
+      request<unknown>('GET', '/api/private/search', { query }),
+    getPrivateNeighbourhood: (subject: { kind: 'user' | 'thing' | 'unlinked'; id: string }, depth?: number) =>
+      request<unknown>('GET', '/api/private/neighbourhood', { query: { subjectKind: subject.kind, subjectId: subject.id, depth } }),
     getUnlinkedPersonPrivate: (profileId: string) =>
       request<unknown>('GET', `/api/private/unlinked-people/${encodeURIComponent(profileId)}`),
     resolvePrivateThing: (body: Record<string, unknown>) =>
