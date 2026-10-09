@@ -157,7 +157,7 @@ def body_text(row):
     if not blob:
         return '', True
     # Recognize only the common typedstream NSString envelope. Unknown encodings
-    # go to the local review queue with original bytes, never lossy replacement.
+    # go to the local review queue by source reference, never lossy replacement.
     try:
         start = blob.index(b'NSString') + len(b'NSString')
         data = blob[start:]

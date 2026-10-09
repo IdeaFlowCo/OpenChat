@@ -675,10 +675,8 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
 /**
  * GET /api/auth/export?range=last_day
  *
- * Download an account-scoped JSON bundle: profile, conversations the caller is
- * still a participant in, matching messages for the selected range, thoughts,
- * blocked users, and non-secret agent key metadata if present. The optional
- * range query defaults to `last_day`.
+ * Direct-human-session export; see docs/connect-your-bot.md#account-export
+ * for the contents, range, and credential contract.
  */
 router.get('/export', requireAuth, requireDirectSession, requireDirectHumanSession, async (req: Request, res: Response) => {
   const session = getDriver().session();

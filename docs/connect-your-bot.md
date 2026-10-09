@@ -185,11 +185,15 @@ tappable link to the filed resource:
 |--------|------|-------------|
 | `GET` | `/api/auth/export?range=<range>` | Download an account JSON export |
 
-Account export requires a user JWT, not an agent key. The optional `range`
+Account export requires a direct signed-in human session. Agent keys, embedded
+sessions, and delegated connectors cannot use it. The optional `range`
 query defaults to `last_day`; supported values are `last_hour`, `last_day`,
 `last_week`, `last_month`, and `all_time`. The export includes profile,
 conversations, range-filtered messages and thoughts, blocked users, and
-non-secret agent key metadata. Plaintext keys are never included.
+non-secret agent key metadata. It also includes live private captures in
+`savedMessages`, filtered by capture creation time for the selected range, with
+source-thread and contact-snapshot metadata. Forgotten captures and plaintext
+keys are never included.
 
 ---
 

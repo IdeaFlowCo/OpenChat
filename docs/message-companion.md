@@ -5,13 +5,8 @@ run the companion archive-only. Do not sync or import real data into production,
 enable uploads, or deploy until the security review is complete and release is
 authorized. Code validation and PR preparation may continue with synthetic data.
 
-OpenChat's **Streams** tab opens **Saved from messages** directly. **All saved**
-combines private captures across source conversations and directly written notes.
-Select a conversation to see its stream. Click the person byline to open their
-**Contact details**; **Stream** and **Contact details** are visible peer views.
-Search and **Add** remain available. Add in All saved writes to My notes; Add in
-a person stream writes there; Add in Contact details creates a labeled field.
-Existing personal Stream notes remain under **My notes**.
+For the Streams landing screen, direct writing, and existing personal notes,
+see [Messages and Stream](../README.md#messages-and-stream).
 
 Pin is an owner-private placement choice, independent of a contact field. Saving
 or pinning an external message never publishes it, sends a reply, joins anyone
@@ -55,13 +50,17 @@ python3 scripts/message-companion/service.py status
 python3 scripts/message-companion/service.py stop
 ```
 
-Use `--state`, `--messages`, `--config`, and `--account` **before** the subcommand.
+For `companion.py`, use `--state`, `--messages`, `--config`, and `--account`
+**before** the subcommand. `service.py` takes its options after the action.
 The same account namespace must mean the same Messages account on each Mac.
 `service.py install --archive-only` installs a local capture-only watcher before
 server pairing. After pairing and lifting the security-review hold, run `service.py install --upload-enabled` to enable
 uploads, or `service.py install --archive-only` to disable them again. Reinstalling
-without either flag preserves the installed mode and state path. The service
-uses a private outbox, exclusive watcher lock, periodic full reconciliation,
+without either flag preserves the installed mode and state path. A first install
+without a mode flag enables upload attempts; always pass `--archive-only` while
+the hold applies. Standalone `sync` uploads immediately, and `watch` attempts
+uploads unless given `--archive-only`; the hold is an operational restriction,
+not a code-enforced switch. The service uses a private outbox, exclusive watcher lock, periodic full reconciliation,
 launchd restart, and retry with checkpoints retained. Stop unloads the service;
 install loads it again. It runs independently of the OpenChat window, so the
 same GUI can be installed on both Macs without keeping a window open.
@@ -91,7 +90,7 @@ title, birthday, website). It imports a dated snapshot attached to the source
 thread. Source field labels are preserved and checked alongside values; confidential
 fields are omitted before queueing and scrubbed from staged snapshots before
 upload. Canonical Contacts records are unchanged. Apple notes are excluded. The UI labels the snapshot **From Apple
-Contacts**. Current code is source reading plus explicit address append, not a
+Contacts**. Current code is source reading plus explicit address/note append, not a
 general bidirectional sync engine or a replacement for every Apple Contacts field.
 
 `add-address.applescript CONTACT_NAME STREET` appends an explicitly supplied
@@ -101,6 +100,13 @@ the saved value. Contacts.app controls permission and account synchronization.
 Never write Contacts SQLite directly. Do not infer a city, home label or country
 from an incomplete source message. Adding a detail in OpenChat does not silently
 write it to Apple Contacts. Full field editing/conflict review is a later adapter.
+
+`osascript scripts/message-companion/add-contact-note.applescript CONTACT_NAME NOTE`
+explicitly appends a locally supplied line to exactly one matching contact,
+retains existing notes, and returns a fixed status after verification. An already
+present line is not appended again. This helper is run from the repository and
+is not copied by the service installer; appended Apple notes remain excluded
+from capture snapshots. Keep real private values in the local-only workflow.
 
 ## Data and API contract
 
@@ -116,8 +122,9 @@ One source message has one capture per owner/source thread; new trigger events
 union tags. Replays never re-pin an item the owner unpinned. Forget removes
 payload and leaves a tombstone preventing reimport. The Mac's historical outbox
 is a separate local archive; Forget in OpenChat does not erase Messages or that
-local archive. Account export includes live saved messages; deletion removes
-all captures, threads and devices for the owner. HTTP responses are no-store.
+local archive. See the [account export contract](connect-your-bot.md#account-export) for
+saved-message export and session requirements. Account deletion removes all
+captures, threads and devices for the owner. HTTP responses are no-store.
 
 ## Design continuation
 

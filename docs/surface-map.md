@@ -25,7 +25,7 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | `ScanQr` | People / Me | **Scan a code** | 1. Profile › "Scan a code" button (under QR)<br>2. New message › "Scan a code" top row<br>3. Settings › Contacts › Scan QR | 2 | Native and browser scanner; see [card scanning usage and fallbacks](../apps/mobile/README.md#scan-an-openchat-card). |
 | `ContactProfile` | People | **Profile** (screen: **Contact info**) | In-chat header tap; Chats › Friends/People/Search › Profile | 2 | View the visible official profile without starting a DM; conversation-backed profiles also show available presence, groups in common and contact details. See [client usage](../apps/mobile/README.md#set-a-private-contact-name). **Asks** lists the Stories this person shared with the viewer (the Stories feed narrowed to one author; enhanced mode only), each with **Respond** opening the Story. A collapsed **Private to you** card holds the viewer's own notes, importance, catch-up cadence and links to people, companies, ideas and projects; only the viewer ever sees it. |
 | `ContactProfile` private names | People | **Set private name** / **Edit private name** | Chats › Friends/People/Search › Profile; or person chat › named header | 2 | See [private contact name usage](../apps/mobile/README.md#set-a-private-contact-name) and the [API/privacy contract](private-contact-names.md). |
-| `PrivateThing` | People | **Private notes** (item name) | Contact Info › Private to you › a linked company, idea, project or person | 3 | One of the viewer's own saved things with its private notes and links; each link opens the next person or thing. Reached only from a link, so it sits one tap past the two-tap rule by design. |
+| `PrivateThing` | People | **Private notes** (item name) | Contact Info › Private to you › a linked company, idea, project or person | 3 | One of the viewer's own saved things with its private notes and links; each link opens the next person or thing. Also reached from saved-message Contact details › Connections and notes; these paths exceed the two-tap rule. |
 | `CatchUp` | People | **Catch up** | Chats › New message › "Catch up" | 2 | People whose private catch-up date has passed, soonest first, with a Caught up action. Cadence is set on each person's Private to you card. |
 | `CardEntry` | People | **Add friend** / **Save contact** | Profile › Scan a code › card; shared `/c/:token` link | 2 | Shows the public card and no-login vCard download. Sends an explicit friend request; pending and accepted states are shown on revisit. Old clients retain card-to-DM. |
 | `PersonEntry` | People | **Add friend** | Chats › Find people › "Add friend" beside a person; shared person link | 2 | Public person preview with an explicit request action; Message keeps its existing DM behavior. |
@@ -38,7 +38,7 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | `StoryComposer` | Asks | **Share a Story** | Asks screen › "Share a Story"; Stories rail "+" button | 2 | Publish 24h stories, requests, and agent-only quiet searches to network. |
 | `StoryViewer` | Asks | **Story** (Header: Author name) | Stories rail avatar tap | 1 | View network story, reply directly, or ask OpenChat Agent about it. |
 | `SocialReview` | Asks | **Review** | Asks screen › "Review" card; AgentOverlay Review card | 2 | Review and approve/decline quiet match opportunities. |
-| `Thoughts` | Stream | **Stream** | Bottom tab "Stream" | 1 | Personal entries; see [search, creation and actions](../README.md#messages-and-stream). Internal route names stay compatible. |
+| `ThoughtsList` | Stream | **My notes** | Streams › My notes | 2 | Existing personal entries; see [search, creation and actions](../README.md#messages-and-stream). Internal route names stay compatible. |
 | `ConversationThoughts` | Stream | **Chat Stream** | 1. In-chat header "Stream" button<br>2. In-chat overflow menu › "Stream for this chat" | 2 | Compatibility door into [conversation content](conversation-content.md). |
 | `Settings` | Settings | **Settings** | 1. Profile › "Settings" row<br>2. Desktop: sidebar avatar › account menu › **Settings**<br>3. Desktop shortcut (⌘,) | 2 | Account (Edit profile, email, **Sign out** — top card, no scrolling), experience mode, agent keys, theme, notifications, and legal info. |
 | *(action)* `Sign out` | Me / Account | **Sign out** | 1. Profile › Account › Sign out<br>2. Settings › Account › Sign out<br>3. Desktop: sidebar avatar › account menu › **Sign out** | 2 | Clears the stored token and user, disconnects the socket, and returns to `Login`. The same word in the same places on phone, tablet, and desktop web; desktop adds the avatar menu because its avatar has no visible label. |
@@ -83,7 +83,8 @@ The public `/` page verifies the current browser's OpenChat session. Signed-in
 visitors see **Signed in as [name]** and **Open OpenChat**; signed-out visitors
 see **Sign in**. It refreshes on return and cross-tab sign-out. Agent setup links
 to the shared `/agents` guide instead of maintaining separate MCP snippets.
-# Saved-message streams (OpenChat-ri8z)
+
+## Saved-message streams (OpenChat-ri8z)
 
 | Noun / feature | Visible door | Behavior |
 | --- | --- | --- |
@@ -92,4 +93,4 @@ to the shared `/agents` guide instead of maintaining separate MCP snippets.
 | Contact details | Click a saved item's person name, or person → **Contact details** | Apple Contacts fields plus private source-backed details; pinning remains independent. |
 | Connections | Contact details → **Connections and notes** | Existing shared Noos private people overlay, not a new graph. |
 | New entry | Streams → **＋ Add** | Writes in the selected context; does not require an external message. |
-| Mac companion | Streams → **Mac companion** | Pair or disconnect an always-on source Mac; existing personal notes remain under My notes. |
+| Mac companion | Streams → **Mac companion** | Pair or disconnect a source Mac; see [companion setup](message-companion.md#cli). |

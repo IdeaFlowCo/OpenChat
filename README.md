@@ -29,7 +29,18 @@ visible during transient failures. Reconnecting also reloads the open thread.
 If access is denied or the conversation is unavailable, cached messages are
 cleared instead.
 
-Open **Stream** from Chats for personal entries. The search bar filters text and
+Open **Streams** from Chats for **Saved from messages**. **All saved** combines
+private conversation captures and directly written entries. Select a source
+conversation to see its stream, or tap a single person's byline for **Contact
+details**. Search and **＋ Add** stay visible. Add in All saved writes to the
+capture library's My notes stream; Add in a selected stream writes there; Add
+in Contact details creates a labeled field. Pins are private and independent
+of saving. **View source** shows the captured words and trigger, not a live
+Messages conversation. See the [Mac companion guide](docs/message-companion.md)
+for capture gestures, pairing, privacy, and local setup.
+
+Existing personal entries remain under **Streams → My notes**, separate from
+the capture library's My notes stream. This editor's search bar filters text and
 tags. Its visible **Create** action opens an editable entry using your search
 text, even when nothing matches; with empty text it opens a blank entry. The
 **+ Create** button also opens a blank entry. Tap **Save entry** or leave the
@@ -44,8 +55,8 @@ and linking shared Ask/Offer posts and managing their linked projections.
 
 Hashtag suggestions combine your own tags with tags from hashtagged messages
 and tagged replies in chats you currently belong to; other people's private
-captures never contribute. Saved-message entries have an **Original message**
-door: it highlights the source with up to five nondeleted messages before and
+captures never contribute. Entries saved from OpenChat chats under **My notes**
+have an **Original message** door: it highlights the source with up to five nondeleted messages before and
 after, and offers **Open chat**. Current membership is required; saving an entry
 does not grant source access, and deleted or inaccessible sources are unavailable.
 
