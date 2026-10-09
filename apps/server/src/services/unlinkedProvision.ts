@@ -38,3 +38,45 @@ export async function searchUnlinkedForIdentity(identity: UnlinkedIdentity | nul
     return failure("upstream_unavailable");
   }
 }
+
+export type UnlinkedProfileResult =
+  | { ok: true; profile: { id: string; name: string } }
+  | { ok: false; code: "not_linked" | "not_configured" | "not_found" | "grant_revoked" | "scope_not_granted" | "upstream_unavailable" };
+
+/**
+ * Confirm that a profile id names a published Unlinked profile, read with the
+ * owner's own identity-scoped, read-only grant. Returns the canonical id (a
+ * merged profile answers with the one it moved to) and its public name.
+ * Profiles that exist only in the owner's private import are not published
+ * and are not confirmed here.
+ */
+export async function readUnlinkedProfileForIdentity(identity: UnlinkedIdentity | null, profileId: string): Promise<UnlinkedProfileResult> {
+  if (!identity || identity.issuer !== "https://id.ideaflow.app/api/auth" || !identity.subject) return { ok: false, code: "not_linked" };
+  if (!unlinkedProvisionConfigured()) return { ok: false, code: "not_configured" };
+  const base = (process.env.UNLINKED_API_BASE || "https://www.unlinked.ai").replace(/\/+$/, "");
+  try {
+    const grantResponse = await fetch(base + "/api/agent/v1/provision-grant", {
+      method: "POST", redirect: "error", signal: AbortSignal.timeout(15000),
+      headers: { "Content-Type": "application/json", Authorization: "Basic " + Buffer.from(process.env.UNLINKED_PROVISION_CLIENT_ID + ":" + process.env.UNLINKED_PROVISION_CLIENT_SECRET).toString("base64") },
+      body: JSON.stringify(identity),
+    });
+    const grant = await grantResponse.json() as { accessToken?: string; error?: { code?: string } };
+    if (!grantResponse.ok || typeof grant.accessToken !== "string" || !grant.accessToken) {
+      const code = grant.error?.code;
+      return { ok: false, code: code === "not_linked" || code === "grant_revoked" ? code : "upstream_unavailable" };
+    }
+    const response = await fetch(base + "/api/agent/v1/people/" + encodeURIComponent(profileId), {
+      method: "GET", redirect: "error", signal: AbortSignal.timeout(15000), headers: { Authorization: "Bearer " + grant.accessToken },
+    });
+    const result = await response.json() as { profile?: { id?: unknown; name?: unknown }; error?: { code?: string } };
+    if (!response.ok || result.error) {
+      const code = result.error?.code;
+      return { ok: false, code: code === "not_found" || code === "invalid_input" ? "not_found" : code === "scope_not_granted" ? "scope_not_granted" : code === "grant_revoked" ? "grant_revoked" : "upstream_unavailable" };
+    }
+    const id = result.profile?.id, name = result.profile?.name;
+    if (typeof id !== "string" || !id || typeof name !== "string" || !name.trim()) return { ok: false, code: "not_found" };
+    return { ok: true, profile: { id, name: name.trim().slice(0, 120) } };
+  } catch {
+    return { ok: false, code: "upstream_unavailable" };
+  }
+}

@@ -48,3 +48,10 @@ jobs:
           apps/server/test/agentNetwork.route.test.ts
           apps/server/test/agentNetwork.integration.test.ts
           apps/server/test/chatUnread.route.test.ts
+          apps/server/test/privateGraph.test.ts
+          apps/server/test/privateGraph.route.test.ts
+          apps/server/test/privateGraph.scope.test.ts
+          apps/server/test/privateGraph.integration.test.ts
+          apps/server/test/privateGraph.people.integration.test.ts
+          apps/server/test/ideaflowConnector.test.ts
+          apps/server/test/ideaflowConnector.privateGraph.test.ts

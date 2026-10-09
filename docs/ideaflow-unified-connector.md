@@ -45,6 +45,21 @@ Read scope exposes `oc_list_conversations`, `oc_get_messages`, `oc_search`, and
 not advertised. Unknown fields and tools are rejected. Write scope does not imply
 read scope.
 
+### Private people knowledge
+
+The owner's [private graph](private-graph.md) (the shared Noos people overlay,
+also shown in Unlinked) is exposed with the same scope split. Read scope adds
+`oc_get_person_private`, `oc_get_unlinked_person_private`, `oc_list_private_links`,
+`oc_list_private_things`, `oc_get_private_thing` and `oc_list_catch_up`. Write
+scope adds `oc_set_person_private`, `oc_add_private_note`, `oc_delete_private_note`,
+`oc_add_private_link` and `oc_delete_private_link`. Through the hub they appear as
+`openchat__oc_…`. A subject or link target can be an OpenChat person (`user`), a
+saved thing, or an Unlinked profile (`unlinked`, stored as the overlay ref
+`unlinked:person:<profileId>`). Connector requests reach `/api/private` with the
+connector's own scope names: `GET` needs `openchat:read`, every change needs
+`openchat:write`. Ambiguous names return HTTP 409 with `code: "ambiguous_name"`
+and `candidates`, surfaced to the agent as a tool error.
+
 Normal messages require `content` and a stable `clientRequestId`; use only after
 the user requests sending. Context posts require `text` and `clientRequestId`,
 with optional `replyToId` and `kind`. Retries use the original `clientRequestId`
@@ -65,5 +80,7 @@ uses the actual listening port, never the caller's Host or URL arguments.
 `apps/server/test/ideaflowConnector.test.ts` checks exact byte/signature validation,
 replay protection, identity lookup, separately enforced scopes, schema restrictions,
 normal-route assertion rejection, one-use operation binding, membership denial,
-and connector attribution without sending any real messages. The Context graph
+and connector attribution without sending any real messages.
+`apps/server/test/ideaflowConnector.privateGraph.test.ts` checks the private-graph
+tool catalog, scope split, dispatch as the linked owner and ambiguous-name results. The Context graph
 suite runs separately against an isolated Neo4j database.
