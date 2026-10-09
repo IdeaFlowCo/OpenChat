@@ -129,6 +129,41 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(error.exception.code,2)
         self.assertEqual(self.calls,[])
 
+    def test_logs_default_locally_and_override_preserves_state_and_mode(self):
+        state=self.root/'external archive/state.sqlite3'
+        self.assertEqual(self.invoke('install','--state',str(state),'--archive-only')[0],0)
+        config=self.launches[-1]
+        default_logs=self.root/'Library/Logs/OpenChatCompanion'
+        self.assertEqual(Path(config['StandardOutPath']).parent,default_logs)
+        self.assertEqual(Path(config['StandardErrorPath']).parent,default_logs)
+        self.assertTrue(default_logs.is_dir())
+        command=config['ProgramArguments']
+        custom=self.root/'custom logs'
+        self.assertEqual(self.invoke('install','--log-dir',str(custom))[0],0)
+        self.assertEqual(self.launches[-1]['ProgramArguments'],command)
+        self.assertEqual(Path(self.launches[-1]['StandardOutPath']).parent,custom)
+        self.assertEqual(Path(self.launches[-1]['StandardErrorPath']).parent,custom)
+        self.assertEqual(self.invoke('install')[0],0)
+        self.assertEqual(Path(self.launches[-1]['StandardOutPath']).parent,custom)
+        self.assertEqual(self.launches[-1]['ProgramArguments'],command)
+        self.assertEqual(self.invoke('stop')[0],0)
+        self.assertEqual(self.invoke('start')[0],0)
+        self.assertEqual(Path(self.launches[-1]['StandardOutPath']).parent,custom)
+
+    def test_legacy_external_logs_change_only_with_explicit_override(self):
+        state=self.root/'external archive/state.sqlite3'
+        self.assertEqual(self.invoke('install','--state',str(state),'--archive-only')[0],0)
+        config=plistlib.loads(self.plist.read_bytes())
+        config['StandardOutPath']=str(state.parent/'companion.log')
+        config['StandardErrorPath']=str(state.parent/'companion-error.log')
+        self.plist.write_bytes(plistlib.dumps(config))
+        self.assertEqual(self.invoke('install')[0],0)
+        self.assertEqual(self.launches[-1]['StandardOutPath'],config['StandardOutPath'])
+        local=self.root/'Library/Logs/OpenChatCompanion'
+        self.assertEqual(self.invoke('install','--log-dir',str(local))[0],0)
+        self.assertEqual(Path(self.launches[-1]['StandardOutPath']).parent,local)
+        self.assertEqual(self.launches[-1]['ProgramArguments'],config['ProgramArguments'])
+
 
 if __name__ == '__main__':
     unittest.main()

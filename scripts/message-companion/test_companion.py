@@ -290,6 +290,43 @@ class CaptureTests(unittest.TestCase):
             self.assertEqual(call.call_args.args[2]['captures'][0]['contactDetails']['fields'],[safe])
         self.assertEqual(self.upload_states(),[1])
 
+    def test_normalized_confidential_source_stays_local_for_manual_and_reply_saves(self):
+        text='Original words #ＣＯＮＦＩＤＥＮＴＩＡＬ'
+        self.message('source',text,False)
+        self.message('reply','#reading',parent='source')
+        self.archive()
+        self.assertEqual(self.rows(),[])
+        self.args.guid='source';self.args.tag=['reading']
+        with patch.object(app,'contact_names',return_value={}):
+            with self.assertRaisesRegex(ValueError,'local-only-confidential'):app.save(self.args)
+        self.assertEqual(self.rows(),[])
+        with sqlite3.connect(self.messages) as db:
+            self.assertEqual(db.execute("SELECT text FROM message WHERE guid='source'").fetchone()[0],text)
+
+    def test_normalized_confidential_text_in_existing_outbox_never_uploads(self):
+        self.prepare_uploads(1)
+        with sqlite3.connect(self.state) as db:
+            key,payload=db.execute('SELECT id,payload FROM outbox').fetchone()
+        for field in ('text','triggerText'):
+            with self.subTest(field=field):
+                value=json.loads(payload);value[field]='Original words #ＣＯＮＦＩＤＥＮＴＩＡＬ'
+                with sqlite3.connect(self.state) as db:
+                    db.execute('INSERT OR REPLACE INTO outbox(id,payload,uploaded) VALUES (?,?,0)',(key,json.dumps(value)))
+                with patch.object(app,'api_call') as call:
+                    self.assertEqual(app.sync(self.args),{'uploaded':0})
+                    call.assert_not_called()
+                self.assertEqual(self.rows(),[])
+
+    def test_complete_unicode_hashtags_preserve_exact_source(self):
+        text='Read #cafe\u0301 #किताब #e\u0301lan #Ｃａｆé #_ https://example.test/#ignore\u0301'
+        self.message('unicode',text)
+        self.archive()
+        capture=self.rows()[0]
+        self.assertEqual(capture['text'],text)
+        self.assertEqual(capture['triggerText'],text)
+        self.assertEqual(capture['tags'],['café','किताब','élan','_'])
+        self.assertEqual(app.tags_in('word#hidden e\u0301#hidden /#hidden #valid'),['valid'])
+
 
 class ContactSnapshotTests(unittest.TestCase):
     def test_reads_source_labels_without_exporting_confidential_fields_or_mutating_contacts(self):
@@ -309,6 +346,7 @@ class ContactSnapshotTests(unittest.TestCase):
                     INSERT INTO ZABCDEMAILADDRESS VALUES (1,'person@example.test','_$!<Home>!$_');
                     INSERT INTO ZABCDEMAILADDRESS VALUES (1,'private@example.test','confidential');
                     INSERT INTO ZABCDPHONENUMBER VALUES (1,'555-0100','Mobile');
+                    INSERT INTO ZABCDPHONENUMBER VALUES (1,'555 0100','Home');
                     INSERT INTO ZABCDPHONENUMBER VALUES (1,'dummy-phone','ＣＯＮＦＩＤＥＮＴＩＡＬ');
                     INSERT INTO ZABCDPHONENUMBER VALUES (1,'123-45-6789','Other');
                     INSERT INTO ZABCDPOSTALADDRESS VALUES (1,'Apartment 3',NULL,NULL,NULL,NULL,'_$!<Home>!$_');
@@ -326,10 +364,22 @@ class ContactSnapshotTests(unittest.TestCase):
                 {'label':'Organization','value':'Example org'},
                 {'label':'Job title','value':'Designer'},
                 {'label':'Phone · Mobile','value':'555-0100'},
+                {'label':'Phone · Home','value':'555 0100'},
                 {'label':'Email · Home','value':'person@example.test'},
                 {'label':'Address · Home','value':'Apartment 3'},
                 {'label':'Website · Personal','value':'https://example.test'},
             ])
+            self.assertEqual(path.read_bytes(),original)
+            db=sqlite3.connect(path)
+            try:
+                db.execute("INSERT INTO ZABCDRECORD VALUES (2,'Another','Person',NULL,NULL,NULL,1000)")
+                db.execute("INSERT INTO ZABCDPHONENUMBER VALUES (2,'5550100','Mobile')")
+                db.commit()
+            finally:db.close()
+            original=path.read_bytes()
+            with patch.object(Path,'home',return_value=root):cards=app.contact_cards()
+            self.assertNotIn('5550100',cards)
+            self.assertIn('person@example.test',cards)
             self.assertEqual(path.read_bytes(),original)
 
 

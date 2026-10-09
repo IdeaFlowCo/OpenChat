@@ -24,7 +24,6 @@ from datetime import datetime, timezone
 APPLE_EPOCH = 978307200
 SAVE_EMOJI = '🔖'
 PIN_EMOJI = '📌'
-TAG = re.compile(r'(?<![\w/#&=])#([^\W_][\w-]*|_[\w-]+)', re.UNICODE)
 URL = re.compile(r'https?://\S+', re.I)
 
 
@@ -32,6 +31,7 @@ def confidential(text, tags=()):
     """Keep explicitly confidential/identifier-like values in their canonical local source.
     This is a conservative routing rule, not a guarantee of semantic detection.
     """
+    text = unicodedata.normalize('NFKC', text)
     if any(unicodedata.normalize('NFKC', tag).lower() == 'confidential' for tag in tags if isinstance(tag, str)):
         return True
     if re.search(r'#confidential\b|(?:ssn|social security|passport|driver.?s? licen[cs]e|tax.?id|account number|routing number|card number|confidential)\s*[:#=-]?\s*[A-Z0-9 -]{5,}', text, re.I):
@@ -67,7 +67,20 @@ def scrub_contact_details(details):
 
 def tags_in(text):
     # A URL fragment is not a capture gesture. Preserve case in source, normalize tags.
-    return list(dict.fromkeys(m.group(1) for m in TAG.finditer(URL.sub('', text))))
+    text = URL.sub('', text)
+    tags = []
+    for match in re.finditer('#', text):
+        start = match.start()
+        if start and (text[start-1] in '_/#&=' or unicodedata.category(text[start-1])[0] in 'LMN'):
+            continue
+        start += 1
+        if start == len(text) or not (text[start] == '_' or unicodedata.category(text[start])[0] in 'LN'):
+            continue
+        end = start + 1
+        while end < len(text) and (text[end] in '_-' or unicodedata.category(text[end])[0] in 'LMN'):
+            end += 1
+        tags.append(text[start:end])
+    return list(dict.fromkeys(tags))
 
 
 def utf16_length(value):
@@ -242,7 +255,8 @@ def contact_cards():
                         except (ValueError,OverflowError):pass
                     card={'fields':fields[:40],'modifiedAt':apple_date(modified or 0)}
                     if len(json.dumps(card).encode())>16000:continue
-                    for handle in handles:found.setdefault(normalize_handle(handle),[]).append(card)
+                    for handle in {normalize_handle(h) for h in handles}:
+                        if handle:found.setdefault(handle,[]).append(card)
         except sqlite3.Error:continue
     # Ambiguous contact identities stay unresolved. Do not merge cards by name.
     return {handle:cards[0] for handle,cards in found.items() if len(cards)==1}

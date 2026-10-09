@@ -1,5 +1,10 @@
 # Saved messages and the Mac companion
 
+**Security-review hold for this task:** keep all real message data local and
+run the companion archive-only. Do not sync or import real data into production,
+enable uploads, or deploy until the security review is complete and release is
+authorized. Code validation and PR preparation may continue with synthetic data.
+
 OpenChat's **Streams** tab opens **Saved from messages** directly. **All saved**
 combines private captures across source conversations and directly written notes.
 Select a conversation to see its stream. Click the person byline to open their
@@ -44,8 +49,8 @@ python3 scripts/message-companion/companion.py archive --full
 python3 scripts/message-companion/companion.py status
 python3 scripts/message-companion/companion.py save --guid MESSAGE_GUID --tag longevity
 python3 scripts/message-companion/companion.py sync
-python3 scripts/message-companion/companion.py watch
-python3 scripts/message-companion/service.py install --state /private/path/companion.sqlite3
+python3 scripts/message-companion/companion.py watch --archive-only
+python3 scripts/message-companion/service.py install --state /private/path/companion.sqlite3 --archive-only
 python3 scripts/message-companion/service.py status
 python3 scripts/message-companion/service.py stop
 ```
@@ -53,7 +58,7 @@ python3 scripts/message-companion/service.py stop
 Use `--state`, `--messages`, `--config`, and `--account` **before** the subcommand.
 The same account namespace must mean the same Messages account on each Mac.
 `service.py install --archive-only` installs a local capture-only watcher before
-server pairing. After pairing, run `service.py install --upload-enabled` to enable
+server pairing. After pairing and lifting the security-review hold, run `service.py install --upload-enabled` to enable
 uploads, or `service.py install --archive-only` to disable them again. Reinstalling
 without either flag preserves the installed mode and state path. The service
 uses a private outbox, exclusive watcher lock, periodic full reconciliation,
@@ -148,10 +153,24 @@ On this M4, the Command Line Tools Python lacked Full Disk Access. The existing
 authorized interpreter can be used explicitly (no TCC changes are made):
 
 ```sh
-/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/bin/python3.12 scripts/message-companion/service.py install --upload-enabled
+/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/bin/python3.12 scripts/message-companion/service.py install --archive-only --log-dir "$HOME/Library/Logs/OpenChatCompanion"
 ```
 
 Omit the mode flag to preserve the installed mode, or use `--archive-only` for
 local capture. The interpreter path is machine-specific; use an authorized
 installed interpreter on other Macs. Pipeline review does not manage the live
 service.
+
+New installs put small stdout/stderr logs in `~/Library/Logs/OpenChatCompanion`,
+independently of the archive's `--state` path. Use `install --log-dir PATH` to
+choose log storage; reinstall without that option preserves existing log paths.
+To migrate an older installation whose logs are beside the external archive,
+explicitly pass `--log-dir "$HOME/Library/Logs/OpenChatCompanion"`. The archive
+stays external, and the state path and upload mode are preserved unless overridden.
+
+On this M4, launchd could not open log files on the protected external volume
+before starting Python. The interpreter's Full Disk Access does not grant that
+pre-launch operation to launchd. Local logs plus the already-authorized Homebrew
+Python realpath have been proven to run archive-only. This is separate from
+Python needing permission to read Messages and the external archive; no TCC
+changes or live-service actions belong to pipeline review.

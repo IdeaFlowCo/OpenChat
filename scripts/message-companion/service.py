@@ -18,6 +18,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action',choices=['install','start','stop','status'])
     parser.add_argument('--state')
+    parser.add_argument('--log-dir')
     mode=parser.add_mutually_exclusive_group()
     mode.add_argument('--archive-only',dest='archive_only',action='store_true',default=None)
     mode.add_argument('--upload-enabled',dest='archive_only',action='store_false')
@@ -33,7 +34,8 @@ def main():
                 'running':result.returncode==0 and bool(state and state[1]=='running'),
                 'lastExitCode':int(exit_code[1]) if exit_code else None}
     if args.action=='install':
-        previous=plistlib.loads(plist.read_bytes()).get('ProgramArguments',[]) if plist.exists() else []
+        previous_config=plistlib.loads(plist.read_bytes()) if plist.exists() else {}
+        previous=previous_config.get('ProgramArguments',[])
         previous_state=previous[previous.index('--state')+1] if '--state' in previous else None
         selected_state=args.state or previous_state or str(Path.home()/'Library/Application Support/OpenChat/companion.sqlite3')
         archive_only=args.archive_only if args.archive_only is not None else '--archive-only' in previous
@@ -41,6 +43,10 @@ def main():
         if not executable.is_file() or not os.access(executable,os.X_OK):
             print(json.dumps({'action':'install','success':False,'error':'Python executable unavailable'}));return 1
         state=Path(selected_state).expanduser().resolve();state.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+        log_dir=Path(args.log_dir).expanduser().resolve() if args.log_dir else Path.home()/'Library/Logs/OpenChatCompanion'
+        stdout=log_dir/'companion.log' if args.log_dir else Path(previous_config.get('StandardOutPath',log_dir/'companion.log'))
+        stderr=log_dir/'companion-error.log' if args.log_dir else Path(previous_config.get('StandardErrorPath',log_dir/'companion-error.log'))
+        for directory in {stdout.parent,stderr.parent}:directory.mkdir(parents=True,exist_ok=True,mode=0o700)
         library=Path.home()/'.local/lib/openchat-companion';library.mkdir(parents=True,exist_ok=True)
         for name in ('companion.py','service.py','add-address.applescript'):
             source=Path(__file__).resolve().parent/name;dest=library/name
@@ -48,7 +54,7 @@ def main():
         command=[str(executable),str(library/'companion.py'),'--state',str(state),'watch']
         if archive_only:command.append('--archive-only')
         config={'Label':LABEL,'ProgramArguments':command,'RunAtLoad':True,'KeepAlive':True,'ThrottleInterval':30,
-                'StandardOutPath':str(state.parent/'companion.log'),'StandardErrorPath':str(state.parent/'companion-error.log'),
+                'StandardOutPath':str(stdout),'StandardErrorPath':str(stderr),
                 'WorkingDirectory':str(library),'EnvironmentVariables':{'PATH':'/opt/homebrew/bin:/usr/bin:/bin'},'ProcessType':'Background'}
         plist.parent.mkdir(parents=True,exist_ok=True)
         run('launchctl','bootout',target)
