@@ -47,6 +47,7 @@ these routes never return it.
 | `POST /people/:userId/links`, `POST /things/:thingId/links` | `{ relation, to }` where `to` is `{kind:'user', id}` or `{kind:'person'\|'company'\|'idea'\|'project', id \| name}`; a name creates or reuses the saved thing |
 | `DELETE /links/:linkId` | Remove a link |
 | `GET /things?q=&kind=`, `GET /things/:thingId` | Saved things, and one with its notes and links |
+| `POST /things/resolve` | `{kind, name, createNew?, clientRequestId?}`: find or save by name under the no-merge rules below |
 | `GET /due` | People whose catch-up date has passed |
 | `GET /links?q=` | Every link the owner recorded, newest first, filtered by a name or relation |
 | `GET /unlinked-people/:profileId` | Card, notes and links for an Unlinked profile (never creates, never calls Unlinked) |
@@ -97,7 +98,7 @@ tap), and the add-link form appears only after **+ Add link**. Above the card,
 or `oc_list_story_feed` with `authorId` for agents); that is their public-to-you
 side and is not part of the private graph. A linked thing
 opens its own page, where more links and notes can be added. **Catch up**, on
-the People screen, lists who is due. Agent tools: `oc_get_person` (name, shared asks and the private card in one read), `oc_get_person_private`, `oc_get_unlinked_person_private`, `oc_list_private_links`,
+the People screen, lists who is due. Agent tools: `oc_get_person` (name, shared asks and the private card in one read), `oc_get_person_private`, `oc_get_unlinked_person_private`, `oc_list_private_links`, `oc_save_private_thing`,
 `oc_set_person_private`, `oc_add_private_note`, `oc_delete_private_note`,
 `oc_add_private_link`, `oc_delete_private_link`, `oc_list_private_things`,
 `oc_get_private_thing`, `oc_list_catch_up`.

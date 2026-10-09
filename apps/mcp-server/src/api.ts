@@ -419,6 +419,8 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<unknown>('POST', `${privateSubjectPath(subject)}/links`, { body: { relation, to } }),
     getUnlinkedPersonPrivate: (profileId: string) =>
       request<unknown>('GET', `/api/private/unlinked-people/${encodeURIComponent(profileId)}`),
+    resolvePrivateThing: (body: Record<string, unknown>) =>
+      request<unknown>('POST', '/api/private/things/resolve', { body }),
     listPrivateLinks: (query?: string) =>
       request<unknown>('GET', '/api/private/links', { query: { q: query } }),
     deletePrivateLink: (linkId: string) =>

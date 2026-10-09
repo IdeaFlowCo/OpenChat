@@ -8,7 +8,7 @@ const state = vi.hoisted(() => ({ run: vi.fn() }));
 vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({ run: state.run, close: async () => {} }) }) }));
 const graph = vi.hoisted(() => ({
   addLink: vi.fn(), addNote: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
-  getUnlinkedPersonOverlay: vi.fn(), listDue: vi.fn(), listOwnerLinks: vi.fn(), listThings: vi.fn(), updatePersonCard: vi.fn(),
+  getUnlinkedPersonOverlay: vi.fn(), listDue: vi.fn(), resolvePrivateThing: vi.fn(), listOwnerLinks: vi.fn(), listThings: vi.fn(), updatePersonCard: vi.fn(),
 }));
 vi.mock('../src/services/privateGraph.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/privateGraph.js')>('../src/services/privateGraph.js');
@@ -26,7 +26,7 @@ function sign(body: string, scope: string) {
   return `${header}.${payload}.${createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url')}`;
 }
 const PRIVATE_READS = ['oc_get_person_private', 'oc_get_unlinked_person_private', 'oc_list_private_links', 'oc_list_private_things', 'oc_get_private_thing', 'oc_list_catch_up'];
-const PRIVATE_WRITES = ['oc_set_person_private', 'oc_add_private_note', 'oc_delete_private_note', 'oc_add_private_link', 'oc_delete_private_link'];
+const PRIVATE_WRITES = ['oc_set_person_private', 'oc_add_private_note', 'oc_delete_private_note', 'oc_add_private_link', 'oc_delete_private_link', 'oc_save_private_thing'];
 
 describe('private people knowledge through the shared Ideaflow connector', () => {
   let server: Server, base: string;
@@ -89,6 +89,11 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     graph.updatePersonCard.mockResolvedValue({ important: true });
     await tool('oc_set_person_private', { userId: 'bob', important: true, cadenceDays: null });
     expect(graph.updatePersonCard).toHaveBeenCalledWith('owner', 'bob', { important: true, cadenceDays: null });
+
+    graph.resolvePrivateThing.mockResolvedValue({ id: 'thing-1', kind: 'person', name: 'Maya' });
+    const saved = await tool('oc_save_private_thing', { kind: 'person', name: 'Maya', createNew: true, clientRequestId: 'req-2' });
+    expect(JSON.parse(saved.result.content[0].text)).toEqual({ id: 'thing-1', kind: 'person', name: 'Maya' });
+    expect(graph.resolvePrivateThing).toHaveBeenCalledWith('owner', { kind: 'person', name: 'Maya', createNew: true, clientRequestId: 'req-2' });
 
     graph.deleteLink.mockResolvedValue({ deleted: true });
     await tool('oc_delete_private_link', { linkId: 'link-1' });

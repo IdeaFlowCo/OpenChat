@@ -1180,6 +1180,11 @@ export function buildServer(
     `Read the owner's private notes and relations about an Unlinked profile (profile id from an Unlinked tool result). ${PRIVATE_PEOPLE}`,
     { profileId: z.string().min(1).max(160) }, ({ profileId }) => api.getUnlinkedPersonPrivate(profileId));
 
+  privateTool('oc_save_private_thing', 'Find or save a private person, company, idea or project',
+    `Find or save a saved thing by name for someone with no OpenChat account or Unlinked profile. A shared name fails with code ambiguous_name and candidates; createNew with a clientRequestId saves a separate one, and retries return the same entity. ${PRIVATE_PEOPLE}`,
+    { kind: z.enum(['person', 'company', 'idea', 'project']), name: z.string().min(1).max(120), createNew: z.boolean().optional(), clientRequestId: z.string().min(1).max(200).optional() },
+    (input) => api.resolvePrivateThing(input));
+
   privateTool('oc_list_private_links', "List the owner's private relations",
     `List every private relation the owner has recorded, newest first, optionally filtered by a name or relation. ${PRIVATE_PEOPLE}`,
     { query: z.string().max(120).optional() }, ({ query }) => api.listPrivateLinks(query));

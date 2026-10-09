@@ -81,6 +81,15 @@ integration('private people: names, Unlinked profiles and retries', { timeout: 3
     const chosen = await graph.addLink(dana, { kind: 'user', id: alex }, 'knows', { kind: 'person', id: separate.other.id });
     expect(chosen.other.id).toBe(separate.other.id);
 
+    // Saving by name follows the same rules.
+    expect(await failure(() => graph.resolvePrivateThing(dana, { kind: 'person', name: alexName }))).toMatchObject({ status: 409, code: 'ambiguous_name' });
+    const third = await graph.resolvePrivateThing(dana, { kind: 'person', name: alexName, createNew: true, clientRequestId: `req3-${suffix}` });
+    expect((await graph.resolvePrivateThing(dana, { kind: 'person', name: alexName, createNew: true, clientRequestId: `req3-${suffix}` })).id).toBe(third.id);
+    expect([alex, separate.other.id]).not.toContain(third.id);
+    const maya = await graph.resolvePrivateThing(dana, { kind: 'person', name: `Maya ${suffix}` });
+    expect((await graph.resolvePrivateThing(dana, { kind: 'person', name: `maya ${suffix}` })).id).toBe(maya.id);
+    expect(await failure(() => graph.resolvePrivateThing(dana, { kind: 'unlinked', id: 'maya-1' }))).toMatchObject({ status: 400 });
+
     // A name only Dana's saved list uses is still reused, so typing it twice is one person.
     const priya = await graph.addLink(dana, { kind: 'user', id: alex }, 'sister of', { kind: 'person', name: `Priya ${suffix}` });
     const priyaAgain = await graph.addLink(dana, { kind: 'user', id: alex }, 'Sister  of', { kind: 'person', name: ` priya ${suffix} ` });
