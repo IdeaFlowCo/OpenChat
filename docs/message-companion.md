@@ -1,9 +1,12 @@
 # Saved messages and the Mac companion
 
-**Security-review hold for this task:** keep all real message data local and
-run the companion archive-only. Do not sync or import real data into production,
-enable uploads, or deploy until the security review is complete and release is
-authorized. Code validation and PR preparation may continue with synthetic data.
+**Security-review hold for this task:** Jacob's later instruction supersedes
+the earlier shipping authorization and standing deployment instructions. His
+security review has not completed. Keep all real message data local and run the
+companion archive-only. Until he completes that review and authorizes release,
+do not upload real data, import it into any database, pair a device, merge,
+deploy, or run production commands. Local code validation, synthetic CI testing,
+private branch pushes, and PR preparation may continue.
 
 For the Streams landing screen, direct writing, and existing personal notes,
 see [Messages and Stream](../README.md#messages-and-stream).
@@ -43,7 +46,6 @@ No new Python packages are needed. `chat.db` is always opened read-only.
 python3 scripts/message-companion/companion.py archive --full
 python3 scripts/message-companion/companion.py status
 python3 scripts/message-companion/companion.py save --guid MESSAGE_GUID --tag longevity
-python3 scripts/message-companion/companion.py sync
 python3 scripts/message-companion/companion.py watch --archive-only
 python3 scripts/message-companion/service.py install --state /private/path/companion.sqlite3 --archive-only
 python3 scripts/message-companion/service.py status
@@ -54,7 +56,8 @@ For `companion.py`, use `--state`, `--messages`, `--config`, and `--account`
 **before** the subcommand. `service.py` takes its options after the action.
 The same account namespace must mean the same Messages account on each Mac.
 `service.py install --archive-only` installs a local capture-only watcher before
-server pairing. After pairing and lifting the security-review hold, run `service.py install --upload-enabled` to enable
+server pairing. Only after the security-review hold is lifted, pair the device
+and run `service.py install --upload-enabled` to enable
 uploads, or `service.py install --archive-only` to disable them again. Reinstalling
 without either flag preserves the installed mode and state path. A first install
 without a mode flag enables upload attempts; always pass `--archive-only` while
@@ -65,7 +68,7 @@ launchd restart, and retry with checkpoints retained. Stop unloads the service;
 install loads it again. It runs independently of the OpenChat window, so the
 same GUI can be installed on both Macs without keeping a window open.
 
-In **Streams → Mac companion**, create a credential for that Mac. Save the
+After the hold is lifted, in **Streams → Mac companion**, create a credential for that Mac. Save the
 displayed configuration as `~/.config/openchat/companion.json`, mode `0600`:
 
 ```json
@@ -140,7 +143,9 @@ use the shared people overlay; do not create a second knowledge graph.
 Tests cover authored-only capture, exact reply resolution, URL fragments,
 Unicode text, pins, idempotency, source privacy, direct entry, contact details,
 cursor scopes, device revocation, forgetting and account lifecycle. Real Neo4j
-integration runs in the existing CI database service.
+integration is configured in the existing CI database service. Persistence
+behavior is not accepted until `apps/server/test/messageCaptures.integration.test.ts`
+passes against real Neo4j in CI; that requirement remains outstanding.
 
 Confidential identifiers and explicitly confidential labels/tags stay unsent.
 Direct Add leaves the draft open and asks you to store it locally in an
