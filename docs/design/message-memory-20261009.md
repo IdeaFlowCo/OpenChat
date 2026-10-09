@@ -125,3 +125,12 @@ Exact hashtag grammar remains a proposal: any topic tag captures the replied-to 
 Addresses, personal phone/email, birthdays, family details and sensitive context start private. Public professional roles, websites, projects, asks/offers and chosen interests are suitable owner-controlled shared-profile candidates. Research links and recommendations are natural chat-sharing candidates. Commitments can carry explicit assignee/due date; reminders are separate opted-in behavior. Secrets such as passwords/recovery codes belong in a vault, outside this contact/stream model.
 
 The single-note / multiple-view direction with Vision remains useful, extended with typed contact-field projections and independent conversation scope/audience. A structured address is not merely a prose note, though it retains the same source capture.
+
+
+## Literal emoji reply — OpenChat-st58
+
+Lavish feedback: “Can you also do an emoji reply, or no?”
+
+Yes as proposed behavior: an exact configured emoji-only reply (e.g. 📌) with a resolvable parent saves that original message/link privately to the source chat stream. Distinguish this from a Tapback event and from a hashtag reply. Do not intercept arbitrary social emojis or guess a source for an unthreaded emoji. Normalize harmless surrounding whitespace/emoji presentation selectors, but do not interpret longer prose merely containing the emoji as a capture command. Topic hashtags add organization; explicit #address/contact instructions may request structured contact extraction. The generic emoji gesture does not automatically overwrite address-book fields.
+
+The concept now includes an Emoji-only reply example beside the address, longevity and person-note examples. This is not an implementation of an iMessage connector; target Mac event and parent linkage remain verification work. Fable has been asked to review these choices as part of the whole vision.
