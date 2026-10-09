@@ -1,0 +1,32 @@
+name: Web bundle
+
+# Builds the /app RN-web bundle on a hosted runner and keeps it as an
+# artifact, so deploys from a memory-constrained host can pass it to
+# infra/deploy.sh via CLIENT_DIST_DIR instead of running expo export locally.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build /app web bundle
+        run: bash infra/build-web.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-bundle-${{ github.sha }}
+          path: client-app/dist/
+          retention-days: 14
+          if-no-files-found: error
