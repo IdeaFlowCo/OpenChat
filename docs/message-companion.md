@@ -117,11 +117,22 @@ views of the same intended records. The current shipping implementation lives
 in OpenChat; there is no second app or Vision dual-write. WhatsApp is represented
 in mockups but is not an enabled ingest channel yet. Future work includes an
 explicit person identity join across channels, provider-native pin inspection,
-source edit/retraction reconciliation, field sync conflict review, and Branch
-into an idea/project with linked source evidence. Private relationships already
+source edit/retraction reconciliation, field sync conflict review, and Add related note
+to an idea/project with linked source evidence. Private relationships already
 use the shared people overlay; do not create a second knowledge graph.
 
 Tests cover authored-only capture, exact reply resolution, URL fragments,
 Unicode text, pins, idempotency, source privacy, direct entry, contact details,
 cursor scopes, device revocation, forgetting and account lifecycle. Real Neo4j
 integration runs in the existing CI database service.
+
+Confidential identifiers and explicitly confidential labels/tags stay unsent.
+Direct Add leaves the draft open and asks you to store it locally in an
+appropriate secure app; it does not provide a durable local vault.
+
+Service install resolves Python to its executable path and sets a working
+directory. Reinstall preserves the installed state path and archive-only mode
+unless explicitly overridden. Install/start success requires an observed running
+state; status includes the last launchd exit code. A loaded job alone does not
+prove the companion is running. For startup failures, inspect `launchctl print gui/$(id -u)/com.openchat.message-companion` and the log paths in the installed
+plist locally; do not share private log contents.

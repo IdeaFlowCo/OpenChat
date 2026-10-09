@@ -188,5 +188,68 @@ class CaptureTests(unittest.TestCase):
             with self.assertRaises(ValueError):app.sync(self.args)
         self.assertEqual(self.upload_states(),[0,0,0])
 
+    def test_explicit_confidential_manual_tags_never_enqueue(self):
+        self.message('source','Ordinary words',False)
+        self.args.guid='source'
+        for tag in ('confidential','CONFIDENTIAL','ＣＯＮＦＩＤＥＮＴＩＡＬ'):
+            self.args.tag=[tag]
+            with patch.object(app,'contact_names',return_value={}):
+                with self.assertRaisesRegex(ValueError,'local-only-confidential'):
+                    app.save(self.args)
+        self.assertEqual(self.rows(),[])
+
+    def test_existing_confidential_tag_is_removed_without_upload(self):
+        self.prepare_uploads(1)
+        with sqlite3.connect(self.state) as c:
+            key,payload=c.execute('SELECT id,payload FROM outbox').fetchone()
+            value=json.loads(payload);value['tags']=['ＣＯＮＦＩＤＥＮＴＩＡＬ']
+            c.execute('UPDATE outbox SET payload=? WHERE id=?',(json.dumps(value),key))
+        with patch.object(app,'api_call') as call:
+            self.assertEqual(app.sync(self.args),{'uploaded':0})
+            call.assert_not_called()
+        self.assertEqual(self.rows(),[])
+        self.assertEqual(app.status(self.args)['review'],{'local-only-confidential':1})
+
+    def test_acknowledgement_does_not_consume_concurrent_payload_update(self):
+        self.prepare_uploads(1)
+        sent=[]
+        def upload(cfg,path,body):
+            sent.append(body['captures'][0])
+            if len(sent)>1:
+                raise urllib.error.HTTPError('https://example.test',503,'Retry',{},None)
+            with sqlite3.connect(self.state) as c:
+                key,payload=c.execute('SELECT id,payload FROM outbox').fetchone()
+                updated=json.loads(payload)
+                updated['contactDetails']={'modifiedAt':'2026-10-09T00:00:00Z','fields':[{'label':'City','value':'Example City'}]}
+                c.execute('UPDATE outbox SET payload=?,uploaded=0 WHERE id=?',(json.dumps(updated),key))
+            return {'accepted':1}
+        with patch.object(app,'api_call',side_effect=upload):
+            with self.assertRaises(urllib.error.HTTPError):app.sync(self.args)
+        self.assertEqual(self.upload_states(),[0])
+        self.assertNotIn('contactDetails',sent[0])
+        self.assertEqual(sent[1]['contactDetails']['fields'][0]['value'],'Example City')
+        with patch.object(app,'api_call',return_value={'accepted':1}) as call:
+            self.assertEqual(app.sync(self.args),{'uploaded':1})
+            self.assertEqual(call.call_args.args[2]['captures'][0],sent[1])
+        self.assertEqual(self.upload_states(),[1])
+
+    def test_rejection_does_not_quarantine_concurrently_corrected_payload(self):
+        self.prepare_uploads(1)
+        sent=[]
+        def upload(cfg,path,body):
+            sent.append(body['captures'][0])
+            if len(sent)==1:
+                with sqlite3.connect(self.state) as c:
+                    key,payload=c.execute('SELECT id,payload FROM outbox').fetchone()
+                    value=json.loads(payload);value['text']='Corrected ordinary text'
+                    c.execute('UPDATE outbox SET payload=?,uploaded=0 WHERE id=?',(json.dumps(value),key))
+                raise urllib.error.HTTPError('https://example.test',400,'Invalid',{},None)
+            return {'accepted':1}
+        with patch.object(app,'api_call',side_effect=upload):
+            self.assertEqual(app.sync(self.args),{'uploaded':1})
+        self.assertEqual(self.upload_states(),[1])
+        self.assertEqual(app.status(self.args)['review'],{})
+        self.assertEqual(sent[1]['text'],'Corrected ordinary text')
+
 
 if __name__=='__main__': unittest.main()

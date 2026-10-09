@@ -28,10 +28,12 @@ TAG = re.compile(r'(?<![\w/#&=])#([^\W_][\w-]*|_[\w-]+)', re.UNICODE)
 URL = re.compile(r'https?://\S+', re.I)
 
 
-def confidential(text):
+def confidential(text, tags=()):
     """Keep explicitly confidential/identifier-like values in their canonical local source.
     This is a conservative routing rule, not a guarantee of semantic detection.
     """
+    if any(unicodedata.normalize('NFKC', tag).lower() == 'confidential' for tag in tags if isinstance(tag, str)):
+        return True
     if re.search(r'#confidential\b|(?:ssn|social security|passport|driver.?s? licen[cs]e|tax.?id|account number|routing number|card number|confidential)\s*[:#=-]?\s*[A-Z0-9 -]{5,}', text, re.I):
         return True
     if re.search(r'(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)',text):
@@ -260,7 +262,7 @@ def capture_payload(source, row, chat, account, names, manual_tags=None):
         return None, 'unsupported-source-body'
     if not original_text.strip():
         return None, 'source-has-no-text'
-    if confidential(original_text) or confidential(text):
+    if confidential(original_text, tags) or confidential(text):
         return None, 'local-only-confidential'
     if len(original_text)>256000 or len(text)>256000 or any(len(tag)>256 for tag in tags):
         return None, 'capture-exceeds-server-limit'
@@ -355,9 +357,10 @@ def sync(args):
     cfg = config(args)
     sent = 0
     with private_db(args.state) as out:
-        def quarantine(key, reason):
-            out.execute('UPDATE outbox SET uploaded=-1 WHERE id=?', (key,))
-            out.execute('INSERT OR REPLACE INTO review VALUES (?,?,?)', (key, reason, json.dumps({'outboxId':key})))
+        def quarantine(key, payload, reason):
+            changed = out.execute('UPDATE outbox SET uploaded=-1 WHERE id=? AND payload=? AND uploaded=0', (key,payload)).rowcount
+            if changed:
+                out.execute('INSERT OR REPLACE INTO review VALUES (?,?,?)', (key, reason, json.dumps({'outboxId':key})))
             out.commit()
 
         def upload(batch):
@@ -365,7 +368,7 @@ def sync(args):
             body = {'captures':[json.loads(r[1]) for r in batch]}
             if len(json.dumps(body).encode()) > 1900000:
                 if len(batch) == 1:
-                    quarantine(batch[0][0], 'capture-exceeds-upload-limit')
+                    quarantine(batch[0][0], batch[0][1], 'capture-exceeds-upload-limit')
                     return
                 middle = len(batch) // 2
                 upload(batch[:middle])
@@ -377,7 +380,7 @@ def sync(args):
                 if error.code not in (400, 413, 422):
                     raise
                 if len(batch) == 1:
-                    quarantine(batch[0][0], 'server-rejected-' + str(error.code))
+                    quarantine(batch[0][0], batch[0][1], 'server-rejected-' + str(error.code))
                     return
                 middle = len(batch) // 2
                 upload(batch[:middle])
@@ -385,7 +388,7 @@ def sync(args):
                 return
             if response.get('accepted') != len(batch):
                 raise ValueError('Server did not acknowledge the whole batch; checkpoint retained.')
-            out.executemany('UPDATE outbox SET uploaded=1 WHERE id=?', [(r[0],) for r in batch])
+            out.executemany('UPDATE outbox SET uploaded=1 WHERE id=? AND payload=? AND uploaded=0', batch)
             out.commit()
             sent += len(batch)
 
@@ -399,11 +402,12 @@ def sync(args):
                     value=json.loads(payload)
                     validate_capture(value)
                 except (ValueError, TypeError):
-                    quarantine(key, 'invalid-capture')
+                    quarantine(key, payload, 'invalid-capture')
                     continue
-                if confidential(value['text']) or confidential(value['triggerText']):
-                    out.execute('INSERT OR REPLACE INTO review VALUES (?,?,?)',(key,'local-only-confidential',json.dumps({'messageGuid':value['sourceMessageId'],'chatGuid':value['sourceThreadId']})))
-                    out.execute('DELETE FROM outbox WHERE id=?',(key,))
+                if confidential(value['text'], value['tags']) or confidential(value['triggerText']):
+                    changed = out.execute('DELETE FROM outbox WHERE id=? AND payload=? AND uploaded=0',(key,payload)).rowcount
+                    if changed:
+                        out.execute('INSERT OR REPLACE INTO review VALUES (?,?,?)',(key,'local-only-confidential',json.dumps({'messageGuid':value['sourceMessageId'],'chatGuid':value['sourceThreadId']})))
                 else:safe.append((key,payload))
             out.commit()
             if safe:

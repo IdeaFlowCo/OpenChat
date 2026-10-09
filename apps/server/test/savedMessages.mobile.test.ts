@@ -40,3 +40,31 @@ it('pins privately without publishing or changing the contact destination',async
   await act(async()=>{tree=create(React.createElement(SavedMessagesScreen));});await press('Pin');
   expect(mocks.update).toHaveBeenCalledWith('capture',{pinned:true});
 });
+
+it.each([
+  ['SSN','dummy-identifier'], ['Passport number','dummy-identifier'],
+  ['Bank account','dummy-identifier'], ['Confidential','ordinary words'],
+])('keeps the %s contact draft unsent',async(label,value)=>{
+  await act(async()=>{tree=create(React.createElement(SavedMessagesScreen));});
+  await act(async()=>tree.root.findByProps({accessibilityLabel:'Open details for Dad'}).props.onPress());
+  await press('＋ Add');
+  await act(async()=>{
+    tree.root.findByProps({accessibilityLabel:'Contact field name'}).props.onChangeText(label);
+    tree.root.findByProps({accessibilityLabel:'Contact detail value'}).props.onChangeText(value);
+  });
+  mocks.list.mockClear();mocks.threads.mockClear();
+  await press('Add');
+  expect(mocks.add).not.toHaveBeenCalled();
+  expect(mocks.list).not.toHaveBeenCalled();
+  expect(mocks.threads).not.toHaveBeenCalled();
+  expect(tree.root.findByProps({accessibilityLabel:'Contact detail value'}).props.value).toBe(value);
+  expect(tree.root.findAllByProps({accessibilityRole:'alert'}).some(n=>n.children.join('').includes('Store it locally'))).toBe(true);
+});
+it.each(['Ordinary words #ＣＯＮＦＩＤＥＮＴＩＡＬ','Example SSN: 123-45-6789','4111 1111 1111 1111','passport:dummy-id'])('keeps identifier-like or confidential notes unsent',async(value)=>{
+  await act(async()=>{tree=create(React.createElement(SavedMessagesScreen));});
+  await press('＋ Add');
+  await act(async()=>tree.root.findByProps({accessibilityLabel:'New note or link'}).props.onChangeText(value));
+  await press('Add');
+  expect(mocks.add).not.toHaveBeenCalled();
+  expect(tree.root.findByProps({accessibilityLabel:'New note or link'}).props.value).toBe(value);
+});

@@ -20,6 +20,8 @@ class ServiceTests(unittest.TestCase):
         self.running = False
         self.launches = []
         self.calls = []
+        sleep = patch.object(service.time, 'sleep')
+        sleep.start(); self.addCleanup(sleep.stop)
         home = patch.object(Path, 'home', return_value=self.root)
         home.start(); self.addCleanup(home.stop)
         run = patch.object(service.subprocess, 'run', side_effect=self.launchctl)
@@ -61,23 +63,52 @@ class ServiceTests(unittest.TestCase):
         installed = self.plist.read_bytes()
         self.assertEqual(self.invoke('stop')[0], 0)
         self.assertFalse(self.loaded)
-        self.assertEqual(self.invoke('start'), (0, {'action':'start', 'success':True}))
+        self.assertEqual(self.invoke('start')[0], 0)
         self.assertTrue(self.running)
         self.assertEqual(self.plist.read_bytes(), installed)
         self.assertEqual(self.launches[1], self.launches[0])
         self.assertEqual(self.launches[1]['ProgramArguments'][-4:], ['--state', str(state), 'watch', '--archive-only'])
-        self.assertEqual([c[1] for c in self.calls[-3:]], ['print','bootstrap','kickstart'])
+        self.assertEqual([c[1] for c in self.calls[-4:]], ['print','bootstrap','kickstart','print'])
 
     def test_loaded_service_starts_without_bootstrapping(self):
         self.loaded = True
         self.assertEqual(self.invoke('start')[0], 0)
-        self.assertEqual([c[1] for c in self.calls], ['print','kickstart'])
+        self.assertEqual([c[1] for c in self.calls], ['print','kickstart','print'])
         self.assertTrue(self.running)
 
     def test_missing_install_fails_without_replacing_configuration(self):
-        self.assertEqual(self.invoke('start'), (1, {'action':'start', 'success':False}))
-        self.assertEqual([c[1] for c in self.calls], ['print','bootstrap'])
+        rc, outcome = self.invoke('start')
+        self.assertEqual(rc, 1)
+        self.assertFalse(outcome['success'])
+        self.assertFalse(outcome['loaded'])
+        self.assertEqual([c[1] for c in self.calls], ['print','bootstrap','print'])
         self.assertFalse(self.plist.exists())
+
+    def test_install_resolves_executable_and_preserves_configuration_on_reinstall(self):
+        executable=self.root/'real python'
+        executable.write_text('dummy executable')
+        executable.chmod(0o700)
+        alias=self.root/'python3'
+        alias.symlink_to(executable)
+        state=self.root/'external archive/state.sqlite3'
+        with patch.object(service.sys,'executable',str(alias)):
+            self.assertEqual(self.invoke('install','--state',str(state),'--archive-only')[0],0)
+            self.assertEqual(self.invoke('install')[0],0)
+        config=self.launches[-1]
+        self.assertEqual(config['ProgramArguments'][0],str(executable))
+        self.assertEqual(config['ProgramArguments'][-4:],['--state',str(state),'watch','--archive-only'])
+        self.assertTrue(Path(config['WorkingDirectory']).is_dir())
+
+    def test_loaded_but_not_running_is_reported_as_failed_start(self):
+        def failed(command, **kwargs):
+            return subprocess.CompletedProcess(command,0,'state = spawn scheduled\nlast exit code = 78: EX_CONFIG\n','')
+        with patch.object(service.subprocess,'run',side_effect=failed):
+            rc, outcome=self.invoke('start')
+        self.assertEqual(rc,1)
+        self.assertTrue(outcome['loaded'])
+        self.assertFalse(outcome['running'])
+        self.assertFalse(outcome['success'])
+        self.assertEqual(outcome['lastExitCode'],78)
 
 
 if __name__ == '__main__':
