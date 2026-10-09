@@ -46,6 +46,25 @@ def confidential(text, tags=()):
     return False
 
 
+def confidential_contact_field(label, value):
+    label = unicodedata.normalize('NFKC', label).lower().replace('_', ' ')
+    if re.search(r'\b(?:confidential|ssn|social security|passport|driver.?s? licen[cs]e|tax[ -]?(?:id|identifier|identification)|national[ -]?id|government[ -]?id|account|routing|card number|credit card|debit card)\b', label):
+        return True
+    return confidential(label) or confidential(unicodedata.normalize('NFKC', value))
+
+
+def scrub_contact_details(details):
+    if not isinstance(details, dict) or not isinstance(details.get('fields'), list):
+        return details
+    fields = []
+    for field in details['fields']:
+        if isinstance(field, dict) and isinstance(field.get('label'), str) and isinstance(field.get('value'), str):
+            if confidential_contact_field(field['label'], field['value']):
+                continue
+        fields.append(field)
+    return {**details, 'fields': fields}
+
+
 def tags_in(text):
     # A URL fragment is not a capture gesture. Preserve case in source, normalize tags.
     return list(dict.fromkeys(m.group(1) for m in TAG.finditer(URL.sub('', text))))
@@ -203,17 +222,21 @@ def contact_cards():
                 for row in db.execute('SELECT Z_PK,ZFIRSTNAME,ZLASTNAME,ZORGANIZATION,ZJOBTITLE,ZBIRTHDAY,ZMODIFICATIONDATE FROM ZABCDRECORD'):
                     pk,first,last,org,job,birthday,modified=row
                     fields=[];handles=[]
-                    def add(label,value):
-                        if value and not confidential(str(value)):
-                            fields.append({'label':label,'value':str(value)[:2000]})
+                    def add(label,value,source_label=None):
+                        custom=re.sub(r'^_\$!<(.+)>!\$_$',r'\1',str(source_label or ''))
+                        label=label+' · '+custom if custom else label
+                        if value and not confidential_contact_field(label,str(value)):
+                            fields.append({'label':label[:80],'value':str(value)[:2000]})
+                            return True
+                        return False
                     add('Name',' '.join(x for x in (first,last) if x));add('Organization',org);add('Job title',job)
                     for r in db.execute('SELECT ZFULLNUMBER,ZLABEL FROM ZABCDPHONENUMBER WHERE ZOWNER=?',(pk,)):
-                        if r[0]:handles.append(r[0]);add('Phone',r[0])
+                        if add('Phone',r[0],r[1]):handles.append(r[0])
                     for r in db.execute('SELECT ZADDRESS,ZLABEL FROM ZABCDEMAILADDRESS WHERE ZOWNER=?',(pk,)):
-                        if r[0]:handles.append(r[0]);add('Email',r[0])
-                    for r in db.execute('SELECT ZSTREET,ZCITY,ZSTATE,ZZIPCODE,ZCOUNTRYNAME FROM ZABCDPOSTALADDRESS WHERE ZOWNER=?',(pk,)):
-                        add('Address',', '.join(str(x) for x in r if x))
-                    for r in db.execute('SELECT ZURL FROM ZABCDURLADDRESS WHERE ZOWNER=?',(pk,)):add('Website',r[0])
+                        if add('Email',r[0],r[1]):handles.append(r[0])
+                    for r in db.execute('SELECT ZSTREET,ZCITY,ZSTATE,ZZIPCODE,ZCOUNTRYNAME,ZLABEL FROM ZABCDPOSTALADDRESS WHERE ZOWNER=?',(pk,)):
+                        add('Address',', '.join(str(x) for x in r[:5] if x),r[5])
+                    for r in db.execute('SELECT ZURL,ZLABEL FROM ZABCDURLADDRESS WHERE ZOWNER=?',(pk,)):add('Website',r[0],r[1])
                     if birthday:
                         try:add('Birthday',datetime.fromtimestamp(float(birthday)+APPLE_EPOCH,timezone.utc).strftime('%B %d'))
                         except (ValueError,OverflowError):pass
@@ -305,7 +328,7 @@ def archive(args):
                 if payload:
                     if len(payload['participants'])==1:
                         card=cards.get(normalize_handle(payload['participants'][0]))
-                        if card:payload['contactDetails']=card
+                        if card:payload['contactDetails']=scrub_contact_details(card)
                     try:
                         validate_capture(payload)
                     except ValueError:
@@ -400,6 +423,15 @@ def sync(args):
             for key,payload in batch:
                 try:
                     value=json.loads(payload)
+                    if isinstance(value,dict) and 'contactDetails' in value:
+                        cleaned=scrub_contact_details(value['contactDetails'])
+                        if cleaned!=value['contactDetails']:
+                            value['contactDetails']=cleaned
+                            serialized=json.dumps(value,ensure_ascii=False)
+                            changed=out.execute('UPDATE outbox SET payload=? WHERE id=? AND payload=? AND uploaded=0',(serialized,key,payload)).rowcount
+                            out.commit()
+                            if not changed:continue
+                            payload=serialized
                     validate_capture(value)
                 except (ValueError, TypeError):
                     quarantine(key, payload, 'invalid-capture')
@@ -434,7 +466,7 @@ def save(args):
         payload.update(text=text, sourceMessageId=row['guid'], sourceAt=apple_date(row['date']))
         if len(payload['participants'])==1:
             card=contact_cards().get(normalize_handle(payload['participants'][0]))
-            if card:payload['contactDetails']=card
+            if card:payload['contactDetails']=scrub_contact_details(card)
         key = event_id(args.account, chats[0]['guid'], row['guid']+':manual:'+','.join(sorted(tags)))
         payload['triggerMessageId'] = row['guid']+':manual:'+','.join(sorted(tags))
         validate_capture(payload)

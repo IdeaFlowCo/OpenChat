@@ -110,6 +110,25 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(outcome['success'])
         self.assertEqual(outcome['lastExitCode'],78)
 
+    def test_upload_mode_can_be_enabled_disabled_and_preserved(self):
+        state=self.root/'external archive/state.sqlite3'
+        self.assertEqual(self.invoke('install','--state',str(state),'--archive-only')[0],0)
+        executable=self.launches[-1]['ProgramArguments'][0]
+        for flag, archive_only in [('--upload-enabled',False),(None,False),('--archive-only',True),(None,True)]:
+            args=('install',flag) if flag else ('install',)
+            self.assertEqual(self.invoke(*args)[0],0)
+            command=self.launches[-1]['ProgramArguments']
+            self.assertEqual('--archive-only' in command,archive_only)
+            self.assertEqual(command[command.index('--state')+1],str(state))
+            self.assertEqual(command[0],executable)
+
+    def test_conflicting_modes_are_rejected_without_service_changes(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                self.invoke('install','--archive-only','--upload-enabled')
+        self.assertEqual(error.exception.code,2)
+        self.assertEqual(self.calls,[])
+
 
 if __name__ == '__main__':
     unittest.main()

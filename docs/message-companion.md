@@ -53,7 +53,9 @@ python3 scripts/message-companion/service.py stop
 Use `--state`, `--messages`, `--config`, and `--account` **before** the subcommand.
 The same account namespace must mean the same Messages account on each Mac.
 `service.py install --archive-only` installs a local capture-only watcher before
-server pairing. Re-run install without that flag to enable upload. The service
+server pairing. After pairing, run `service.py install --upload-enabled` to enable
+uploads, or `service.py install --archive-only` to disable them again. Reinstalling
+without either flag preserves the installed mode and state path. The service
 uses a private outbox, exclusive watcher lock, periodic full reconciliation,
 launchd restart, and retry with checkpoints retained. Stop unloads the service;
 install loads it again. It runs independently of the OpenChat window, so the
@@ -81,7 +83,9 @@ implementation does not disable SIP or promise unsupported operations.
 For an unambiguous single-person thread, the companion reads ordinary structured
 fields from Apple Contacts (name, phone, email, postal address, organization, job
 title, birthday, website). It imports a dated snapshot attached to the source
-thread. Apple notes are excluded. The UI labels the snapshot **From Apple
+thread. Source field labels are preserved and checked alongside values; confidential
+fields are omitted before queueing and scrubbed from staged snapshots before
+upload. Canonical Contacts records are unchanged. Apple notes are excluded. The UI labels the snapshot **From Apple
 Contacts**. Current code is source reading plus explicit address append, not a
 general bidirectional sync engine or a replacement for every Apple Contacts field.
 
@@ -136,3 +140,18 @@ unless explicitly overridden. Install/start success requires an observed running
 state; status includes the last launchd exit code. A loaded job alone does not
 prove the companion is running. For startup failures, inspect `launchctl print gui/$(id -u)/com.openchat.message-companion` and the log paths in the installed
 plist locally; do not share private log contents.
+
+Run the installer with the interpreter already authorized to read Messages,
+Contacts, and the external archive. The installed job uses that interpreter's
+resolved executable; permission for another Python or terminal is insufficient.
+On this M4, the Command Line Tools Python lacked Full Disk Access. The existing
+authorized interpreter can be used explicitly (no TCC changes are made):
+
+```sh
+/opt/homebrew/Cellar/python@3.12/3.12.13_4/Frameworks/Python.framework/Versions/3.12/bin/python3.12 scripts/message-companion/service.py install --upload-enabled
+```
+
+Omit the mode flag to preserve the installed mode, or use `--archive-only` for
+local capture. The interpreter path is machine-specific; use an authorized
+installed interpreter on other Macs. Pipeline review does not manage the live
+service.

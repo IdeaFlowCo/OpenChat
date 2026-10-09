@@ -18,7 +18,9 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action',choices=['install','start','stop','status'])
     parser.add_argument('--state')
-    parser.add_argument('--archive-only',action='store_true',default=None)
+    mode=parser.add_mutually_exclusive_group()
+    mode.add_argument('--archive-only',dest='archive_only',action='store_true',default=None)
+    mode.add_argument('--upload-enabled',dest='archive_only',action='store_false')
     args=parser.parse_args()
     plist=Path.home()/'Library/LaunchAgents'/f'{LABEL}.plist'
     target=f'gui/{os.getuid()}/{LABEL}'

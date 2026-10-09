@@ -251,5 +251,86 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(app.status(self.args)['review'],{})
         self.assertEqual(sent[1]['text'],'Corrected ordinary text')
 
+    def test_contact_snapshots_are_scrubbed_before_archive_and_manual_enqueue(self):
+        card={'modifiedAt':'2026-10-09T00:00:00Z','fields':[
+            {'label':'confidential','value':'dummy-private'},
+            {'label':'City','value':'Example City'},
+        ]}
+        self.message('source','Ordinary words #tag')
+        with patch.object(app,'contact_cards',return_value={'dad@example.test':card}):
+            self.archive()
+            self.args.guid='source';self.args.tag=['address']
+            with patch.object(app,'contact_names',return_value={}):app.save(self.args)
+        self.assertEqual(len(self.rows()),2)
+        for row in self.rows():
+            self.assertEqual(row['contactDetails']['fields'],[{'label':'City','value':'Example City'}])
+        self.assertEqual(len(card['fields']),2)
+
+    def test_staged_contact_fields_are_scrubbed_before_upload_and_retry(self):
+        self.prepare_uploads(1)
+        safe={'label':'Address · Home','value':'Apartment 3'}
+        card={'modifiedAt':'2026-10-09T00:00:00Z','fields':[
+            safe,{'label':'ＣＯＮＦＩＤＥＮＴＩＡＬ','value':'dummy-private'},
+            {'label':'Passport','value':'dummy-id'},{'label':'Bank account','value':'dummy-id'},
+            {'label':'Other','value':'123-45-6789'},
+        ]}
+        with sqlite3.connect(self.state) as c:
+            key,payload=c.execute('SELECT id,payload FROM outbox').fetchone()
+            value=json.loads(payload);value['contactDetails']=card
+            c.execute('UPDATE outbox SET payload=? WHERE id=?',(json.dumps(value),key))
+        def unavailable(cfg,path,body):
+            self.assertEqual(body['captures'][0]['contactDetails']['fields'],[safe])
+            raise urllib.error.HTTPError('https://example.test',503,'Retry',{},None)
+        with patch.object(app,'api_call',side_effect=unavailable):
+            with self.assertRaises(urllib.error.HTTPError):app.sync(self.args)
+        self.assertEqual(self.rows()[0]['contactDetails']['fields'],[safe])
+        self.assertEqual(self.upload_states(),[0])
+        with patch.object(app,'api_call',return_value={'accepted':1}) as call:
+            self.assertEqual(app.sync(self.args),{'uploaded':1})
+            self.assertEqual(call.call_args.args[2]['captures'][0]['contactDetails']['fields'],[safe])
+        self.assertEqual(self.upload_states(),[1])
+
+
+class ContactSnapshotTests(unittest.TestCase):
+    def test_reads_source_labels_without_exporting_confidential_fields_or_mutating_contacts(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temp:
+            root=Path(temp)
+            folder=root/'Library/Application Support/AddressBook';folder.mkdir(parents=True)
+            path=folder/'AddressBook-v22.abcddb'
+            db=sqlite3.connect(path)
+            try:
+                db.executescript("""
+                    CREATE TABLE ZABCDRECORD (Z_PK INTEGER,ZFIRSTNAME TEXT,ZLASTNAME TEXT,ZORGANIZATION TEXT,ZJOBTITLE TEXT,ZBIRTHDAY REAL,ZMODIFICATIONDATE REAL);
+                    CREATE TABLE ZABCDPHONENUMBER (ZOWNER INTEGER,ZFULLNUMBER TEXT,ZLABEL TEXT);
+                    CREATE TABLE ZABCDEMAILADDRESS (ZOWNER INTEGER,ZADDRESS TEXT,ZLABEL TEXT);
+                    CREATE TABLE ZABCDPOSTALADDRESS (ZOWNER INTEGER,ZSTREET TEXT,ZCITY TEXT,ZSTATE TEXT,ZZIPCODE TEXT,ZCOUNTRYNAME TEXT,ZLABEL TEXT);
+                    CREATE TABLE ZABCDURLADDRESS (ZOWNER INTEGER,ZURL TEXT,ZLABEL TEXT);
+                    INSERT INTO ZABCDRECORD VALUES (1,'Example','Person','Example org','Designer',NULL,1000);
+                    INSERT INTO ZABCDEMAILADDRESS VALUES (1,'person@example.test','_$!<Home>!$_');
+                    INSERT INTO ZABCDEMAILADDRESS VALUES (1,'private@example.test','confidential');
+                    INSERT INTO ZABCDPHONENUMBER VALUES (1,'555-0100','Mobile');
+                    INSERT INTO ZABCDPHONENUMBER VALUES (1,'dummy-phone','ＣＯＮＦＩＤＥＮＴＩＡＬ');
+                    INSERT INTO ZABCDPHONENUMBER VALUES (1,'123-45-6789','Other');
+                    INSERT INTO ZABCDPOSTALADDRESS VALUES (1,'Apartment 3',NULL,NULL,NULL,NULL,'_$!<Home>!$_');
+                    INSERT INTO ZABCDPOSTALADDRESS VALUES (1,'dummy-private',NULL,NULL,NULL,NULL,'Confidential');
+                    INSERT INTO ZABCDURLADDRESS VALUES (1,'https://example.test','Personal');
+                    INSERT INTO ZABCDURLADDRESS VALUES (1,'https://private.example.test','confidential');
+                """)
+                db.commit()
+            finally:db.close()
+            original=path.read_bytes()
+            with patch.object(Path,'home',return_value=root):cards=app.contact_cards()
+            self.assertEqual(set(cards),{'person@example.test','5550100'})
+            self.assertEqual(cards['person@example.test']['fields'],[
+                {'label':'Name','value':'Example Person'},
+                {'label':'Organization','value':'Example org'},
+                {'label':'Job title','value':'Designer'},
+                {'label':'Phone · Mobile','value':'555-0100'},
+                {'label':'Email · Home','value':'person@example.test'},
+                {'label':'Address · Home','value':'Apartment 3'},
+                {'label':'Website · Personal','value':'https://example.test'},
+            ])
+            self.assertEqual(path.read_bytes(),original)
+
 
 if __name__=='__main__': unittest.main()
