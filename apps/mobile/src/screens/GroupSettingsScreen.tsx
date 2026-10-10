@@ -25,6 +25,7 @@ import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp, RouteProps } from '../navigation/types';
+import { onlinePresence } from '../utils/listTime';
 
 export function GroupSettingsScreen() {
   const navigation = useNavigation<NavProp<'GroupSettings'>>();
@@ -244,7 +245,7 @@ export function GroupSettingsScreen() {
                 name={p.user.name}
                 email={safeEmail || undefined}
                 isBot={p.user.isBot}
-                presenceStatus={live?.status || p.user.presenceStatus}
+                presenceStatus={onlinePresence(live?.status || p.user.presenceStatus)}
                 size={40}
               />
               <View style={{ flex: 1 }}>

@@ -37,6 +37,7 @@ import { buildComposeSections } from '../utils/composeSections';
 import { AGENT_DISPLAY_NAME, getUserDisplayName } from '../utils/conversationDisplay';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp } from '../navigation/types';
+import { onlinePresence } from '../utils/listTime';
 
 type Mode = 'direct' | 'group';
 const DIRECTORY_PAGE_SIZE = 50;
@@ -222,7 +223,7 @@ export function NewConversationScreen() {
           email={item.email}
           avatarUrl={item.avatarUrl}
           isBot={item.isBot}
-          presenceStatus={live?.status || item.presenceStatus}
+          presenceStatus={onlinePresence(live?.status || item.presenceStatus)}
           size={40}
         />
         <View style={styles.rowText}>
