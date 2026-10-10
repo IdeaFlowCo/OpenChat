@@ -21,6 +21,8 @@ jobs:
       - run: npm ci
       - name: Mobile typecheck
         run: npx tsc --noEmit -p apps/mobile/tsconfig.json
+      - name: Mobile design-token lint (no new fontSize/radius/hex literals)
+        run: npm run lint --workspace=apps/mobile
       - name: Mobile permission and share utilities
         run: npm run test --workspace=apps/mobile
       - name: Group opening, message loading, and contact card privacy

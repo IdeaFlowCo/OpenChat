@@ -1,0 +1,467 @@
+{
+  "App.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/components/AddMeCardView.tsx": {
+    "no-restricted-syntax": {
+      "count": 5
+    }
+  },
+  "src/components/AgentNetworkCard.tsx": {
+    "no-restricted-syntax": {
+      "count": 22
+    }
+  },
+  "src/components/AgentOverlayButton.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "src/components/AiDisclosureBanner.tsx": {
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "src/components/BotBadge.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/components/ChatEmptyState.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "src/components/ConnectAgentLink.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "src/components/ConnectionStatusLine.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "src/components/ContextComposer.tsx": {
+    "no-restricted-syntax": {
+      "count": 7
+    }
+  },
+  "src/components/ContextDraftCard.tsx": {
+    "no-restricted-syntax": {
+      "count": 9
+    }
+  },
+  "src/components/ContextIntentionControls.tsx": {
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "src/components/ContextLane.tsx": {
+    "no-restricted-syntax": {
+      "count": 8
+    }
+  },
+  "src/components/ContextStreamEntry.tsx": {
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "src/components/ContextWebhookSetup.tsx": {
+    "no-restricted-syntax": {
+      "count": 7
+    }
+  },
+  "src/components/ConversationHeaderContent.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "src/components/ConversationLaneSwitch.tsx": {
+    "no-restricted-syntax": {
+      "count": 5
+    }
+  },
+  "src/components/ConversationList.tsx": {
+    "no-restricted-syntax": {
+      "count": 9
+    }
+  },
+  "src/components/EntryHeader.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/components/ErrorBoundary.tsx": {
+    "no-restricted-syntax": {
+      "count": 5
+    }
+  },
+  "src/components/ExportSheet.tsx": {
+    "no-restricted-syntax": {
+      "count": 10
+    }
+  },
+  "src/components/FeedbackModal.tsx": {
+    "no-restricted-syntax": {
+      "count": 8
+    }
+  },
+  "src/components/FriendControls.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "src/components/GlobalRecordingBar.tsx": {
+    "no-restricted-syntax": {
+      "count": 6
+    }
+  },
+  "src/components/HashtagAutocomplete.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/components/InAppMessageBanner.tsx": {
+    "no-restricted-syntax": {
+      "count": 5
+    }
+  },
+  "src/components/JumpToBottomButton.tsx": {
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "src/components/LinkPreviewCard.tsx": {
+    "no-restricted-syntax": {
+      "count": 5
+    }
+  },
+  "src/components/MasterDetailLayout.tsx": {
+    "no-restricted-syntax": {
+      "count": 16
+    }
+  },
+  "src/components/McpSetupCard.tsx": {
+    "no-restricted-syntax": {
+      "count": 20
+    }
+  },
+  "src/components/MentionAutocomplete.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "src/components/MessageActionSheet.tsx": {
+    "no-restricted-syntax": {
+      "count": 15
+    }
+  },
+  "src/components/NVCComposerModal.tsx": {
+    "no-restricted-syntax": {
+      "count": 9
+    }
+  },
+  "src/components/OfflineBanner.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/components/PasswordRecoveryHelp.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "src/components/PresenceDot.tsx": {
+    "no-restricted-syntax": {
+      "count": 5
+    }
+  },
+  "src/components/PrivateGraph.tsx": {
+    "no-restricted-syntax": {
+      "count": 24
+    }
+  },
+  "src/components/ProfileAsks.tsx": {
+    "no-restricted-syntax": {
+      "count": 6
+    }
+  },
+  "src/components/ProfileNoteCapture.tsx": {
+    "no-restricted-syntax": {
+      "count": 16
+    }
+  },
+  "src/components/PushSoftAsk.tsx": {
+    "no-restricted-syntax": {
+      "count": 5
+    }
+  },
+  "src/components/ReactionPicker.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/components/ReactionsBar.tsx": {
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "src/components/StoriesStrip.tsx": {
+    "no-restricted-syntax": {
+      "count": 9
+    }
+  },
+  "src/components/StreamEditor.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/components/ThoughtCard.tsx": {
+    "no-restricted-syntax": {
+      "count": 20
+    }
+  },
+  "src/components/ThoughtsSearchBar.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/components/ToastMessage.tsx": {
+    "no-restricted-syntax": {
+      "count": 6
+    }
+  },
+  "src/components/TransformButton.tsx": {
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "src/components/UnlinkedSessionGate.tsx": {
+    "no-restricted-syntax": {
+      "count": 5
+    }
+  },
+  "src/components/UpdateBanner.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "src/components/VoiceMessageBubble.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/components/YouBadge.tsx": {
+    "no-restricted-syntax": {
+      "count": 6
+    }
+  },
+  "src/navigation/chatBackOptions.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "src/screens/AddAgentKeyScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 13
+    }
+  },
+  "src/screens/AddEditThoughtScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 17
+    }
+  },
+  "src/screens/AgentKeyDetailScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 12
+    }
+  },
+  "src/screens/AgentKeysScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 16
+    }
+  },
+  "src/screens/AgentOverlayScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 28
+    }
+  },
+  "src/screens/AsksScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 16
+    }
+  },
+  "src/screens/BlockedUsersScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 6
+    }
+  },
+  "src/screens/CardEntryScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 5
+    }
+  },
+  "src/screens/CatchUpScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/screens/ChatScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 50
+    }
+  },
+  "src/screens/ComposeScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "src/screens/ContactProfileScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 8
+    }
+  },
+  "src/screens/ContextReviewScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 7
+    }
+  },
+  "src/screens/ConversationsScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 9
+    }
+  },
+  "src/screens/ForwardPickerScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 5
+    }
+  },
+  "src/screens/FriendsScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 12
+    }
+  },
+  "src/screens/GroupInvitePreviewScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 13
+    }
+  },
+  "src/screens/GroupInviteScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 14
+    }
+  },
+  "src/screens/GroupSettingsScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 10
+    }
+  },
+  "src/screens/InvitePersonScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 7
+    }
+  },
+  "src/screens/KeyboardShortcutsScreen.web.tsx": {
+    "no-restricted-syntax": {
+      "count": 6
+    }
+  },
+  "src/screens/LoginScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 50
+    }
+  },
+  "src/screens/MyCardScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 31
+    }
+  },
+  "src/screens/NewConversationScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 15
+    }
+  },
+  "src/screens/OnboardingScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 20
+    }
+  },
+  "src/screens/OriginalMessageScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/screens/PermissionsScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 9
+    }
+  },
+  "src/screens/PersonEntryScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 8
+    }
+  },
+  "src/screens/PrivateThingScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/screens/ProfileEditScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 13
+    }
+  },
+  "src/screens/ScanQrScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 7
+    }
+  },
+  "src/screens/ScanQrScreen.web.tsx": {
+    "no-restricted-syntax": {
+      "count": 9
+    }
+  },
+  "src/screens/SearchScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 7
+    }
+  },
+  "src/screens/SecretaryScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 18
+    }
+  },
+  "src/screens/SettingsScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 52
+    }
+  },
+  "src/screens/SocialReviewScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 13
+    }
+  },
+  "src/screens/StoryComposerScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 31
+    }
+  },
+  "src/screens/StoryViewerScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 11
+    }
+  },
+  "src/screens/ThoughtsScreen.tsx": {
+    "no-restricted-syntax": {
+      "count": 8
+    }
+  },
+  "src/utils/colorForUserId.ts": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  }
+}

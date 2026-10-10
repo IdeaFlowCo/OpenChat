@@ -6,6 +6,7 @@ export type AppIconName =
   | 'bot'
   | 'camera'
   | 'chat'
+  | 'check'
   | 'chevron-down'
   | 'chevron-left'
   | 'chevron-right'
@@ -17,6 +18,8 @@ export type AppIconName =
   | 'forward'
   | 'heart'
   | 'info'
+  | 'link'
+  | 'lock'
   | 'logout'
   | 'mic'
   | 'more'
@@ -30,6 +33,7 @@ export type AppIconName =
   | 'reply'
   | 'search'
   | 'settings'
+  | 'share'
   | 'sparkle'
   | 'stop'
   | 'thought'
@@ -280,6 +284,30 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
           <Path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" {...common} />
           <Polyline points="16 17 21 12 16 7" {...common} />
           <Line x1="21" y1="12" x2="9" y2="12" {...common} />
+        </>
+      )}
+      {name === 'check' && (
+        <Polyline points="5 12.5 10 17.5 19 7" {...common} />
+      )}
+      {name === 'lock' && (
+        /* Padlock: marks the viewer-only (private) layer. */
+        <>
+          <Path d="M6 11h12v9H6z" {...common} />
+          <Path d="M8.5 11V8a3.5 3.5 0 0 1 7 0v3" {...common} />
+        </>
+      )}
+      {name === 'link' && (
+        <>
+          <Path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.2 1.2" {...common} />
+          <Path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.2-1.2" {...common} />
+        </>
+      )}
+      {name === 'share' && (
+        /* Box with an arrow up and out: the iOS share glyph. */
+        <>
+          <Path d="M8 9H6v11h12V9h-2" {...common} />
+          <Polyline points="8 6 12 2 16 6" {...common} />
+          <Line x1="12" y1="2" x2="12" y2="14" {...common} />
         </>
       )}
       {name === 'x' && (
