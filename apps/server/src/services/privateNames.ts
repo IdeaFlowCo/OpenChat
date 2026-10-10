@@ -2,6 +2,7 @@ import { classifyContactDiscoveryQuery } from '../privacy/contactDiscovery.js';
 import { getDriver } from '../db.js';
 import { normalizePublicDisplayName } from '../privacy/profilePrivacy.js';
 import { acquireContextAclLocks } from './contextAccess.js';
+import { projectCardForStranger, settingsFromNode, type CardOwnerRecord, type StrangerCard } from './addMeCard.js';
 
 export class PrivateNameError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -82,13 +83,27 @@ export async function clearPrivateName(ownerId: string, targetId: string): Promi
  * The same visibility gate applies as aliases; no email/phone/private label is
  * projected into this identity response.
  */
-export async function getContactProfile(ownerId: string, targetId: string, proof?: unknown): Promise<{ id: string; name: string; avatarUrl: string | null; isBot: boolean }> {
+/**
+ * The person's own layer as a viewer sees it. `card` (the fields they chose to
+ * show on their shareable card) is added only for accepted friends: the card
+ * already promises those fields to anyone holding its link, and a friend is a
+ * narrower audience than that. Everyone else gets the identity alone.
+ */
+export async function getContactProfile(ownerId: string, targetId: string, proof?: unknown): Promise<{ id: string; name: string; avatarUrl: string | null; isBot: boolean; card?: StrangerCard }> {
   const session = getDriver().session();
   try {
     const result = await session.run(`${visibleTarget}
-      RETURN target { .id, .name, .avatarUrl, .isBot } AS user`, paramsFor(ownerId, targetId, proof));
+      OPTIONAL MATCH (friendship:OpenChatConnection {pairKey: $pairKey, state: 'accepted'})
+      OPTIONAL MATCH (target)-[:HAS_ADDME_CARD]->(card:AddMeCard) WHERE friendship IS NOT NULL AND card.revokedAt IS NULL
+      WITH target, card ORDER BY card.createdAt DESC LIMIT 1
+      RETURN target { .id, .name, .avatarUrl, .isBot } AS user,
+        target { .name, .avatarUrl, .isBot, .profileStatusText, .profileStatusEmoji } AS owner,
+        CASE WHEN card IS NULL THEN null ELSE properties(card) END AS card`, paramsFor(ownerId, targetId, proof));
     if (!result.records.length) throw new PrivateNameError(404, 'Person unavailable');
     const user = result.records[0].get('user') as { id: string; name?: unknown; avatarUrl?: string | null; isBot?: boolean };
-    return { id: user.id, name: normalizePublicDisplayName(user.name), avatarUrl: user.avatarUrl || null, isBot: user.isBot === true };
+    const profile = { id: user.id, name: normalizePublicDisplayName(user.name), avatarUrl: user.avatarUrl || null, isBot: user.isBot === true };
+    const cardProps = result.records[0].get('card') as Record<string, unknown> | null;
+    if (!cardProps) return profile;
+    return { ...profile, card: projectCardForStranger(result.records[0].get('owner') as CardOwnerRecord, settingsFromNode(cardProps)) };
   } finally { await session.close(); }
 }

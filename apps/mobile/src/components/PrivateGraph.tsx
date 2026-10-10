@@ -4,8 +4,8 @@
  *
  * `PrivateNotes` and `PrivateLinks` work for a contact (`kind: 'user'`) or for
  * a saved company, idea, project or person (`kind: 'thing'`). `PrivateCard`
- * is the collapsed card on a contact's profile: it stays out of the way until
- * opened, so the profile itself reads as it always has.
+ * is the collapsed card on a contact's profile: a lock eyebrow and a one-line
+ * summary until opened, so their layer leads and yours stays out of the way.
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -15,7 +15,10 @@ import {
 } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
+import { radius, roles, space, type } from '../theme/tokens';
+import { AppIcon } from './AppIcon';
 import { ProfileNoteCapture } from './ProfileNoteCapture';
+import { Button, Chip } from './ui';
 
 export const CADENCES: Array<{ label: string; days: number | null }> = [
   { label: 'None', days: null }, { label: 'Weekly', days: 7 }, { label: 'Monthly', days: 30 },
@@ -50,16 +53,6 @@ export function privateSummary(card: PrivatePersonCard, notes: number, links: nu
     links ? `${links} ${links === 1 ? 'link' : 'links'}` : '',
   ].filter(Boolean);
   return parts.length ? parts.join(' · ') : 'Notes, importance, catch-up and links';
-}
-
-type Colors = ReturnType<typeof getColors>;
-function Chip({ label, selected, onPress, c, disabled }: { label: string; selected: boolean; onPress: () => void; c: Colors; disabled?: boolean }) {
-  return (
-    <TouchableOpacity onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityState={{ selected }}
-      style={[styles.chip, { borderColor: c.border, backgroundColor: selected ? c.primary : c.surface }]}>
-      <Text style={{ color: selected ? c.onPrimary : c.textPrimary, fontSize: 14 }}>{label}</Text>
-    </TouchableOpacity>
-  );
 }
 
 export function PrivateNotes({ subject, notes, onChange }: { subject: PrivateSubject; notes: PrivateNote[]; onChange: (notes: PrivateNote[]) => void }) {
@@ -170,7 +163,7 @@ export function PrivateLinks({ subject, links, onChange, onOpenThing, onOpenPers
       )}
       {adding && <>
       <View style={styles.chips}>
-        {RELATIONS.map(option => <Chip key={option} label={option} selected={relation === option} onPress={() => { setRelation(option); setKind(RELATION_KIND[option]!); }} c={c} disabled={busy} />)}
+        {RELATIONS.map(option => <Chip key={option} label={option} selected={relation === option} onPress={() => { setRelation(option); setKind(RELATION_KIND[option]!); }} disabled={busy} />)}
       </View>
       <TextInput
         value={RELATIONS.includes(relation) ? '' : relation} onChangeText={setRelation} maxLength={60} editable={!busy} autoCapitalize="none"
@@ -178,7 +171,7 @@ export function PrivateLinks({ subject, links, onChange, onOpenThing, onOpenPers
         style={[styles.input, { color: c.textPrimary, borderColor: c.border, backgroundColor: c.background }]}
       />
       <View style={styles.chips}>
-        {THING_KINDS.map(option => <Chip key={option.kind} label={option.label} selected={kind === option.kind} onPress={() => setKind(option.kind)} c={c} disabled={busy} />)}
+        {THING_KINDS.map(option => <Chip key={option.kind} label={option.label} selected={kind === option.kind} onPress={() => setKind(option.kind)} disabled={busy} />)}
       </View>
       <TextInput
         value={name} onChangeText={setName} maxLength={120} editable={!busy}
@@ -215,10 +208,11 @@ export function PrivateLinks({ subject, links, onChange, onOpenThing, onOpenPers
   );
 }
 
-export function PrivateCard({ userId, onOpenThing, onOpenPerson, onAskAgent, sharedAsks }: { userId: string; onOpenThing: (thingId: string) => void; onOpenPerson: (userId: string) => void; onAskAgent?: () => void; sharedAsks?: ReactNode }) {
+export function PrivateCard({ userId, onOpenThing, onOpenPerson, nameRow }: { userId: string; onOpenThing: (thingId: string) => void; onOpenPerson: (userId: string) => void; nameRow?: ReactNode }) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  const [open, setOpen] = useState(true);
+  const r = roles(c);
+  const [open, setOpen] = useState(false);
   const [card, setCard] = useState<PrivatePersonCard | null>(null);
   const [notes, setNotes] = useState<PrivateNote[]>([]);
   const [links, setLinks] = useState<PrivateLink[]>([]);
@@ -242,60 +236,62 @@ export function PrivateCard({ userId, onOpenThing, onOpenPerson, onAskAgent, sha
     finally { setBusy(false); }
   }, [userId]);
 
-  if (!card) return error ? <Text style={{ color: c.textMetadata, marginTop: 16 }}>{error}</Text> : <ActivityIndicator color={c.primary} style={{ marginTop: 16 }} />;
+  if (!card && !error) return <ActivityIndicator color={r.accent} style={styles.status} />;
+  // The private name has its own API, so it stays editable when the overlay cannot load.
+  if (!card) return (
+    <View style={styles.status}>
+      <Text style={[type.meta, { color: r.textMeta }]}>{error}</Text>
+      {nameRow && <View style={[styles.card, styles.fallback, { backgroundColor: r.card, borderColor: r.line }]}>{nameRow}</View>}
+    </View>
+  );
   const subject: PrivateSubject = { kind: 'user', id: userId };
   const due = dueLabel(card.nextDueAt);
   return (
-    <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-      <TouchableOpacity onPress={() => setOpen(value => !value)} style={styles.header} accessibilityRole="button" accessibilityState={{ expanded: open }}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.title, { color: c.textPrimary }]}>Private to you</Text>
-          <Text style={{ color: c.textMetadata, fontSize: 13 }} numberOfLines={2}>
-            {open ? 'Your notes and connections stay private. Shared asks keep their original audience.' : privateSummary(card, notes.length, links.length)}
-          </Text>
+    <View style={[styles.card, { backgroundColor: r.card, borderColor: r.line }]}>
+      <TouchableOpacity onPress={() => setOpen(value => !value)} style={styles.header} accessibilityRole="button" accessibilityState={{ expanded: open }}
+        accessibilityLabel={`Private to you. ${privateSummary(card, notes.length, links.length)}`}>
+        <View style={styles.headerText}>
+          <View style={styles.eyebrow}>
+            <AppIcon name="lock" color={r.textMeta} size={12} strokeWidth={2.4} />
+            <Text style={[type.eyebrow, { color: r.textMeta }]}>Private to you</Text>
+          </View>
+          <Text style={[type.body, { color: r.text }]} numberOfLines={2}>{privateSummary(card, notes.length, links.length)}</Text>
         </View>
-        <Text style={{ color: c.textMuted, fontSize: 18 }}>{open ? '⌄' : '›'}</Text>
+        <AppIcon name={open ? 'chevron-down' : 'chevron-right'} color={r.decoration} size={18} />
       </TouchableOpacity>
       {open && (
-        <View style={styles.body}>
-          <ProfileNoteCapture key={userId} subject={subject} notes={notes} onChange={reload} onAskAgent={onAskAgent} sharedAsks={sharedAsks} />
+        <View style={[styles.body, { borderTopColor: r.line }]}>
+          {nameRow}
+          <ProfileNoteCapture key={userId} subject={subject} notes={notes} onChange={reload} />
           <View style={styles.chips}>
-            <TouchableOpacity onPress={() => void patch({ important: !card.important })} disabled={busy} accessibilityRole="switch" accessibilityState={{ checked: card.important }}
-              style={[styles.chip, { borderColor: c.border, backgroundColor: card.important ? c.primary : c.surface }]}>
-              <Text style={{ color: card.important ? c.onPrimary : c.textPrimary, fontSize: 14 }}>{card.important ? '★ Important' : '☆ Mark important'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setCadenceOpen(value => !value)} accessibilityRole="button" accessibilityState={{ expanded: cadenceOpen }}
-              style={[styles.chip, { borderColor: c.border, backgroundColor: card.cadenceDays ? c.primary : c.surface }]}>
-              <Text style={{ color: card.cadenceDays ? c.onPrimary : c.textPrimary, fontSize: 14 }}>
-                {`${card.cadenceDays ? `Catch up ${cadenceLabel(card)}` : 'Set a catch-up'} ${cadenceOpen ? '▴' : '▾'}`}
-              </Text>
-            </TouchableOpacity>
+            <Chip label={card.important ? 'Important' : 'Mark important'} icon={card.important ? 'check' : undefined} selected={card.important}
+              onPress={() => void patch({ important: !card.important })} disabled={busy} />
+            <Chip label={card.cadenceDays ? `Catch up ${cadenceLabel(card)}` : 'Set a catch-up'} selected={!!card.cadenceDays}
+              onPress={() => setCadenceOpen(value => !value)} />
           </View>
           {cadenceOpen && (
             <View style={styles.section}>
               <View style={styles.chips}>
-                {CADENCES.map(option => <Chip key={option.label} label={option.label} selected={card.cadenceDays === option.days} onPress={() => void patch({ cadenceDays: option.days })} c={c} disabled={busy} />)}
+                {CADENCES.map(option => <Chip key={option.label} label={option.label} selected={card.cadenceDays === option.days} onPress={() => void patch({ cadenceDays: option.days })} disabled={busy} />)}
               </View>
               {/* Stretching tops out at a year, so it is offered only below that. */}
               {card.cadenceDays !== null && card.cadenceDays < 365 && (
                 <View style={styles.chips}>
                   <Chip label={card.cadenceMode === 'expanding' ? 'Stretching the gap each time' : 'Stretch the gap each time'} selected={card.cadenceMode === 'expanding'}
-                    onPress={() => void patch({ cadenceMode: card.cadenceMode === 'expanding' ? 'fixed' : 'expanding' })} c={c} disabled={busy} />
+                    onPress={() => void patch({ cadenceMode: card.cadenceMode === 'expanding' ? 'fixed' : 'expanding' })} disabled={busy} />
                 </View>
               )}
             </View>
           )}
           {card.cadenceDays !== null && (
             <View style={styles.itemMeta}>
-              <Text style={{ color: c.textMetadata, fontSize: 13, flex: 1 }}>{due}</Text>
-              <TouchableOpacity onPress={() => void patch({ contactedNow: true })} disabled={busy} accessibilityRole="button" style={styles.textButton}>
-                <Text style={{ color: c.primary, fontWeight: '700', fontSize: 14 }}>Caught up today</Text>
-              </TouchableOpacity>
+              <Text style={[type.meta, { color: r.textMeta, flex: 1 }]}>{due}</Text>
+              <Button size="sm" variant="ghost" label="Caught up today" disabled={busy} onPress={() => void patch({ contactedNow: true })} />
             </View>
           )}
 
           <PrivateLinks subject={subject} links={links} onChange={setLinks} onOpenThing={onOpenThing} onOpenPerson={onOpenPerson} />
-          {error && <Text style={{ color: c.danger }}>{error}</Text>}
+          {error && <Text style={[type.meta, { color: r.danger }]}>{error}</Text>}
         </View>
       )}
     </View>
@@ -303,14 +299,16 @@ export function PrivateCard({ userId, onOpenThing, onOpenPerson, onAskAgent, sha
 }
 
 const styles = StyleSheet.create({
-  card: { marginTop: 16, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 14 },
-  title: { fontSize: 16, fontWeight: '700' },
-  body: { paddingHorizontal: 14, paddingBottom: 16, gap: 14 },
+  card: { marginTop: space[6], borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  status: { marginTop: space[6] },
+  fallback: { marginTop: space[2], paddingHorizontal: space[4] },
+  header: { flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[4], paddingVertical: space[3], minHeight: 56 },
+  headerText: { flex: 1, minWidth: 0, gap: space[1] },
+  eyebrow: { flexDirection: 'row', alignItems: 'center', gap: space[1] + 2 },
+  body: { paddingHorizontal: space[4], paddingTop: space[2], paddingBottom: space[4], gap: space[4], borderTopWidth: StyleSheet.hairlineWidth },
   section: { gap: 10 },
   heading: { fontSize: 15, fontWeight: '700' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, paddingVertical: 8, paddingHorizontal: 14, minHeight: 44, justifyContent: 'center' },
   item: { paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, gap: 6 },
   linkRow: { flexDirection: 'row', alignItems: 'center' },
   itemMeta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

@@ -2,15 +2,17 @@
  * Asks on a contact's profile — what this person is asking for, limited to the
  * Stories they chose to share with the viewer. It is the Stories feed narrowed
  * to one author, so audience, blocks and expiry are the server's rules, not
- * this component's. Stories are additive: a failed load shows nothing.
+ * this component's. Stories are additive: a failed load or an empty list shows
+ * nothing. It sits in their layer on the profile, above the private card.
  */
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { api, type FeedStory } from '../api/client';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
-import { capsLabel } from '../theme/typography';
+import { roles, space, type } from '../theme/tokens';
+import { Button, Card, SectionLabel } from './ui';
 
 export function askTimeLeft(expiresAt: string, now = Date.now()): string {
   const hours = Math.ceil(Math.max(0, Date.parse(expiresAt) - now) / 3_600_000);
@@ -35,43 +37,27 @@ export function ProfileAsks({ userId, onOpenStory }: { userId: string; onOpenSto
     return () => { active = false; };
   }, [enhanced, userId]);
 
-  if (!enhanced || stories === null) return null;
+  if (!enhanced || !stories?.length) return null;
+  const r = roles(c);
   return (
-    <View style={styles.root}>
-      <Text style={[styles.label, { color: c.textMetadata }]}>
-        {stories.length ? `Shared with you · ${stories.length}` : 'Shared with you'}
-      </Text>
-      {stories.length === 0 ? (
-        <Text style={[styles.empty, { color: c.textMetadata }]}>Nothing shared with you right now.</Text>
-      ) : (
-        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-          {stories.map((story, index) => (
-            <View key={story.id} style={[styles.ask, index > 0 && { borderTopColor: c.divider, borderTopWidth: StyleSheet.hairlineWidth }]}>
-              <Text style={{ color: c.textPrimary, fontSize: 15, lineHeight: 21 }} numberOfLines={5}>{story.text}</Text>
-              <View style={styles.askFooter}>
-                <Text style={{ color: c.textMetadata, fontSize: 12 }}>{askTimeLeft(story.storyExpiresAt)}</Text>
-                <TouchableOpacity
-                  onPress={() => onOpenStory(story)}
-                  accessibilityRole="button"
-                  style={[styles.respond, { borderColor: c.border, backgroundColor: c.surfaceElevated }]}
-                >
-                  <Text style={{ color: c.textPrimary, fontWeight: '700', fontSize: 14 }}>Respond</Text>
-                </TouchableOpacity>
-              </View>
+    <View>
+      <SectionLabel>{`Shared with you · ${stories.length}`}</SectionLabel>
+      <Card padding="none">
+        {stories.map((story, index) => (
+          <View key={story.id} style={[styles.ask, index > 0 && { borderTopColor: r.line, borderTopWidth: StyleSheet.hairlineWidth }]}>
+            <Text style={[type.body, { color: r.text }]} numberOfLines={5}>{story.text}</Text>
+            <View style={styles.askFooter}>
+              <Text style={[type.meta, { color: r.textMeta }]}>{askTimeLeft(story.storyExpiresAt)}</Text>
+              <Button size="sm" label="Respond" onPress={() => onOpenStory(story)} />
             </View>
-          ))}
-        </View>
-      )}
+          </View>
+        ))}
+      </Card>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { marginTop: 16, gap: 6 },
-  label: { ...capsLabel, marginHorizontal: 2 },
-  empty: { fontSize: 13, marginHorizontal: 2 },
-  card: { borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
-  ask: { paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
+  ask: { paddingHorizontal: space[4], paddingVertical: space[3], gap: space[2] },
   askFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  respond: { borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 8, paddingHorizontal: 14, minHeight: 44, justifyContent: 'center' },
 });

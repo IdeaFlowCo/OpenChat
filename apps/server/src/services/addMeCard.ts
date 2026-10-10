@@ -194,7 +194,7 @@ export function parseCardSettingsPatch(body: unknown): CardSettingsPatchResult {
   return { ok: true, patch };
 }
 
-function settingsFromNode(props: Record<string, unknown>): CardSettings {
+export function settingsFromNode(props: Record<string, unknown>): CardSettings {
   return {
     showAvatar: props.showAvatar !== false, // Defaults to true if missing
     showStatus: props.showStatus === true,

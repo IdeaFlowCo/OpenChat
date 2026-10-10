@@ -93,6 +93,8 @@ export interface User {
   /** Count of conversations the requesting user shares with this candidate. */
   sharedConversations?: number;
   openUserDirectoryEnabled?: boolean;
+  /** Their card fields (headline, links), from the contact profile; sent to accepted friends only. */
+  card?: StrangerCard;
 }
 
 export interface Participant {

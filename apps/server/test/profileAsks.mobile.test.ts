@@ -13,6 +13,7 @@ vi.mock('react-native', async () => {
     Text: host('Text'), TouchableOpacity: host('TouchableOpacity'), View: host('View'),
   };
 });
+vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/contexts/SocialExperienceContext', () => ({ useSocialExperience: () => mocks.social }));
 vi.mock('../../mobile/src/theme/colors', () => ({ getColors: () => ({ surface: '#fff', surfaceElevated: '#eee', border: '#ccc', divider: '#ddd', textPrimary: '#123', textMetadata: '#456' }) }));
@@ -54,11 +55,10 @@ describe('asks on a contact profile', () => {
     expect(mocks.openStory).toHaveBeenCalledWith(first);
   });
 
-  it('says so in one quiet line when nothing is shared', async () => {
+  it('adds no section when nothing is shared', async () => {
     mocks.listStoryFeed.mockResolvedValue([]);
     await mount();
-    expect(texts()).toBe('Shared with you\nNothing shared with you right now.');
-    expect(buttons('Respond')).toHaveLength(0);
+    expect(root!.toJSON()).toBeNull();
   });
 
   it('shows nothing when the feed fails or the coordination layer is off', async () => {

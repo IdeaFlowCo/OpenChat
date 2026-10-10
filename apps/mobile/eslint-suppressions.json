@@ -181,17 +181,12 @@
   },
   "src/components/PrivateGraph.tsx": {
     "no-restricted-syntax": {
-      "count": 24
-    }
-  },
-  "src/components/ProfileAsks.tsx": {
-    "no-restricted-syntax": {
-      "count": 6
+      "count": 14
     }
   },
   "src/components/ProfileNoteCapture.tsx": {
     "no-restricted-syntax": {
-      "count": 16
+      "count": 14
     }
   },
   "src/components/PushSoftAsk.tsx": {
@@ -317,11 +312,6 @@
   "src/screens/ComposeScreen.tsx": {
     "no-restricted-syntax": {
       "count": 2
-    }
-  },
-  "src/screens/ContactProfileScreen.tsx": {
-    "no-restricted-syntax": {
-      "count": 8
     }
   },
   "src/screens/ContextReviewScreen.tsx": {
