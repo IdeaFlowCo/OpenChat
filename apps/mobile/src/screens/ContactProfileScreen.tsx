@@ -250,7 +250,7 @@ export function ContactProfileScreen() {
                 key={link.label}
                 icon="link"
                 title={link.label}
-                subtitle={link.url.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '')}
+                subtitle={link.url.replace(/^https?:\/\/(www\.)?/i, '').replace(/[?#].*$/, '').replace(/\/$/, '')}
                 divider={index > 0}
                 chevron={false}
                 onPress={() => void Linking.openURL(link.url)}

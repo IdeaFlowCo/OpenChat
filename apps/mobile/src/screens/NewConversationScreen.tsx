@@ -1,10 +1,12 @@
 /**
- * Compose / new-conversation flow.
+ * Compose / new-conversation flow (OpenChat-eo3n.2).
  *
- * Single screen with two modes (toggle): "Direct" (pick one contact, start
- * DM) and "Group" (name a solo group or optionally pick contacts, create).
- * Mirrors the
- * web ChatSidebar picker but adapted to a full-screen mobile presentation.
+ * Like WhatsApp, Telegram and Messenger: a search field, one "New group" row,
+ * then people in three tiers: Recent (your direct chats, newest first),
+ * Friends, and Everyone (the directory search). Recent and Friends come from
+ * data already loaded, so they show and filter instantly. Tapping a person
+ * starts the DM; in New group, tapping selects. Inviting and scanning are
+ * contact management: they live on People and in the no-results state.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -29,6 +31,10 @@ import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { YouBadge } from '../components/YouBadge';
 import { AppIcon } from '../components/AppIcon';
+import { Button, Chip, ListRow, SectionLabel } from '../components/ui';
+import { radius, roles, space, type } from '../theme/tokens';
+import { buildComposeSections } from '../utils/composeSections';
+import { AGENT_DISPLAY_NAME, getUserDisplayName } from '../utils/conversationDisplay';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp } from '../navigation/types';
 
@@ -47,8 +53,20 @@ function useDebounced<T>(value: T, delay = 250): T {
 export function NewConversationScreen() {
   const navigation = useNavigation<NavProp<'NewConversation'>>();
   const { scheme } = useTheme();
-  const c = getColors(scheme);
-  const { createConversation, currentUser, presence } = useChat();
+  const r = roles(getColors(scheme));
+  const { createConversation, currentUser, presence, conversations } = useChat();
+  const [friendUsers, setFriendUsers] = useState<User[]>([]);
+  const [blockedIds, setBlockedIds] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    let active = true;
+    api.listFriends()
+      .then(lists => { if (active) setFriendUsers(lists.friends.map(row => ({ id: row.user?.id ?? row.userId, name: row.user?.name, avatarUrl: row.user?.avatarUrl }))); })
+      .catch(() => { /* Friends is additive; the directory still works. */ });
+    api.listBlocked()
+      .then(users => { if (active) setBlockedIds(new Set(users.map(user => user.id))); })
+      .catch(() => { /* Best effort: the server still refuses blocked people. */ });
+    return () => { active = false; };
+  }, []);
 
   const [mode, setMode] = useState<Mode>('direct');
   const [query, setQuery] = useState('');
@@ -56,7 +74,7 @@ export function NewConversationScreen() {
   const results = contactResult.rows;
   const resultQuery = contactResult.query.trim();
   const exactEmail = resultQuery.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resultQuery) ? resultQuery : undefined;
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [selected, setSelected] = useState<User[]>([]);
@@ -154,131 +172,148 @@ export function NewConversationScreen() {
     }
   };
 
-  const headerInstructions = useMemo(() => {
-    if (mode === 'direct') {
-      return currentUser?.openUserDirectoryEnabled
-        ? 'Browse everyone or search by name'
-        : 'Search by name to start chatting';
-    }
-    if (selected.length === 0) {
-      return trimmedGroupTitle
-        ? 'Ready to create — add people now or later'
-        : 'Name your group — you can add people later';
-    }
-    return `${selected.length} selected — tap Create when ready`;
-  }, [currentUser?.openUserDirectoryEnabled, mode, selected.length, trimmedGroupTitle]);
+  const sections = useMemo(() => buildComposeSections({
+    conversations, friends: friendUsers, directory: results, currentUserId: currentUser?.userId, query, blockedIds,
+  }), [conversations, friendUsers, results, currentUser?.userId, query, blockedIds]);
+  const friendIds = useMemo(() => new Set(friendUsers.map(user => user.id)), [friendUsers]);
 
-  return (
-    <KeyboardAvoidingView 
-      style={[styles.root, { backgroundColor: c.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+  type Tier = 'recent' | 'friends' | 'everyone';
+  type Item = { kind: 'header'; key: string; title: string } | { kind: 'person'; key: string; user: User; tier: Tier };
+  const items = useMemo(() => {
+    const out: Item[] = [];
+    const add = (tier: Tier, title: string, users: User[]) => {
+      if (!users.length) return;
+      out.push({ kind: 'header', key: `h-${tier}`, title });
+      for (const user of users) out.push({ kind: 'person', key: `${tier}-${user.id}`, user, tier });
+    };
+    add('recent', 'Recent', sections.recent);
+    add('friends', 'Friends', sections.friends);
+    add('everyone', 'Everyone', sections.everyone);
+    return out;
+  }, [sections]);
+  // Pending until the directory has answered for exactly this query, so the
+  // no-results state never flashes between keystroke and request.
+  const searching = loading || contactResult.query !== query;
+  const trimmedQuery = query.trim();
+
+  const leaveGroup = () => { setMode('direct'); setSelected([]); setGroupTitle(''); };
+
+  const renderPerson = (item: User, tier: Tier) => {
+    const checked = isSelected(item.id);
+    const live = presence.get(item.id);
+    const isSelf = item.id === currentUser?.userId;
+    const name = isSelf ? (item.name || currentUser?.name || 'You')
+      : item.isBot && (item.id === 'assistant' || item.name === 'Assistant') ? AGENT_DISPLAY_NAME
+      : getUserDisplayName(item);
+    const subtitle = isSelf ? 'Note to self'
+      : tier === 'everyone' && item.sharedConversations ? `${item.sharedConversations} shared conversation${item.sharedConversations === 1 ? '' : 's'}`
+      : '';
+    return (
       <TouchableOpacity
-        style={[styles.scanTopRow, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}
-        onPress={() => navigation.navigate('InvitePerson')}
-        accessibilityRole="button"
-      >
-        <Text style={[styles.scanTopLabel, { color: c.textPrimary }]}>Invite a person</Text>
-        <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.scanTopRow, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}
-        onPress={() => navigation.navigate('ScanQr')}
+        style={[styles.row, { backgroundColor: checked ? r.accentSoft : 'transparent' }]}
+        onPress={() => handleSelect(item)}
         activeOpacity={0.7}
         accessibilityRole="button"
-        accessibilityLabel="Scan a code"
+        accessibilityLabel={mode === 'group' ? `${checked ? 'Remove' : 'Add'} ${name} ${checked ? 'from' : 'to'} the group` : `Message ${name}`}
+        accessibilityState={mode === 'group' ? { selected: checked } : undefined}
       >
-        <View style={styles.scanTopContent}>
-          <AppIcon name="camera" color={c.primary} size={20} />
-          <Text style={[styles.scanTopLabel, { color: c.textPrimary }]}>Scan a code</Text>
+        <Avatar
+          name={item.name}
+          email={item.email}
+          avatarUrl={item.avatarUrl}
+          isBot={item.isBot}
+          presenceStatus={live?.status || item.presenceStatus}
+          size={40}
+        />
+        <View style={styles.rowText}>
+          <View style={styles.rowTop}>
+            <Text style={[type.bodyStrong, styles.name, { color: r.text }]} numberOfLines={1}>{name}</Text>
+            <YouBadge isSelf={isSelf} compact />
+            <BotBadge isBot={item.isBot} compact />
+          </View>
+          {!!subtitle && <Text style={[type.meta, { color: r.textMeta }]} numberOfLines={1}>{subtitle}</Text>}
         </View>
-        <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
+        {!item.isBot && !isSelf && (
+          <TouchableOpacity
+            onPress={event => { event.stopPropagation(); navigation.navigate('ContactProfile', { userId: item.id, ...(tier === 'everyone' && exactEmail ? { exactEmail } : {}) }); }}
+            style={styles.rowAction}
+            accessibilityRole="button"
+            accessibilityLabel={`Profile for ${item.name || 'person'}`}
+          >
+            <Text style={[type.label, { color: r.textSecondary, fontWeight: '600' }]}>Profile</Text>
+          </TouchableOpacity>
+        )}
+        {mode === 'direct' && (tier === 'everyone' || (tier === 'recent' && !friendIds.has(item.id))) && !item.isBot && !isSelf && (
+          <TouchableOpacity
+            onPress={(event) => { event.stopPropagation(); navigation.navigate('PersonEntry', { userId: item.id }); }}
+            style={styles.rowAction}
+            accessibilityRole="button"
+          >
+            <Text style={[type.label, { color: r.textSecondary, fontWeight: '600' }]}>Add friend</Text>
+          </TouchableOpacity>
+        )}
+        {mode === 'group' && (
+          <View style={[styles.check, { borderColor: checked ? r.accent : r.line, backgroundColor: checked ? r.accent : 'transparent' }]}>
+            {checked && <AppIcon name="check" color={r.onAccent} size={14} strokeWidth={3} />}
+          </View>
+        )}
       </TouchableOpacity>
+    );
+  };
 
-      {/* Mode toggle */}
-      <View style={styles.modeRow}>
-        {(['direct', 'group'] as Mode[]).map(m => {
-          const active = mode === m;
-          return (
-            <TouchableOpacity
-              key={m}
-              style={[
-                styles.modeBtn,
-                {
-                  backgroundColor: active ? c.primary : c.surfaceElevated,
-                  borderColor: active ? c.primary : c.border,
-                },
-              ]}
-              onPress={() => { setMode(m); setSelected([]); setGroupTitle(''); }}
-            >
-              <Text style={{ color: active ? c.onPrimary : c.textPrimary, fontWeight: '600' }}>
-                {m === 'direct' ? 'Direct Message' : 'Group'}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+  return (
+    <KeyboardAvoidingView
+      style={[styles.root, { backgroundColor: r.canvas }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <View style={styles.top}>
+        <TextInput
+          style={[styles.search, { backgroundColor: r.input, color: r.text, borderColor: r.line }]}
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search by name or exact email"
+          placeholderTextColor={r.decoration}
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel="Search people"
+        />
+        {mode === 'direct' ? (
+          <ListRow icon="people" title="New group" onPress={() => { setMode('group'); setSelected([]); }} style={styles.newGroup} />
+        ) : (
+          <View style={styles.groupHeader}>
+            <View style={styles.groupHeaderRow}>
+              <Text accessibilityRole="header" style={[type.title, { color: r.text }]}>New group</Text>
+              <Button size="sm" variant="ghost" label="Cancel" onPress={leaveGroup} />
+            </View>
+            <TextInput
+              style={[styles.search, { backgroundColor: r.input, color: r.text, borderColor: r.line }]}
+              value={groupTitle}
+              onChangeText={setGroupTitle}
+              placeholder={selected.length === 0 ? 'Group name (required)' : 'Group name (optional)'}
+              placeholderTextColor={r.decoration}
+              accessibilityLabel="Group name"
+            />
+            {selected.length > 0 && (
+              <View style={styles.pillsRow}>
+                {selected.map(u => {
+                  const safeEmail = isPlaceholderEmail(u.email) ? '' : u.email;
+                  const displayName = u.name || safeEmail || 'Unknown';
+                  return <Chip key={u.id} label={displayName} icon="x" selected onPress={() => setSelected(prev => prev.filter(x => x.id !== u.id))} accessibilityLabel={`Remove ${displayName}`} />;
+                })}
+              </View>
+            )}
+          </View>
+        )}
       </View>
 
-      <Text style={[styles.subtitle, { color: c.textSecondary }]}>{headerInstructions}</Text>
-
-      <TextInput
-        style={[styles.search, { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border }]}
-        value={query}
-        onChangeText={setQuery}
-        placeholder={currentUser?.openUserDirectoryEnabled
-          ? 'Browse or search by name or exact email'
-          : 'Search by name or exact email'}
-        placeholderTextColor={c.textMuted}
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-      <Text style={[styles.discoveryHint, { color: c.textMetadata }]}>
-        {currentUser?.openUserDirectoryEnabled
-          ? 'Everyone with directory visibility is shown. Email addresses stay private.'
-          : 'Email addresses stay private in search results.'}
-      </Text>
-
-      {mode === 'group' && (
-        <View style={styles.groupTitleWrap}>
-          <TextInput
-            style={[styles.search, { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border }]}
-            value={groupTitle}
-            onChangeText={setGroupTitle}
-            placeholder={selected.length === 0 ? 'Group name (required)' : 'Group name (optional)'}
-            placeholderTextColor={c.textMuted}
-          />
-        </View>
-      )}
-
-      {mode === 'group' && selected.length > 0 && (
-        <View style={styles.pillsRow}>
-          {selected.map(u => {
-            const safeEmail = isPlaceholderEmail(u.email) ? '' : u.email;
-            const displayName = u.name || safeEmail || 'Unknown';
-            return (
-              <TouchableOpacity
-                key={u.id}
-                style={[styles.pill, { backgroundColor: c.primaryMuted, borderColor: c.primary }]}
-                onPress={() => setSelected(prev => prev.filter(x => x.id !== u.id))}
-                accessibilityLabel={`Remove ${displayName}`}
-              >
-                <Text style={{ color: c.primary, fontSize: 12, fontWeight: '600' }}>
-                  {displayName}  ×
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      )}
-
-      {loading && results.length === 0 ? (
+      {searching && items.length === 0 ? (
         <View style={styles.center}>
-          <ActivityIndicator color={c.primary} />
+          <ActivityIndicator color={r.accent} />
         </View>
       ) : (
         <FlatList
-          data={results}
-          keyExtractor={u => u.id}
+          data={items}
+          keyExtractor={item => item.key}
           // Keyboard handling (openchat-w1d): when the search keyboard is up it
           // used to cover the list with no way to scroll to the people behind
           // it. automaticallyAdjustKeyboardInsets insets the scroll area above
@@ -288,119 +323,42 @@ export function NewConversationScreen() {
           automaticallyAdjustKeyboardInsets={Platform.OS === 'ios' ? true : undefined}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: 24 }}
+          contentContainerStyle={{ paddingBottom: space[6] }}
           onEndReached={loadMore}
           onEndReachedThreshold={0.35}
-          ListFooterComponent={loadingMore ? (
+          ListFooterComponent={loadingMore || (searching && items.length > 0) ? (
             <View style={styles.loadingMore}>
-              <ActivityIndicator color={c.primary} />
+              <ActivityIndicator color={r.accent} />
             </View>
           ) : null}
           ListEmptyComponent={
-            <View style={styles.center}>
-              <Text style={{ color: c.textSecondary, marginTop: 24 }}>
-                {query
-                  ? `No people found for "${query}"`
-                  : currentUser?.openUserDirectoryEnabled
-                    ? 'No people are available yet.'
-                    : 'Type a name or complete email address.'}
+            <View style={styles.empty}>
+              <Text style={[type.body, styles.emptyText, { color: r.textSecondary }]}>
+                {trimmedQuery ? `No one named “${trimmedQuery}” yet.` : 'No one here yet.'}
               </Text>
+              <Text style={[type.meta, styles.emptyText, { color: r.textMeta }]}>Invite them, or scan their code if they are with you.</Text>
+              <View style={styles.emptyActions}>
+                <Button variant="primary" icon="share" label="Invite a person" onPress={() => navigation.navigate('InvitePerson')} />
+                <Button icon="camera" label="Scan a code" onPress={() => navigation.navigate('ScanQr')} />
+              </View>
             </View>
           }
-          renderItem={({ item }) => {
-            const checked = isSelected(item.id);
-            const live = presence.get(item.id);
-            return (
-              <TouchableOpacity
-                style={[styles.row, { borderColor: c.divider, backgroundColor: checked ? c.primaryMuted : 'transparent' }]}
-                onPress={() => handleSelect(item)}
-                activeOpacity={0.7}
-              >
-                <Avatar
-                  name={item.name}
-                  email={item.email}
-                  avatarUrl={item.avatarUrl}
-                  isBot={item.isBot}
-                  presenceStatus={live?.status || item.presenceStatus}
-                  size={40}
-                />
-                <View style={{ flex: 1 }}>
-                  <View style={styles.rowTop}>
-                    <Text style={[styles.name, { color: c.textPrimary }]} numberOfLines={1}>
-                      {item.id === currentUser?.userId ? (item.name || currentUser?.name || 'You') : (item.name || 'OpenChat member')}
-                    </Text>
-                    <YouBadge isSelf={item.id === currentUser?.userId} compact />
-                    <BotBadge isBot={item.isBot} compact />
-                  </View>
-                  <Text style={[styles.email, { color: c.textSecondary }]} numberOfLines={1}>
-                    {item.id === currentUser?.userId
-                      ? 'Note to self'
-                      : `OpenChat · ${item.id.slice(0, 6)}`}
-                  </Text>
-                  {!!item.sharedConversations && (
-                    <Text style={[styles.sharedSubtitle, { color: c.textMetadata }]} numberOfLines={1}>
-                      {item.sharedConversations} shared conversation{item.sharedConversations === 1 ? '' : 's'}
-                    </Text>
-                  )}
-                </View>
-                {!item.isBot && item.id !== currentUser?.userId && (
-                  <TouchableOpacity
-                    onPress={event => { event.stopPropagation(); navigation.navigate('ContactProfile', { userId: item.id, ...(exactEmail ? { exactEmail } : {}) }); }}
-                    style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Profile for ${item.name || 'person'}`}
-                  >
-                    <Text style={{ color: c.primary, fontWeight: '700' }}>Profile</Text>
-                  </TouchableOpacity>
-                )}
-                {mode === 'group' && (
-                  <View style={[styles.check, {
-                    borderColor: checked ? c.primary : c.border,
-                    backgroundColor: checked ? c.primary : 'transparent',
-                  }]}>
-                    {checked && <Text style={{ color: c.onPrimary, fontWeight: '700' }}>✓</Text>}
-                  </View>
-                )}
-                {mode === 'direct' && !item.isBot && item.id !== currentUser?.userId && (
-                  <TouchableOpacity
-                    onPress={(event) => { event.stopPropagation(); navigation.navigate('PersonEntry', { userId: item.id }); }}
-                    style={{ paddingHorizontal: 8, paddingVertical: 10 }}
-                    accessibilityRole="button"
-                  >
-                    <Text style={{ color: c.primary, fontWeight: '700' }}>Add friend</Text>
-                  </TouchableOpacity>
-                )}
-              </TouchableOpacity>
-            );
-          }}
+          renderItem={({ item }) => item.kind === 'header'
+            ? <SectionLabel style={styles.sectionLabel}>{item.title}</SectionLabel>
+            : renderPerson(item.user, item.tier)}
         />
       )}
 
       {mode === 'group' && (
-        <View style={[styles.footer, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <TouchableOpacity
-            style={[
-              styles.createBtn,
-              {
-                backgroundColor: canCreateGroup ? c.primary : c.surfaceElevated,
-                opacity: creating ? 0.6 : 1,
-              },
-            ]}
-            onPress={handleCreateGroup}
-            disabled={!canCreateGroup || creating}
-          >
-            <Text style={{
-              color: canCreateGroup ? c.onPrimary : c.textMuted,
-              fontWeight: '600',
-              fontSize: 16,
-            }}>
-              {creating
-                ? 'Creating…'
-                : selected.length === 0
-                  ? 'Create group'
-                  : `Create group (${selected.length})`}
-            </Text>
-          </TouchableOpacity>
+        <View style={[styles.footer, { backgroundColor: r.card, borderColor: r.line }]}>
+          <Button
+            variant="primary"
+            block
+            disabled={!canCreateGroup}
+            loading={creating}
+            onPress={() => void handleCreateGroup()}
+            label={selected.length === 0 ? 'Create group' : `Create group (${selected.length})`}
+          />
         </View>
       )}
     </KeyboardAvoidingView>
@@ -408,83 +366,48 @@ export function NewConversationScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, paddingHorizontal: 16, paddingTop: 12 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 32 },
-  loadingMore: { paddingVertical: 16, alignItems: 'center' },
-  modeRow: { flexDirection: 'row', gap: 8 },
-  modeBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  subtitle: { fontSize: 13, marginTop: 12 },
-  discoveryHint: { fontSize: 12, marginTop: 6, marginBottom: 2 },
+  root: { flex: 1, paddingHorizontal: space[4], paddingTop: space[3] },
+  top: { gap: space[2] },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: space[8] },
+  loadingMore: { paddingVertical: space[4], alignItems: 'center' },
   search: {
-    marginTop: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    fontSize: 16,
-  },
-  groupTitleWrap: { marginTop: 4 },
-  pillsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-  pill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
+    ...type.body,
+    paddingHorizontal: space[3],
+    paddingVertical: space[2] + 2,
+    minHeight: 44,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
   },
+  newGroup: { paddingHorizontal: 0 },
+  groupHeader: { gap: space[2], paddingTop: space[1] },
+  groupHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pillsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space[1] + 2 },
+  sectionLabel: { marginTop: space[4] },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    marginHorizontal: -16,
-    paddingLeft: 16,
-    paddingRight: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 12,
+    paddingVertical: space[2] + 2,
+    marginHorizontal: -space[4],
+    paddingHorizontal: space[4],
+    gap: space[3],
+    minHeight: 56,
   },
+  rowText: { flex: 1, minWidth: 0, gap: 2 },
   rowTop: { flexDirection: 'row', alignItems: 'center' },
-  name: { fontSize: 16, fontWeight: '600' },
-  email: { fontSize: 13, marginTop: 2 },
-  sharedSubtitle: { fontSize: 12, marginTop: 2 },
+  name: { flexShrink: 1 },
+  rowAction: { minHeight: 44, justifyContent: 'center', paddingHorizontal: space[2] },
   check: {
-    width: 24, height: 24, borderRadius: 12,
+    width: 24, height: 24, borderRadius: radius.pill,
     borderWidth: 2, alignItems: 'center', justifyContent: 'center',
   },
+  empty: { alignItems: 'center', paddingTop: space[8], gap: space[2] },
+  emptyText: { textAlign: 'center' },
+  emptyActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: space[2], marginTop: space[3] },
   footer: {
-    marginHorizontal: -16,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 24,
+    marginHorizontal: -space[4],
+    paddingHorizontal: space[4],
+    paddingTop: space[3],
+    paddingBottom: space[6],
     borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  createBtn: {
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  scanTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: 12,
-  },
-  scanTopContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  scanTopLabel: {
-    fontSize: 15,
-    fontWeight: '600',
   },
 });
