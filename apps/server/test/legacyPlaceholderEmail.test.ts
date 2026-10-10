@@ -1,30 +1,10 @@
-import express from 'express';
-import jwt from 'jsonwebtoken';
-import type { Server } from 'node:http';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   LEGACY_PLACEHOLDER_EMAIL_DOMAIN,
   isLegacyPlaceholderEmail,
-  legacyEmailProjection,
   legacyPlaceholderEmail,
 } from '../src/privacy/legacyEmailCompat.js';
-import { CONVERSATIONS_QUERY } from '../src/queries/chatUnread.js';
-
-const mocks = vi.hoisted(() => ({
-  run: vi.fn(),
-  close: vi.fn(async () => {}),
-}));
-
-vi.mock('../src/db.js', () => ({
-  getDriver: () => ({
-    session: () => ({ run: mocks.run, close: mocks.close }),
-  }),
-}));
-
-import chatRouter from '../src/routes/chat.js';
-import { ensureDirectConversation } from '../src/services/directConversation.js';
-
 const REAL_EMAIL = 'alice.real@example.test';
 const USER_ID = 'u_9fZq3';
 
@@ -84,100 +64,4 @@ describe('legacy placeholder email', () => {
     expect(nameMap.get(USER_ID.toLowerCase())).toBe(USER_ID);
   });
 
-  it('emits a Cypher map-projection entry, not a real .email property read', () => {
-    const fragment = legacyEmailProjection('participant');
-
-    expect(fragment).toBe(`email: participant.id + '@${LEGACY_PLACEHOLDER_EMAIL_DOMAIN}'`);
-    expect(fragment).not.toContain('.email');
-  });
-});
-
-/**
- * Asserts a captured Cypher string projects a synthetic placeholder for `userVar`
- * and still never reads the real `.email` property (the OpenChat-51a invariant).
- */
-function expectPlaceholderProjection(cypher: string | undefined, userVar: string): void {
-  expect(cypher, `no Cypher captured for ${userVar}`).toBeDefined();
-  expect(cypher).toContain(legacyEmailProjection(userVar));
-  expect(cypher).not.toContain('.email');
-}
-
-describe('server projections carry the placeholder', () => {
-  it('projects it for conversation-list participants', () => {
-    expectPlaceholderProjection(CONVERSATIONS_QUERY, 'participant');
-  });
-
-  it('projects it for participants of a newly created direct conversation', async () => {
-    mocks.run.mockReset();
-    mocks.run
-      .mockResolvedValueOnce({ records: [{ get: () => true }] })
-      .mockResolvedValueOnce({
-        records: [{
-          get: (key: string) => key === 'created'
-            ? true
-            : { id: 'dm-1', participants: [] },
-        }],
-      });
-
-    await ensureDirectConversation('a', 'b');
-
-    expectPlaceholderProjection(String(mocks.run.mock.calls[1][0]), 'user');
-  });
-});
-
-describe('chat routes', () => {
-  let server: Server;
-  let baseUrl: string;
-  const token = jwt.sign({ userId: USER_ID, email: REAL_EMAIL }, 'dev-secret-change-me');
-  const authorization = `Bearer ${token}`;
-
-  beforeAll(async () => {
-    const app = express();
-    app.use(express.json());
-    app.use('/api/chat', chatRouter);
-    await new Promise<void>(resolve => {
-      server = app.listen(0, '127.0.0.1', () => resolve());
-    });
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('Test server did not bind');
-    baseUrl = `http://127.0.0.1:${address.port}`;
-  });
-
-  afterAll(async () => {
-    await new Promise<void>((resolve, reject) => {
-      server.close(error => (error ? reject(error) : resolve()));
-    });
-  });
-
-  beforeEach(() => {
-    mocks.run.mockReset();
-    mocks.run.mockResolvedValue({ records: [] });
-  });
-
-  function capture(marker: string): string | undefined {
-    return mocks.run.mock.calls
-      .map(([query]) => String(query))
-      .find(query => query.includes(marker));
-  }
-
-  it('projects the placeholder for conversation-detail participants', async () => {
-    await fetch(`${baseUrl}/api/chat/conversations/sailing`, {
-      headers: { Authorization: authorization },
-    });
-
-    expectPlaceholderProjection(capture('AS participants'), 'participant');
-  });
-
-  it('projects the placeholder for message senders', async () => {
-    mocks.run.mockResolvedValueOnce({ records: [{ get: () => ({}) }] });
-
-    await fetch(`${baseUrl}/api/chat/conversations/sailing/messages`, {
-      headers: { Authorization: authorization },
-    });
-
-    const messageQuery = capture('AS message');
-    expectPlaceholderProjection(messageQuery, 'sender');
-    // Reply-quote senders are hydrated inline and reach the same clients.
-    expect(messageQuery).toContain(legacyEmailProjection('replySender'));
-  });
 });

@@ -1,5 +1,6 @@
 /* eslint-disable no-control-regex -- Reject controls in external profile IDs and OIDC subjects. */
 import { nanoid } from 'nanoid';
+import type { ManagedTransaction } from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { normalizePublicDisplayName } from '../privacy/profilePrivacy.js';
 
@@ -41,11 +42,16 @@ export async function resolveUnlinkedRecipient(profileId: string): Promise<Unlin
 export async function ensureSharedInbox(identity: { issuer: string; subject: string }, name: string): Promise<{ id: string; name: string }> {
   if (identity?.issuer !== ISSUER || typeof identity.subject !== 'string' || !identity.subject || identity.subject.length > 512 || /[\x00-\x1f\x7f]/.test(identity.subject)) throw new Error('invalid_identity');
   const session = getDriver().session();
-  try {
+  try { return await ensureSharedInboxInTransaction(session, identity, name); }
+  finally { await session.close(); }
+}
+
+export async function ensureSharedInboxInTransaction(tx: Pick<ManagedTransaction, 'run'>, identity: { issuer: string; subject: string }, name: string): Promise<{ id: string; name: string }> {
+  if (identity.issuer !== ISSUER || !identity.subject || identity.subject.length > 512 || /[\x00-\x1f\x7f]/.test(identity.subject)) throw new Error('invalid_identity');
     // Lazily materialize the same shared account. This is an inbox, not a
     // login, public profile, contact request, conversation or message.
     // The unique identity key also used at OIDC sign-in makes retries converge.
-    const result = await session.run(`MERGE (u:User {ideaflowIdentityKey:$key})
+    const result = await tx.run(`MERGE (u:User {ideaflowIdentityKey:$key})
       ON CREATE SET u.id=$id,u.ideaflowIssuer=$issuer,u.ideaflowSub=$subject,
         u.name=$name,u.signupProvider='ideaflow-id',u.sharedInboxPending=true,
         u.createdAt=datetime(),u.presenceStatus='offline'
@@ -53,5 +59,4 @@ export async function ensureSharedInbox(identity: { issuer: string; subject: str
       RETURN u.id AS id,u.name AS name`, { key: `${ISSUER}\u001f${identity.subject}`, id: nanoid(), issuer: ISSUER, subject: identity.subject, name });
     if (result.records.length !== 1 || typeof result.records[0].get('id') !== 'string') throw new Error('messaging_unavailable');
     return { id: result.records[0].get('id'), name: normalizePublicDisplayName(result.records[0].get('name')) };
-  } finally { await session.close(); }
 }
