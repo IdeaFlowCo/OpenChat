@@ -1,9 +1,9 @@
 {
   "repository": "IdeaFlowCo/noos",
   "path": "src/overlay",
-  "commit": "3aca051d846c5bd6489aa9439ed657d574155d3a",
+  "commit": "43bfa39023f3f090c454b550f87daaa12ec7f09a",
   "files": {
-    "contract.ts": "3bffaf7fa3c676830296971219460091fb19c80af82d7bf3b926ef8f94ac139b",
-    "store.ts": "e7578be358e57f49198a74a5fe65011e67b618eb694ac14a4d7db2d3cac2970c"
+    "contract.ts": "fae49d60cc2af455656e54dfcb6b3820799b3930ada425db33af665582a0dc37",
+    "store.ts": "d4d647dc81b743b67e20788d6255f3d9f8c90813643b0b7f697a60339450d169"
   }
 }

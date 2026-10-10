@@ -2,12 +2,12 @@ import neo4j from 'neo4j-driver';
 import type { Driver, ManagedTransaction } from 'neo4j-driver';
 import { nanoid } from 'nanoid';
 import {
-  cleanKind, cleanName, cleanProvenance, cleanRef, cleanRelation, cleanRelationType, cleanRequestId, cleanText, EMPTY_CARD, fail, intervalAfterContact, isId, isOwnerKey,
-  LIMITS, nameKey, nextDue, OverlayError, readProvenance, relationTypeOf, separateRef,
+  cleanDescription, cleanKind, cleanLinkAttributes, cleanName, cleanProvenance, cleanRef, cleanRelation, cleanRelationType, cleanRequestId, cleanText, EMPTY_CARD, fail,
+  intervalAfterContact, isId, isOwnerKey, isSeparateRef, LIMITS, nameKey, nextDue, OverlayError, parseLinkPatch, readProvenance, readRelationType, relationTypeOf, separateRef,
 } from './contract.js';
 import type {
-  Candidate, Card, CardPatch, DueEntity, Edge, Entity, EntityDetail, EntityKind, Link, LinkEnd, Neighbourhood, Note, OverlayPrincipal, Provenance, RelationType,
-  SearchHit, SearchResult,
+  Candidate, Card, CardPatch, DueEntity, Edge, Entity, EntityDetail, EntityKind, Link, LinkAttributeInput, LinkEnd, LinkPatch, Neighbourhood, Note, OverlayPrincipal,
+  Provenance, RelationType, SearchHit, SearchResult,
 } from './contract.js';
 
 /**
@@ -81,10 +81,10 @@ export class OverlayStore {
    * single ref-less entity of that kind and name. Apps naming something from
    * a person's words use `resolve`, which never merges same-named entities.
    */
-  async ensure(principal: OverlayPrincipal | null, input: { kind?: unknown; name?: unknown; ref?: unknown }): Promise<{ entity: Entity; created: boolean }> {
-    const ownerKey = this.owner(principal), kind = cleanKind(input?.kind), name = cleanName(input?.name);
+  async ensure(principal: OverlayPrincipal | null, input: { kind?: unknown; name?: unknown; ref?: unknown; description?: unknown }): Promise<{ entity: Entity; created: boolean }> {
+    const ownerKey = this.owner(principal), kind = cleanKind(input?.kind), name = cleanName(input?.name), description = cleanDescription(input?.description);
     const ref = input.ref === undefined || input.ref === null ? null : cleanRef(input.ref);
-    return retryOnce(() => this.write(tx => ensureIn(tx, ownerKey, { kind, name, ref })));
+    return retryOnce(() => this.write(tx => ensureIn(tx, ownerKey, { kind, name, ref, description })));
   }
 
   /**
@@ -97,11 +97,11 @@ export class OverlayStore {
    * is (joining two entities is a separate, explicit act) and is returned in
    * `unattached`, as is any ref beyond the per-entity ref limit.
    */
-  async ensureRefs(principal: OverlayPrincipal | null, input: { kind?: unknown; name?: unknown; refs?: unknown }): Promise<{ entity: Entity; created: boolean; unattached: string[] }> {
-    const ownerKey = this.owner(principal), kind = cleanKind(input?.kind), name = cleanName(input?.name);
+  async ensureRefs(principal: OverlayPrincipal | null, input: { kind?: unknown; name?: unknown; refs?: unknown; description?: unknown }): Promise<{ entity: Entity; created: boolean; unattached: string[] }> {
+    const ownerKey = this.owner(principal), kind = cleanKind(input?.kind), name = cleanName(input?.name), description = cleanDescription(input?.description);
     if (!Array.isArray(input.refs) || !input.refs.length || input.refs.length > LIMITS.refsPerEntity) return fail(400, 'invalid_ref');
     const refs = [...new Set(input.refs.map(cleanRef))];
-    return retryOnce(() => this.write(tx => ensureRefsIn(tx, ownerKey, { kind, name, refs })));
+    return retryOnce(() => this.write(tx => ensureRefsIn(tx, ownerKey, { kind, name, refs, description })));
   }
 
   /**
@@ -112,27 +112,42 @@ export class OverlayStore {
    * and the caller picks one by id or asks for a separate entity with
    * `createNew` plus a `clientRequestId` (retries find the same one).
    */
-  async resolve(principal: OverlayPrincipal | null, input: { kind?: unknown; name?: unknown; createNew?: unknown; clientRequestId?: unknown }): Promise<{ entity: Entity; created: boolean }> {
+  async resolve(principal: OverlayPrincipal | null, input: { kind?: unknown; name?: unknown; createNew?: unknown; clientRequestId?: unknown; description?: unknown }): Promise<{ entity: Entity; created: boolean }> {
     const ownerKey = this.owner(principal), target = cleanResolve(input);
     return retryOnce(() => this.write(tx => resolveIn(tx, ownerKey, principal!.app, target)));
   }
 
-  /** Rename, attach another ref, or change the card (importance and cadence). */
-  async update(principal: OverlayPrincipal | null, id: unknown, patch: { name?: unknown; addRef?: unknown; card?: CardPatch }): Promise<Entity> {
+  /**
+   * Rename, change the one-line description (null clears it), change the kind,
+   * attach another ref, or change the card (importance and cadence). The kind
+   * changes only for the owner's own entities (no ref, or only a separate-entity
+   * ref): an idea can become a project, but an app's account stays the app's
+   * kind (409 `kind_fixed`). A rename or kind change that would collide with
+   * another entity saved by that name answers 409 `name_conflict`.
+   */
+  async update(principal: OverlayPrincipal | null, id: unknown, patch: { name?: unknown; addRef?: unknown; card?: CardPatch; description?: unknown; kind?: unknown }): Promise<Entity> {
     const ownerKey = this.owner(principal);
     if (!isId(id)) return fail(404, 'not_found');
     const name = patch.name === undefined ? undefined : cleanName(patch.name);
     const addRef = patch.addRef === undefined ? undefined : cleanRef(patch.addRef);
-    if (name === undefined && addRef === undefined && !patch.card) return fail(400, 'nothing_to_change');
+    const description = patch.description === undefined ? undefined : cleanDescription(patch.description);
+    const kind = patch.kind === undefined ? undefined : cleanKind(patch.kind);
+    if (name === undefined && addRef === undefined && !patch.card && description === undefined && kind === undefined) return fail(400, 'nothing_to_change');
     return this.write(async tx => {
       const current = await entity(tx, ownerKey, id), now = new Date().toISOString();
-      if (name !== undefined && name !== current.name) {
-        const slot = current.refs.length ? null : nameSlot(current.kind, name);
+      const nextName = name ?? current.name, nextKind = kind ?? current.kind;
+      if (nextKind !== current.kind && !current.refs.every(isSeparateRef)) fail(409, 'kind_fixed');
+      if (nextName !== current.name || nextKind !== current.kind) {
+        const slot = current.refs.length ? null : nameSlot(nextKind, nextName);
         if (slot) {
           const clash = await tx.run('MATCH (e:OverlayEntity {ownerKey: $ownerKey, nameSlot: $slot}) WHERE e.id <> $id RETURN e.id AS id', { ownerKey, slot, id });
           if (clash.records.length) fail(409, 'name_conflict');
         }
-        await tx.run('MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey}) SET e.name = $name, e.nameKey = $nameKey, e.nameSlot = $slot, e.updatedAt = $now', { id, ownerKey, name, nameKey: nameKey(name), slot, now });
+        await tx.run('MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey}) SET e.name = $name, e.nameKey = $nameKey, e.nameSlot = $slot, e.kind = $kind, e.updatedAt = $now',
+          { id, ownerKey, name: nextName, nameKey: nameKey(nextName), slot, kind: nextKind, now });
+      }
+      if (description !== undefined && description !== current.description) {
+        await tx.run('MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey}) SET e.description = $description, e.updatedAt = $now', { id, ownerKey, description, now });
       }
       if (addRef !== undefined && !current.refs.includes(addRef)) {
         if (current.refs.length >= LIMITS.refsPerEntity) fail(409, 'ref_limit');
@@ -175,25 +190,32 @@ export class OverlayStore {
   /**
    * A private edge between two of the owner's entities, in the owner's own
    * words. The same (from, relation, to) is one link: repeating it returns the
-   * existing one, with its original provenance.
+   * existing one, with its original provenance and attributes (change those
+   * with `updateLink`). `attributes` may name the `relationType` (otherwise
+   * derived from the words and the end kinds) and give `since`, `until` and
+   * `context`.
    */
-  async addLink(principal: OverlayPrincipal | null, fromId: unknown, rawRelation: unknown, toId: unknown, provenance?: unknown): Promise<{ link: Link; created: boolean }> {
-    const ownerKey = this.owner(principal), relation = cleanRelation(rawRelation), by = cleanProvenance(provenance);
+  async addLink(principal: OverlayPrincipal | null, fromId: unknown, rawRelation: unknown, toId: unknown, provenance?: unknown, attributes?: unknown): Promise<{ link: Link; created: boolean }> {
+    const ownerKey = this.owner(principal), relation = cleanRelation(rawRelation), by = cleanProvenance(provenance), extra = cleanLinkAttributes(attributes);
     if (!isId(fromId) || !isId(toId)) return fail(404, 'not_found');
-    return this.write(tx => addLinkIn(tx, ownerKey, fromId, relation, toId, by));
+    return this.write(tx => addLinkIn(tx, ownerKey, fromId, relation, toId, by, extra));
   }
 
   /**
-   * Change a link's relation text in place ("sister of" to "cousin of"). The
-   * relation is part of the link's identity, so the edit rewrites relation,
-   * identity and type together. When the owner already has the edited link,
-   * the two become one: the edited link goes and the existing one is returned
-   * with `merged: true`. The editor's provenance replaces the old one.
+   * Edit a link in place. `change` is the new relation text (the original
+   * form) or a patch `{relation?, relationType?, assertion?, since?, until?,
+   * context?}`. Changing the relation ("sister of" to "cousin of") rewrites
+   * relation, identity and type together and the editor's provenance replaces
+   * the old one; when the owner already has the edited link the two become
+   * one, the edited link goes and the existing one is returned with
+   * `merged: true` (with any other fields of the patch applied to it).
+   * Anything else is a plain edit: the original author stays and the edit is
+   * recorded in `updatedAt` and `updatedBy`.
    */
-  async updateLink(principal: OverlayPrincipal | null, linkId: unknown, rawRelation: unknown, provenance?: unknown): Promise<{ link: Link; merged: boolean }> {
-    const ownerKey = this.owner(principal), relation = cleanRelation(rawRelation), by = cleanProvenance(provenance);
+  async updateLink(principal: OverlayPrincipal | null, linkId: unknown, change: unknown, provenance?: unknown): Promise<{ link: Link; merged: boolean }> {
+    const ownerKey = this.owner(principal), patch = parseLinkPatch(change), by = cleanProvenance(provenance);
     if (!isId(linkId)) return fail(404, 'not_found');
-    return this.write(tx => updateLinkIn(tx, ownerKey, linkId, relation, by));
+    return this.write(tx => updateLinkIn(tx, ownerKey, linkId, patch, by));
   }
 
   async deleteLink(principal: OverlayPrincipal | null, linkId: unknown): Promise<void> {
@@ -225,9 +247,9 @@ export class OverlayStore {
   }
 
   /**
-   * Search the owner's overlay: entities by name or note text, and links by
-   * relation text, relation type or either end's name. Bounded; `truncated`
-   * says more matched than were returned.
+   * Search the owner's overlay: entities by name, description or note text,
+   * and links by relation text, context, relation type or either end's name.
+   * Bounded; `truncated` says more matched than were returned.
    */
   async search(principal: OverlayPrincipal | null, filter: { q?: unknown; relationType?: unknown; kind?: unknown; limit?: unknown } = {}): Promise<SearchResult> {
     const ownerKey = this.owner(principal);
@@ -242,14 +264,15 @@ export class OverlayStore {
         const found = await tx.run(`MATCH (e:OverlayEntity {ownerKey: $ownerKey})
           WHERE ($kind IS NULL OR e.kind = $kind)
           WITH e, ($q = '' OR e.nameKey CONTAINS $q) AS byName,
+            ($q <> '' AND toLower(coalesce(e.description, '')) CONTAINS $q) AS byDescription,
             ($q <> '' AND EXISTS { MATCH (n:OverlayNote {ownerKey: $ownerKey, entityId: e.id}) WHERE toLower(n.text) CONTAINS $q }) AS byNote
-          WHERE byName OR byNote
-          RETURN ${ENTITY} AS entity, byName, byNote ORDER BY byName DESC, e.nameKey LIMIT $limit`,
+          WHERE byName OR byDescription OR byNote
+          RETURN ${ENTITY} AS entity, byName, byDescription, byNote ORDER BY byName DESC, byDescription DESC, e.nameKey LIMIT $limit`,
         { ownerKey, q, kind, limit: neo4j.int(max + 1) });
         truncated = found.records.length > max;
         entities = found.records.slice(0, max).map(record => ({
           ...entityFrom(record.get('entity') as Record<string, unknown>),
-          matched: [...(record.get('byName') && q ? ['name' as const] : []), ...(record.get('byNote') ? ['note' as const] : [])],
+          matched: [...(record.get('byName') && q ? ['name' as const] : []), ...(record.get('byDescription') ? ['description' as const] : []), ...(record.get('byNote') ? ['note' as const] : [])],
         }));
       }
       const links: SearchResult['links'] = [];
@@ -262,7 +285,7 @@ export class OverlayStore {
           const edge = edgeFrom(record.get('edge') as Record<string, unknown>);
           const from = endFrom(record.get('fromEnd') as Record<string, unknown>), to = endFrom(record.get('toEnd') as Record<string, unknown>);
           if (relationType && edge.relationType !== relationType) continue;
-          if (q && ![edge.relation, from.name, to.name].some(value => nameKey(value).includes(q))) continue;
+          if (q && ![edge.relation, from.name, to.name, edge.context ?? ''].some(value => nameKey(value).includes(q))) continue;
           if (links.length >= max) { truncated = true; break; }
           links.push({ ...edge, fromId: from.id, toId: to.id, from, to });
         }
@@ -322,9 +345,10 @@ export class OverlayStore {
     return this.read(async tx => {
       const rows = async (query: string) => (await tx.run(query, { ownerKey })).records.map(record => record.get('row'));
       return {
-        entities: await rows(`MATCH (e:OverlayEntity {ownerKey: $ownerKey}) RETURN e { .id, .kind, .name, .important, .cadenceDays, .cadenceMode, .intervalDays, .lastContactAt, .createdAt, .updatedAt, refs: [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] } AS row ORDER BY e.createdAt`),
+        entities: await rows(`MATCH (e:OverlayEntity {ownerKey: $ownerKey}) RETURN e { .id, .kind, .name, .description, .important, .cadenceDays, .cadenceMode, .intervalDays, .lastContactAt, .createdAt, .updatedAt, refs: [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] } AS row ORDER BY e.createdAt`),
         notes: await rows('MATCH (n:OverlayNote {ownerKey: $ownerKey}) RETURN n { .id, .entityId, .text, .createdAt, .updatedAt, .author, .source, .assertion } AS row ORDER BY n.createdAt'),
-        links: (await rows('MATCH (a:OverlayEntity {ownerKey: $ownerKey})-[l:OVERLAY_LINK]->(b) RETURN { id: l.id, fromId: a.id, relation: l.relation, relationType: l.relationType, toId: b.id, createdAt: l.createdAt, updatedAt: l.updatedAt, author: l.author, source: l.source, assertion: l.assertion } AS row ORDER BY l.createdAt'))
+        links: (await rows(`MATCH (a:OverlayEntity {ownerKey: $ownerKey})-[l:OVERLAY_LINK]->(b) RETURN { id: l.id, fromId: a.id, relation: l.relation, relationType: l.relationType, toId: b.id,
+          createdAt: l.createdAt, updatedAt: l.updatedAt, updatedBy: l.updatedBy, author: l.author, source: l.source, assertion: l.assertion, since: l.since, until: l.until, context: l.context } AS row ORDER BY l.createdAt`))
           .map(row => ({ ...(row as Record<string, unknown>), relationType: storedRelationType(row as Record<string, unknown>) })),
       };
     });
@@ -403,42 +427,49 @@ export async function deleteEntityIn(tx: Runner, ownerKey: string, id: string): 
   return { notesRemoved: number(notes.records[0]?.get('removed')), linksRemoved: number(found.records[0]?.get('links')), refsRemoved: number(refs.records[0]?.get('removed')) };
 }
 
-/** `ensure` inside the caller's transaction. Inputs must already be cleaned. */
-export async function ensureIn(tx: Runner, ownerKey: string, input: { kind: EntityKind; name: string; ref: string | null }): Promise<{ entity: Entity; created: boolean }> {
+/**
+ * `ensure` inside the caller's transaction. Inputs must already be cleaned. A
+ * `description` is stored on a new entity, and fills an existing entity's
+ * blank one; it never replaces a description already there.
+ */
+export async function ensureIn(tx: Runner, ownerKey: string, input: { kind: EntityKind; name: string; ref: string | null; description?: string | null }): Promise<{ entity: Entity; created: boolean }> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
-  const { kind, name, ref } = input, now = new Date().toISOString();
+  const { kind, name, ref } = input, description = input.description ?? null, now = new Date().toISOString();
+  let existingId: string | undefined;
   if (ref) {
     const bound = await tx.run('MATCH (r:OverlayRef {ownerKey: $ownerKey, ref: $ref}) RETURN r.entityId AS id', { ownerKey, ref });
-    const existingId = bound.records[0]?.get('id') as string | undefined;
+    existingId = bound.records[0]?.get('id') as string | undefined;
     if (existingId) {
       const current = await entity(tx, ownerKey, existingId);
       if (current.kind !== kind) fail(409, 'kind_conflict');
       if (current.name !== name) await tx.run('MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey}) SET e.name = $name, e.nameKey = $nameKey, e.updatedAt = $now', { id: existingId, ownerKey, name, nameKey: nameKey(name), now });
-      return { entity: { ...current, name }, created: false };
     }
   } else {
     const named = await tx.run('MATCH (e:OverlayEntity {ownerKey: $ownerKey, nameSlot: $slot}) RETURN e.id AS id', { ownerKey, slot: nameSlot(kind, name) });
-    const existingId = named.records[0]?.get('id') as string | undefined;
-    if (existingId) return { entity: await entity(tx, ownerKey, existingId), created: false };
+    existingId = named.records[0]?.get('id') as string | undefined;
+  }
+  if (existingId) {
+    if (description !== null) await tx.run('MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey}) WHERE e.description IS NULL SET e.description = $description, e.updatedAt = $now', { id: existingId, ownerKey, description, now });
+    return { entity: await entity(tx, ownerKey, existingId), created: false };
   }
   await limit(tx, 'MATCH (e:OverlayEntity {ownerKey: $ownerKey}) RETURN count(e) AS total', ownerKey, LIMITS.entitiesPerOwner, 'entity_limit');
   const id = nanoid();
-  await tx.run(`CREATE (e:OverlayEntity {id: $id, ownerKey: $ownerKey, kind: $kind, name: $name, nameKey: $nameKey, nameSlot: $slot,
+  await tx.run(`CREATE (e:OverlayEntity {id: $id, ownerKey: $ownerKey, kind: $kind, name: $name, nameKey: $nameKey, nameSlot: $slot, description: $description,
     audience: 'owner', important: false, cadenceMode: 'fixed', createdAt: $now, updatedAt: $now})
     FOREACH (value IN CASE WHEN $ref IS NULL THEN [] ELSE [$ref] END |
       CREATE (:OverlayRef {ownerKey: $ownerKey, ref: value, entityId: $id})-[:REF_OF]->(e))`,
-  { id, ownerKey, kind, name, nameKey: nameKey(name), slot: ref ? null : nameSlot(kind, name), ref, now });
-  return { entity: { id, kind, name, refs: ref ? [ref] : [], card: { ...EMPTY_CARD } }, created: true };
+  { id, ownerKey, kind, name, nameKey: nameKey(name), slot: ref ? null : nameSlot(kind, name), description, ref, now });
+  return { entity: { id, kind, name, description, refs: ref ? [ref] : [], card: { ...EMPTY_CARD } }, created: true };
 }
 
 /** `ensureRefs` inside the caller's transaction. Inputs must already be cleaned (refs deduplicated, at least one). */
-export async function ensureRefsIn(tx: Runner, ownerKey: string, input: { kind: EntityKind; name: string; refs: string[] }): Promise<{ entity: Entity; created: boolean; unattached: string[] }> {
+export async function ensureRefsIn(tx: Runner, ownerKey: string, input: { kind: EntityKind; name: string; refs: string[]; description?: string | null }): Promise<{ entity: Entity; created: boolean; unattached: string[] }> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
-  const { kind, name, refs } = input;
+  const { kind, name, refs, description } = input;
   const found = await tx.run('UNWIND $refs AS ref OPTIONAL MATCH (r:OverlayRef {ownerKey: $ownerKey, ref: ref}) RETURN ref, r.entityId AS id', { ownerKey, refs });
   const boundTo = new Map(found.records.map(record => [String(record.get('ref')), (record.get('id') as string | null) ?? null]));
   const primary = refs.find(ref => boundTo.get(ref)) ?? refs[0]!;
-  const { entity: current, created } = await ensureIn(tx, ownerKey, { kind, name, ref: primary });
+  const { entity: current, created } = await ensureIn(tx, ownerKey, { kind, name, ref: primary, description });
   const unattached: string[] = [], now = new Date().toISOString();
   let count = current.refs.length;
   for (const ref of refs) {
@@ -453,24 +484,32 @@ export async function ensureRefsIn(tx: Runner, ownerKey: string, input: { kind: 
   return { entity: await entity(tx, ownerKey, current.id), created, unattached };
 }
 
-export interface ResolveTarget { kind: EntityKind; name: string; requestId: string | null }
-export function cleanResolve(input: { kind?: unknown; name?: unknown; createNew?: unknown; clientRequestId?: unknown }): ResolveTarget {
-  const kind = cleanKind(input?.kind), name = cleanName(input?.name);
-  if (input.createNew === undefined || input.createNew === null || input.createNew === false) return { kind, name, requestId: null };
+export interface ResolveTarget { kind: EntityKind; name: string; requestId: string | null; description?: string | null }
+export function cleanResolve(input: { kind?: unknown; name?: unknown; createNew?: unknown; clientRequestId?: unknown; description?: unknown }): ResolveTarget {
+  const kind = cleanKind(input?.kind), name = cleanName(input?.name), description = cleanDescription(input?.description);
+  if (input.createNew === undefined || input.createNew === null || input.createNew === false) return { kind, name, requestId: null, description };
   // A deliberately separate entity needs a request id so a retry finds it instead of making a third.
   if (input.createNew !== true) return fail(400, 'invalid_create_new');
-  return { kind, name, requestId: cleanRequestId(input.clientRequestId) };
+  return { kind, name, requestId: cleanRequestId(input.clientRequestId), description };
 }
 
 /** `resolve` inside the caller's transaction; `app` scopes the ref of a separate entity. */
 export async function resolveIn(tx: Runner, ownerKey: string, app: string, target: ResolveTarget): Promise<{ entity: Entity; created: boolean }> {
-  if (target.requestId !== null) return ensureIn(tx, ownerKey, { kind: target.kind, name: target.name, ref: separateRef(app, target.requestId) });
+  const description = target.description ?? null;
+  if (target.requestId !== null) return ensureIn(tx, ownerKey, { kind: target.kind, name: target.name, ref: separateRef(app, target.requestId), description });
   const found = await tx.run(`MATCH (e:OverlayEntity {ownerKey: $ownerKey, kind: $kind, nameKey: $nameKey})
-    RETURN e.id AS id, e.name AS name, [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] AS refs ORDER BY e.createdAt LIMIT 20`,
+    RETURN e.id AS id, e.name AS name, e.description AS description, [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] AS refs ORDER BY e.createdAt LIMIT 20`,
   { ownerKey, kind: target.kind, nameKey: nameKey(target.name) });
-  const matches: Candidate[] = found.records.map(record => ({ id: String(record.get('id')), kind: target.kind, name: String(record.get('name')), refs: ((record.get('refs') as string[]) ?? []).slice().sort() }));
-  if (!matches.length) return ensureIn(tx, ownerKey, { kind: target.kind, name: target.name, ref: null });
-  if (matches.length === 1 && matches[0]!.refs.length === 0) return { entity: await entity(tx, ownerKey, matches[0]!.id), created: false };
+  const matches: Candidate[] = found.records.map(record => ({
+    id: String(record.get('id')), kind: target.kind, name: String(record.get('name')),
+    description: typeof record.get('description') === 'string' ? record.get('description') as string : null, refs: ((record.get('refs') as string[]) ?? []).slice().sort(),
+  }));
+  if (!matches.length) return ensureIn(tx, ownerKey, { kind: target.kind, name: target.name, ref: null, description });
+  if (matches.length === 1 && matches[0]!.refs.length === 0) {
+    const id = matches[0]!.id;
+    if (description !== null) await tx.run('MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey}) WHERE e.description IS NULL SET e.description = $description, e.updatedAt = $now', { id, ownerKey, description, now: new Date().toISOString() });
+    return { entity: await entity(tx, ownerKey, id), created: false };
+  }
   return fail(409, 'ambiguous_name', { candidates: matches });
 }
 
@@ -502,54 +541,70 @@ export async function deleteNoteIn(tx: Runner, ownerKey: string, noteId: string)
   if (!number(result.records[0]?.get('removed'))) fail(404, 'not_found');
 }
 
-/** `addLink` inside the caller's transaction. */
-export async function addLinkIn(tx: Runner, ownerKey: string, fromId: string, rawRelation: string, toId: string, provenance: Provenance): Promise<{ link: Link; created: boolean }> {
+/** `addLink` inside the caller's transaction. `attributes` as for `addLink` (cleaned again here). */
+export async function addLinkIn(tx: Runner, ownerKey: string, fromId: string, rawRelation: string, toId: string, provenance: Provenance, attributes: LinkAttributeInput = {}): Promise<{ link: Link; created: boolean }> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
-  const relation = cleanRelation(rawRelation);
+  const relation = cleanRelation(rawRelation), extra = cleanLinkAttributes(attributes);
   if (!isId(fromId) || !isId(toId)) return fail(404, 'not_found');
   if (fromId === toId) return fail(400, 'self_link');
   // Locks the subject, so the limit check and the write see the same links.
-  const locked = await tx.run('MATCH (a:OverlayEntity {id: $fromId, ownerKey: $ownerKey}) SET a._lock = true REMOVE a._lock RETURN a.id AS id', { fromId, ownerKey });
+  const locked = await tx.run('MATCH (a:OverlayEntity {id: $fromId, ownerKey: $ownerKey}) SET a._lock = true REMOVE a._lock RETURN a.kind AS kind', { fromId, ownerKey });
   if (!locked.records.length) return fail(404, 'not_found');
+  const fromKind = locked.records[0]!.get('kind') as EntityKind;
   const other = await entity(tx, ownerKey, toId);
   const linkKey = JSON.stringify([fromId, relation, toId]);
   const existing = await tx.run(`MATCH (:OverlayEntity {id: $fromId, ownerKey: $ownerKey})-[l:OVERLAY_LINK {linkKey: $linkKey}]->(:OverlayEntity {id: $toId, ownerKey: $ownerKey}) RETURN ${EDGE} AS edge`, { fromId, toId, ownerKey, linkKey });
   if (existing.records.length) return { link: linkFrom(edgeFrom(existing.records[0]!.get('edge') as Record<string, unknown>), 'out', other), created: false };
   await limit(tx, 'MATCH (:OverlayEntity {ownerKey: $ownerKey})-[l:OVERLAY_LINK]->() RETURN count(l) AS total', ownerKey, LIMITS.linksPerOwner, 'link_limit');
-  const now = new Date().toISOString(), id = nanoid(), relationType = relationTypeOf(relation);
+  const now = new Date().toISOString(), id = nanoid(), relationType = extra.relationType ?? relationTypeOf(relation, fromKind, other.kind);
   const result = await tx.run(`MATCH (a:OverlayEntity {id: $fromId, ownerKey: $ownerKey}), (b:OverlayEntity {id: $toId, ownerKey: $ownerKey})
     MERGE (a)-[l:OVERLAY_LINK {linkKey: $linkKey}]->(b)
     ON CREATE SET l.id = $id, l.ownerKey = $ownerKey, l.relation = $relation, l.relationType = $relationType, l.audience = 'owner', l.createdAt = $now,
-      l.author = $author, l.source = $source, l.assertion = $assertion
+      l.author = $author, l.source = $source, l.assertion = $assertion, l.since = $since, l.until = $until, l.context = $context
     RETURN ${EDGE} AS edge`,
-  { fromId, toId, ownerKey, relation, relationType, linkKey, id, now, ...provenance });
+  { fromId, toId, ownerKey, relation, relationType, linkKey, id, now, ...provenance, since: extra.since ?? null, until: extra.until ?? null, context: extra.context ?? null });
   return { link: linkFrom(edgeFrom(result.records[0]!.get('edge') as Record<string, unknown>), 'out', other), created: true };
 }
 
-/** `updateLink` inside the caller's transaction. */
-export async function updateLinkIn(tx: Runner, ownerKey: string, linkId: string, rawRelation: string, provenance: Provenance): Promise<{ link: Link; merged: boolean }> {
+/** `updateLink` inside the caller's transaction. `change` is the new relation text or a link patch (cleaned again here). */
+export async function updateLinkIn(tx: Runner, ownerKey: string, linkId: string, change: string | LinkPatch, provenance: Provenance): Promise<{ link: Link; merged: boolean }> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
   if (!isId(linkId)) return fail(404, 'not_found');
-  const relation = cleanRelation(rawRelation);
+  const patch = parseLinkPatch(change);
   const found = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey})-[l:OVERLAY_LINK {id: $linkId}]->(b:OverlayEntity {ownerKey: $ownerKey})
-    WHERE l.ownerKey = $ownerKey SET a._lock = true REMOVE a._lock RETURN a.id AS fromId, b.id AS toId`, { ownerKey, linkId });
+    WHERE l.ownerKey = $ownerKey SET a._lock = true REMOVE a._lock RETURN a.id AS fromId, b.id AS toId, a.kind AS fromKind, l.relation AS relation`, { ownerKey, linkId });
   const row = found.records[0];
   if (!row) return fail(404, 'not_found');
-  const fromId = String(row.get('fromId')), toId = String(row.get('toId')), other = await entity(tx, ownerKey, toId);
-  const linkKey = JSON.stringify([fromId, relation, toId]);
-  const clash = await tx.run(`MATCH (:OverlayEntity {id: $fromId, ownerKey: $ownerKey})-[m:OVERLAY_LINK {linkKey: $linkKey}]->(:OverlayEntity {id: $toId, ownerKey: $ownerKey})
-    WHERE m.id <> $linkId RETURN ${edge('m')} AS edge`, { fromId, toId, ownerKey, linkKey, linkId });
-  if (clash.records.length) {
-    // The edited link would be one the owner already has: keep that one.
-    await tx.run('MATCH ()-[l:OVERLAY_LINK {id: $linkId}]->() WHERE l.ownerKey = $ownerKey DELETE l', { linkId, ownerKey });
-    return { link: linkFrom(edgeFrom(clash.records[0]!.get('edge') as Record<string, unknown>), 'out', other), merged: true };
+  const fromId = String(row.get('fromId')), toId = String(row.get('toId')), fromKind = row.get('fromKind') as EntityKind, other = await entity(tx, ownerKey, toId);
+  const now = new Date().toISOString();
+  // Fields edited in place; a null value removes the property (reads back as null).
+  const inPlace = (relation: string): Record<string, unknown> => {
+    const values: Record<string, unknown> = {};
+    for (const key of ['since', 'until', 'context'] as const) if (patch[key] !== undefined) values[key] = patch[key];
+    if (patch.relationType !== undefined) values.relationType = patch.relationType ?? relationTypeOf(relation, fromKind, other.kind);
+    if (patch.assertion !== undefined) values.assertion = patch.assertion;
+    return values;
+  };
+  const read = async (query: string, parameters: Record<string, unknown>) => linkFrom(edgeFrom((await tx.run(query, parameters)).records[0]!.get('edge') as Record<string, unknown>), 'out', other);
+  const currentRelation = String(row.get('relation'));
+  if (patch.relation === undefined || patch.relation === currentRelation) {
+    const values = inPlace(currentRelation);
+    const touched = Object.keys(values).length ? { ...values, updatedAt: now, updatedBy: provenance.author } : {};
+    return { link: await read(`MATCH ()-[l:OVERLAY_LINK {id: $linkId}]->() WHERE l.ownerKey = $ownerKey SET l += $touched RETURN ${EDGE} AS edge`, { linkId, ownerKey, touched }), merged: false };
   }
-  const updated = await tx.run(`MATCH ()-[l:OVERLAY_LINK {id: $linkId}]->() WHERE l.ownerKey = $ownerKey
-    SET l.relation = $relation, l.linkKey = $linkKey, l.relationType = $relationType, l.updatedAt = $now,
-      l.author = $author, l.source = $source, l.assertion = $assertion
-    RETURN ${EDGE} AS edge`,
-  { linkId, ownerKey, relation, linkKey, relationType: relationTypeOf(relation), now: new Date().toISOString(), ...provenance });
-  return { link: linkFrom(edgeFrom(updated.records[0]!.get('edge') as Record<string, unknown>), 'out', other), merged: false };
+  const relation = patch.relation, linkKey = JSON.stringify([fromId, relation, toId]);
+  const clash = await tx.run(`MATCH (:OverlayEntity {id: $fromId, ownerKey: $ownerKey})-[m:OVERLAY_LINK {linkKey: $linkKey}]->(:OverlayEntity {id: $toId, ownerKey: $ownerKey})
+    WHERE m.id <> $linkId RETURN m.id AS id`, { fromId, toId, ownerKey, linkKey, linkId });
+  if (clash.records.length) {
+    // The edited link would be one the owner already has: keep that one, with the rest of the edit applied.
+    await tx.run('MATCH ()-[l:OVERLAY_LINK {id: $linkId}]->() WHERE l.ownerKey = $ownerKey DELETE l', { linkId, ownerKey });
+    const values = inPlace(relation);
+    const touched = Object.keys(values).length ? { ...values, updatedAt: now, updatedBy: provenance.author } : {};
+    return { link: await read(`MATCH ()-[l:OVERLAY_LINK {id: $survivor}]->() WHERE l.ownerKey = $ownerKey SET l += $touched RETURN ${EDGE} AS edge`, { survivor: String(clash.records[0]!.get('id')), ownerKey, touched }), merged: true };
+  }
+  const values = { ...inPlace(relation), relation, linkKey, relationType: patch.relationType ?? relationTypeOf(relation, fromKind, other.kind),
+    updatedAt: now, updatedBy: provenance.author, author: provenance.author, source: provenance.source, assertion: patch.assertion ?? provenance.assertion };
+  return { link: await read(`MATCH ()-[l:OVERLAY_LINK {id: $linkId}]->() WHERE l.ownerKey = $ownerKey SET l += $values RETURN ${EDGE} AS edge`, { linkId, ownerKey, values }), merged: false };
 }
 
 export async function deleteLinkIn(tx: Runner, ownerKey: string, linkId: string): Promise<void> {
@@ -576,23 +631,29 @@ async function retryOnce<T>(attempt: () => Promise<T>): Promise<T> {
     return attempt();
   }
 }
-const ENTITY = 'e { .id, .kind, .name, .important, .cadenceDays, .cadenceMode, .intervalDays, .lastContactAt, .cadenceSetAt, .createdAt, refs: [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] }';
+const ENTITY = 'e { .id, .kind, .name, .description, .important, .cadenceDays, .cadenceMode, .intervalDays, .lastContactAt, .cadenceSetAt, .createdAt, refs: [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] }';
 const NOTE = 'n { .id, .text, .createdAt, .updatedAt, .author, .source, .assertion }';
-const edge = (name: string) => `${name} { .id, .relation, .relationType, .createdAt, .updatedAt, .author, .source, .assertion }`;
+const edge = (name: string) => `${name} { .id, .relation, .relationType, .createdAt, .updatedAt, .updatedBy, .author, .source, .assertion, .since, .until, .context }`;
 const EDGE = edge('l');
 const end = (name: string) => `${name} { .id, .kind, .name, refs: [(r:OverlayRef)-[:REF_OF]->(${name}) | r.ref] }`;
 
 function noteFrom(value: Record<string, unknown>): Note {
   return { id: String(value.id), text: String(value.text), createdAt: String(value.createdAt), updatedAt: String(value.updatedAt ?? value.createdAt), ...readProvenance(value) };
 }
-/** Links written before relation types existed get the type a new write would. */
+/**
+ * The stored type; the retired `other` reads as `related`. Links written
+ * before relation types existed are typed from their words alone, exactly as
+ * they always read (not from their end kinds), so existing data reads unchanged.
+ */
 function storedRelationType(value: Record<string, unknown>): RelationType {
-  return typeof value.relationType === 'string' && value.relationType ? value.relationType as RelationType : relationTypeOf(String(value.relation ?? ''));
+  return readRelationType(value.relationType, String(value.relation ?? ''));
 }
+const textOrNull = (value: unknown): string | null => typeof value === 'string' && value ? value : null;
 function edgeFrom(value: Record<string, unknown>): Omit<Edge, 'fromId' | 'toId'> & { fromId: string; toId: string } {
   return {
     id: String(value.id), relation: String(value.relation), relationType: storedRelationType(value), fromId: '', toId: '',
-    createdAt: String(value.createdAt), updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : null, ...readProvenance(value),
+    createdAt: String(value.createdAt), updatedAt: textOrNull(value.updatedAt), updatedBy: textOrNull(value.updatedBy), ...readProvenance(value),
+    since: textOrNull(value.since), until: textOrNull(value.until), context: textOrNull(value.context),
   };
 }
 function endFrom(value: Record<string, unknown>): LinkEnd {
@@ -602,7 +663,8 @@ function linkFrom(edge: Omit<Edge, 'fromId' | 'toId'>, direction: 'out' | 'in', 
   return {
     id: edge.id, relation: edge.relation, relationType: edge.relationType, direction,
     other: { id: other.id, kind: other.kind, name: other.name, refs: other.refs.slice().sort() },
-    createdAt: edge.createdAt, updatedAt: edge.updatedAt, author: edge.author, source: edge.source, assertion: edge.assertion,
+    createdAt: edge.createdAt, updatedAt: edge.updatedAt, updatedBy: edge.updatedBy, author: edge.author, source: edge.source, assertion: edge.assertion,
+    since: edge.since, until: edge.until, context: edge.context,
   };
 }
 
@@ -613,7 +675,7 @@ function entityFrom(value: Record<string, unknown>): Entity {
     intervalDays: optional(value.intervalDays), lastContactAt: typeof value.lastContactAt === 'string' ? value.lastContactAt : null,
   };
   const anchor = typeof value.cadenceSetAt === 'string' ? value.cadenceSetAt : String(value.createdAt);
-  return { id: String(value.id), kind: value.kind as EntityKind, name: String(value.name), refs: (value.refs as string[]).slice().sort(), card: { ...card, nextDueAt: nextDue(card, anchor) } };
+  return { id: String(value.id), kind: value.kind as EntityKind, name: String(value.name), description: textOrNull(value.description), refs: (value.refs as string[]).slice().sort(), card: { ...card, nextDueAt: nextDue(card, anchor) } };
 }
 
 async function entity(tx: Runner, ownerKey: string, id: string): Promise<Entity> {

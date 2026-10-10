@@ -9,7 +9,7 @@ import { resolveActor } from '../middleware/resolveActor.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import {
   addLink, addNote, createPrivateThing, deleteLink, deleteNote, deletePrivateThing, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
-  parseCardPatch, PrivateGraphError, searchPrivate, updateLink, updateNote, updatePersonCard,
+  parseCardPatch, PrivateGraphError, searchPrivate, updateLink, updateNote, updatePersonCard, updatePrivateThing,
 } from '../services/privateGraph.js';
 import type { Provenance } from '../services/privateGraph.js';
 
@@ -34,6 +34,10 @@ function fail(error: unknown, res: Response): void {
 }
 const owner = (req: Request) => req.user!.userId;
 const id = (req: Request, key: string) => req.params[key] as string;
+/** The given fields among `keys` in the request body (absent ones are left out; null is kept, it clears). */
+const picked = (req: Request, keys: readonly string[]): Record<string, unknown> => Object.fromEntries(keys.filter(key => req.body?.[key] !== undefined).map(key => [key, req.body[key]]));
+/** A new link's optional facts: relationType (otherwise derived), since, until, context. */
+const linkAttributes = (req: Request) => picked(req, ['relationType', 'since', 'until', 'context']);
 
 /**
  * Who is writing, from how the request authenticated, never from its body:
@@ -69,7 +73,7 @@ router.post('/people/:userId/notes', async (req: Request, res: Response) => {
 });
 
 router.post('/people/:userId/links', async (req: Request, res: Response) => {
-  try { res.status(201).json(await addLink(owner(req), { kind: 'user', id: id(req, 'userId') }, req.body?.relation, req.body?.to, provenanceFor(req))); } catch (error) { fail(error, res); }
+  try { res.status(201).json(await addLink(owner(req), { kind: 'user', id: id(req, 'userId') }, req.body?.relation, req.body?.to, provenanceFor(req), linkAttributes(req))); } catch (error) { fail(error, res); }
 });
 
 router.get('/links', async (req: Request, res: Response) => {
@@ -100,11 +104,11 @@ router.post('/unlinked-people/:profileId/notes', async (req: Request, res: Respo
 });
 
 router.post('/unlinked-people/:profileId/links', async (req: Request, res: Response) => {
-  try { res.status(201).json(await addLink(owner(req), { kind: 'unlinked', id: id(req, 'profileId') }, req.body?.relation, req.body?.to, provenanceFor(req))); } catch (error) { fail(error, res); }
+  try { res.status(201).json(await addLink(owner(req), { kind: 'unlinked', id: id(req, 'profileId') }, req.body?.relation, req.body?.to, provenanceFor(req), linkAttributes(req))); } catch (error) { fail(error, res); }
 });
 
 router.post('/things', async (req: Request, res: Response) => {
-  try { res.status(201).json(await createPrivateThing(owner(req), req.body?.kind, req.body?.name)); } catch (error) { fail(error, res); }
+  try { res.status(201).json(await createPrivateThing(owner(req), req.body?.kind, req.body?.name, req.body?.description)); } catch (error) { fail(error, res); }
 });
 
 // Agent path: find or save by name without merging same-named people.
@@ -120,6 +124,11 @@ router.get('/things/:thingId', async (req: Request, res: Response) => {
   try { res.json(await getThing(owner(req), id(req, 'thingId'))); } catch (error) { fail(error, res); }
 });
 
+// Rename, describe (null or '' clears) or re-kind a saved thing (an idea that became a project).
+router.patch('/things/:thingId', async (req: Request, res: Response) => {
+  try { res.json(await updatePrivateThing(owner(req), id(req, 'thingId'), req.body)); } catch (error) { fail(error, res); }
+});
+
 // Undo for a saved thing: removes it with its notes and links.
 router.delete('/things/:thingId', async (req: Request, res: Response) => {
   try { res.json(await deletePrivateThing(owner(req), id(req, 'thingId'))); } catch (error) { fail(error, res); }
@@ -130,7 +139,7 @@ router.post('/things/:thingId/notes', async (req: Request, res: Response) => {
 });
 
 router.post('/things/:thingId/links', async (req: Request, res: Response) => {
-  try { res.status(201).json(await addLink(owner(req), { kind: 'thing', id: id(req, 'thingId') }, req.body?.relation, req.body?.to, provenanceFor(req))); } catch (error) { fail(error, res); }
+  try { res.status(201).json(await addLink(owner(req), { kind: 'thing', id: id(req, 'thingId') }, req.body?.relation, req.body?.to, provenanceFor(req), linkAttributes(req))); } catch (error) { fail(error, res); }
 });
 
 router.patch('/notes/:noteId', async (req: Request, res: Response) => {
@@ -141,9 +150,12 @@ router.delete('/notes/:noteId', async (req: Request, res: Response) => {
   try { res.json(await deleteNote(owner(req), id(req, 'noteId'))); } catch (error) { fail(error, res); }
 });
 
-// Edit a relation's text in place; merging into an identical existing relation returns it with merged: true.
+// Edit a relation in place: relation text, relationType, assertion, since, until, context.
+// A relation edit that lands on an identical existing relation returns it with merged: true.
 router.patch('/links/:linkId', async (req: Request, res: Response) => {
-  try { res.json(await updateLink(owner(req), id(req, 'linkId'), req.body?.relation, provenanceFor(req))); } catch (error) { fail(error, res); }
+  try {
+    res.json(await updateLink(owner(req), id(req, 'linkId'), picked(req, ['relation', 'relationType', 'assertion', 'since', 'until', 'context']), provenanceFor(req)));
+  } catch (error) { fail(error, res); }
 });
 
 router.delete('/links/:linkId', async (req: Request, res: Response) => {

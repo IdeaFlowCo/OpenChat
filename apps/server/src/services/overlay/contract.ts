@@ -1,6 +1,6 @@
 /**
  * People overlay, version 1: one person's own notes, importance, catch-up
- * cadence and links about people, companies, ideas and projects.
+ * cadence and links about people, companies, ideas, projects and topics.
  *
  * Deliberately owner-only. Nothing here grants anyone but the owner access;
  * `audience` is stored so a later team tier can widen it explicitly.
@@ -15,7 +15,12 @@
  */
 import { createHash } from 'node:crypto';
 
-export const ENTITY_KINDS = ['person', 'company', 'idea', 'project'] as const;
+/**
+ * `topic` is a thing in the world that people and projects are about (ADHD,
+ * coherence, Neo4j); `idea` and `project` are things the owner might do.
+ * `company` also covers schools and other organisations.
+ */
+export const ENTITY_KINDS = ['person', 'company', 'idea', 'project', 'topic'] as const;
 export type EntityKind = (typeof ENTITY_KINDS)[number];
 export type CadenceMode = 'fixed' | 'expanding';
 
@@ -27,7 +32,8 @@ export interface Card {
   lastContactAt: string | null;
   nextDueAt: string | null;
 }
-export interface Entity { id: string; kind: EntityKind; name: string; refs: string[]; card: Card }
+/** `description` is a one-line summary (280 characters or fewer), null when none was given. */
+export interface Entity { id: string; kind: EntityKind; name: string; description: string | null; refs: string[]; card: Card }
 
 /**
  * Who wrote a note or link and how. All optional on storage: records written
@@ -44,21 +50,33 @@ export interface Provenance { author: string | null; source: ProvenanceSource | 
 /** What a write records when the caller says nothing: the owner, in an app, stating it. */
 export const OWNER_PROVENANCE: Provenance = { author: 'owner', source: 'app', assertion: 'stated' };
 
-/** A small canonical set, derived from the owner's free-text relation for querying. */
-export const RELATION_TYPES = ['knows', 'family', 'works_at', 'worked_with', 'works_on', 'attended', 'interested_in', 'other'] as const;
+/**
+ * A small canonical set for querying; the owner's free-text `relation` stays
+ * the label. `related` is the honest generic fallback ("connected to"); it
+ * replaced `other`, which old links and old callers still use and which reads
+ * back as `related`.
+ */
+export const RELATION_TYPES = ['knows', 'family', 'worked_with', 'works_at', 'works_on', 'attended', 'interested_in', 'part_of', 'about', 'related'] as const;
 export type RelationType = (typeof RELATION_TYPES)[number];
 
 export interface Note extends Provenance { id: string; text: string; createdAt: string; updatedAt: string }
 export interface LinkEnd { id: string; kind: EntityKind; name: string; refs: string[] }
-export interface Link extends Provenance { id: string; relation: string; relationType: RelationType; direction: 'out' | 'in'; other: LinkEnd; createdAt: string; updatedAt: string | null }
+/**
+ * Facts about a link besides its relation, all nullable: `since` and `until`
+ * are free date text ("2019", "2024-03"), `context` how it came about ("met at
+ * AGI House hackathon"). `updatedBy` is the author of the last edit, so an
+ * edit never overwrites who first asserted the link.
+ */
+export interface LinkAttributes { since: string | null; until: string | null; context: string | null }
+export interface Link extends Provenance, LinkAttributes { id: string; relation: string; relationType: RelationType; direction: 'out' | 'in'; other: LinkEnd; createdAt: string; updatedAt: string | null; updatedBy: string | null }
 /** A link as an edge between two ends, for search and neighbourhood reads. */
-export interface Edge extends Provenance { id: string; relation: string; relationType: RelationType; fromId: string; toId: string; createdAt: string; updatedAt: string | null }
+export interface Edge extends Provenance, LinkAttributes { id: string; relation: string; relationType: RelationType; fromId: string; toId: string; createdAt: string; updatedAt: string | null; updatedBy: string | null }
 export interface EntityDetail extends Entity { notes: Note[]; links: Link[] }
-export interface SearchHit extends Entity { matched: Array<'name' | 'note' | 'link'> }
+export interface SearchHit extends Entity { matched: Array<'name' | 'description' | 'note' | 'link'> }
 export interface SearchResult { entities: SearchHit[]; links: Array<Edge & { from: LinkEnd; to: LinkEnd }>; truncated: boolean }
 export interface Neighbourhood { center: Entity; depth: 1 | 2; entities: Entity[]; links: Edge[]; truncated: boolean }
 /** One of several same-named entities, offered back when a name alone is ambiguous. */
-export interface Candidate { id: string; kind: EntityKind; name: string; refs: string[] }
+export interface Candidate { id: string; kind: EntityKind; name: string; description: string | null; refs: string[] }
 export interface DueEntity { id: string; name: string; refs: string[]; important: boolean; nextDueAt: string; lastContactAt: string | null }
 export interface CardPatch { important?: boolean; cadenceDays?: number | null; cadenceMode?: CadenceMode; contactedNow?: boolean }
 
@@ -74,6 +92,7 @@ export const fail = (status: number, code: string, details?: Record<string, unkn
 export const LIMITS = {
   noteLength: 4000, notesPerEntity: 200, linksPerOwner: 5000, entitiesPerOwner: 5000,
   relationLength: 60, nameLength: 120, cadenceDays: 3650, refsPerEntity: 8,
+  descriptionLength: 280, contextLength: 280, dateTextLength: 20,
 } as const;
 const EXPANDING_FACTOR = 1.6;
 const EXPANDING_CEILING_DAYS = 365;
@@ -137,6 +156,20 @@ export const cleanRelation = (value: unknown): string => cleanText(value, LIMITS
 export function cleanKind(value: unknown): EntityKind {
   return ENTITY_KINDS.includes(value as EntityKind) ? value as EntityKind : fail(400, 'invalid_kind');
 }
+/**
+ * One optional line of free text: null, undefined or blank is "none";
+ * whitespace (newlines included) collapses to single spaces.
+ */
+function cleanLine(value: unknown, max: number, code: string): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') return fail(400, code);
+  // eslint-disable-next-line no-control-regex -- deliberate control-character strip
+  const text = value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (text.length > max) return fail(400, code);
+  return text || null;
+}
+/** An entity's one-line summary ("a feed that nudges you into coherence"); null clears it. */
+export const cleanDescription = (value: unknown): string | null => cleanLine(value, LIMITS.descriptionLength, 'invalid_description');
 
 /** A retry key for a deliberately separate entity ("a different Alex"). */
 export function cleanRequestId(value: unknown): string {
@@ -149,6 +182,8 @@ export function cleanRequestId(value: unknown): string {
  */
 export const separateRef = (app: string, requestId: string): string =>
   cleanRef(`${app}:private:${createHash('sha256').update(cleanRequestId(requestId)).digest('hex').slice(0, 32)}`);
+/** Whether a ref is only such a separate-entity ref (it names no app record, so the entity is the owner's own). */
+export const isSeparateRef = (ref: string): boolean => /^[a-z][a-z0-9-]{1,30}:private:[a-f0-9]{32}$/.test(ref);
 
 /**
  * Provenance a caller supplies. Missing fields take the owner defaults;
@@ -189,27 +224,86 @@ export function readProvenance(value: { author?: unknown; source?: unknown; asse
 }
 
 /**
- * The canonical type of a free-text relation. Deterministic, so links stored
- * before relation types existed read back with the same type a new write
- * would get. First match wins; the order puts specific phrases first
+ * The canonical type of a free-text relation, given what it connects. A
+ * caller-supplied type wins (see `cleanRelationType`); otherwise the first
+ * pattern whose words match *and* whose ends fit applies, else `related`. So
+ * "connected to" between two people is `knows`, but from an idea to a person
+ * it is `related`. Ends are checked in either direction ("employs" and
+ * "employed by" are both `works_at`). With no kinds given only the words
+ * decide, among the original types; that is how links stored without a type
+ * (before 2026-10-09) read, unchanged. The order puts specific phrases first
  * ("worked with" before "works at", family words before "knows").
  */
-const RELATION_PATTERNS: Array<[RelationType, RegExp]> = [
-  ['family', /\b(sister|brother|sibling|twin|mother|father|mom|mum|dad|parent|son|daughter|child|kid|cousin|aunt|uncle|niece|nephew|grand(mother|father|parent|son|daughter|child|ma|pa)|grandma|grandpa|wife|husband|spouse|married|fianc[eé]e?|in-law|step(mother|father|sister|brother|son|daughter)|half-(sister|brother)|family|related to|relative)\b/],
-  ['worked_with', /\b(work(s|ed|ing)? (together )?with|colleague|co-?worker|teammate|team ?mate|collaborat\w*|co-?founded with|used to work with)\b/],
-  ['works_on', /\b(work(s|ed|ing)? on|build(s|ing)?|built|maintain(s|ed|er|ing)?|contribut\w*|lead(s|ing)? (the )?project|runs? (the )?project|creator of|author of)\b/],
-  ['works_at', /\b(work(s|ed|ing)? (at|for)|employ\w*|job at|hired (at|by)|(ceo|cto|cfo|coo|cpo|vp|founder|co-?founder|cofounder|president|director|engineer|manager|intern|partner|advisor|investor|board member|staff|head|lead) (at|of)|founded|runs|joined)\b/],
-  ['attended', /\b(attend(s|ed|ing)?|went to|goes to|stud(y|ies|ied|ying) at|alumn(us|a|i|ae)|graduat\w*|student at|class of|enrolled|school|college|university|classmate)\b/],
-  ['interested_in', /\b(interest(s|ed)?|likes?|loves?|into|cares? about|passionate|fan of|curious about|excited about|follows|wants|cares)\b/],
-  ['knows', /\b(knows?|knew|friends?|met|acquaint\w*|introduc\w*|mentor(s|ed|ing|ee)?|neighbou?r|roommate|room ?mate|housemate|connected|contact|close to|dated|dating|ex)\b/],
+type Ends = Array<[readonly EntityKind[], readonly EntityKind[]]>;
+const PEOPLE: Ends = [[['person'], ['person']]];
+const RELATION_PATTERNS: Array<[RelationType, Ends | null, RegExp]> = [
+  ['family', PEOPLE, /\b(sister|brother|sibling|twin|mother|father|mom|mum|dad|parent|son|daughter|child|kid|cousin|aunt|uncle|niece|nephew|grand(mother|father|parent|son|daughter|child|ma|pa)|grandma|grandpa|wife|husband|spouse|married|fianc[eé]e?|in-law|step(mother|father|sister|brother|son|daughter)|half-(sister|brother)|family|related to|relative)\b/],
+  ['worked_with', PEOPLE, /\b(work(s|ed|ing)? (together )?with|colleague|co-?worker|teammate|team ?mate|collaborat\w*|co-?founded with|used to work with)\b/],
+  ['works_on', [[['person', 'company'], ['project', 'idea']]], /\b(work(s|ed|ing)? on|build(s|ing)?|built|maintain(s|ed|er|ing)?|contribut\w*|lead(s|ing)? (the )?project|runs? (the )?project|creator of|author of)\b/],
+  ['works_at', [[['person'], ['company']]], /\b(work(s|ed|ing)? (at|for)|employ\w*|job at|hired (at|by)|(ceo|cto|cfo|coo|cpo|vp|founder|co-?founder|cofounder|president|director|engineer|manager|intern|partner|advisor|investor|board member|staff|head|lead) (at|of)|founded|runs|joined)\b/],
+  ['attended', [[['person'], ['company', 'topic']]], /\b(attend(s|ed|ing)?|went to|goes to|stud(y|ies|ied|ying) at|alumn(us|a|i|ae)|graduat\w*|student at|class of|enrolled|school|college|university|classmate)\b/],
+  ['part_of', [[['project', 'idea', 'company'], ['project', 'company']]], /\b(part of|idea for|belongs? to|subsidiary of|division of|component of|feature of|module of|spin-?off of|sub-?project of|within|under)\b/],
+  ['interested_in', [[['person'], ['topic', 'idea', 'project', 'company']]], /\b(interest(s|ed)?|likes?|loves?|into|cares? about|passionate|fan of|curious about|excited about|follows|wants|cares)\b/],
+  ['about', [[['person', 'company', 'idea', 'project', 'topic'], ['topic']]], /\b(about|has|had|have|tagged|topic|concerns?|regarding|re|diagnosed with|lives with|deals with|struggles with|focus(es|ed)? on|on)\b/],
+  ['knows', PEOPLE, /\b(knows?|knew|friends?|met|acquaint\w*|introduc\w*|mentor(s|ed|ing|ee)?|neighbou?r|roommate|room ?mate|housemate|connected|contact|close to|dated|dating|ex)\b/],
 ];
-export function relationTypeOf(relation: string): RelationType {
+/** Types added with end kinds (`part_of`, `about`) need the kinds; without them only the original word patterns apply. */
+const NEEDS_KINDS: readonly RelationType[] = ['part_of', 'about'];
+const endsFit = (type: RelationType, ends: Ends | null, from?: EntityKind, to?: EntityKind): boolean =>
+  from === undefined || to === undefined ? !NEEDS_KINDS.includes(type)
+    : !ends || ends.some(([a, b]) => (a.includes(from) && b.includes(to)) || (a.includes(to) && b.includes(from)));
+export function relationTypeOf(relation: string, fromKind?: EntityKind, toKind?: EntityKind): RelationType {
   const text = relation.normalize('NFKC').toLowerCase().replace(/[_]+/g, ' ');
-  for (const [type, pattern] of RELATION_PATTERNS) if (pattern.test(text)) return type;
-  return 'other';
+  for (const [type, ends, pattern] of RELATION_PATTERNS) if (endsFit(type, ends, fromKind, toKind) && pattern.test(text)) return type;
+  return 'related';
 }
+/** A stored type as read back: the retired `other` is `related`; a missing or unknown one is derived from the words (and kinds, when given). */
+export function readRelationType(stored: unknown, relation: string, fromKind?: EntityKind, toKind?: EntityKind): RelationType {
+  if (stored === 'other') return 'related';
+  return RELATION_TYPES.includes(stored as RelationType) ? stored as RelationType : relationTypeOf(relation, fromKind, toKind);
+}
+/** A caller-named relation type; the retired `other` is accepted as `related`. */
 export function cleanRelationType(value: unknown): RelationType {
+  if (value === 'other') return 'related';
   return RELATION_TYPES.includes(value as RelationType) ? value as RelationType : fail(400, 'invalid_relation_type');
+}
+
+/**
+ * The attributes a caller may give a link, on add or edit. On add, absent
+ * means none; on edit, absent leaves it and null clears it.
+ */
+export interface LinkAttributeInput { relationType?: RelationType | null; since?: string | null; until?: string | null; context?: string | null }
+const LINK_ATTRIBUTE_KEYS = ['relationType', 'since', 'until', 'context'] as const;
+export function cleanLinkAttributes(value: unknown): LinkAttributeInput {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) return fail(400, 'invalid_link');
+  const input = value as Record<string, unknown>, result: LinkAttributeInput = {};
+  if (Object.keys(input).some(key => !(LINK_ATTRIBUTE_KEYS as readonly string[]).includes(key))) return fail(400, 'invalid_link');
+  if (input.relationType !== undefined) result.relationType = input.relationType === null || input.relationType === '' ? null : cleanRelationType(input.relationType);
+  if (input.since !== undefined) result.since = cleanLine(input.since, LIMITS.dateTextLength, 'invalid_since');
+  if (input.until !== undefined) result.until = cleanLine(input.until, LIMITS.dateTextLength, 'invalid_until');
+  if (input.context !== undefined) result.context = cleanLine(input.context, LIMITS.contextLength, 'invalid_context');
+  return result;
+}
+
+/**
+ * An edit to a link (`PATCH /links/:id`). `relation` is part of the link's
+ * identity; everything else is edited in place. `relationType: null` means
+ * "derive it from the relation again".
+ */
+export interface LinkPatch extends LinkAttributeInput { relation?: string; assertion?: Assertion }
+export function parseLinkPatch(value: unknown): LinkPatch {
+  if (typeof value === 'string') return { relation: cleanRelation(value) };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(400, 'invalid_link');
+  const { relation, assertion, ...attributes } = value as Record<string, unknown>;
+  const patch: LinkPatch = cleanLinkAttributes(attributes);
+  if (relation !== undefined) patch.relation = cleanRelation(relation);
+  if (assertion !== undefined) {
+    if (!ASSERTIONS.includes(assertion as Assertion)) return fail(400, 'invalid_provenance');
+    patch.assertion = assertion as Assertion;
+  }
+  if (!Object.keys(patch).length) return fail(400, 'nothing_to_change');
+  return patch;
 }
 
 /**

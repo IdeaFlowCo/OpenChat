@@ -94,7 +94,7 @@ integration('private graph: one owner, never anyone else', () => {
     await graph.addNote(alice, { kind: 'thing', id: idea.other.id }, 'Worth a longer write-up');
 
     const things = await graph.listThings(alice, 'acme', undefined);
-    expect(things.things).toEqual([{ id: works.other.id, kind: 'company', name: 'Acme Robotics' }]);
+    expect(things.things).toEqual([{ id: works.other.id, kind: 'company', name: 'Acme Robotics', description: null }]);
     expect((await graph.listThings(alice, '', 'idea')).things.map(value => value.name)).toEqual(['Open social graph']);
     expect((await graph.listThings(carol, '', undefined)).things).toEqual([]);
 

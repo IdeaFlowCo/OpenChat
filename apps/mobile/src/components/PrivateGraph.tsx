@@ -25,7 +25,7 @@ export const RELATIONS = ['mentioned', 'knows', 'works at', 'works on', 'interes
 /** The kind a suggested relation most often points at, so the form starts coherent ("works at" → company). */
 const RELATION_KIND: Record<string, PrivateThingKind> = { 'mentioned': 'idea', 'knows': 'person', 'works at': 'company', 'works on': 'project', 'interested in': 'idea' };
 export const THING_KINDS: Array<{ kind: PrivateThingKind; label: string }> = [
-  { kind: 'company', label: 'Company' }, { kind: 'idea', label: 'Idea' }, { kind: 'project', label: 'Project' }, { kind: 'person', label: 'Person' },
+  { kind: 'company', label: 'Company' }, { kind: 'idea', label: 'Idea' }, { kind: 'project', label: 'Project' }, { kind: 'topic', label: 'Topic' }, { kind: 'person', label: 'Person' },
 ];
 const kindLabel = (kind: string) => kind === 'user' ? 'on OpenChat' : kind;
 

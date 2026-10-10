@@ -64,7 +64,7 @@ describe('private graph agent-key scopes', () => {
     expect(mocks.createPrivateThing).not.toHaveBeenCalled();
     mocks.scopes = ['write'];
     expect((await call('POST','/things',{kind:'person',name:'Chet',ownerId:'mallory'})).status).toBe(201);
-    expect(mocks.createPrivateThing).toHaveBeenCalledWith('alice','person','Chet');
+    expect(mocks.createPrivateThing).toHaveBeenCalledWith('alice','person','Chet',undefined);
   });
 
   it('gives a signed-in person and a read-write key both', async () => {
