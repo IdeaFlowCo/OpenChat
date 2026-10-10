@@ -130,7 +130,7 @@ const styles = StyleSheet.create({
   shell: { borderBottomWidth: StyleSheet.hairlineWidth, paddingBottom: space[2] },
   headingRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: space[4], gap: space[2] },
   heading: { flex: 1 },
-  collapseButton: { minWidth: 60, minHeight: 36, alignItems: 'flex-end', justifyContent: 'center' },
+  collapseButton: { minWidth: 60, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' },
   rail: { alignItems: 'center', gap: space[2], paddingHorizontal: space[3], paddingTop: space[1], paddingBottom: 2 },
   tile: { width: 68, minHeight: 78, alignItems: 'center' },
   newCircle: { width: 54, height: 54, borderRadius: 27, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
