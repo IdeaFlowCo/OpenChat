@@ -15,7 +15,7 @@
 
 import { Router, Request, Response } from 'express';
 import { getDriver } from '../db.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireDirectSession } from '../middleware/auth.js';
 import { getVapidPublicKey, isPushConfigured } from '../services/push.js';
 
 const router = Router();
@@ -31,7 +31,7 @@ router.get('/vapid-public-key', (_req: Request, res: Response) => {
 
 // Subscribe — store the PushSubscriptionJSON the browser produces.
 // Body: { subscription: { endpoint, keys: { p256dh, auth } }, userAgent? }
-router.post('/subscribe', requireAuth, async (req: Request, res: Response) => {
+router.post('/subscribe', requireAuth, requireDirectSession, async (req: Request, res: Response) => {
   if (!isPushConfigured()) {
     res.status(503).json({ error: 'Push notifications not configured on this server.' });
     return;
@@ -85,7 +85,7 @@ router.post('/subscribe', requireAuth, async (req: Request, res: Response) => {
 
 // Unsubscribe — delete by endpoint (caller-owned only).
 // Body: { endpoint }
-router.delete('/subscribe', requireAuth, async (req: Request, res: Response) => {
+router.delete('/subscribe', requireAuth, requireDirectSession, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const { endpoint } = req.body as { endpoint?: string };
   if (!endpoint?.trim()) {
@@ -116,7 +116,7 @@ router.delete('/subscribe', requireAuth, async (req: Request, res: Response) => 
 // Stored as (User)-[:HAS_PUSH_TOKEN]->(NativePushToken {userId, platform, token}).
 // Keyed by (userId, platform) so re-registering on the same device replaces
 // the previous token (Expo can rotate tokens after app reinstall, etc.).
-router.post('/register-native', requireAuth, async (req: Request, res: Response) => {
+router.post('/register-native', requireAuth, requireDirectSession, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const { token, platform } = req.body as { token?: string; platform?: string };
 
@@ -152,7 +152,7 @@ router.post('/register-native', requireAuth, async (req: Request, res: Response)
 });
 
 // Deregister — used at logout. Body: { platform: 'ios' | 'android' }
-router.delete('/register-native', requireAuth, async (req: Request, res: Response) => {
+router.delete('/register-native', requireAuth, requireDirectSession, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const { platform } = req.body as { platform?: string };
 
