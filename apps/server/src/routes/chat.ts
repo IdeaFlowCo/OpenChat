@@ -888,6 +888,7 @@ router.patch('/conversations/:id/read', requireAuth, async (req: Request, res: R
     const check = await session.run(`
       MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
       SET rel.lastReadAt = datetime($now)
+      REMOVE rel.markedUnreadAt
       RETURN c
     `, { userId, conversationId, now });
 
@@ -927,6 +928,33 @@ router.patch('/conversations/:id/read', requireAuth, async (req: Request, res: R
   } catch (error) {
     console.error('Error marking read:', error);
     res.status(500).json({ error: 'Failed to mark read' });
+  } finally {
+    await session.close();
+  }
+});
+
+// PATCH /api/chat/conversations/:id/unread — mark the conversation unread for
+// the caller only (Unlinked native Messages, unlinked-rif). The conversation
+// counts as at least one unread until the caller reads it again (the read
+// route clears the flag). Other participants' read receipts are unchanged.
+router.patch('/conversations/:id/unread', requireAuth, async (req: Request, res: Response) => {
+  const session = getDriver().session();
+  const userId = req.user!.userId;
+  const { id: conversationId } = req.params;
+  try {
+    const result = await session.run(`
+      MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+      SET rel.markedUnreadAt = datetime($now)
+      RETURN c.id AS id
+    `, { userId, conversationId, now: new Date().toISOString() });
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    res.json({ ok: true, conversationId, markedUnread: true });
+  } catch (error) {
+    console.error('Error marking unread:', error);
+    res.status(500).json({ error: 'Failed to mark unread' });
   } finally {
     await session.close();
   }

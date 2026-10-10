@@ -49,6 +49,9 @@ jobs:
           apps/server/test/agentNetwork.route.test.ts
           apps/server/test/agentNetwork.integration.test.ts
           apps/server/test/chatUnread.route.test.ts
+          apps/server/test/chatUnread.integration.test.ts
+          apps/server/test/chatMarkUnread.route.test.ts
+          apps/server/test/unlinkedIdentities.integration.test.ts
           apps/server/test/unlinkedConnections.integration.test.ts
           apps/server/test/directConversationPrivacy.test.ts
           apps/server/test/privateGraph.test.ts

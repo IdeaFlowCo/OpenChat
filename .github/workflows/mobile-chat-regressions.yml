@@ -37,6 +37,11 @@ jobs:
           test/contextHostedReview.mobile.test.ts test/contextHostedApi.mobile.test.ts test/contextHosted.route.test.ts
           test/contextWebhookSetup.mobile.test.ts test/contextWebhooks.route.test.ts test/contextWebhookTransport.test.ts
           test/conversationContent.route.test.ts test/contextIntentions.mobile.test.ts
+      - name: Unlinked confidential exchanges (session, recipient, identities) and compose entry
+        working-directory: apps/server
+        run: >-
+          npx vitest run test/unlinkedSession.test.ts test/unlinkedMessaging.test.ts test/unlinkedIdentity.test.ts
+          test/unlinkedIdentities.test.ts test/unlinkedCompose.test.ts
       - name: Ideaflow-only web sign-in, automatic sign-in, account switch, and native login parity
         working-directory: apps/server
         run: >-

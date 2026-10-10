@@ -53,7 +53,10 @@ export const CONVERSATIONS_QUERY = `
     // Returns ISO timestamp, the literal 'always', or null.
     mutedUntil: myRel.mutedUntil,
     lastReadAt: myRel.lastReadAt,
-    unreadCount: unreadCount
+    // A conversation the member marked unread counts as at least one unread
+    // until it is read again; read receipts (lastReadAt) are not changed.
+    markedUnread: myRel.markedUnreadAt IS NOT NULL,
+    unreadCount: CASE WHEN unreadCount = 0 AND myRel.markedUnreadAt IS NOT NULL THEN 1 ELSE unreadCount END
   } AS conversation
   ORDER BY c.lastMessageAt DESC
 `;
@@ -61,9 +64,10 @@ export const CONVERSATIONS_QUERY = `
 export const UNREAD_TOTAL_QUERY = `
   MATCH (u:User {id: $userId})-[myRel:PARTICIPATES_IN]->(c:Conversation)
   ${visibleConversationPredicate}
-  MATCH (m:Message {conversationId: c.id})
+  OPTIONAL MATCH (m:Message {conversationId: c.id})
   WHERE m.createdAt > coalesce(myRel.lastReadAt, datetime({epochMillis: 0}))
     AND m.senderId <> $userId
     AND m.deletedAt IS NULL
-  RETURN count(m) AS unreadTotal
+  WITH myRel, count(m) AS unread
+  RETURN sum(CASE WHEN unread = 0 AND myRel.markedUnreadAt IS NOT NULL THEN 1 ELSE unread END) AS unreadTotal
 `;

@@ -79,3 +79,22 @@ entry opens or creates the direct conversation, without sending anything. Linked
 [linkedin-messaging-plan.md](linkedin-messaging-plan.md).
 
 The embedded receiver accepts the exact `embed=unlinked` presentation flag alongside the compose query. It still rejects unknown/repeated parameters and resolves the public profile on the server before choosing a recipient. Embedded pending compose state stays in memory per frame, separate from standalone compose storage.
+
+## Unlinked native Messages: identities and mark-unread
+
+Unlinked's native inbox (www.unlinked.ai/messages) uses two small additions:
+
+- `POST /api/unlinked/identities` (confidential, `UNLINKED_MESSAGING_SECRET`,
+  no browser Origin, 600/min): `{issuer, subject, userIds[1..200]}` returns
+  `{identities: [{userId, issuer, subject}]}` only for users who share a
+  conversation with that member's shared inbox and have a shared Ideaflow
+  identity, excluding blocked pairs. No names, emails or other contacts are
+  returned. Unlinked maps an identity to a public profile only if that person
+  claimed a published one ("View on Unlinked").
+- `PATCH /api/chat/conversations/:id/unread` (any signed-in session, including
+  embedded Unlinked sessions) sets `markedUnreadAt` on the caller's own
+  participation. The conversation list (`markedUnread`, `unreadCount`) and
+  `/unread-total` count it as at least one unread until the caller reads it
+  again (`PATCH .../read` clears the flag). Other participants' read
+  receipts are unchanged. Native and web clients show it through the existing
+  `unreadCount` with no client change.

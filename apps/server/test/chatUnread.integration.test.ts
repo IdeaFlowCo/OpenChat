@@ -160,6 +160,49 @@ integration('server-side unread tracking', () => {
     }
   });
 
+  it('a conversation marked unread counts as one until it is read; receipts are unchanged', async () => {
+    const session = driver.session();
+    try {
+      await session.run(`
+        MATCH (:User {id: $userId})-[rel:PARTICIPATES_IN]->(:Conversation {id: $conversationId})
+        SET rel.lastReadAt = datetime('2026-01-02T05:00:00Z'), rel.markedUnreadAt = datetime('2026-01-02T05:01:00Z')
+      `, { userId: aliceId, conversationId });
+      let list = await session.run(CONVERSATIONS_QUERY, { userId: aliceId });
+      let conversation = list.records.map(record => record.get('conversation')).find(value => value.id === conversationId);
+      expect(conversation.markedUnread).toBe(true);
+      expect(conversation.unreadCount.toNumber()).toBe(1);
+      expect(conversation.lastReadAt.toString()).toBe('2026-01-02T05:00:00Z');
+      expect((await session.run(UNREAD_TOTAL_QUERY, { userId: aliceId })).records[0].get('unreadTotal').toNumber()).toBe(1);
+      // A flag on a conversation hidden by a block stays out of the total.
+      await session.run(`
+        MATCH (:User {id: $userId})-[rel:PARTICIPATES_IN]->(:Conversation {id: $blockedConversationId})
+        SET rel.markedUnreadAt = datetime('2026-01-02T05:01:00Z')
+      `, { userId: aliceId, blockedConversationId });
+      expect((await session.run(UNREAD_TOTAL_QUERY, { userId: aliceId })).records[0].get('unreadTotal').toNumber()).toBe(1);
+      // A flagged conversation with no messages at all counts as one.
+      await session.run(`
+        MATCH (alice:User {id: $userId})
+        CREATE (alice)-[:PARTICIPATES_IN {role: 'member', markedUnreadAt: datetime()}]->(:Conversation {id: $emptyId, type: 'group', title: 'empty'})
+      `, { userId: aliceId, emptyId: `${conversationId}-empty` });
+      expect((await session.run(UNREAD_TOTAL_QUERY, { userId: aliceId })).records[0].get('unreadTotal').toNumber()).toBe(2);
+      list = await session.run(CONVERSATIONS_QUERY, { userId: aliceId });
+      expect(list.records.map(record => record.get('conversation')).find(value => value.id === `${conversationId}-empty`).unreadCount.toNumber()).toBe(1);
+      await session.run('MATCH (c:Conversation {id: $emptyId}) DETACH DELETE c', { emptyId: `${conversationId}-empty` });
+      // Reading again (the read route REMOVEs the flag) restores the computed count.
+      await session.run(`
+        MATCH (:User {id: $userId})-[rel:PARTICIPATES_IN]->(:Conversation {id: $conversationId})
+        SET rel.lastReadAt = datetime('2026-01-01T00:00:00Z') REMOVE rel.markedUnreadAt
+      `, { userId: aliceId, conversationId });
+      list = await session.run(CONVERSATIONS_QUERY, { userId: aliceId });
+      conversation = list.records.map(record => record.get('conversation')).find(value => value.id === conversationId);
+      expect(conversation.markedUnread).toBe(false);
+      expect(conversation.unreadCount.toNumber()).toBe(1);
+      expect((await session.run(UNREAD_TOTAL_QUERY, { userId: aliceId })).records[0].get('unreadTotal').toNumber()).toBe(1);
+    } finally {
+      await session.close();
+    }
+  });
+
   it('returns zero after the conversation is marked read', async () => {
     const session = driver.session();
     try {
