@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
@@ -14,9 +14,12 @@ import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { usePrivateName } from '../contexts/PrivateNamesContext';
-import { FriendControls } from '../components/FriendControls';
 import { PrivateCard } from '../components/PrivateGraph';
+import { ProfileActions } from '../components/ProfileActions';
 import { ProfileAsks } from '../components/ProfileAsks';
+import { Button, Card, ListRow, SectionLabel } from '../components/ui';
+import { radius, roles, space, type } from '../theme/tokens';
+import { confirmAction } from '../utils/confirm';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp, RouteProps } from '../navigation/types';
 
@@ -41,6 +44,7 @@ export function ContactProfileScreen() {
   const { userId, exactEmail } = route.params;
   const { scheme } = useTheme();
   const c = getColors(scheme);
+  const r = roles(c);
   const { currentUser, conversations, presence, refreshConversations, createConversation } = useChat();
 
   // Pull the most recent user object from any conversation participant.
@@ -98,25 +102,19 @@ export function ContactProfileScreen() {
   const handleBlock = useCallback(() => {
     if (!user) return;
     const safeEmail = isPlaceholderEmail(user.email) ? '' : user.email;
-    Alert.alert(
+    confirmAction(
       `Block ${user.name || safeEmail || 'Unknown'}?`,
       "You won't receive messages from them anymore. You can unblock from Settings.",
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Block',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.blockUser(user.id);
-              await refreshConversations();
-              navigation.goBack();
-            } catch (err) {
-              Alert.alert('Error', err instanceof Error ? err.message : 'Failed to block.');
-            }
-          },
-        },
-      ],
+      'Block',
+      () => void (async () => {
+        try {
+          await api.blockUser(user.id);
+          await refreshConversations();
+          navigation.goBack();
+        } catch (err) {
+          Alert.alert('Error', err instanceof Error ? err.message : 'Failed to block.');
+        }
+      })(),
     );
   }, [user, refreshConversations, navigation]);
 
@@ -151,8 +149,8 @@ export function ContactProfileScreen() {
 
   if (!user) {
     return (
-      <View style={[styles.root, { backgroundColor: c.background, justifyContent: 'center', alignItems: 'center' }]}>
-        {loadingProfile ? <ActivityIndicator color={c.primary} accessibilityLabel="Loading contact profile" /> : <Text style={{ color: c.textSecondary }}>Person unavailable.</Text>}
+      <View style={[styles.root, styles.centered, { backgroundColor: r.canvas }]}>
+        {loadingProfile ? <ActivityIndicator color={r.accent} accessibilityLabel="Loading contact profile" /> : <Text style={[type.body, { color: r.textSecondary }]}>Person unavailable.</Text>}
       </View>
     );
   }
@@ -165,106 +163,122 @@ export function ContactProfileScreen() {
     (pres?.status === 'online' ? 'Online' : null) ||
     (user.statusMessage) ||
     (user.lastSeenAt ? `Last seen ${relativeLastSeen(user.lastSeenAt)}` : '');
+  const isSelf = userId === currentUser?.userId;
+  const statusText = `${user.profileStatus?.emoji ? user.profileStatus.emoji + ' ' : ''}${user.profileStatus?.text || ''}`.trim();
+  const card = user.card;
+  const links = [
+    card?.linkedIn ? { label: 'LinkedIn', url: card.linkedIn } : null,
+    card?.x ? { label: 'X', url: card.x } : null,
+    card?.link ? { label: 'Website', url: card.link } : null,
+  ].filter((link): link is { label: string; url: string } => !!link);
+  const meta = [presenceLine, !user.isBot && groupsInCommon > 0 ? `${groupsInCommon} ${groupsInCommon === 1 ? 'group' : 'groups'} in common` : ''].filter(Boolean).join(' · ');
+
+  const nameRow = canSetPrivateName ? (editingName ? (
+    <View style={styles.nameEditor}>
+      <TextInput
+        accessibilityLabel="Private name"
+        value={nameDraft}
+        onChangeText={setNameDraft}
+        maxLength={100}
+        editable={!nameBusy}
+        autoFocus
+        placeholder={officialName}
+        placeholderTextColor={r.decoration}
+        style={[styles.input, { color: r.text, backgroundColor: r.input, borderColor: r.line }]}
+      />
+      <View style={styles.inlineButtons}>
+        <Button size="sm" variant="primary" label={nameBusy ? 'Saving…' : 'Save private name'} disabled={nameBusy || !nameDraft.trim()} onPress={() => void saveName(nameDraft.trim())} />
+        <Button size="sm" variant="ghost" label="Cancel" disabled={nameBusy} onPress={() => setEditingName(false)} />
+        {!!privateName.name && <Button size="sm" variant="ghost" label="Clear private name" disabled={nameBusy} onPress={() => void saveName(null)} />}
+      </View>
+      {!!nameError && <Text accessibilityRole="alert" style={[type.meta, { color: r.danger }]}>{nameError}</Text>}
+    </View>
+  ) : (
+    <ListRow
+      icon="edit"
+      title={privateName.name ? 'Edit private name' : 'Set private name'}
+      subtitle={privateName.name ? `Shown to you instead of ${officialName}` : 'A name only you see'}
+      disabled={nameBusy}
+      onPress={() => { setNameDraft(privateName.name || ''); setNameError(''); setEditingName(true); }}
+      style={styles.flushRow}
+    />
+  )) : null;
 
   return (
-    <ScrollView style={[styles.root, { backgroundColor: c.background }]} contentContainerStyle={styles.content}>
-      {/* Avatar + identity block */}
+    <ScrollView style={[styles.root, { backgroundColor: r.canvas }]} contentContainerStyle={styles.content}>
+      {/* Their layer: identity, then what they chose to show. */}
       <View style={styles.identity}>
-        <Avatar name={displayName} email={safeEmail || undefined} isBot={user.isBot} avatarUrl={user.avatarUrl} size={72} />
-        <View style={[styles.identityText]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-            <Text style={[styles.name, { color: c.textPrimary }]} numberOfLines={1}>{displayName}</Text>
+        <Avatar name={displayName} email={safeEmail || undefined} isBot={user.isBot} avatarUrl={user.avatarUrl} size={88} />
+        <View style={styles.identityText}>
+          <View style={styles.nameRow}>
+            <Text style={[type.heading, styles.name, { color: r.text }]} numberOfLines={1}>{displayName}</Text>
             <BotBadge isBot={user.isBot} />
           </View>
           {!!privateName.name && (
-            <Text style={[styles.email, { color: c.textMetadata }]} accessibilityLabel={`Official OpenChat name: ${officialName}`}>
+            <Text style={[type.meta, { color: r.textMeta }]} accessibilityLabel={`Official OpenChat name: ${officialName}`}>
               OpenChat name: {officialName}
             </Text>
           )}
-          {(user.profileStatus?.emoji || user.profileStatus?.text) && (
-            <Text style={{ color: c.textPrimary, fontSize: 15, fontStyle: 'italic', marginTop: 4, textAlign: 'center', maxWidth: 280 }} numberOfLines={2}>
-              {`${user.profileStatus.emoji ? user.profileStatus.emoji + ' ' : ''}${user.profileStatus.text || ''}`.trim()}
-            </Text>
-          )}
+          {!!card?.headline && <Text style={[type.body, styles.centeredText, { color: r.textSecondary }]} numberOfLines={2}>{card.headline}</Text>}
+          {!!statusText && <Text style={[type.body, styles.centeredText, { color: r.text }]} numberOfLines={2}>{statusText}</Text>}
           {!!safeEmail && safeEmail !== displayName && (
-            <Text style={[styles.email, { color: c.textSecondary }]} numberOfLines={1}>{safeEmail}</Text>
-
+            <Text style={[type.label, { color: r.textSecondary }]} numberOfLines={1}>{safeEmail}</Text>
           )}
-          {!!presenceLine && (
-            <Text style={[styles.presence, { color: c.textSecondary }]}>{presenceLine}</Text>
-          )}
-          {!user.isBot && groupsInCommon > 0 && (
-            <Text style={[styles.presence, { color: c.textMetadata }]}>
-              {`${groupsInCommon} ${groupsInCommon === 1 ? 'group' : 'groups'} in common`}
-            </Text>
-          )}
+          {!!meta && <Text style={[type.meta, { color: r.textMeta }]}>{meta}</Text>}
         </View>
       </View>
 
-      {canSetPrivateName && (
-        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, padding: 14, gap: 10 }]}>
-          <Text style={{ color: c.textMetadata }}>Private name — visible only to you. Their OpenChat name is self-set.</Text>
-          {editingName ? <>
-            <TextInput
-              accessibilityLabel="Private name"
-              value={nameDraft}
-              onChangeText={setNameDraft}
-              maxLength={100}
-              editable={!nameBusy}
-              autoFocus
-              style={{ color: c.textPrimary, borderColor: c.border, borderWidth: 1, borderRadius: 6, padding: 12 }}
-            />
-            <TouchableOpacity style={styles.privateNameAction} accessibilityRole="button" disabled={nameBusy || !nameDraft.trim()} onPress={() => void saveName(nameDraft.trim())}>
-              <Text style={{ color: c.primary }}>{nameBusy ? 'Saving…' : 'Save private name'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.privateNameAction} accessibilityRole="button" disabled={nameBusy} onPress={() => setEditingName(false)}>
-              <Text style={{ color: c.textPrimary }}>Cancel</Text>
-            </TouchableOpacity>
-          </> : (
-            <TouchableOpacity style={styles.privateNameAction} accessibilityRole="button" disabled={nameBusy} onPress={() => { setNameDraft(privateName.name || ''); setNameError(''); setEditingName(true); }}>
-              <Text style={{ color: c.primary }}>{privateName.name ? 'Edit private name' : 'Set private name'}</Text>
-            </TouchableOpacity>
-          )}
-          {!!privateName.name && <TouchableOpacity style={styles.privateNameAction} accessibilityRole="button" disabled={nameBusy} onPress={() => void saveName(null)}>
-            <Text style={{ color: c.primary }}>Clear private name</Text>
-          </TouchableOpacity>}
-          {!!nameError && <Text accessibilityRole="alert" style={{ color: c.danger }}>{nameError}</Text>}
-        </View>
+      {!isSelf && (
+        <ProfileActions
+          userId={userId}
+          name={displayName}
+          isBot={user.isBot}
+          onMessage={async () => {
+            const conversation = await createConversation([userId], { type: 'direct' });
+            navigation.navigate('Chat', { conversationId: conversation.id });
+          }}
+          onAskAgent={canSetPrivateName ? () => navigation.navigate('AgentOverlay', { context: { kind: 'person', id: userId, label: displayName, includePrivate: true } }) : undefined}
+        />
       )}
 
-      {!user.isBot && <FriendControls userId={userId} onMessage={async () => {
-        const conversation = await createConversation([userId], { type: 'direct' });
-        navigation.navigate('Chat', { conversationId: conversation.id });
-      }} />}
+      {links.length > 0 && (
+        <>
+          <SectionLabel>Links</SectionLabel>
+          <Card padding="none">
+            {links.map((link, index) => (
+              <ListRow
+                key={link.label}
+                icon="link"
+                title={link.label}
+                subtitle={link.url.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '')}
+                divider={index > 0}
+                chevron={false}
+                onPress={() => void Linking.openURL(link.url)}
+                accessibilityLabel={`${link.label}: ${link.url}`}
+              />
+            ))}
+          </Card>
+        </>
+      )}
 
       {/* What they are asking for, limited to what they shared with you. */}
+      {canSetPrivateName && <ProfileAsks userId={userId} onOpenStory={story => navigation.navigate('StoryViewer', { story })} />}
 
-      {/* Your own notes, importance, catch-up and links about this person. Collapsed until opened. */}
+      {/* Your layer: notes, importance, catch-up, links and the private name. Collapsed until opened. */}
       {canSetPrivateName && (
         <PrivateCard
           userId={userId}
-          onAskAgent={() => navigation.navigate('AgentOverlay', { context: { kind: 'person', id: userId, label: displayName, includePrivate: true } })}
-          sharedAsks={<ProfileAsks userId={userId} onOpenStory={story => navigation.navigate('StoryViewer', { story })} />}
+          nameRow={nameRow}
           onOpenThing={thingId => navigation.navigate('PrivateThing', { thingId })}
           onOpenPerson={id => navigation.push('ContactProfile', { userId: id })}
         />
       )}
 
-      {/* Actions */}
-      {!user.isBot && (
-        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <TouchableOpacity
-            style={[styles.row, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
-            onPress={handleReport}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.rowLabel, { color: c.textPrimary }]}>Report user</Text>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.row} onPress={handleBlock} activeOpacity={0.7}>
-            <Text style={[styles.rowLabel, { color: c.danger }]}>Block user</Text>
-          </TouchableOpacity>
-        </View>
+      {!user.isBot && !isSelf && (
+        <Card padding="none" style={styles.safety}>
+          <ListRow icon="flag" title="Report user" onPress={handleReport} />
+          <ListRow icon="block" title="Block user" destructive divider chevron={false} onPress={handleBlock} />
+        </Card>
       )}
     </ScrollView>
   );
@@ -272,24 +286,16 @@ export function ContactProfileScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  content: { padding: 16, alignItems: 'stretch', width: '100%', maxWidth: 960, alignSelf: 'center' },
-  identity: { alignItems: 'center', paddingVertical: 16, gap: 12 },
-  identityText: { alignItems: 'center', gap: 4 },
-  name: { fontSize: 22, fontWeight: '700', maxWidth: 280, textAlign: 'center' },
-  email: { fontSize: 14 },
-  presence: { fontSize: 13, marginTop: 2 },
-  card: {
-    marginTop: 16,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-  },
-  privateNameAction: { minHeight: 44, justifyContent: 'center' },
-  rowLabel: { fontSize: 16, flex: 1 },
+  centered: { justifyContent: 'center', alignItems: 'center' },
+  content: { padding: space[4], paddingBottom: space[10], alignItems: 'stretch', width: '100%', maxWidth: 720, alignSelf: 'center' },
+  identity: { alignItems: 'center', paddingTop: space[4], gap: space[3] },
+  identityText: { alignItems: 'center', gap: space[1] },
+  nameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space[2] },
+  name: { maxWidth: 300, textAlign: 'center' },
+  centeredText: { textAlign: 'center', maxWidth: 320 },
+  nameEditor: { gap: space[2], paddingVertical: space[2] },
+  input: { ...type.body, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: space[3], paddingVertical: space[3], minHeight: 44 },
+  inlineButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2] },
+  flushRow: { paddingHorizontal: 0 },
+  safety: { marginTop: space[6] },
 });

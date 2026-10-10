@@ -19,10 +19,12 @@ vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ sc
 vi.mock('../../mobile/src/api/client', () => ({ api: { getContactProfile: mocks.getProfile, getPrivateName: mocks.get, setPrivateName: mocks.set, clearPrivateName: mocks.clear } }));
 vi.mock('../../mobile/src/components/Avatar', () => ({ Avatar: () => null }));
 vi.mock('../../mobile/src/components/BotBadge', () => ({ BotBadge: () => null }));
-vi.mock('../../mobile/src/components/FriendControls', () => ({ FriendControls: () => null }));
-// The asks list and the private card have their own suites; here they stay out of the way.
+vi.mock('../../mobile/src/components/ProfileActions', () => ({ ProfileActions: () => null }));
+vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
+// The asks list and the private card have their own suites. The private name row lives
+// inside the (collapsed) private card, so the stand-in renders just that row.
 vi.mock('../../mobile/src/components/ProfileAsks', () => ({ ProfileAsks: () => null }));
-vi.mock('../../mobile/src/components/PrivateGraph', () => ({ PrivateCard: () => null }));
+vi.mock('../../mobile/src/components/PrivateGraph', () => ({ PrivateCard: ({ nameRow }: any) => nameRow ?? null }));
 import { PrivateNamesProvider, usePrivateName } from '../../mobile/src/contexts/PrivateNamesContext.js';
 import { ContactProfileScreen } from '../../mobile/src/screens/ContactProfileScreen.js';
 import { ConversationHeaderContent } from '../../mobile/src/components/ConversationHeaderContent.js';
@@ -74,6 +76,7 @@ describe('native and canonical web private names', () => {
     await act(async () => root!.root.findByType('TextInput').props.onChangeText('Best Buddy'));
     await act(async () => button('Save private name').props.onPress());
     expect(text()).toContain('Best Buddy');
+    await act(async () => button('Edit private name').props.onPress());
     await act(async () => button('Clear private name').props.onPress());
     expect(mocks.clear).toHaveBeenCalledWith('bob');
     expect(text()).not.toContain('Best Buddy'); expect(text()).toContain('Updated Bob');
@@ -105,6 +108,7 @@ describe('native and canonical web private names', () => {
     await act(async () => button('Save private name').props.onPress());
     expect(mocks.set).toHaveBeenCalledWith('bob', 'No DM needed', undefined);
     expect(text()).toContain('No DM needed'); expect(text()).toContain('Official Bob');
+    await act(async () => button('Edit private name').props.onPress());
     await act(async () => button('Clear private name').props.onPress());
     expect(mocks.clear).toHaveBeenCalledWith('bob'); expect(button('Set private name')).toBeDefined();
   });
@@ -118,6 +122,19 @@ describe('native and canonical web private names', () => {
   it('offers no alias editor for a bot', async () => { mocks.isBot = true; await render(); expect(button('Set private name')).toBeUndefined(); });
 });
 
+it('shows their card layer (headline, links) only when the profile carries it', async () => {
+  mocks.noConversation = true;
+  await act(async () => { root = create(React.createElement(PrivateNamesProvider, null, React.createElement(ContactProfileScreen))); });
+  expect(text()).not.toContain('LinkedIn');
+  await act(async () => root!.unmount()); root = undefined;
+  mocks.getProfile.mockResolvedValue({ id: 'bob', name: 'Official Bob', isBot: false, card: { name: 'Official Bob', isBot: false, headline: 'Builds quiet tools', avatarUrl: null, status: null, linkedIn: 'https://www.linkedin.com/in/bob-example', x: null, link: null } });
+  await act(async () => { root = create(React.createElement(PrivateNamesProvider, null, React.createElement(ContactProfileScreen))); });
+  expect(text()).toContain('Builds quiet tools');
+  expect(text()).toContain('LinkedIn');
+  expect(text()).toContain('linkedin.com/in/bob-example');
+  expect(text()).not.toContain('Website');
+});
+
 it.each(['ios', 'web'])('uses search proof for no-conversation profile and alias operations on %s', async platform => {
   mocks.platform.OS = platform; mocks.noConversation = true; mocks.exactEmail = 'bob@example.test';
   await act(async () => { root = create(React.createElement(PrivateNamesProvider, null, React.createElement(ContactProfileScreen))); });
@@ -128,6 +145,7 @@ it.each(['ios', 'web'])('uses search proof for no-conversation profile and alias
   await act(async () => button('Save private name').props.onPress());
   expect(mocks.set).toHaveBeenCalledWith('bob', 'Buddy', 'bob@example.test');
   expect(text()).toContain('Official Bob');
+  await act(async () => button('Edit private name').props.onPress());
   await act(async () => button('Clear private name').props.onPress());
   expect(mocks.clear).toHaveBeenCalledWith('bob');
 });

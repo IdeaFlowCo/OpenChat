@@ -18,6 +18,7 @@ vi.mock('react-native', async () => {
   };
 });
 vi.mock('../../mobile/src/components/ProfileNoteCapture', () => ({ ProfileNoteCapture: ({ notes }: any) => React.createElement('View', {}, notes.map((note: any) => React.createElement('Text', { key: note.id }, note.text))) }));
+vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/theme/colors', () => ({ getColors: () => ({ background: '#fff', surface: '#fff', surfaceElevated: '#eee', border: '#ccc', divider: '#ddd', primary: '#123', onPrimary: '#fff', textPrimary: '#123', textSecondary: '#456', textMetadata: '#456', textMuted: '#999', danger: '#c00' }) }));
 vi.mock('../../mobile/src/api/client', () => ({
@@ -53,13 +54,23 @@ afterEach(async () => {
 });
 
 describe('the private card on a contact profile', () => {
-  it('shows saved private notes immediately, and can hide the private card', async () => {
+  it('starts collapsed with a summary, opens to the saved notes, and closes again', async () => {
     mocks.getPrivatePerson.mockResolvedValue({ userId: 'bob', card: emptyCard, notes: [{ id: 'n1', text: 'Secret note' }], links: [] });
     await mount();
-    expect(texts()).toContain('Your notes and connections stay private');
+    expect(texts()).toContain('Private to you');
+    expect(texts()).toContain('1 note');
+    expect(texts()).not.toContain('Secret note');
+    await act(async () => { button('Private to you').props.onPress(); });
     expect(texts()).toContain('Secret note');
     await act(async () => { button('Private to you').props.onPress(); });
     expect(texts()).not.toContain('Secret note');
+  });
+
+  it('shows the private name row only inside the opened card', async () => {
+    await act(async () => { root = create(React.createElement(PrivateCard, { userId: 'bob', onOpenThing: mocks.openThing, onOpenPerson: mocks.openPerson, nameRow: React.createElement('Text', {}, 'Set private name') })); });
+    expect(texts()).not.toContain('Set private name');
+    await act(async () => { button('Private to you').props.onPress(); });
+    expect(texts()).toContain('Set private name');
   });
 
   it('saves importance, cadence and a catch-up through the owner’s own card', async () => {
@@ -68,9 +79,12 @@ describe('the private card on a contact profile', () => {
       .mockResolvedValueOnce({ card: { ...emptyCard, important: true, cadenceDays: 90, intervalDays: 90, nextDueAt: '2000-01-01T00:00:00Z' } })
       .mockResolvedValueOnce({ card: { ...emptyCard, important: true, cadenceDays: 90, intervalDays: 90, lastContactAt: '2026-10-02T00:00:00Z', nextDueAt: '2099-01-01T00:00:00Z' } });
     await mount();
+    await act(async () => { button('Private to you').props.onPress(); });
     await act(async () => { button('Mark important').props.onPress(); });
     expect(mocks.updatePrivatePerson).toHaveBeenLastCalledWith('bob', { important: true });
-    expect(texts()).toContain('★ Important');
+    expect(texts()).not.toContain('Mark important');
+    const important = root!.root.findAllByType('TouchableOpacity').find(node => node.props.accessibilityLabel === 'Important');
+    expect(important?.props.accessibilityState).toMatchObject({ selected: true });
     // Cadence choices stay folded behind one chip until asked for.
     expect(texts()).not.toContain('Quarterly');
     await act(async () => { button('Set a catch-up').props.onPress(); });
@@ -89,6 +103,7 @@ describe('the private card on a contact profile', () => {
     mocks.addPrivateLink.mockResolvedValue({ id: 'l1', relation: 'works at', direction: 'out', other: { kind: 'company', id: 't1', name: 'Acme Robotics' }, createdAt: '2026-10-02T00:00:00Z' });
     mocks.getPrivatePerson.mockResolvedValue({ userId: 'bob', card: emptyCard, notes: [], links: [{ id: 'l0', relation: 'knows', direction: 'out', other: { kind: 'user', id: 'carol', name: 'Carol' }, createdAt: '2026-10-01T00:00:00Z' }] });
     await mount();
+    await act(async () => { button('Private to you').props.onPress(); });
     // The add-link form stays out of the way until "+ Add link".
     expect(input('Name')).toBeUndefined();
     await act(async () => { button('+ Add connection').props.onPress(); });

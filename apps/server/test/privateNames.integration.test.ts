@@ -59,6 +59,27 @@ integration('private names real Neo4j + HTTP privacy', () => {
     await run(`MATCH (a:User {id: $alice}), (b:User {id: $noDm}) CREATE (b)-[:BLOCKED]->(a)`, { alice, noDm });
     expect((await request(app).get(`${path(noDm)}/profile`).set('Authorization', token(alice))).status).toBe(404);
   });
+  it('adds the card layer for accepted friends only, honouring each show flag', async () => {
+    const pairKey = JSON.stringify([alice, bob].sort());
+    await run(`MATCH (b:User {id: $bob}) CREATE (b)-[:HAS_ADDME_CARD]->(:AddMeCard {token: $token, createdAt: datetime(),
+      showAvatar: true, showStatus: false, showHeadline: true, headline: 'Builds quiet tools', showLinkedIn: true,
+      linkedIn: 'https://www.linkedin.com/in/bob-example', showX: false, x: 'https://x.com/bob-hidden', showLink: false, link: null})`,
+    { bob, token: `card${suffix}`.replace(/[^a-zA-Z0-9]/g, '').slice(0, 24) });
+    const before = await request(app).get(`${path(bob)}/profile`).set('Authorization', token(alice));
+    expect(before.body.card).toBeUndefined();
+    await run(`CREATE (:OpenChatConnection {pairKey: $pairKey, state: 'accepted', firstId: $alice, secondId: $bob})`, { pairKey, alice, bob });
+    try {
+      const friend = await request(app).get(`${path(bob)}/profile`).set('Authorization', token(alice));
+      expect(friend.status).toBe(200);
+      expect(friend.body.card).toMatchObject({ headline: 'Builds quiet tools', linkedIn: 'https://www.linkedin.com/in/bob-example', x: null, link: null });
+      expect(JSON.stringify(friend.body)).not.toContain('bob-hidden');
+      const stranger = await request(app).get(`${path(bob)}/profile`).set('Authorization', token(mallory));
+      expect(stranger.status).toBe(200);
+      expect(stranger.body.card).toBeUndefined();
+    } finally {
+      await run(`MATCH (c:OpenChatConnection {pairKey: $pairKey}) DELETE c`, { pairKey });
+    }
+  });
   it('rechecks exact-email discovery for every profile and alias operation without granting ID access', async () => {
     const email = `exact-${suffix}@example.test`;
     await run(`MATCH (u:User) WHERE u.id IN $targets SET u.discoveryMode = 'email_only', u.email = CASE WHEN u.id = $target THEN $email ELSE 'different@example.test' END`, { targets: [emailOnly, otherEmail], target: emailOnly, email });
