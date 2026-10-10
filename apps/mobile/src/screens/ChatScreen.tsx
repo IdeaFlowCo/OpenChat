@@ -57,6 +57,8 @@ import { HashtagAutocomplete } from '../components/HashtagAutocomplete';
 import { TransformButton } from '../components/TransformButton';
 import { NVCComposerModal } from '../components/NVCComposerModal';
 import { LinkPreviewCard } from '../components/LinkPreviewCard';
+import { AgentMarkdown } from '../components/AgentMarkdown';
+import { dedupeLinkPreviews } from '../utils/linkPreviews';
 import { AgentNetworkCard } from '../components/AgentNetworkCard';
 import type { Participant } from '../api/client';
 import { ExportSheet } from '../components/ExportSheet';
@@ -1462,7 +1464,10 @@ export function ChatScreen({
           {m.deletedAt
             ? <Text style={{ color: isOwn ? ownTint(0.55) : c.textMetadata, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
             : (!!m.content && (
-                isGroup
+                // Agents write Markdown; render it rather than showing ** and backticks (OpenChat-eo3n.5).
+                !isOwn && (m.sender?.isBot || (!isGroup && other?.isBot))
+                  ? <AgentMarkdown content={m.content} color={c.bubbleOtherText} linkColor={c.primary} codeBackground={c.surfaceElevated} />
+                  : isGroup
                   ? <Text style={{ fontSize: 16 }}>
                       {renderContentWithMentions(
                         m.content,
@@ -1501,7 +1506,7 @@ export function ChatScreen({
           <ReactionsBar reactions={m.reactions!} isOwn={isOwn} onToggle={(emoji) => void handleReact(m.id, emoji)} />
         )}
         {/* Link preview cards below bubble (OpenChat-hq2) */}
-        {!!(m.linkPreviews && m.linkPreviews.length > 0) && !m.deletedAt && m.linkPreviews.map((preview) => (
+        {!!(m.linkPreviews && m.linkPreviews.length > 0) && !m.deletedAt && dedupeLinkPreviews(m.linkPreviews).map((preview) => (
           <LinkPreviewCard
             key={preview.url}
             preview={preview}
