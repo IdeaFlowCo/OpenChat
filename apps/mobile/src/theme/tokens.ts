@@ -5,7 +5,7 @@
  * The palette was never the problem; the missing system underneath it was:
  * 25 font sizes, 23 corner radii and per-file padding. Every new or migrated
  * style takes its size, spacing and corner from here, and
- * `apps/mobile/eslint.config.js` rejects new `fontSize`/hex literals outside
+ * `apps/mobile/eslint.config.mjs` rejects new `fontSize`/hex literals outside
  * `src/theme/`. Like palette.ts, this module imports nothing from
  * `react-native`, so it stays testable and shareable.
  *

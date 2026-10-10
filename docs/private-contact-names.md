@@ -2,7 +2,7 @@
 
 For set/edit/clear instructions in the native and responsive web client, see [private contact names in the client README](../apps/mobile/README.md#set-a-private-contact-name).
 
-`GET /api/private-names/:id/profile` also returns a minimal official `{ id, name, avatarUrl, isBot }` projection after the same authenticated visibility check. It contains no email, phone or private name and does not require a conversation.
+`GET /api/private-names/:id/profile` also returns a minimal official `{ id, name, avatarUrl, isBot }` projection after the same authenticated visibility check. It contains no email, phone or private name and does not require a conversation. When the viewer and target are accepted friends (an `accepted` `OpenChatConnection`), it adds `card`: the target's active AddMe card projected exactly as a card-link holder sees it (`projectCardForStranger`, so each `show*` flag is honoured and no token, id or email is included). Every other viewer gets only the four fields above.
 
 The server stores a directed `OPENCHAT_PRIVATE_NAME` relationship from the authenticated viewer’s `User` to the canonical target `User`. `GET`, `PUT`, and `DELETE /api/private-names/:id` derive the owner exclusively from the signed-in session; caller-supplied owner identifiers are ignored. `GET` returns `{ name: string | null }`; `PUT` accepts `{ name: string }` and returns the trimmed name; `DELETE` returns `{ name: null }`. Names must be nonempty after trimming, at most 100 UTF-16 code units, and free of C0 control characters, DEL, and Unicode line/paragraph separators; invalid input returns 400.
 

@@ -128,6 +128,13 @@ describe('the private card on a contact profile', () => {
     await mount();
     expect(texts()).toContain('Private notes unavailable');
   });
+
+  it('keeps the private name row reachable when the private card cannot load', async () => {
+    mocks.getPrivatePerson.mockRejectedValue(new Error('offline'));
+    await act(async () => { root = create(React.createElement(PrivateCard, { userId: 'bob', onOpenThing: mocks.openThing, onOpenPerson: mocks.openPerson, nameRow: React.createElement('Text', {}, 'Set private name') })); });
+    expect(texts()).toContain('Private notes unavailable');
+    expect(texts()).toContain('Set private name');
+  });
 });
 
 describe('private card wording', () => {

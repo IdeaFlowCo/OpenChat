@@ -125,9 +125,9 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         headerTintColor: c.primary,
         contentStyle: { backgroundColor: c.background },
         ...chatBackOptions(route.name, navigation, c.primary),
-        headerRight: route.name === 'AgentOverlay' ? undefined : () => <AgentOverlayButton color={c.primary} onPress={() => navigation.navigate('AgentOverlay', {
-          context: route.name === 'ContactProfile' ? { kind: 'person', id: (route.params as { userId: string }).userId, label: 'This person', includePrivate: true }
-            : route.name === 'PrivateThing' ? { kind: 'thing', id: (route.params as { thingId: string }).thingId, label: 'This saved item', includePrivate: true }
+        // Contact info carries its own Ask agent in the profile action row (OpenChat-eo3n.6).
+        headerRight: route.name === 'AgentOverlay' || route.name === 'ContactProfile' ? undefined : () => <AgentOverlayButton color={c.primary} onPress={() => navigation.navigate('AgentOverlay', {
+          context: route.name === 'PrivateThing' ? { kind: 'thing', id: (route.params as { thingId: string }).thingId, label: 'This saved item', includePrivate: true }
             : route.name === 'Chat' ? { kind: 'conversation', id: (route.params as { conversationId: string }).conversationId, label: 'Current conversation', includePrivate: true }
             : { kind: 'page', label: route.name.replace(/([a-z])([A-Z])/g, '$1 $2') },
         })} />,

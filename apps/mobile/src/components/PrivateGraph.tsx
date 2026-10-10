@@ -236,7 +236,14 @@ export function PrivateCard({ userId, onOpenThing, onOpenPerson, nameRow }: { us
     finally { setBusy(false); }
   }, [userId]);
 
-  if (!card) return error ? <Text style={[type.meta, styles.status, { color: r.textMeta }]}>{error}</Text> : <ActivityIndicator color={r.accent} style={styles.status} />;
+  if (!card && !error) return <ActivityIndicator color={r.accent} style={styles.status} />;
+  // The private name has its own API, so it stays editable when the overlay cannot load.
+  if (!card) return (
+    <View style={styles.status}>
+      <Text style={[type.meta, { color: r.textMeta }]}>{error}</Text>
+      {nameRow && <View style={[styles.card, styles.fallback, { backgroundColor: r.card, borderColor: r.line }]}>{nameRow}</View>}
+    </View>
+  );
   const subject: PrivateSubject = { kind: 'user', id: userId };
   const due = dueLabel(card.nextDueAt);
   return (
@@ -294,6 +301,7 @@ export function PrivateCard({ userId, onOpenThing, onOpenPerson, nameRow }: { us
 const styles = StyleSheet.create({
   card: { marginTop: space[6], borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   status: { marginTop: space[6] },
+  fallback: { marginTop: space[2], paddingHorizontal: space[4] },
   header: { flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[4], paddingVertical: space[3], minHeight: 56 },
   headerText: { flex: 1, minWidth: 0, gap: space[1] },
   eyebrow: { flexDirection: 'row', alignItems: 'center', gap: space[1] + 2 },
