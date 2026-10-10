@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { getDriver } from '../db.js';
+import { UNLINKED_PARTNER_IDENTITIES_QUERY } from '../queries/unlinkedIdentities.js';
 import { ensureSharedInbox, resolveUnlinkedRecipient, unlinkedProfileId } from '../services/unlinkedMessaging.js';
 
 const router = Router();
@@ -72,15 +73,7 @@ router.post('/unlinked/identities', async (req, res) => {
   }
   const session = getDriver().session({ defaultAccessMode: 'READ' });
   try {
-    const result = await session.run(`
-      MATCH (viewer:User {ideaflowIdentityKey: $key})
-      WHERE viewer.ideaflowIssuer = $issuer AND viewer.ideaflowSub = $subject
-      UNWIND $userIds AS otherId
-      MATCH (viewer)-[:PARTICIPATES_IN]->(c:Conversation)<-[:PARTICIPATES_IN]-(other:User {id: otherId})
-      WHERE other.id <> viewer.id AND other.ideaflowIssuer = $issuer AND other.ideaflowSub IS NOT NULL
-        AND NOT (viewer)-[:BLOCKED]-(other)
-      RETURN DISTINCT other.id AS userId, other.ideaflowSub AS subject
-    `, { key: `${issuer}\u001f${input.subject}`, issuer, subject: input.subject, userIds: [...new Set(input.userIds as string[])] });
+    const result = await session.run(UNLINKED_PARTNER_IDENTITIES_QUERY, { key: `${issuer}\u001f${input.subject}`, issuer, subject: input.subject, userIds: [...new Set(input.userIds as string[])] });
     res.json({ identities: result.records.map(record => ({ userId: record.get('userId'), issuer, subject: record.get('subject') })) });
   } catch { res.status(503).json({ error: 'messaging_unavailable' }); }
   finally { await session.close(); }
