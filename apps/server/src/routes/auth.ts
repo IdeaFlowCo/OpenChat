@@ -8,7 +8,7 @@ import { OAuth2Client, TokenPayload } from 'google-auth-library';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { getDriver } from '../db.js';
 import { legacyEmailProjection } from '../privacy/legacyEmailCompat.js';
-import { requireAuth, AuthUser } from '../middleware/auth.js';
+import { requireAuth, requireDirectSession, AuthUser } from '../middleware/auth.js';
 import { parseCorsOrigins } from '../config/cors.js';
 import { chatOriginForHost, ideaflowCallbackForHost } from '../config/publicUrl.js';
 import {
@@ -680,7 +680,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
  * blocked users, and non-secret agent key metadata if present. The optional
  * range query defaults to `last_day`.
  */
-router.get('/export', requireAuth, async (req: Request, res: Response) => {
+router.get('/export', requireAuth, requireDirectSession, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
   const range = parseExportRange(req.query.range);
@@ -1493,7 +1493,7 @@ router.post('/google/idtoken-exchange', rejectGoogleLinking, async (req: Request
  * Returns 204 on success. Emits `user:deleted` via Socket.IO so other clients
  * can refresh their views.
  */
-router.delete('/me', requireAuth, async (req: Request, res: Response) => {
+router.delete('/me', requireAuth, requireDirectSession, async (req: Request, res: Response) => {
   const session = getDriver().session();
   const userId = req.user!.userId;
 
