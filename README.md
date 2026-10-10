@@ -80,6 +80,19 @@ for synchronization and privacy rules.
 See the [Unlinked compose contract](docs/unlinked-compose-contract.md) for
 accepted profile context, card recipient resolution, and sign-in return rules.
 
+### Profile asks (source rollout held)
+
+In the coordinated Unlinked release, open your **Profile → Add an ask**, write
+an ask, choose its visibility (Private by default), and publish. Use the owner
+controls to edit, close, or remove it. Eligible viewers choose **Message about
+this** on your profile to open your OpenChat conversation. **About this ask**
+offers **Add ask to draft** or **Dismiss**; adding preserves existing draft text,
+and sending still requires **Send**.
+
+This feature is source-only pending release-owner approval. See the
+[publication contract](docs/profile-ask-publication.md) for audience, lifecycle,
+and coordinated rollout requirements.
+
 ## Create a World Issue Tracker board
 
 Open **OpenChat Agent** from Chats and ask it to create a public World Issue

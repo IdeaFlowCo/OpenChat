@@ -1,3 +1,4 @@
+import { PROFILE_STORY_VISIBILITY, profileAskActiveCount } from './profileAsks.js';
 import { acquireContextAclLocks } from './contextAccess.js';
 import { reconcileIntentionLifecycle } from './contextIntentions.js';
 import type { Server as IOServer } from 'socket.io';
@@ -70,6 +71,8 @@ export interface OwnedStory {
   matchingMode: MatchingMode;
   openToCollaborators: boolean;
   text: string | null;
+  showOnProfile?: boolean;
+  profileVisibility?: 'private' | 'selected' | 'public';
   humanVisible: boolean;
   agentSearchEnabled: boolean;
   explicitQuietSearch: boolean;
@@ -238,6 +241,8 @@ function ownedStoryFromRecord(value: unknown): OwnedStory {
     matchingMode: story.matchingMode as MatchingMode ?? 'fulfillment',
     openToCollaborators: story.openToCollaborators === true,
     text: story.text as string | null ?? null,
+    showOnProfile: story.showOnProfile === true,
+    profileVisibility: story.profileVisibility as OwnedStory['profileVisibility'],
     humanVisible: story.humanVisible === true,
     agentSearchEnabled: story.agentSearchEnabled === true,
     explicitQuietSearch: story.explicitQuietSearch === true,
@@ -780,16 +785,8 @@ const FEED_STORY_QUERY = `
   MATCH (owner:User)-[:OWNS_STORY]->(story:OpenChatStory {status: 'active', humanVisible: true})
   MATCH (viewer:User {id: $viewerId})
   WHERE story.storyExpiresAt > datetime($now)
-    AND NOT (owner)-[:BLOCKED]->(viewer)
-    AND NOT (viewer)-[:BLOCKED]->(owner)
-    AND (
-      owner.id = viewer.id
-      OR viewer.id IN coalesce(story.audienceUserIds, [])
-      OR EXISTS {
-        MATCH (owner)-[:PARTICIPATES_IN]->(audienceConversation:Conversation)<-[:PARTICIPATES_IN]-(viewer)
-        WHERE audienceConversation.id IN coalesce(story.audienceConversationIds, [])
-      }
-    )
+    AND story.profileRemovedAt IS NULL
+    AND (${PROFILE_STORY_VISIBILITY})
     AND ($storyId IS NULL OR story.id = $storyId)
     AND ($authorId IS NULL OR owner.id = $authorId)
   RETURN story { .* } AS story, owner { .id, .name } AS author
@@ -827,6 +824,12 @@ export async function updateStory(
   try {
     return await session.executeWrite(async tx => {
     await acquireContextAclLocks(tx,{userIds:[userId]});
+    const publication = await tx.run(`MATCH (:User {id:$userId})-[:OWNS_STORY]->(s:OpenChatStory {id:$storyId}) RETURN s`,{userId,storyId});
+    const current = publication.records[0]?.get('s').properties;
+    const nextStatus = patch.status ?? current?.status;
+    const nextExpiry = patch.storyExpiresAt ?? current?.storyExpiresAt?.toString();
+    if (current?.showOnProfile === true && !current.profileRemovedAt && nextStatus === 'active' && Date.parse(nextExpiry) > Date.now()
+      && await profileAskActiveCount(tx,userId,storyId) >= 50) throw new SocialLayerValidationError('Close an ask before activating another');
     const result = await tx.run(
       `MATCH (owner:User {id:$userId})
        SET owner.contextAclRevision=coalesce(owner.contextAclRevision,0)+1
@@ -838,7 +841,8 @@ export async function updateStory(
        WHERE NOT (story.status = 'withdrawn' AND nextStatus <> 'withdrawn')
          AND (nextStatus <> 'active' OR coalesce(intent.lifecycleState,CASE WHEN intent.status='withdrawn' THEN 'withdrawn' ELSE 'open' END)='open')
          AND (nextStatus <> 'active' OR story.humanVisible = false OR nextStoryExpiry > datetime($now))
-       SET story.status = nextStatus,
+       SET story.profileRevision = CASE WHEN story.showOnProfile = true THEN coalesce(story.profileRevision,0)+1 ELSE story.profileRevision END,
+           story.status = nextStatus,
            story.storyExpiresAt = nextStoryExpiry,
            story.updatedAt = datetime($now),
            intent.status = CASE

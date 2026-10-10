@@ -23,7 +23,8 @@ for the production cutover and old-host compatibility.
 - Web keyboard shortcuts, including Up/Down conversation navigation in the
   wide master-detail layout
 - Private conversational capture in My Agent, with explicit activation for
-  quiet matching or selected-audience, expiring Stories
+  quiet matching or expiring Stories (see the
+  [publication audience contract](../../docs/profile-ask-publication.md))
 - Fulfillment, reciprocal, and shared-goal matching with anonymous proposals
   and double opt-in before a DM is created
 - Actionable review queue plus reversible Enhanced / Simple chat modes and an
@@ -145,7 +146,7 @@ src/api/
   socket.ts                  # Socket.io: connect, join, send, message:new listener
 src/components/
   MasterDetailLayout.tsx     # wide iPad / desktop sidebar + chat pane
-  StoriesStrip.tsx           # selected-audience Story rail
+  StoriesStrip.tsx           # authorized Story rail
 src/contexts/
   SocialExperienceContext.tsx # enhanced/simple, network, and layout preferences
 src/screens/

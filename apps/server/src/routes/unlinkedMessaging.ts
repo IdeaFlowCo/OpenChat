@@ -1,3 +1,5 @@
+import { ASK_ID, listProfileAsks } from '../services/profileAsks.js';
+import { getDriver } from '../db.js';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { Router } from 'express';
@@ -9,13 +11,26 @@ const budgets = new Map<string, { at: number; count: number }>();
 router.post('/unlinked/recipient', requireAuth, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const profileId = unlinkedProfileId(req.body?.profile);
-  if (!profileId || Object.keys(req.body).some(key => key !== 'profile')) { res.status(400).json({ error: 'A public Unlinked profile is required.' }); return; }
+  if (!profileId || Object.keys(req.body).some(key => !['profile','askId'].includes(key)) || (req.body.askId !== undefined && (typeof req.body.askId !== 'string' || !ASK_ID.test(req.body.askId)))) { res.status(400).json({ error: 'A public Unlinked profile is required.' }); return; }
   const now = Date.now();
   for (const [key, value] of budgets) if (now - value.at >= 60000) budgets.delete(key);
   const budget = budgets.get(req.user!.userId) ?? { at: now, count: 0 };
   if (budget.count >= 30 || budgets.size >= 10000 && !budgets.has(req.user!.userId)) { res.status(429).json({ error: 'Please wait a moment and try again.' }); return; }
   budget.count++; budgets.set(req.user!.userId, budget);
-  try { res.json(await resolveUnlinkedRecipient(profileId)); }
+  try {
+    const result = await resolveUnlinkedRecipient(profileId);
+    if (req.body.askId !== undefined) {
+      if (req.agentKeyId || req.connectorDelegation) { res.status(403).json({error:'Use a browser session'}); return; }
+      if (result.status !== 'ready') { res.json({status:'unavailable'}); return; }
+      const session=getDriver().session();
+      try {
+        const asks=await listProfileAsks(session,result.recipient.id,req.user!.userId,req.body.askId);
+        const ask=asks.find(a=>Date.parse(a.expiresAt)>Date.now() && (!a.status || a.status==='active'));
+        if (!ask) { res.json({status:'unavailable'}); return; }
+        res.json({...result,ask:{id:ask.id,text:ask.text,expiresAt:ask.expiresAt}});
+      } finally { await session.close(); }
+    } else res.json(result);
+  }
   catch { res.status(503).json({ error: 'We could not open this person’s inbox. Please try again.' }); }
 });
 // A confidential exchange: only the authenticated Unlinked server supplies

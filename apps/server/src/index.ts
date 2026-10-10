@@ -1,3 +1,4 @@
+import profileAsksRoutes from './routes/profileAsks.js';
 import contextIntentionsRoutes from './routes/contextIntentions.js';
 import conversationContentRoutes from './routes/conversationContent.js';
 import contextWebhooksRoutes from './routes/contextWebhooks.js';
@@ -447,6 +448,7 @@ app.use('/api/chat', contextRoutes);
 app.use('/api', entryIntentsRoutes);
 app.use('/api', unlinkedMessagingRoutes);
 app.use('/api', unlinkedConnectionRoutes);
+app.use('/api', profileAsksRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/client-logs', clientLogsRoutes);
 app.use('/api/push', pushRoutes);

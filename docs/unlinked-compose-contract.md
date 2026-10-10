@@ -15,13 +15,14 @@ continues to expose the same inbox.
 
 `https://chat.ideaflow.app/app/?intent=compose&source=unlinked` accepts an optional
 canonical public `https://www.unlinked.ai/people/<id>` in `profile`, and an
-optional existing 24-alphanumeric OpenChat `card` token. Unknown or repeated
-parameters invalidate the entry. Private profile fields, names, email addresses,
+optional existing 24-alphanumeric OpenChat `card` token. An optional `askId`
+(1–80 ASCII letters, digits, underscores or hyphens) requires `profile` and
+forbids `card`. Unknown or repeated parameters invalidate the entry. Private profile fields, names, email addresses,
 message bodies and caller-selected recipient IDs are never accepted in the URL.
 
 A card is resolved by OpenChat's card service. Otherwise a public profile is
-resolved by authenticated `POST /api/unlinked/recipient` with `{profile}`. The
-OpenChat server calls the fixed Unlinked `/api/messaging/v1/recipient` endpoint
+resolved by authenticated `POST /api/unlinked/recipient` with `{profile}` and
+optional `askId`. The OpenChat server calls the fixed Unlinked `/api/messaging/v1/recipient` endpoint
 with `{profileId}` and its dedicated `UNLINKED_MESSAGING_SECRET`. Unlinked checks
 the live published profile, its live owner and its exact active Ideaflow binding.
 Only this confidential response can identify the recipient; the URL is not proof.
@@ -79,3 +80,10 @@ entry opens or creates the direct conversation, without sending anything. Linked
 [linkedin-messaging-plan.md](linkedin-messaging-plan.md).
 
 The embedded receiver accepts the exact `embed=unlinked` presentation flag alongside the compose query. It still rejects unknown/repeated parameters and resolves the public profile on the server before choosing a recipient. Embedded pending compose state stays in memory per frame, separate from standalone compose storage.
+
+## Ask context (coordinated source rollout held)
+
+Ask entries use the same sign-in/embedded capture flow. The
+[publication contract](profile-ask-publication.md) owns ask authorization and
+context handling; [README usage](../README.md#profile-asks-source-rollout-held)
+describes the user controls.
