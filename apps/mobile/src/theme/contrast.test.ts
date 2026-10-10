@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { palette } from './palette';
+import { roles } from './tokens';
 
 const NORMAL_TEXT_MIN = 4.5;
 
@@ -23,7 +24,19 @@ function relativeLuminance(hex: string): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-/** WCAG 2.2 contrast ratio. Opaque pairs only — do not use for alpha blends. */
+/** Composite an `rgba(r, g, b, a)` tint (or an opaque hex) over an opaque ground. */
+function flatten(tint: string, ground: string): string {
+  const m = tint.match(/^rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/);
+  if (!m) return tint;
+  const alpha = Number(m[4]);
+  const g = ground.replace('#', '');
+  return '#' + [1, 2, 3].map((i, k) => {
+    const channel = Math.round(Number(m[i]) * alpha + parseInt(g.slice(k * 2, k * 2 + 2), 16) * (1 - alpha));
+    return channel.toString(16).padStart(2, '0');
+  }).join('');
+}
+
+/** WCAG 2.2 contrast ratio. Opaque pairs only — flatten alpha tints first. */
 function contrastRatio(foreground: string, background: string): number {
   const a = relativeLuminance(foreground);
   const b = relativeLuminance(background);
@@ -56,6 +69,13 @@ describe.each(['light', 'dark'] as const)('%s theme contrast', scheme => {
   it('keeps primary text well clear of the threshold', () => {
     expect(contrastRatio(c.textPrimary, c.background)).toBeGreaterThanOrEqual(7);
     expect(contrastRatio(c.textPrimary, c.surface)).toBeGreaterThanOrEqual(7);
+  });
+
+  it('reads selected-chip text on the soft accent tint (tokens.ts roles)', () => {
+    const r = roles(c);
+    for (const ground of [c.background, c.surface] as const) {
+      expect(contrastRatio(r.onAccentSoft, flatten(r.accentSoft, ground))).toBeGreaterThanOrEqual(NORMAL_TEXT_MIN);
+    }
   });
 
   it('reads own-bubble text against its own fill', () => {

@@ -48,6 +48,7 @@
   "scripts": {
     "start": "expo start",
     "test": "vitest run",
+    "lint": "eslint src App.tsx",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",

@@ -67,6 +67,16 @@ Pick the token by role, not by how it looks:
 `contrast.test.ts` fails the build if these drift, so add new opaque pairs there
 rather than eyeballing them.
 
+**Design tokens and primitives (OpenChat-eo3n).** Sizes, spacing, corners and
+colour roles come from `theme/tokens.ts` (`type`, `space`, `radius`, `roles`);
+buttons, cards, chips, section labels and settings rows come from
+`components/ui/`. Migrate a screen when you touch it. `npm run lint
+--workspace=apps/mobile` rejects new `fontSize`/`borderRadius`/hex literals
+outside `src/theme/`; existing ones are baselined in
+`apps/mobile/eslint-suppressions.json`. After migrating a file, run
+`npx eslint src App.tsx --prune-suppressions` there; never use `--suppress-all`
+to hide new literals.
+
 Chat headers (compact native-stack, embedded/desktop) share
 `components/ConversationHeaderContent.tsx`: a shrinking identity column
 (`flex:1`/`minWidth:0`, one-line tail ellipsis) plus a fixed-width action
