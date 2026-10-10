@@ -10,6 +10,8 @@ export interface ChipProps {
   onPress?: () => void;
   icon?: AppIconName;
   disabled?: boolean;
+  /** `radio` inside an accessibilityRole="radiogroup" (single choice). */
+  accessibilityRole?: 'button' | 'radio';
   accessibilityLabel?: string;
   testID?: string;
   style?: StyleProp<ViewStyle>;
@@ -20,7 +22,7 @@ const SLOP = (touchTarget - HEIGHT) / 2;
 
 /** Filter, tag and choice chip. Pill-shaped; selected chips take the soft
  * accent tint. Without `onPress` it renders as a static tag. */
-export function Chip({ label, selected, onPress, icon, disabled, accessibilityLabel, testID, style }: ChipProps) {
+export function Chip({ label, selected, onPress, icon, disabled, accessibilityRole = 'button', accessibilityLabel, testID, style }: ChipProps) {
   const { scheme } = useTheme();
   const r = roles(getColors(scheme));
   const fg = selected ? r.onAccentSoft : r.textSecondary;
@@ -34,9 +36,9 @@ export function Chip({ label, selected, onPress, icon, disabled, accessibilityLa
   if (!onPress) return <View style={chrome} testID={testID}>{body}</View>;
   return (
     <TouchableOpacity
-      accessibilityRole="button"
+      accessibilityRole={accessibilityRole}
       accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ selected: !!selected, disabled: !!disabled }}
+      accessibilityState={accessibilityRole === 'radio' ? { checked: !!selected, disabled: !!disabled } : { selected: !!selected, disabled: !!disabled }}
       onPress={onPress}
       disabled={disabled}
       hitSlop={{ top: SLOP, bottom: SLOP, left: 2, right: 2 }}
