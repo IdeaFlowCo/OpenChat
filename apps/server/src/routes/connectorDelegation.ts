@@ -1,5 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireDirectSession } from '../middleware/auth.js';
 import { ConnectorDelegationService, loadConnectorDelegationConfig, type ConnectorScope } from '../services/connectorDelegation.js';
 
 export function createConnectorDelegation() {
@@ -64,13 +64,13 @@ export function buildConnectorDelegationRoutes(service: ConnectorDelegationServi
     res.json({ transaction: tx, reviewPath: `/api/connector-delegations/review/${encodeURIComponent(tx)}` });
   });
 
-  router.get('/review/:transaction', requireAuth, (req, res) => {
+  router.get('/review/:transaction', requireAuth, requireDirectSession, (req, res) => {
     const review = service.review(req.params.transaction as string, req.user!.userId);
     if (!review) { res.sendStatus(404); return; }
     res.json(review);
   });
 
-  router.post('/consent', requireAuth, (req, res) => {
+  router.post('/consent', requireAuth, requireDirectSession, (req, res) => {
     const { transaction, approvedScopes } = req.body ?? {};
     if (typeof transaction !== 'string' || !Array.isArray(approvedScopes)) { res.sendStatus(400); return; }
     const result = service.consent(transaction, req.user!.userId, approvedScopes);

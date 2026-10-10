@@ -105,6 +105,11 @@ describe('disabled connector and bounded code delegation', () => {
     });
     expect((await request(app).post('/api/connector-delegations/consent').set('Authorization', userJwt('bob'))
       .send({ transaction: start.body.transaction, approvedScopes: ['openchat.read'] })).status).toBe(403);
+    const embeddedAlice = 'Bearer ' + jwt.sign({ userId: 'alice', email: 'shared-inbox@ideaflow.invalid', embedded: 'unlinked' },
+      process.env.JWT_SECRET || 'dev-secret-change-me', { expiresIn: '10m' });
+    expect((await request(app).get(start.body.reviewPath).set('Authorization', embeddedAlice)).status).toBe(403);
+    expect((await request(app).post('/api/connector-delegations/consent').set('Authorization', embeddedAlice)
+      .send({ transaction: start.body.transaction, approvedScopes: ['openchat.read'] })).status).toBe(403);
     expect((await request(app).post('/api/connector-delegations/consent').set('Authorization', userJwt('alice'))
       .send({ transaction: start.body.transaction, approvedScopes: ['openchat.read'] })).status).toBe(403);
     const { code } = await issue('g-code', 'notes-alice', 'alice');
