@@ -366,12 +366,7 @@
   },
   "src/screens/MyCardScreen.tsx": {
     "no-restricted-syntax": {
-      "count": 31
-    }
-  },
-  "src/screens/NewConversationScreen.tsx": {
-    "no-restricted-syntax": {
-      "count": 15
+      "count": 5
     }
   },
   "src/screens/OnboardingScreen.tsx": {

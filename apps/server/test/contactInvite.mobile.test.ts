@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('react-native', () => ({
   ActivityIndicator: 'ActivityIndicator', ScrollView: 'ScrollView', Text: 'Text',
   TouchableOpacity: 'TouchableOpacity', View: 'View', Switch: 'Switch', TextInput: 'TextInput',
+  Modal: ({ visible, children }: any) => (visible ? children : null),
   Platform: mocks.platform, StyleSheet: { create: (value: unknown) => value },
   useWindowDimensions: () => ({ width: 390 }),
   AppState: { addEventListener: (_: string, listener: (state: string) => void) => {
@@ -203,10 +204,12 @@ describe('individual contact invitation lifecycle', () => {
 describe('My card sharing lifecycle', () => {
   it.each([
     ['blur', 'Open in WhatsApp'], ['account', 'Open in WhatsApp'], ['logout', 'Open in WhatsApp'],
-    ['blur', 'Share card link'], ['account', 'Share card link'], ['logout', 'Share card link'],
+    ['blur', 'Share link'], ['account', 'Share link'], ['logout', 'Share link'],
   ])('cancels a pending %s handoff from %s', async (reason, label) => {
     component = MyCardScreen;
     await render();
+    // Sharing lives behind Profile › Share profile (OpenChat-eo3n.7).
+    await act(async () => { press('Share profile'); });
     const request = deferred<ReturnType<typeof card>>();
     mocks.getMyCard.mockReturnValue(request.promise);
     let pending: Promise<void>;

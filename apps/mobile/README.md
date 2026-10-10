@@ -70,7 +70,7 @@ build date when available. The label is available before signing in.
 
 ### Scan an OpenChat card
 
-From Chats, open **People** or your **Profile**, then **Scan a code**.
+From Chats, open **People**, then **Scan a code**.
 In a browser, tap **Start camera** to enable the camera; opening the scanner
 alone does not request access. Leaving the scanner or opening a recognized
 card stops the camera. Repeated frames open the card only once.

@@ -33,7 +33,7 @@ jobs:
           test/conversationThoughts.mobile.test.ts
           test/conversationDisplay.test.ts test/contactInvite.mobile.test.ts
           test/addMeCard.test.ts test/addMeCard.route.test.ts
-          test/privateNames.route.test.ts test/privateNames.mobile.test.ts test/contactProfileDoors.mobile.test.ts
+          test/privateNames.route.test.ts test/privateNames.mobile.test.ts test/contactProfileDoors.mobile.test.ts test/compose.mobile.test.ts test/agentMarkdown.mobile.test.ts
           test/contextHostedReview.mobile.test.ts test/contextHostedApi.mobile.test.ts test/contextHosted.route.test.ts
           test/contextWebhookSetup.mobile.test.ts test/contextWebhooks.route.test.ts test/contextWebhookTransport.test.ts
           test/conversationContent.route.test.ts test/contextIntentions.mobile.test.ts

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   navigation: { navigate: vi.fn(), getState: () => ({ routes: [{ name: 'Conversations' }] }), goBack: vi.fn() },
   signOut: vi.fn(async () => {}),
   getMyCard: vi.fn(),
+  updateMyCard: vi.fn(),
   currentUser: { userId: 'u1', name: 'Jacob', email: 'jacob@example.com' } as Record<string, unknown> | null,
   ideaflowEnabled: false,
   events: [] as string[],
@@ -78,7 +79,7 @@ vi.mock('../../mobile/src/api/client', () => ({
   OPENCHAT_URL: 'https://chat.ideaflow.app',
   addMeCardUrl: (token: string) => `https://chat.ideaflow.app/c/${token}`,
   clearSession: vi.fn(),
-  api: { getMyCard: mocks.getMyCard },
+  api: { getMyCard: mocks.getMyCard, updateMyCard: mocks.updateMyCard },
 }));
 vi.mock('../../mobile/src/services/notifications', () => ({ registerForPushNotificationsAsync: vi.fn() }));
 vi.mock('../../mobile/src/services/exportDownload', () => ({ saveJsonDownload: vi.fn() }));
@@ -188,10 +189,43 @@ describe('Profile (MyCard) sign out', () => {
     const tree = create(React.createElement(MyCardScreen));
     await flush();
 
+    // The card link (and its reset) live in the Share profile sheet.
+    expect(hasText(tree.root, 'Reset card link')).toBe(false);
+    await act(async () => { buttonLabelled(tree.root, 'Share profile').props.onPress(); });
     expect(hasText(tree.root, 'Reset card link')).toBe(true);
     const signOut = buttonLabelled(tree.root, 'Sign out');
     await act(async () => { signOut.props.onPress(); });
     expect(mocks.signOut).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Profile (MyCard) per-field audience', () => {
+  it('maps each audience choice onto the card flag the server already honours', async () => {
+    mocks.getMyCard.mockResolvedValueOnce(CARD);
+    mocks.updateMyCard.mockResolvedValue({ ...CARD, settings: { ...CARD.settings, showHeadline: true } });
+    const tree = create(React.createElement(MyCardScreen));
+    await flush();
+    // Only audiences the server can honour are offered; no Everyone/Connections split for card fields.
+    expect(hasText(tree.root, 'Friends & card')).toBe(true);
+    expect(hasText(tree.root, 'Connections')).toBe(false);
+    await act(async () => { buttonLabelled(tree.root, 'Headline: friends and card').props.onPress(); });
+    expect(mocks.updateMyCard).toHaveBeenLastCalledWith({ showHeadline: true });
+    await flush();
+    await act(async () => { buttonLabelled(tree.root, 'Headline: only me').props.onPress(); });
+    expect(mocks.updateMyCard).toHaveBeenLastCalledWith({ showHeadline: false });
+    await act(async () => { buttonLabelled(tree.root, 'Photo: not on card').props.onPress(); });
+    expect(mocks.updateMyCard).toHaveBeenLastCalledWith({ showAvatar: false });
+  });
+
+  it('leads with identity and keeps the QR behind Share profile, with no Scan a code', async () => {
+    mocks.getMyCard.mockResolvedValueOnce(CARD);
+    const tree = create(React.createElement(MyCardScreen));
+    await flush();
+    expect(hasText(tree.root, 'Scan a code')).toBe(false);
+    expect(tree.root.findAll(n => n.props.accessibilityLabel === 'My card QR code')).toHaveLength(0);
+    await act(async () => { buttonLabelled(tree.root, 'Share profile').props.onPress(); });
+    expect(tree.root.findAll(n => n.props.accessibilityLabel === 'My card QR code').length).toBeGreaterThan(0);
+    expect(hasText(tree.root, 'Open in WhatsApp')).toBe(true);
   });
 });
 
@@ -290,7 +324,7 @@ describe('Switch account (web, Ideaflow ID enabled)', () => {
     await settle();
 
     const order = textOrder(tree.root);
-    expect(order.indexOf('Switch account')).toBeGreaterThan(order.indexOf('ACCOUNT'));
+    expect(order.indexOf('Switch account')).toBeGreaterThan(order.indexOf('Account'));
     expect(order.indexOf('Switch account')).toBeLessThan(order.indexOf('Sign out'));
     await act(async () => { buttonLabelled(tree.root, 'Switch account').props.onPress(); });
     await settleUntil(() => mocks.events.length >= 3);
