@@ -7,12 +7,13 @@ vi.mock('../src/services/privateGraph.js', async () => {
 });
 import { captureNoteReview, parseSuggestions, similarAsk, undoNoteReview, applyNoteReview } from '../src/services/privateNoteReview.js';
 
+const OWNER_KEY = 'a'.repeat(64);
 const review = { id: 'review-id', subject: {kind:'user',id:'bob'}, note:{id:'raw-note',text:'Chet works at Acme',createdAt:'now',updatedAt:'now'},status:'applied',suggestions:[],appliedIds:['s1'],createdAt:'now',createdRecords:[{id:'new-link',kind:'connection',suggestionId:'s1'},{id:'new-ask',kind:'ask',suggestionId:'s2'}] };
 const rows = (data: Record<string, unknown>) => ({ records: [{get: (key: string) => data[key]}] });
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.principal.mockResolvedValue({app:'openchat',ownerKey:'owner-key'});
-  mocks.subject.mockResolvedValue({principal:{app:'openchat',ownerKey:'owner-key'},entityId:'entity-id',name:'Chet'});
+  mocks.principal.mockResolvedValue({app:'openchat',ownerKey:OWNER_KEY});
+  mocks.subject.mockResolvedValue({principal:{app:'openchat',ownerKey:OWNER_KEY},entityId:'entity-id',name:'Chet'});
   mocks.run.mockResolvedValue({records:[]});
 });
 describe('private note review source validation', () => {
@@ -45,8 +46,8 @@ describe('durable batch operations', () => {
     expect(undone.status).toBe('undone');
     const deletes = mocks.run.mock.calls.filter(([query]) => query.includes('DELETE'));
     expect(deletes).toHaveLength(2);
-    expect(deletes.map(([,params]) => params.id)).toEqual(['new-link','new-ask']);
-    expect(deletes.every(([query,params]) => query.includes('ownerKey') && params.ownerKey === 'owner-key')).toBe(true);
+    expect(deletes.map(([,params]) => params.id ?? params.linkId)).toEqual(['new-link','new-ask']);
+    expect(deletes.every(([query,params]) => query.includes('ownerKey') && params.ownerKey === OWNER_KEY)).toBe(true);
     expect(mocks.run.mock.calls.some(([query]) => query.includes('OverlayNote') || query.includes('DELETE e'))).toBe(false);
   });
   it('repeated apply and undo are idempotent', async () => {
@@ -59,7 +60,7 @@ describe('durable batch operations', () => {
   });
   it('does not reveal or delete a different owner review', async () => {
     await expect(undoNoteReview('mallory','review-id')).rejects.toMatchObject({status:404});
-    expect(mocks.run.mock.calls.every(([,params]) => params.ownerKey === 'owner-key')).toBe(true);
+    expect(mocks.run.mock.calls.every(([,params]) => params.ownerKey === OWNER_KEY)).toBe(true);
     expect(mocks.run.mock.calls.some(([query]) => query.includes('DELETE'))).toBe(false);
   });
 });

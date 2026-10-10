@@ -42,7 +42,7 @@ mock('/services/hashtagSuggestions', `export const fetchHashtagSuggestions=async
 mock('/services/ideaflowSignIn', `export const markIdeaflowAccountChoice=()=>{};`);
 mock('/services/ideaflowNativeSignIn', `export const markIdeaflowAccountChoiceNative=()=>{};`);
 mock('/services/ideaflowAutoSignIn', `export const clearIdeaflowSignedOut=()=>{},markIdeaflowSignedOut=()=>{};`);
-for(const name of ['MessageActionSheet','ReactionsBar','ToastMessage','AiDisclosureBanner','BotBadge','NewMessagesPill','VoiceMessageBubble','HashtagAutocomplete','TransformButton','NVCComposerModal','LinkPreviewCard','AgentNetworkCard','AgentOverlayButton','ExportSheet']) mock('/components/'+name, `export const ${name}=()=>null;`);
+for(const name of ['MessageActionSheet','ReactionsBar','ToastMessage','AiDisclosureBanner','BotBadge','JumpToBottomButton','VoiceMessageBubble','HashtagAutocomplete','TransformButton','NVCComposerModal','LinkPreviewCard','AgentNetworkCard','AgentOverlayButton','ExportSheet']) mock('/components/'+name, `export const ${name}=()=>null;`);
 mock('/components/InAppMessageBanner', `export const showInAppBanner=()=>{};`);
 mock('@react-navigation/native', `export {useFocusEffect,useRoute,useNavigation} from './apps/server/test/fixtures/conversationNavigation';`);
 mock('@react-navigation/elements', `export const useHeaderHeight=()=>56;`);

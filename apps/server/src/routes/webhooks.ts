@@ -20,6 +20,7 @@ import crypto from 'node:crypto';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
 import { resolveActor } from '../middleware/resolveActor.js';
+import { requireDirectSession } from '../middleware/auth.js';
 import { MESSAGE_CREATED_EVENT } from '../services/webhookDispatch.js';
 
 const router = Router();
@@ -49,7 +50,7 @@ function normalizeSuppliedSecret(value: unknown): string | null {
 
 // ── POST /api/webhooks ────────────────────────────────────────────────────────
 
-router.post('/', resolveActor, async (req: Request, res: Response) => {
+router.post('/', resolveActor, requireDirectSession, async (req: Request, res: Response) => {
   const ownerUserId = req.user!.userId;
   const { url, events, conversationId, secret } = req.body as {
     url?: string;
@@ -139,7 +140,7 @@ router.post('/', resolveActor, async (req: Request, res: Response) => {
 
 // ── GET /api/webhooks ─────────────────────────────────────────────────────────
 
-router.get('/', resolveActor, async (req: Request, res: Response) => {
+router.get('/', resolveActor, requireDirectSession, async (req: Request, res: Response) => {
   const ownerUserId = req.user!.userId;
   const session = getDriver().session();
   try {
@@ -158,7 +159,7 @@ router.get('/', resolveActor, async (req: Request, res: Response) => {
 
 // ── DELETE /api/webhooks/:id ──────────────────────────────────────────────────
 
-router.delete('/:id', resolveActor, async (req: Request, res: Response) => {
+router.delete('/:id', resolveActor, requireDirectSession, async (req: Request, res: Response) => {
   const ownerUserId = req.user!.userId;
   const { id } = req.params;
   const session = getDriver().session();

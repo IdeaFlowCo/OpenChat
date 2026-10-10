@@ -913,7 +913,7 @@ export interface FriendRow extends FriendStatus { user: Pick<User, 'id' | 'name'
 export interface FriendLists { friends: FriendRow[]; incoming: FriendRow[]; outgoing: FriendRow[] }
 
 /** Private graph: the signed-in person's own notes and links about people. Only they ever see it. */
-export type PrivateThingKind = 'person' | 'company' | 'idea' | 'project';
+export type PrivateThingKind = 'person' | 'company' | 'idea' | 'project' | 'topic';
 export type PrivateNodeKind = 'user' | PrivateThingKind;
 export type PrivateSubject = { kind: 'user' | 'thing'; id: string };
 export interface PrivatePersonCard {
@@ -932,7 +932,8 @@ export interface PrivateAsk { id: string; text: string; status: 'active' | 'paus
 export interface PrivateNote { id: string; text: string; createdAt: string; updatedAt: string }
 export interface PrivateLink { id: string; relation: string; direction: 'out' | 'in'; other: { kind: PrivateNodeKind; id: string; name: string }; createdAt: string }
 export interface PrivatePersonOverlay { userId: string; person?: { id: string; name: string; avatarUrl: string | null }; card: PrivatePersonCard; notes: PrivateNote[]; links: PrivateLink[] }
-export interface PrivateThing { id: string; kind: PrivateThingKind; name: string }
+/** `description` is the owner's one-line summary (server 2026-10-10; absent from older servers). */
+export interface PrivateThing { id: string; kind: PrivateThingKind; name: string; description?: string | null }
 export interface PrivateThingDetail extends PrivateThing { notes: PrivateNote[]; links: PrivateLink[] }
 export interface CatchUpPerson { userId: string; name: string; avatarUrl: string | null; important: boolean; nextDueAt: string; lastContactAt: string | null }
 export type PrivateLinkTarget = { kind: 'user'; id: string } | { kind: PrivateThingKind; id?: string; name?: string };
@@ -1233,14 +1234,20 @@ export const api = {
     request<{ ok: boolean }>('/api/auth/me', { method: 'DELETE' }),
 
   /**
-   * Submit user feedback. Server creates a WorldIssueTracker issue (oc8.3) and
-   * returns its URL. Requires the server /api/feedback route (gated on the
-   * WIT_AGENT_KEY env var); returns 503 until that's configured/deployed.
+   * Submit user feedback. Server creates a World Issue Tracker issue under the
+   * user's Ideaflow account (or anonymously when asked) and returns its URL
+   * plus how it was posted (OpenChat-0xjt).
    */
-  submitFeedback: (message: string, context?: string) =>
-    request<{ url: string; id?: string }>('/api/feedback', {
+  submitFeedback: (message: string, context?: string, anonymous = false) =>
+    request<{
+      url: string;
+      id?: string;
+      postedAs?: 'account' | 'name_only' | 'anonymous';
+      displayName?: string;
+      note?: string;
+    }>('/api/feedback', {
       method: 'POST',
-      body: JSON.stringify({ message, context }),
+      body: JSON.stringify({ message, context, anonymous }),
     }),
 
   /**

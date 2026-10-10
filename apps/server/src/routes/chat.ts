@@ -1280,11 +1280,23 @@ router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
     const rawOffset = parseInt(req.query.offset as string, 10);
     const offset = Math.min(Math.max(Number.isFinite(rawOffset) ? rawOffset : 0, 0), 100_000);
 
+    // Like every messenger, people you already talk to come first
+    // (OpenChat-3n0s): direct chats by most recent activity, then yourself,
+    // then people from shared groups, then everyone else. People you already
+    // share a conversation with are findable by name whatever their discovery
+    // setting — finding them is not discovery. Blocks always apply.
     const query = `
         MATCH (actor:User {id: $userId})
         WITH actor
         MATCH (u:User)
-        WHERE ($directory = true AND (
+        WITH actor, u, (u.id <> actor.id AND coalesce(u.isBot, false) = false
+          AND EXISTS { (actor)-[:PARTICIPATES_IN]->(:Conversation)<-[:PARTICIPATES_IN]-(u) }) AS known
+        WHERE (known
+               AND NOT (actor)-[:BLOCKED]->(u)
+               AND NOT (u)-[:BLOCKED]->(actor)
+               AND ($directory = true
+                    OR ($name <> '' AND toLower(coalesce(u.name, '')) CONTAINS $name)))
+           OR ($directory = true AND (
                  u.id = $userId
                  OR (u.id <> $userId
                      AND NOT (actor)-[:BLOCKED]->(u)
@@ -1308,6 +1320,9 @@ router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
                      AND NOT coalesce(u.name, '') CONTAINS '@'
                      AND toLower(coalesce(u.name, '')) CONTAINS $name)
                ))
+        OPTIONAL MATCH (actor)-[:PARTICIPATES_IN]->(dm:Conversation {type: 'direct'})<-[:PARTICIPATES_IN]-(u)
+        WHERE u.id <> actor.id
+        WITH actor, u, known, max(coalesce(dm.lastMessageAt, dm.createdAt)) AS lastDirect, count(dm) > 0 AS direct
         RETURN u { .id,
           name: CASE WHEN u.name IS NULL OR trim(u.name) = '' OR u.name CONTAINS '@'
             THEN $fallbackName ELSE u.name END,
@@ -1315,7 +1330,9 @@ router.get('/contacts', resolveActor, async (req: Request, res: Response) => {
           sharedConversations: CASE WHEN u.id = actor.id THEN 0
             ELSE COUNT { (u)-[:PARTICIPATES_IN]->(:Conversation)<-[:PARTICIPATES_IN]-(actor) } END
         } AS user
-        ORDER BY CASE WHEN u.id = $userId THEN 0 ELSE 1 END,
+        ORDER BY CASE WHEN direct THEN 0 WHEN u.id = $userId THEN 1 WHEN known THEN 2 ELSE 3 END,
+          coalesce(lastDirect, datetime('1970-01-01T00:00:00Z')) DESC,
+          CASE WHEN $name <> '' AND toLower(coalesce(u.name, '')) STARTS WITH $name THEN 0 ELSE 1 END,
           toLower(coalesce(u.name, '')), u.id
         SKIP $offset
         LIMIT $limit

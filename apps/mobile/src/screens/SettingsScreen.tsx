@@ -135,12 +135,13 @@ export function SettingsScreen() {
   const handleSendFeedback = useCallback(() => {
     setFeedbackModalVisible(true);
   }, []);
-  const handleSubmitFeedback = useCallback(async (text: string) => {
+  const handleSubmitFeedback = useCallback(async (text: string, anonymous: boolean) => {
     setSendingFeedback(true);
     try {
-      const { url } = await api.submitFeedback(text);
+      const { url, postedAs, displayName } = await api.submitFeedback(text, undefined, anonymous);
       setFeedbackModalVisible(false);
-      Alert.alert('Thanks!', `Your feedback was sent.${url ? `\n\n${url}` : ''}`);
+      const as = postedAs === 'anonymous' ? ' anonymously' : displayName ? ` as ${displayName}` : '';
+      Alert.alert('Thanks!', `Your feedback was posted${as}.${url ? `\n\n${url}` : ''}`);
     } catch (err) {
       Alert.alert(
         'Couldn’t send feedback',
@@ -877,6 +878,7 @@ export function SettingsScreen() {
       <FeedbackModal
         visible={feedbackModalVisible}
         sending={sendingFeedback}
+        filerName={currentUser?.name}
         onSubmit={handleSubmitFeedback}
         onCancel={() => setFeedbackModalVisible(false)}
       />

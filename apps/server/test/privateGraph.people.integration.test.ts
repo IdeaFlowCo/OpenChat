@@ -1,12 +1,23 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import neo4j, { type Driver } from 'neo4j-driver';
 
-// Unlinked is asked only to confirm a profile id the first time it is written.
-const unlinked = vi.hoisted(() => ({ read: vi.fn() }));
+// Unlinked is asked only to confirm a profile id the first time it is written,
+// and to resolve imported contacts (connection id or LinkedIn address).
+const unlinked = vi.hoisted(() => ({ read: vi.fn(), byHash: vi.fn() }));
 vi.mock('../src/services/unlinkedProvision.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/unlinkedProvision.js')>('../src/services/unlinkedProvision.js');
-  return { ...actual, readUnlinkedProfileForIdentity: unlinked.read };
+  return { ...actual, lookupUnlinkedContactForIdentity: unlinked.read, lookupUnlinkedContactsByHash: unlinked.byHash };
 });
+const HASH_STELLA = 'a1'.repeat(32), HASH_JUN = 'b2'.repeat(32), HASH_MAYA = 'c3'.repeat(32), HASH_NOLA = 'd4'.repeat(32);
+const CONNECTION = { stella: '5'.repeat(64), jun: '6'.repeat(64), maya: '7'.repeat(64), nameless: '8'.repeat(64), nola: '9'.repeat(64) };
+// Contacts of the owner "dana" only: another owner's lookups answer not_found.
+const CONTACTS = [
+  { connectionId: CONNECTION.stella, name: 'Stella Import', linkedinRefHash: HASH_STELLA, publishedProfileId: null, url: 'linkedin.com/in/stella-import' },
+  { connectionId: CONNECTION.jun, name: 'Jun Import', linkedinRefHash: HASH_JUN, publishedProfileId: null, url: 'linkedin.com/in/jun-import' },
+  { connectionId: CONNECTION.maya, name: 'Maya Imported', linkedinRefHash: HASH_MAYA, publishedProfileId: 'maya-1', url: 'linkedin.com/in/maya-example' },
+  { connectionId: CONNECTION.nameless, name: 'No Key', linkedinRefHash: null, publishedProfileId: null, url: '' },
+];
+const contact = (value: typeof CONTACTS[number]) => ({ connectionId: value.connectionId, name: value.name, linkedinRefHash: value.linkedinRefHash, publishedProfileId: value.publishedProfileId });
 
 const uri = process.env.NEO4J_TEST_URI;
 const user = process.env.NEO4J_TEST_USER;
@@ -15,6 +26,7 @@ const integration = uri && user && password ? describe.sequential : describe.ski
 
 integration('private people: names, Unlinked profiles and retries', { timeout: 30000 }, () => {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let nolaPublished = false;
   const [dana, alex, other] = ['pp-dana', 'pp-alex', 'pp-other'].map(prefix => `${prefix}-${suffix}`) as [string, string, string];
   const alexName = `Alex ${suffix}`;
   const userIds = [dana, alex, other];
@@ -42,10 +54,17 @@ integration('private people: names, Unlinked profiles and retries', { timeout: 3
   });
 
   beforeEach(() => {
-    unlinked.read.mockReset().mockImplementation(async (_identity: unknown, profileId: string) => {
-      if (profileId === 'maya-1' || profileId === 'maya-old') return { ok: true, profile: { id: 'maya-1', name: 'Maya Example' } };
-      return { ok: false, code: 'not_found' };
+    unlinked.read.mockReset().mockImplementation(async (identity: { subject: string } | null, query: Record<string, string>) => {
+      const mine = identity?.subject === `sub-${suffix}`;
+      if (query.profileId === 'maya-1' || query.profileId === 'maya-old') return { ok: true, contact: mine && nolaPublished ? contact(CONTACTS[2]!) : { connectionId: null, name: 'Maya Example', linkedinRefHash: null, publishedProfileId: 'maya-1' } };
+      if (query.profileId === 'nola-pub') return { ok: true, contact: { connectionId: null, name: 'Nola Published', linkedinRefHash: null, publishedProfileId: 'nola-pub' } };
+      if (!mine) return { ok: false, code: 'not_found' };
+      if (query.connectionId === CONNECTION.nola) return { ok: true, contact: { connectionId: CONNECTION.nola, name: 'Nola Import', linkedinRefHash: HASH_NOLA, publishedProfileId: nolaPublished ? 'nola-pub' : null } };
+      const found = CONTACTS.find(value => value.connectionId === query.connectionId || (query.linkedinUrl && value.url && query.linkedinUrl.includes(value.url)));
+      return found ? { ok: true, contact: contact(found) } : { ok: false, code: 'not_found' };
     });
+    unlinked.byHash.mockReset().mockImplementation(async (identity: { subject: string } | null, hashes: string[]) => ({ ok: true,
+      contacts: identity?.subject === `sub-${suffix}` ? CONTACTS.filter(value => value.linkedinRefHash && hashes.includes(value.linkedinRefHash)).map(contact) : [] }));
   });
 
   afterAll(async () => {
@@ -81,6 +100,15 @@ integration('private people: names, Unlinked profiles and retries', { timeout: 3
     const chosen = await graph.addLink(dana, { kind: 'user', id: alex }, 'knows', { kind: 'person', id: separate.other.id });
     expect(chosen.other.id).toBe(separate.other.id);
 
+    // Saving by name follows the same rules.
+    expect(await failure(() => graph.resolvePrivateThing(dana, { kind: 'person', name: alexName }))).toMatchObject({ status: 409, code: 'ambiguous_name' });
+    const third = await graph.resolvePrivateThing(dana, { kind: 'person', name: alexName, createNew: true, clientRequestId: `req3-${suffix}` });
+    expect((await graph.resolvePrivateThing(dana, { kind: 'person', name: alexName, createNew: true, clientRequestId: `req3-${suffix}` })).id).toBe(third.id);
+    expect([alex, separate.other.id]).not.toContain(third.id);
+    const maya = await graph.resolvePrivateThing(dana, { kind: 'person', name: `Maya ${suffix}` });
+    expect((await graph.resolvePrivateThing(dana, { kind: 'person', name: `maya ${suffix}` })).id).toBe(maya.id);
+    expect(await failure(() => graph.resolvePrivateThing(dana, { kind: 'unlinked', id: 'maya-1' }))).toMatchObject({ status: 400 });
+
     // A name only Dana's saved list uses is still reused, so typing it twice is one person.
     const priya = await graph.addLink(dana, { kind: 'user', id: alex }, 'sister of', { kind: 'person', name: `Priya ${suffix}` });
     const priyaAgain = await graph.addLink(dana, { kind: 'user', id: alex }, 'Sister  of', { kind: 'person', name: ` priya ${suffix} ` });
@@ -91,6 +119,7 @@ integration('private people: names, Unlinked profiles and retries', { timeout: 3
     const sister = await graph.addLink(dana, { kind: 'unlinked', id: 'maya-1' }, 'sister of', { kind: 'person', name: `Priya ${suffix}` });
     expect(unlinked.read).toHaveBeenCalledTimes(1);
     expect(unlinked.read.mock.calls[0]![0]).toEqual({ issuer: 'https://id.ideaflow.app/api/auth', subject: `sub-${suffix}` });
+    expect(unlinked.read.mock.calls[0]![1]).toEqual({ profileId: 'maya-1' });
     const knows = await graph.addLink(dana, { kind: 'user', id: alex }, 'knows', { kind: 'unlinked', id: 'maya-1' });
     expect(knows.other).toMatchObject({ kind: 'person', name: 'Maya Example', unlinkedProfileId: 'maya-1' });
     // Known now: no further call to Unlinked, and retries return the same note and link.
@@ -140,5 +169,130 @@ integration('private people: names, Unlinked profiles and retries', { timeout: 3
     expect(await graph.deleteNote(dana, card.notes[0]!.id)).toEqual({ deleted: true });
     expect((await graph.getUnlinkedPersonOverlay(dana, 'maya-1')).notes).toEqual([]);
     expect(await failure(() => graph.deleteLink(other, card.links[0]!.id))).toMatchObject({ status: 404 });
+  });
+  it('deletes a saved thing with its notes, links in both directions and refs, for its owner only', async () => {
+    const count = async (query: string, params: Record<string, unknown>) => {
+      const session = driver.session();
+      try { return (await session.run(query, params)).records[0]!.get('total').toNumber() as number; } finally { await session.close(); }
+    };
+    const kept = await graph.resolvePrivateThing(dana, { kind: 'person', name: `Kept ${suffix}` });
+    const doomed = await graph.resolvePrivateThing(dana, { kind: 'person', name: `Doomed ${suffix}`, createNew: true, clientRequestId: `doomed-${suffix}` });
+    await graph.addNote(dana, { kind: 'thing', id: doomed.id }, 'First note');
+    await graph.addNote(dana, { kind: 'thing', id: doomed.id }, 'Second note');
+    const outgoing = await graph.addLink(dana, { kind: 'thing', id: doomed.id }, 'knows', { kind: 'person', id: kept.id });
+    const incoming = await graph.addLink(dana, { kind: 'user', id: alex }, 'worked with', { kind: 'person', id: doomed.id });
+    const unrelated = await graph.addLink(dana, { kind: 'user', id: alex }, 'mentors', { kind: 'person', id: kept.id });
+    const session = driver.session();
+    try {
+      await session.run("CREATE (:OpenChatNoteReview {id: $id, ownerKey: 'x', entityId: $entityId})", { id: `foreign-review-${suffix}`, entityId: doomed.id });
+      await session.run('MATCH (e:OverlayEntity {id: $entityId}) CREATE (:OpenChatPrivateAsk {id: $id, ownerKey: e.ownerKey, entityId: e.id, text: "ask"})', { id: `ask-${suffix}`, entityId: doomed.id });
+    } finally { await session.close(); }
+
+    // Another owner cannot see or delete it, and an OpenChat person's card is not a saved thing.
+    expect(await failure(() => graph.deletePrivateThing(other, doomed.id))).toMatchObject({ status: 404 });
+    expect((await graph.getThing(dana, doomed.id)).notes).toHaveLength(2);
+    const alexCard = await graph.getPersonOverlay(dana, alex);
+    const lookup = driver.session();
+    let alexIds: string[];
+    try { alexIds = (await lookup.run('MATCH (r:OverlayRef {ref: $ref})-[:REF_OF]->(e) RETURN e.id AS id', { ref: `openchat:user:${alex}` })).records.map(record => record.get('id') as string); }
+    finally { await lookup.close(); }
+    expect(alexIds.length).toBeGreaterThan(0);
+    for (const id of alexIds) expect(await failure(() => graph.deletePrivateThing(dana, id))).toMatchObject({ status: 404 });
+    expect((await graph.getPersonOverlay(dana, alex)).notes).toEqual(alexCard.notes);
+
+    expect(await graph.deletePrivateThing(dana, doomed.id)).toEqual({ deleted: true, id: doomed.id, notesRemoved: 2, linksRemoved: 2 });
+    expect(await failure(() => graph.getThing(dana, doomed.id))).toMatchObject({ status: 404 });
+    expect(await count('MATCH (n) WHERE (n:OverlayEntity AND n.id = $id) OR ((n:OverlayNote OR n:OverlayRef) AND n.entityId = $id) RETURN count(n) AS total', { id: doomed.id })).toBe(0);
+    expect(await count('MATCH ()-[l:OVERLAY_LINK]-() WHERE l.id IN $ids RETURN count(l) AS total', { ids: [outgoing.id, incoming.id] })).toBe(0);
+    expect(await count('MATCH (a:OpenChatPrivateAsk {id: $id}) RETURN count(a) AS total', { id: `ask-${suffix}` })).toBe(0);
+    // Only the owner's own records go: another owner's row naming the same id stays.
+    expect(await count('MATCH (r:OpenChatNoteReview {id: $id}) RETURN count(r) AS total', { id: `foreign-review-${suffix}` })).toBe(1);
+    // What it was linked to stays, with its other links.
+    const keptAfter = await graph.getThing(dana, kept.id);
+    expect(keptAfter.links.map(value => value.id)).toEqual([unrelated.id]);
+    expect((await graph.getPersonOverlay(dana, alex)).links.some(value => value.id === incoming.id)).toBe(false);
+    expect((await graph.listOwnerLinks(dana, `Doomed ${suffix}`)).links).toEqual([]);
+    // The name is free again: saving it now makes a new entity.
+    expect((await graph.resolvePrivateThing(dana, { kind: 'person', name: `Doomed ${suffix}`, createNew: true, clientRequestId: `doomed-${suffix}` })).id).not.toBe(doomed.id);
+    // Deleting again, or an id that never existed, is consistently 404.
+    expect(await failure(() => graph.deletePrivateThing(dana, doomed.id))).toMatchObject({ status: 404 });
+    expect(await failure(() => graph.deletePrivateThing(dana, 'no-such-thing-id'))).toMatchObject({ status: 404 });
+
+    // An Unlinked profile's saved thing can be deleted too, freeing its ref.
+    const maya = await graph.getUnlinkedPersonOverlay(dana, 'maya-1');
+    expect(maya.thingId).not.toBeNull();
+    expect((await graph.deletePrivateThing(dana, maya.thingId!)).deleted).toBe(true);
+    expect((await graph.getUnlinkedPersonOverlay(dana, 'maya-1')).thingId).toBeNull();
+    const session2 = driver.session();
+    try { await session2.run('MATCH (r:OpenChatNoteReview {id: $id}) DETACH DELETE r', { id: `foreign-review-${suffix}` }); } finally { await session2.close(); }
+  });
+  it('links and notes imported LinkedIn contacts by connection id or address, keyed by the hashed slug', async () => {
+    const stella = await graph.addLink(dana, { kind: 'user', id: alex }, 'knows', { kind: 'unlinked', id: CONNECTION.stella });
+    expect(stella.other).toMatchObject({ kind: 'person', name: 'Stella Import', linkedinRefHash: HASH_STELLA, unlinkedConnectionId: CONNECTION.stella });
+    expect(stella.other.unlinkedProfileId).toBeUndefined();
+    // The same contact by LinkedIn address is the same entity; retries never duplicate.
+    const byUrl = await graph.addLink(dana, { kind: 'user', id: alex }, 'knows', { kind: 'unlinked', id: 'https://www.linkedin.com/in/stella-import' });
+    expect(byUrl.id).toBe(stella.id);
+    // Imported contact as the subject of a note and a link to another imported contact.
+    await graph.addNote(dana, { kind: 'unlinked', id: CONNECTION.stella }, 'Founder; met at the fintech dinner');
+    const pair = await graph.addLink(dana, { kind: 'unlinked', id: CONNECTION.stella }, 'worked with', { kind: 'unlinked', id: CONNECTION.jun });
+    expect(pair.other).toMatchObject({ name: 'Jun Import', linkedinRefHash: HASH_JUN, unlinkedConnectionId: CONNECTION.jun });
+
+    const card = await graph.getUnlinkedPersonOverlay(dana, CONNECTION.stella);
+    expect(card).toMatchObject({ profileId: null, connectionId: CONNECTION.stella, linkedinRefHash: HASH_STELLA, name: 'Stella Import' });
+    expect(card.notes.map(value => value.text)).toEqual(['Founder; met at the fintech dinner']);
+    expect(card.links.map(value => [value.relation, value.direction, value.other.unlinkedConnectionId ?? value.other.id]).sort()).toEqual([['knows', 'in', alex], ['worked with', 'out', CONNECTION.jun]]);
+    expect((await graph.getUnlinkedPersonOverlay(dana, 'linkedin.com/in/stella-import')).thingId).toBe(card.thingId);
+
+    // Stored as linkedin:in:<hash>: no connection id or address in the overlay.
+    const session = driver.session();
+    try {
+      const refs = (await session.run('MATCH (r:OverlayRef)-[:REF_OF]->(e:OverlayEntity {id: $id}) RETURN collect(r.ref) AS refs', { id: card.thingId })).records[0]!.get('refs') as string[];
+      expect(refs).toEqual([`linkedin:in:${HASH_STELLA}`]);
+    } finally { await session.close(); }
+
+    // Reads show imported contacts with name and connection id.
+    const search = await graph.searchPrivate(dana, { q: 'Stella' });
+    expect(search.things).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Stella Import', unlinkedConnectionId: CONNECTION.stella, linkedinRefHash: HASH_STELLA })]));
+    const around = await graph.getNeighbourhood(dana, { kind: 'unlinked', id: CONNECTION.stella }, 1);
+    expect(around.center).toMatchObject({ name: 'Stella Import', unlinkedConnectionId: CONNECTION.stella });
+    expect(around.nodes.map(value => value.name).sort()).toEqual([alexName, 'Jun Import'].sort());
+    const listed = await graph.listOwnerLinks(dana, 'worked with');
+    expect(listed.links.find(value => value.id === pair.id)).toMatchObject({ from: { unlinkedConnectionId: CONNECTION.stella }, to: { unlinkedConnectionId: CONNECTION.jun } });
+    expect((await graph.getThing(dana, card.thingId!))).toMatchObject({ linkedinRefHash: HASH_STELLA, unlinkedConnectionId: CONNECTION.stella });
+    // When Unlinked cannot answer, reads still work, just without the connection id.
+    unlinked.byHash.mockResolvedValueOnce({ ok: false, code: 'upstream_unavailable' });
+    const degraded = await graph.searchPrivate(dana, { q: 'Stella' });
+    expect(degraded.things.find(value => value.name === 'Stella Import')).toMatchObject({ linkedinRefHash: HASH_STELLA });
+    expect(degraded.things.find(value => value.name === 'Stella Import')!.unlinkedConnectionId).toBeUndefined();
+
+    // A contact with nothing to key it by is refused; unknown or another owner's ids are 404.
+    expect(await failure(() => graph.addNote(dana, { kind: 'unlinked', id: CONNECTION.nameless }, 'x'))).toMatchObject({ status: 409 });
+    expect(await failure(() => graph.addNote(dana, { kind: 'unlinked', id: 'f'.repeat(64) }, 'x'))).toMatchObject({ status: 404 });
+    expect(await failure(() => graph.addNote(other, { kind: 'unlinked', id: CONNECTION.stella }, 'x'))).toMatchObject({ status: 404 });
+    expect(await graph.getUnlinkedPersonOverlay(other, CONNECTION.stella)).toMatchObject({ thingId: null, notes: [], links: [] });
+    // A same-named person saved by name stays separate (never merged by name).
+    const byName = await graph.resolvePrivateThing(dana, { kind: 'person', name: 'Stella Import', createNew: true, clientRequestId: `stella-name-${suffix}` });
+    expect(byName.id).not.toBe(card.thingId);
+  });
+
+  it('an imported contact who is also published is one entity, in either order', async () => {
+    // Published profile written first (maya-1), then the imported contact with the same person: joins it.
+    await graph.addNote(dana, { kind: 'unlinked', id: 'maya-1' }, 'Published first');
+    const published = await graph.getUnlinkedPersonOverlay(dana, 'maya-1');
+    expect(published).toMatchObject({ profileId: 'maya-1', linkedinRefHash: null });
+    const imported = await graph.addNote(dana, { kind: 'unlinked', id: CONNECTION.maya }, 'Imported and published');
+    expect(imported.text).toBe('Imported and published');
+    const joined = await graph.getUnlinkedPersonOverlay(dana, CONNECTION.maya);
+    expect(joined).toMatchObject({ thingId: published.thingId, profileId: 'maya-1', linkedinRefHash: HASH_MAYA, connectionId: CONNECTION.maya });
+    // Imported first (nola, unpublished), later published: the published ref joins the same entity.
+    await graph.addNote(dana, { kind: 'unlinked', id: CONNECTION.nola }, 'Imported before publishing');
+    const before = await graph.getUnlinkedPersonOverlay(dana, CONNECTION.nola);
+    expect(before.profileId).toBeNull();
+    nolaPublished = true;
+    await graph.addNote(dana, { kind: 'unlinked', id: CONNECTION.nola }, 'Still the same person');
+    const after = await graph.getUnlinkedPersonOverlay(dana, 'nola-pub');
+    expect(after).toMatchObject({ thingId: before.thingId, profileId: 'nola-pub', linkedinRefHash: HASH_NOLA });
+    expect(after.notes.map(value => value.text).sort()).toEqual(['Imported before publishing', 'Still the same person']);
   });
 });

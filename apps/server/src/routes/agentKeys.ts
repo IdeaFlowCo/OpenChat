@@ -19,7 +19,7 @@ import { Router, Request, Response } from 'express';
 import crypto from 'node:crypto';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireDirectSession } from '../middleware/auth.js';
 import { evictFromCache } from '../middleware/resolveActor.js';
 import { acquireContextAclLocks } from '../services/contextAccess.js';
 
@@ -72,7 +72,7 @@ function decryptKey(keyCiphertext: string, keyIv: string): string | null {
 
 // ── POST /api/agent-keys ──────────────────────────────────────────────────────
 
-router.post('/', requireAuth, async (req: Request, res: Response) => {
+router.post('/', requireAuth, requireDirectSession, async (req: Request, res: Response) => {
   if (!getEncryptionKey()) {
     res.status(503).json({ error: 'Server not configured for agent keys' });
     return;
@@ -162,7 +162,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
 // ── GET /api/agent-keys ───────────────────────────────────────────────────────
 
-router.get('/', requireAuth, async (req: Request, res: Response) => {
+router.get('/', requireAuth, requireDirectSession, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const session = getDriver().session();
   try {
@@ -183,7 +183,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
 // ── GET /api/agent-keys/:id/reveal ───────────────────────────────────────────
 
-router.get('/:id/reveal', requireAuth, async (req: Request, res: Response) => {
+router.get('/:id/reveal', requireAuth, requireDirectSession, async (req: Request, res: Response) => {
   if (!getEncryptionKey()) {
     res.status(503).json({ error: 'Server not configured for agent keys' });
     return;
@@ -250,7 +250,7 @@ router.get('/:id/reveal', requireAuth, async (req: Request, res: Response) => {
 
 // ── PATCH /api/agent-keys/:id ────────────────────────────────────────────────
 
-router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
+router.patch('/:id', requireAuth, requireDirectSession, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const { id } = req.params;
   const { name, scopes } = req.body as { name?: string; scopes?: string[] };
@@ -311,7 +311,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 
 // ── DELETE /api/agent-keys/:id ───────────────────────────────────────────────
 
-router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
+router.delete('/:id', requireAuth, requireDirectSession, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const { id } = req.params;
   const session = getDriver().session();

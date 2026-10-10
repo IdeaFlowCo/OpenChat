@@ -74,6 +74,19 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   next();
 }
 
+/**
+ * Embedded sessions (the 10-minute token OpenChat issues to Unlinked's embedded
+ * chat) act for the person only inside that embed. Credentials, delegation
+ * consent, data export and account deletion need a direct OpenChat sign-in.
+ */
+export function requireDirectSession(req: Request, res: Response, next: NextFunction): void {
+  if (req.user?.embedded) {
+    res.status(403).json({ error: 'Sign in to OpenChat directly to do this' });
+    return;
+  }
+  next();
+}
+
 export function optionalAuth(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
 

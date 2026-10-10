@@ -44,7 +44,7 @@ import { AppIcon } from '../components/AppIcon';
 import { usePrivateName } from '../contexts/PrivateNamesContext';
 import { ConversationHeaderContent } from '../components/ConversationHeaderContent';
 import { isPlaceholderEmail } from '../utils/email';
-import { NewMessagesPill } from '../components/NewMessagesPill';
+import { JumpToBottomButton } from '../components/JumpToBottomButton';
 import { ChatEmptyState } from '../components/ChatEmptyState';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import type { NavProp, RouteProps } from '../navigation/types';
@@ -341,6 +341,8 @@ export function ChatScreen({
   const [hashtagSuggestions, setHashtagSuggestions] = useState<HashtagSuggestion[]>([]);
   const [hashtagSelectedIndex, setHashtagSelectedIndex] = useState(0);
   const [hashtagDismissed, setHashtagDismissed] = useState(false);
+  // Drives the composer's hide-keyboard button (native only).
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const textInputRef = useRef<TextInput>(null);
   const sendInFlightRef = useRef(false);
   const listRef = useRef<FlatList<RenderRow>>(null);
@@ -450,7 +452,7 @@ export function ChatScreen({
   // ── Scroll behavior ────────────────────────────────────────────────────────
   // We track "is the user near the bottom?" both as a ref (for synchronous
   // reads inside onScroll / the messages effect, without re-creating handlers
-  // each render) AND as a state (so the NewMessagesPill can react). The ref
+  // each render) AND as a state (so the jump-to-latest arrow can react). The ref
   // is the source of truth for decisions; the state is for rendering only.
   const isAtBottomRef = useRef(true);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -824,7 +826,7 @@ export function ChatScreen({
     }
   };
 
-  // R5. Pill tap → scroll to latest. onScroll will fire as the scroll
+  // R5. Jump-to-latest arrow tap → scroll to latest. onScroll will fire as the scroll
   // animates and naturally flip isAtBottom + clear unreadCount.
   const handlePillPress = () => {
     listRef.current?.scrollToEnd({ animated: true });
@@ -849,10 +851,17 @@ export function ChatScreen({
       setMentionQuery(null);
       setHashtagDismissed(true);
     });
+    // iOS fires the Will* events, Android only the Did* ones.
+    const visibleSubs = Platform.OS === 'ios'
+      ? [Keyboard.addListener('keyboardWillShow', () => setKeyboardVisible(true)),
+        Keyboard.addListener('keyboardWillHide', () => setKeyboardVisible(false))]
+      : [Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true)),
+        Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false))];
     return () => {
       willShowSub.remove();
       showSub.remove();
       hideSub.remove();
+      visibleSubs.forEach((sub) => sub.remove());
     };
   }, [measureTop]);
 
@@ -1662,8 +1671,8 @@ export function ChatScreen({
             />
           )}
         />
-        {unreadCount > 0 && !isAtBottom && (
-          <NewMessagesPill count={unreadCount} onPress={handlePillPress} />
+        {!isAtBottom && (
+          <JumpToBottomButton unreadCount={unreadCount} onPress={handlePillPress} />
         )}
         </View>
       )}
@@ -1833,6 +1842,20 @@ export function ChatScreen({
       )}
 
       <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
+        {/* Hide-keyboard button: a visible way out while typing, beyond the
+            swipe-down-on-the-list gesture. Native only; web has no
+            on-screen keyboard to dismiss. */}
+        {keyboardVisible && Platform.OS !== 'web' && (
+          <TouchableOpacity
+            onPress={() => Keyboard.dismiss()}
+            style={styles.attachBtn}
+            hitSlop={{ top: 8, right: 4, bottom: 8, left: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Hide keyboard"
+          >
+            <AppIcon name="chevron-down" color={c.textSecondary} size={22} />
+          </TouchableOpacity>
+        )}
         {/* Attachment pick button (OpenChat-6bg) — hidden in edit mode or while recording */}
         {!editingMessage && !isRecording && (
           <TouchableOpacity

@@ -17,7 +17,7 @@ import { UnlinkedSessionGate } from './src/components/UnlinkedSessionGate';
  */
 
 import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Keyboard, Platform, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -409,6 +409,16 @@ function focusedChatId(state: NestedNavigationState): string | null {
   return route.name === 'Chat' ? route.params?.conversationId ?? null : null;
 }
 
+// True when a chat thread is focused with a screen beneath it in its stack,
+// so the native back button and edge swipe can leave it.
+function chatCanGoBack(state: NestedNavigationState, depth = 0): boolean {
+  const index = state.index ?? 0;
+  const route = state.routes[index];
+  if (!route) return false;
+  if (route.state) return chatCanGoBack(route.state, depth + 1);
+  return route.name === 'Chat' && depth > 0 && index > 0;
+}
+
 function TabIcon({ label, icon, focused, color, c, stacked }: {
   /** Emoji fallback — used only when `icon` is not provided. */
   label?: string;
@@ -512,16 +522,25 @@ function AuthedTabs({
   // The pill's bottom half already clears the home indicator, so borrow a
   // little of the inset instead of stacking the full 34pt below the labels.
   const stackedBottomPadding = Math.max(insets.bottom - 8, 0);
+  // Like Messages/WhatsApp, a phone-width chat thread owns the whole screen:
+  // the tab bar shows on the lists, and the thread leaves by back/edge swipe.
+  const narrow = width < 768;
   return (
     <Tab.Navigator
-      tabBar={(props) => (
-        <View>
-          <GlobalRecordingBar
-            activeConversationId={focusedChatId(props.state as unknown as NestedNavigationState)}
-          />
-          {!isUnlinkedEmbed() && <BottomTabBar {...props} />}
-        </View>
-      )}
+      tabBar={(props) => {
+        const navState = props.state as unknown as NestedNavigationState;
+        const hideInThread = narrow && chatCanGoBack(navState);
+        return (
+          <View>
+            <GlobalRecordingBar activeConversationId={focusedChatId(navState)} />
+            {!isUnlinkedEmbed() && !hideInThread && <BottomTabBar {...props} />}
+          </View>
+        );
+      }}
+      // A tab switch ends text editing, as in iOS system apps. Otherwise the
+      // previous tab's focused input keeps the keyboard up over the new tab's
+      // tab bar, leaving no visible way back.
+      screenListeners={{ blur: () => Keyboard.dismiss() }}
       screenOptions={{
         headerShown: false,
         tabBarStyle: [

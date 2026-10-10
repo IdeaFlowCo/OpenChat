@@ -5,8 +5,9 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  addLink: vi.fn(), addNote: vi.fn(), createPrivateThing: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
-  listDue: vi.fn(), listThings: vi.fn(), updateNote: vi.fn(), updatePersonCard: vi.fn(),
+  addLink: vi.fn(), addNote: vi.fn(), createPrivateThing: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), deletePrivateThing: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
+  listDue: vi.fn(), listThings: vi.fn(), updateNote: vi.fn(), updatePersonCard: vi.fn(), updateLink: vi.fn(), searchPrivate: vi.fn(), getNeighbourhood: vi.fn(),
+  updatePrivateThing: vi.fn(),
 }));
 vi.mock('../src/services/privateGraph.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/privateGraph.js')>('../src/services/privateGraph.js');
@@ -36,7 +37,7 @@ describe('private graph routes', () => {
   });
 
   it('requires sign-in on every route', async () => {
-    for (const [method, path] of [['GET', '/due'], ['GET', '/people/bob'], ['PATCH', '/people/bob'], ['POST', '/people/bob/notes'], ['POST', '/people/bob/links'], ['GET', '/things'], ['POST', '/things'], ['GET', '/things/t1'], ['POST', '/things/t1/notes'], ['POST', '/things/t1/links'], ['PATCH', '/notes/n1'], ['DELETE', '/notes/n1'], ['DELETE', '/links/l1']]) {
+    for (const [method, path] of [['GET', '/due'], ['GET', '/people/bob'], ['PATCH', '/people/bob'], ['POST', '/people/bob/notes'], ['POST', '/people/bob/links'], ['GET', '/things'], ['POST', '/things'], ['GET', '/things/t1'], ['POST', '/things/t1/notes'], ['POST', '/things/t1/links'], ['PATCH', '/notes/n1'], ['DELETE', '/notes/n1'], ['DELETE', '/links/l1'], ['DELETE', '/things/t1'], ['PATCH', '/things/t1']]) {
       expect((await fetch(`${baseUrl}/api/private${path}`, { method })).status, `${method} ${path}`).toBe(401);
     }
     expect(Object.values(mocks).every(mock => mock.mock.calls.length === 0)).toBe(true);
@@ -50,13 +51,46 @@ describe('private graph routes', () => {
     expect((await call('/people/bob')).status).toBe(200);
     expect(mocks.getPersonOverlay).toHaveBeenCalledWith('alice', 'bob');
     expect((await call('/people/bob/notes', { method: 'POST', body: JSON.stringify({ text: 'hi', ownerId: 'mallory' }) })).status).toBe(201);
-    expect(mocks.addNote).toHaveBeenCalledWith('alice', { kind: 'user', id: 'bob' }, 'hi');
+    expect(mocks.addNote).toHaveBeenCalledWith('alice', { kind: 'user', id: 'bob' }, 'hi', { author: 'owner', source: 'app', assertion: 'stated' });
     expect((await call('/people/bob', { method: 'PATCH', body: JSON.stringify({ important: true, ownerId: 'mallory' }) })).status).toBe(200);
     expect(mocks.updatePersonCard).toHaveBeenCalledWith('alice', 'bob', { important: true });
     expect((await call('/people/bob', { method: 'PATCH', body: JSON.stringify({ ownerId: 'mallory' }) })).status).toBe(400);
     expect(mocks.updatePersonCard).toHaveBeenCalledTimes(1);
     expect((await call('/things/t1/links', { method: 'POST', body: JSON.stringify({ relation: 'part of', to: { kind: 'project', name: 'Atlas' } }) })).status).toBe(201);
-    expect(mocks.addLink).toHaveBeenCalledWith('alice', { kind: 'thing', id: 't1' }, 'part of', { kind: 'project', name: 'Atlas' });
+    expect(mocks.addLink).toHaveBeenCalledWith('alice', { kind: 'thing', id: 't1' }, 'part of', { kind: 'project', name: 'Atlas' }, { author: 'owner', source: 'app', assertion: 'stated' }, {});
+  });
+
+  it('records the signed-in owner as author whatever the body claims', async () => {
+    mocks.addLink.mockResolvedValue({ id: 'l1' });
+    expect((await call('/people/bob/links', { method: 'POST', body: JSON.stringify({ relation: 'knows', to: { kind: 'user', id: 'carol' }, author: 'agent:Spoof', source: 'connector', assertion: 'inferred' }) })).status).toBe(201);
+    expect(mocks.addLink).toHaveBeenCalledWith('alice', { kind: 'user', id: 'bob' }, 'knows', { kind: 'user', id: 'carol' }, { author: 'owner', source: 'app', assertion: 'stated' }, {});
+  });
+
+  it('passes a new link\'s relationType, since, until and context, and only those', async () => {
+    mocks.addLink.mockResolvedValue({ id: 'l2' });
+    const body = { relation: 'old flame', to: { kind: 'user', id: 'carol' }, relationType: 'knows', since: '2019', until: null, context: 'AGI House', colour: 'red' };
+    expect((await call('/people/bob/links', { method: 'POST', body: JSON.stringify(body) })).status).toBe(201);
+    expect(mocks.addLink).toHaveBeenCalledWith('alice', { kind: 'user', id: 'bob' }, 'old flame', { kind: 'user', id: 'carol' }, { author: 'owner', source: 'app', assertion: 'stated' }, { relationType: 'knows', since: '2019', until: null, context: 'AGI House' });
+  });
+
+  it('edits a relation, searches and reads a neighbourhood for the signed-in owner only', async () => {
+    mocks.updateLink.mockResolvedValue({ link: { id: 'l1', relation: 'cousin of' }, merged: false });
+    const edited = await call('/links/l1', { method: 'PATCH', body: JSON.stringify({ relation: 'cousin of', ownerId: 'mallory' }) });
+    expect([edited.status, await edited.json()]).toEqual([200, { link: { id: 'l1', relation: 'cousin of' }, merged: false }]);
+    expect(mocks.updateLink).toHaveBeenCalledWith('alice', 'l1', { relation: 'cousin of' }, { author: 'owner', source: 'app', assertion: 'stated' });
+    await call('/links/l1', { method: 'PATCH', body: JSON.stringify({ assertion: 'inferred', context: null, author: 'agent:Spoof' }) });
+    expect(mocks.updateLink).toHaveBeenLastCalledWith('alice', 'l1', { assertion: 'inferred', context: null }, { author: 'owner', source: 'app', assertion: 'stated' });
+
+    mocks.searchPrivate.mockResolvedValue({ things: [], links: [], truncated: false });
+    expect((await call('/search?q=maya&relationType=family&kind=person&limit=5')).status).toBe(200);
+    expect(mocks.searchPrivate).toHaveBeenCalledWith('alice', { q: 'maya', relationType: 'family', kind: 'person', limit: '5' });
+
+    mocks.getNeighbourhood.mockResolvedValue({ center: { kind: 'user', id: 'bob', name: 'Bob' }, depth: 2, nodes: [], links: [], truncated: false });
+    expect((await call('/neighbourhood?subjectKind=user&subjectId=bob&depth=2')).status).toBe(200);
+    expect(mocks.getNeighbourhood).toHaveBeenCalledWith('alice', { kind: 'user', id: 'bob' }, '2');
+    for (const bad of ['/neighbourhood', '/neighbourhood?subjectKind=planet&subjectId=x', '/neighbourhood?subjectKind=user']) expect((await call(bad)).status, bad).toBe(400);
+    expect(mocks.getNeighbourhood).toHaveBeenCalledTimes(1);
+    for (const [method, path] of [['PATCH', '/links/l1'], ['GET', '/search'], ['GET', '/neighbourhood']]) expect((await fetch(`${baseUrl}/api/private${path}`, { method })).status, `${method} ${path}`).toBe(401);
   });
 
   it('creates a saved person only for the signed-in owner without account binding', async () => {
@@ -64,7 +98,28 @@ describe('private graph routes', () => {
     const response = await call('/things', {method:'POST',body:JSON.stringify({kind:'person',name:'Chet',ownerId:'mallory',userId:'other-account'})});
     expect(response.status).toBe(201);
     expect(await response.json()).toEqual({id:'saved-person',kind:'person',name:'Chet'});
-    expect(mocks.createPrivateThing).toHaveBeenCalledWith('alice','person','Chet');
+    expect(mocks.createPrivateThing).toHaveBeenCalledWith('alice','person','Chet',undefined);
+  });
+
+  it('edits a saved thing only for the signed-in owner', async () => {
+    mocks.updatePrivateThing.mockResolvedValue({ id: 't1', kind: 'project', name: 'Bloomscroll', description: 'a feed that nudges you into coherence' });
+    const response = await call('/things/t1', { method: 'PATCH', body: JSON.stringify({ kind: 'project', description: 'a feed that nudges you into coherence' }) });
+    expect([response.status, (await response.json()).kind]).toEqual([200, 'project']);
+    expect(mocks.updatePrivateThing).toHaveBeenCalledWith('alice', 't1', { kind: 'project', description: 'a feed that nudges you into coherence' });
+    mocks.updatePrivateThing.mockRejectedValueOnce(new PrivateGraphError(404, 'Not found'));
+    expect((await call('/things/someone-elses', { method: 'PATCH', body: JSON.stringify({ description: 'x' }) })).status).toBe(404);
+  });
+
+  it('deletes a saved thing only for the signed-in owner, and reports a missing one as not found', async () => {
+    mocks.deletePrivateThing.mockResolvedValueOnce({ deleted: true, id: 't1', notesRemoved: 2, linksRemoved: 1 });
+    const response = await call('/things/t1', { method: 'DELETE', body: JSON.stringify({ ownerId: 'mallory' }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ deleted: true, id: 't1', notesRemoved: 2, linksRemoved: 1 });
+    expect(mocks.deletePrivateThing).toHaveBeenCalledWith('alice', 't1');
+    mocks.deletePrivateThing.mockRejectedValueOnce(new PrivateGraphError(404, 'Not found'));
+    const again = await call('/things/t1', { method: 'DELETE' });
+    expect(again.status).toBe(404);
+    expect(await again.json()).toEqual({ error: 'Not found' });
   });
 
   it('reports a missing or unavailable person as not found, never as a sign-in failure', async () => {
