@@ -1,5 +1,6 @@
 import contextIntentionsRoutes from './routes/contextIntentions.js';
 import conversationContentRoutes from './routes/conversationContent.js';
+import messageCapturesRoutes from './routes/messageCaptures.js';
 import contextWebhooksRoutes from './routes/contextWebhooks.js';
 import { ensureContextWebhookIndexes,startContextWebhookWorker } from './services/contextWebhooks.js';
 import unlinkedMessagingRoutes from './routes/unlinkedMessaging.js';
@@ -106,6 +107,7 @@ app.use(cors({
   credentials: true
 }));
 app.post('/api/connector/mcp', express.raw({ type:'application/json', limit:'1mb' }), handleIdeaflowConnector);
+app.use('/api/captures/ingest', express.json({ limit: '2mb' }));
 app.use(express.json());
 app.use('/api', connectorOperationGuard);
 
@@ -450,6 +452,7 @@ app.use('/api/client-logs', clientLogsRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/thoughts', thoughtsRoutes);
+app.use('/api/captures', messageCapturesRoutes);
 app.use('/api/agent-keys', agentKeysRoutes);
 app.use('/api/webhooks', webhooksRoutes);
 app.use('/api/feedback', feedbackRoutes);

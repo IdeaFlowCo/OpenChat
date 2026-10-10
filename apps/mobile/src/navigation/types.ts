@@ -81,6 +81,7 @@ export type RootStackParamList = {
 
 // ── Thoughts stack (OpenChat-zi1) ─────────────────────────────────────────────
 export type ThoughtsStackParamList = {
+  SavedMessages: undefined;
   ThoughtsList: undefined;
   OriginalMessage: { thoughtId: string };
   /** Add / edit a thought. When `thought` is provided it's edit mode. */

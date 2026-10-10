@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
+import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => {
   return {
     state,
     sessionRun: vi.fn(async (query: string, params: Record<string, unknown>) => {
+      if(query.includes('OpenChatCapture'))return {records:[{get:(key:string)=>key==='c'?({properties:{id:'saved-1',ownerId:params.userId,text:'Private saved message',events:['internal-event']}}):({id:'thread-1',contactDetailsJson:JSON.stringify([{label:'City',value:'Example City'}])})}]};
       if (query.includes('CREATE (u)-[:OWNS_KEY]->(k)')) {
         state.agentKeys.push({
           id: params.id as string,
@@ -111,6 +113,16 @@ describe('GET /api/auth/export', () => {
     }
   });
 
+  it('denies embedded archive exports before reading private data', async () => {
+    const app = express();
+    app.use('/api/auth', authRoutes);
+    const token = jwt.sign({ userId: 'owner-1', email: 'owner@example.com', embedded: 'unlinked' }, process.env.JWT_SECRET!);
+    const response = await request(app).get('/api/auth/export?range=all_time').set('Authorization', `Bearer ${token}`);
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error: 'Sign in to OpenChat directly to do this' });
+    expect(mocks.sessionRun).not.toHaveBeenCalled();
+  });
+
   it('includes an agent key created through the agent-key route', async () => {
     const app = express();
     app.use(express.json());
@@ -160,6 +172,7 @@ describe('GET /api/auth/export', () => {
     ]);
     expect(exported).toMatchObject({
       schema: 'openchat.account_export.v1',
+      savedMessages: [{ id: 'saved-1', text: 'Private saved message', sourceThread: { id: 'thread-1', contactDetailsJson: JSON.stringify([{ label: 'City', value: 'Example City' }]) } }],
       intentDrafts: [{
         id: 'draft-1', ownerUserId: 'owner-1', details: 'owner-private',
         source: 'private-message', provenance: { messageId: 'source-1' },

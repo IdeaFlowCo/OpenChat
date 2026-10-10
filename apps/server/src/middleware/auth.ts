@@ -100,3 +100,11 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction): v
 
   next();
 }
+
+export function requireDirectHumanSession(req: Request, res: Response, next: NextFunction): void {
+  if (!req.user || req.user.embedded || req.agentKeyId || req.connectorDelegation) {
+    res.status(404).json({ error: 'Open this in your signed-in OpenChat app' });
+    return;
+  }
+  next();
+}

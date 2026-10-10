@@ -1,0 +1,17 @@
+{
+  "labels": [
+    "Bank account", "account", "Financial account number", "routing", "Routing number",
+    "IBAN", "ＳＳＮ", "social security", "social-security number", "tax ID", "Tax_ID",
+    "tax identification", "passport", "driver license", "Driver’s license", "drivers licence",
+    "card number", "Credit card", "Debit card", "payment card", "national ID", "government-id",
+    "ＣＯＮＦＩＤＥＮＴＩＡＬ"
+  ],
+  "ordinary": [
+    {"text":"Apartment 3", "label":"Mailing address"},
+    {"text":"555-0100", "label":"Phone"},
+    {"text":"October 9", "label":"Birthday"},
+    {"text":"https://example.test/article #reading", "label":"Website"},
+    {"text":"Accountability matters #remember", "label":"Note"},
+    {"text":"A new idea #longevity", "label":"Note"}
+  ]
+}

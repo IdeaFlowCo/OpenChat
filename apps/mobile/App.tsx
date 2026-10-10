@@ -88,6 +88,7 @@ import { AgentKeysScreen } from './src/screens/AgentKeysScreen';
 import { AddAgentKeyScreen } from './src/screens/AddAgentKeyScreen';
 import { AgentKeyDetailScreen } from './src/screens/AgentKeyDetailScreen';
 import { ThoughtsScreen } from './src/screens/ThoughtsScreen';
+import { SavedMessagesScreen } from './src/screens/SavedMessagesScreen';
 import { AddEditThoughtScreen } from './src/screens/AddEditThoughtScreen';
 import { ConversationThoughtsScreen } from './src/screens/ConversationThoughtsScreen';
 import { AsksScreen } from './src/screens/AsksScreen';
@@ -334,6 +335,11 @@ function ThoughtsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         contentStyle: { backgroundColor: c.background },
       }}
     >
+      <ThoughtsStack.Screen
+        name="SavedMessages"
+        component={SavedMessagesScreen}
+        options={{ title: 'Streams' }}
+      />
       <ThoughtsStack.Screen
         name="ThoughtsList"
         component={ThoughtsScreen}
@@ -597,10 +603,10 @@ function AuthedTabs({
       <Tab.Screen
         name="ThoughtsTab"
         options={{
-          title: 'Stream',
-          tabBarAccessibilityLabel: 'Stream',
+          title: 'Streams',
+          tabBarAccessibilityLabel: 'Streams',
           tabBarLabel: ({ focused, color }) => (
-            <TabLabel text="Stream" focused={focused} color={color} />
+            <TabLabel text="Streams" focused={focused} color={color} />
           ),
           tabBarIcon: ({ focused, color }) => (
             <TabIcon icon="thought" focused={focused} color={color} c={c} stacked={stacked} />
