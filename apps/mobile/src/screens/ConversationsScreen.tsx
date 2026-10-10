@@ -31,6 +31,8 @@ import { serif } from '../theme/typography';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { AppIcon } from '../components/AppIcon';
+import { Chip, ListRow } from '../components/ui';
+import { formatListTime, onlinePresence } from '../utils/listTime';
 import { AgentOverlayButton } from '../components/AgentOverlayButton';
 import { HeaderBarButton } from '../components/HeaderBarButton';
 import { ConnectionStatusLine } from '../components/ConnectionStatusLine';
@@ -45,16 +47,6 @@ import {
 } from '../utils/conversationDisplay';
 import { getConversationPreview } from '../utils/conversationPresentation';
 
-function formatTime(iso: string | undefined): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  if (diff < 60_000) return 'now';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
-  return d.toLocaleDateString();
-}
 
 function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
   if (conv.type === 'direct') {
@@ -165,7 +157,7 @@ function ConvRow({
                 <AppIcon name="mute" color={textMetadata} size={13} strokeWidth={1.8} />
               )}
               <Text style={[styles.rowTime, { color: textMetadata }]}>
-                {formatTime(item.lastMessageAt)}
+                {formatListTime(item.lastMessageAt)}
               </Text>
             </View>
           </View>
@@ -285,11 +277,16 @@ export function ConversationsScreen() {
         keyExtractor={item => item.id}
         ListHeaderComponent={
           <View>
-          {!isUnlinkedEmbed() && <View style={[styles.peopleDoors, { borderBottomColor: c.divider }]}>
-            <TouchableOpacity onPress={() => navigation.navigate('Friends', { section: 'friends' })} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>People</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation.navigate('Friends', { section: 'requests' })} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>{friendRequestCount ? `Requests (${friendRequestCount})` : 'Requests'}</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation.navigate('NewConversation')} style={styles.peopleDoor}><Text style={{ color: c.primary, fontWeight: '700' }}>Find people</Text></TouchableOpacity>
-          </View>}
+          {!isUnlinkedEmbed() && (
+            <ListRow
+              icon="people"
+              title="People"
+              onPress={() => navigation.navigate('Friends', { section: friendRequestCount ? 'requests' : 'friends' })}
+              accessibilityLabel={friendRequestCount ? `People, ${friendRequestCount} friend ${friendRequestCount === 1 ? 'request' : 'requests'}` : 'People'}
+              trailing={friendRequestCount ? <Chip label={`Requests ${friendRequestCount}`} selected /> : undefined}
+              style={[styles.peopleRow, { borderBottomColor: c.divider }]}
+            />
+          )}
           <StoriesStrip
             onCreate={() => navigation.navigate('StoryComposer')}
             onOpenStory={(story) => navigation.navigate('StoryViewer', { story })}
@@ -314,7 +311,7 @@ export function ConversationsScreen() {
               No chats yet
             </Text>
             <Text style={{ color: c.textSecondary, textAlign: 'center', paddingHorizontal: 32 }}>
-              Tap ＋ in the top-right to start a direct message or create a group.
+              Start a direct message or a group.
             </Text>
             <TouchableOpacity
               onPress={() => navigation.navigate('NewConversation')}
@@ -343,7 +340,7 @@ export function ConversationsScreen() {
               unread={unread}
               isMuted={isMuted}
               someoneTyping={someoneTyping}
-              presenceStatus={live?.status || other?.presenceStatus}
+              presenceStatus={onlinePresence(live?.status || other?.presenceStatus)}
               isBot={other?.isBot}
               pulseIn={pulseIn}
               primaryColor={c.primary}
@@ -366,8 +363,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   headerAvatarAction: { paddingHorizontal: 8 },
   headerTitleWrap: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
-  peopleDoors: { flexDirection: 'row', flexWrap: 'wrap', borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 16 },
-  peopleDoor: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, marginRight: 8 },
+  peopleRow: { borderBottomWidth: StyleSheet.hairlineWidth },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

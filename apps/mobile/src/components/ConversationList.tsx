@@ -40,19 +40,10 @@ import {
   getUserDisplayName,
 } from '../utils/conversationDisplay';
 import { StoriesStrip } from './StoriesStrip';
+import { formatListTime, onlinePresence } from '../utils/listTime';
 import type { FeedStory } from '../api/client';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
 
-function formatTime(iso: string | undefined): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  if (diff < 60_000) return 'now';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
-  return d.toLocaleDateString();
-}
 
 function getDisplayTitle(conv: Conversation, me: CurrentUser | null): string {
   if (conv.type === 'direct') {
@@ -121,7 +112,7 @@ function ConversationRow({ item, isActive, onPress, compact }: RowProps) {
             name={item.type === 'direct' ? (other?.name || other?.email || title) : title}
             email={other?.email}
             isBot={other?.isBot}
-            presenceStatus={item.type === 'direct' ? (live?.status || other?.presenceStatus) : undefined}
+            presenceStatus={item.type === 'direct' ? onlinePresence(live?.status || other?.presenceStatus) : undefined}
             size={36}
           />
           {unread > 0 && (
@@ -151,7 +142,7 @@ function ConversationRow({ item, isActive, onPress, compact }: RowProps) {
         name={item.type === 'direct' ? (other?.name || other?.email || title) : title}
         email={other?.email}
         isBot={other?.isBot}
-        presenceStatus={item.type === 'direct' ? (live?.status || other?.presenceStatus) : undefined}
+        presenceStatus={item.type === 'direct' ? onlinePresence(live?.status || other?.presenceStatus) : undefined}
         size={48}
       />
       <View style={{ flex: 1 }}>
@@ -174,7 +165,7 @@ function ConversationRow({ item, isActive, onPress, compact }: RowProps) {
             )}
           </View>
           <Text style={[styles.rowTime, { color: c.textMetadata }]}>
-            {formatTime(item.lastMessageAt)}
+            {formatListTime(item.lastMessageAt)}
           </Text>
         </View>
         <View style={styles.previewRow}>
