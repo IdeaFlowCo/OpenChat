@@ -206,7 +206,7 @@
   },
   "src/components/StoriesStrip.tsx": {
     "no-restricted-syntax": {
-      "count": 9
+      "count": 4
     }
   },
   "src/components/StreamEditor.tsx": {

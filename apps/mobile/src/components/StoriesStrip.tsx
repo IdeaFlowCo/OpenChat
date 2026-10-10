@@ -12,7 +12,8 @@ import { api, type FeedStory } from '../api/client';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
-import { capsLabel, serif } from '../theme/typography';
+import { capsLabel } from '../theme/typography';
+import { radius, space, type } from '../theme/tokens';
 import { AppIcon } from './AppIcon';
 import { Avatar } from './Avatar';
 
@@ -36,9 +37,7 @@ export function StoriesStrip({ compact, onCreate, onOpenStory, onOpenReview }: S
   const {
     enhanced,
     storiesCollapsed,
-    storiesIntroDismissed,
     setStoriesCollapsed,
-    dismissStoriesIntro,
   } = useSocialExperience();
   const [stories, setStories] = useState<FeedStory[]>([]);
   const [loading, setLoading] = useState(false);
@@ -63,36 +62,20 @@ export function StoriesStrip({ compact, onCreate, onOpenStory, onOpenReview }: S
   return (
     <View style={[styles.shell, { backgroundColor: c.surface, borderBottomColor: c.border }]}>
       <View style={styles.headingRow}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.heading, { color: c.textPrimary }]}>Stories</Text>
-          <Text style={[styles.subheading, { color: c.textMetadata }]}>People share; agents filter.</Text>
-        </View>
+        <Text accessibilityRole="header" style={[type.eyebrow, styles.heading, { color: c.textMetadata }]}>Stories</Text>
         <TouchableOpacity
           onPress={() => void setStoriesCollapsed(!storiesCollapsed)}
           accessibilityRole="button"
           accessibilityState={{ expanded: !storiesCollapsed }}
-          accessibilityLabel={storiesCollapsed ? 'Show Stories' : 'Collapse Stories'}
+          accessibilityLabel={storiesCollapsed ? 'Show Stories' : 'Hide Stories'}
           style={styles.collapseButton}
         >
-          <Text style={{ color: c.primary, fontWeight: '700' }}>{storiesCollapsed ? 'Show' : 'Collapse'}</Text>
+          <Text style={[type.label, { color: c.textSecondary, fontWeight: '600' }]}>{storiesCollapsed ? 'Show' : 'Hide'}</Text>
         </TouchableOpacity>
       </View>
 
       {!storiesCollapsed && (
         <>
-          {!storiesIntroDismissed && (
-            <View style={[styles.intro, { backgroundColor: c.primaryMuted, borderColor: c.border }]}>
-              <Text style={[styles.introText, { color: c.textSecondary }]}>You never have to watch them all. OpenChat Agent filters matching opportunities into Review.</Text>
-              <TouchableOpacity
-                onPress={() => void dismissStoriesIntro()}
-                accessibilityLabel="Dismiss Stories explanation"
-                style={styles.dismiss}
-              >
-                <AppIcon name="x" size={16} color={c.textSecondary} />
-              </TouchableOpacity>
-            </View>
-          )}
-
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -115,7 +98,7 @@ export function StoriesStrip({ compact, onCreate, onOpenStory, onOpenReview }: S
               accessibilityLabel="Open agent Review"
               style={styles.tile}
             >
-              <View style={[styles.agentCircle, { borderColor: c.primary, backgroundColor: c.primaryMuted }]}>
+              <View style={[styles.agentCircle, { backgroundColor: c.primaryMuted }]}>
                 <AppIcon name="sparkle" color={c.primary} size={22} />
               </View>
               <Text numberOfLines={1} style={[styles.tileLabel, { color: c.primary }]}>Review</Text>
@@ -144,26 +127,14 @@ export function StoriesStrip({ compact, onCreate, onOpenStory, onOpenReview }: S
 }
 
 const styles = StyleSheet.create({
-  shell: { borderBottomWidth: StyleSheet.hairlineWidth, paddingTop: 10, paddingBottom: 8 },
-  headingRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 8 },
-  heading: { fontFamily: serif, fontSize: 17, fontWeight: '600' },
-  subheading: { fontSize: 11, marginTop: 1 },
+  shell: { borderBottomWidth: StyleSheet.hairlineWidth, paddingBottom: space[2] },
+  headingRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: space[4], gap: space[2] },
+  heading: { flex: 1 },
   collapseButton: { minWidth: 60, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' },
-  intro: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 12,
-    marginTop: 6,
-    paddingLeft: 11,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-  },
-  introText: { flex: 1, fontSize: 11, lineHeight: 16, paddingVertical: 8 },
-  dismiss: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  rail: { alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 2 },
+  rail: { alignItems: 'center', gap: space[2], paddingHorizontal: space[3], paddingTop: space[1], paddingBottom: 2 },
   tile: { width: 68, minHeight: 78, alignItems: 'center' },
   newCircle: { width: 54, height: 54, borderRadius: 27, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  agentCircle: { width: 54, height: 54, borderRadius: 18, borderWidth: 1.5, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' },
+  agentCircle: { width: 54, height: 54, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   storyCircle: { width: 56, height: 56, borderRadius: 28, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   tileLabel: { ...capsLabel, width: 68, textAlign: 'center', marginTop: 5, textTransform: 'none', letterSpacing: 0, fontSize: 11 },
   expiry: { fontSize: 9, marginTop: 1 },
