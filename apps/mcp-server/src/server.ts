@@ -1126,8 +1126,19 @@ export function buildServer(
 
   // ---- private graph: the owner's own notes and links about people ----
   const PRIVATE_PEOPLE = "Private people knowledge: only the owner sees it, shown in OpenChat and on the owner's Unlinked person and contact pages; it never notifies anyone or changes a public profile.";
-  const PROVENANCE = "Notes and relations carry author ('owner' or 'agent:<name>'), source ('app', 'connector', 'direct-key' or 'suggestion') and assertion ('stated' or 'inferred'), null on records made before provenance was kept; relations also carry relationType.";
-  const RELATION_TYPES = ['knows', 'family', 'works_at', 'worked_with', 'works_on', 'attended', 'interested_in', 'other'] as const;
+  const PROVENANCE = "Notes and relations carry author ('owner' or 'agent:<name>'), source ('app', 'connector', 'direct-key' or 'suggestion') and assertion ('stated' or 'inferred'), null on records made before provenance was kept; relations also carry relationType, since, until and context (null when not given) and updatedBy (who last edited them in place).";
+  // Noos overlay relation types (2026-10-10). 'related' is the generic fallback; the retired 'other' still reads as 'related'.
+  const RELATION_TYPES = ['knows', 'family', 'worked_with', 'works_at', 'works_on', 'attended', 'interested_in', 'part_of', 'about', 'related'] as const;
+  const THING_KINDS = ['person', 'company', 'idea', 'project', 'topic'] as const;
+  const KINDS_TEXT = 'person, company, idea, project or topic (a thing in the world people and projects are about, such as ADHD or coherence)';
+  const relationTypeSchema = z.enum(RELATION_TYPES).optional().describe("Canonical type for querying; omit to derive it from the relation's words and what it connects (knows/family/worked_with only between two people; 'related' when nothing fits)");
+  const linkFacts = {
+    since: z.string().max(20).optional().describe("Free date text such as '2019' or '2024-03'"),
+    until: z.string().max(20).optional().describe("Free date text such as '2021'"),
+    context: z.string().max(280).optional().describe("How it came about, for example 'met at AGI House hackathon'"),
+  };
+  const descriptionSchema = z.string().max(280).optional().describe("One-line summary, for example 'a feed that nudges you into coherence' (280 characters or fewer)");
+  const given = (input: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter(key => input[key] !== undefined).map(key => [key, input[key]]));
   const assertionSchema = z.enum(['stated', 'inferred']).optional().describe("'stated' (default) when the owner said it; 'inferred' when you concluded it yourself");
   const subjectSchema = {
     subjectKind: z.enum(['user', 'thing', 'unlinked']).describe("'user' for a person on OpenChat (use their user id), 'thing' for one of the owner's saved companies, ideas, projects or people (use its id), 'unlinked' for an Unlinked person (a published profile id, a connection id from unlinked_list_connections for an imported LinkedIn contact, or a linkedin.com/in/ address)"),
@@ -1174,28 +1185,30 @@ export function buildServer(
     { noteId: z.string().min(1).max(64) }, ({ noteId }) => api.deletePrivateNote(noteId));
 
   privateTool('oc_add_private_link', 'Link a person or thing to another',
-    `Record a private relation in the owner's own words ('knows', 'sister of', 'worked with', 'works at') from a person, Unlinked profile or saved thing to another. toKind 'user' with toId for a person on OpenChat; toKind 'unlinked' with toId for an Unlinked profile id, or a connection id from unlinked_list_connections or a linkedin.com/in/ address for an imported LinkedIn contact (one entity either way); otherwise toId for a saved thing or toName. A name is reused only when it names exactly one saved thing; if several people share it the call fails with code ambiguous_name and candidates, so ask which one and pass its id. createNew with a clientRequestId saves a different person with an existing name. Repeating the same relation returns the same link. Recorded as written by this agent key, with a relationType derived from its words. ${PRIVATE_PEOPLE}`,
+    `Record a private relation in the owner's own words ('knows', 'sister of', 'worked with', 'works at') from a person, Unlinked profile or saved thing to another. toKind 'user' with toId for a person on OpenChat; toKind 'unlinked' with toId for an Unlinked profile id, or a connection id from unlinked_list_connections or a linkedin.com/in/ address for an imported LinkedIn contact (one entity either way); otherwise toId for a saved thing or toName. A name is reused only when it names exactly one saved thing; if several people share it the call fails with code ambiguous_name and candidates, so ask which one and pass its id. createNew with a clientRequestId saves a different person with an existing name. Repeating the same relation returns the same link unchanged (change it with oc_update_private_link). Recorded as written by this agent key, with a relationType derived from its words and what it connects unless you pass one; since, until and context are optional facts about it. ${PRIVATE_PEOPLE}`,
     {
       ...subjectSchema,
       relation: z.string().min(1).max(60),
-      toKind: z.enum(['user', 'unlinked', 'person', 'company', 'idea', 'project']),
+      toKind: z.enum(['user', 'unlinked', ...THING_KINDS]),
       toId: z.string().min(1).max(200).optional(),
       toName: z.string().min(1).max(120).optional(),
       createNew: z.boolean().optional(),
       clientRequestId: z.string().min(1).max(200).optional(),
       assertion: assertionSchema,
+      relationType: relationTypeSchema,
+      ...linkFacts,
     },
-    ({ subjectKind, subjectId, relation, toKind, toId, toName, createNew, clientRequestId, assertion }) =>
-      api.addPrivateLink({ kind: subjectKind, id: subjectId }, relation, { kind: toKind, ...(toId ? { id: toId } : {}), ...(toName ? { name: toName } : {}), ...(createNew !== undefined ? { createNew } : {}), ...(clientRequestId ? { clientRequestId } : {}) }, assertion));
+    ({ subjectKind, subjectId, relation, toKind, toId, toName, createNew, clientRequestId, assertion, ...rest }) =>
+      api.addPrivateLink({ kind: subjectKind, id: subjectId }, relation, { kind: toKind, ...(toId ? { id: toId } : {}), ...(toName ? { name: toName } : {}), ...(createNew !== undefined ? { createNew } : {}), ...(clientRequestId ? { clientRequestId } : {}) }, assertion, given(rest, ['relationType', 'since', 'until', 'context'])));
 
-  privateTool('oc_update_private_link', 'Correct a private relation',
-    `Correct one of the owner's private relations in place by link id, for example 'sister of' to 'cousin of'. The relation text, its relationType and the link's identity change together; if the owner already has that exact relation between the same two ends, the two become one and the existing link is returned with merged true. ${PRIVATE_PEOPLE}`,
-    { linkId: z.string().min(1).max(64), relation: z.string().min(1).max(60), assertion: assertionSchema },
-    ({ linkId, relation, assertion }) => api.updatePrivateLink(linkId, relation, assertion));
+  privateTool('oc_update_private_link', 'Edit a private relation',
+    `Edit one of the owner's private relations in place by link id; give at least one field. relation corrects the words ('sister of' to 'cousin of'): the relation text, its relationType and the link's identity change together and it is recorded as written by this agent key; if the owner already has that exact relation between the same two ends, the two become one and the existing link is returned with merged true. assertion, relationType, since, until and context change in place without changing who first recorded it (updatedBy records this key); an empty string clears since, until or context. ${PRIVATE_PEOPLE}`,
+    { linkId: z.string().min(1).max(64), relation: z.string().min(1).max(60).optional(), assertion: assertionSchema, relationType: relationTypeSchema, ...linkFacts },
+    ({ linkId, ...change }) => api.updatePrivateLink(linkId, given(change, ['relation', 'assertion', 'relationType', 'since', 'until', 'context'])));
 
   privateTool('oc_search_private', "Search the owner's private people knowledge",
-    `Search saved people, companies, ideas and projects, plus OpenChat people and Unlinked people the owner has written about, by name or private note text; and private relations by relation text, either end's name, or relationType (${RELATION_TYPES.join(', ')}). Give at least one of query, relationType or kind. Bounded; truncated says more matched. ${PROVENANCE} ${PRIVATE_PEOPLE}`,
-    { query: z.string().max(120).optional(), relationType: z.enum(RELATION_TYPES).optional(), kind: z.enum(['person', 'company', 'idea', 'project']).optional(), limit: z.number().int().min(1).max(50).optional() },
+    `Search saved people, companies, ideas and projects, plus OpenChat people and Unlinked people the owner has written about, by name, description or private note text; and private relations by relation text, context, either end's name, or relationType (${RELATION_TYPES.join(', ')}). Give at least one of query, relationType or kind (${KINDS_TEXT}). Bounded; truncated says more matched. ${PROVENANCE} ${PRIVATE_PEOPLE}`,
+    { query: z.string().max(120).optional(), relationType: z.enum(RELATION_TYPES).optional(), kind: z.enum(THING_KINDS).optional(), limit: z.number().int().min(1).max(50).optional() },
     ({ query, relationType, kind, limit }) => api.searchPrivate({ q: query, relationType, kind, limit }));
 
   privateTool('oc_get_neighbourhood', 'Read what surrounds a person or thing',
@@ -1207,10 +1220,15 @@ export function buildServer(
     `Read the owner's private notes and relations about an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address. ${PRIVATE_PEOPLE}`,
     { profileId: z.string().min(1).max(512) }, ({ profileId }) => api.getUnlinkedPersonPrivate(profileId));
 
-  privateTool('oc_save_private_thing', 'Find or save a private person, company, idea or project',
-    `Find or save a saved thing by name for someone with no OpenChat account or Unlinked profile. A shared name fails with code ambiguous_name and candidates; createNew with a clientRequestId saves a separate one, and retries return the same entity. ${PRIVATE_PEOPLE}`,
-    { kind: z.enum(['person', 'company', 'idea', 'project']), name: z.string().min(1).max(120), createNew: z.boolean().optional(), clientRequestId: z.string().min(1).max(200).optional() },
+  privateTool('oc_save_private_thing', 'Find or save a private person, company, idea, project or topic',
+    `Find or save a saved ${KINDS_TEXT} by name, for someone or something with no OpenChat account or Unlinked profile. Give a one-line description rather than a separate idea node for what something is; on an existing thing it fills a blank description and never replaces one (oc_update_private_thing changes it). A shared name fails with code ambiguous_name and candidates; createNew with a clientRequestId saves a separate one, and retries return the same entity. ${PRIVATE_PEOPLE}`,
+    { kind: z.enum(THING_KINDS), name: z.string().min(1).max(120), description: descriptionSchema, createNew: z.boolean().optional(), clientRequestId: z.string().min(1).max(200).optional() },
     (input) => api.resolvePrivateThing(input));
+
+  privateTool('oc_update_private_thing', 'Edit a saved person, company, idea, project or topic',
+    `Edit one of the owner's saved things by id: rename it, set its one-line description (an empty string clears it), or change its kind (${KINDS_TEXT}), for example an idea that became a project. Someone on Unlinked keeps their kind; OpenChat people (user ids) are not saved things. A rename or kind change that collides with another saved thing of that name and kind is refused. ${PRIVATE_PEOPLE}`,
+    { thingId: z.string().min(1).max(64), name: z.string().min(1).max(120).optional(), description: descriptionSchema, kind: z.enum(THING_KINDS).optional() },
+    ({ thingId, ...patch }) => api.updatePrivateThing(thingId, given(patch, ['name', 'description', 'kind'])));
 
   privateTool('oc_list_private_links', "List the owner's private relations",
     `List every private relation the owner has recorded, newest first, optionally filtered by a name or relation. ${PRIVATE_PEOPLE}`,
@@ -1223,9 +1241,9 @@ export function buildServer(
     `Delete (undo) one of the owner's saved things by id: removes it together with its private notes and every private relation to or from it. This is the undo for oc_save_private_thing and cannot be reversed. OpenChat people (user ids) are not saved things. ${PRIVATE_PEOPLE}`,
     { thingId: z.string().min(1).max(64) }, ({ thingId }) => api.deletePrivateThing(thingId));
 
-  privateTool('oc_list_private_things', "List the owner's saved companies, ideas, projects and people",
-    "List the owner's saved things, optionally filtered by name and kind. Use an id with oc_get_private_thing to see who and what is linked to it.",
-    { query: z.string().max(120).optional(), kind: z.enum(['person', 'company', 'idea', 'project']).optional() },
+  privateTool('oc_list_private_things', "List the owner's saved companies, ideas, projects, topics and people",
+    "List the owner's saved things with their one-line descriptions, optionally filtered by name and kind. Use an id with oc_get_private_thing to see who and what is linked to it.",
+    { query: z.string().max(120).optional(), kind: z.enum(THING_KINDS).optional() },
     ({ query, kind }) => api.listPrivateThings(query, kind));
 
   privateTool('oc_get_private_thing', 'Read a saved company, idea, project or person',

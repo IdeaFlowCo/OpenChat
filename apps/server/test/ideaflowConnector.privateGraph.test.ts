@@ -9,7 +9,7 @@ vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({ run: stat
 const graph = vi.hoisted(() => ({
   addLink: vi.fn(), addNote: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), deletePrivateThing: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
   getUnlinkedPersonOverlay: vi.fn(), listDue: vi.fn(), resolvePrivateThing: vi.fn(), listOwnerLinks: vi.fn(), listThings: vi.fn(), updatePersonCard: vi.fn(),
-  updateLink: vi.fn(), searchPrivate: vi.fn(), getNeighbourhood: vi.fn(),
+  updateLink: vi.fn(), searchPrivate: vi.fn(), getNeighbourhood: vi.fn(), updatePrivateThing: vi.fn(),
 }));
 vi.mock('../src/services/privateGraph.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/privateGraph.js')>('../src/services/privateGraph.js');
@@ -27,7 +27,7 @@ function sign(body: string, scope: string, client?: unknown) {
   return `${header}.${payload}.${createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url')}`;
 }
 const PRIVATE_READS = ['oc_get_person_private', 'oc_get_unlinked_person_private', 'oc_list_private_links', 'oc_search_private', 'oc_get_neighbourhood', 'oc_list_private_things', 'oc_get_private_thing', 'oc_list_catch_up'];
-const PRIVATE_WRITES = ['oc_set_person_private', 'oc_add_private_note', 'oc_delete_private_note', 'oc_add_private_link', 'oc_update_private_link', 'oc_delete_private_link', 'oc_save_private_thing', 'oc_delete_private_thing'];
+const PRIVATE_WRITES = ['oc_set_person_private', 'oc_add_private_note', 'oc_delete_private_note', 'oc_add_private_link', 'oc_update_private_link', 'oc_delete_private_link', 'oc_save_private_thing', 'oc_update_private_thing', 'oc_delete_private_thing'];
 const CONNECTOR = { author: 'agent:Ideaflow connector', source: 'connector', assertion: 'stated' };
 
 describe('private people knowledge through the shared Ideaflow connector', () => {
@@ -71,7 +71,16 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
       expect(all.find((value: any) => value.name === name).description, name).toMatch(/author .*source .*assertion/);
     }
     const search = all.find((value: any) => value.name === 'oc_search_private');
-    expect(search.inputSchema.properties.relationType.enum).toEqual(['knows', 'family', 'works_at', 'worked_with', 'works_on', 'attended', 'interested_in', 'other']);
+    expect(search.inputSchema.properties.relationType.enum).toEqual(['knows', 'family', 'worked_with', 'works_at', 'works_on', 'attended', 'interested_in', 'part_of', 'about', 'related']);
+    expect(search.inputSchema.properties.kind.enum).toEqual(['person', 'company', 'idea', 'project', 'topic']);
+    const add = all.find((value: any) => value.name === 'oc_add_private_link');
+    expect(Object.keys(add.inputSchema.properties)).toEqual(expect.arrayContaining(['relationType', 'since', 'until', 'context']));
+    expect(add.inputSchema.properties.toKind.enum).toContain('topic');
+    const update = all.find((value: any) => value.name === 'oc_update_private_link');
+    expect(update.inputSchema.required).toEqual(['linkId']);
+    expect(Object.keys(update.inputSchema.properties)).toEqual(expect.arrayContaining(['relation', 'assertion', 'relationType', 'since', 'until', 'context']));
+    expect(all.find((value: any) => value.name === 'oc_save_private_thing').inputSchema.properties.description.maxLength).toBe(280);
+    expect(all.find((value: any) => value.name === 'oc_update_private_thing').annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(all.find((value: any) => value.name === 'oc_update_private_link').annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(all.find((value: any) => value.name === 'oc_delete_private_link').annotations.destructiveHint).toBe(true);
     const remove = all.find((value: any) => value.name === 'oc_delete_private_thing');
@@ -94,7 +103,7 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     graph.addLink.mockResolvedValue({ id: 'link-1' });
     const link = await tool('oc_add_private_link', { subjectKind: 'unlinked', subjectId: 'maya-1', relation: 'sister of', toKind: 'person', toName: 'Priya', createNew: true, clientRequestId: 'req-1' });
     expect(JSON.parse(link.result.content[0].text)).toEqual({ id: 'link-1' });
-    expect(graph.addLink).toHaveBeenCalledWith('owner', { kind: 'unlinked', id: 'maya-1' }, 'sister of', { kind: 'person', name: 'Priya', createNew: true, clientRequestId: 'req-1' }, CONNECTOR);
+    expect(graph.addLink).toHaveBeenCalledWith('owner', { kind: 'unlinked', id: 'maya-1' }, 'sister of', { kind: 'person', name: 'Priya', createNew: true, clientRequestId: 'req-1' }, CONNECTOR, {});
 
     graph.addNote.mockResolvedValue({ id: 'note-1' });
     await tool('oc_add_private_note', { subjectKind: 'user', subjectId: 'bob', text: 'Met at dinner' });
@@ -108,6 +117,21 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     const saved = await tool('oc_save_private_thing', { kind: 'person', name: 'Maya', createNew: true, clientRequestId: 'req-2' });
     expect(JSON.parse(saved.result.content[0].text)).toEqual({ id: 'thing-1', kind: 'person', name: 'Maya' });
     expect(graph.resolvePrivateThing).toHaveBeenCalledWith('owner', { kind: 'person', name: 'Maya', createNew: true, clientRequestId: 'req-2' });
+
+    graph.addLink.mockResolvedValue({ id: 'link-3' });
+    await tool('oc_add_private_link', { subjectKind: 'thing', subjectId: 'idea-1', relation: 'connected to', toKind: 'topic', toName: 'Coherence', relationType: 'about', since: '2026', context: 'from the call' });
+    expect(graph.addLink).toHaveBeenLastCalledWith('owner', { kind: 'thing', id: 'idea-1' }, 'connected to', { kind: 'topic', name: 'Coherence' }, CONNECTOR, { relationType: 'about', since: '2026', context: 'from the call' });
+
+    graph.resolvePrivateThing.mockResolvedValue({ id: 'thing-2', kind: 'idea', name: 'Bloomscroll', description: 'a feed that nudges you into coherence' });
+    await tool('oc_save_private_thing', { kind: 'idea', name: 'Bloomscroll', description: 'a feed that nudges you into coherence' });
+    expect(graph.resolvePrivateThing).toHaveBeenLastCalledWith('owner', { kind: 'idea', name: 'Bloomscroll', description: 'a feed that nudges you into coherence' });
+
+    graph.updatePrivateThing.mockResolvedValue({ id: 'thing-2', kind: 'project', name: 'Bloomscroll', description: null });
+    const updated = await tool('oc_update_private_thing', { thingId: 'thing-2', kind: 'project', description: '' });
+    expect(JSON.parse(updated.result.content[0].text)).toEqual({ id: 'thing-2', kind: 'project', name: 'Bloomscroll', description: null });
+    expect(graph.updatePrivateThing).toHaveBeenCalledWith('owner', 'thing-2', { kind: 'project', description: '' });
+    expect((await call('tools/call', { name: 'oc_update_private_thing', arguments: { thingId: 'thing-2', kind: 'planet' } })).status).toBe(400);
+    expect((await call('tools/call', { name: 'oc_update_private_thing', arguments: { thingId: 'thing-2', name: 'x' } }, 'openchat:read')).status).toBe(403);
 
     graph.deleteLink.mockResolvedValue({ deleted: true });
     await tool('oc_delete_private_link', { linkId: 'link-1' });
@@ -127,7 +151,7 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
   it('records the agent client named by the hub, and lets it mark a relation as inferred', async () => {
     graph.addLink.mockResolvedValue({ id: 'link-2' });
     await tool('oc_add_private_link', { subjectKind: 'user', subjectId: 'bob', relation: 'knows', toKind: 'user', toId: 'carol', assertion: 'inferred' }, undefined, 'Claude Desktop');
-    expect(graph.addLink).toHaveBeenLastCalledWith('owner', { kind: 'user', id: 'bob' }, 'knows', { kind: 'user', id: 'carol' }, { author: 'agent:Claude Desktop', source: 'connector', assertion: 'inferred' });
+    expect(graph.addLink).toHaveBeenLastCalledWith('owner', { kind: 'user', id: 'bob' }, 'knows', { kind: 'user', id: 'carol' }, { author: 'agent:Claude Desktop', source: 'connector', assertion: 'inferred' }, {});
     graph.addNote.mockResolvedValue({ id: 'note-2' });
     for (const client of ['x'.repeat(101), 'bad\nname', 7]) {
       await tool('oc_add_private_note', { subjectKind: 'user', subjectId: 'bob', text: 'hi' }, undefined, client);
@@ -140,8 +164,15 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     graph.updateLink.mockResolvedValue({ link: { id: 'link-1', relation: 'cousin of', relationType: 'family' }, merged: true });
     const edited = await tool('oc_update_private_link', { linkId: 'link-1', relation: 'cousin of' });
     expect(JSON.parse(edited.result.content[0].text)).toEqual({ link: { id: 'link-1', relation: 'cousin of', relationType: 'family' }, merged: true });
-    expect(graph.updateLink).toHaveBeenCalledWith('owner', 'link-1', 'cousin of', CONNECTOR);
+    expect(graph.updateLink).toHaveBeenCalledWith('owner', 'link-1', { relation: 'cousin of' }, CONNECTOR);
     expect((await call('tools/call', { name: 'oc_update_private_link', arguments: { linkId: 'link-1', relation: 'x' } }, 'openchat:read')).status).toBe(403);
+    // noos-ph2i.3: the assertion and facts change in place; the agent is still the editor, not the author of the edit's fields.
+    graph.updateLink.mockResolvedValue({ link: { id: 'link-1', assertion: 'inferred' }, merged: false });
+    await tool('oc_update_private_link', { linkId: 'link-1', assertion: 'inferred', relationType: 'related', since: '2019', context: '' });
+    expect(graph.updateLink).toHaveBeenLastCalledWith('owner', 'link-1', { assertion: 'inferred', relationType: 'related', since: '2019', context: '' }, { ...CONNECTOR, assertion: 'inferred' });
+    for (const args of [{ linkId: 'link-1', relationType: 'enemy' }, { linkId: 'link-1', since: 'x'.repeat(21) }, { linkId: 'link-1', context: 'x'.repeat(281) }]) {
+      expect((await call('tools/call', { name: 'oc_update_private_link', arguments: args })).status).toBe(400);
+    }
 
     graph.searchPrivate.mockResolvedValue({ things: [], links: [], truncated: false });
     await tool('oc_search_private', { query: 'maya', relationType: 'family', kind: 'person', limit: 5 }, 'openchat:read');

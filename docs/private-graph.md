@@ -13,10 +13,10 @@ read-only, on person and contact pages (Unlinked `docs/private-context.md`).
 
 | Stored as | Meaning |
 |---|---|
-| `OverlayEntity` | A person, company, idea or project the owner keeps something about. Importance and catch-up cadence sit on it. One made by name is unique per owner, kind and name. |
+| `OverlayEntity` | A person, company, idea, project or topic the owner keeps something about, with an optional one-line `description`. Importance and catch-up cadence sit on it. One made by name is unique per owner, kind and name. |
 | `OverlayRef` | How an app points at an entity. A person on OpenChat is the entity named by `openchat:user:<id>`; an entity can carry refs from several apps. |
 | `OverlayNote` | A note about an entity, with its provenance. |
-| `OVERLAY_LINK` | A real relationship between two of the owner's entities, with the relation in the owner's own words ("knows", "works at", "interested in"), a derived `relationType`, and its provenance. |
+| `OVERLAY_LINK` | A real relationship between two of the owner's entities, with the relation in the owner's own words ("knows", "works at", "interested in"), a `relationType`, optional `since`, `until` and `context`, and its provenance. |
 
 Every node and link carries the owner's key and every query is anchored on it.
 The key is derived from the owner's Ideaflow sign-in when they have one, so the
@@ -56,14 +56,15 @@ these routes never return it.
 | `PATCH /people/:userId` | `important`, `cadenceDays` (or `null`), `cadenceMode`, `contactedNow: true` |
 | `POST /people/:userId/notes`, `POST /things/:thingId/notes` | Add a note |
 | `PATCH /notes/:noteId`, `DELETE /notes/:noteId` | Edit or delete a note |
-| `POST /people/:userId/links`, `POST /things/:thingId/links` | `{ relation, to }` where `to` is `{kind:'user', id}` or `{kind:'person'\|'company'\|'idea'\|'project', id \| name}`; a name creates or reuses the saved thing |
-| `PATCH /links/:linkId` | `{ relation }`: correct a relation in place ("sister of" to "cousin of"). Relation, `relationType` and link identity change together; if the owner already has that exact link, the two become one and `{ link, merged: true }` returns the existing one |
+| `POST /people/:userId/links`, `POST /things/:thingId/links` | `{ relation, to, relationType?, since?, until?, context? }` where `to` is `{kind:'user', id}` or `{kind:'person'\|'company'\|'idea'\|'project'\|'topic', id \| name}`; a name creates or reuses the saved thing. Repeating an existing link returns it unchanged |
+| `PATCH /links/:linkId` | Any of `{ relation, relationType, assertion, since, until, context }`, see [Editing a relation](#editing-a-relation) |
 | `DELETE /links/:linkId` | Remove a link |
-| `GET /search?q=&relationType=&kind=&limit=` | Search saved things, OpenChat people and Unlinked people the owner wrote about (by name or note text; `matched` says which), and links by relation text, either end's name or `relationType`. At least one filter; at most 50 of each; `truncated` when more matched. Blocked people are left out |
+| `GET /search?q=&relationType=&kind=&limit=` | Search saved things, OpenChat people and Unlinked people the owner wrote about (by name, description or note text; `matched` says which), and links by relation text, context, either end's name or `relationType`. At least one filter; at most 50 of each; `truncated` when more matched. Blocked people are left out |
 | `GET /neighbourhood?subjectKind=user\|thing\|unlinked&subjectId=&depth=1\|2` | A subject and everything one or two links away, with those links (`from`, `to`). Never creates anything; at most 100 nodes and 200 links. Blocked people are left out |
-| `GET /things?q=&kind=`, `GET /things/:thingId` | Saved things, and one with its notes and links |
+| `GET /things?q=&kind=`, `GET /things/:thingId` | Saved things (with `description`), and one with its notes and links |
+| `PATCH /things/:thingId` | `{ name?, description?, kind? }`: rename, describe (`null` or `''` clears) or change the kind of a saved thing (an idea that became a project). Someone on Unlinked keeps their kind (409); an OpenChat person's card answers 404 |
 | `DELETE /things/:thingId` | Delete (undo) a saved thing: the entity, its notes, its links in both directions and its refs, plus OpenChat's note reviews and asks about it, in one transaction. Answers `{deleted: true, id, notesRemoved, linksRemoved}`; a missing, already-deleted or foreign id, or an OpenChat person's card, answers 404 |
-| `POST /things/resolve` | `{kind, name, createNew?, clientRequestId?}`: find or save by name under the no-merge rules below |
+| `POST /things`, `POST /things/resolve` | `{kind, name, description?}` / `{kind, name, description?, createNew?, clientRequestId?}`: find or save by name under the no-merge rules below. A description is stored on a new thing and fills an existing thing's blank one; it never replaces one |
 | `GET /due` | People whose catch-up date has passed |
 | `GET /links?q=` | Every link the owner recorded, newest first, filtered by a name or relation |
 | `GET /unlinked-people/:profileId` | Card, notes and links for an Unlinked profile (never creates, never calls Unlinked) |
@@ -137,12 +138,48 @@ derived from how the request authenticated (never from its body):
 | A note-review suggestion the owner (or an agent) applied | the applier | `suggestion` |
 
 `assertion` is `stated`, or `inferred` for applied suggestions and when an agent
-passes `assertion: "inferred"`. Links also carry `relationType`, derived from
-the relation text: `knows`, `family`, `works_at`, `worked_with`, `works_on`,
-`attended`, `interested_in` or `other`. Notes and links written earlier have no
-provenance and read back with `author`, `source` and `assertion` set to `null`;
-their `relationType` is derived the same way on read. A repeated note or link
-keeps its first provenance; an edited relation records the editor's.
+passes `assertion: "inferred"`. Notes and links written earlier have no
+provenance and read back with `author`, `source` and `assertion` set to `null`.
+A repeated note or link keeps its first provenance.
+
+Links also carry `relationType`, a query facet over the owner's words: `knows`,
+`family`, `worked_with`, `works_at`, `works_on`, `attended`, `interested_in`,
+`part_of`, `about` or `related` (Noos `docs/PEOPLE_OVERLAY.md` has the table).
+A caller may name it; otherwise it is derived from the words *and* what the
+link connects, so `knows`, `family` and `worked_with` only join two people and
+an idea "connected to" a person is `related`, the generic fallback. `related`
+replaced `other` on 2026-10-10: stored `other` reads back as `related` and
+`other` is still accepted as input. Stored types are never rewritten; links
+stored with no type (before 2026-10-09) are typed from their words, as before.
+
+### Editing a relation
+
+`PATCH /links/:linkId` (`oc_update_private_link`) takes any of `relation`,
+`relationType`, `assertion`, `since`, `until` and `context`; `null` (or `''`
+from an agent tool) clears `since`, `until` or `context`, and
+`relationType: null` derives it again.
+
+- A new `relation` ("sister of" to "cousin of") changes the relation, its
+  `relationType` and the link's identity together and records the editor's
+  provenance. If the owner already has that exact link, the two become one and
+  `{ link, merged: true }` returns the existing one, with the rest of the edit
+  applied to it.
+- Anything else is an in-place edit (for example `stated` to `inferred`): the
+  original `author` and `source` stay, and `updatedAt` and `updatedBy` (the
+  editor) record the change.
+
+`since` and `until` are free date text (20 characters or fewer, "2019",
+"2024-03"); `context` is one line of 280 or fewer ("met at AGI House
+hackathon"). All three read back as `null` on links without them.
+
+### Kinds and descriptions
+
+Saved things are `person`, `company` (also schools and organisations),
+`idea`, `project` or `topic` (since 2026-10-10: a thing in the world people and
+projects are about, such as ADHD or coherence). Each may carry a one-line
+`description` (280 characters or fewer) instead of a separate node for what it
+is; search matches it. A saved thing's kind can change (an idea becomes a
+project) unless it names someone on Unlinked.
 
 Account export includes the owner's private graph under `privateGraph`
 (entities, notes and links). Account deletion removes everything the person
@@ -160,9 +197,16 @@ side and is not part of the private graph. A linked thing
 opens its own page, where more links and notes can be added. **Catch up**, on
 the People screen, lists who is due. Agent tools: `oc_get_person` (name, shared asks and the private card in one read), `oc_get_person_private`, `oc_get_unlinked_person_private`, `oc_list_private_links`, `oc_search_private`, `oc_get_neighbourhood`, `oc_save_private_thing`,
 `oc_set_person_private`, `oc_add_private_note`, `oc_delete_private_note`,
-`oc_add_private_link`, `oc_update_private_link`, `oc_delete_private_link`, `oc_delete_private_thing`, `oc_list_private_things`,
-`oc_get_private_thing`, `oc_list_catch_up`. Read results include provenance and
-`relationType`. Unlinked does not show this knowledge yet; tool descriptions say
+`oc_add_private_link`, `oc_update_private_link`, `oc_delete_private_link`, `oc_update_private_thing`, `oc_delete_private_thing`, `oc_list_private_things`,
+`oc_get_private_thing`, `oc_list_catch_up`. Read results include provenance,
+`relationType`, `since`, `until`, `context` and `updatedBy` on relations and
+`description` on things. `oc_save_private_thing` takes `description` and the
+`topic` kind; `oc_add_private_link` takes `relationType`, `since`, `until` and
+`context`; `oc_update_private_link` edits any of `relation`, `assertion`,
+`relationType`, `since`, `until` and `context`; `oc_update_private_thing`
+renames, describes or re-kinds a saved thing. The same tools exist on the
+shared Ideaflow connector (which lists OpenChat's catalog live) and on the
+OpenChat MCP server for agent keys. Unlinked does not show this knowledge yet; tool descriptions say
 so. Unlinked people, including imported LinkedIn contacts, are reached with
 `toKind`/`subjectKind` `unlinked` (see [People from Unlinked](#people-from-unlinked)).
 

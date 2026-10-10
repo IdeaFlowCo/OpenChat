@@ -13,6 +13,7 @@ integration('private graph: provenance, relation edits, search and neighbourhood
   const [owner, bob, carol, blocked, other] = ['pv-owner', 'pv-bob', 'pv-carol', 'pv-blocked', 'pv-other'].map(prefix => `${prefix}-${suffix}`) as [string, string, string, string, string];
   const userIds = [owner, bob, carol, blocked, other];
   const AGENT = { author: 'agent:Claude', source: 'connector', assertion: 'stated' } as const;
+  const OWNER = { author: 'owner', source: 'app', assertion: 'stated' } as const;
   let driver: Driver;
   let graph: typeof import('../src/services/privateGraph.js');
   let review: typeof import('../src/services/privateNoteReview.js');
@@ -134,6 +135,44 @@ integration('private graph: provenance, relation edits, search and neighbourhood
     expect(await graph.getNeighbourhood(owner, { kind: 'unlinked', id: 'nobody-here' }, '1')).toMatchObject({ center: { unlinkedProfileId: 'nobody-here' }, nodes: [], links: [] });
     expect(await status(() => graph.getNeighbourhood(owner, { kind: 'thing', id: acme.other.id }, '3'))).toBe(400);
     expect(await status(() => graph.getNeighbourhood(other, { kind: 'thing', id: acme.other.id }, '1'))).toBe(404);
+  });
+
+  // noos-ph2i.2/.3/.6 (Noos 0.3.20), through OpenChat's service.
+  it('types relations by what they connect, edits assertions and facts in place, and keeps descriptions and topics', async () => {
+    const idea = await graph.resolvePrivateThing(owner, { kind: 'idea', name: `Bloomscroll ${suffix}`, description: 'a feed that nudges you into coherence' });
+    expect(idea).toMatchObject({ kind: 'idea', description: 'a feed that nudges you into coherence' });
+    // The 2026-10-10 bug: an idea "connected to" a person is not "knows".
+    const connected = await graph.addLink(owner, { kind: 'thing', id: idea.id }, 'connected to', { kind: 'user', id: bob }, AGENT);
+    expect(connected).toMatchObject({ relationType: 'related', since: null, until: null, context: null, updatedBy: null });
+    expect((await graph.addLink(owner, { kind: 'user', id: bob }, 'connected to', { kind: 'user', id: carol })).relationType).toBe('knows');
+    const about = await graph.addLink(owner, { kind: 'thing', id: idea.id }, 'is about', { kind: 'topic', name: `Coherence ${suffix}` }, OWNER, { since: '2026', context: 'from the 10-10 call' });
+    expect(about).toMatchObject({ relationType: 'about', since: '2026', context: 'from the 10-10 call', other: { kind: 'topic' } });
+    expect((await graph.addLink(owner, { kind: 'user', id: bob }, 'odd one', { kind: 'user', id: carol }, OWNER, { relationType: 'other' })).relationType).toBe('related');
+    expect(await status(() => graph.addLink(owner, { kind: 'user', id: bob }, 'odd two', { kind: 'user', id: carol }, OWNER, { relationType: 'enemy' }))).toBe(400);
+    expect(await status(() => graph.addLink(owner, { kind: 'user', id: bob }, 'odd three', { kind: 'user', id: carol }, OWNER, { since: 'x'.repeat(21) }))).toBe(400);
+
+    // The assertion changes in place: the agent stays the author, the owner is recorded as the editor.
+    const flipped = await graph.updateLink(owner, connected.id, { assertion: 'inferred', context: 'Bob suggested it' });
+    expect(flipped).toMatchObject({ merged: false, link: { id: connected.id, assertion: 'inferred', author: 'agent:Claude', source: 'connector', updatedBy: 'owner', context: 'Bob suggested it' } });
+    expect((await graph.updateLink(owner, connected.id, { context: null, relationType: 'works_on' })).link).toMatchObject({ context: null, relationType: 'works_on' });
+    expect(await status(() => graph.updateLink(owner, connected.id, {}))).toBe(400);
+    expect(await status(() => graph.updateLink(other, connected.id, { assertion: 'stated' }))).toBe(404);
+    const listed = (await graph.listOwnerLinks(owner, `Bloomscroll ${suffix}`)).links.find(link => link.id === about.id);
+    expect(listed).toMatchObject({ since: '2026', context: 'from the 10-10 call', updatedBy: null });
+
+    // Descriptions are searchable; an idea graduates to a project; an OpenChat person is not a saved thing.
+    const found = await graph.searchPrivate(owner, { q: 'nudges you into' });
+    expect(found.things).toEqual([expect.objectContaining({ id: idea.id, description: 'a feed that nudges you into coherence', matched: ['description'] })]);
+    const project = await graph.updatePrivateThing(owner, idea.id, { kind: 'project', description: 'feed + nudges' });
+    expect(project).toEqual({ id: idea.id, kind: 'project', name: `Bloomscroll ${suffix}`, description: 'feed + nudges' });
+    expect((await graph.updatePrivateThing(owner, idea.id, { description: '' })).description).toBeNull();
+    expect((await graph.getThing(owner, idea.id)).kind).toBe('project');
+    expect(await status(() => graph.updatePrivateThing(owner, idea.id, { kind: 'planet' }))).toBe(400);
+    expect(await status(() => graph.updatePrivateThing(owner, idea.id, { ownerKey: 'x' }))).toBe(400);
+    expect(await status(() => graph.updatePrivateThing(other, idea.id, { description: 'mine' }))).toBe(404);
+    const bobEntity = (await graph.getNeighbourhood(owner, { kind: 'user', id: bob }, '1')).center;
+    expect(bobEntity).toMatchObject({ kind: 'user', id: bob });
+    expect((await graph.listThings(owner, `Coherence ${suffix}`, 'topic')).things).toEqual([expect.objectContaining({ kind: 'topic', description: null })]);
   });
 
   it('applied suggestions go through the overlay as source suggestion, assertion inferred', async () => {

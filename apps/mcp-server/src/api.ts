@@ -415,10 +415,12 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<unknown>('POST', `${privateSubjectPath(subject)}/notes`, { body: { text, ...(assertion ? { assertion } : {}) } }),
     deletePrivateNote: (noteId: string) =>
       request<unknown>('DELETE', `/api/private/notes/${encodeURIComponent(noteId)}`),
-    addPrivateLink: (subject: { kind: 'user' | 'thing' | 'unlinked'; id: string }, relation: string, to: Record<string, unknown>, assertion?: 'stated' | 'inferred') =>
-      request<unknown>('POST', `${privateSubjectPath(subject)}/links`, { body: { relation, to, ...(assertion ? { assertion } : {}) } }),
-    updatePrivateLink: (linkId: string, relation: string, assertion?: 'stated' | 'inferred') =>
-      request<unknown>('PATCH', `/api/private/links/${encodeURIComponent(linkId)}`, { body: { relation, ...(assertion ? { assertion } : {}) } }),
+    /** `attributes`: optional relationType, since, until, context. */
+    addPrivateLink: (subject: { kind: 'user' | 'thing' | 'unlinked'; id: string }, relation: string, to: Record<string, unknown>, assertion?: 'stated' | 'inferred', attributes: Record<string, unknown> = {}) =>
+      request<unknown>('POST', `${privateSubjectPath(subject)}/links`, { body: { relation, to, ...(assertion ? { assertion } : {}), ...attributes } }),
+    /** `change`: the new relation text, or any of relation, assertion, relationType, since, until, context. */
+    updatePrivateLink: (linkId: string, change: string | Record<string, unknown>, assertion?: 'stated' | 'inferred') =>
+      request<unknown>('PATCH', `/api/private/links/${encodeURIComponent(linkId)}`, { body: { ...(typeof change === 'string' ? { relation: change } : change), ...(assertion ? { assertion } : {}) } }),
     searchPrivate: (query: { q?: string; relationType?: string; kind?: string; limit?: number }) =>
       request<unknown>('GET', '/api/private/search', { query }),
     getPrivateNeighbourhood: (subject: { kind: 'user' | 'thing' | 'unlinked'; id: string }, depth?: number) =>
@@ -435,6 +437,9 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<unknown>('GET', '/api/private/things', { query: { q: query, kind } }),
     getPrivateThing: (thingId: string) =>
       request<unknown>('GET', `/api/private/things/${encodeURIComponent(thingId)}`),
+    /** Rename, describe ('' clears) or re-kind a saved thing. */
+    updatePrivateThing: (thingId: string, body: { name?: string; description?: string; kind?: string }) =>
+      request<unknown>('PATCH', `/api/private/things/${encodeURIComponent(thingId)}`, { body }),
     deletePrivateThing: (thingId: string) =>
       request<unknown>('DELETE', `/api/private/things/${encodeURIComponent(thingId)}`),
     listCatchUp: () => request<unknown>('GET', '/api/private/due'),

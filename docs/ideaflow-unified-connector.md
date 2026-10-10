@@ -54,10 +54,13 @@ split. Read scope adds `oc_get_person_private`, `oc_get_unlinked_person_private`
 text, `relationType` or kind), `oc_get_neighbourhood` (a subject and what is one
 or two relations away), `oc_list_private_things`, `oc_get_private_thing` and
 `oc_list_catch_up`. Write scope adds `oc_set_person_private`, `oc_add_private_note`,
-`oc_delete_private_note`, `oc_add_private_link`, `oc_update_private_link`
-(correct a relation's text in place), `oc_delete_private_link`,
-`oc_save_private_thing` and `oc_delete_private_thing` (the undo for saving a
-thing; removes it with its notes and relations). Notes and relations written
+`oc_delete_private_note`, `oc_add_private_link` (optionally with
+`relationType`, `since`, `until`, `context`), `oc_update_private_link`
+(correct a relation's text, or change its assertion, type or facts in place),
+`oc_delete_private_link`, `oc_save_private_thing` (with an optional one-line
+`description`; kinds include `topic`), `oc_update_private_thing` (rename,
+describe or re-kind a saved thing) and `oc_delete_private_thing` (the undo for
+saving a thing; removes it with its notes and relations). Notes and relations written
 through the connector are recorded with `author` `agent:<client name>` (the
 `client` claim the hub adds from the grant; `agent:Ideaflow connector` when an
 older hub omits it), `source` `connector`, and `assertion` `stated` unless the
