@@ -55,7 +55,7 @@ export function MyCardScreen() {
   const navigation = useNavigation<NavProp<'MyCard'>>();
   const { scheme } = useTheme();
   const r = roles(getColors(scheme));
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const { currentUser, refreshConversations, signOut } = useChat();
   const ideaflowSwitch = useIdeaflowAccountSwitch();
   const guardAction = useFocusedAccountGuard(currentUser?.userId);
@@ -73,6 +73,8 @@ export function MyCardScreen() {
   const [previewing, setPreviewing] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
+  // A rotated link must never still say "Copied" (the clipboard holds the old one).
+  useEffect(() => { setCopied(false); }, [card?.token]);
 
   const handleOpenAgent = async () => {
     if (openingAgent) return;
@@ -106,8 +108,11 @@ export function MyCardScreen() {
     setSaving(true);
     setError(null);
     try {
-      applyCard(await api.updateMyCard(patch));
+      const next = await api.updateMyCard(patch);
+      applyCard(next);
       setStrangerView(null);
+      // Keep an open preview current instead of leaving it on a spinner.
+      if (previewing) setStrangerView(await api.getPublicCard(next.token));
     } catch (err) {
       setError(err instanceof Error ? err.message.replace(/^\d+:\s*/, '') : 'Could not save.');
       if (card) applyCard(card);
@@ -202,7 +207,8 @@ export function MyCardScreen() {
   }
 
   const url = card ? addMeCardUrl(card.token) : '';
-  const qrSize = Math.max(180, Math.min(width - 112, 260));
+  // Shrink the code on short screens (landscape phones, small browser windows).
+  const qrSize = Math.max(140, Math.min(width - 112, 260, (height || 800) * 0.32));
   const name = card?.preview.name || currentUser?.name || 'Your profile';
   const headerHeadline = card?.settings.headline || (currentUser as any)?.statusMessage;
   const myLinks = card ? [
@@ -219,8 +225,8 @@ export function MyCardScreen() {
       <View style={styles.fieldHeader}>
         <Text style={[type.bodyStrong, styles.fieldLabel, { color: r.text }]}>{label}</Text>
         <View style={styles.audience} accessibilityRole="radiogroup" accessibilityLabel={`Who sees your ${label}`}>
-          <Chip label="Friends & card" selected={shown} disabled={saving} onPress={() => { if (!shown) onChange(true); }} accessibilityLabel={`${label}: friends and card`} />
-          <Chip label="Only me" icon="lock" selected={!shown} disabled={saving} onPress={() => { if (shown) onChange(false); }} accessibilityLabel={`${label}: only me`} />
+          <Chip label="Friends & card" selected={shown} disabled={saving} onPress={() => { if (!shown) onChange(true); }} accessibilityRole="radio" accessibilityLabel={`${label}: friends and card`} />
+          <Chip label="Only me" icon="lock" selected={!shown} disabled={saving} onPress={() => { if (shown) onChange(false); }} accessibilityRole="radio" accessibilityLabel={`${label}: only me`} />
         </View>
       </View>
       {field}
@@ -249,7 +255,7 @@ export function MyCardScreen() {
           </View>
         )}
         <View style={styles.identityActions}>
-          {card && <Button variant="primary" icon="share" label="Share profile" onPress={() => { setCopied(false); setSharing(true); }} />}
+          {card && <Button variant="primary" icon="share" label="Share profile" onPress={() => { setCopied(false); setError(null); setSharing(true); }} />}
           <Button icon="edit" label="Edit profile" onPress={() => navigation.navigate('ProfileEdit')} />
         </View>
       </View>
@@ -270,8 +276,8 @@ export function MyCardScreen() {
           <View style={styles.fieldHeader}>
             <Text style={[type.bodyStrong, styles.fieldLabel, { color: r.text }]}>Photo</Text>
             <View style={styles.audience} accessibilityRole="radiogroup" accessibilityLabel="Who sees your photo">
-              <Chip label="Everyone" selected={card.settings.showAvatar} disabled={saving} onPress={() => { if (!card.settings.showAvatar) void save({ showAvatar: true }); }} accessibilityLabel="Photo: everyone" />
-              <Chip label="Not on card" selected={!card.settings.showAvatar} disabled={saving} onPress={() => { if (card.settings.showAvatar) void save({ showAvatar: false }); }} accessibilityLabel="Photo: not on card" />
+              <Chip label="Everyone" selected={card.settings.showAvatar} disabled={saving} onPress={() => { if (!card.settings.showAvatar) void save({ showAvatar: true }); }} accessibilityRole="radio" accessibilityLabel="Photo: everyone" />
+              <Chip label="Not on card" selected={!card.settings.showAvatar} disabled={saving} onPress={() => { if (card.settings.showAvatar) void save({ showAvatar: false }); }} accessibilityRole="radio" accessibilityLabel="Photo: not on card" />
             </View>
           </View>
         </View>
@@ -321,7 +327,10 @@ export function MyCardScreen() {
       {card && (
         <Modal visible={sharing} transparent animationType="fade" onRequestClose={() => setSharing(false)}>
           <View style={styles.backdrop}>
+            {/* Tapping outside closes, so the sheet never traps anyone (iOS has no back key). */}
+            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setSharing(false)} accessibilityLabel="Close share sheet" accessibilityRole="button" />
             <View style={[styles.sheet, sheetShadow, { backgroundColor: r.card, borderColor: r.line }]} accessibilityViewIsModal>
+              <ScrollView contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled">
               <View style={styles.sheetHeader}>
                 <Text accessibilityRole="header" style={[type.title, { color: r.text }]}>Share profile</Text>
                 <Button size="sm" variant="ghost" label="Done" onPress={() => setSharing(false)} />
@@ -342,6 +351,7 @@ export function MyCardScreen() {
               {error ? <Text style={[type.meta, { color: r.danger }]}>{error}</Text> : null}
               <Button size="sm" variant="ghost" label="Reset card link" disabled={saving} onPress={handleReset}
                 accessibilityHint="Stops your current QR code and link from working" style={styles.reset} />
+              </ScrollView>
             </View>
           </View>
         </Modal>
@@ -368,7 +378,8 @@ const styles = StyleSheet.create({
   previewWrap: { alignItems: 'center', gap: space[3], marginTop: space[2] },
   error: { marginTop: space[4], textAlign: 'center' },
   backdrop: { flex: 1, backgroundColor: 'rgba(28, 25, 23, 0.35)', justifyContent: 'center', alignItems: 'center', padding: space[4] },
-  sheet: { width: '100%', maxWidth: 400, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, padding: space[4], gap: space[3] },
+  sheet: { width: '100%', maxWidth: 400, maxHeight: '92%', borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  sheetBody: { padding: space[4], gap: space[3] },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   qrPanel: {
     // Fixed white panel with generous padding = the QR quiet zone. High
