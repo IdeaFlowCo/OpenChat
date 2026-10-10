@@ -45,4 +45,19 @@ describe('parseAgentMarkdown', () => {
   it('keeps plain text unchanged', () => {
     expect(parseAgentMarkdown('Hello there\nsecond line')).toEqual([{ t: 'p', c: [{ t: 'text', v: 'Hello there\nsecond line' }] }]);
   });
+
+  it('stays fast on adversarial input', () => {
+    const started = Date.now();
+    parseAgentMarkdown('['.repeat(20000));
+    parseAgentMarkdown('[a]('.repeat(5000));
+    parseAgentMarkdown('https://a' + ')'.repeat(20000) + 'x');
+    parseAgentMarkdown('*_'.repeat(10000));
+    expect(Date.now() - started).toBeLessThan(1500);
+  });
+
+  it('italicises after a space or at the start without lookbehind', () => {
+    expect(parseInline('*one* and _two_')).toEqual([
+      { t: 'italic', c: [{ t: 'text', v: 'one' }] }, { t: 'text', v: ' and ' }, { t: 'italic', c: [{ t: 'text', v: 'two' }] },
+    ]);
+  });
 });

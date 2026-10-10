@@ -13,4 +13,9 @@ describe('dedupeLinkPreviews', () => {
     ]);
     expect(out.map(x => x.url)).toEqual(['https://worldissuetracker.com/', 'https://worldissuetracker.com/about']);
   });
+
+  it('never collapses different hosts or different pages that share a generic title', () => {
+    const out = dedupeLinkPreviews([p('https://a.example/login', 'Login'), p('https://b.example/login', 'Login'), p('https://a.example/x', 'Home'), p('https://a.example/y', 'Other')]);
+    expect(out).toHaveLength(4);
+  });
 });

@@ -1466,7 +1466,9 @@ export function ChatScreen({
             : (!!m.content && (
                 // Agents write Markdown; render it rather than showing ** and backticks (OpenChat-eo3n.5).
                 !isOwn && (m.sender?.isBot || (!isGroup && other?.isBot))
-                  ? <AgentMarkdown content={m.content} color={c.bubbleOtherText} linkColor={c.primary} codeBackground={c.surfaceElevated} />
+                  ? <AgentMarkdown content={m.content} color={c.bubbleOtherText} linkColor={c.primary} codeBackground={c.surfaceElevated}
+                      onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
+                      renderText={isGroup && m.content.includes('@') ? text => renderContentWithMentions(text, mentionableParticipants, c.bubbleOtherText, scheme) : undefined} />
                   : isGroup
                   ? <Text style={{ fontSize: 16 }}>
                       {renderContentWithMentions(

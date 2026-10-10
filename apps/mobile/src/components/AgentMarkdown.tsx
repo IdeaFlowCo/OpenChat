@@ -10,20 +10,24 @@ import { radius, space, type } from '../theme/tokens';
 
 const mono = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'ui-monospace, SFMono-Regular, Menlo, monospace' });
 
-export function AgentMarkdown({ content, color, linkColor, codeBackground }: {
+export function AgentMarkdown({ content, color, linkColor, codeBackground, renderText, onLongPress }: {
   content: string; color: string; linkColor: string; codeBackground: string;
+  /** Styles plain text runs, e.g. @mentions in a group. */
+  renderText?: (text: string) => ReactNode;
+  /** The bubble's long-press, so links still open the message menu. */
+  onLongPress?: () => void;
 }) {
   const blocks = useMemo(() => parseAgentMarkdown(content), [content]);
 
   const inline = (nodes: Inline[], key = 'i'): ReactNode => nodes.map((node, index) => {
     const k = `${key}.${index}`;
     switch (node.t) {
-      case 'text': return <Fragment key={k}>{node.v}</Fragment>;
+      case 'text': return <Fragment key={k}>{renderText ? renderText(node.v) : node.v}</Fragment>;
       case 'bold': return <Text key={k} style={styles.bold}>{inline(node.c, k)}</Text>;
       case 'italic': return <Text key={k} style={styles.italic}>{inline(node.c, k)}</Text>;
       case 'code': return <Text key={k} style={[styles.code, { backgroundColor: codeBackground }]}>{node.v}</Text>;
       case 'link': return (
-        <Text key={k} accessibilityRole="link" style={[styles.link, { color: linkColor }]} onPress={() => { void Linking.openURL(node.href).catch(() => {}); }}>
+        <Text key={k} accessibilityRole="link" style={[styles.link, { color: linkColor }]} onPress={() => { void Linking.openURL(node.href).catch(() => {}); }} onLongPress={onLongPress}>
           {inline(node.c, k)}
         </Text>
       );
@@ -40,7 +44,7 @@ export function AgentMarkdown({ content, color, linkColor, codeBackground }: {
           case 'quote': return <Text key={key} style={[styles.body, styles.quote, { color, borderLeftColor: codeBackground }]}>{inline(block.c, key)}</Text>;
           case 'code': return (
             <View key={key} style={[styles.codeBlock, { backgroundColor: codeBackground }]}>
-              <Text style={[styles.codeText, { color }]} selectable>{block.v}</Text>
+              <Text style={[styles.codeText, { color }]}>{block.v}</Text>
             </View>
           );
           case 'list': return (

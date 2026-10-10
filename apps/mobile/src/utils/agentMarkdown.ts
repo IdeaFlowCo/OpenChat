@@ -35,11 +35,21 @@ export function safeHref(raw: string): string | null {
   }
 }
 
-const TRAILING = /[.,;:!?)\]'"’”]+$/;
-// Order matters: code spans first so their contents are literal.
-const INLINE_SOURCE = /`([^`\n]+)`|\[([^\]\n]+)\]\(([^)\s]+)\)|\*\*(?=\S)([^*\n]*?\S)\*\*|__(?=\S)([^_\n]*?\S)__|(?<![\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])|(?<![\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])|(https?:\/\/[^\s<>]+|www\.[^\s<>]+)/;
+const TRAILING_CHARS = new Set(['.', ',', ';', ':', '!', '?', ')', ']', "'", '"', '’', '”']);
+/** Split sentence punctuation off the end of a URL (a loop: a `+$` regex is quadratic on long runs). */
+function splitTrailing(url: string): [string, string] {
+  let end = url.length;
+  while (end > 0 && TRAILING_CHARS.has(url[end - 1]!)) end--;
+  return [url.slice(0, end), url.slice(end)];
+}
+/** Longer text renders literally: bounded work for any message an agent can be made to echo. */
+export const MAX_INLINE_LENGTH = 4000;
+// Order matters: code spans first so their contents are literal. No lookbehind
+// (Safari before 16.4 cannot parse it): italics capture the preceding character.
+const INLINE_SOURCE = /`([^`\n]+)`|\[([^\]\n]{1,300})\]\(([^)\s]{1,2000})\)|\*\*(?=\S)([^*\n]*?\S)\*\*|__(?=\S)([^_\n]*?\S)__|(^|[^\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])|(^|[^\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])|(https?:\/\/[^\s<>]{1,2000}|www\.[^\s<>]{1,2000})/;
 
 export function parseInline(text: string): Inline[] {
+  if (text.length > MAX_INLINE_LENGTH) return [{ t: 'text', v: text }];
   const out: Inline[] = [];
   const pushText = (v: string) => {
     if (!v) return;
@@ -59,11 +69,12 @@ export function parseInline(text: string): Inline[] {
       if (href) out.push({ t: 'link', c: parseInline(m[2]), href });
       else pushText(m[0]);
     } else if (m[4] !== undefined || m[5] !== undefined) out.push({ t: 'bold', c: parseInline((m[4] ?? m[5])!) });
-    else if (m[6] !== undefined || m[7] !== undefined) out.push({ t: 'italic', c: parseInline((m[6] ?? m[7])!) });
-    else if (m[8] !== undefined) {
+    else if (m[7] !== undefined || m[9] !== undefined) {
+      pushText((m[6] ?? m[8]) ?? '');
+      out.push({ t: 'italic', c: parseInline((m[7] ?? m[9])!) });
+    } else if (m[10] !== undefined) {
       // Sentence punctuation after a URL stays outside the link.
-      const trail = m[8].match(TRAILING)?.[0] ?? '';
-      const raw = trail ? m[8].slice(0, -trail.length) : m[8];
+      const [raw, trail] = splitTrailing(m[10]);
       const href = safeHref(raw);
       if (href) out.push({ t: 'link', c: [{ t: 'text', v: raw }], href }); else pushText(raw);
       pushText(trail);
