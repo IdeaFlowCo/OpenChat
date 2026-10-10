@@ -369,11 +369,6 @@
       "count": 5
     }
   },
-  "src/screens/NewConversationScreen.tsx": {
-    "no-restricted-syntax": {
-      "count": 15
-    }
-  },
   "src/screens/OnboardingScreen.tsx": {
     "no-restricted-syntax": {
       "count": 20

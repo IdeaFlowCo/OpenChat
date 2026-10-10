@@ -10,7 +10,7 @@ vi.mock('react-native', () => ({
 vi.mock('@react-navigation/native', () => ({ useNavigation: () => mocks.navigation, useRoute: () => ({ params: {} }), useFocusEffect: (callback: () => void) => React.useEffect(callback, [callback]) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ currentUser: { userId: 'alice', openUserDirectoryEnabled: true }, conversations: [], presence: new Map(), createConversation: mocks.createConversation }) }));
-vi.mock('../../mobile/src/api/client', () => ({ api: { listPrivateThings: mocks.listPrivateThings, createPrivateThing: mocks.createPrivateThing, getContacts: mocks.getContacts, listFriends: mocks.listFriends, search: mocks.search } }));
+vi.mock('../../mobile/src/api/client', () => ({ api: { listPrivateThings: mocks.listPrivateThings, createPrivateThing: mocks.createPrivateThing, getContacts: mocks.getContacts, listFriends: mocks.listFriends, listBlocked: async () => [], search: mocks.search } }));
 vi.mock('../../mobile/src/components/Avatar', () => ({ Avatar: () => null }));
 vi.mock('../../mobile/src/components/BotBadge', () => ({ BotBadge: () => null }));
 vi.mock('../../mobile/src/components/YouBadge', () => ({ YouBadge: () => null }));
@@ -61,7 +61,7 @@ it.each(['ios', 'web'])('carries completed People email proof in Direct and Grou
   await act(async () => { root = create(React.createElement(NewConversationScreen)); });
   const searchInput = () => root!.root.findAllByType('TextInput').find(n => n.props.placeholder?.includes('exact email'))!;
   const profileDoor = () => root!.root.findAllByType('TouchableOpacity').find(n => n.props.accessibilityLabel === 'Profile for Official Bob')!;
-  const groupButton = root!.root.findAllByType('TouchableOpacity').find(n => n.findAllByType('Text').some(child => child.props.children === 'Group'))!;
+  const groupButton = root!.root.findAllByType('TouchableOpacity').find(n => n.findAllByType('Text').some(child => child.props.children === 'New group'))!;
   await act(async () => searchInput().props.onChangeText(' BOB@example.test '));
   await act(async () => vi.advanceTimersByTime(350));
   const stopPropagation = vi.fn();

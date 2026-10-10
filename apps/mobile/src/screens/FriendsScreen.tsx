@@ -100,6 +100,7 @@ export function FriendsScreen() {
       <View style={styles.findRow}>
         <TouchableOpacity onPress={() => navigation.navigate('NewConversation')}><Text style={{ color: c.primary, fontWeight: '700' }}>Find people</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('ScanQr')}><Text style={{ color: c.primary, fontWeight: '700' }}>Scan a code</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate('InvitePerson')}><Text style={{ color: c.primary, fontWeight: '700' }}>Invite a person</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('CatchUp')}><Text style={{ color: c.primary, fontWeight: '700' }}>Catch up</Text></TouchableOpacity>
       </View>
       {section === 'friends' && savedOwner === ownerId && <View style={{ gap: 12 }}>
