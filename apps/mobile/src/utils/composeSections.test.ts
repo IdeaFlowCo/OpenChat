@@ -48,4 +48,9 @@ describe('buildComposeSections', () => {
     expect(sections.recent.map(u => u.id)).toEqual(['claire']);
     expect(buildComposeSections({ conversations, friends: [], directory: [], currentUserId: 'me', query: 'qian' }).recent.map(u => u.id)).toEqual(['harrison']);
   });
+
+  it('leaves out people you blocked, even with an old direct chat', () => {
+    const sections = buildComposeSections({ conversations, friends: [claire], directory: [claire, adam], currentUserId: 'me', query: '', blockedIds: new Set(['claire']) });
+    expect([...sections.recent, ...sections.friends, ...sections.everyone].map(u => u.id)).not.toContain('claire');
+  });
 });

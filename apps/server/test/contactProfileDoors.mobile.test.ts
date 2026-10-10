@@ -10,7 +10,7 @@ vi.mock('react-native', () => ({
 vi.mock('@react-navigation/native', () => ({ useNavigation: () => mocks.navigation, useRoute: () => ({ params: {} }), useFocusEffect: (callback: () => void) => React.useEffect(callback, [callback]) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ currentUser: { userId: 'alice', openUserDirectoryEnabled: true }, conversations: [], presence: new Map(), createConversation: mocks.createConversation }) }));
-vi.mock('../../mobile/src/api/client', () => ({ api: { listPrivateThings: mocks.listPrivateThings, createPrivateThing: mocks.createPrivateThing, getContacts: mocks.getContacts, listFriends: mocks.listFriends, search: mocks.search } }));
+vi.mock('../../mobile/src/api/client', () => ({ api: { listPrivateThings: mocks.listPrivateThings, createPrivateThing: mocks.createPrivateThing, getContacts: mocks.getContacts, listFriends: mocks.listFriends, listBlocked: async () => [], search: mocks.search } }));
 vi.mock('../../mobile/src/components/Avatar', () => ({ Avatar: () => null }));
 vi.mock('../../mobile/src/components/BotBadge', () => ({ BotBadge: () => null }));
 vi.mock('../../mobile/src/components/YouBadge', () => ({ YouBadge: () => null }));

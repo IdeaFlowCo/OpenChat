@@ -3,7 +3,7 @@ import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   navigation: { navigate: vi.fn(), replace: vi.fn() }, createConversation: vi.fn(), getContacts: vi.fn(), listFriends: vi.fn(),
-  conversations: [] as any[],
+  conversations: [] as any[], listBlocked: vi.fn(),
 }));
 vi.mock('react-native', () => ({
   Platform: { OS: 'ios', select: (v: any) => v.ios ?? v.default }, StyleSheet: { create: (s: unknown) => s, hairlineWidth: 1 },
@@ -13,7 +13,7 @@ vi.mock('react-native', () => ({
 vi.mock('@react-navigation/native', () => ({ useNavigation: () => mocks.navigation }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ currentUser: { userId: 'me', openUserDirectoryEnabled: true }, conversations: mocks.conversations, presence: new Map(), createConversation: mocks.createConversation }) }));
-vi.mock('../../mobile/src/api/client', () => ({ api: { getContacts: mocks.getContacts, listFriends: mocks.listFriends } }));
+vi.mock('../../mobile/src/api/client', () => ({ api: { getContacts: mocks.getContacts, listFriends: mocks.listFriends, listBlocked: mocks.listBlocked } }));
 vi.mock('../../mobile/src/components/Avatar', () => ({ Avatar: () => null }));
 vi.mock('../../mobile/src/components/BotBadge', () => ({ BotBadge: () => null }));
 vi.mock('../../mobile/src/components/YouBadge', () => ({ YouBadge: () => null }));
@@ -31,6 +31,7 @@ beforeEach(() => {
   mocks.listFriends.mockResolvedValue({ friends: [{ userId: 'mg', user: { id: 'mg', name: 'Michael G' }, state: 'friends' }], incoming: [], outgoing: [] });
   mocks.getContacts.mockReturnValue(new Promise(() => {})); // the directory never answers
   mocks.createConversation.mockResolvedValue({ id: 'new' });
+  mocks.listBlocked.mockResolvedValue([]);
 });
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; vi.useRealTimers(); delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT; });
 
@@ -76,5 +77,12 @@ describe('New message (OpenChat-eo3n.2)', () => {
     expect(mocks.createConversation).not.toHaveBeenCalled();
     await act(async () => button('Create group (1)')!.props.onPress());
     expect(mocks.createConversation).toHaveBeenCalledWith(['cl'], { type: 'group', title: undefined });
+  });
+
+  it('leaves people you blocked out of Recent', async () => {
+    mocks.listBlocked.mockResolvedValue([{ id: 'cl', name: 'Claire' }]);
+    await act(async () => { root = create(React.createElement(NewConversationScreen)); });
+    expect(texts()).not.toContain('Claire');
+    expect(texts()).toContain('Harrison Qian');
   });
 });

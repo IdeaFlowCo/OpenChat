@@ -29,21 +29,23 @@ function filterRanked(users: User[], query: string): User[] {
 
 export interface ComposeSections { recent: User[]; friends: User[]; everyone: User[] }
 
-export function buildComposeSections({ conversations, friends, directory, currentUserId, query }: {
+export function buildComposeSections({ conversations, friends, directory, currentUserId, query, blockedIds }: {
   conversations: Conversation[];
   friends: User[];
   directory: User[];
   currentUserId?: string;
   query: string;
+  /** People you blocked: their old DM can still be listed, but they cannot be messaged. */
+  blockedIds?: ReadonlySet<string>;
 }): ComposeSections {
-  const seen = new Set<string>();
+  const seen = new Set<string>(blockedIds ?? []);
   const recentAll: User[] = [];
   const direct = conversations
     .filter(conv => conv.type === 'direct' && conv.lastMessageAt)
     .sort((a, b) => Date.parse(b.lastMessageAt!) - Date.parse(a.lastMessageAt!));
   for (const conv of direct) {
     const other = conv.participants?.find(p => p.user?.id && p.user.id !== currentUserId)?.user;
-    if (!other || seen.has(other.id)) continue;
+    if (!other || !currentUserId || seen.has(other.id)) continue;
     seen.add(other.id);
     recentAll.push(other);
   }
@@ -51,11 +53,11 @@ export function buildComposeSections({ conversations, friends, directory, curren
   const shown = new Set(recent.map(user => user.id));
   const friendRows = filterRanked(
     friends
-      .filter(user => !shown.has(user.id) && user.id !== currentUserId)
+      .filter(user => !shown.has(user.id) && !blockedIds?.has(user.id) && user.id !== currentUserId)
       .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', undefined, { sensitivity: 'base' })),
     query,
   );
   for (const user of friendRows) shown.add(user.id);
-  const everyone = directory.filter(user => !shown.has(user.id));
+  const everyone = directory.filter(user => !shown.has(user.id) && !blockedIds?.has(user.id));
   return { recent, friends: friendRows, everyone };
 }

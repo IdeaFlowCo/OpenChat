@@ -34,6 +34,7 @@ import { AppIcon } from '../components/AppIcon';
 import { Button, Chip, ListRow, SectionLabel } from '../components/ui';
 import { radius, roles, space, type } from '../theme/tokens';
 import { buildComposeSections } from '../utils/composeSections';
+import { AGENT_DISPLAY_NAME, getUserDisplayName } from '../utils/conversationDisplay';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp } from '../navigation/types';
 
@@ -55,11 +56,15 @@ export function NewConversationScreen() {
   const r = roles(getColors(scheme));
   const { createConversation, currentUser, presence, conversations } = useChat();
   const [friendUsers, setFriendUsers] = useState<User[]>([]);
+  const [blockedIds, setBlockedIds] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     let active = true;
     api.listFriends()
       .then(lists => { if (active) setFriendUsers(lists.friends.map(row => ({ id: row.user?.id ?? row.userId, name: row.user?.name, avatarUrl: row.user?.avatarUrl }))); })
       .catch(() => { /* Friends is additive; the directory still works. */ });
+    api.listBlocked()
+      .then(users => { if (active) setBlockedIds(new Set(users.map(user => user.id))); })
+      .catch(() => { /* Best effort: the server still refuses blocked people. */ });
     return () => { active = false; };
   }, []);
 
@@ -69,7 +74,7 @@ export function NewConversationScreen() {
   const results = contactResult.rows;
   const resultQuery = contactResult.query.trim();
   const exactEmail = resultQuery.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resultQuery) ? resultQuery : undefined;
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [selected, setSelected] = useState<User[]>([]);
@@ -168,8 +173,9 @@ export function NewConversationScreen() {
   };
 
   const sections = useMemo(() => buildComposeSections({
-    conversations, friends: friendUsers, directory: results, currentUserId: currentUser?.userId, query,
-  }), [conversations, friendUsers, results, currentUser?.userId, query]);
+    conversations, friends: friendUsers, directory: results, currentUserId: currentUser?.userId, query, blockedIds,
+  }), [conversations, friendUsers, results, currentUser?.userId, query, blockedIds]);
+  const friendIds = useMemo(() => new Set(friendUsers.map(user => user.id)), [friendUsers]);
 
   type Tier = 'recent' | 'friends' | 'everyone';
   type Item = { kind: 'header'; key: string; title: string } | { kind: 'person'; key: string; user: User; tier: Tier };
@@ -185,7 +191,9 @@ export function NewConversationScreen() {
     add('everyone', 'Everyone', sections.everyone);
     return out;
   }, [sections]);
-  const searching = loading || debounced !== query;
+  // Pending until the directory has answered for exactly this query, so the
+  // no-results state never flashes between keystroke and request.
+  const searching = loading || contactResult.query !== query;
   const trimmedQuery = query.trim();
 
   const leaveGroup = () => { setMode('direct'); setSelected([]); setGroupTitle(''); };
@@ -194,7 +202,9 @@ export function NewConversationScreen() {
     const checked = isSelected(item.id);
     const live = presence.get(item.id);
     const isSelf = item.id === currentUser?.userId;
-    const name = isSelf ? (item.name || currentUser?.name || 'You') : (item.name || 'OpenChat member');
+    const name = isSelf ? (item.name || currentUser?.name || 'You')
+      : item.isBot && (item.id === 'assistant' || item.name === 'Assistant') ? AGENT_DISPLAY_NAME
+      : getUserDisplayName(item);
     const subtitle = isSelf ? 'Note to self'
       : tier === 'everyone' && item.sharedConversations ? `${item.sharedConversations} shared conversation${item.sharedConversations === 1 ? '' : 's'}`
       : '';
@@ -203,6 +213,8 @@ export function NewConversationScreen() {
         style={[styles.row, { backgroundColor: checked ? r.accentSoft : 'transparent' }]}
         onPress={() => handleSelect(item)}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={mode === 'group' ? `${checked ? 'Remove' : 'Add'} ${name} ${checked ? 'from' : 'to'} the group` : `Message ${name}`}
         accessibilityState={mode === 'group' ? { selected: checked } : undefined}
       >
         <Avatar
@@ -231,7 +243,7 @@ export function NewConversationScreen() {
             <Text style={[type.label, { color: r.textSecondary, fontWeight: '600' }]}>Profile</Text>
           </TouchableOpacity>
         )}
-        {mode === 'direct' && tier === 'everyone' && !item.isBot && !isSelf && (
+        {mode === 'direct' && (tier === 'everyone' || (tier === 'recent' && !friendIds.has(item.id))) && !item.isBot && !isSelf && (
           <TouchableOpacity
             onPress={(event) => { event.stopPropagation(); navigation.navigate('PersonEntry', { userId: item.id }); }}
             style={styles.rowAction}
