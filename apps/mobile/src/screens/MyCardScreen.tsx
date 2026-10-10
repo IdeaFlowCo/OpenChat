@@ -1,12 +1,13 @@
 import { ConnectAgentLink } from '../components/ConnectAgentLink';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ComponentProps, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -28,7 +29,8 @@ import {
 } from '../api/client';
 import { AddMeCardView } from '../components/AddMeCardView';
 import { Avatar } from '../components/Avatar';
-import { AppIcon } from '../components/AppIcon';
+import { Button, Card, Chip, ListRow, SectionLabel } from '../components/ui';
+import { radius, roles, sheetShadow, space, type } from '../theme/tokens';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp } from '../navigation/types';
 import { currentCardUrl, shareCard, shareCardOnWhatsApp } from '../utils/cardSharing';
@@ -52,8 +54,8 @@ function confirmReset(onConfirm: () => void) {
 export function MyCardScreen() {
   const navigation = useNavigation<NavProp<'MyCard'>>();
   const { scheme } = useTheme();
-  const c = getColors(scheme);
-  const { width } = useWindowDimensions();
+  const r = roles(getColors(scheme));
+  const { width, height } = useWindowDimensions();
   const { currentUser, refreshConversations, signOut } = useChat();
   const ideaflowSwitch = useIdeaflowAccountSwitch();
   const guardAction = useFocusedAccountGuard(currentUser?.userId);
@@ -69,6 +71,10 @@ export function MyCardScreen() {
   const [link, setLink] = useState('');
   const [strangerView, setStrangerView] = useState<StrangerCard | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [copied, setCopied] = useState(false);
+  // A rotated link must never still say "Copied" (the clipboard holds the old one).
+  useEffect(() => { setCopied(false); }, [card?.token]);
 
   const handleOpenAgent = async () => {
     if (openingAgent) return;
@@ -102,8 +108,11 @@ export function MyCardScreen() {
     setSaving(true);
     setError(null);
     try {
-      applyCard(await api.updateMyCard(patch));
+      const next = await api.updateMyCard(patch);
+      applyCard(next);
       setStrangerView(null);
+      // Keep an open preview current instead of leaving it on a spinner.
+      if (previewing) setStrangerView(await api.getPublicCard(next.token));
     } catch (err) {
       setError(err instanceof Error ? err.message.replace(/^\d+:\s*/, '') : 'Could not save.');
       if (card) applyCard(card);
@@ -120,30 +129,6 @@ export function MyCardScreen() {
     if (x.trim() !== (card.settings.x ?? '')) patch.x = x.trim() || null;
     if (link.trim() !== (card.settings.link ?? '')) patch.link = link.trim() || null;
     if (Object.keys(patch).length > 0) void save(patch);
-  };
-
-  const applyPreset = (preset: 'minimal' | 'business' | 'open') => {
-    const patch: Partial<AddMeCardSettings> = {};
-    if (preset === 'minimal') {
-      patch.showAvatar = true;
-      patch.showHeadline = false;
-      patch.showLinkedIn = false;
-      patch.showX = false;
-      patch.showLink = false;
-    } else if (preset === 'business') {
-      patch.showAvatar = true;
-      patch.showHeadline = true;
-      patch.showLinkedIn = true;
-      patch.showX = true;
-      patch.showLink = false;
-    } else if (preset === 'open') {
-      patch.showAvatar = true;
-      patch.showHeadline = true;
-      patch.showLinkedIn = true;
-      patch.showX = true;
-      patch.showLink = true;
-    }
-    void save(patch);
   };
 
   const togglePreview = async () => {
@@ -189,6 +174,12 @@ export function MyCardScreen() {
     } catch { if (isCurrent()) setError('Could not open WhatsApp. Try Share link instead.'); }
   };
 
+  const handleCopy = async () => {
+    if (!card) return;
+    try { await Clipboard.setStringAsync(addMeCardUrl(card.token)); setCopied(true); }
+    catch { setError('Could not copy your link. Try again.'); }
+  };
+
   const handleReset = () => confirmReset(async () => {
     setSaving(true);
     try {
@@ -209,390 +200,200 @@ export function MyCardScreen() {
   // strand the user without Settings or Sign out (OpenChat-3ar0).
   if (!card && !error) {
     return (
-      <View style={[styles.center, { backgroundColor: c.background }]}>
-        <ActivityIndicator color={c.primary} size="large" />
+      <View style={[styles.center, { backgroundColor: r.canvas }]}>
+        <ActivityIndicator color={r.accent} size="large" />
       </View>
     );
   }
 
   const url = card ? addMeCardUrl(card.token) : '';
-  const qrSize = Math.max(180, Math.min(width - 96, 320));
+  // Shrink the code on short screens (landscape phones, small browser windows).
+  const qrSize = Math.max(140, Math.min(width - 112, 260, (height || 800) * 0.32));
+  const name = card?.preview.name || currentUser?.name || 'Your profile';
   const headerHeadline = card?.settings.headline || (currentUser as any)?.statusMessage;
+  const myLinks = card ? [
+    card.settings.linkedIn ? { label: 'LinkedIn', url: card.settings.linkedIn } : null,
+    card.settings.x ? { label: 'X', url: card.settings.x } : null,
+    card.settings.link ? { label: 'Website', url: card.settings.link } : null,
+  ].filter((item): item is { label: string; url: string } => !!item) : [];
+
+  // Per-field audience. Today a field is either on your card (anyone with the
+  // card link, and friends on your profile) or only on this screen. Only
+  // audiences the server honours are offered (OpenChat-eo3n.7).
+  const audienceRow = (label: string, shown: boolean, onChange: (show: boolean) => void, field: ReactNode, divider: boolean) => (
+    <View style={[styles.fieldRow, divider && { borderTopColor: r.line, borderTopWidth: StyleSheet.hairlineWidth }]}>
+      <View style={styles.fieldHeader}>
+        <Text style={[type.bodyStrong, styles.fieldLabel, { color: r.text }]}>{label}</Text>
+        <View style={styles.audience} accessibilityRole="radiogroup" accessibilityLabel={`Who sees your ${label}`}>
+          <Chip label="Friends & card" selected={shown} disabled={saving} onPress={() => { if (!shown) onChange(true); }} accessibilityRole="radio" accessibilityLabel={`${label}: friends and card`} />
+          <Chip label="Only me" icon="lock" selected={!shown} disabled={saving} onPress={() => { if (shown) onChange(false); }} accessibilityRole="radio" accessibilityLabel={`${label}: only me`} />
+        </View>
+      </View>
+      {field}
+    </View>
+  );
+  const input = (value: string, onChangeText: (v: string) => void, placeholder: string, extra: Partial<ComponentProps<typeof TextInput>> = {}) => (
+    <TextInput value={value} onChangeText={onChangeText} onBlur={saveTextFields} onSubmitEditing={saveTextFields} placeholder={placeholder}
+      placeholderTextColor={r.decoration} returnKeyType="done" style={[styles.input, { color: r.text, backgroundColor: r.input, borderColor: r.line }]} {...extra} />
+  );
+  const urlInput = { autoCapitalize: 'none' as const, autoCorrect: false, keyboardType: 'url' as const, maxLength: 200 };
 
   return (
     <ScrollView
-      style={{ backgroundColor: c.background }}
+      style={{ backgroundColor: r.canvas }}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
     >
-      {/* Header row: photo, name, headline. Tap opens Edit profile as a sheet. */}
-      <TouchableOpacity
-        style={[styles.headerCard, { backgroundColor: c.surface, borderColor: c.border }]}
-        onPress={() => navigation.navigate('ProfileEdit')}
-        accessibilityRole="button"
-        accessibilityLabel="Edit profile"
-        activeOpacity={0.7}
-      >
-        <Avatar
-          name={card?.preview.name || currentUser?.name || 'Profile'}
-          email={safeEmail}
-          avatarUrl={currentUser?.avatarUrl ?? undefined}
-          size={52}
-        />
-        <View style={styles.headerInfo}>
-          <Text style={[styles.headerName, { color: c.textPrimary }]} numberOfLines={1}>
-            {card?.preview.name || currentUser?.name || 'Your Profile'}
-          </Text>
-          {!!headerHeadline && (
-            <Text style={[styles.headerHeadline, { color: c.textSecondary }]} numberOfLines={1}>
-              {headerHeadline}
-            </Text>
-          )}
-          <Text style={[styles.headerEditHint, { color: c.primary }]}>
-            Edit profile ›
-          </Text>
+      {/* Identity first: who you are, then one door to share it. */}
+      <View style={styles.identity}>
+        <Avatar name={name} email={safeEmail} avatarUrl={currentUser?.avatarUrl ?? undefined} size={88} />
+        <Text style={[type.heading, styles.centered, { color: r.text }]} numberOfLines={1}>{name}</Text>
+        {!!headerHeadline && <Text style={[type.body, styles.centered, { color: r.textSecondary }]} numberOfLines={2}>{headerHeadline}</Text>}
+        {myLinks.length > 0 && (
+          <View style={styles.linkChips}>
+            {myLinks.map(item => <Chip key={item.label} icon="link" label={item.label} onPress={() => void Linking.openURL(item.url)} accessibilityLabel={`${item.label}: ${item.url}`} />)}
+          </View>
+        )}
+        <View style={styles.identityActions}>
+          {card && <Button variant="primary" icon="share" label="Share profile" onPress={() => { setCopied(false); setError(null); setSharing(true); }} />}
+          <Button icon="edit" label="Edit profile" onPress={() => navigation.navigate('ProfileEdit')} />
         </View>
-        <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
-      </TouchableOpacity>
+      </View>
 
       {!card ? (
-        <View style={[styles.cardUnavailable, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <Text style={[styles.sub, { color: c.textMetadata }]}>{error}</Text>
-        </View>
+        <Card style={styles.block}><Text style={[type.label, styles.centered, { color: r.textMeta }]}>{error}</Text></Card>
       ) : (
       <>
-      {previewing ? (
-        <View style={styles.previewWrap}>
-          <Text style={[styles.sub, { color: c.textMetadata }]}>
-            This is exactly what someone sees after scanning your code.
-          </Text>
-          {strangerView ? <AddMeCardView card={strangerView} /> : <ActivityIndicator color={c.primary} />}
+      <SectionLabel style={styles.block}>What people see</SectionLabel>
+      <Card padding="none" style={styles.block}>
+        <View style={styles.fieldRow}>
+          <View style={styles.fieldHeader}>
+            <Text style={[type.bodyStrong, styles.fieldLabel, { color: r.text }]}>Name</Text>
+            <Chip label="Everyone" selected />
+          </View>
         </View>
-      ) : (
-        <View style={styles.qrPanel} accessibilityLabel="My card QR code">
-          <QRCode value={url} size={qrSize} color="#000000" backgroundColor="#ffffff" ecl="M" />
-          <Text style={styles.qrName} numberOfLines={1}>{card.preview.name}</Text>
-          <Text style={styles.qrHint}>Scan to send me a friend request</Text>
+        <View style={[styles.fieldRow, { borderTopColor: r.line, borderTopWidth: StyleSheet.hairlineWidth }]}>
+          <View style={styles.fieldHeader}>
+            <Text style={[type.bodyStrong, styles.fieldLabel, { color: r.text }]}>Photo</Text>
+            <View style={styles.audience} accessibilityRole="radiogroup" accessibilityLabel="Who sees your photo">
+              <Chip label="Everyone" selected={card.settings.showAvatar} disabled={saving} onPress={() => { if (!card.settings.showAvatar) void save({ showAvatar: true }); }} accessibilityRole="radio" accessibilityLabel="Photo: everyone" />
+              <Chip label="Not on card" selected={!card.settings.showAvatar} disabled={saving} onPress={() => { if (card.settings.showAvatar) void save({ showAvatar: false }); }} accessibilityRole="radio" accessibilityLabel="Photo: not on card" />
+            </View>
+          </View>
+        </View>
+        {audienceRow('Headline', card.settings.showHeadline, v => void save({ showHeadline: v }), input(headline, setHeadline, 'e.g. Founder at Ideaflow', { maxLength: 80 }), true)}
+        {audienceRow('LinkedIn', card.settings.showLinkedIn, v => void save({ showLinkedIn: v }), input(linkedIn, setLinkedIn, 'linkedin.com/in/you', urlInput), true)}
+        {audienceRow('X', card.settings.showX, v => void save({ showX: v }), input(x, setX, 'x.com/you', urlInput), true)}
+        {audienceRow('Website', card.settings.showLink, v => void save({ showLink: v }), input(link, setLink, 'yoursite.com', urlInput), true)}
+      </Card>
+      <Text style={[type.meta, styles.block, styles.footnote, { color: r.textMeta }]}>
+        Friends see these on your profile, and so does anyone you give your card link. Email, phone number and account id are never shown.
+      </Text>
+      <View style={[styles.block, styles.previewRow]}>
+        <Button size="sm" variant="ghost" icon="info" label={previewing ? 'Hide preview' : 'Preview your card'} onPress={() => void togglePreview()} />
+      </View>
+      {previewing && (
+        <View style={[styles.block, styles.previewWrap]}>
+          {strangerView ? <AddMeCardView card={strangerView} /> : <ActivityIndicator color={r.accent} />}
         </View>
       )}
-
-      <TouchableOpacity
-        style={[styles.scanCodeBtn, { backgroundColor: c.primary }]}
-        onPress={() => navigation.navigate('ScanQr')}
-        accessibilityRole="button"
-        accessibilityLabel="Scan a code"
-        activeOpacity={0.8}
-      >
-        <AppIcon name="camera" color={c.onPrimary} size={20} />
-        <Text style={[styles.scanCodeBtnText, { color: c.onPrimary }]}>Scan a code</Text>
-      </TouchableOpacity>
-
-      <View style={styles.actions}>
-        <TouchableOpacity style={[styles.actionBtn, { backgroundColor: c.primary }]} onPress={handleShare} accessibilityRole="button">
-          <Text style={[styles.actionText, { color: c.onPrimary }]}>Share card link</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.actionBtn, { borderColor: c.border, borderWidth: 1 }]} onPress={togglePreview} accessibilityRole="button">
-          <Text style={[styles.actionText, { color: c.textPrimary }]}>{previewing ? 'Show QR' : 'Preview as stranger'}</Text>
-        </TouchableOpacity>
-      </View>
-      <TouchableOpacity style={[styles.scanCodeBtn, { backgroundColor: c.surface, borderColor: c.border, borderWidth: 1 }]} onPress={handleWhatsApp} accessibilityRole="button">
-        <Text style={[styles.scanCodeBtnText, { color: c.textPrimary }]}>Open in WhatsApp</Text>
-      </TouchableOpacity>
-
-      <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>PRESETS</Text>
-      <View style={styles.presetRow}>
-        <TouchableOpacity style={[styles.presetBtn, { backgroundColor: c.surface, borderColor: c.border }]} onPress={() => applyPreset('minimal')}>
-          <Text style={[styles.presetText, { color: c.textPrimary }]}>Minimal</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.presetBtn, { backgroundColor: c.surface, borderColor: c.border }]} onPress={() => applyPreset('business')}>
-          <Text style={[styles.presetText, { color: c.textPrimary }]}>Business Card</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.presetBtn, { backgroundColor: c.surface, borderColor: c.border }]} onPress={() => applyPreset('open')}>
-          <Text style={[styles.presetText, { color: c.textPrimary }]}>Open</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>WHAT PEOPLE SEE</Text>
-      <View style={[styles.section, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <View style={[styles.row, { borderBottomColor: c.divider }]}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.label, { color: c.textPrimary }]}>Name</Text>
-            <Text style={[styles.hint, { color: c.textMetadata }]}>Always shown · change it in Edit profile</Text>
-          </View>
-        </View>
-        <View style={[styles.row, { borderBottomColor: c.divider }]}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.label, { color: c.textPrimary }]}>Photo</Text>
-            <Text style={[styles.hint, { color: c.textMetadata }]}>Your profile photo</Text>
-          </View>
-          <Switch value={card.settings.showAvatar} onValueChange={(v) => void save({ showAvatar: v })} disabled={saving} trackColor={{ false: c.border, true: c.primary }} accessibilityLabel="Show photo on card" />
-        </View>
-        
-        <View style={[styles.fieldRow, { borderBottomColor: c.divider }]}>
-          <View style={styles.fieldHeader}>
-            <Text style={[styles.label, { color: c.textPrimary }]}>Headline</Text>
-            <Switch value={card.settings.showHeadline} onValueChange={(v) => void save({ showHeadline: v })} disabled={saving} trackColor={{ false: c.border, true: c.primary }} />
-          </View>
-          <TextInput value={headline} onChangeText={setHeadline} onBlur={saveTextFields} onSubmitEditing={saveTextFields} placeholder="Optional · e.g. Founder at Ideaflow" placeholderTextColor={c.textMuted} maxLength={80} returnKeyType="done" style={[styles.input, { color: c.textPrimary, borderColor: c.border, opacity: card.settings.showHeadline ? 1 : 0.5 }]} editable={card.settings.showHeadline} />
-        </View>
-
-        <View style={[styles.fieldRow, { borderBottomColor: c.divider }]}>
-          <View style={styles.fieldHeader}>
-            <Text style={[styles.label, { color: c.textPrimary }]}>LinkedIn</Text>
-            <Switch value={card.settings.showLinkedIn} onValueChange={(v) => void save({ showLinkedIn: v })} disabled={saving} trackColor={{ false: c.border, true: c.primary }} />
-          </View>
-          <TextInput value={linkedIn} onChangeText={setLinkedIn} onBlur={saveTextFields} onSubmitEditing={saveTextFields} placeholder="Optional · e.g. linkedin.com/in/you" placeholderTextColor={c.textMuted} autoCapitalize="none" autoCorrect={false} keyboardType="url" maxLength={200} returnKeyType="done" style={[styles.input, { color: c.textPrimary, borderColor: c.border, opacity: card.settings.showLinkedIn ? 1 : 0.5 }]} editable={card.settings.showLinkedIn} />
-        </View>
-
-        <View style={[styles.fieldRow, { borderBottomColor: c.divider }]}>
-          <View style={styles.fieldHeader}>
-            <Text style={[styles.label, { color: c.textPrimary }]}>X / Twitter</Text>
-            <Switch value={card.settings.showX} onValueChange={(v) => void save({ showX: v })} disabled={saving} trackColor={{ false: c.border, true: c.primary }} />
-          </View>
-          <TextInput value={x} onChangeText={setX} onBlur={saveTextFields} onSubmitEditing={saveTextFields} placeholder="Optional · e.g. x.com/you" placeholderTextColor={c.textMuted} autoCapitalize="none" autoCorrect={false} keyboardType="url" maxLength={200} returnKeyType="done" style={[styles.input, { color: c.textPrimary, borderColor: c.border, opacity: card.settings.showX ? 1 : 0.5 }]} editable={card.settings.showX} />
-        </View>
-
-        <View style={[styles.fieldRow, { borderBottomWidth: 0 }]}>
-          <View style={styles.fieldHeader}>
-            <Text style={[styles.label, { color: c.textPrimary }]}>Other Link</Text>
-            <Switch value={card.settings.showLink} onValueChange={(v) => void save({ showLink: v })} disabled={saving} trackColor={{ false: c.border, true: c.primary }} />
-          </View>
-          <TextInput value={link} onChangeText={setLink} onBlur={saveTextFields} onSubmitEditing={saveTextFields} placeholder="Optional · e.g. yoursite.com" placeholderTextColor={c.textMuted} autoCapitalize="none" autoCorrect={false} keyboardType="url" maxLength={200} returnKeyType="done" style={[styles.input, { color: c.textPrimary, borderColor: c.border, opacity: card.settings.showLink ? 1 : 0.5 }]} editable={card.settings.showLink} />
-        </View>
-      </View>
-      <Text style={[styles.footnote, { color: c.textMetadata }]}>
-        Never shown on your card: email, phone number, or account id.
-      </Text>
       </>
       )}
 
-      <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>PROFILE & SETTINGS</Text>
-      <View style={[styles.menuSection, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <TouchableOpacity
-          style={[styles.menuRow, { borderBottomColor: c.divider }]}
-          onPress={() => navigation.navigate('ProfileEdit')}
-          accessibilityRole="button"
-          activeOpacity={0.7}
-        >
-          <View style={styles.menuIconWrap}>
-            <AppIcon name="edit" color={c.primary} size={20} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.menuLabel, { color: c.textPrimary }]}>Edit profile</Text>
-            <Text style={[styles.menuHint, { color: c.textMetadata }]}>Name, photo, status, and directory settings</Text>
-          </View>
-          <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.menuRow, { borderBottomColor: c.divider }]}
-          onPress={handleOpenAgent}
-          disabled={openingAgent}
-          accessibilityRole="button"
-          activeOpacity={0.7}
-        >
-          <View style={styles.menuIconWrap}>
-            <AppIcon name="bot" color={c.primary} size={20} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.menuLabel, { color: c.textPrimary }]}>OpenChat Agent</Text>
-            <Text style={[styles.menuHint, { color: c.textMetadata }]}>Private conversation, asks, and agent coordination</Text>
-          </View>
-          {openingAgent ? (
-            <ActivityIndicator size="small" color={c.primary} />
-          ) : (
-            <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
-          )}
-        </TouchableOpacity>
-
-        <ConnectAgentLink detail />
-
-        <TouchableOpacity
-          style={[styles.menuRow, { borderBottomWidth: 0 }]}
-          onPress={() => navigation.navigate('Settings')}
-          accessibilityRole="button"
-          activeOpacity={0.7}
-        >
-          <View style={styles.menuIconWrap}>
-            <AppIcon name="settings" color={c.primary} size={20} strokeWidth={1.8} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.menuLabel, { color: c.textPrimary }]}>Settings</Text>
-            <Text style={[styles.menuHint, { color: c.textMetadata }]}>Preferences, notifications, and account</Text>
-          </View>
-          <AppIcon name="chevron-right" color={c.textMetadata} size={18} />
-        </TouchableOpacity>
-      </View>
+      <SectionLabel style={styles.block}>Profile & settings</SectionLabel>
+      <Card padding="none" style={styles.block}>
+        <ListRow icon="edit" title="Edit profile" subtitle="Name, photo, status and directory settings" onPress={() => navigation.navigate('ProfileEdit')} />
+        <ListRow icon="bot" title="OpenChat Agent" subtitle="Private conversation, asks and agent coordination" divider disabled={openingAgent}
+          trailing={openingAgent ? <ActivityIndicator size="small" color={r.accent} /> : undefined} chevron={!openingAgent} onPress={() => void handleOpenAgent()} />
+        <View style={{ borderTopColor: r.line, borderTopWidth: StyleSheet.hairlineWidth }}><ConnectAgentLink detail /></View>
+        <ListRow icon="settings" title="Settings" subtitle="Preferences, notifications and account" divider onPress={() => navigation.navigate('Settings')} />
+      </Card>
 
       {/* Sign out lives on Profile because the avatar is the one "Me" door on
           every width (phone header, desktop sidebar): Chats › avatar › Sign out
           is two taps everywhere. Settings › Account carries the same row. */}
-      <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>ACCOUNT</Text>
-      <View style={[styles.menuSection, { backgroundColor: c.surface, borderColor: c.border }]}>
+      <SectionLabel style={styles.block}>Account</SectionLabel>
+      <Card padding="none" style={styles.block}>
         {ideaflowSwitch.available && (
-          <TouchableOpacity
-            style={[styles.menuRow, { borderBottomColor: c.divider }]}
-            onPress={() => { void ideaflowSwitch.switchAccount(); }}
-            disabled={ideaflowSwitch.switching}
-            accessibilityRole="button"
-            accessibilityLabel="Switch account"
-            activeOpacity={0.7}
-          >
-            <View style={styles.menuIconWrap}>
-              <AppIcon name="people" color={c.primary} size={20} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.menuLabel, { color: c.textPrimary }]}>Switch account</Text>
-              <Text style={[styles.menuHint, { color: c.textMetadata }]} numberOfLines={1}>
-                Use another Ideaflow account
-              </Text>
-            </View>
-            {ideaflowSwitch.switching && <ActivityIndicator size="small" color={c.primary} />}
-          </TouchableOpacity>
+          <ListRow icon="people" title="Switch account" subtitle="Use another Ideaflow account" disabled={ideaflowSwitch.switching} chevron={false}
+            trailing={ideaflowSwitch.switching ? <ActivityIndicator size="small" color={r.accent} /> : undefined} onPress={() => { void ideaflowSwitch.switchAccount(); }} />
         )}
-        <TouchableOpacity
-          style={[styles.menuRow, { borderBottomWidth: 0 }]}
-          onPress={() => { void signOut(); }}
-          accessibilityRole="button"
-          accessibilityLabel="Sign out"
-          activeOpacity={0.7}
-        >
-          <View style={styles.menuIconWrap}>
-            <AppIcon name="logout" color={c.danger} size={20} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.menuLabel, { color: c.danger }]}>Sign out</Text>
-            <Text style={[styles.menuHint, { color: c.textMetadata }]} numberOfLines={1}>
-              {safeEmail ? `Signed in as ${safeEmail}` : 'Return to the sign-in screen on this device'}
-            </Text>
-          </View>
-        </TouchableOpacity>
-      </View>
+        <ListRow icon="logout" title="Sign out" destructive chevron={false} divider={ideaflowSwitch.available}
+          subtitle={safeEmail ? `Signed in as ${safeEmail}` : 'Return to the sign-in screen on this device'} onPress={() => { void signOut(); }} />
+      </Card>
 
-      {card && error ? <Text style={[styles.error, { color: c.danger }]}>{error}</Text> : null}
+      {card && error && !sharing ? <Text style={[type.label, styles.error, { color: r.danger }]}>{error}</Text> : null}
 
       {card && (
-        <TouchableOpacity onPress={handleReset} disabled={saving} style={styles.reset} accessibilityRole="button">
-          <Text style={{ color: c.danger, fontWeight: '600' }}>Reset card link</Text>
-          <Text style={[styles.hint, { color: c.textMetadata, textAlign: 'center' }]}>
-            Stops your current QR and link from working
-          </Text>
-        </TouchableOpacity>
+        <Modal visible={sharing} transparent animationType="fade" onRequestClose={() => setSharing(false)}>
+          <View style={styles.backdrop}>
+            {/* Tapping outside closes, so the sheet never traps anyone (iOS has no back key). */}
+            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setSharing(false)} accessibilityLabel="Close share sheet" accessibilityRole="button" />
+            <View style={[styles.sheet, sheetShadow, { backgroundColor: r.card, borderColor: r.line }]} accessibilityViewIsModal>
+              <ScrollView contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled">
+              <View style={styles.sheetHeader}>
+                <Text accessibilityRole="header" style={[type.title, { color: r.text }]}>Share profile</Text>
+                <Button size="sm" variant="ghost" label="Done" onPress={() => setSharing(false)} />
+              </View>
+              <View style={styles.qrPanel} accessibilityLabel="My card QR code">
+                <QRCode value={url} size={qrSize} color="#000000" backgroundColor="#ffffff" ecl="M" />
+                <Text style={[type.title, styles.qrName]} numberOfLines={1}>{card.preview.name}</Text>
+                <Text style={[type.label, styles.qrHint]}>Scan to send me a friend request</Text>
+              </View>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Copy link" onPress={() => void handleCopy()} style={[styles.linkRow, { backgroundColor: r.input, borderColor: r.line }]}>
+                <Text style={[type.label, styles.linkText, { color: r.textSecondary }]} numberOfLines={1}>{url.replace(/^https?:\/\//, '')}</Text>
+                <Text style={[type.label, { color: r.text, fontWeight: '600' }]}>{copied ? 'Copied' : 'Copy'}</Text>
+              </TouchableOpacity>
+              <View style={styles.sheetActions}>
+                <Button variant="primary" icon="share" label="Share link" block onPress={() => void handleShare()} />
+                <Button label="Open in WhatsApp" block onPress={() => void handleWhatsApp()} />
+              </View>
+              {error ? <Text style={[type.meta, { color: r.danger }]}>{error}</Text> : null}
+              <Button size="sm" variant="ghost" label="Reset card link" disabled={saving} onPress={handleReset}
+                accessibilityHint="Stops your current QR code and link from working" style={styles.reset} />
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
       )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  content: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 24, paddingBottom: 48 },
-  headerCard: {
-    width: '100%',
-    maxWidth: 420,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    marginBottom: 20,
-  },
-  headerInfo: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
-  },
-  headerName: {
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  headerHeadline: {
-    fontSize: 13,
-  },
-  headerEditHint: {
-    fontSize: 13,
-    fontWeight: '600',
-    marginTop: 2,
-  },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space[6] },
+  content: { alignItems: 'center', paddingHorizontal: space[4], paddingTop: space[6], paddingBottom: space[10] },
+  block: { width: '100%', maxWidth: 560 },
+  identity: { alignItems: 'center', gap: space[2], width: '100%', maxWidth: 560 },
+  centered: { textAlign: 'center', maxWidth: 340 },
+  linkChips: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: space[2], marginTop: space[1] },
+  identityActions: { flexDirection: 'row', gap: space[2], marginTop: space[3] },
+  fieldRow: { paddingHorizontal: space[4], paddingVertical: space[3], gap: space[2] },
+  fieldHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[2], flexWrap: 'wrap' },
+  fieldLabel: { flexShrink: 1 },
+  audience: { flexDirection: 'row', gap: space[1] + 2 },
+  input: { ...type.body, paddingHorizontal: space[3], paddingVertical: space[2] + 2, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, minHeight: 44 },
+  footnote: { marginTop: space[2] },
+  previewRow: { alignItems: 'flex-start', marginTop: space[1] },
+  previewWrap: { alignItems: 'center', gap: space[3], marginTop: space[2] },
+  error: { marginTop: space[4], textAlign: 'center' },
+  backdrop: { flex: 1, backgroundColor: 'rgba(28, 25, 23, 0.35)', justifyContent: 'center', alignItems: 'center', padding: space[4] },
+  sheet: { width: '100%', maxWidth: 400, maxHeight: '92%', borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  sheetBody: { padding: space[4], gap: space[3] },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   qrPanel: {
     // Fixed white panel with generous padding = the QR quiet zone. High
     // contrast in every theme is the point; do not theme this.
     backgroundColor: '#ffffff',
-    borderRadius: 20,
-    padding: 24,
+    borderRadius: radius.lg,
+    padding: space[5],
     alignItems: 'center',
+    alignSelf: 'center',
   },
-  qrName: { color: '#000000', fontSize: 20, fontWeight: '700', marginTop: 16, maxWidth: 320 },
-  qrHint: { color: '#3a3a3c', fontSize: 14, marginTop: 2 },
-  scanCodeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    width: '100%',
-    maxWidth: 420,
-    marginTop: 14,
-    paddingVertical: 14,
-    borderRadius: 12,
-  },
-  scanCodeBtnText: {
-    fontWeight: '700',
-    fontSize: 16,
-  },
-  previewWrap: { width: '100%', alignItems: 'center', gap: 12 },
-  cardUnavailable: {
-    width: '100%',
-    maxWidth: 420,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 24,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-  },
-  sub: { fontSize: 14, textAlign: 'center' },
-  actions: { flexDirection: 'row', gap: 12, marginTop: 12, width: '100%', maxWidth: 420 },
-  actionBtn: { flex: 1, paddingVertical: 13, borderRadius: 12, alignItems: 'center' },
-  actionText: { fontWeight: '700', fontSize: 15 },
-  sectionLabel: { alignSelf: 'stretch', maxWidth: 420, width: '100%', marginLeft: 'auto', marginRight: 'auto', fontSize: 12, fontWeight: '600', letterSpacing: 0.5, marginTop: 32, marginBottom: 8 },
-  presetRow: { flexDirection: 'row', gap: 8, width: '100%', maxWidth: 420, marginBottom: 8 },
-  presetBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center' },
-  presetText: { fontSize: 13, fontWeight: '600' },
-  section: { width: '100%', maxWidth: 420, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth },
-  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  fieldRow: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  fieldHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  label: { fontSize: 16, fontWeight: '500' },
-  hint: { fontSize: 13, marginTop: 2 },
-  input: { fontSize: 15, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth },
-  footnote: { fontSize: 13, marginTop: 8, maxWidth: 420, width: '100%' },
-  menuSection: {
-    width: '100%',
-    maxWidth: 420,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-  },
-  menuRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 12,
-  },
-  menuIconWrap: {
-    width: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  menuLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  menuHint: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  error: { fontSize: 14, marginTop: 16, textAlign: 'center' },
-  reset: { marginTop: 32, alignItems: 'center', paddingVertical: 8 },
+  qrName: { color: '#000000', marginTop: space[3], maxWidth: 280 },
+  qrHint: { color: '#3a3a3c', marginTop: 2 },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: space[3], minHeight: 44, paddingHorizontal: space[3], borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
+  linkText: { flex: 1, minWidth: 0 },
+  sheetActions: { gap: space[2] },
+  reset: { alignSelf: 'center' },
 });
