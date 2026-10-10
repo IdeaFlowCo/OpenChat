@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
+import { getDriver } from '../db.js';
 import { ensureSharedInbox, resolveUnlinkedRecipient, unlinkedProfileId } from '../services/unlinkedMessaging.js';
 
 const router = Router();
@@ -44,5 +45,44 @@ router.post('/unlinked/session', async (req, res) => {
     const token = jwt.sign({ ...user, embedded: 'unlinked' }, process.env.JWT_SECRET, { expiresIn: '10m' });
     res.json({ token, user });
   } catch { res.status(503).json({ error: 'messaging_unavailable' }); }
+});
+// Unlinked's "View on Unlinked": which of a member's conversation partners have a
+// shared Ideaflow identity. Confidential (service secret, no browser Origin).
+// Answers only for users who share a visible conversation with that member,
+// never the member's other contacts, emails or names; Unlinked then maps the
+// identity to a published profile only if that person claimed one.
+let identitiesWindow = 0, identitiesRequests = 0;
+router.post('/unlinked/identities', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const secret = process.env.UNLINKED_MESSAGING_SECRET;
+  if (!secret || secret.length < 32) { res.status(503).json({ error: 'messaging_unavailable' }); return; }
+  if (req.headers.origin) { res.status(403).json({ error: 'forbidden' }); return; }
+  const digest = (value: string) => createHash('sha256').update(value).digest();
+  if (!timingSafeEqual(digest(req.headers.authorization ?? ''), digest(`Bearer ${secret}`))) { res.status(401).json({ error: 'unauthorized' }); return; }
+  if (Date.now() - identitiesWindow >= 60000) { identitiesWindow = Date.now(); identitiesRequests = 0; }
+  if (++identitiesRequests > 600) { res.status(429).json({ error: 'rate_limited' }); return; }
+  const input = req.body;
+  const issuer = 'https://id.ideaflow.app/api/auth';
+  if (!input || Array.isArray(input) || Object.keys(input).some(key => !['issuer', 'subject', 'userIds'].includes(key)) ||
+      input.issuer !== issuer || typeof input.subject !== 'string' || !input.subject || input.subject.length > 512 ||
+      Array.from(input.subject as string).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) ||
+      !Array.isArray(input.userIds) || input.userIds.length < 1 || input.userIds.length > 200 ||
+      input.userIds.some((id: unknown) => typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id))) {
+    res.status(400).json({ error: 'invalid_input' }); return;
+  }
+  const session = getDriver().session({ defaultAccessMode: 'READ' });
+  try {
+    const result = await session.run(`
+      MATCH (viewer:User {ideaflowIdentityKey: $key})
+      WHERE viewer.ideaflowIssuer = $issuer AND viewer.ideaflowSub = $subject
+      UNWIND $userIds AS otherId
+      MATCH (viewer)-[:PARTICIPATES_IN]->(c:Conversation)<-[:PARTICIPATES_IN]-(other:User {id: otherId})
+      WHERE other.id <> viewer.id AND other.ideaflowIssuer = $issuer AND other.ideaflowSub IS NOT NULL
+        AND NOT (viewer)-[:BLOCKED]-(other)
+      RETURN DISTINCT other.id AS userId, other.ideaflowSub AS subject
+    `, { key: `${issuer}\u001f${input.subject}`, issuer, subject: input.subject, userIds: [...new Set(input.userIds as string[])] });
+    res.json({ identities: result.records.map(record => ({ userId: record.get('userId'), issuer, subject: record.get('subject') })) });
+  } catch { res.status(503).json({ error: 'messaging_unavailable' }); }
+  finally { await session.close(); }
 });
 export default router;

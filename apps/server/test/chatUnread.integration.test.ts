@@ -160,6 +160,34 @@ integration('server-side unread tracking', () => {
     }
   });
 
+  it('a conversation marked unread counts as one until it is read; receipts are unchanged', async () => {
+    const session = driver.session();
+    try {
+      await session.run(`
+        MATCH (:User {id: $userId})-[rel:PARTICIPATES_IN]->(:Conversation {id: $conversationId})
+        SET rel.lastReadAt = datetime('2026-01-02T05:00:00Z'), rel.markedUnreadAt = datetime('2026-01-02T05:01:00Z')
+      `, { userId: aliceId, conversationId });
+      let list = await session.run(CONVERSATIONS_QUERY, { userId: aliceId });
+      let conversation = list.records.map(record => record.get('conversation')).find(value => value.id === conversationId);
+      expect(conversation.markedUnread).toBe(true);
+      expect(conversation.unreadCount.toNumber()).toBe(1);
+      expect(conversation.lastReadAt.toString()).toBe('2026-01-02T05:00:00Z');
+      expect((await session.run(UNREAD_TOTAL_QUERY, { userId: aliceId })).records[0].get('unreadTotal').toNumber()).toBe(1);
+      // Reading again (the read route REMOVEs the flag) restores the computed count.
+      await session.run(`
+        MATCH (:User {id: $userId})-[rel:PARTICIPATES_IN]->(:Conversation {id: $conversationId})
+        SET rel.lastReadAt = datetime('2026-01-01T00:00:00Z') REMOVE rel.markedUnreadAt
+      `, { userId: aliceId, conversationId });
+      list = await session.run(CONVERSATIONS_QUERY, { userId: aliceId });
+      conversation = list.records.map(record => record.get('conversation')).find(value => value.id === conversationId);
+      expect(conversation.markedUnread).toBe(false);
+      expect(conversation.unreadCount.toNumber()).toBe(1);
+      expect((await session.run(UNREAD_TOTAL_QUERY, { userId: aliceId })).records[0].get('unreadTotal').toNumber()).toBe(1);
+    } finally {
+      await session.close();
+    }
+  });
+
   it('returns zero after the conversation is marked read', async () => {
     const session = driver.session();
     try {
