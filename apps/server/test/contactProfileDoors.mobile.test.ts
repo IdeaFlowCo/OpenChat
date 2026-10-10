@@ -61,7 +61,7 @@ it.each(['ios', 'web'])('carries completed People email proof in Direct and Grou
   await act(async () => { root = create(React.createElement(NewConversationScreen)); });
   const searchInput = () => root!.root.findAllByType('TextInput').find(n => n.props.placeholder?.includes('exact email'))!;
   const profileDoor = () => root!.root.findAllByType('TouchableOpacity').find(n => n.props.accessibilityLabel === 'Profile for Official Bob')!;
-  const groupButton = root!.root.findAllByType('TouchableOpacity').find(n => n.findAllByType('Text').some(child => child.props.children === 'Group'))!;
+  const groupButton = root!.root.findAllByType('TouchableOpacity').find(n => n.findAllByType('Text').some(child => child.props.children === 'New group'))!;
   await act(async () => searchInput().props.onChangeText(' BOB@example.test '));
   await act(async () => vi.advanceTimersByTime(350));
   const stopPropagation = vi.fn();
