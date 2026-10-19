@@ -277,6 +277,7 @@ const ConversationStreamEntry = {
     hasSourceMessage: { type: 'boolean' },
     sourceMessageId: { type: ['string', 'null'], description: 'Null when the original message is deleted or its conversation is inaccessible.' },
     sourceConversationId: { type: ['string', 'null'], description: 'Only disclosed with independent membership in the original conversation.' },
+    collapsed: { type: 'boolean', description: 'The reading user’s own collapse preference; never visible to other participants.' },
   },
   required: ['id', 'text', 'createdAt', 'updatedAt'],
 } as const;

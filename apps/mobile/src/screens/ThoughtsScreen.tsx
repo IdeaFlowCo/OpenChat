@@ -22,6 +22,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useChat } from '../contexts/ChatContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { fetchThoughts, createThought, updateThought, deleteThought, Thought } from '../services/thoughts';
@@ -29,6 +30,8 @@ import { getSocket } from '../api/socket';
 import { StreamEditor } from '../components/StreamEditor';
 import { ThoughtCard } from '../components/ThoughtCard';
 import { ThoughtsSearchBar } from '../components/ThoughtsSearchBar';
+import { StreamCompactToggle } from '../components/StreamCompactToggle';
+import { applyCollapsed, ingestStreamCollapsed } from '../services/streamDisplay';
 import type { ThoughtsNavProp } from '../navigation/types';
 import { AppIcon } from '../components/AppIcon';
 import { streamErrorMessage } from './streamError';
@@ -36,6 +39,8 @@ import { streamErrorMessage } from './streamError';
 // ── ThoughtsScreen ────────────────────────────────────────────────────────────
 
 export function ThoughtsScreen() {
+  const { currentUser } = useChat();
+  const viewer = currentUser?.userId;
   const navigation = useNavigation<ThoughtsNavProp<'ThoughtsList'>>();
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -63,6 +68,7 @@ export function ThoughtsScreen() {
       const trimmed = q.trim();
       const data = await fetchThoughts({ limit: 50, ...(trimmed ? { q: trimmed } : {}) });
       if (mountedRef.current) {
+        if (viewer) ingestStreamCollapsed(viewer, data);
         activeQueryRef.current = trimmed;
         setThoughts(data);
       }
@@ -74,7 +80,7 @@ export function ThoughtsScreen() {
         setRefreshing(false);
       }
     }
-  }, []);
+  }, [viewer]);
 
   // Reload whenever the screen comes into focus (e.g., returning from add/edit),
   // honoring whatever search query is active. We read the query from a ref so
@@ -104,6 +110,7 @@ export function ThoughtsScreen() {
     if (!sock) return;
     const onCreated = (payload: { thought: Thought }) => {
       if (!payload?.thought) return;
+      if (viewer) ingestStreamCollapsed(viewer, [payload.thought]);
       // While a search is active the list is filtered server-side; don't
       // blindly prepend a new thought that may not match the query.
       if (activeQueryRef.current) return;
@@ -116,16 +123,23 @@ export function ThoughtsScreen() {
 
     const onUpdated = (payload: { thought: Thought }) => {
       if (!payload?.thought) return;
+      if (viewer) ingestStreamCollapsed(viewer, [payload.thought]);
       setThoughts((prev) => prev.map((t) => (t.id === payload.thought.id ? { ...t, ...payload.thought } : t)));
+    };
+
+    const onCollapsed = (payload: { thoughtId: string; collapsed: boolean }) => {
+      if (viewer && payload?.thoughtId) applyCollapsed(viewer, payload.thoughtId, payload.collapsed === true);
     };
 
     sock.on('thought:created', onCreated);
     sock.on('thought:updated', onUpdated);
+    sock.on('thought:collapsed', onCollapsed);
     return () => {
       sock.off('thought:created', onCreated);
       sock.off('thought:updated', onUpdated);
+      sock.off('thought:collapsed', onCollapsed);
     };
-  }, []);
+  }, [viewer]);
 
   const handleDelete = useCallback(async (id: string) => {
     try {
@@ -240,6 +254,9 @@ export function ThoughtsScreen() {
         onCreate={text => openAdd(text)}
         placeholder="Search or create a Stream entry"
       />
+      <View style={styles.displayRow}>
+        <StreamCompactToggle />
+      </View>
 
       <FlatList
         data={thoughts}
@@ -290,6 +307,7 @@ export function ThoughtsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  displayRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 12 },
   searchWrap: {
     padding: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,

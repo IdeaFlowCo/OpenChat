@@ -763,6 +763,8 @@ export interface Thought {
   /** Author info — present on shared chat-scoped thoughts. */
   authorId?: string | null;
   authorName?: string | null;
+  /** The viewer's own collapse preference; follows the entry into every Stream view. */
+  collapsed?: boolean;
 }
 
 export type ContextWebhookRoutingStatus = 'ready' | 'hosted_precedence' | 'key_ineligible' | 'conversation_unavailable' | 'conflict' | 'server_disabled' | 'disabled';
@@ -1729,6 +1731,13 @@ export const api = {
     messageId: string;
     messages: { id: string; content: string; createdAt: string; senderName?: string }[];
   }>(`/api/thoughts/${encodeURIComponent(id)}/context`),
+
+  /** Collapse or expand any Stream entry I can read, for me only. */
+  setThoughtCollapsed: (id: string, collapsed: boolean) =>
+    request<{ id: string; collapsed: boolean }>(`/api/thoughts/${encodeURIComponent(id)}/collapsed`, {
+      method: 'PUT',
+      body: JSON.stringify({ collapsed }),
+    }),
 
   /** Pin one of my thoughts to a conversation I participate in. */
   pinThought: (id: string, conversationId: string, expectedText: string) =>

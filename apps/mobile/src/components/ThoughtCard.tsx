@@ -6,6 +6,10 @@
  * Shows: text, kind badge (color-coded), status badge, relative time, tag
  * chips, optional provenance line ("from <chat>" / "by <author>"), and an
  * optional pin toggle.
+ *
+ * Collapse (OpenChat-q60e) is the viewer's saved preference and applies in
+ * every Stream view; a collapsed card shows one line. Compact view condenses
+ * long entries to their first lines until "Show more".
  */
 
 import React, { useState } from 'react';
@@ -14,6 +18,9 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import type { Thought } from '../api/client';
 import { AppIcon } from './AppIcon';
+import * as Clipboard from 'expo-clipboard';
+import { originalMessageUrl } from '../utils/parseOpenChatUrl';
+import { COMPACT_VISIBLE_LINES, isLongStreamText, useStreamCompact, useThoughtCollapsed } from '../services/streamDisplay';
 
 // Ink & Paper: warm, muted kind colors (was stock Tailwind indigo/amber/etc).
 const KIND_COLORS: Record<string, string> = {
@@ -64,6 +71,16 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
   const tags = item.tags ?? [];
   const [actions, setActions] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [collapsed, toggleCollapsedSaved] = useThoughtCollapsed(item.id, item.collapsed);
+  const [compact] = useStreamCompact();
+  const [revealed, setRevealed] = useState(false);
+  const [collapseError, setCollapseError] = useState(false);
+  const long = isLongStreamText(item.text);
+  const condensed = !collapsed && compact && long && !revealed;
+  const toggleCollapsed = () => {
+    setCollapseError(false);
+    toggleCollapsedSaved().catch(() => setCollapseError(true));
+  };
   const openActions = () => { setConfirmDelete(false); setActions(true); };
   const action = (label: string, run: () => void) => <TouchableOpacity onPress={() => { setActions(false); run(); }} accessibilityRole="button" style={{ padding: 14 }}><Text style={{ color: c.primary }}>{label}</Text></TouchableOpacity>;
 
@@ -72,8 +89,9 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
     // Keep right-click on its View parent and long-press on the touchable.
     <View {...(Platform.OS === 'web' ? { onContextMenu: (event: { preventDefault: () => void; stopPropagation: () => void }) => { event.preventDefault(); event.stopPropagation(); openActions(); } } : {})}>
     <TouchableOpacity
-      onPress={onPress}
-      disabled={!onPress && !onDelete && !onOpenContext && !onTogglePin}
+      // A collapsed card's tap reveals it; editing starts from the expanded card.
+      onPress={collapsed ? toggleCollapsed : onPress}
+      accessibilityState={{ expanded: !collapsed }}
       onLongPress={openActions}
       activeOpacity={0.7}
       style={[
@@ -130,6 +148,16 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
             />
           </TouchableOpacity>
         )}
+        <TouchableOpacity
+          onPress={toggleCollapsed}
+          hitSlop={{ top: 12, right: 12, bottom: 12, left: 12 }}
+          accessibilityRole="button"
+          accessibilityLabel={collapsed ? 'Expand entry' : 'Collapse entry'}
+          accessibilityState={{ expanded: !collapsed }}
+          style={styles.pinBtn}
+        >
+          <AppIcon name={collapsed ? 'chevron-right' : 'chevron-down'} color={c.textMuted} size={16} strokeWidth={2} />
+        </TouchableOpacity>
       </View>
 
       <Modal visible={actions} transparent animationType="fade" onRequestClose={() => setActions(false)}>
@@ -139,8 +167,10 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
             {confirmDelete ? <>
               {onDelete && action('Delete entry', onDelete)}
             </> : <>
+              {action(collapsed ? 'Expand entry' : 'Collapse entry', toggleCollapsed)}
               {onPress && action('Edit entry', onPress)}
               {onOpenContext && action('Original message', onOpenContext)}
+              {onOpenContext && action('Copy link to original', () => void Clipboard.setStringAsync(originalMessageUrl(item.id)).catch(() => undefined))}
               {onTogglePin && action(item.pinned ? 'Unpin from chat' : 'Pin to chat', onTogglePin)}
               {onDelete && <TouchableOpacity onPress={() => setConfirmDelete(true)} style={{ padding: 14 }}><Text style={{ color: c.danger }}>Delete entry…</Text></TouchableOpacity>}
             </>}
@@ -148,19 +178,30 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
           </Pressable>
         </Pressable>
       </Modal>
-      {onOpenContext && <TouchableOpacity onPress={onOpenContext} accessibilityRole="button" style={{ paddingVertical: 8 }}><Text style={{ color: c.primary }}>Original message</Text></TouchableOpacity>}
+      {!collapsed && onOpenContext && <TouchableOpacity onPress={onOpenContext} accessibilityRole="button" style={{ paddingVertical: 8 }}><Text style={{ color: c.primary }}>Original message</Text></TouchableOpacity>}
       {/* Body text */}
-      <Text style={[styles.bodyText, { color: c.textPrimary }]}>{item.text}</Text>
+      <Text
+        style={[styles.bodyText, { color: collapsed ? c.textMetadata : c.textPrimary }]}
+        numberOfLines={collapsed ? 1 : condensed ? COMPACT_VISIBLE_LINES : undefined}
+      >
+        {item.text}
+      </Text>
+      {collapseError && <Text accessibilityRole="alert" style={[styles.subtitle, { color: c.danger }]}>Could not save. Try again.</Text>}
+      {!collapsed && compact && long && (
+        <TouchableOpacity onPress={() => setRevealed((r) => !r)} accessibilityRole="button" style={{ paddingVertical: 6 }}>
+          <Text style={{ color: c.primary }}>{revealed ? 'Show less' : 'Show more'}</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Provenance / attribution */}
-      {!!subtitle && (
+      {!collapsed && !!subtitle && (
         <Text style={[styles.subtitle, { color: c.textMetadata }]} numberOfLines={1}>
           {subtitle}
         </Text>
       )}
 
       {/* Tag chips — visually distinct from the kind badge (pill, monospace #). */}
-      {tags.length > 0 && (
+      {!collapsed && tags.length > 0 && (
         <View style={styles.tagRow}>
           {tags.map((tag) => (
             <TouchableOpacity

@@ -47,6 +47,8 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | `Search` | Search | **Search** | Chats header magnifying glass; desktop shortcut (⌘K) | 1 | Search conversations and messages. |
 | `BlockedUsers` | Settings | **Blocked users** | Settings › Legal & Account › Blocked users | 3 | Manage blocked contacts. |
 | `GroupSettings` | Chats | **Group Info** | In-chat header tap on a group conversation | 2 | Group member roster, rename, add/remove participants. |
+| Stream display | Stream | **Compact view** | Personal Stream toolbar; chat conversation-content toolbar | 2 | Device-local display control; see [Stream usage](../README.md#messages-and-stream). |
+| Stream entry actions | Stream | **Collapse entry** / **Expand entry**, **Copy link to original** | Stream entry actions (long-press or web right-click); tap a collapsed entry to expand | — | Entry-level actions after opening Stream; original-link action appears for entries with an original-message door. See [Stream usage](../README.md#messages-and-stream). |
 | `OriginalMessage` | Stream | **Original message** | Chats › Stream › Original message; chat Stream entry | 2 | Exact accessible source and nearby messages; unavailable source gives no chat data. |
 | `Compose` | Chats | **Message with OpenChat** | External Unlinked profile CTA or incoming compose link | 2 | See [compose usage](../README.md#message-with-openchat-from-unlinked) and [incoming-link contract](unlinked-compose-contract.md). |
 | *(existing Chat)* Accepted Unlinked connection | Chats | Conversation participant name | Chats › participant's conversation | 1 | See [acceptance behavior](../README.md#message-with-openchat-from-unlinked) and [synchronization contract](unlinked-accepted-connections.md). |

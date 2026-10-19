@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Session } from 'neo4j-driver';
 import { checkContextReadAccess } from './contextAccess.js';
 import { ContextLaneError, projectContextPost } from './contextLane.js';
+import { collapsedExpr, streamTagQuery } from './streamSearch.js';
 
 export type ContentFilter = 'all' | 'context' | 'stream';
 export interface ConversationContentOptions { filter?: ContentFilter; search?: string; cursor?: string; limit?: number; includePrivate?: boolean; contextAvailable?: boolean }
@@ -63,7 +64,7 @@ export async function listConversationContent(session: Session, userId: string, 
           reduce(allTags=[], copy IN copies | reduce(nextTags=allTags, tag IN coalesce(copy.node.tags,[]) | CASE WHEN tag IN nextTags THEN nextTags ELSE nextTags+tag END)) AS tags
       }
       WITH t, origin, visibility, provenance, pinned, pinnedBy, pinnedAt, aliases, tags
-      WHERE ($search='' OR (t.deletedAt IS NULL AND (toLower(t.text) CONTAINS toLower($search) OR any(tag IN tags WHERE toLower(tag) CONTAINS toLower($search)))))
+      WHERE ($search='' OR (t.deletedAt IS NULL AND (toLower(t.text) CONTAINS toLower($search) OR any(tag IN tags WHERE toLower(tag) CONTAINS toLower($tagSearch)))))
         AND ($cursorAt IS NULL OR t.createdAt < datetime($cursorAt) OR (t.createdAt=datetime($cursorAt) AND t.id<$cursorId))
       WITH t, origin, visibility, provenance, pinned, pinnedBy, pinnedAt, aliases, tags
       ORDER BY t.createdAt DESC,t.id DESC LIMIT toInteger($limit)
@@ -72,12 +73,13 @@ export async function listConversationContent(session: Session, userId: string, 
       OPTIONAL MATCH (t)-[:REPLIES_TO]->(parent:Thought {lane:'context',conversationId:$conversationId})
       OPTIONAL MATCH (parentAuthor:User {id:parent.authorId})
       RETURN t, origin, visibility, provenance, pinned, pinnedBy, pinnedAt, aliases, tags, author.name AS authorName,
+        ${collapsedExpr()} AS collapsed,
         source IS NOT NULL AS hasSourceMessage,
         CASE WHEN source.deletedAt IS NULL AND EXISTS { MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:source.conversationId}) } THEN source.id ELSE null END AS sourceMessageId,
         CASE WHEN source.deletedAt IS NULL AND EXISTS { MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:source.conversationId}) } THEN source.conversationId ELSE null END AS sourceConversationId,
         parent.id AS parentId, parent.text AS parentText, parent.deletedAt AS parentDeletedAt, parent.authorId AS parentAuthorId, parentAuthor.name AS parentAuthorName
       ORDER BY t.createdAt DESC,t.id DESC`, {
-      userId, conversationId, filter, search: options.search || '', includePrivate,
+      userId, conversationId, filter, search: options.search || '', tagSearch: streamTagQuery(options.search || ''), includePrivate,
       cursorAt: cursor?.at ?? null, cursorId: cursor?.id ?? '', limit: limit + 1,
     });
     const items = result.records.slice(0, limit).map(record => {
@@ -96,6 +98,7 @@ export async function listConversationContent(session: Session, userId: string, 
         pinned: record.get('pinned') as boolean, pinnedBy: record.get('pinnedBy') as string|null, pinnedAt: asString(record.get('pinnedAt')),
         hasSourceMessage: record.get('hasSourceMessage') as boolean, sourceMessageId: record.get('sourceMessageId') as string|null,
         sourceConversationId: record.get('sourceConversationId') as string|null,
+        collapsed: record.get('collapsed') === true,
       } };
     });
     const last = items.at(-1);

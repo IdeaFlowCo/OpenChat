@@ -5,6 +5,9 @@ import { parseComposeIntent } from '../utils/composeIntent';
 const KEY = 'openchat:compose_intent';
 const listeners = new Set<() => void>();
 export type PendingComposeIntent = { intent: ComposeIntent; revision: string };
+export type PendingNavigationIntent =
+  | (PendingComposeIntent & { kind: 'compose' })
+  | { kind: 'original'; thoughtId: string; revision: string };
 let sequence = 0;
 // Each embedded tab owns its pending recipient, even when browser storage is
 // blocked. Never consume a standalone tab's pending compose request.
@@ -26,24 +29,38 @@ function serialize<T>(operation: () => Promise<T>): Promise<T> {
   operations = result.catch(() => undefined);
   return result;
 }
-function parseSaved(raw: string | null): PendingComposeIntent | null {
+function parseSaved(raw: string | null): PendingNavigationIntent | null {
   if (!raw) return null;
   try {
     const saved = JSON.parse(raw);
     if (!Number.isFinite(saved.capturedAt) || Date.now() - saved.capturedAt > 60 * 60 * 1000) return null;
+    const revision = typeof saved.revision === 'string' ? saved.revision : `legacy:${raw}`;
+    if (saved.kind === 'original') {
+      return typeof saved.thoughtId === 'string' && saved.thoughtId.trim()
+        ? { kind: 'original', thoughtId: saved.thoughtId, revision } : null;
+    }
     const params = new URLSearchParams({ intent: 'compose', ...saved.intent });
     const intent = parseComposeIntent(new URL(`https://chat.ideaflow.app/app/?${params}`));
     if (!intent) return null;
     // Older captures remain replayable after the client updates.
-    return { intent, revision: typeof saved.revision === 'string' ? saved.revision : `legacy:${raw}` };
+    return { kind: 'compose', intent, revision };
   } catch { return null; }
 }
 export async function captureComposeIntent(intent: ComposeIntent): Promise<void> {
   await serialize(() => writePending(JSON.stringify({ intent, capturedAt: Date.now(), revision: `${Date.now()}-${++sequence}-${Math.random().toString(36).slice(2)}` })));
   listeners.forEach(listener => listener());
 }
-export function loadPendingComposeIntent(): Promise<PendingComposeIntent | null> {
+export async function captureOriginalIntent(thoughtId: string): Promise<void> {
+  if (!thoughtId.trim()) return;
+  await serialize(() => writePending(JSON.stringify({ kind: 'original', thoughtId, capturedAt: Date.now(), revision: `${Date.now()}-${++sequence}-${Math.random().toString(36).slice(2)}` })));
+  listeners.forEach(listener => listener());
+}
+export function loadPendingNavigationIntent(): Promise<PendingNavigationIntent | null> {
   return serialize(async () => parseSaved(await readPending()));
+}
+export async function loadPendingComposeIntent(): Promise<PendingComposeIntent | null> {
+  const pending = await loadPendingNavigationIntent();
+  return pending?.kind === 'compose' ? { intent: pending.intent, revision: pending.revision } : null;
 }
 export async function loadComposeIntent(): Promise<ComposeIntent | null> {
   return (await loadPendingComposeIntent())?.intent ?? null;

@@ -1,3 +1,4 @@
+import { captureOriginalIntent } from '../services/composeIntents';
 import { CommonActions, createNavigationContainerRef } from '@react-navigation/native';
 import type { RootStackParamList } from './types';
 
@@ -29,5 +30,7 @@ export class ConversationNavigationQueue {
 }
 
 const queue = new ConversationNavigationQueue();
+
 export const openConversation = (destination: Destination) => queue.open(destination, navigationRef);
+export const openOriginalMessage = (thoughtId: string) => captureOriginalIntent(thoughtId);
 export const flushConversationNavigation = () => queue.flush(navigationRef);

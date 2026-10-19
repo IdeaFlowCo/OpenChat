@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseOpenChatUrl } from './parseOpenChatUrl';
+import { originalMessageUrl, parseOpenChatUrl } from './parseOpenChatUrl';
 
 describe('parseOpenChatUrl AddMe cards', () => {
   const token = 'AbCdEfGhIjKlMnOpQrStUvWx';
@@ -21,5 +21,14 @@ describe('parseOpenChatUrl AddMe cards', () => {
     expect(parseOpenChatUrl('https://chat.ideaflow.app/u/user123')).toEqual({ type: 'user', userId: 'user123' });
     expect(parseOpenChatUrl('https://chat.ideaflow.app/i/tok')).toEqual({ type: 'invite', token: 'tok' });
     expect(parseOpenChatUrl('https://example.com/c/abc')).toEqual({ type: 'unknown' });
+  });
+});
+
+describe('Stream original-message links', () => {
+  it('round-trips the shareable link to the original message', () => {
+    const url = originalMessageUrl('VASum6BCBCg594zj-lXkH');
+    expect(url).toBe('https://chat.ideaflow.app/app/original/VASum6BCBCg594zj-lXkH');
+    expect(parseOpenChatUrl(url)).toEqual({ type: 'original', thoughtId: 'VASum6BCBCg594zj-lXkH' });
+    expect(parseOpenChatUrl('https://chat.ideaflow.app/app/original/')).toEqual({ type: 'unknown' });
   });
 });

@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   fetchConversationThoughts: vi.fn(),
   fetchThoughts: vi.fn(),
   createThought: vi.fn(),
+  setCollapsed: vi.fn(),
+  storage: new Map<string, string>(),
   getSocket: vi.fn(() => ({
     on: vi.fn(),
     off: vi.fn(),
@@ -77,7 +79,13 @@ vi.mock('../../mobile/src/contexts/SocialExperienceContext', () => ({
   useSocialExperience: () => ({ enhanced: false }),
 }));
 vi.mock('../../mobile/src/contexts/RecordingContext', () => ({ useRecording: () => mocks.recording }));
-vi.mock('../../mobile/src/api/client', () => ({ api: { getConversationContent: mocks.content, pinThought: mocks.pin, createThought: mocks.createThought, getHashtagSuggestions: async () => [] } }));
+vi.mock('../../mobile/src/api/client', () => ({ api: { getConversationContent: mocks.content, pinThought: mocks.pin, createThought: mocks.createThought, setThoughtCollapsed: mocks.setCollapsed, getHashtagSuggestions: async () => [] } }));
+vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn(async () => true) }));
+vi.mock('@react-native-async-storage/async-storage', () => ({ default: {
+  getItem: async (key: string) => mocks.storage.get(key) ?? null,
+  setItem: async (key: string, value: string) => { mocks.storage.set(key, value); },
+  removeItem: async (key: string) => { mocks.storage.delete(key); },
+} }));
 vi.mock('../../mobile/src/api/socket', () => ({
   getSocket: () => mocks.getSocket(),
   joinConversation: vi.fn(),
@@ -124,6 +132,7 @@ import { ContextComposer } from '../../mobile/src/components/ContextComposer';
 import { ConversationThoughtsScreen } from '../../mobile/src/screens/ConversationThoughtsScreen.js';
 import { ThoughtCard } from '../../mobile/src/components/ThoughtCard.js';
 import { ChatScreen } from '../../mobile/src/screens/ChatScreen.js';
+import * as Clipboard from 'expo-clipboard';
 
 describe('ConversationThoughtsScreen parity & search', () => {
   let screen: ReturnType<typeof create> | undefined;
@@ -238,6 +247,57 @@ describe('ConversationThoughtsScreen parity & search', () => {
     mocks.content.mockResolvedValue({ items: [entry('Changed private text')] }); await act(async () => button('Refresh').props.onPress());
     expect(button('Share & pin to this chat').props.disabled).toBe(true); expect(mocks.pin).not.toHaveBeenCalled();
     expect(JSON.stringify(screen!.toJSON())).toContain('Entry changed. Cancel and review');
+  });
+  // OpenChat-q60e: collapse is saved per viewer; Compact view condenses long entries.
+  const streamEntry = (id: string, text: string, collapsed = false) => {
+    const e = entry(text);
+    return { ...e, id, sourceAliases: [id], thought: { ...e.thought, id, collapsed } };
+  };
+  // Innermost match: the card itself is a touchable that contains these buttons.
+  const innerButton = (label: string) => screen!.root.findAllByType('TouchableOpacity' as any).filter(node => node.findAllByType('Text' as any).some(text => text.children.join('') === label)).at(-1)!;
+  const bodyText = (text: string) => screen!.root.findAllByType('Text' as any).find(node => node.children.join('') === text)!;
+  it('copies a link from a reply-tag entry to its access-checked Original screen', async () => {
+    const e = streamEntry('reply-tag-entry', 'Parent message without the reply hashtag');
+    Object.assign(e.thought, { sourceMessageId: 'parent-message', sourceConversationId: 'conv-1' });
+    mocks.content.mockResolvedValue({ items: [e] }); await mount();
+    await act(async () => screen!.root.findByType(ThoughtCard).findAllByType('TouchableOpacity' as any)[0].props.onLongPress());
+    await act(async () => innerButton('Copy link to original').props.onPress());
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith('https://chat.ideaflow.app/app/original/reply-tag-entry');
+  });
+  it('collapses a Stream entry to one line, saves it, and expands on tap', async () => {
+    mocks.setCollapsed.mockResolvedValue({ id: 'collapse-me', collapsed: true });
+    mocks.content.mockResolvedValue({ items: [streamEntry('collapse-me', 'A note worth folding away')] }); await mount();
+    expect(bodyText('A note worth folding away').props.numberOfLines).toBeUndefined();
+    await act(async () => button('Collapse entry').props.onPress());
+    expect(mocks.setCollapsed).toHaveBeenCalledWith('collapse-me', true);
+    expect(bodyText('A note worth folding away').props.numberOfLines).toBe(1);
+    expect(JSON.stringify(screen!.toJSON())).not.toContain('#alpha');
+    mocks.setCollapsed.mockResolvedValue({ id: 'collapse-me', collapsed: false });
+    await act(async () => screen!.root.findByType(ThoughtCard).findAllByType('TouchableOpacity' as any)[0].props.onPress());
+    expect(mocks.setCollapsed).toHaveBeenLastCalledWith('collapse-me', false);
+    expect(bodyText('A note worth folding away').props.numberOfLines).toBeUndefined();
+  });
+  it('renders a server-collapsed entry collapsed and rolls back a failed toggle', async () => {
+    mocks.setCollapsed.mockRejectedValue(new Error('offline'));
+    mocks.content.mockResolvedValue({ items: [streamEntry('saved-collapsed', 'Collapsed elsewhere', true)] }); await mount();
+    expect(bodyText('Collapsed elsewhere').props.numberOfLines).toBe(1);
+    await act(async () => button('Expand entry').props.onPress());
+    expect(bodyText('Collapsed elsewhere').props.numberOfLines).toBe(1);
+    expect(JSON.stringify(screen!.toJSON())).toContain('Could not save. Try again.');
+  });
+  it('Compact view condenses long entries until Show more, and can be turned off', async () => {
+    const long = Array.from({ length: 8 }, (_, i) => `line ${i + 1}`).join('\n');
+    mocks.content.mockResolvedValue({ items: [streamEntry('long-entry', long)] }); await mount();
+    expect(bodyText(long).props.numberOfLines).toBe(4);
+    await act(async () => innerButton('Show more').props.onPress());
+    expect(bodyText(long).props.numberOfLines).toBeUndefined();
+    await act(async () => innerButton('Show less').props.onPress());
+    const toggle = screen!.root.findAllByType('TouchableOpacity' as any).find(node => node.props.accessibilityRole === 'switch')!;
+    expect(toggle.props.accessibilityState).toEqual({ checked: true });
+    await act(async () => toggle.props.onPress());
+    expect(bodyText(long).props.numberOfLines).toBeUndefined();
+    expect(mocks.storage.get('openchat.stream.compact')).toBe('false');
+    await act(async () => toggle.props.onPress());
   });
   it('reselecting the current content filter keeps loaded entries visible', async () => {
     mocks.content.mockResolvedValue({ items: [entry('Still visible')] }); await mount();

@@ -8,6 +8,7 @@
  *   https://chat.ideaflow.app/c/<t> → { type: 'card', token }
  *   https://chat.globalbr.ai/c/<t> → { type: 'card', token } (legacy)
  *   Both hosts also accept /u/<id>, /i/<token>, and /app/?intent=... links.
+ *   https://chat.ideaflow.app/app/original/<thoughtId> → { type: 'original', thoughtId }
  *   anything else                   → { type: 'unknown' }
  */
 
@@ -18,8 +19,12 @@ export type ParsedOpenChatUrl =
   | { type: 'invite'; token: string }
   | { type: 'card'; token: string }
   | { type: 'context'; conversationId: string; entryId: string }
+  | { type: 'original'; thoughtId: string }
   | ({ type: 'compose' } & ComposeIntent)
   | { type: 'unknown' };
+
+/** Shareable web link to a Stream entry's original message (parsed back as `original`). */
+export const originalMessageUrl = (thoughtId: string) => `https://chat.ideaflow.app/app/original/${encodeURIComponent(thoughtId)}`;
 
 export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
   let url: URL;
@@ -67,6 +72,10 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
 
     const cardMatch = url.pathname.match(/^\/c\/([^/]+)\/?$/);
     if (cardMatch?.[1]) return { type: 'card', token: cardMatch[1] };
+
+    // A Stream entry's original message; the screen re-checks access on open.
+    const originalMatch = url.pathname.match(/^\/app\/original\/([^\/]+)\/?$/);
+    if (originalMatch?.[1]) return { type: 'original', thoughtId: decodeURIComponent(originalMatch[1]) };
 
     const contextMatch = url.pathname.match(/^\/app\/context\/([^\/]+)\/([^\/]+)$/);
     if (contextMatch?.[1] && contextMatch?.[2]) return { type: 'context', conversationId: contextMatch[1], entryId: contextMatch[2] };
