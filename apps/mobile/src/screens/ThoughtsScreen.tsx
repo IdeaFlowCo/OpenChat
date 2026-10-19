@@ -31,7 +31,7 @@ import { StreamEditor } from '../components/StreamEditor';
 import { ThoughtCard } from '../components/ThoughtCard';
 import { ThoughtsSearchBar } from '../components/ThoughtsSearchBar';
 import { StreamCompactToggle } from '../components/StreamCompactToggle';
-import { applyCollapsed } from '../services/streamDisplay';
+import { applyCollapsed, ingestStreamCollapsed } from '../services/streamDisplay';
 import type { ThoughtsNavProp } from '../navigation/types';
 import { AppIcon } from '../components/AppIcon';
 import { streamErrorMessage } from './streamError';
@@ -68,6 +68,7 @@ export function ThoughtsScreen() {
       const trimmed = q.trim();
       const data = await fetchThoughts({ limit: 50, ...(trimmed ? { q: trimmed } : {}) });
       if (mountedRef.current) {
+        if (viewer) ingestStreamCollapsed(viewer, data);
         activeQueryRef.current = trimmed;
         setThoughts(data);
       }
@@ -79,7 +80,7 @@ export function ThoughtsScreen() {
         setRefreshing(false);
       }
     }
-  }, []);
+  }, [viewer]);
 
   // Reload whenever the screen comes into focus (e.g., returning from add/edit),
   // honoring whatever search query is active. We read the query from a ref so
@@ -109,6 +110,7 @@ export function ThoughtsScreen() {
     if (!sock) return;
     const onCreated = (payload: { thought: Thought }) => {
       if (!payload?.thought) return;
+      if (viewer) ingestStreamCollapsed(viewer, [payload.thought]);
       // While a search is active the list is filtered server-side; don't
       // blindly prepend a new thought that may not match the query.
       if (activeQueryRef.current) return;
@@ -121,6 +123,7 @@ export function ThoughtsScreen() {
 
     const onUpdated = (payload: { thought: Thought }) => {
       if (!payload?.thought) return;
+      if (viewer) ingestStreamCollapsed(viewer, [payload.thought]);
       setThoughts((prev) => prev.map((t) => (t.id === payload.thought.id ? { ...t, ...payload.thought } : t)));
     };
 

@@ -1,19 +1,31 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { StreamCollapseState } from './streamCollapseState';
 
-it('isolates viewers and yields to changed authoritative state', () => {
-  const state = new StreamCollapseState();
-  state.set('a', 'entry', true, false);
+it('keeps shared current state when mounted cards retain stale props', () => {
+  const changed = vi.fn();
+  const state = new StreamCollapseState(changed);
+  state.ingest('a', [{ id: 'entry', collapsed: false }]);
+  state.set('a', 'entry', true);
+  state.ingest('a', [{ id: 'entry', collapsed: true }]);
   expect(state.read('a', 'entry', false)).toBe(true);
-  expect(state.read('b', 'entry', false)).toBe(false);
   expect(state.read('a', 'entry', true)).toBe(true);
-  expect(state.read('a', 'entry', false)).toBe(false);
+  expect(changed).toHaveBeenCalledTimes(2);
+  state.ingest('a', [{ id: 'entry', collapsed: false }]);
+  expect(state.read('a', 'entry', true)).toBe(false);
+  expect(changed).toHaveBeenCalledTimes(3);
 });
 
-it('reconciles socket overrides after observing their baseline', () => {
-  const state = new StreamCollapseState();
-  state.set('a', 'entry', true);
-  expect(state.read('a', 'entry', false)).toBe(true);
+it('isolates viewers and uses props only for entries never ingested', () => {
+  const changed = vi.fn();
+  const state = new StreamCollapseState(changed);
   expect(state.read('a', 'entry', true)).toBe(true);
   expect(state.read('a', 'entry', false)).toBe(false);
+  expect(changed).not.toHaveBeenCalled();
+  state.ingest('a', [{ id: 'entry', collapsed: true }]);
+  expect(state.read('b', 'entry', false)).toBe(false);
+  state.ingest('a', [{ id: 'entry' }]);
+  expect(state.read('a', 'entry', false)).toBe(true);
+  state.set('b', 'entry', false);
+  expect(state.read('a', 'entry', false)).toBe(true);
+  expect(state.read('b', 'entry', true)).toBe(false);
 });

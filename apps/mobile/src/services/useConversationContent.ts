@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ingestStreamCollapsed } from './streamDisplay';
 import { api, type ConversationContentItem, type ConversationContentFilter } from '../api/client';
 /** Mount per account/conversation. Private rows never enter shared Context caches. */
 export function useConversationContent(accountId: string, conversationId: string) {
@@ -20,6 +21,7 @@ export function useConversationContent(accountId: string, conversationId: string
     try {
       const page = await api.getConversationContent(conversationId, { filter: query.filter, search: query.search.trim(), ...(more ? { cursor: query.cursor } : {}) });
       if (!alive.current || revision !== sequence.current) return;
+      ingestStreamCollapsed(accountId, page.items.flatMap(item => item.origin === 'stream' ? [item.thought] : []));
       setItems(previous => more ? [...new Map([...previous, ...page.items].map(item => [item.id, item])).values()] : page.items);
       setCursor(page.nextCursor);
       setContextAvailable(page.contextAvailable !== false);

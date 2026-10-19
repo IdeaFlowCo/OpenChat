@@ -1,21 +1,25 @@
 export class StreamCollapseState {
-  private viewers = new Map<string, Map<string, { base?: boolean; value: boolean }>>();
+  private viewers = new Map<string, Map<string, boolean>>();
 
-  read(viewer: string, id: string, server: boolean | undefined): boolean {
-    const entries = this.viewers.get(viewer);
-    const entry = entries?.get(id);
-    if (!entry) return server === true;
-    if (entry.base === undefined) entry.base = server;
-    if (server !== undefined && entry.base !== server) {
-      entries?.delete(id);
-      return server;
-    }
-    return entry.value;
+  private onChange: () => void;
+
+  constructor(onChange: () => void = () => undefined) { this.onChange = onChange; }
+
+  read(viewer: string, id: string, fallback: boolean | undefined): boolean {
+    return this.viewers.get(viewer)?.get(id) ?? fallback === true;
   }
 
-  set(viewer: string, id: string, value: boolean, base?: boolean): void {
+  set(viewer: string, id: string, value: boolean): void {
     let entries = this.viewers.get(viewer);
     if (!entries) { entries = new Map(); this.viewers.set(viewer, entries); }
-    entries.set(id, { base: entries.get(id)?.base ?? base, value });
+    if (entries.get(id) === value) return;
+    entries.set(id, value);
+    this.onChange();
+  }
+
+  ingest(viewer: string, items: readonly { id: string; collapsed?: boolean }[]): void {
+    for (const item of items) {
+      if (item.collapsed !== undefined) this.set(viewer, item.id, item.collapsed);
+    }
   }
 }

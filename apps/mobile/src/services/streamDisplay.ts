@@ -20,13 +20,17 @@ export const COMPACT_MIN_LINES = 6;
 export const COMPACT_MIN_CHARS = 400;
 export const COMPACT_VISIBLE_LINES = 4;
 
-const collapseOverrides = new StreamCollapseState();
 let compact = true;
 let version = 0;
 const listeners = new Set<() => void>();
 const emit = () => { version += 1; listeners.forEach((listener) => listener()); };
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
 const getVersion = () => version;
+const collapseOverrides = new StreamCollapseState(emit);
+
+export function ingestStreamCollapsed(viewer: string, items: readonly { id: string; collapsed?: boolean }[]): void {
+  collapseOverrides.ingest(viewer, items);
+}
 
 void AsyncStorage.getItem(COMPACT_KEY).then((stored) => {
   if (stored === 'false' && compact) { compact = false; emit(); }
@@ -39,7 +43,6 @@ export function isLongStreamText(text: string): boolean {
 /** Applies a collapse change made elsewhere (socket event from another screen or device). */
 export function applyCollapsed(viewer: string, thoughtId: string, collapsed: boolean): void {
   collapseOverrides.set(viewer, thoughtId, collapsed);
-  emit();
 }
 
 export function useStreamCompact(): [boolean, (next: boolean) => void] {
@@ -60,13 +63,11 @@ export function useThoughtCollapsed(id: string, serverCollapsed: boolean | undef
   const collapsed = collapseOverrides.read(viewer, id, serverCollapsed);
   const toggle = useCallback(async () => {
     const previous = collapseOverrides.read(viewer, id, serverCollapsed);
-    collapseOverrides.set(viewer, id, !previous, serverCollapsed);
-    emit();
+    collapseOverrides.set(viewer, id, !previous);
     try {
       await api.setThoughtCollapsed(id, !previous);
     } catch (e) {
-      collapseOverrides.set(viewer, id, previous, serverCollapsed);
-      emit();
+      collapseOverrides.set(viewer, id, previous);
       throw e;
     }
   }, [viewer, id, serverCollapsed]);
