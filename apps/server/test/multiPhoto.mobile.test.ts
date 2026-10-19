@@ -3,9 +3,15 @@ import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const scrollTo = vi.hoisted(() => vi.fn());
+const share = vi.hoisted(() => vi.fn(async () => ({ action: 'sharedAction' })));
+const fsMock = vi.hoisted(() => ({
+  downloadAsync: vi.fn(async (_url: string, dest: string) => ({ uri: dest, status: 200 })),
+}));
 const picker = vi.hoisted(() => ({
   launchImageLibraryAsync: vi.fn(),
+  launchCameraAsync: vi.fn(),
   requestMediaLibraryPermissionsAsync: vi.fn(async () => ({ status: 'granted' })),
+  requestCameraPermissionsAsync: vi.fn(async () => ({ status: 'granted' })),
 }));
 
 vi.mock('react-native', async () => {
@@ -13,6 +19,9 @@ vi.mock('react-native', async () => {
   const host = (name: string) => ({ children, ...props }: any) => React.createElement(name, props, children);
   return {
     Platform: { OS: 'ios', select: (v: any) => v.ios ?? v.default },
+    Share: { share, dismissedAction: 'dismissedAction' },
+    Alert: { alert: vi.fn() },
+    ActivityIndicator: host('ActivityIndicator'),
     StyleSheet: { create: (s: unknown) => s, absoluteFillObject: {} },
     Image: host('Image'),
     Modal: ({ visible, children }: any) => (visible ? React.createElement('Modal', null, children) : null),
@@ -26,13 +35,17 @@ vi.mock('react-native', async () => {
   };
 });
 vi.mock('expo-image-picker', () => picker);
-vi.mock('expo-file-system/legacy', () => ({ uploadAsync: vi.fn(), getInfoAsync: vi.fn(), FileSystemUploadType: { BINARY_CONTENT: 0 } }));
+vi.mock('expo-file-system/legacy', () => ({
+  uploadAsync: vi.fn(), getInfoAsync: vi.fn(), FileSystemUploadType: { BINARY_CONTENT: 0 },
+  cacheDirectory: 'file:///cache/', downloadAsync: fsMock.downloadAsync,
+}));
 vi.mock('../../mobile/src/api/client.js', () => ({ api: {} }));
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 
 import { PhotoGrid } from '../../mobile/src/components/PhotoGrid.js';
 import { PhotoViewer } from '../../mobile/src/components/PhotoViewer.js';
-import { MAX_IMAGES_PER_MESSAGE, pickImages } from '../../mobile/src/services/attachments.js';
+import { MAX_IMAGES_PER_MESSAGE, filesToAssets, pickImages, releaseAsset, takePhoto } from '../../mobile/src/services/attachments.js';
+import { saveOrSharePhoto } from '../../mobile/src/services/photoActions.js';
 
 const photos = (n: number) => Array.from({ length: n }, (_, i) => ({ url: `https://cdn.test/${i}.jpg`, mimeType: 'image/jpeg', width: 800, height: 600 }));
 
@@ -43,7 +56,12 @@ async function renderGrid(n: number, onOpen = vi.fn()) {
 }
 
 describe('multi-photo messages (OpenChat-wpmb)', () => {
-  beforeEach(() => picker.launchImageLibraryAsync.mockReset());
+  beforeEach(() => {
+    picker.launchImageLibraryAsync.mockReset();
+    picker.launchCameraAsync.mockReset();
+    share.mockClear();
+    fsMock.downloadAsync.mockClear();
+  });
 
   it('keeps a single photo as one full image', async () => {
     const root = await renderGrid(1);
@@ -112,5 +130,49 @@ describe('multi-photo messages (OpenChat-wpmb)', () => {
     await press('Previous photo');
     expect(text()).toContain('"1"," of ","3"');
     expect(scrollTo).toHaveBeenLastCalledWith({ x: 0, animated: true });
+  });
+
+  it('takes a photo with the camera after asking for camera access (OpenChat-p4xo)', async () => {
+    picker.launchCameraAsync.mockResolvedValue({ canceled: false, assets: [{ uri: 'file:///cam.jpg', width: 3024, height: 4032 }] });
+    const photo = await takePhoto();
+    expect(picker.requestCameraPermissionsAsync).toHaveBeenCalled();
+    expect(photo).toMatchObject({ uri: 'file:///cam.jpg', mimeType: 'image/jpeg', width: 3024, height: 4032 });
+    picker.launchCameraAsync.mockResolvedValue({ canceled: true, assets: null });
+    expect(await takePhoto()).toBeNull();
+  });
+
+  it('turns pasted or dropped image files into pending photos (OpenChat-63zy)', async () => {
+    const png = () => new File([new Uint8Array([1, 2, 3])], 'image.png', { type: 'image/png' });
+    const files = [png(), new File(['x'], 'notes.txt', { type: 'text/plain' }), png(), new File(['y'], 'a.heic', { type: 'image/heic' }), png()];
+    const assets = await filesToAssets(files, 2);
+    expect(assets).toHaveLength(2);
+    expect(assets.every(a => a.mimeType === 'image/png' && a.uri.startsWith('blob:') && a.fileSize === 3)).toBe(true);
+    expect(new Set(assets.map(a => a.fileName)).size).toBe(2);
+    const revoke = vi.spyOn(URL, 'revokeObjectURL');
+    assets.forEach(releaseAsset);
+    releaseAsset({ ...assets[0], uri: 'file:///keep.jpg' });
+    expect(revoke).toHaveBeenCalledTimes(2);
+    revoke.mockRestore();
+  });
+
+  it('shares the downloaded photo file on iOS so Save Image is offered (OpenChat-5wm2)', async () => {
+    const result = await saveOrSharePhoto('https://storage.googleapis.com/b/attachments/u/n/beach.jpg');
+    expect(fsMock.downloadAsync).toHaveBeenCalledWith('https://storage.googleapis.com/b/attachments/u/n/beach.jpg', expect.stringMatching(/^file:\/\/\/cache\/\d+_beach\.jpg$/));
+    expect(share).toHaveBeenCalledWith({ url: expect.stringMatching(/_beach\.jpg$/) });
+    expect(result).toBe('shared');
+  });
+
+  it('shares the photo being viewed from the viewer', async () => {
+    (globalThis as any).requestAnimationFrame ??= (cb: () => void) => { cb(); return 0; };
+    (globalThis as any).cancelAnimationFrame ??= () => {};
+    const urls = photos(3).map(p => p.url);
+    let root!: ReturnType<typeof create>;
+    await act(async () => { root = create(React.createElement(PhotoViewer, { state: { urls, index: 2 }, onClose: vi.fn() })); });
+    const overlay = root.root.find(n => n.type === 'View' && typeof n.props.onLayout === 'function');
+    await act(async () => overlay.props.onLayout({ nativeEvent: { layout: { width: 400, height: 800 } } }));
+    const btn = root.root.find(n => n.type === 'TouchableOpacity' && n.props.accessibilityLabel === 'Share photo');
+    expect(JSON.stringify(root.toJSON())).toContain('"Share"');
+    await act(async () => btn.props.onPress());
+    expect(fsMock.downloadAsync).toHaveBeenCalledWith(urls[2], expect.any(String));
   });
 });

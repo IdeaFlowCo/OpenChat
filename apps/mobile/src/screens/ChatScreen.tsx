@@ -52,7 +52,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import type { NavProp, RouteProps } from '../navigation/types';
 import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
-import { MAX_IMAGES_PER_MESSAGE, pickImages, uploadImage, PickedAsset } from '../services/attachments';
+import { MAX_IMAGES_PER_MESSAGE, filesToAssets, pickImages, releaseAsset, takePhoto, uploadImage, PickedAsset } from '../services/attachments';
 import { PhotoGrid } from '../components/PhotoGrid';
 import { PhotoViewer, PhotoViewerState } from '../components/PhotoViewer';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
@@ -402,6 +402,8 @@ export function ChatScreen({
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   // fullscreen viewer: every photo of the tapped message, opened at one
   const [photoViewer, setPhotoViewer] = useState<PhotoViewerState | null>(null);
+  // Web: photos dragged over the chat (OpenChat-63zy)
+  const [dropActive, setDropActive] = useState(false);
 
   // ── Voice recording state (build-90 pieces 1+2) ────────────────────────────
   // The provider owns expo-av and all gesture timing so navigation cannot tear
@@ -945,16 +947,87 @@ export function ChatScreen({
     });
   }, [activeHashtag, text]);
 
+  // Live count for DOM listeners that outlive a render.
+  const pendingCountRef = useRef(0);
+  pendingCountRef.current = pendingAssets.length;
+  const addPendingAssets = useCallback((assets: PickedAsset[]) => {
+    if (!assets.length) return;
+    setPendingAssets(prev => {
+      const merged = [...prev, ...assets];
+      merged.slice(MAX_IMAGES_PER_MESSAGE).forEach(releaseAsset);
+      return merged.slice(0, MAX_IMAGES_PER_MESSAGE);
+    });
+  }, []);
+
   // ── Attachment pick handler (OpenChat-6bg) ────────────────────────────────
   const handlePickAttachment = useCallback(async () => {
     if (composerBusy || uploadingAttachment) return;
     const room = MAX_IMAGES_PER_MESSAGE - pendingAssets.length;
     if (room <= 0) return;
-    const assets = await pickImages(room);
-    if (assets.length) {
-      setPendingAssets(prev => [...prev, ...assets].slice(0, MAX_IMAGES_PER_MESSAGE));
-    }
-  }, [composerBusy, uploadingAttachment, pendingAssets.length]);
+    addPendingAssets(await pickImages(room));
+  }, [composerBusy, uploadingAttachment, pendingAssets.length, addPendingAssets]);
+
+  // ── Camera (OpenChat-p4xo) ────────────────────────────────────────────────
+  const handleTakePhoto = useCallback(async () => {
+    if (composerBusy || uploadingAttachment || pendingAssets.length >= MAX_IMAGES_PER_MESSAGE) return;
+    const photo = await takePhoto();
+    if (photo) addPendingAssets([photo]);
+  }, [composerBusy, uploadingAttachment, pendingAssets.length, addPendingAssets]);
+
+  const removePendingAsset = useCallback((index: number) => {
+    setPendingAssets(prev => {
+      const removed = prev[index];
+      if (removed) releaseAsset(removed);
+      return prev.filter((_, j) => j !== index);
+    });
+  }, []);
+
+  // ── Web paste and drag-and-drop (OpenChat-63zy) ───────────────────────────
+  // RN-web refs are DOM nodes. Pasted or dropped image files join the pending
+  // strip; pasted text still pastes as usual.
+  const acceptsDroppedPhotos = Platform.OS === 'web' && !editingMessage && !isRecording;
+  useEffect(() => {
+    if (!acceptsDroppedPhotos) return;
+    const input = textInputRef.current as unknown as HTMLElement | null;
+    const root = rootRef.current as unknown as HTMLElement | null;
+    if (!input?.addEventListener || !root?.addEventListener) return;
+    const room = () => MAX_IMAGES_PER_MESSAGE - pendingCountRef.current;
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files');
+
+    const onPaste = (e: ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files ?? []).filter(f => f.type.startsWith('image/'));
+      if (!files.length) return;
+      if (!e.clipboardData?.getData('text/plain')) e.preventDefault();
+      void filesToAssets(files, room()).then(addPendingAssets);
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      setDropActive(true);
+    };
+    const onDragLeave = (e: DragEvent) => {
+      // Only when the pointer leaves the chat, not when it crosses a child.
+      if (!e.relatedTarget || !root.contains(e.relatedTarget as Node)) setDropActive(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setDropActive(false);
+      void filesToAssets(Array.from(e.dataTransfer?.files ?? []), room()).then(addPendingAssets);
+    };
+    input.addEventListener('paste', onPaste);
+    root.addEventListener('dragover', onDragOver);
+    root.addEventListener('dragleave', onDragLeave);
+    root.addEventListener('drop', onDrop);
+    return () => {
+      input.removeEventListener('paste', onPaste);
+      root.removeEventListener('dragover', onDragOver);
+      root.removeEventListener('dragleave', onDragLeave);
+      root.removeEventListener('drop', onDrop);
+      setDropActive(false);
+    };
+  }, [acceptsDroppedPhotos, addPendingAssets]);
 
   // ── Voice recording handlers (OpenChat-xxc) ──────────────────────────────
 
@@ -1049,6 +1122,7 @@ export function ChatScreen({
           // Upload in parallel; Promise.all keeps the picked order.
           attachments = await Promise.all(assetsToUpload.map(uploadImage));
           uploaded = true;
+          assetsToUpload.forEach(releaseAsset);
         } finally {
           setUploadingAttachment(false);
         }
@@ -1765,7 +1839,7 @@ export function ChatScreen({
                   resizeMode="cover"
                 />
                 <TouchableOpacity
-                  onPress={() => setPendingAssets(prev => prev.filter((_, j) => j !== i))}
+                  onPress={() => removePendingAsset(i)}
                   style={[styles.attachmentPreviewRemove, { backgroundColor: c.textPrimary }]}
                   hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
                   accessibilityRole="button"
@@ -1909,6 +1983,18 @@ export function ChatScreen({
             <AppIcon name="attach" color={c.textSecondary} size={22} />
           </TouchableOpacity>
         )}
+        {/* Camera (OpenChat-p4xo) — native only; web uses the file picker, paste or drop */}
+        {!editingMessage && !isRecording && Platform.OS !== 'web' && (
+          <TouchableOpacity
+            onPress={handleTakePhoto}
+            disabled={composerBusy || uploadingAttachment || pendingAssets.length >= MAX_IMAGES_PER_MESSAGE}
+            style={[styles.attachBtn, { opacity: composerBusy || uploadingAttachment ? 0.4 : 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Take photo"
+          >
+            <AppIcon name="camera" color={c.textSecondary} size={22} />
+          </TouchableOpacity>
+        )}
         <TextInput
           ref={textInputRef}
           style={[
@@ -2040,6 +2126,15 @@ export function ChatScreen({
       </>
       )}
       </KeyboardAvoidingView>
+      {dropActive && (
+        <View
+          pointerEvents="none"
+          style={[styles.dropOverlay, { borderColor: c.primary, backgroundColor: c.background }]}
+        >
+          <AppIcon name="attach" color={c.primary} size={28} />
+          <Text style={[styles.dropOverlayText, { color: c.textPrimary }]}>Drop photos to add them</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -2204,6 +2299,18 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
+  dropOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    margin: space[3],
+    borderWidth: 2,
+    borderStyle: 'dashed' as const,
+    borderRadius: radius.lg,
+    opacity: 0.94,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: space[2],
+  },
+  dropOverlayText: { ...type.title },
   attachmentPreviewStrip: {
     gap: space[2],
     paddingTop: space[1],

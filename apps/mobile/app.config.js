@@ -68,7 +68,7 @@ module.exports = {
         // existing remote notification entitlement (build-90 pieces 1+2).
         UIBackgroundModes: ['audio', 'remote-notification'],
         NSCameraUsageDescription:
-          'OpenChat uses the camera to scan QR codes for adding contacts and joining group chats.',
+          'OpenChat uses the camera to take photos to send in chats and to scan QR codes for adding contacts and joining group chats.',
         NSPhotoLibraryUsageDescription:
           'OpenChat uses your photo library so you can share images in chats.',
         NSMicrophoneUsageDescription:
