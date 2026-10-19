@@ -132,6 +132,7 @@ import { ContextComposer } from '../../mobile/src/components/ContextComposer';
 import { ConversationThoughtsScreen } from '../../mobile/src/screens/ConversationThoughtsScreen.js';
 import { ThoughtCard } from '../../mobile/src/components/ThoughtCard.js';
 import { ChatScreen } from '../../mobile/src/screens/ChatScreen.js';
+import * as Clipboard from 'expo-clipboard';
 
 describe('ConversationThoughtsScreen parity & search', () => {
   let screen: ReturnType<typeof create> | undefined;
@@ -255,6 +256,14 @@ describe('ConversationThoughtsScreen parity & search', () => {
   // Innermost match: the card itself is a touchable that contains these buttons.
   const innerButton = (label: string) => screen!.root.findAllByType('TouchableOpacity' as any).filter(node => node.findAllByType('Text' as any).some(text => text.children.join('') === label)).at(-1)!;
   const bodyText = (text: string) => screen!.root.findAllByType('Text' as any).find(node => node.children.join('') === text)!;
+  it('copies a link from a reply-tag entry to its access-checked Original screen', async () => {
+    const e = streamEntry('reply-tag-entry', 'Parent message without the reply hashtag');
+    Object.assign(e.thought, { sourceMessageId: 'parent-message', sourceConversationId: 'conv-1' });
+    mocks.content.mockResolvedValue({ items: [e] }); await mount();
+    await act(async () => screen!.root.findByType(ThoughtCard).findAllByType('TouchableOpacity' as any)[0].props.onLongPress());
+    await act(async () => innerButton('Copy link to original').props.onPress());
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith('https://chat.ideaflow.app/app/original/reply-tag-entry');
+  });
   it('collapses a Stream entry to one line, saves it, and expands on tap', async () => {
     mocks.setCollapsed.mockResolvedValue({ id: 'collapse-me', collapsed: true });
     mocks.content.mockResolvedValue({ items: [streamEntry('collapse-me', 'A note worth folding away')] }); await mount();
