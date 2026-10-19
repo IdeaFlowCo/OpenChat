@@ -1023,6 +1023,7 @@ export function ChatScreen({
       return;
     }
 
+    const currentReply = replyTo;
     const currentReplyToId = replyTo?.messageId;
     const assetsToUpload = pendingAssets;
     setText('');
@@ -1062,6 +1063,7 @@ export function ChatScreen({
       if (!uploaded) {
         setPendingAssets(assetsToUpload);
         if (trimmed) setText(prev => prev || trimmed);
+        if (currentReply) setReplyTo(prev => prev ?? currentReply);
       }
       Alert.alert(
         'Upload failed',
