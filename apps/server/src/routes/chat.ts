@@ -1009,6 +1009,10 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
 
   // Validate attachments shape if present
   if (hasAttachments) {
+    if ((attachments as unknown[]).length > MAX_ATTACHMENTS_PER_MESSAGE) {
+      res.status(400).json({ error: `At most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments per message` });
+      return;
+    }
     for (const a of attachments as unknown[]) {
       const att = a as Record<string, unknown>;
       if (!att.url || typeof att.url !== 'string') {
@@ -1079,7 +1083,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     const hasAudio = hasAttachments && (attachments as { mimeType?: string }[]).some(
       (a) => typeof a?.mimeType === 'string' && a.mimeType.startsWith('audio/')
     );
-    const preview = messageContent || (hasAudio ? 'Voice note' : hasAttachments ? 'Photo' : '');
+    const preview = messageContent || (hasAudio ? 'Voice note' : hasAttachments ? photoPreview((attachments as unknown[]).length) : '');
 
     if (req.connectorDelegation) {
       const existing = await session.run('MATCH (m:Message {id: $id}) RETURN m { .* } AS message', { id: messageId });
@@ -1870,7 +1874,9 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
     const messageId = nanoid();
     const now = new Date().toISOString();
     const content = (sourceMsg.content as string) || '';
-    const preview = content || (attachmentsJson ? 'Photo' : '');
+    let attachmentCount = 0;
+    try { attachmentCount = attachmentsJson ? (JSON.parse(attachmentsJson) as unknown[]).length : 0; } catch { attachmentCount = 1; }
+    const preview = content || (attachmentsJson ? photoPreview(attachmentCount) : '');
 
     // 5. Create the new message in the target conversation.
     const result = await session.run(`
@@ -2433,6 +2439,14 @@ router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Reques
 });
 
 // ─── Attachments (OpenChat-6bg) ──────────────────────────────────────────────
+
+// Photos per message (OpenChat-wpmb); the mobile picker uses the same cap.
+const MAX_ATTACHMENTS_PER_MESSAGE = 10;
+
+/** Conversation-list preview for a caption-less photo message. */
+function photoPreview(count: number): string {
+  return count > 1 ? `${count} photos` : 'Photo';
+}
 
 // Image MIME types allowed for upload (OpenChat-6bg).
 const IMAGE_MIME_TYPES = new Set([

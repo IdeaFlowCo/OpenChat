@@ -18,6 +18,7 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -38,6 +39,7 @@ import { ContextLane } from '../components/ContextLane';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
 import { useRecording } from '../contexts/RecordingContext';
 import { getColors } from '../theme/colors';
+import { radius, space, type } from '../theme/tokens';
 import { Avatar } from '../components/Avatar';
 import { AiDisclosureBanner } from '../components/AiDisclosureBanner';
 import { AppIcon } from '../components/AppIcon';
@@ -50,7 +52,9 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import type { NavProp, RouteProps } from '../navigation/types';
 import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
-import { pickImage, uploadImage, PickedAsset } from '../services/attachments';
+import { MAX_IMAGES_PER_MESSAGE, pickImages, uploadImage, PickedAsset } from '../services/attachments';
+import { PhotoGrid } from '../components/PhotoGrid';
+import { PhotoViewer, PhotoViewerState } from '../components/PhotoViewer';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
 import { MentionAutocomplete, MentionCandidate } from '../components/MentionAutocomplete';
 import { HashtagAutocomplete } from '../components/HashtagAutocomplete';
@@ -392,11 +396,12 @@ export function ChatScreen({
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
 
   // ── Attachment state (OpenChat-6bg) ────────────────────────────────────────
-  // pendingAsset: picked but not yet uploaded (shown as preview above composer)
-  const [pendingAsset, setPendingAsset] = useState<PickedAsset | null>(null);
+  // pendingAssets: picked but not yet uploaded (shown as a strip above the
+  // composer); several photos send as one message (OpenChat-wpmb).
+  const [pendingAssets, setPendingAssets] = useState<PickedAsset[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
-  // fullscreen viewer
-  const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
+  // fullscreen viewer: every photo of the tapped message, opened at one
+  const [photoViewer, setPhotoViewer] = useState<PhotoViewerState | null>(null);
 
   // ── Voice recording state (build-90 pieces 1+2) ────────────────────────────
   // The provider owns expo-av and all gesture timing so navigation cannot tear
@@ -943,9 +948,13 @@ export function ChatScreen({
   // ── Attachment pick handler (OpenChat-6bg) ────────────────────────────────
   const handlePickAttachment = useCallback(async () => {
     if (composerBusy || uploadingAttachment) return;
-    const asset = await pickImage();
-    if (asset) setPendingAsset(asset);
-  }, [composerBusy, uploadingAttachment]);
+    const room = MAX_IMAGES_PER_MESSAGE - pendingAssets.length;
+    if (room <= 0) return;
+    const assets = await pickImages(room);
+    if (assets.length) {
+      setPendingAssets(prev => [...prev, ...assets].slice(0, MAX_IMAGES_PER_MESSAGE));
+    }
+  }, [composerBusy, uploadingAttachment, pendingAssets.length]);
 
   // ── Voice recording handlers (OpenChat-xxc) ──────────────────────────────
 
@@ -988,7 +997,7 @@ export function ChatScreen({
 
   const handleSend = async () => {
     const trimmed = text.trim();
-    const hasAttachment = !!pendingAsset;
+    const hasAttachment = pendingAssets.length > 0;
     if ((!trimmed && !hasAttachment) || composerBusy || sendInFlightRef.current) return;
     if (!isConnected) {
       Alert.alert('Offline', 'OpenChat is offline. Your message was not sent. Reconnect, then try again.');
@@ -1015,10 +1024,10 @@ export function ChatScreen({
     }
 
     const currentReplyToId = replyTo?.messageId;
-    const assetToUpload = pendingAsset;
+    const assetsToUpload = pendingAssets;
     setText('');
     setReplyTo(null);
-    setPendingAsset(null);
+    setPendingAssets([]);
     setMentionQuery(null);
     mentionAtOffset.current = -1;
     setActiveHashtag(null);
@@ -1030,13 +1039,15 @@ export function ChatScreen({
     if (typingTimer.current) clearTimeout(typingTimer.current);
     reportTyping(conversationId, false);
 
+    let uploaded = !assetsToUpload.length;
     try {
       let attachments: Attachment[] | undefined;
-      if (assetToUpload) {
+      if (assetsToUpload.length) {
         setUploadingAttachment(true);
         try {
-          const att = await uploadImage(assetToUpload);
-          attachments = [att];
+          // Upload in parallel; Promise.all keeps the picked order.
+          attachments = await Promise.all(assetsToUpload.map(uploadImage));
+          uploaded = true;
         } finally {
           setUploadingAttachment(false);
         }
@@ -1046,7 +1057,18 @@ export function ChatScreen({
       hapticSend();
     } catch (err) {
       console.warn('[ChatScreen] send failed:', err);
-      Alert.alert('Upload failed', 'Could not send the image. Please try again.');
+      // An upload failure never reached the chat (a failed send leaves its own
+      // failed bubble), so put the photos and caption back for a retry.
+      if (!uploaded) {
+        setPendingAssets(assetsToUpload);
+        if (trimmed) setText(prev => prev || trimmed);
+      }
+      Alert.alert(
+        'Upload failed',
+        assetsToUpload.length > 1
+          ? 'Could not send the photos. Please try again.'
+          : 'Could not send the image. Please try again.'
+      );
     } finally {
       sendInFlightRef.current = false;
       setSending(false);
@@ -1409,7 +1431,7 @@ export function ChatScreen({
               {getUserDisplayName(m.sender)}
             </Text>
           )}
-          {/* Attachments: audio (OpenChat-xxc) or image (OpenChat-6bg) */}
+          {/* Attachments: audio (OpenChat-xxc), then photos (OpenChat-6bg, OpenChat-wpmb) */}
           {m.attachments?.map((att, i) => {
             // ── Audio attachment ────────────────────────────────────
             // Voice notes are first-class text (2026-09-02): the
@@ -1440,26 +1462,18 @@ export function ChatScreen({
                 </View>
               );
             }
-            // ── Image attachment ────────────────────────────────────
-            const aspectRatio = att.width && att.height ? att.width / att.height : 1;
-            return (
-              <TouchableOpacity
-                key={i}
-                onPress={() => setFullscreenImage(att.url)}
-                activeOpacity={0.85}
-                style={{ marginBottom: m.content ? 6 : 0 }}
-              >
-                <Image
-                  source={{ uri: att.url }}
-                  style={[
-                    styles.attachmentImage,
-                    { aspectRatio: Math.min(Math.max(aspectRatio, 0.5), 2) },
-                  ]}
-                  resizeMode="cover"
-                />
-              </TouchableOpacity>
-            );
+            return null;
           })}
+          {(() => {
+            const photos = (m.attachments ?? []).filter(att => att.type !== 'audio');
+            return photos.length > 0 && (
+              <PhotoGrid
+                photos={photos}
+                hasCaption={!!m.content}
+                onOpen={index => setPhotoViewer({ urls: photos.map(p => p.url), index })}
+              />
+            );
+          })()}
           {/* Deleted: muted italic tombstone (OpenChat-q9h) */}
           {m.deletedAt
             ? <Text style={{ color: isOwn ? ownTint(0.55) : c.textMetadata, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
@@ -1732,30 +1746,49 @@ export function ChatScreen({
         </View>
       )}
 
-      {/* Pending attachment preview bar (OpenChat-6bg) */}
-      {pendingAsset && (
+      {/* Pending photos strip (OpenChat-6bg, multi-photo OpenChat-wpmb) */}
+      {pendingAssets.length > 0 && (
         <View style={[styles.attachmentPreviewBar, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <Image
-            source={{ uri: pendingAsset.uri }}
-            style={styles.attachmentPreviewThumb}
-            resizeMode="cover"
-          />
-          <View style={{ flex: 1, marginLeft: 8 }}>
-            <Text style={{ color: c.textPrimary, fontSize: 13 }} numberOfLines={1}>
-              {pendingAsset.fileName}
-            </Text>
-            <Text style={{ color: c.textSecondary, fontSize: 11 }}>
-              {pendingAsset.width && pendingAsset.height ? `${pendingAsset.width}×${pendingAsset.height}` : 'Image'}
-              {pendingAsset.fileSize ? `  •  ${(pendingAsset.fileSize / 1024).toFixed(0)} KB` : ''}
-            </Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => setPendingAsset(null)}
-            style={styles.replyBarClose}
-            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.attachmentPreviewStrip}
+            keyboardShouldPersistTaps="handled"
           >
-            <Text style={{ color: c.textMuted, fontSize: 22, lineHeight: 26 }}>×</Text>
-          </TouchableOpacity>
+            {pendingAssets.map((asset, i) => (
+              <View key={`${asset.uri}-${i}`} style={styles.attachmentPreviewItem}>
+                <Image
+                  source={{ uri: asset.uri }}
+                  style={styles.attachmentPreviewThumb}
+                  resizeMode="cover"
+                />
+                <TouchableOpacity
+                  onPress={() => setPendingAssets(prev => prev.filter((_, j) => j !== i))}
+                  style={[styles.attachmentPreviewRemove, { backgroundColor: c.textPrimary }]}
+                  hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove photo ${i + 1}`}
+                >
+                  <AppIcon name="x" color={c.background} size={12} />
+                </TouchableOpacity>
+              </View>
+            ))}
+            {pendingAssets.length < MAX_IMAGES_PER_MESSAGE && (
+              <TouchableOpacity
+                onPress={handlePickAttachment}
+                disabled={composerBusy || uploadingAttachment}
+                style={[styles.attachmentPreviewAdd, { borderColor: c.border }]}
+                accessibilityRole="button"
+                accessibilityLabel="Add more photos"
+              >
+                <AppIcon name="plus" color={c.textSecondary} size={18} />
+                <Text style={[styles.attachmentPreviewAddLabel, { color: c.textMetadata }]}>Add</Text>
+              </TouchableOpacity>
+            )}
+          </ScrollView>
+          <Text style={[styles.attachmentPreviewCount, { color: c.textMetadata }]}>
+            {pendingAssets.length === 1 ? '1 photo' : `${pendingAssets.length} photos`}
+          </Text>
         </View>
       )}
 
@@ -1917,7 +1950,7 @@ export function ChatScreen({
           Hold to record; drag left > 80px to cancel.
           On web, always hidden (Platform.OS === 'web').
         */}
-        {!editingMessage && !text.trim() && !pendingAsset && Platform.OS !== 'web'
+        {!editingMessage && !text.trim() && !pendingAssets.length && Platform.OS !== 'web'
           && (!isAnyRecording || isRecording) && (
           <View
             onTouchStart={(e) => { void handleMicPressIn(e.nativeEvent.pageX); }}
@@ -1946,11 +1979,11 @@ export function ChatScreen({
           </View>
         )}
         {/* Send button: shown when there is text or a pending asset */}
-        {(!!text.trim() || !!pendingAsset || editingMessage) && (
+        {(!!text.trim() || pendingAssets.length > 0 || editingMessage) && (
           <TouchableOpacity
-            style={[styles.send, { backgroundColor: c.primary, opacity: (!text.trim() && !pendingAsset) || composerBusy ? 0.5 : 1 }]}
+            style={[styles.send, { backgroundColor: c.primary, opacity: (!text.trim() && !pendingAssets.length) || composerBusy ? 0.5 : 1 }]}
             onPress={handleSend}
-            disabled={(!text.trim() && !pendingAsset) || composerBusy}
+            disabled={(!text.trim() && !pendingAssets.length) || composerBusy}
             accessibilityLabel="Send message"
           >
             {(sending && uploadingAttachment) ? (
@@ -1962,34 +1995,8 @@ export function ChatScreen({
         )}
       </View>
 
-      {/* Fullscreen image viewer modal (OpenChat-6bg) */}
-      <Modal
-        visible={!!fullscreenImage}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setFullscreenImage(null)}
-      >
-        <TouchableOpacity
-          style={styles.fullscreenOverlay}
-          activeOpacity={1}
-          onPress={() => setFullscreenImage(null)}
-        >
-          {fullscreenImage && (
-            <Image
-              source={{ uri: fullscreenImage }}
-              style={styles.fullscreenImage}
-              resizeMode="contain"
-            />
-          )}
-          <TouchableOpacity
-            style={styles.fullscreenClose}
-            onPress={() => setFullscreenImage(null)}
-            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
-          >
-            <Text style={{ color: '#fff', fontSize: 28, lineHeight: 32 }}>×</Text>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+      {/* Fullscreen photo viewer (OpenChat-6bg, paging OpenChat-wpmb) */}
+      <PhotoViewer state={photoViewer} onClose={() => setPhotoViewer(null)} />
 
       {/* Message action sheet (OpenChat-uxj, OpenChat-46p, OpenChat-wgl, OpenChat-q9h, OpenChat-7bd, OpenChat-hhc) */}
       <MessageActionSheet
@@ -2195,11 +2202,39 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  attachmentPreviewThumb: {
-    width: 48,
-    height: 48,
-    borderRadius: 6,
+  attachmentPreviewStrip: {
+    gap: space[2],
+    paddingTop: space[1],
+    paddingRight: space[2],
+    alignItems: 'center' as const,
   },
+  attachmentPreviewItem: { position: 'relative' as const },
+  attachmentPreviewThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.sm,
+  },
+  attachmentPreviewRemove: {
+    position: 'absolute' as const,
+    top: -4,
+    right: -4,
+    width: 18,
+    height: 18,
+    borderRadius: radius.pill,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  attachmentPreviewAdd: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderStyle: 'dashed' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  attachmentPreviewAddLabel: { ...type.caption, marginTop: 2 },
+  attachmentPreviewCount: { ...type.meta, marginLeft: space[2] },
   attachBtn: {
     paddingBottom: 6,
     paddingRight: 2,
@@ -2225,29 +2260,5 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 16,
     marginLeft: 4,
-  },
-  attachmentImage: {
-    width: '100%',
-    borderRadius: 10,
-    overflow: 'hidden' as const,
-  },
-  fullscreenOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.92)',
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-  },
-  fullscreenImage: {
-    width: '100%',
-    height: '100%',
-  },
-  fullscreenClose: {
-    position: 'absolute' as const,
-    top: 52,
-    right: 20,
-    width: 40,
-    height: 40,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
   },
 });

@@ -107,4 +107,22 @@ describe('chat attachments route', () => {
     expect(data.getUrl).toMatch(/^https:\/\/test-endpoint\/test-bucket\/attachments\/test-user\//);
     expect(data.key).toMatch(/^attachments\/test-user\/.*?\/photo\.jpg$/);
   });
+  it('rejects a message carrying more than ten attachments before touching the database', async () => {
+    const photos = Array.from({ length: 11 }, (_, i) => ({
+      url: `https://test-endpoint/test-bucket/attachments/test-user/${i}/photo.jpg`,
+      mimeType: 'image/jpeg',
+    }));
+    const res = await fetch(`${baseUrl}/api/chat/conversations/conv-1/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ content: '', attachments: photos }),
+    });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/At most 10 attachments/);
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
 });
