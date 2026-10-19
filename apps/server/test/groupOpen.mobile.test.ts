@@ -54,7 +54,7 @@ vi.mock('../../mobile/src/contexts/PrivateNamesContext', () => ({ usePrivateName
 vi.mock('../../mobile/src/api/client', () => ({ api: {} }));
 vi.mock('../../mobile/src/services/notifications', () => ({ setActiveConversationForNotifications: vi.fn() }));
 vi.mock('../../mobile/src/services/haptics', () => ({ hapticSend: vi.fn(), hapticReceive: mocks.receive }));
-vi.mock('../../mobile/src/services/attachments', () => ({ pickImage: vi.fn(), uploadImage: vi.fn() }));
+vi.mock('../../mobile/src/services/attachments', () => ({ MAX_IMAGES_PER_MESSAGE: 10, pickImages: vi.fn(async () => []), uploadImage: vi.fn() }));
 vi.mock('../../mobile/src/services/exportDownload', () => ({ saveJsonDownload: vi.fn() }));
 vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn() }));
 vi.mock('../../mobile/src/services/hashtagSuggestions', () => ({

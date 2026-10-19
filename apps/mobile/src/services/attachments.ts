@@ -2,7 +2,8 @@
  * attachments.ts — image pick + upload helpers (OpenChat-6bg).
  *
  * Flow:
- *   1. pickImage() → shows system photo picker, returns a local asset descriptor.
+ *   1. pickImages() → shows system photo picker (multi-select), returns local
+ *      asset descriptors.
  *   2. uploadImage(asset) → calls /api/chat/attachments/presign for a presigned
  *      PUT URL, uploads the binary via fetch PUT, returns the public GET URL +
  *      metadata suitable for storing on a Message.
@@ -38,29 +39,10 @@ export interface PickedAsset {
   fileSize: number;
 }
 
-/**
- * Open the system image picker. Returns null if the user cancels or permission
- * is denied. Requests permission automatically on first call.
- */
-export async function pickImage(): Promise<PickedAsset | null> {
-  // On iOS / Android, request permission if not already granted.
-  if (Platform.OS !== 'web') {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      return null;
-    }
-  }
+/** Most photos one message can carry; the server enforces the same cap. */
+export const MAX_IMAGES_PER_MESSAGE = 10;
 
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ['images'],
-    allowsEditing: false,
-    quality: 0.85,
-    exif: false,
-  });
-
-  if (result.canceled || result.assets.length === 0) return null;
-
-  const asset = result.assets[0];
+function toPickedAsset(asset: ImagePicker.ImagePickerAsset): PickedAsset {
   const uri = asset.uri;
 
   // Determine MIME type
@@ -71,17 +53,45 @@ export async function pickImage(): Promise<PickedAsset | null> {
   // Infer filename from URI if expo didn't provide one
   const fileName = asset.fileName || uri.split('/').pop() || `photo_${Date.now()}.jpg`;
 
-  // Use the file size from expo (available on web and recent iOS/Android).
-  const fileSize = asset.fileSize ?? 0;
-
   return {
     uri,
     mimeType,
     width: asset.width ?? 0,
     height: asset.height ?? 0,
     fileName,
-    fileSize,
+    // Use the file size from expo (available on web and recent iOS/Android).
+    fileSize: asset.fileSize ?? 0,
   };
+}
+
+/**
+ * Open the system image picker with multi-select (OpenChat-wpmb). Returns the
+ * picked photos in selection order, or [] if the user cancels or permission is
+ * denied. Requests permission automatically on first call.
+ */
+export async function pickImages(limit = MAX_IMAGES_PER_MESSAGE): Promise<PickedAsset[]> {
+  if (limit <= 0) return [];
+  // On iOS / Android, request permission if not already granted.
+  if (Platform.OS !== 'web') {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      return [];
+    }
+  }
+
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    allowsEditing: false,
+    allowsMultipleSelection: limit > 1,
+    selectionLimit: limit,
+    orderedSelection: true,
+    quality: 0.85,
+    exif: false,
+  });
+
+  if (result.canceled) return [];
+  // Some platforms ignore selectionLimit (web file inputs), so trim here too.
+  return result.assets.slice(0, limit).map(toPickedAsset);
 }
 
 /**
