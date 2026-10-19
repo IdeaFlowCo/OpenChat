@@ -48,6 +48,17 @@ captures never contribute. Saved-message entries have an **Original message**
 door: it highlights the source with up to five nondeleted messages before and
 after, and offers **Open chat**. Current membership is required; saving an entry
 does not grant source access, and deleted or inaccessible sources are unavailable.
+**Copy link to original** in an entry's actions gives a shareable
+`https://chat.ideaflow.app/app/original/<entryId>` link; opening it re-checks
+membership the same way.
+
+Search matches tags with or without the `#`, so `#event` finds entries saved by
+replying `#event` to someone's message. The chevron on each entry (or
+**Collapse entry** in its actions) folds it to one line. Collapse is your own
+saved preference: it applies in your Stream and every chat Stream, on every
+device, and never changes what others see. **Compact view** (on by default,
+remembered per device) shows the first four lines of long entries until
+**Show more**.
 
 ## Notifications and conversation links
 

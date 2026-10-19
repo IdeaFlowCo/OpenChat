@@ -17,3 +17,5 @@ The additive read-only MCP tool `oc_list_conversation_content` accepts the same 
 Intention tracking is described in [Context intention lifecycle](context-intention-lifecycle.md). Explicit webhook setup is described in [Context webhooks](context-webhooks.md).
 
 Tests: `conversationContent.integration.test.ts` uses an isolated Neo4j fixture for mixed pagination, aliases, private visibility, key revocation, source redaction, reviewed pin races and membership loss. `conversationContent.route.test.ts` covers actor gating. Mobile tests cover the compatibility Stream door, search/tag/socket refresh, private entry creation and sharing, stale preview rejection, account replacement, permission loss and unchanged filter selection.
+
+Stream entries carry `collapsed`, the reading user's own preference, set with `PUT /api/thoughts/:id/collapsed {collapsed}` on any entry the user can read (own, pinned to a chat they belong to, or a tag capture from such a chat); it is stored as `(:User)-[:COLLAPSED_THOUGHT]->(:Thought)` and emits `thought:collapsed` to that user only. Search treats a leading `#` as optional when matching tags.

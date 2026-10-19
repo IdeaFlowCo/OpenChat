@@ -29,5 +29,28 @@ export class ConversationNavigationQueue {
 }
 
 const queue = new ConversationNavigationQueue();
+
+/** Stream entry original-message links wait for the same signed-in Main stack. */
+let pendingOriginal: string | null = null;
+function flushOriginal(ref: Navigator) {
+  if (!pendingOriginal || !ref.isReady()) return;
+  const root = ref.getRootState();
+  if (root?.routes[root.index]?.name !== 'Main') return;
+  const thoughtId = pendingOriginal;
+  pendingOriginal = null;
+  ref.dispatch(CommonActions.navigate({
+    name: 'Main',
+    params: { screen: 'ThoughtsTab', params: { screen: 'OriginalMessage', params: { thoughtId } } },
+  }));
+}
+
 export const openConversation = (destination: Destination) => queue.open(destination, navigationRef);
-export const flushConversationNavigation = () => queue.flush(navigationRef);
+export const openOriginalMessage = (thoughtId: string) => {
+  if (!thoughtId.trim()) return;
+  pendingOriginal = thoughtId;
+  flushOriginal(navigationRef);
+};
+export const flushConversationNavigation = () => {
+  queue.flush(navigationRef);
+  flushOriginal(navigationRef);
+};

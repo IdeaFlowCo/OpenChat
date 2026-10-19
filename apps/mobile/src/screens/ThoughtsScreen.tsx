@@ -29,6 +29,8 @@ import { getSocket } from '../api/socket';
 import { StreamEditor } from '../components/StreamEditor';
 import { ThoughtCard } from '../components/ThoughtCard';
 import { ThoughtsSearchBar } from '../components/ThoughtsSearchBar';
+import { StreamCompactToggle } from '../components/StreamCompactToggle';
+import { applyCollapsed } from '../services/streamDisplay';
 import type { ThoughtsNavProp } from '../navigation/types';
 import { AppIcon } from '../components/AppIcon';
 import { streamErrorMessage } from './streamError';
@@ -119,11 +121,17 @@ export function ThoughtsScreen() {
       setThoughts((prev) => prev.map((t) => (t.id === payload.thought.id ? { ...t, ...payload.thought } : t)));
     };
 
+    const onCollapsed = (payload: { thoughtId: string; collapsed: boolean }) => {
+      if (payload?.thoughtId) applyCollapsed(payload.thoughtId, payload.collapsed === true);
+    };
+
     sock.on('thought:created', onCreated);
     sock.on('thought:updated', onUpdated);
+    sock.on('thought:collapsed', onCollapsed);
     return () => {
       sock.off('thought:created', onCreated);
       sock.off('thought:updated', onUpdated);
+      sock.off('thought:collapsed', onCollapsed);
     };
   }, []);
 
@@ -240,6 +248,9 @@ export function ThoughtsScreen() {
         onCreate={text => openAdd(text)}
         placeholder="Search or create a Stream entry"
       />
+      <View style={styles.displayRow}>
+        <StreamCompactToggle />
+      </View>
 
       <FlatList
         data={thoughts}
@@ -290,6 +301,7 @@ export function ThoughtsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  displayRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 12 },
   searchWrap: {
     padding: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,

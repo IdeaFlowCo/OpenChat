@@ -2,7 +2,7 @@ import { captureComposeIntent } from './composeIntents';
 import { Linking, Platform } from 'react-native';
 import { parseOpenChatUrl } from '../utils/parseOpenChatUrl';
 import { createEntryIntent, notifyEntryIntentCaptured, saveEntryIntent, EntryTarget } from './entryIntents';
-import { openConversation } from '../navigation/conversationNavigation';
+import { openConversation, openOriginalMessage } from '../navigation/conversationNavigation';
 
 export function installDeepLinkHandling(): () => void {
   let disposed = false;
@@ -14,6 +14,11 @@ export function installDeepLinkHandling(): () => void {
     if (parsed.type === 'compose') {
       const { type: _type, ...intent } = parsed;
       await captureComposeIntent(intent);
+      return;
+    }
+
+    if (parsed.type === 'original') {
+      openOriginalMessage(parsed.thoughtId);
       return;
     }
 

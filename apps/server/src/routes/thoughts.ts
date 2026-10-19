@@ -19,6 +19,7 @@ import neo4j from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { extractTagsFromMessage } from '../services/extractThoughtsFromMessage.js';
+import { COLLAPSED_REL, collapsedExpr, streamSearchPredicate, streamTagQuery } from '../services/streamSearch.js';
 
 const router = Router();
 
@@ -91,6 +92,8 @@ export function mergeDuplicateThoughtsFromSameMessage(
       kind: thought.kind,
       createdAt: thought.createdAt,
       updatedAt: thought.updatedAt,
+      // Collapse is keyed by the id the client renders, which is now this row's.
+      ...(thought.collapsed !== undefined ? { collapsed: thought.collapsed } : {}),
     };
   }
 
@@ -219,7 +222,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   if (before) conds.push('t.createdAt < datetime($before)');
   if (q)
     conds.push(
-      '(toLower(t.text) CONTAINS toLower($q) OR any(tag IN coalesce(t.tags, []) WHERE toLower(tag) CONTAINS toLower($q)))'
+      streamSearchPredicate()
     );
   if (conversationId)
     conds.push(
@@ -244,7 +247,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         sourceMessageId: CASE WHEN EXISTS { MATCH (u)-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.id ELSE null END,
         sourceConversationId: CASE WHEN EXISTS { MATCH (u)-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.conversationId ELSE null END,
         sourceConversationName: CASE WHEN EXISTS { MATCH (u)-[:PARTICIPATES_IN]->(conv) } THEN conv.name ELSE null END,
-        scopeConversationId: t.scopeConversationId
+        scopeConversationId: t.scopeConversationId,
+        collapsed: ${collapsedExpr()}
       } AS thought
       ORDER BY t.createdAt DESC
       LIMIT $limit
@@ -252,7 +256,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       // Neo4j's LIMIT clause requires a true integer; JS Number(50) gets
       // serialized as 50.0 and Neo4j rejects it. Wrap via neo4j.int().
       // Same pattern as server/src/routes/chat.ts:796.
-      { userId, before: before ?? undefined, q: q ?? undefined, conversationId: conversationId ?? undefined, limit: neo4j.int(limit) }
+      { userId, before: before ?? undefined, q: q ?? undefined, tagQ: q ? streamTagQuery(q) : undefined, conversationId: conversationId ?? undefined, limit: neo4j.int(limit) }
     );
 
     const thoughts = mergeDuplicateThoughtsFromSameMessage(
@@ -296,7 +300,7 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
     const pinnedConds = ["(t.lane IS NULL OR t.lane <> 'context')"];
     if (q) {
       pinnedConds.push(
-        '(toLower(t.text) CONTAINS toLower($q) OR any(tag IN coalesce(t.tags, []) WHERE toLower(tag) CONTAINS toLower($q)))'
+        streamSearchPredicate()
       );
     }
     const pinnedWhere = pinnedConds.length ? `WHERE ${pinnedConds.join(' AND ')}` : '';
@@ -317,12 +321,13 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
         sourceConversationId: CASE WHEN EXISTS { MATCH (:User {id: $userId})-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.conversationId ELSE null END,
         pinnedBy: p.pinnedBy,
         pinnedAt: p.pinnedAt,
-        pinned: true
+        pinned: true,
+        collapsed: ${collapsedExpr()}
       } AS thought
       ORDER BY p.pinnedAt DESC
       LIMIT 100
       `,
-      { userId, conversationId, q: q ?? undefined }
+      { userId, conversationId, q: q ?? undefined, tagQ: q ? streamTagQuery(q) : undefined }
     );
 
     const fromChatConds = [
@@ -333,7 +338,7 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
     ];
     if (q) {
       fromChatConds.push(
-        '(toLower(t.text) CONTAINS toLower($q) OR any(tag IN coalesce(t.tags, []) WHERE toLower(tag) CONTAINS toLower($q)))'
+        streamSearchPredicate()
       );
     }
     const fromChatWhere = fromChatConds.length ? `WHERE ${fromChatConds.join(' AND ')}` : '';
@@ -360,12 +365,13 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
         sourceConversationId: CASE WHEN EXISTS { MATCH (:User {id: $userId})-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.conversationId ELSE null END,
         authorId: t.userId,
         authorName: author.name,
-        pinned: false
+        pinned: false,
+        collapsed: ${collapsedExpr()}
       } AS thought
       ORDER BY t.createdAt DESC
       LIMIT 100
       `,
-      { userId, conversationId, q: q ?? undefined }
+      { userId, conversationId, q: q ?? undefined, tagQ: q ? streamTagQuery(q) : undefined }
     );
 
     res.json({
@@ -801,6 +807,56 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   } catch (err) {
     console.error('DELETE /api/thoughts/:id error:', err);
     res.status(500).json({ error: 'Failed to delete thought' });
+  } finally {
+    await session.close();
+  }
+});
+
+/**
+ * PUT /api/thoughts/:id/collapsed  { collapsed: boolean }
+ * The viewer's own collapse preference for any Stream entry they can read
+ * (OpenChat-q60e). It follows the entry into every Stream surface and never
+ * changes what other participants see.
+ */
+router.put('/:id/collapsed', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { id } = req.params;
+  const { collapsed } = req.body ?? {};
+  if (typeof collapsed !== 'boolean') {
+    res.status(400).json({ error: 'collapsed must be a boolean' });
+    return;
+  }
+
+  const session = getDriver().session();
+  try {
+    // Readable = own entry, pinned to a chat the viewer is in, or a tag capture
+    // from a chat the viewer is in. Same audience as the Stream reads above.
+    const result = await session.run(
+      `
+      MATCH (viewer:User {id: $userId}), (t:Thought {id: $id})
+      WHERE (t.lane IS NULL OR t.lane <> 'context') AND t.deletedAt IS NULL
+        AND (t.userId = $userId
+          OR EXISTS { MATCH (t)-[:PINNED_IN]->(:Conversation)<-[:PARTICIPATES_IN]-(viewer) }
+          OR (t.captureMethod IN ['inline-tag', 'reply-tag']
+              AND EXISTS { MATCH (t)-[:FROM_MESSAGE]->(m:Message)
+                           MATCH (viewer)-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) }))
+      ${collapsed
+        ? `MERGE (viewer)-[r:${COLLAPSED_REL}]->(t) ON CREATE SET r.at = datetime()`
+        : `OPTIONAL MATCH (viewer)-[r:${COLLAPSED_REL}]->(t) DELETE r`}
+      RETURN t.id AS id
+      `,
+      { userId, id }
+    );
+    if (result.records.length === 0) {
+      res.status(404).json({ error: 'Stream entry not found' });
+      return;
+    }
+    // Other open screens and devices of the same viewer stay in sync.
+    req.app.get('io')?.to(`user:${userId}`).emit('thought:collapsed', { thoughtId: id, collapsed });
+    res.json({ id, collapsed });
+  } catch (err) {
+    console.error('PUT /api/thoughts/:id/collapsed error:', err);
+    res.status(500).json({ error: 'Failed to update Stream entry' });
   } finally {
     await session.close();
   }

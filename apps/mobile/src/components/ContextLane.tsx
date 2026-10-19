@@ -8,6 +8,8 @@ import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { ContextComposer } from './ContextComposer';
 import { ContextStreamEntry, ConversationEntryEditor } from './ContextStreamEntry';
+import { StreamCompactToggle } from './StreamCompactToggle';
+import { applyCollapsed } from '../services/streamDisplay';
 import { useConversationContent } from '../services/useConversationContent';
 import { getSocket } from '../api/socket';
 import { ContextIntentionControls } from './ContextIntentionControls';
@@ -61,8 +63,10 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
     const socket = getSocket();
     const refresh = () => void load();
     const events = ['thought:created', 'thought:shared', 'thought:unshared', 'thought:pinned', 'thought:unpinned', 'thought:updated'];
+    const onCollapsed = (payload: { thoughtId: string; collapsed: boolean }) => { if (payload?.thoughtId) applyCollapsed(payload.thoughtId, payload.collapsed === true); };
     events.forEach(event => socket?.on(event, refresh));
-    return () => { events.forEach(event => socket?.off(event, refresh)); };
+    socket?.on('thought:collapsed', onCollapsed);
+    return () => { events.forEach(event => socket?.off(event, refresh)); socket?.off('thought:collapsed', onCollapsed); };
   }, [load]);
 
   const action = async (id: string, fn: () => Promise<unknown>, success?: string) => {
@@ -106,7 +110,7 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
       <TextInput accessibilityLabel="Search conversation content" placeholder={feed.contextAvailable === false ? 'Search Stream' : 'Search Context and Stream'} placeholderTextColor={c.textMuted} value={search} onChangeText={feed.chooseSearch} style={[styles.search, { color: c.textPrimary, backgroundColor: c.surface, borderColor: c.border }]} />
       {search ? button('Clear search', () => feed.chooseSearch('')) : null}{button('Refresh', () => void load())}
     </View>
-    <View style={[styles.actions, { paddingHorizontal: 12 }]}>{(feed.contextAvailable === false ? ['stream'] as const : ['all', 'context', 'stream'] as const).map(filter => <TouchableOpacity key={filter} accessibilityRole="button" accessibilityLabel={`${filter === 'all' ? 'All content' : filter === 'context' ? 'Context posts' : 'Stream entries'}`} accessibilityState={{ selected: feed.contextAvailable === false || feed.filter === filter }} onPress={() => feed.chooseFilter(filter)} style={[styles.action, { backgroundColor: feed.contextAvailable === false || feed.filter === filter ? c.primaryMuted : undefined, borderRadius: 8 }]}><Text style={{ color: c.primary }}>{filter === 'all' ? 'All' : filter === 'context' ? 'Context' : 'Stream'}</Text></TouchableOpacity>)}{button('Private entry', () => setCreatingPrivate(true))}</View>
+    <View style={[styles.actions, { paddingHorizontal: 12 }]}>{(feed.contextAvailable === false ? ['stream'] as const : ['all', 'context', 'stream'] as const).map(filter => <TouchableOpacity key={filter} accessibilityRole="button" accessibilityLabel={`${filter === 'all' ? 'All content' : filter === 'context' ? 'Context posts' : 'Stream entries'}`} accessibilityState={{ selected: feed.contextAvailable === false || feed.filter === filter }} onPress={() => feed.chooseFilter(filter)} style={[styles.action, { backgroundColor: feed.contextAvailable === false || feed.filter === filter ? c.primaryMuted : undefined, borderRadius: 8 }]}><Text style={{ color: c.primary }}>{filter === 'all' ? 'All' : filter === 'context' ? 'Context' : 'Stream'}</Text></TouchableOpacity>)}{button('Private entry', () => setCreatingPrivate(true))}<StreamCompactToggle /></View>
     {feed.contextAvailable === false && <Text style={{ color: c.textMetadata, paddingHorizontal: 16 }}>Context is unavailable. This chat’s Stream and your private entries remain available.</Text>}
     {creatingPrivate && <ConversationEntryEditor conversationId={conversationId} onCancel={() => setCreatingPrivate(false)} onDone={() => { setCreatingPrivate(false); void load(); }} />}
     {feedback && <Text accessibilityRole={feedback.error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={{ color: feedback.error ? c.danger : c.textMetadata, padding: 12 }}>{feedback.text}</Text>}
