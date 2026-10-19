@@ -3,10 +3,13 @@
  *
  * Shows every photo of one message; swipe (native) or the arrow buttons and
  * ←/→ keys (web) move between them, with an "n of N" counter. Tapping the
- * backdrop or × closes it.
+ * backdrop or × closes it. Share (iOS/Android) or Download (web) saves the
+ * current photo (OpenChat-5wm2).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Image,
   Modal,
   NativeScrollEvent,
@@ -19,6 +22,7 @@ import {
   View,
 } from 'react-native';
 import { AppIcon } from './AppIcon';
+import { photoActionLabel, saveOrSharePhoto } from '../services/photoActions';
 import { radius, space, type } from '../theme/tokens';
 
 export interface PhotoViewerState {
@@ -36,6 +40,7 @@ export function PhotoViewer({ state, onClose }: Props) {
   const [{ width, height }, setSize] = useState({ width: 0, height: 0 });
   const scrollRef = useRef<ScrollView>(null);
   const [index, setIndex] = useState(0);
+  const [saving, setSaving] = useState(false);
   const urls = state?.urls ?? [];
   const count = urls.length;
 
@@ -76,6 +81,20 @@ export function PhotoViewer({ state, onClose }: Props) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [state, index, goTo, onClose]);
+
+  const handleSave = async () => {
+    const url = urls[index];
+    if (!url || saving) return;
+    setSaving(true);
+    try {
+      await saveOrSharePhoto(url);
+    } catch (err) {
+      console.warn('[PhotoViewer] save/share failed:', err);
+      Alert.alert('Could not save photo', 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (width > 0) setIndex(Math.round(e.nativeEvent.contentOffset.x / width));
@@ -138,6 +157,20 @@ export function PhotoViewer({ state, onClose }: Props) {
             <AppIcon name="chevron-right" color="white" size={28} />
           </TouchableOpacity>
         )}
+        {count > 0 && (
+          <TouchableOpacity
+            style={styles.saveButton}
+            onPress={handleSave}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel={`${photoActionLabel} photo`}
+          >
+            {saving
+              ? <ActivityIndicator size="small" color="white" />
+              : <AppIcon name={photoActionLabel === 'Download' ? 'download' : 'share'} color="white" size={18} />}
+            <Text style={styles.saveLabel}>{photoActionLabel}</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.close}
           onPress={onClose}
@@ -178,6 +211,19 @@ const styles = StyleSheet.create({
   },
   arrowLeft: { left: space[3] },
   arrowRight: { right: space[3] },
+  saveButton: {
+    position: 'absolute',
+    bottom: 44,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[2],
+    minHeight: 44,
+    paddingHorizontal: space[4],
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  saveLabel: { ...type.bodyStrong, color: 'white' },
   close: {
     position: 'absolute',
     top: 52,

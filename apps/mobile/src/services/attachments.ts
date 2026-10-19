@@ -95,6 +95,63 @@ export async function pickImages(limit = MAX_IMAGES_PER_MESSAGE): Promise<Picked
 }
 
 /**
+ * Take a photo with the camera from the chat composer (OpenChat-p4xo).
+ * Returns null if the user cancels or denies camera access.
+ */
+export async function takePhoto(): Promise<PickedAsset | null> {
+  if (Platform.OS !== 'web') {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') return null;
+  }
+  const result = await ImagePicker.launchCameraAsync({
+    mediaTypes: ['images'],
+    allowsEditing: false,
+    quality: 0.85,
+    exif: false,
+  });
+  if (result.canceled || result.assets.length === 0) return null;
+  return toPickedAsset(result.assets[0]);
+}
+
+const PASTEABLE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+
+/**
+ * Turn image files from a web paste or drop into pending photos
+ * (OpenChat-63zy). Non-image and unsupported files are skipped. Dimensions are
+ * read so a single photo keeps its aspect ratio in the bubble.
+ */
+export async function filesToAssets(files: Iterable<File>, limit = MAX_IMAGES_PER_MESSAGE): Promise<PickedAsset[]> {
+  const images = Array.from(files).filter(f => PASTEABLE_IMAGE_TYPES.has(f.type)).slice(0, Math.max(limit, 0));
+  return Promise.all(images.map(async (file, i) => {
+    const uri = URL.createObjectURL(file);
+    const { width, height } = await imageSize(uri);
+    const ext = file.type.split('/')[1] === 'jpeg' ? 'jpg' : file.type.split('/')[1];
+    return {
+      uri,
+      mimeType: file.type,
+      width,
+      height,
+      // Clipboard images are all called "image.png"; keep names distinct.
+      fileName: file.name && file.name !== 'image.png' ? file.name : `pasted_${Date.now()}_${i}.${ext}`,
+      fileSize: file.size,
+    };
+  }));
+}
+
+function imageSize(uri: string): Promise<{ width: number; height: number }> {
+  return new Promise(resolve => {
+    if (typeof window === 'undefined' || typeof window.Image !== 'function') {
+      resolve({ width: 0, height: 0 });
+      return;
+    }
+    const img = new window.Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => resolve({ width: 0, height: 0 });
+    img.src = uri;
+  });
+}
+
+/**
  * Upload a picked asset to GCS via a presigned PUT URL.
  * Returns an Attachment descriptor ready to embed in a message.
  */
@@ -208,4 +265,11 @@ export async function uploadAudio(
     mimeType,
     durationMs,
   };
+}
+
+/** Free the memory behind a pasted/dropped photo once it is sent or removed. */
+export function releaseAsset(asset: PickedAsset): void {
+  if (asset.uri.startsWith('blob:') && typeof URL.revokeObjectURL === 'function') {
+    URL.revokeObjectURL(asset.uri);
+  }
 }
