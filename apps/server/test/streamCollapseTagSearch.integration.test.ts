@@ -112,6 +112,41 @@ integration('Stream tag search and per-viewer collapse', () => {
     expect(after.body.fromChat.find((t: { id: string }) => t.id === id('entry')).collapsed).toBe(false);
   });
 
+  it('shares collapse across legacy aliases selected by different searches', async () => {
+    await run(`
+      MATCH (t:Thought {id: $entry})-[:FROM_MESSAGE]->(m:Message), (v:User {id: $viewer})
+      CREATE (v)-[:HAS_THOUGHT]->(a:Thought)
+      SET a = properties(t), a.id = $alias, a.tags = ['alias-only']
+      CREATE (a)-[:FROM_MESSAGE]->(m)
+    `, { entry: id('entry'), viewer: id('viewer'), alias: id('alias') });
+    await run(`
+      MATCH (v:User {id: $viewer}), (a:Thought {id: $alias})
+      CREATE (v)-[:COLLAPSED_THOUGHT]->(a)
+    `, { viewer: id('viewer'), alias: id('alias') });
+    for (const q of ['', '#event', '#alias-only']) {
+      const res = await request(app).get('/api/thoughts').query({ q }).set('Authorization', auth('viewer'));
+      expect(res.body.length).toBeGreaterThan(0);
+      expect(res.body.every((t: { collapsed: boolean }) => t.collapsed)).toBe(true);
+    }
+    for (const collapsed of [true, false]) {
+      const res = await request(app).put(`/api/thoughts/${id('alias')}/collapsed`).send({ collapsed }).set('Authorization', auth('viewer'));
+      expect(res.status).toBe(200);
+      const rels = await run(`
+        MATCH (:User {id: $viewer})-[r:COLLAPSED_THOUGHT]->(t:Thought)
+        WHERE t.id IN [$entry, $alias] RETURN count(r) AS n
+      `, { viewer: id('viewer'), entry: id('entry'), alias: id('alias') });
+      expect(rels.records[0].get('n').toNumber()).toBe(collapsed ? 2 : 0);
+      const chat = await request(app).get(`/api/thoughts/conversation/${id('chat')}`).set('Authorization', auth('viewer'));
+      expect(chat.body.fromChat.every((t: { collapsed: boolean }) => t.collapsed === collapsed)).toBe(true);
+      const session = driver.session();
+      try {
+        const page = await content.listConversationContent(session, id('viewer'), id('chat'), { filter: 'stream', contextAvailable: false });
+        expect(page.items.length).toBeGreaterThan(0);
+        expect(page.items.every(item => item.origin === 'stream' && item.thought.collapsed === collapsed)).toBe(true);
+      } finally { await session.close(); }
+    }
+  });
+
   it('cannot collapse entries the viewer cannot read', async () => {
     const outsider = await request(app).put(`/api/thoughts/${id('entry')}/collapsed`).send({ collapsed: true }).set('Authorization', auth('outsider'));
     expect(outsider.status).toBe(404);

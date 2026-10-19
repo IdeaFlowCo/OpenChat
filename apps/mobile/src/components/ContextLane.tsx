@@ -63,11 +63,11 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
     const socket = getSocket();
     const refresh = () => void load();
     const events = ['thought:created', 'thought:shared', 'thought:unshared', 'thought:pinned', 'thought:unpinned', 'thought:updated'];
-    const onCollapsed = (payload: { thoughtId: string; collapsed: boolean }) => { if (payload?.thoughtId) applyCollapsed(payload.thoughtId, payload.collapsed === true); };
+    const onCollapsed = (payload: { thoughtId: string; collapsed: boolean }) => { if (payload?.thoughtId) applyCollapsed(accountId, payload.thoughtId, payload.collapsed === true); };
     events.forEach(event => socket?.on(event, refresh));
     socket?.on('thought:collapsed', onCollapsed);
     return () => { events.forEach(event => socket?.off(event, refresh)); socket?.off('thought:collapsed', onCollapsed); };
-  }, [load]);
+  }, [load, accountId]);
 
   const action = async (id: string, fn: () => Promise<unknown>, success?: string) => {
     if (busy) return;

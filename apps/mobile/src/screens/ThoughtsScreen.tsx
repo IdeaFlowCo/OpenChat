@@ -22,6 +22,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useChat } from '../contexts/ChatContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { fetchThoughts, createThought, updateThought, deleteThought, Thought } from '../services/thoughts';
@@ -38,6 +39,8 @@ import { streamErrorMessage } from './streamError';
 // ── ThoughtsScreen ────────────────────────────────────────────────────────────
 
 export function ThoughtsScreen() {
+  const { currentUser } = useChat();
+  const viewer = currentUser?.userId;
   const navigation = useNavigation<ThoughtsNavProp<'ThoughtsList'>>();
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -122,7 +125,7 @@ export function ThoughtsScreen() {
     };
 
     const onCollapsed = (payload: { thoughtId: string; collapsed: boolean }) => {
-      if (payload?.thoughtId) applyCollapsed(payload.thoughtId, payload.collapsed === true);
+      if (viewer && payload?.thoughtId) applyCollapsed(viewer, payload.thoughtId, payload.collapsed === true);
     };
 
     sock.on('thought:created', onCreated);
@@ -133,7 +136,7 @@ export function ThoughtsScreen() {
       sock.off('thought:updated', onUpdated);
       sock.off('thought:collapsed', onCollapsed);
     };
-  }, []);
+  }, [viewer]);
 
   const handleDelete = useCallback(async (id: string) => {
     try {

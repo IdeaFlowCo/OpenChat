@@ -19,7 +19,7 @@ import neo4j from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { extractTagsFromMessage } from '../services/extractThoughtsFromMessage.js';
-import { COLLAPSED_REL, collapsedExpr, streamSearchPredicate, streamTagQuery } from '../services/streamSearch.js';
+import { COLLAPSED_REL, readableStreamExpr, streamAliasExpr, collapsedExpr, streamSearchPredicate, streamTagQuery } from '../services/streamSearch.js';
 
 const router = Router();
 
@@ -834,16 +834,13 @@ router.put('/:id/collapsed', requireAuth, async (req: Request, res: Response) =>
     const result = await session.run(
       `
       MATCH (viewer:User {id: $userId}), (t:Thought {id: $id})
-      WHERE (t.lane IS NULL OR t.lane <> 'context') AND t.deletedAt IS NULL
-        AND (t.userId = $userId
-          OR EXISTS { MATCH (t)-[:PINNED_IN]->(:Conversation)<-[:PARTICIPATES_IN]-(viewer) }
-          OR (t.captureMethod IN ['inline-tag', 'reply-tag']
-              AND EXISTS { MATCH (t)-[:FROM_MESSAGE]->(m:Message)
-                           MATCH (viewer)-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) }))
+      WHERE ${readableStreamExpr()}
+      MATCH (alias:Thought)
+      WHERE ${streamAliasExpr()} AND ${readableStreamExpr('alias')}
       ${collapsed
-        ? `MERGE (viewer)-[r:${COLLAPSED_REL}]->(t) ON CREATE SET r.at = datetime()`
-        : `OPTIONAL MATCH (viewer)-[r:${COLLAPSED_REL}]->(t) DELETE r`}
-      RETURN t.id AS id
+        ? `MERGE (viewer)-[r:${COLLAPSED_REL}]->(alias) ON CREATE SET r.at = datetime()`
+        : `OPTIONAL MATCH (viewer)-[r:${COLLAPSED_REL}]->(alias) DELETE r`}
+      RETURN alias.id AS id
       `,
       { userId, id }
     );
@@ -852,7 +849,9 @@ router.put('/:id/collapsed', requireAuth, async (req: Request, res: Response) =>
       return;
     }
     // Other open screens and devices of the same viewer stay in sync.
-    req.app.get('io')?.to(`user:${userId}`).emit('thought:collapsed', { thoughtId: id, collapsed });
+    for (const record of result.records) {
+      req.app.get('io')?.to(`user:${userId}`).emit('thought:collapsed', { thoughtId: record.get('id'), collapsed });
+    }
     res.json({ id, collapsed });
   } catch (err) {
     console.error('PUT /api/thoughts/:id/collapsed error:', err);

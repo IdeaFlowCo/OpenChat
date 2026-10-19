@@ -10,6 +10,8 @@
 
 import { useCallback, useSyncExternalStore } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useChat } from '../contexts/ChatContext';
+import { StreamCollapseState } from './streamCollapseState';
 import { api } from '../api/client';
 
 const COMPACT_KEY = 'openchat.stream.compact';
@@ -18,7 +20,7 @@ export const COMPACT_MIN_LINES = 6;
 export const COMPACT_MIN_CHARS = 400;
 export const COMPACT_VISIBLE_LINES = 4;
 
-const collapseOverrides = new Map<string, boolean>();
+const collapseOverrides = new StreamCollapseState();
 let compact = true;
 let version = 0;
 const listeners = new Set<() => void>();
@@ -35,9 +37,8 @@ export function isLongStreamText(text: string): boolean {
 }
 
 /** Applies a collapse change made elsewhere (socket event from another screen or device). */
-export function applyCollapsed(thoughtId: string, collapsed: boolean): void {
-  if (collapseOverrides.get(thoughtId) === collapsed) return;
-  collapseOverrides.set(thoughtId, collapsed);
+export function applyCollapsed(viewer: string, thoughtId: string, collapsed: boolean): void {
+  collapseOverrides.set(viewer, thoughtId, collapsed);
   emit();
 }
 
@@ -54,18 +55,20 @@ export function useStreamCompact(): [boolean, (next: boolean) => void] {
 /** Collapsed state for one entry plus a saved toggle that rolls back on failure. */
 export function useThoughtCollapsed(id: string, serverCollapsed: boolean | undefined): [boolean, () => Promise<void>] {
   useSyncExternalStore(subscribe, getVersion);
-  const collapsed = collapseOverrides.get(id) ?? serverCollapsed === true;
+  const { currentUser } = useChat();
+  const viewer = currentUser?.userId ?? '';
+  const collapsed = collapseOverrides.read(viewer, id, serverCollapsed);
   const toggle = useCallback(async () => {
-    const previous = collapseOverrides.get(id) ?? serverCollapsed === true;
-    collapseOverrides.set(id, !previous);
+    const previous = collapseOverrides.read(viewer, id, serverCollapsed);
+    collapseOverrides.set(viewer, id, !previous, serverCollapsed);
     emit();
     try {
       await api.setThoughtCollapsed(id, !previous);
     } catch (e) {
-      collapseOverrides.set(id, previous);
+      collapseOverrides.set(viewer, id, previous, serverCollapsed);
       emit();
       throw e;
     }
-  }, [id, serverCollapsed]);
+  }, [viewer, id, serverCollapsed]);
   return [collapsed, toggle];
 }
