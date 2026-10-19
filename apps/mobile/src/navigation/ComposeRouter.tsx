@@ -1,7 +1,7 @@
 import { CommonActions } from '@react-navigation/native';
 import { useEffect } from 'react';
 import { navigationRef } from '../services/notifications';
-import { consumeComposeIntent, loadPendingComposeIntent, onComposeCaptured } from '../services/composeIntents';
+import { consumeComposeIntent, loadPendingNavigationIntent, onComposeCaptured } from '../services/composeIntents';
 export function ComposeRouter({ ready }: { ready: boolean }) {
   useEffect(() => {
     if (!ready) return;
@@ -17,9 +17,11 @@ export function ComposeRouter({ ready }: { ready: boolean }) {
       try {
         do {
           rerouteRequested = false;
-          const pending = await loadPendingComposeIntent();
+          const pending = await loadPendingNavigationIntent();
           if (active && pending && canRoute()) {
-            navigationRef.dispatch(CommonActions.navigate({ name: 'Main', params: { screen: 'ChatsTab', params: { screen: 'Compose', params: { ...pending.intent, requestRevision: pending.revision } } } }));
+            navigationRef.dispatch(CommonActions.navigate(pending.kind === 'original'
+              ? { name: 'Main', params: { screen: 'ThoughtsTab', params: { screen: 'OriginalMessage', params: { thoughtId: pending.thoughtId } } } }
+              : { name: 'Main', params: { screen: 'ChatsTab', params: { screen: 'Compose', params: { ...pending.intent, requestRevision: pending.revision } } } }));
             await consumeComposeIntent(pending.revision);
           }
         } while (active && rerouteRequested && canRoute());

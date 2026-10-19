@@ -18,7 +18,7 @@ export function installDeepLinkHandling(): () => void {
     }
 
     if (parsed.type === 'original') {
-      openOriginalMessage(parsed.thoughtId);
+      await openOriginalMessage(parsed.thoughtId);
       return;
     }
 

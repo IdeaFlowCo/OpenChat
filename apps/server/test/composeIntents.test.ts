@@ -3,7 +3,7 @@ const embed = vi.hoisted(() => ({ active: false }));
 vi.mock('../../mobile/src/services/unlinkedEmbed', () => ({ isUnlinkedEmbed: () => embed.active }));
 const storage = vi.hoisted(() => new Map<string, string>());
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: { setItem: async (key: string, value: string) => { storage.set(key, value); }, getItem: async (key: string) => storage.get(key) || null, removeItem: async (key: string) => { storage.delete(key); } } }));
-import { captureComposeIntent, consumeComposeIntent, loadComposeIntent, loadPendingComposeIntent } from '../../mobile/src/services/composeIntents';
+import { captureOriginalIntent, loadPendingNavigationIntent, captureComposeIntent, consumeComposeIntent, loadComposeIntent, loadPendingComposeIntent } from '../../mobile/src/services/composeIntents';
 beforeEach(() => { storage.clear(); embed.active = false; });
 it('retains safe incoming context across sign-in reload until routed', async () => {
   const intent = { source: 'unlinked' as const, profile: 'https://www.unlinked.ai/people/public-id' };
@@ -39,4 +39,19 @@ it('isolates embedded recipients from standalone storage, without reading or cha
   expect(storage.get('openchat:compose_intent')).toBe(saved);
   embed.active = false;
   expect(await loadComposeIntent()).toEqual(standalone);
+});
+
+it('restores an original-message destination after a sign-in reload', async () => {
+  await captureOriginalIntent('thought-123');
+  const before = (await loadPendingNavigationIntent())!;
+  vi.resetModules();
+  const restored = await import('../../mobile/src/services/composeIntents');
+  expect(await restored.loadPendingNavigationIntent()).toEqual(before);
+  expect(await restored.loadPendingComposeIntent()).toBeNull();
+  await restored.captureOriginalIntent('thought-newer');
+  expect(await restored.consumeComposeIntent(before.revision)).toBe(false);
+  const latest = (await restored.loadPendingNavigationIntent())!;
+  expect(latest).toMatchObject({ kind: 'original', thoughtId: 'thought-newer' });
+  expect(await restored.consumeComposeIntent(latest.revision)).toBe(true);
+  expect(await restored.loadPendingNavigationIntent()).toBeNull();
 });

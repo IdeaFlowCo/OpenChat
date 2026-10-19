@@ -12,7 +12,7 @@ vi.mock('../../mobile/src/services/notifications', () => ({ navigationRef: {
   isReady: () => true, getCurrentRoute: () => ({ name: 'Conversations' }), dispatch: mocks.dispatch,
   addListener: (name: string, listener: () => void) => { mocks.listeners.set(name, listener); return () => mocks.listeners.delete(name); },
 } }));
-import { captureComposeIntent, loadPendingComposeIntent } from '../../mobile/src/services/composeIntents';
+import { captureOriginalIntent, loadPendingNavigationIntent, captureComposeIntent, loadPendingComposeIntent } from '../../mobile/src/services/composeIntents';
 import { ComposeRouter } from '../../mobile/src/navigation/ComposeRouter';
 let root: ReturnType<typeof create> | undefined;
 beforeEach(() => { vi.clearAllMocks(); mocks.storage.clear(); mocks.listeners.clear(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
@@ -38,4 +38,16 @@ it('assigns fresh identity when the exact same link is captured twice', async ()
   expect(mocks.dispatch).toHaveBeenCalledTimes(2);
   const revisions = mocks.dispatch.mock.calls.map(([action]) => action.params.params.params.requestRevision);
   expect(revisions[0]).not.toBe(revisions[1]);
+});
+
+it('retains an original-message destination through authentication and consumes it after routing', async () => {
+  await captureOriginalIntent('thought-123');
+  await act(async () => { root = create(React.createElement(ComposeRouter, { ready: false })); });
+  expect(mocks.dispatch).not.toHaveBeenCalled();
+  expect(await loadPendingNavigationIntent()).toMatchObject({ kind: 'original', thoughtId: 'thought-123' });
+  await act(async () => { root!.update(React.createElement(ComposeRouter, { ready: true })); });
+  expect(mocks.dispatch).toHaveBeenCalledWith({
+    name: 'Main', params: { screen: 'ThoughtsTab', params: { screen: 'OriginalMessage', params: { thoughtId: 'thought-123' } } },
+  });
+  expect(await loadPendingNavigationIntent()).toBeNull();
 });
