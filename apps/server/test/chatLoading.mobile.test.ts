@@ -17,7 +17,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({ default: {
   getAllKeys: async () => [...disk.keys()],
 } }));
 const socket = { connected: true, on: (event: string, handler: (...args: any[]) => void) => mocks.handlers.set(event, handler), off: (event: string) => mocks.handlers.delete(event) };
-vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn() }));
+vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn(), logInfo: vi.fn() }));
 vi.mock('expo-crypto', () => ({ randomUUID: () => ++mocks.uuid === 1 ? 'client-message' : `client-message-${mocks.uuid}` }));
 vi.mock('../../mobile/src/services/notifications', () => ({ setUnreadBadgeCount: vi.fn(), setActiveConversationForNotifications: mocks.notificationSelection, loadMutedConvs: async () => ({}) }));
 vi.mock('../../mobile/src/api/client', () => ({
