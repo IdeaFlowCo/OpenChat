@@ -43,7 +43,7 @@ it('keeps outbox data through history eviction and session expiry, but clears it
   const restored = new OfflineChat('alice', storage); await restored.load();
   expect(restored.pending.get('one')).toEqual(entry());
   await restored.close(true);
-  expect(disk.size).toBe(0);
+  expect([...disk.keys()].filter(key => key.startsWith('openchat:offline:'))).toEqual([]);
 });
 it('removes revoked conversations from cached history', async () => {
   const store = new OfflineChat('alice', storage);
@@ -56,4 +56,41 @@ it.each([undefined, 408, 429, 500, 503])('retries transport or temporary failure
 });
 it.each([400, 401, 403, 404, 413, 422])('does not automatically retry rejection %s', status => {
   expect(retryableSendError({ status })).toBe(false);
+});
+
+it('invalidates suspended tabs while allowing a fresh same-account login', async () => {
+  const first = new OfflineChat('alice', storage);
+  const suspended = new OfflineChat('alice', storage);
+  await suspended.put(entry());
+  await first.close(true);
+  expect(await suspended.isActive()).toBe(false);
+  await expect(suspended.saveMessages('chat', [entry().message])).rejects.toThrow('Chat session ended');
+  await expect(suspended.put(entry('two'))).rejects.toThrow('Chat session ended');
+  const fresh = new OfflineChat('alice', storage);
+  await fresh.load();
+  expect(fresh.pending.size).toBe(0);
+  await fresh.put(entry('new'));
+  expect(await fresh.isActive()).toBe(true);
+});
+
+it('waits for an older in-flight write before erasing account data', async () => {
+  let started!: () => void;
+  const entered = new Promise<void>(done => { started = done; });
+  let finish!: () => void;
+  const blocked = new Promise<void>(done => { finish = done; });
+  storage.setItem.mockImplementationOnce(async (key, value) => {
+    started();
+    await blocked;
+    disk.set(key, value);
+  });
+  const writer = new OfflineChat('alice', storage);
+  const signingOut = new OfflineChat('alice', storage);
+  const writing = writer.put(entry());
+  await entered;
+  const closing = signingOut.close(true);
+  finish();
+  await Promise.all([writing, closing]);
+  expect(await writer.isActive()).toBe(false);
+  expect([...disk.keys()].filter(key => key.startsWith('openchat:offline:'))).toEqual([]);
+  expect(writer.pending.size).toBe(0);
 });

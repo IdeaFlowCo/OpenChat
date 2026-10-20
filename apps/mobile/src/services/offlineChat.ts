@@ -9,6 +9,8 @@ export type PendingMessage = {
 type Cache = { conversations: Conversation[]; threads: Record<string, Message[]> };
 export type ChatStorage = Pick<typeof AsyncStorage, 'getItem' | 'setItem' | 'removeItem' | 'getAllKeys'>;
 
+const queues = new WeakMap<ChatStorage, Map<string, Promise<void>>>();
+
 /** Account-scoped, bounded history; outbox entries have independent keys so
  * two web tabs cannot overwrite each other's newly composed messages. */
 export class OfflineChat {
@@ -17,19 +19,44 @@ export class OfflineChat {
   private writes = Promise.resolve();
   private closed = false;
   private readonly prefix: string;
+  private readonly generationKey: string;
+  private readonly generation: Promise<string | null>;
+
+  async isActive(): Promise<boolean> {
+    const generation = await this.generation;
+    return generation === await this.storage.getItem(this.generationKey) && !this.closed;
+  }
+
+  private async exclusive(action: () => Promise<void>): Promise<void> {
+    if (typeof navigator !== 'undefined' && navigator.locks) {
+      await navigator.locks.request(this.generationKey, action);
+      return;
+    }
+    let queue = queues.get(this.storage);
+    if (!queue) { queue = new Map(); queues.set(this.storage, queue); }
+    const next = (queue.get(this.prefix) ?? Promise.resolve()).then(action);
+    queue.set(this.prefix, next.catch(() => {}));
+    await next;
+  }
 
   constructor(readonly accountId: string, private storage: ChatStorage = AsyncStorage) {
     this.prefix = `openchat:offline:v1:${encodeURIComponent(accountId)}:`;
+    this.generationKey = `openchat:account-generation:${encodeURIComponent(accountId)}`;
+    this.generation = this.storage.getItem(this.generationKey);
   }
 
   private write(action: () => Promise<void>): Promise<void> {
     if (this.closed) return Promise.reject(new Error('Chat session ended'));
-    const next = this.writes.then(action);
+    const next = this.writes.then(() => this.exclusive(async () => {
+      if (!await this.isActive()) throw new Error('Chat session ended');
+      await action();
+    }));
     this.writes = next.catch(() => {});
     return next;
   }
 
   async load(): Promise<void> {
+    if (!await this.isActive()) return;
     const raw = await this.storage.getItem(`${this.prefix}cache`);
     if (raw) {
       try {
@@ -92,7 +119,7 @@ export class OfflineChat {
     // Do not report success or clear the composer before durable storage succeeds.
     const json = JSON.stringify(entry);
     await this.write(() => this.storage.setItem(`${this.prefix}outbox:${entry.clientId}`, json));
-    this.pending.set(entry.clientId, entry);
+    if (await this.isActive()) this.pending.set(entry.clientId, entry);
   }
 
   async remove(clientId: string): Promise<void> {
@@ -104,11 +131,16 @@ export class OfflineChat {
    * pending sends after older writes finish; expiry preserves them for re-login. */
   async close(erase = false): Promise<void> {
     this.closed = true;
-    await this.writes;
     if (erase) {
-      const keys = (await this.storage.getAllKeys()).filter(key => key.startsWith(this.prefix));
-      await Promise.all(keys.map(key => this.storage.removeItem(key)));
+      await this.storage.setItem(this.generationKey, `${Date.now()}-${Math.random()}`);
+      await this.exclusive(async () => {
+        const keys = (await this.storage.getAllKeys()).filter(key => key.startsWith(this.prefix));
+        await Promise.all(keys.map(key => this.storage.removeItem(key)));
+      });
+      this.pending.clear();
+      this.cache = { conversations: [], threads: {} };
     }
+    await this.writes;
   }
 }
 

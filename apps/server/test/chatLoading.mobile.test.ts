@@ -5,6 +5,7 @@ import type { Message } from '../../mobile/src/api/client.js';
 
 const mocks = vi.hoisted(() => ({ getMessages: vi.fn(), getMessagesBefore: vi.fn(),
   wsSend: vi.fn(), send: vi.fn(), account: 'me', uuid: 0, banner: vi.fn(), notificationSelection: vi.fn(), messagesSince: vi.fn(),
+  getMe: vi.fn(), connect: vi.fn(), getConversations: vi.fn(),
   markRead: vi.fn(), edit: vi.fn(), remove: vi.fn(), reaction: vi.fn(),
   handlers: new Map<string, (...args: any[]) => void>(),
 }));
@@ -21,13 +22,13 @@ vi.mock('expo-crypto', () => ({ randomUUID: () => ++mocks.uuid === 1 ? 'client-m
 vi.mock('../../mobile/src/services/notifications', () => ({ setUnreadBadgeCount: vi.fn(), setActiveConversationForNotifications: mocks.notificationSelection, loadMutedConvs: async () => ({}) }));
 vi.mock('../../mobile/src/api/client', () => ({
   api: { sendMessage: mocks.send, editMessage: mocks.edit, deleteMessage: mocks.remove, addReaction: mocks.reaction, markRead: mocks.markRead, getMessages: mocks.getMessages, getMessagesBefore: mocks.getMessagesBefore,
-    getMe: async () => ({ id: mocks.account }), getConversations: async () => [{ id: 'sailing' }],
+    getMe: mocks.getMe, getConversations: mocks.getConversations,
     listMatches: async () => [], getAiDisclosureStatus: async () => ({}), messagesSince: mocks.messagesSince,
   }, getToken: async () => 'test', getUser: async () => ({ userId: mocks.account }), setSession: vi.fn(), clearSession: vi.fn(),
   onAuthExpired: () => vi.fn(),
   isDroppedMessageSend: (value: any) => value?.dropped === true,
 }));
-vi.mock('../../mobile/src/api/socket', () => ({ sendMessage: mocks.wsSend, joinConversation: vi.fn(), leaveConversation: vi.fn(), connect: async () => socket, disconnect: vi.fn(), emitPresenceUpdate: vi.fn() }));
+vi.mock('../../mobile/src/api/socket', () => ({ sendMessage: mocks.wsSend, joinConversation: vi.fn(), leaveConversation: vi.fn(), connect: mocks.connect, disconnect: vi.fn(), emitPresenceUpdate: vi.fn() }));
 vi.mock('../../mobile/src/components/InAppMessageBanner', () => ({ showInAppBanner: mocks.banner }));
 
 import { ChatProvider, useChat } from '../../mobile/src/contexts/ChatContext.js';
@@ -52,6 +53,9 @@ beforeEach(async () => {
   socket.connected = true;
   mocks.handlers.clear();
   mocks.account = 'me';
+  mocks.getMe.mockImplementation(async () => ({ id: mocks.account }));
+  mocks.getConversations.mockResolvedValue([{ id: 'sailing' }]);
+  mocks.connect.mockResolvedValue(socket);
   mocks.uuid = 0;
   mocks.messagesSince.mockResolvedValue({ messages: [], truncated: true });
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -676,5 +680,49 @@ it('erases cached chats and pending sends on explicit sign-out', async () => {
   await act(async () => chat.sendMessage('private pending message'));
   expect([...disk.values()].join()).toContain('private pending message');
   await act(async () => chat.signOut());
+  expect([...disk.keys()].filter(key => key.startsWith('openchat:offline:'))).toEqual([]);
+});
+
+it('renders saved chats while identity is pending without opening network ingestion', async () => {
+  disk.set('openchat:offline:v1:me:cache', JSON.stringify({ conversations: [{ id: 'saved' }], threads: {} }));
+  let resolve!: (me: { id: string }) => void;
+  mocks.getMe.mockReturnValue(new Promise(done => { resolve = done; }));
+  let boot!: Promise<boolean>;
+  await act(async () => { boot = chat.bootstrapIfAuthed(); });
+  expect(chat.conversations).toEqual([{ id: 'saved' }]);
+  await act(async () => chat.refreshConversations());
+  expect(mocks.getConversations).not.toHaveBeenCalled();
+  expect(mocks.connect).not.toHaveBeenCalled();
+  expect(mocks.handlers.size).toBe(0);
+  await act(async () => { resolve({ id: 'other' }); await boot; });
+  expect(chat.isAuthed).toBe(false);
+  expect(chat.conversations).toEqual([]);
+  expect(mocks.connect).not.toHaveBeenCalled();
+  expect(JSON.parse(disk.get('openchat:offline:v1:me:cache')!).conversations).toEqual([{ id: 'saved' }]);
+});
+
+it('starts network ingestion only after the saved account identity is verified', async () => {
+  let resolve!: (me: { id: string }) => void;
+  mocks.getMe.mockReturnValue(new Promise(done => { resolve = done; }));
+  let boot!: Promise<boolean>;
+  await act(async () => { boot = chat.bootstrapIfAuthed(); });
+  expect(mocks.connect).not.toHaveBeenCalled();
+  await act(async () => { resolve({ id: 'me' }); await boot; });
+  expect(mocks.connect).toHaveBeenCalledOnce();
+  expect(mocks.getConversations).toHaveBeenCalled();
+});
+
+it('does not fall back to HTTP or recreate data after another tab signs out during a send', async () => {
+  await openSendingThread();
+  let reject!: (error: Error) => void;
+  mocks.wsSend.mockReturnValue(new Promise((_done, fail) => { reject = fail; }));
+  let sending!: Promise<void>;
+  await act(async () => { sending = chat.sendMessage('pending across tabs'); });
+  const { OfflineChat } = await import('../../mobile/src/services/offlineChat');
+  const other = new OfflineChat('me');
+  await other.load();
+  await other.close(true);
+  await act(async () => { reject(new Error('lost connection')); await sending; });
+  expect(mocks.send).not.toHaveBeenCalled();
   expect([...disk.keys()].filter(key => key.startsWith('openchat:offline:'))).toEqual([]);
 });

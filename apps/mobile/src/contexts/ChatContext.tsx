@@ -351,20 +351,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const flushPending = useCallback((): Promise<void> => {
     const store = offlineRef.current;
-    if (!store || !chatSocket?.connected) return Promise.resolve();
+    if (!store || !chatSocket?.connected || verifiedAccountRef.current !== store.accountId) return Promise.resolve();
     if (flushingRef.current?.store === store) return flushingRef.current.promise;
     const isCurrent = () => offlineRef.current === store;
     const run = async () => {
-      if (verifiedAccountRef.current !== store.accountId) {
-        try {
-          const me = await api.getMe();
-          if (!isCurrent() || me.id !== store.accountId) return;
-          verifiedAccountRef.current = me.id;
-        } catch { return; }
-      }
       // Preserve composition order. A transport failure pauses the queue until
       // reconnection or the retry timer; permanent failures do not block others.
-      while (isCurrent() && chatSocket.connected) {
+      while (isCurrent() && chatSocket.connected && await store.isActive()) {
         const entry = [...store.pending.values()].filter(item => item.state === 'queued')
           .sort((a, b) => a.message.createdAt.localeCompare(b.message.createdAt))[0];
         if (!entry) return;
@@ -381,26 +374,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           } else {
             try { real = await wsSend(id, message.content, message.replyToId, clientId); }
             catch {
-              if (!isCurrent()) return;
+              if (!isCurrent() || !await store.isActive()) return;
               const response = await api.sendMessage(id, message.content, undefined, clientId, message.replyToId);
               real = isDroppedMessageSend(response) ? null : response;
             }
           }
         } catch (error) {
-          if (!isCurrent()) return;
+          if (!isCurrent() || !await store.isActive()) return;
           const observed = retainedSendsRef.current.get(id)?.get(clientId);
           if (observed && !observed.id.startsWith('local-')) real = observed;
           else {
-            const state = retryableSendError(error) ? 'queued' : 'failed';
+            const status = (error as { status?: number })?.status;
+            const state = retryableSendError(error) || status === 401 ? 'queued' : 'failed';
             const updated: PendingMessage = { ...entry, state };
             await store.put(updated);
-            if (!isCurrent()) return;
+            if (!isCurrent() || !await store.isActive()) return;
             displayPending(updated);
             if (state === 'queued') return;
             continue;
           }
         }
-        if (!isCurrent()) return;
+        if (!isCurrent() || !await store.isActive()) return;
         const sends = retainedSendsRef.current.get(id);
         const observed = sends?.get(clientId);
         if (!observed) { await store.remove(clientId); continue; }
@@ -413,7 +407,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           const history = store.cache.threads[id] ?? [];
           await store.saveMessages(id, mergeMessages(id, history, [canonical]));
         } else sends?.delete(clientId);
-        if (!isCurrent()) return;
+        if (!isCurrent() || !await store.isActive()) return;
         if (activeConvIdRef.current === id) setMessages(current => mergeCreationMessages(id,
           current.filter(item => item.id !== message.id), canonical ? [canonical] : []));
         await store.remove(clientId);
@@ -439,13 +433,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const store = offlineRef.current;
-    if (isAuthed && conversationsLoaded && store && store.accountId === currentUser?.userId) {
+    if (isAuthed && verifiedAccountRef.current && conversationsLoaded && store && store.accountId === currentUser?.userId) {
       void store.saveConversations(conversations).catch(error => console.warn('[ChatContext] cache unavailable:', error));
     }
   }, [conversations, conversationsLoaded, currentUser, isAuthed]);
   useEffect(() => {
     const store = offlineRef.current;
-    if (isAuthed && activeConversationId && store && store.accountId === currentUser?.userId
+    if (isAuthed && verifiedAccountRef.current && activeConversationId && store && store.accountId === currentUser?.userId
       && !messageLoadError && (!loadingMessages || messages.length > 0)
       && messages.every(message => message.conversationId === activeConversationId)) {
       void store.saveMessages(activeConversationId, messages).catch(error => console.warn('[ChatContext] cache unavailable:', error));
@@ -528,9 +522,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const refreshConversations = useCallback(async () => {
     const session = sendSessionRef.current;
+    if (!verifiedAccountRef.current || !await offlineRef.current?.isActive()) return;
     try {
       const data = await api.getConversations();
-      if (session !== sendSessionRef.current) return;
+      if (session !== sendSessionRef.current || !await offlineRef.current?.isActive()) return;
       setConversations(sortConversationsByRecent(data));
       setUnreadByConv(unreadCountsFromConversations(data));
       setConversationsLoaded(true);
@@ -592,7 +587,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (!offlineRef.current) {
       const store = new OfflineChat(u.userId);
       await store.load().catch(error => console.warn('[ChatContext] offline cache unavailable:', error));
-      if (session !== sendSessionRef.current) return false;
+      if (session !== sendSessionRef.current || !await store.isActive()) return false;
       offlineRef.current = store;
       setConversations(store.cache.conversations);
       setUnreadByConv(unreadCountsFromConversations(store.cache.conversations));
@@ -603,16 +598,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setIsAuthed(true);
     setAuthInitialized(true);
     if (!isUnlinkedEmbed()) clearIdeaflowSignedOut();
-    // Render saved chats before any network operation. Fetch may remain pending
-    // for a long time on a captive portal or a connection with no internet.
     try {
-      const sock = await connect();
-      if (session !== sendSessionRef.current) return false;
-      setChatSocket(sock);
-    } catch (error) { console.warn('[ChatContext] socket connect failed:', error); }
-    void api.getMe().then(async me => {
-      if (session !== sendSessionRef.current) return;
-      // Never attach one account's cached data to a different token identity.
+      const me = await api.getMe();
+      if (session !== sendSessionRef.current || !await offlineRef.current?.isActive()) return false;
       if (me.id !== u.userId) {
         const previous = offlineRef.current;
         offlineRef.current = null;
@@ -623,13 +611,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         setCurrentUser(null);
         setConversations([]);
         await clearSession();
-        return;
+        return false;
       }
-      const refreshed: CurrentUser = { userId: me.id, email: me.email ?? u.email ?? '',
+      verifiedAccountRef.current = me.id;
+      setCurrentUser({ userId: me.id, email: me.email ?? u.email ?? '',
         name: me.name, avatarUrl: me.avatarUrl, discoveryMode: me.discoveryMode ?? 'name',
-        openUserDirectoryEnabled: me.openUserDirectoryEnabled === true };
-      setCurrentUser(refreshed);
-    }).catch(error => console.warn('[ChatContext] current-user refresh failed:', error));
+        openUserDirectoryEnabled: me.openUserDirectoryEnabled === true });
+      const sock = await connect();
+      if (session !== sendSessionRef.current || !await offlineRef.current?.isActive()) return false;
+      setChatSocket(sock);
+    } catch (error) {
+      console.warn('[ChatContext] identity verification or socket connect failed:', error);
+      return true;
+    }
     void refreshConversations();
     void refetchMatches().catch(() => {});
     lastSyncAtRef.current = new Date().toISOString();
@@ -642,11 +636,58 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return true;
   }, [refreshConversations, refetchMatches, resetMessageSession, displayPending]);
 
+  useEffect(() => {
+    if (!isAuthed) return;
+    let running = false;
+    const resume = async () => {
+      if (running) return;
+      running = true;
+      try {
+        const store = offlineRef.current;
+        if (!store) return;
+        if (!await store.isActive()) {
+          if (offlineRef.current !== store) return;
+          offlineRef.current = null;
+          void store.close();
+          disconnect();
+          resetMessageSession(null);
+          setChatSocket(null);
+          setIsConnected(false);
+          setIsAuthed(false);
+          setCurrentUser(null);
+          setConversations([]);
+          setConversationsLoaded(false);
+        } else if (!verifiedAccountRef.current) {
+          await bootstrapIfAuthed();
+        }
+      } catch (error) {
+        console.warn('[ChatContext] session resumption failed:', error);
+      } finally { running = false; }
+    };
+    const listener = () => { void resume(); };
+    const timer = setInterval(listener, 10000);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', listener);
+      window.addEventListener('online', listener);
+      window.addEventListener('pageshow', listener);
+      window.addEventListener('focus', listener);
+    }
+    return () => {
+      clearInterval(timer);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('storage', listener);
+        window.removeEventListener('online', listener);
+        window.removeEventListener('pageshow', listener);
+        window.removeEventListener('focus', listener);
+      }
+    };
+  }, [isAuthed, bootstrapIfAuthed, resetMessageSession]);
+
   // Reload history without erasing messages or edits received while REST is in flight.
   const retryMessages = useCallback(() => {
     const id = activeConvIdRef.current;
     if (!id) return;
-    if (offlineRef.current && !chatSocket?.connected) {
+    if (offlineRef.current && (!verifiedAccountRef.current || !chatSocket?.connected)) {
       setLoadingMessages(false);
       setMessageLoadError(offlineRef.current.cache.threads[id]?.length
         || retainedSendsRef.current.get(id)?.size ? null : 'No saved messages yet. Reconnect to load this chat.');
@@ -1052,7 +1093,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     activeConversationLaneRef.current = nextLane;
 
     if (id) {
-      joinConversation(id);
+      if (verifiedAccountRef.current) joinConversation(id);
       if (isChatVisible(id)) {
         setUnreadByConv(curr => {
           if (!curr.has(id)) return curr;
