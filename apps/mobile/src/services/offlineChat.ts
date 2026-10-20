@@ -1,10 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Conversation, Message } from '../api/client';
+import type { QueuedPhoto } from './photoOutbox';
 
 export type PendingMessage = {
   clientId: string;
   message: Message;
   state: 'queued' | 'failed';
+  /** Photos for this message, uploaded by the outbox before sending. */
+  photos?: QueuedPhoto[];
+  /** Why the entry is waiting or failed, shown under the bubble. */
+  detail?: string;
 };
 type Cache = { conversations: Conversation[]; threads: Record<string, Message[]> };
 export type ChatStorage = Pick<typeof AsyncStorage, 'getItem' | 'setItem' | 'removeItem' | 'getAllKeys'>;

@@ -158,7 +158,7 @@ function imageSize(uri: string): Promise<{ width: number; height: number }> {
 export class PhotoUploadError extends Error {
   constructor(
     readonly fileName: string,
-    readonly stage: 'size' | 'presign' | 'upload',
+    readonly stage: 'file' | 'size' | 'presign' | 'upload',
     readonly reason: string,
     readonly status?: number,
   ) {
@@ -196,19 +196,25 @@ export async function uploadImage(asset: PickedAsset): Promise<Attachment> {
   // rather than the compressed copy.
   let sizeBytes = 0;
   let webBlob: Blob | undefined;
-  try {
-    if (Platform.OS === 'web') {
+  const missing = () => new PhotoUploadError(name, 'file', 'the photo is no longer on this device');
+  if (Platform.OS === 'web') {
+    // A blob: URL from paste/drop does not survive a page reload.
+    try {
       const res = await fetch(asset.uri);
       webBlob = await res.blob();
-      sizeBytes = webBlob.size;
-    } else {
-      const fileInfo = await getInfoAsync(asset.uri);
-      if (fileInfo.exists && 'size' in fileInfo && typeof fileInfo.size === 'number') {
-        sizeBytes = fileInfo.size;
-      }
+    } catch {
+      throw missing();
     }
-  } catch {
-    // Fall through to the picker's size below.
+    sizeBytes = webBlob.size;
+  } else {
+    let fileInfo: Awaited<ReturnType<typeof getInfoAsync>> | undefined;
+    try {
+      fileInfo = await getInfoAsync(asset.uri);
+    } catch {
+      // Fall through to the picker's size below.
+    }
+    if (fileInfo && !fileInfo.exists) throw missing();
+    if (fileInfo?.exists && 'size' in fileInfo && typeof fileInfo.size === 'number') sizeBytes = fileInfo.size;
   }
   if (!sizeBytes) sizeBytes = asset.fileSize;
   if (!sizeBytes) throw new PhotoUploadError(name, 'size', "couldn't read the photo file");
@@ -267,6 +273,51 @@ export async function uploadImage(asset: PickedAsset): Promise<Attachment> {
   };
 }
 
+/**
+ * Errors a retry won't fix: wrong type, too big, file gone, or the server
+ * saying no (4xx other than timeout/rate limit). Weak-signal failures —
+ * dropped connections, timeouts, 5xx — are worth retrying later.
+ */
+export function isPermanentUploadError(error: PhotoUploadError): boolean {
+  if (error.stage === 'file' || error.stage === 'size') return true;
+  if (error.reason.includes("aren't supported")) return true;
+  const status = error.status;
+  if (!status) return false;
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+/**
+ * Check photos before queueing them so problems a retry can't fix are
+ * reported while the user is still looking at the composer.
+ */
+export async function checkPhotosForSend(assets: PickedAsset[]): Promise<{
+  ok: PickedAsset[];
+  rejected: { asset: PickedAsset; reason: string }[];
+}> {
+  const ok: PickedAsset[] = [];
+  const rejected: { asset: PickedAsset; reason: string }[] = [];
+  for (const asset of assets) {
+    if (!UPLOADABLE_IMAGE_TYPES.has(asset.mimeType)) {
+      const kind = asset.mimeType.split('/')[1]?.toUpperCase() || 'this';
+      rejected.push({ asset, reason: `${kind} photos aren't supported yet (use JPEG or PNG)` });
+      continue;
+    }
+    let size = asset.fileSize;
+    if (Platform.OS !== 'web') {
+      try {
+        const info = await getInfoAsync(asset.uri);
+        if (info.exists && 'size' in info && typeof info.size === 'number') size = info.size;
+      } catch { /* keep the picker's size */ }
+    }
+    if (size > MAX_IMAGE_BYTES) {
+      rejected.push({ asset, reason: `it's ${(size / 1024 / 1024).toFixed(1)} MB; the limit is 20 MB` });
+      continue;
+    }
+    ok.push(asset);
+  }
+  return { ok, rejected };
+}
+
 export interface PhotoUploadResults {
   /** Uploaded photos, in picked order, for the ones that succeeded. */
   uploaded: { asset: PickedAsset; attachment: Attachment }[];
@@ -280,7 +331,18 @@ export interface PhotoUploadResults {
  */
 export async function uploadImages(
   assets: PickedAsset[],
-  { concurrency = 3, retries = 1, upload = uploadImage }: { concurrency?: number; retries?: number; upload?: typeof uploadImage } = {},
+  {
+    concurrency = 3,
+    retries = 1,
+    upload = uploadImage,
+    onUploaded,
+  }: {
+    concurrency?: number;
+    retries?: number;
+    upload?: typeof uploadImage;
+    /** Called as each photo lands, so a queue can persist progress. */
+    onUploaded?: (index: number, attachment: Attachment) => void | Promise<void>;
+  } = {},
 ): Promise<PhotoUploadResults> {
   const outcomes: ({ attachment: Attachment } | { error: PhotoUploadError })[] = new Array(assets.length);
   let next = 0;
@@ -289,14 +351,15 @@ export async function uploadImages(
       const i = next++;
       for (let attempt = 0; ; attempt++) {
         try {
-          outcomes[i] = { attachment: await upload(assets[i]) };
+          const attachment = await upload(assets[i]);
+          outcomes[i] = { attachment };
+          await onUploaded?.(i, attachment);
           break;
         } catch (err) {
           const error = err instanceof PhotoUploadError
             ? err
             : new PhotoUploadError(assets[i].fileName, 'upload', err instanceof Error ? err.message : String(err));
-          // Size and type problems won't fix themselves on a retry.
-          if (attempt >= retries || error.stage === 'size' || error.reason.includes("aren't supported")) {
+          if (attempt >= retries || isPermanentUploadError(error)) {
             outcomes[i] = { error };
             break;
           }

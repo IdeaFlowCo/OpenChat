@@ -54,7 +54,7 @@ vi.mock('../../mobile/src/contexts/PrivateNamesContext', () => ({ usePrivateName
 vi.mock('../../mobile/src/api/client', () => ({ api: {} }));
 vi.mock('../../mobile/src/services/notifications', () => ({ setActiveConversationForNotifications: vi.fn() }));
 vi.mock('../../mobile/src/services/haptics', () => ({ hapticSend: vi.fn(), hapticReceive: mocks.receive }));
-vi.mock('../../mobile/src/services/attachments', () => ({ MAX_IMAGES_PER_MESSAGE: 10, pickImages: vi.fn(async () => []), takePhoto: vi.fn(async () => null), filesToAssets: vi.fn(async () => []), releaseAsset: vi.fn(), uploadImage: vi.fn(), uploadImages: vi.fn(async () => ({ uploaded: [], failed: [] })) }));
+vi.mock('../../mobile/src/services/attachments', () => ({ MAX_IMAGES_PER_MESSAGE: 10, pickImages: vi.fn(async () => []), takePhoto: vi.fn(async () => null), filesToAssets: vi.fn(async () => []), releaseAsset: vi.fn(), uploadImage: vi.fn(), uploadImages: vi.fn(async () => ({ uploaded: [], failed: [] })), checkPhotosForSend: vi.fn(async (assets: any[]) => ({ ok: assets, rejected: [] })) }));
 vi.mock('../../mobile/src/services/photoActions', () => ({ photoActionLabel: 'Share', saveOrSharePhoto: vi.fn() }));
 vi.mock('../../mobile/src/services/exportDownload', () => ({ saveJsonDownload: vi.fn() }));
 vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn(), logInfo: vi.fn() }));
@@ -272,7 +272,7 @@ describe('desktop composer input', () => {
     await act(async () => handler(key({ repeat: true })));
     expect(mocks.chat.sendMessage).not.toHaveBeenCalled();
     await act(async () => { handler(key()); handler(key()); });
-    expect(mocks.chat.sendMessage).toHaveBeenCalledExactlyOnceWith('One\nTwo', undefined, undefined);
+    expect(mocks.chat.sendMessage).toHaveBeenCalledExactlyOnceWith('One\nTwo', undefined, undefined, undefined);
     await act(async () => screen!.root.findByType('TextInput').props.onChangeText('Pending draft'));
     await act(async () => screen!.root.findByType('TextInput').props.onKeyDownCapture(key()));
     expect(mocks.chat.sendMessage).toHaveBeenCalledTimes(1);
