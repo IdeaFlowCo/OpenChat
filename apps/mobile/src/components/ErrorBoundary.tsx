@@ -16,11 +16,13 @@
  * the list.
  */
 
-import { Component, ErrorInfo, ReactNode } from 'react';
-import { Appearance, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Component, ErrorInfo, ReactNode, useState } from 'react';
+import { Appearance, ScrollView, StyleSheet, Text, TouchableOpacity } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 
 import { logError } from '../services/clientLogger';
 import { getColors } from '../theme/colors';
+import { radius, space, touchTarget, type } from '../theme/tokens';
 
 interface Props {
   children?: ReactNode;
@@ -86,7 +88,7 @@ export class ErrorBoundary extends Component<Props, State> {
     const { error } = this.state;
     if (error) {
       if (this.props.fallback) return this.props.fallback(error, this.retry);
-      return <AppErrorFallback error={error} onRetry={this.retry} />;
+      return <AppErrorFallback error={error} scope={this.props.scope} onRetry={this.retry} />;
     }
     if (this.props.render) return <RenderSlot render={this.props.render} />;
     return this.props.children;
@@ -107,18 +109,39 @@ function RenderSlot({ render }: { render: () => ReactNode }) {
  * rather than `useTheme()`: the boundary must still render if the thing that
  * threw was a context provider.
  */
-function AppErrorFallback({ error, onRetry }: { error: Error; onRetry: () => void }) {
+function AppErrorFallback({ error, scope, onRetry }: { error: Error; scope: string; onRetry: () => void }) {
   const c = getColors(Appearance.getColorScheme?.() ?? 'light');
+  const [copyStatus, setCopyStatus] = useState('');
+  const copyError = async () => {
+    try {
+      const copied = await Clipboard.setStringAsync(
+        `OpenChat error (${scope})\n${error.name}: ${error.message}${error.stack ? `\n\n${error.stack}` : ''}`,
+      );
+      setCopyStatus(copied === false ? 'Could not copy. Select the error text to copy it.' : 'Error copied.');
+    } catch {
+      setCopyStatus('Could not copy. Select the error text to copy it.');
+    }
+  };
   return (
-    <View style={[styles.screen, { backgroundColor: c.background }]}>
+    <ScrollView style={{ backgroundColor: c.background }} contentContainerStyle={styles.screen}>
       <Text style={[styles.title, { color: c.textPrimary }]}>Something went wrong</Text>
       <Text style={[styles.body, { color: c.textMetadata }]}>
         OpenChat hit an unexpected error and stopped drawing this screen. Your messages are
         safe — the problem has been reported.
       </Text>
-      <Text style={[styles.detail, { color: c.textMuted }]} numberOfLines={3}>
+      <Text selectable style={[styles.detail, { color: c.textMetadata }]}>
         {error.message}
       </Text>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Copy error"
+        accessibilityHint="Copies the error message and technical details to the clipboard."
+        onPress={() => { void copyError(); }}
+        style={[styles.button, { backgroundColor: c.surface, borderColor: c.border, borderWidth: StyleSheet.hairlineWidth }]}
+      >
+        <Text style={[styles.buttonLabel, { color: c.textPrimary }]}>Copy error</Text>
+      </TouchableOpacity>
+      {!!copyStatus && <Text accessibilityLiveRegion="polite" style={[styles.body, { color: c.textMetadata }]}>{copyStatus}</Text>}
       <TouchableOpacity
         accessibilityRole="button"
         onPress={onRetry}
@@ -126,15 +149,15 @@ function AppErrorFallback({ error, onRetry }: { error: Error; onRetry: () => voi
       >
         <Text style={[styles.buttonLabel, { color: c.onPrimary }]}>Try again</Text>
       </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
-  title: { fontSize: 20, fontWeight: '600' },
-  body: { fontSize: 15, lineHeight: 21, textAlign: 'center' },
-  detail: { fontSize: 12, textAlign: 'center' },
-  button: { marginTop: 8, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10 },
-  buttonLabel: { fontSize: 15, fontWeight: '600' },
+  screen: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: space[8], gap: space[3] },
+  title: { ...type.heading },
+  body: { ...type.body, textAlign: 'center' },
+  detail: { ...type.meta, textAlign: 'center' },
+  button: { minHeight: touchTarget, justifyContent: 'center', marginTop: space[2], paddingHorizontal: space[5], paddingVertical: space[3], borderRadius: radius.md },
+  buttonLabel: { ...type.bodyStrong },
 });

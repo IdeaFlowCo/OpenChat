@@ -94,11 +94,6 @@
       "count": 3
     }
   },
-  "src/components/ErrorBoundary.tsx": {
-    "no-restricted-syntax": {
-      "count": 5
-    }
-  },
   "src/components/ExportSheet.tsx": {
     "no-restricted-syntax": {
       "count": 10
