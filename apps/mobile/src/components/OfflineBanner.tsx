@@ -126,7 +126,7 @@ export function OfflineBanner() {
       ]}
     >
       <Text style={styles.text} accessibilityRole="text" accessibilityLiveRegion="polite">
-        Offline. Sending and downloads are paused while OpenChat reconnects.
+        Offline. Saved chats are available. Text messages will send when you reconnect.
       </Text>
     </Animated.View>
   );

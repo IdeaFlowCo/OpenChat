@@ -308,7 +308,7 @@ export function ChatScreen({
   }, []);
   const kbOffset = embedded ? 0 : Platform.OS === 'ios' ? (measuredTop ?? headerHeight) : 0;
   const {
-    currentUser, conversations, messages: activeMessages, loadingMessages, messageLoadError, retryMessages, isConnected,
+    retryPendingMessage, discardPendingMessage, currentUser, conversations, messages: activeMessages, loadingMessages, messageLoadError, retryMessages, isConnected,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     setActiveConversation, sendMessage, editMessage, deleteMessage, toggleReaction,
     presence, typingByConv, reportTyping,
@@ -1072,8 +1072,8 @@ export function ChatScreen({
     const trimmed = text.trim();
     const hasAttachment = pendingAssets.length > 0;
     if ((!trimmed && !hasAttachment) || composerBusy || sendInFlightRef.current) return;
-    if (!isConnected) {
-      Alert.alert('Offline', 'OpenChat is offline. Your message was not sent. Reconnect, then try again.');
+    if (!isConnected && (hasAttachment || editingMessage)) {
+      Alert.alert('Connection needed', 'Photos and edits need a connection. You can send text now; it will wait for reconnection.');
       return;
     }
     sendInFlightRef.current = true;
@@ -1122,26 +1122,24 @@ export function ChatScreen({
           // Upload in parallel; Promise.all keeps the picked order.
           attachments = await Promise.all(assetsToUpload.map(uploadImage));
           uploaded = true;
-          assetsToUpload.forEach(releaseAsset);
         } finally {
           setUploadingAttachment(false);
         }
       }
       await sendMessage(trimmed, currentReplyToId, attachments);
+      assetsToUpload.forEach(releaseAsset);
       invalidateHashtagSuggestions(conversationId);
       hapticSend();
     } catch (err) {
       console.warn('[ChatScreen] send failed:', err);
-      // An upload failure never reached the chat (a failed send leaves its own
-      // failed bubble), so put the photos and caption back for a retry.
-      if (!uploaded) {
-        setPendingAssets(assetsToUpload);
-        if (trimmed) setText(prev => prev || trimmed);
-        if (currentReply) setReplyTo(prev => prev ?? currentReply);
-      }
+      // Transport failures are retained by the outbox. Reaching this catch
+      // means upload or durable storage failed; restore the original draft.
+      setPendingAssets(assetsToUpload);
+      if (trimmed) setText(prev => prev || trimmed);
+      if (currentReply) setReplyTo(prev => prev ?? currentReply);
       Alert.alert(
-        'Upload failed',
-        assetsToUpload.length > 1
+        !uploaded ? 'Upload failed' : 'Could not save message',
+        uploaded ? 'Your draft is still in the composer. Free some device storage and try again.' : assetsToUpload.length > 1
           ? 'Could not send the photos. Please try again.'
           : 'Could not send the image. Please try again.'
       );
@@ -1197,6 +1195,7 @@ export function ChatScreen({
 
   // ── Long-press handler ─────────────────────────────────────────────────────
   const handleLongPress = useCallback((m: Message, isOwn: boolean, senderName: string) => {
+    if (m.id.startsWith('local-')) return;
     setActionSheetMessage(m);
     setActionSheetIsOwn(isOwn);
     setActionSheetSenderName(senderName);
@@ -1573,7 +1572,7 @@ export function ChatScreen({
           }
           <View style={styles.bubbleFooter}>
             <Text style={{ color: isOwn ? ownTint(0.7) : c.textMetadata, fontSize: 10 }}>
-              {failed ? 'Failed to send' : formatTime(m.createdAt)}
+              {failed ? 'Failed to send' : m._delivery === 'queued' ? 'Waiting to send' : m._delivery === 'sending' ? 'Sending…' : formatTime(m.createdAt)}
             </Text>
             {/* Edited tag (OpenChat-q9h) */}
             {!!(m.editedAt && !m.deletedAt) && (
@@ -1593,6 +1592,20 @@ export function ChatScreen({
             })()}
           </View>
         </TouchableOpacity>
+        {isOwn && failed && m.id.startsWith('local-') && (
+          <View style={{ flexDirection: 'row', alignSelf: 'flex-end', gap: 8 }}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry message"
+              style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 }}
+              onPress={() => { void retryPendingMessage(m.id.slice(6)).catch(() => Alert.alert('Could not retry', 'Please try again.')); }}>
+              <Text style={{ color: c.textMetadata }}>Retry</Text>
+            </TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Remove failed message"
+              style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 }}
+              onPress={() => { void discardPendingMessage(m.id.slice(6)).catch(() => Alert.alert('Could not remove', 'Please try again.')); }}>
+              <Text style={{ color: c.textMetadata }}>Remove</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {/* Reactions bar below bubble (OpenChat-7bd) */}
         {!!(m.reactions && m.reactions.length > 0) && (
           <ReactionsBar reactions={m.reactions!} isOwn={isOwn} onToggle={(emoji) => void handleReact(m.id, emoji)} />

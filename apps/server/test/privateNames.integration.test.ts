@@ -8,7 +8,9 @@ const user = process.env.NEO4J_TEST_USER;
 const password = process.env.NEO4J_TEST_PASSWORD;
 const integration = uri && user && password ? describe.sequential : describe.skip;
 
-integration('private names real Neo4j + HTTP privacy', () => {
+// Cold Neo4j query planning plus sequential HTTP requests can exceed Vitest's
+// five-second unit-test default on CI runners. Keep a bounded integration budget.
+integration('private names real Neo4j + HTTP privacy', { timeout: 30_000 }, () => {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const ids = ['alice', 'bob', 'mallory', 'hidden', 'bot', 'deleted', 'no-dm', 'email-only', 'other-email'].map(id => `private-name-${id}-${suffix}`);
   const [alice, bob, mallory, hidden, bot, deleted, noDm, emailOnly, otherEmail] = ids;

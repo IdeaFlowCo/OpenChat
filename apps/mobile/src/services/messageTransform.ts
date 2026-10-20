@@ -1,4 +1,4 @@
-import { OPENCHAT_URL, getToken, ApiError } from '../api/client';
+import { OPENCHAT_URL, getToken, ApiError, authenticatedFetch } from '../api/client';
 
 export type TransformType = 'nvc' | 'concise' | 'formal' | 'casual' | 'translate';
 
@@ -26,7 +26,7 @@ export async function transformMessage(
     body['targetLanguage'] = opts.targetLanguage;
   }
 
-  const res = await fetch(`${OPENCHAT_URL}/api/ai/transform`, {
+  const res = await authenticatedFetch(`${OPENCHAT_URL}/api/ai/transform`, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),

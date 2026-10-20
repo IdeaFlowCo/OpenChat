@@ -11,7 +11,7 @@ import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
  */
 
 import { io, Socket } from 'socket.io-client';
-import { OPENCHAT_URL, getToken, Message, Conversation, AgentMatch } from './client';
+import { OPENCHAT_URL, getAuthenticatedToken, Message, Conversation, AgentMatch } from './client';
 
 export interface ParticipantEvent {
   conversationId: string;
@@ -43,14 +43,14 @@ export interface MatchEvent {
 let socket: Socket | null = null;
 
 export async function connect(): Promise<Socket> {
+  const token = await getAuthenticatedToken();
   if (socket && socket.connected) return socket;
-  const token = await getToken();
   if (!token) throw new Error('Not authenticated');
   if (socket) {
     socket.disconnect();
   }
   socket = io(OPENCHAT_URL, {
-    auth: isUnlinkedEmbed() ? (callback) => { void getToken().then(value => callback({ token: value })); } : { token },
+    auth: isUnlinkedEmbed() ? (callback) => { void getAuthenticatedToken().then(value => callback({ token: value })).catch(() => callback({ token: null })); } : { token },
     transports: ['websocket'],
     autoConnect: true,
     reconnection: true,
@@ -60,7 +60,7 @@ export async function connect(): Promise<Socket> {
   if (isUnlinkedEmbed()) {
     const current = socket;
     current.on('disconnect', reason => {
-      if (reason === 'io server disconnect') void getToken().then(value => { if (value && socket === current) current.connect(); });
+      if (reason === 'io server disconnect') void getAuthenticatedToken().then(value => { if (value && socket === current) current.connect(); }).catch(() => {});
     });
   }
   return socket;
