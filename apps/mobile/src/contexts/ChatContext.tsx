@@ -751,19 +751,24 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     };
     const listener = () => { void resume(); };
     const timer = setInterval(listener, 10000);
-    if (typeof window !== 'undefined') {
-      window.addEventListener('storage', listener);
-      window.addEventListener('online', listener);
-      window.addEventListener('pageshow', listener);
-      window.addEventListener('focus', listener);
+    // React Native aliases window to globalThis without DOM event methods.
+    // Capture the browser event target so cleanup uses the same capabilities.
+    const browserWindow = typeof window !== 'undefined'
+      && typeof window.addEventListener === 'function'
+      && typeof window.removeEventListener === 'function' ? window : null;
+    if (browserWindow) {
+      browserWindow.addEventListener('storage', listener);
+      browserWindow.addEventListener('online', listener);
+      browserWindow.addEventListener('pageshow', listener);
+      browserWindow.addEventListener('focus', listener);
     }
     return () => {
       clearInterval(timer);
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('storage', listener);
-        window.removeEventListener('online', listener);
-        window.removeEventListener('pageshow', listener);
-        window.removeEventListener('focus', listener);
+      if (browserWindow) {
+        browserWindow.removeEventListener('storage', listener);
+        browserWindow.removeEventListener('online', listener);
+        browserWindow.removeEventListener('pageshow', listener);
+        browserWindow.removeEventListener('focus', listener);
       }
     };
   }, [isAuthed, bootstrapIfAuthed, resetMessageSession]);
