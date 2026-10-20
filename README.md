@@ -66,6 +66,14 @@ until **Show more**; **Show less** folds them again. It applies with or without
 a search. Both controls affect Stream entries only, including those in the
 combined conversation feed; Context posts are unchanged.
 
+## Unexpected-error recovery
+
+If OpenChat shows **Something went wrong**, the full error message is selectable.
+Tap **Copy error** to copy the message, boundary scope and stack (when available)
+for diagnosis. The screen confirms whether copying succeeded; if it fails,
+select the error text to copy it manually. Tap **Try again** to retry drawing
+the screen.
+
 ## Notifications and conversation links
 
 Native push requires notification permission on a physical device. Tapping a

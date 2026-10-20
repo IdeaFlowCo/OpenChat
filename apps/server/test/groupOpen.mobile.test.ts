@@ -46,6 +46,7 @@ vi.mock('@react-navigation/native', () => ({
   useNavigation: () => mocks.navigation, useRoute: () => mocks.route,
 }));
 vi.mock('@react-navigation/elements', () => ({ useHeaderHeight: () => 56 }));
+vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn(async () => true) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => mocks.chat }));
 vi.mock('../../mobile/src/contexts/SocialExperienceContext', () => ({ useSocialExperience: () => ({ enhanced: false }) }));

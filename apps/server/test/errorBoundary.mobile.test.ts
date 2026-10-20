@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   logError: vi.fn(),
+  copy: vi.fn(),
 }));
 
 // Same inert-primitive boundary the other mobile render tests use: we are
@@ -14,7 +15,9 @@ vi.mock('react-native', () => ({
   Text: 'Text',
   TouchableOpacity: 'TouchableOpacity',
   View: 'View',
+  ScrollView: 'ScrollView',
 }));
+vi.mock('expo-clipboard', () => ({ setStringAsync: mocks.copy }));
 vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: mocks.logError }));
 
 import { ErrorBoundary } from '../../mobile/src/components/ErrorBoundary.js';
@@ -39,6 +42,7 @@ function text() { return JSON.stringify(screen!.toJSON()); }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.copy.mockResolvedValue(true);
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   // React always re-logs a caught render error; keep the suite output readable.
   consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -87,6 +91,32 @@ describe('ErrorBoundary', () => {
     expect((error as Error).message).toContain("reading 'split'");
     expect(context).toMatchObject({ scope: 'chat-message' });
     expect(typeof (context as Record<string, unknown>).componentStack).toBe('string');
+  });
+
+  it('makes the full error selectable and copies diagnostics from the visible action', async () => {
+    const message = 'undefined is not a function\nDetails that must remain copyable';
+    await render(React.createElement(ErrorBoundary, { scope: 'app-root' }, React.createElement(Boom, { message })));
+    const detail = screen!.root.findAllByType('Text').find(node => node.props.children === message)!;
+    expect(detail.props.selectable).toBe(true);
+    expect(detail.props.numberOfLines).toBeUndefined();
+    const copy = screen!.root.findByProps({ accessibilityLabel: 'Copy error' });
+    await act(async () => { copy.props.onPress(); });
+    expect(mocks.copy).toHaveBeenCalledOnce();
+    expect(mocks.copy.mock.calls[0][0]).toContain(`OpenChat error (app-root)\nError: ${message}`);
+    expect(mocks.copy.mock.calls[0][0]).toContain('Boom');
+    expect(text()).toContain('Error copied.');
+    expect(text()).toContain('Try again');
+  });
+
+  it.each(['rejected', 'unavailable'])('keeps recovery available when clipboard is %s', async result => {
+    if (result === 'rejected') mocks.copy.mockRejectedValueOnce(new Error('clipboard unavailable'));
+    else mocks.copy.mockResolvedValueOnce(false);
+    await render(React.createElement(ErrorBoundary, { scope: 'app-root' }, React.createElement(Boom)));
+    await act(async () => { screen!.root.findByProps({ accessibilityLabel: 'Copy error' }).props.onPress(); });
+    expect(text()).toContain('Could not copy.');
+    expect(text()).not.toContain('Error copied.');
+    expect(text()).toContain('Try again');
+    expect(screen!.root.findAllByType('Text').find(node => node.props.children === 'kaboom')?.props.selectable).toBe(true);
   });
 
   it('catches a throw from the render slot, which an inline child call would not', async () => {
