@@ -58,6 +58,8 @@ if [ -d "$MOBILE_REPO" ]; then
       s|</head>|<link rel="manifest" href="/app/manifest.webmanifest"><meta name="theme-color" content="#5664e2"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="OpenChat"><link rel="apple-touch-icon" href="/app/icon-192.png"><script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/app/sw.js",{scope:"/app/"}).catch(function(e){console.warn("SW registration failed",e)})})}</script></head>|
     ' client-app/dist/index.html
 
+    node infra/prepare-offline-shell.mjs client-app/dist
+
     if grep -q "manifest.webmanifest" client-app/dist/index.html; then
       echo "  ✓ PWA manifest + service worker injected into /app/ index.html"
     else

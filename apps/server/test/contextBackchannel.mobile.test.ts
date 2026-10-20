@@ -8,6 +8,7 @@ vi.mock('react-native', () => ({
   View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', TextInput: 'TextInput', ActivityIndicator: 'ActivityIndicator',
   FlatList: ({ data, renderItem, ListEmptyComponent, ListFooterComponent }: any) => React.createElement('List', {}, data.length ? data.map((item: any) => React.createElement(React.Fragment, { key: item.id ?? item.post?.id }, renderItem({ item }))) : ListEmptyComponent, ListFooterComponent),
 }));
+vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn() }));
 vi.mock('@react-navigation/native', () => ({ useFocusEffect: (fn: any) => React.useEffect(fn, [fn]) }));
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 vi.mock('../../mobile/src/api/socket', () => ({ getSocket: () => null }));

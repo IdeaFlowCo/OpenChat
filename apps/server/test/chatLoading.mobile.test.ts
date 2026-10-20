@@ -8,6 +8,13 @@ const mocks = vi.hoisted(() => ({ getMessages: vi.fn(), getMessagesBefore: vi.fn
   markRead: vi.fn(), edit: vi.fn(), remove: vi.fn(), reaction: vi.fn(),
   handlers: new Map<string, (...args: any[]) => void>(),
 }));
+const disk = new Map<string, string>();
+vi.mock('@react-native-async-storage/async-storage', () => ({ default: {
+  getItem: async (key: string) => disk.get(key) ?? null,
+  setItem: async (key: string, value: string) => { disk.set(key, value); },
+  removeItem: async (key: string) => { disk.delete(key); },
+  getAllKeys: async () => [...disk.keys()],
+} }));
 const socket = { connected: true, on: (event: string, handler: (...args: any[]) => void) => mocks.handlers.set(event, handler), off: (event: string) => mocks.handlers.delete(event) };
 vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn() }));
 vi.mock('expo-crypto', () => ({ randomUUID: () => ++mocks.uuid === 1 ? 'client-message' : `client-message-${mocks.uuid}` }));
@@ -16,7 +23,7 @@ vi.mock('../../mobile/src/api/client', () => ({
   api: { sendMessage: mocks.send, editMessage: mocks.edit, deleteMessage: mocks.remove, addReaction: mocks.reaction, markRead: mocks.markRead, getMessages: mocks.getMessages, getMessagesBefore: mocks.getMessagesBefore,
     getMe: async () => ({ id: mocks.account }), getConversations: async () => [{ id: 'sailing' }],
     listMatches: async () => [], getAiDisclosureStatus: async () => ({}), messagesSince: mocks.messagesSince,
-  }, getToken: async () => 'test', getUser: async () => ({ userId: 'me' }), setSession: vi.fn(), clearSession: vi.fn(),
+  }, getToken: async () => 'test', getUser: async () => ({ userId: mocks.account }), setSession: vi.fn(), clearSession: vi.fn(),
   onAuthExpired: () => vi.fn(),
   isDroppedMessageSend: (value: any) => value?.dropped === true,
 }));
@@ -41,6 +48,8 @@ function Probe() { chat = useChat(); return null; }
 
 beforeEach(async () => {
   vi.resetAllMocks();
+  disk.clear();
+  socket.connected = true;
   mocks.handlers.clear();
   mocks.account = 'me';
   mocks.uuid = 0;
@@ -271,11 +280,11 @@ it.each([
   { attachment: false, page: newestPage }, { attachment: true, page: newestPage },
 ])('keeps failed send content after reconnect with attachment=$attachment and page=$page', async ({ attachment, page }) => {
   await openSendingThread();
-  const offline = new Error('offline');
+  const offline = Object.assign(new Error('offline'), { status: 400 });
   mocks.wsSend.mockRejectedValue(offline);
   mocks.send.mockRejectedValue(offline);
   await act(async () => {
-    await expect(chat.sendMessage('unsent text', undefined, attachment ? [image] : undefined)).rejects.toThrow('offline');
+    await chat.sendMessage('unsent text', undefined, attachment ? [image] : undefined);
   });
   expect(mocks.send).toHaveBeenCalledOnce();
   expect(mocks.wsSend).toHaveBeenCalledTimes(attachment ? 0 : 1);
@@ -327,8 +336,8 @@ function pendingSend() {
 
 async function failSend(content = 'retained text') {
   mocks.wsSend.mockRejectedValue(new Error('offline'));
-  mocks.send.mockRejectedValue(new Error('offline'));
-  await act(async () => { await expect(chat.sendMessage(content)).rejects.toThrow('offline'); });
+  mocks.send.mockRejectedValue(Object.assign(new Error('offline'), { status: 400 }));
+  await act(async () => { await chat.sendMessage(content); });
   return chat.messages.find(message => message.content === content)!;
 }
 
@@ -351,7 +360,7 @@ it.each(['success', 'failure'] as const)('settles a late send %s in its retained
   await openSendingThread();
   const response = pendingSend();
   mocks.wsSend.mockReturnValue(response.promise);
-  mocks.send.mockRejectedValue(new Error('offline'));
+  mocks.send.mockRejectedValue(Object.assign(new Error('offline'), { status: 400 }));
   let sending!: Promise<void>;
   await act(async () => { sending = chat.sendMessage('late text'); });
   const local = chat.messages[0];
@@ -360,11 +369,11 @@ it.each(['success', 'failure'] as const)('settles a late send %s in its retained
   const real = { ...local, id: 'client-message' };
   await act(async () => {
     if (outcome === 'success') { response.resolve(real); await sending; }
-    else { response.reject(new Error('offline')); await expect(sending).rejects.toThrow('offline'); }
+    else { response.reject(new Error('offline')); await sending; }
   });
   expect(chat.messages).toEqual([]);
   await act(async () => chat.setActiveConversation('sailing'));
-  expect(chat.messages).toEqual(outcome === 'success' ? [real] : [{ ...local, _failed: true }]);
+  expect(chat.messages).toEqual(outcome === 'success' ? [real] : [{ ...local, _failed: true, _delivery: 'failed' }]);
 });
 
 it.each(['history', 'socket'] as const)('replaces a failed placeholder from %s when both acknowledgments were lost', async delivery => {
@@ -611,4 +620,61 @@ it('does not clear hidden unread when an earlier read receipt response arrives',
     expect(chat.unreadByConv.get('sailing')).toBe(1);
     expect(chat.isChatVisible('sailing')).toBe(false);
   } finally { vi.useRealTimers(); }
+});
+
+it('queues text while disconnected, restores it after restart, then sends the original id exactly once', async () => {
+  await openSendingThread();
+  mocks.getMessages.mockResolvedValue(history);
+  await act(async () => chat.retryMessages());
+  socket.connected = false;
+  await act(async () => mocks.handlers.get('disconnect')!());
+  await act(async () => chat.sendMessage('send after the flight', 'history'));
+  expect(mocks.wsSend).not.toHaveBeenCalled();
+  expect(mocks.send).not.toHaveBeenCalled();
+  expect(chat.messages.at(-1)).toMatchObject({ _delivery: 'queued', replyToId: 'history' });
+  await act(async () => root.unmount());
+  mocks.handlers.clear();
+  await act(async () => { root = create(React.createElement(ChatProvider, null, React.createElement(Probe))); });
+  await act(async () => { await chat.bootstrapIfAuthed(); });
+  mocks.getMessages.mockClear();
+  await act(async () => chat.setActiveConversation('sailing'));
+  expect(mocks.getMessages).not.toHaveBeenCalled();
+  expect(chat.messages.map(message => message.content)).toEqual(['hello', 'send after the flight']);
+  expect(chat.loadingMessages).toBe(false);
+  const queued = chat.messages[1];
+  const real = { ...queued, id: 'client-message', _delivery: undefined, _failed: undefined };
+  mocks.wsSend.mockResolvedValue(real);
+  socket.connected = true;
+  await act(async () => mocks.handlers.get('connect')!());
+  expect(mocks.wsSend).toHaveBeenCalledExactlyOnceWith('sailing', 'send after the flight', 'history', 'client-message');
+  expect(chat.messages.filter(message => message.content === real.content)).toEqual([real]);
+  expect([...disk.keys()].some(key => key.includes(':outbox:'))).toBe(false);
+});
+
+it('keeps transient failures queued and retries the same id, but requires an explicit retry after rejection', async () => {
+  await openSendingThread();
+  mocks.wsSend.mockRejectedValue(new Error('lost ack'));
+  mocks.send.mockRejectedValue(new Error('network unavailable'));
+  await act(async () => chat.sendMessage('keep me'));
+  expect(chat.messages[0]).toMatchObject({ _delivery: 'queued', _failed: false });
+  mocks.send.mockRejectedValue(Object.assign(new Error('no access'), { status: 403 }));
+  await act(async () => chat.retryPendingMessage('client-message'));
+  expect(chat.messages[0]).toMatchObject({ _delivery: 'failed', _failed: true });
+  const calls = mocks.send.mock.calls.length;
+  await act(async () => { mocks.handlers.get('disconnect')!(); mocks.handlers.get('connect')!(); });
+  expect(mocks.send).toHaveBeenCalledTimes(calls);
+  mocks.wsSend.mockResolvedValue({ ...history.messages[0], id: 'client-message', content: 'keep me', senderId: 'me' });
+  await act(async () => chat.retryPendingMessage('client-message'));
+  expect(mocks.wsSend.mock.calls.every(call => call[3] === 'client-message')).toBe(true);
+  expect([...disk.keys()].some(key => key.includes(':outbox:'))).toBe(false);
+});
+
+it('erases cached chats and pending sends on explicit sign-out', async () => {
+  await openSendingThread();
+  socket.connected = false;
+  await act(async () => mocks.handlers.get('disconnect')!());
+  await act(async () => chat.sendMessage('private pending message'));
+  expect([...disk.values()].join()).toContain('private pending message');
+  await act(async () => chat.signOut());
+  expect([...disk.keys()].filter(key => key.startsWith('openchat:offline:'))).toEqual([]);
 });

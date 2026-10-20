@@ -143,6 +143,9 @@ export interface LinkPreview {
 }
 
 export interface Message {
+  /** Local-only delivery state, removed when replaced by the server message. */
+  _delivery?: 'queued' | 'sending' | 'failed';
+  _failed?: boolean;
   id: string;
   content: string;
   senderId: string;
@@ -436,6 +439,13 @@ async function request<T>(
     throw new ApiError(res.status, `${res.status}: ${msg}`, text);
   }
   return (await res.json()) as T;
+}
+
+async function timedRequest<T>(path: string, init?: Parameters<typeof request>[1]): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try { return await request<T>(path, { ...init, signal: controller.signal }); }
+  finally { clearTimeout(timer); }
 }
 
 async function approvedPublication<T>(path: string, payload: object): Promise<T> {
@@ -1022,7 +1032,7 @@ export const api = {
     { status: 'ready'; recipient: { id: string; name: string } } |
     { status: 'unclaimed'; name: string } | { status: 'unavailable' }
   >('/api/unlinked/recipient', { method: 'POST', body: JSON.stringify({ profile }) }),
-  getMe: () => request<User>('/api/auth/me'),
+  getMe: () => timedRequest<User>('/api/auth/me'),
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
   getConversation: (conversationId: string) =>
     request<Conversation>(`/api/chat/conversations/${conversationId}`),
@@ -1033,8 +1043,9 @@ export const api = {
       `/api/chat/conversations/${conversationId}/messages?before=${encodeURIComponent(before)}&limit=${limit}`
     ),
   sendMessage: (conversationId: string, content: string, attachments?: Attachment[], id?: string, replyToId?: string) =>
-    request<Message | DroppedMessageSend>(`/api/chat/conversations/${conversationId}/messages`, {
+    timedRequest<Message | DroppedMessageSend>(`/api/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
+      expireAuthOnForbidden: false,
       // id: client-generated idempotency key shared with the socket path so a
       // WS-then-REST retry collapses to one row server-side (MERGE). OpenChat-60y.
       // replyToId: without it this fallback silently dropped a reply's parent

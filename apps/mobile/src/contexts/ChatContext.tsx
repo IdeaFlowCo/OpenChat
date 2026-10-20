@@ -14,6 +14,7 @@ import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { randomUUID } from 'expo-crypto';
+import { OfflineChat, retryableSendError, type PendingMessage } from '../services/offlineChat';
 import {
   setUnreadBadgeCount,
   setActiveConversationForNotifications,
@@ -107,6 +108,9 @@ interface ChatContextValue {
     replyToId?: string,
     attachments?: Attachment[]
   ) => Promise<void>;
+
+  retryPendingMessage: (clientId: string) => Promise<void>;
+  discardPendingMessage: (clientId: string) => Promise<void>;
 
   // Edit / delete messages (OpenChat-q9h)
   editMessage: (messageId: string, content: string) => Promise<void>;
@@ -260,11 +264,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [messageLoadError, setMessageLoadError] = useState<string | null>(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  const offlineRef = useRef<OfflineChat | null>(null);
+  const verifiedAccountRef = useRef<string | null>(null);
+  useEffect(() => () => {
+    const store = offlineRef.current;
+    offlineRef.current = null;
+    void store?.close();
+  }, []);
+  const flushingRef = useRef<{ store: OfflineChat; promise: Promise<void> } | null>(null);
   const retainedSendsRef = useRef(new Map<string, Map<string, Message>>());
   const messageAccountRef = useRef<string | null>(null);
   const sendSessionRef = useRef(0);
   const resetMessageSession = useCallback((accountId: string | null) => {
     messageAccountRef.current = accountId;
+    verifiedAccountRef.current = null;
     ++sendSessionRef.current;
     retainedSendsRef.current.clear();
     visibilityRef.current = null;
@@ -313,7 +326,132 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
     }
     setMessages(current => current.map(message => message.id === id ? patch(message) : message));
+    const store = offlineRef.current;
+    if (store) for (const [conversationId, cached] of Object.entries(store.cache.threads)) {
+      if (cached.some(message => message.id === id)) void store.saveMessages(conversationId,
+        cached.map(message => message.id === id ? patch(message) : message)).catch(() => {});
+    }
   }, []);
+  const displayPending = useCallback((entry: PendingMessage, delivery = entry.state as Message['_delivery']) => {
+    const id = entry.message.conversationId;
+    let retained = retainedSendsRef.current.get(id);
+    if (!retained) {
+      retained = new Map();
+      retainedSendsRef.current.set(id, retained);
+    }
+    // A live canonical message is stronger evidence than a lost acknowledgement.
+    const existing = retained.get(entry.clientId)
+      ?? offlineRef.current?.cache.threads[id]?.find(message => message.id === entry.clientId);
+    if (existing && !existing.id.startsWith('local-')) retained.set(entry.clientId, existing);
+    if (!existing || existing.id.startsWith('local-')) retained.set(entry.clientId, {
+      ...entry.message, _delivery: delivery, _failed: delivery === 'failed',
+    });
+    if (activeConvIdRef.current === id) setMessages(current => mergeMessages(id, current, []));
+  }, [mergeMessages]);
+
+  const flushPending = useCallback((): Promise<void> => {
+    const store = offlineRef.current;
+    if (!store || !chatSocket?.connected) return Promise.resolve();
+    if (flushingRef.current?.store === store) return flushingRef.current.promise;
+    const isCurrent = () => offlineRef.current === store;
+    const run = async () => {
+      if (verifiedAccountRef.current !== store.accountId) {
+        try {
+          const me = await api.getMe();
+          if (!isCurrent() || me.id !== store.accountId) return;
+          verifiedAccountRef.current = me.id;
+        } catch { return; }
+      }
+      // Preserve composition order. A transport failure pauses the queue until
+      // reconnection or the retry timer; permanent failures do not block others.
+      while (isCurrent() && chatSocket.connected) {
+        const entry = [...store.pending.values()].filter(item => item.state === 'queued')
+          .sort((a, b) => a.message.createdAt.localeCompare(b.message.createdAt))[0];
+        if (!entry) return;
+        const { message, clientId } = entry;
+        const id = message.conversationId;
+        displayPending(entry, 'sending');
+        let real: Message | null = null;
+        try {
+          const confirmed = retainedSendsRef.current.get(id)?.get(clientId);
+          if (confirmed && !confirmed.id.startsWith('local-')) real = confirmed;
+          else if (message.attachments?.length) {
+            const response = await api.sendMessage(id, message.content, message.attachments, clientId, message.replyToId);
+            real = isDroppedMessageSend(response) ? null : response;
+          } else {
+            try { real = await wsSend(id, message.content, message.replyToId, clientId); }
+            catch {
+              if (!isCurrent()) return;
+              const response = await api.sendMessage(id, message.content, undefined, clientId, message.replyToId);
+              real = isDroppedMessageSend(response) ? null : response;
+            }
+          }
+        } catch (error) {
+          if (!isCurrent()) return;
+          const observed = retainedSendsRef.current.get(id)?.get(clientId);
+          if (observed && !observed.id.startsWith('local-')) real = observed;
+          else {
+            const state = retryableSendError(error) ? 'queued' : 'failed';
+            const updated: PendingMessage = { ...entry, state };
+            await store.put(updated);
+            if (!isCurrent()) return;
+            displayPending(updated);
+            if (state === 'queued') return;
+            continue;
+          }
+        }
+        if (!isCurrent()) return;
+        const sends = retainedSendsRef.current.get(id);
+        const observed = sends?.get(clientId);
+        if (!observed) { await store.remove(clientId); continue; }
+        const canonical = observed && !observed.id.startsWith('local-') ? observed
+          : real ? messagePatchesRef.current.get(real.id)?.(real) ?? real : null;
+        if (canonical) {
+          sends?.set(clientId, canonical);
+          setConversations(current => applyMessageToConversationList(current, canonical).conversations);
+          // Save the acknowledged message before deleting its durable outbox key.
+          const history = store.cache.threads[id] ?? [];
+          await store.saveMessages(id, mergeMessages(id, history, [canonical]));
+        } else sends?.delete(clientId);
+        if (!isCurrent()) return;
+        if (activeConvIdRef.current === id) setMessages(current => mergeCreationMessages(id,
+          current.filter(item => item.id !== message.id), canonical ? [canonical] : []));
+        await store.remove(clientId);
+      }
+    };
+    const promise = run().catch(error => {
+      // Disk errors keep the durable entry for a later attempt with the SAME id.
+      console.warn('[ChatContext] outbox paused:', error);
+      if (isCurrent()) for (const entry of store.pending.values()) displayPending(entry);
+    }).finally(() => {
+      if (flushingRef.current?.promise === promise) flushingRef.current = null;
+    });
+    flushingRef.current = { store, promise };
+    return promise;
+  }, [chatSocket, displayPending, mergeMessages, mergeCreationMessages]);
+
+  useEffect(() => {
+    if (!isAuthed || !isConnected) return;
+    void flushPending();
+    const timer = setInterval(() => { void flushPending(); }, 10000);
+    return () => clearInterval(timer);
+  }, [isAuthed, isConnected, flushPending]);
+
+  useEffect(() => {
+    const store = offlineRef.current;
+    if (isAuthed && conversationsLoaded && store && store.accountId === currentUser?.userId) {
+      void store.saveConversations(conversations).catch(error => console.warn('[ChatContext] cache unavailable:', error));
+    }
+  }, [conversations, conversationsLoaded, currentUser, isAuthed]);
+  useEffect(() => {
+    const store = offlineRef.current;
+    if (isAuthed && activeConversationId && store && store.accountId === currentUser?.userId
+      && !messageLoadError && (!loadingMessages || messages.length > 0)
+      && messages.every(message => message.conversationId === activeConversationId)) {
+      void store.saveMessages(activeConversationId, messages).catch(error => console.warn('[ChatContext] cache unavailable:', error));
+    }
+  }, [messages, activeConversationId, loadingMessages, messageLoadError, currentUser, isAuthed]);
+
   // Pagination state (OpenChat-vjc)
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
@@ -389,8 +527,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // ────────────────────────────────────────────────────────────────────────────
 
   const refreshConversations = useCallback(async () => {
+    const session = sendSessionRef.current;
     try {
       const data = await api.getConversations();
+      if (session !== sendSessionRef.current) return;
       setConversations(sortConversationsByRecent(data));
       setUnreadByConv(unreadCountsFromConversations(data));
       setConversationsLoaded(true);
@@ -429,63 +569,89 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       return false;
     }
     let u = await getUser();
-    try {
-      const me = await api.getMe();
-      const refreshed: CurrentUser = {
-        userId: me.id,
-        email: me.email ?? u?.email ?? '',
-        name: me.name,
-        avatarUrl: me.avatarUrl,
-        discoveryMode: me.discoveryMode ?? 'name',
-        openUserDirectoryEnabled: me.openUserDirectoryEnabled === true,
-      };
-      u = refreshed;
-      await setSession(token, refreshed);
-    } catch (error) {
-      console.warn('[ChatContext] current-user refresh failed:', error);
+    if (!u?.userId) {
+      // Legacy token-only sessions need one online identity lookup before any
+      // account-scoped cache can be opened.
+      try {
+        const me = await api.getMe();
+        u = { userId: me.id, email: me.email ?? '', name: me.name, avatarUrl: me.avatarUrl };
+        await setSession(token, u);
+      } catch {
+        setAuthInitialized(true);
+        return false;
+      }
     }
-    const accountId = u?.userId ?? null;
-    if (messageAccountRef.current !== accountId) resetMessageSession(accountId);
+    if (messageAccountRef.current !== u.userId) {
+      void offlineRef.current?.close();
+      offlineRef.current = null;
+      resetMessageSession(u.userId);
+      setConversations([]);
+      setConversationsLoaded(false);
+    }
+    const session = sendSessionRef.current;
+    if (!offlineRef.current) {
+      const store = new OfflineChat(u.userId);
+      await store.load().catch(error => console.warn('[ChatContext] offline cache unavailable:', error));
+      if (session !== sendSessionRef.current) return false;
+      offlineRef.current = store;
+      setConversations(store.cache.conversations);
+      setUnreadByConv(unreadCountsFromConversations(store.cache.conversations));
+      setConversationsLoaded(true);
+      for (const entry of store.pending.values()) displayPending(entry);
+    }
     setCurrentUser(u);
     setIsAuthed(true);
-    // Signed in again: an earlier explicit sign-out no longer blocks the
-    // automatic cross-app sign-in (code-xbh.21.1) after a later expiry.
+    setAuthInitialized(true);
     if (!isUnlinkedEmbed()) clearIdeaflowSignedOut();
+    // Render saved chats before any network operation. Fetch may remain pending
+    // for a long time on a captive portal or a connection with no internet.
     try {
       const sock = await connect();
+      if (session !== sendSessionRef.current) return false;
       setChatSocket(sock);
-    } catch (e) {
-      console.warn('[ChatContext] socket connect failed during bootstrap:', e);
-    }
-    await refreshConversations();
-    // Seed the global pending badge. Non-fatal: opening the overlay always
-    // retries, and match:updated keeps the map current while connected.
-    try {
-      await refetchMatches();
-    } catch {
-      /* best effort during bootstrap */
-    }
-    // Seed lastSyncAt from now so that on reconnect we only fetch messages
-    // that arrived after this bootstrap, not everything since epoch.
+    } catch (error) { console.warn('[ChatContext] socket connect failed:', error); }
+    void api.getMe().then(async me => {
+      if (session !== sendSessionRef.current) return;
+      // Never attach one account's cached data to a different token identity.
+      if (me.id !== u.userId) {
+        const previous = offlineRef.current;
+        offlineRef.current = null;
+        void previous?.close();
+        disconnect();
+        resetMessageSession(null);
+        setIsAuthed(false);
+        setCurrentUser(null);
+        setConversations([]);
+        await clearSession();
+        return;
+      }
+      const refreshed: CurrentUser = { userId: me.id, email: me.email ?? u.email ?? '',
+        name: me.name, avatarUrl: me.avatarUrl, discoveryMode: me.discoveryMode ?? 'name',
+        openUserDirectoryEnabled: me.openUserDirectoryEnabled === true };
+      setCurrentUser(refreshed);
+    }).catch(error => console.warn('[ChatContext] current-user refresh failed:', error));
+    void refreshConversations();
+    void refetchMatches().catch(() => {});
     lastSyncAtRef.current = new Date().toISOString();
-    // Fetch AI disclosure status (OpenChat-ds3). Non-fatal if it fails.
-    try {
-      const ds = await api.getAiDisclosureStatus();
-      setAiDisclosureAcceptedAt(ds.acceptedAt);
-    } catch {
-      /* non-fatal — banner will show until server is updated */
-    }
-    // Load mute map from AsyncStorage (OpenChat-aes). Non-fatal.
-    const muted = await loadMutedConvs();
-    setMutedConvs(muted);
-    setAuthInitialized(true);
+    void api.getAiDisclosureStatus().then(ds => {
+      if (session === sendSessionRef.current) setAiDisclosureAcceptedAt(ds.acceptedAt);
+    }).catch(() => {});
+    void loadMutedConvs().then(muted => {
+      if (session === sendSessionRef.current) setMutedConvs(muted);
+    });
     return true;
-  }, [refreshConversations, refetchMatches, resetMessageSession]);
+  }, [refreshConversations, refetchMatches, resetMessageSession, displayPending]);
 
   // Reload history without erasing messages or edits received while REST is in flight.
   const retryMessages = useCallback(() => {
     const id = activeConvIdRef.current;
     if (!id) return;
+    if (offlineRef.current && !chatSocket?.connected) {
+      setLoadingMessages(false);
+      setMessageLoadError(offlineRef.current.cache.threads[id]?.length
+        || retainedSendsRef.current.get(id)?.size ? null : 'No saved messages yet. Reconnect to load this chat.');
+      return;
+    }
     const generation = ++messageLoadGenerationRef.current;
     const cachedIds = new Set(messagesRef.current.map(message => message.id));
     messagePatchesRef.current.clear();
@@ -512,14 +678,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (activeConvIdRef.current !== id || messageLoadGenerationRef.current !== generation) return;
       console.warn('[ChatContext] loadMessages failed:', err);
       setMessageLoadError('Could not load messages. Check your connection and try again.');
-      if (err?.status === 401 || err?.status === 403 || err?.status === 404) setMessages([]);
+      if (err?.status === 401 || err?.status === 403 || err?.status === 404) {
+        setMessages([]);
+        void offlineRef.current?.forgetConversation(id).catch(() => {});
+      }
     }).finally(() => {
       if (messageLoadGenerationRef.current === generation) {
         historyLoadingRef.current = false;
         setLoadingMessages(false);
       }
     });
-  }, [mergeMessages]);
+  }, [mergeMessages, chatSocket]);
 
   // Wire socket listeners exactly ONCE per authed session.
   useEffect(() => {
@@ -531,6 +700,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     const onConnect = () => {
       setIsConnected(true);
+      if (!wasEverConnectedRef.current) void refreshConversations();
       // Repair failed initial loads and truncated catch-up for the open thread.
       if (activeConvIdRef.current) {
         joinConversation(activeConvIdRef.current);
@@ -629,6 +799,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     };
 
     const onMessage = (msg: Message) => {
+      const store = offlineRef.current;
+      if (store) void store.saveMessages(msg.conversationId,
+        mergeCreationMessages(msg.conversationId, store.cache.threads[msg.conversationId] ?? [], [msg])).catch(() => {});
       // If this is the active conversation, append to message list.
       mergeCreationMessages(msg.conversationId, [], [msg]);
       if (msg.conversationId === activeConvIdRef.current) {
@@ -692,6 +865,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const onParticipantRemoved = (e: ParticipantEvent) => {
       // If WE were removed, drop the conv.
       if (e.userId === currentUser?.userId) {
+        void offlineRef.current?.forgetConversation(e.conversationId).catch(() => {});
         setConversations(prev => prev.filter(c => c.id !== e.conversationId));
         if (activeConvIdRef.current === e.conversationId) {
           setActiveConversationIdState(null);
@@ -889,7 +1063,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
       if (prev !== id) {
         messagePatchesRef.current.clear();
-        setMessages(mergeMessages(id, [], []));
+        setMessages(mergeMessages(id, offlineRef.current?.cache.threads[id] ?? [], []));
       }
       setHasMoreMessages(false);
       setLoadingOlderMessages(false);
@@ -946,75 +1120,44 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const hasAttachments = !!attachments?.length;
     if (!id || (!hasText && !hasAttachments)) return;
 
-    // One idempotency key per logical message, shared by the socket path and
-    // the REST fallback, so a lost-ack retry can't persist two rows (the server
-    // MERGEs on this id). See OpenChat-60y.
+    const store = offlineRef.current;
+    if (!store || !currentUser || store.accountId !== currentUser.userId) throw new Error('Sign in before sending');
     const clientId = randomUUID();
-    const sendSession = sendSessionRef.current;
+    const entry: PendingMessage = { clientId, state: 'queued', message: {
+      id: `local-${clientId}`, content, conversationId: id,
+      senderId: currentUser.userId, createdAt: new Date().toISOString(),
+      sender: { id: currentUser.userId, email: currentUser.email, name: currentUser.name, avatarUrl: currentUser.avatarUrl },
+      replyToId, attachments,
+    } };
+    await store.put(entry);
+    if (offlineRef.current !== store) return;
+    displayPending(entry);
+    setConversations(current => applyMessageToConversationList(current, entry.message).conversations);
+    await flushPending();
+  }, [currentUser, displayPending, flushPending]);
 
-    const optimistic: Message = {
-      id: `local-${clientId}`,
-      content,
-      conversationId: id,
-      senderId: currentUser?.userId || 'me',
-      createdAt: new Date().toISOString(),
-      sender: currentUser ? {
-        id: currentUser.userId,
-        email: currentUser.email,
-        name: currentUser.name,
-        avatarUrl: currentUser.avatarUrl,
-      } : undefined,
-      replyToId,
-      attachments,
-    };
-    let retained = retainedSendsRef.current.get(id);
-    if (!retained) {
-      retained = new Map();
-      retainedSendsRef.current.set(id, retained);
-    }
-    retained.set(clientId, optimistic);
-    if (activeConvIdRef.current === id) setMessages(prev => mergeMessages(id, prev, []));
-    const settle = (incoming: Message | null, failed = false) => {
-      if (sendSessionRef.current !== sendSession) return;
-      const sends = retainedSendsRef.current.get(id);
-      const existing = sends?.get(clientId);
-      if (!existing) return;
-      const canonical = incoming ? messagePatchesRef.current.get(incoming.id)?.(incoming) ?? incoming : null;
-      const real = existing.id !== optimistic.id ? existing : canonical;
-      if (existing) {
-        if (real) sends!.set(clientId, real);
-        else if (!failed) sends!.delete(clientId);
-        else if (existing.id === optimistic.id) sends!.set(clientId, { ...existing, _failed: true } as Message);
-      }
-      if (activeConvIdRef.current === id) {
-        setMessages(prev => mergeCreationMessages(id, prev.filter(message => message.id !== optimistic.id), real ? [real] : []));
-      }
-    };
-    if (hasAttachments) {
-      try {
-        const real = await api.sendMessage(id, content, attachments, clientId, replyToId);
-        settle(isDroppedMessageSend(real) ? null : real);
-      } catch (error) {
-        console.warn('[ChatContext] attachment message send failed:', error);
-        settle(null, true);
-        throw error;
-      }
-      return;
-    }
-    try {
-      settle(await wsSend(id, content, replyToId, clientId));
-    } catch {
-      if (sendSessionRef.current !== sendSession) return;
-      try {
-        const real = await api.sendMessage(id, content, undefined, clientId, replyToId);
-        settle(isDroppedMessageSend(real) ? null : real);
-      } catch (error) {
-        console.warn('[ChatContext] message send failed:', error);
-        settle(null, true);
-        throw error;
-      }
-    }
-  }, [currentUser, mergeMessages, mergeCreationMessages]);
+  const retryPendingMessage = useCallback(async (clientId: string) => {
+    const store = offlineRef.current;
+    const entry = store?.pending.get(clientId);
+    if (!store || !entry) return;
+    const queued: PendingMessage = { ...entry, state: 'queued' };
+    await store.put(queued);
+    if (offlineRef.current !== store) return;
+    displayPending(queued);
+    await flushPending();
+  }, [displayPending, flushPending]);
+
+  const discardPendingMessage = useCallback(async (clientId: string) => {
+    const store = offlineRef.current;
+    const entry = store?.pending.get(clientId);
+    // A send may already have reached the server. Only failed entries can be
+    // removed here; queued entries must keep their idempotency key.
+    if (!store || !entry || entry.state !== 'failed') return;
+    await store.remove(clientId);
+    if (offlineRef.current !== store) return;
+    retainedSendsRef.current.get(entry.message.conversationId)?.delete(clientId);
+    setMessages(current => current.filter(message => message.id !== entry.message.id));
+  }, []);
 
   const sendMessage = useCallback(async (
     content: string,
@@ -1239,6 +1382,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     try { emitPresenceUpdate('offline'); } catch { /* best effort */ }
     disconnect();
+    const offline = offlineRef.current;
+    offlineRef.current = null;
+    const cleanup = offline?.close(explicit);
+    setIsConnected(false);
     resetMessageSession(null);
     activeConvIdRef.current = null;
     ++messageLoadGenerationRef.current;
@@ -1246,6 +1393,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setLoadingMessages(false);
     setMessageLoadError(null);
     contextLaneManager.setAccount(null);
+    await cleanup?.catch(error => console.warn('[ChatContext] cache cleanup failed:', error));
     await clearSession();
     setIsAuthed(false);
     setCurrentUser(null);
@@ -1282,7 +1430,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, registerConversationVisibility, setActiveConversation, messages, loadingMessages, messageLoadError, retryMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
-    sendMessage, sendMessageToConversation,
+    sendMessage, sendMessageToConversation, retryPendingMessage, discardPendingMessage,
     editMessage, deleteMessage,
     toggleReaction,
     blockUser,
@@ -1300,7 +1448,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, registerConversationVisibility, setActiveConversation, messages, loadingMessages, messageLoadError, retryMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
-    sendMessage, sendMessageToConversation,
+    sendMessage, sendMessageToConversation, retryPendingMessage, discardPendingMessage,
     editMessage, deleteMessage,
     toggleReaction,
     blockUser,
