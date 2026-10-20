@@ -62,8 +62,44 @@ beforeEach(async () => {
   await act(async () => { root = create(React.createElement(ChatProvider, null, React.createElement(Probe))); });
 });
 afterEach(async () => {
-  await act(async () => { root.unmount(); });
+  try {
+    await act(async () => { root.unmount(); });
+  } finally {
+    vi.unstubAllGlobals();
+  }
   delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+});
+
+it('restores an authenticated native session when window has no DOM event methods', async () => {
+  // React Native exposes window as the global object, without browser events.
+  vi.stubGlobal('window', {});
+  disk.set('openchat:offline:v1:me:cache', JSON.stringify({
+    conversations: [{ id: 'saved' }], threads: {},
+  }));
+  mocks.getMe.mockRejectedValue(new Error('offline'));
+  await act(async () => { await chat.bootstrapIfAuthed(); });
+  expect(chat.authInitialized).toBe(true);
+  expect(chat.isAuthed).toBe(true);
+  expect(chat.conversations).toEqual([{ id: 'saved' }]);
+  await act(async () => { root.unmount(); });
+  await act(async () => { root = create(React.createElement(ChatProvider, null, React.createElement(Probe))); });
+  await act(async () => { await chat.bootstrapIfAuthed(); });
+  expect(chat.isAuthed).toBe(true);
+  expect(chat.conversations).toEqual([{ id: 'saved' }]);
+});
+
+it('still invalidates a browser session immediately after another tab signs out', async () => {
+  const browser = new EventTarget();
+  vi.stubGlobal('window', browser);
+  await act(async () => { await chat.bootstrapIfAuthed(); });
+  expect(chat.isAuthed).toBe(true);
+  const { OfflineChat } = await import('../../mobile/src/services/offlineChat');
+  const other = new OfflineChat('me');
+  await other.load();
+  await other.close(true);
+  await act(async () => { browser.dispatchEvent(new Event('storage')); });
+  expect(chat.isAuthed).toBe(false);
+  expect(chat.conversations).toEqual([]);
 });
 
 it('keeps the selected group loading when an older thread request completes', async () => {
