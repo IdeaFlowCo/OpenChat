@@ -71,6 +71,9 @@ module.exports = {
           'OpenChat uses the camera to take photos to send in chats and to scan QR codes for adding contacts and joining group chats.',
         NSPhotoLibraryUsageDescription:
           'OpenChat uses your photo library so you can share images in chats.',
+        // Save / Save all from the photo viewer (OpenChat photo save).
+        NSPhotoLibraryAddUsageDescription:
+          'OpenChat saves photos from your chats to your photo library when you tap Save.',
         NSMicrophoneUsageDescription:
           'OpenChat uses the microphone to record voice messages.',
         CFBundleURLTypes: [
@@ -117,6 +120,15 @@ module.exports = {
       'expo-web-browser',
       'expo-camera',
       'expo-image-picker',
+      [
+        'expo-media-library',
+        {
+          photosPermission: 'OpenChat uses your photo library so you can share images in chats.',
+          savePhotosPermission: 'OpenChat saves photos from your chats to your photo library when you tap Save.',
+          isAccessMediaLocationEnabled: false,
+          granularPermissions: ['photo'],
+        },
+      ],
       ['expo-contacts', { contactsPermission: 'Choose one person to invite to OpenChat. Contacts stay on this device and are not uploaded.' }],
       'expo-apple-authentication',
       ['expo-notifications', { color: '#b3541e' }],

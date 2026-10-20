@@ -37,6 +37,8 @@ export interface PickedAsset {
   height: number;
   fileName: string;
   fileSize: number;
+  /** Clockwise degrees to rotate before sending (OpenChat-zwt4). */
+  rotation?: number;
 }
 
 /** Most photos one message can carry; the server enforces the same cap. */

@@ -56,7 +56,7 @@ vi.mock('../../mobile/src/api/client', () => ({ api: {} }));
 vi.mock('../../mobile/src/services/notifications', () => ({ setActiveConversationForNotifications: vi.fn() }));
 vi.mock('../../mobile/src/services/haptics', () => ({ hapticSend: vi.fn(), hapticReceive: mocks.receive }));
 vi.mock('../../mobile/src/services/attachments', () => ({ MAX_IMAGES_PER_MESSAGE: 10, pickImages: vi.fn(async () => []), takePhoto: vi.fn(async () => null), filesToAssets: vi.fn(async () => []), releaseAsset: vi.fn(), uploadImage: vi.fn(), uploadImages: vi.fn(async () => ({ uploaded: [], failed: [] })), checkPhotosForSend: vi.fn(async (assets: any[]) => ({ ok: assets, rejected: [] })) }));
-vi.mock('../../mobile/src/services/photoActions', () => ({ photoActionLabel: 'Share', saveOrSharePhoto: vi.fn() }));
+vi.mock('../../mobile/src/services/photoActions', () => ({ photoActionLabel: 'Save', saveOrSharePhoto: vi.fn(), savePhotos: vi.fn(), sharePhoto: vi.fn(), describeSaveResult: () => '', normalizeRotation: (d?: number) => d ?? 0, canRotateFiles: async () => false, rotateImageFile: async () => null, PhotoSaveError: class extends Error {} }));
 vi.mock('../../mobile/src/services/exportDownload', () => ({ saveJsonDownload: vi.fn() }));
 vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn(), logInfo: vi.fn() }));
 vi.mock('../../mobile/src/services/hashtagSuggestions', () => ({

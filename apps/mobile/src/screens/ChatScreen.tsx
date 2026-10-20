@@ -55,6 +55,7 @@ import { colorForUserId } from '../utils/colorForUserId';
 import { MAX_IMAGES_PER_MESSAGE, checkPhotosForSend, filesToAssets, pickImages, releaseAsset, takePhoto, PickedAsset } from '../services/attachments';
 import { PhotoGrid } from '../components/PhotoGrid';
 import { PhotoViewer, PhotoViewerState } from '../components/PhotoViewer';
+import { PhotoSaveError, canRotateFiles, describeSaveResult, rotateImageFile, savePhotos } from '../services/photoActions';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
 import { MentionAutocomplete, MentionCandidate } from '../components/MentionAutocomplete';
 import { HashtagAutocomplete } from '../components/HashtagAutocomplete';
@@ -67,7 +68,7 @@ import { AgentNetworkCard } from '../components/AgentNetworkCard';
 import type { Participant } from '../api/client';
 import { ExportSheet } from '../components/ExportSheet';
 import { saveJsonDownload } from '../services/exportDownload';
-import { logError, logInfo } from '../services/clientLogger';
+import { logError } from '../services/clientLogger';
 import {
   fetchHashtagSuggestions,
   HashtagSuggestion,
@@ -409,10 +410,17 @@ export function ChatScreen({
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   // fullscreen viewer: every photo of the tapped message, opened at one
   const [photoViewer, setPhotoViewer] = useState<PhotoViewerState | null>(null);
-  const openPhotoViewer = useCallback((urls: string[], index: number, source: 'message' | 'composer') => {
-    // Temporary breadcrumb while confirming taps reach the viewer on iOS.
-    logInfo('photo viewer opened', { source, count: urls.length, index, platform: Platform.OS });
-    setPhotoViewer({ urls, index });
+  // Rotating unsent photos needs the image-manipulator native module, which
+  // app builds before OpenChat-zwt4 don't have.
+  const [canRotatePhotos, setCanRotatePhotos] = useState(false);
+  useEffect(() => { void canRotateFiles().then(setCanRotatePhotos); }, []);
+  const openPhotoViewer = useCallback((
+    urls: string[],
+    index: number,
+    source: 'message' | 'composer',
+    rotations?: number[],
+  ) => {
+    setPhotoViewer({ urls, index, source, rotations });
   }, []);
   // Web: photos dragged over the chat (OpenChat-63zy)
   const [dropActive, setDropActive] = useState(false);
@@ -448,6 +456,17 @@ export function ChatScreen({
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastVisible(false), 3200);
   }, []);
+
+  // Long-press › Save photo(s) (OpenChat-zwt4).
+  const handleSavePhotos = useCallback(async (message: Message) => {
+    const urls = (message.attachments ?? []).filter(a => a.type !== 'audio' && /^https?:/.test(a.url)).map(a => ({ url: a.url }));
+    try {
+      const text = describeSaveResult(await savePhotos(urls));
+      if (text) showToast(text);
+    } catch (err) {
+      Alert.alert('Could not save', err instanceof PhotoSaveError ? err.message : 'Please check your connection and try again.');
+    }
+  }, [showToast]);
 
   // ── Transform banner state (OpenChat-8a0) ──────────────────────────────────
   // originalText: the text before the transform (for Undo).
@@ -1132,6 +1151,22 @@ export function ChatScreen({
     let rejected: { asset: PickedAsset; reason: string }[] = [];
     if (assetsToUpload.length) {
       ({ ok: photos, rejected } = await checkPhotosForSend(assetsToUpload));
+      // Bake in any rotation chosen in the viewer (OpenChat-zwt4).
+      photos = await Promise.all(photos.map(async asset => {
+        if (!asset.rotation) return asset;
+        const rotated = await rotateImageFile(asset.uri, asset.rotation).catch(() => null);
+        if (!rotated) return asset;
+        return {
+          ...asset,
+          uri: rotated.uri,
+          width: rotated.width,
+          height: rotated.height,
+          mimeType: 'image/jpeg',
+          fileName: asset.fileName.replace(/\.\w+$/, '') + '.jpg',
+          fileSize: 0,
+          rotation: 0,
+        };
+      }));
     }
     if (rejected.length) {
       logError('photos rejected before send', undefined, {
@@ -1883,14 +1918,14 @@ export function ChatScreen({
             {pendingAssets.map((asset, i) => (
               <View key={`${asset.uri}-${i}`} style={styles.attachmentPreviewItem}>
                 <TouchableOpacity
-                  onPress={() => openPhotoViewer(pendingAssets.map(a => a.uri), i, 'composer')}
+                  onPress={() => openPhotoViewer(pendingAssets.map(a => a.uri), i, 'composer', pendingAssets.map(a => a.rotation ?? 0))}
                   activeOpacity={0.85}
                   accessibilityRole="imagebutton"
                   accessibilityLabel={`Preview photo ${i + 1} of ${pendingAssets.length}`}
                 >
                   <Image
                     source={{ uri: asset.uri }}
-                    style={styles.attachmentPreviewThumb}
+                    style={[styles.attachmentPreviewThumb, asset.rotation ? { transform: [{ rotate: `${asset.rotation}deg` }] } : null]}
                     resizeMode="cover"
                   />
                 </TouchableOpacity>
@@ -2140,7 +2175,21 @@ export function ChatScreen({
       </View>
 
       {/* Fullscreen photo viewer (OpenChat-6bg, paging OpenChat-wpmb) */}
-      <PhotoViewer state={photoViewer} onClose={() => setPhotoViewer(null)} />
+      <PhotoViewer
+        state={photoViewer}
+        onClose={() => setPhotoViewer(null)}
+        // Unsent photos: rotation applies to what is sent; Remove drops one.
+        onRotate={canRotatePhotos
+          ? (index, rotation) => setPendingAssets(prev => prev.map((a, j) => (j === index ? { ...a, rotation } : a)))
+          : undefined}
+        onRemove={index => {
+          const remaining = pendingAssets.filter((_, j) => j !== index);
+          removePendingAsset(index);
+          setPhotoViewer(remaining.length
+            ? { urls: remaining.map(a => a.uri), index: Math.min(index, remaining.length - 1), source: 'composer', rotations: remaining.map(a => a.rotation ?? 0) }
+            : null);
+        }}
+      />
 
       {/* Message action sheet (OpenChat-uxj, OpenChat-46p, OpenChat-wgl, OpenChat-q9h, OpenChat-7bd, OpenChat-hhc) */}
       <MessageActionSheet
@@ -2150,6 +2199,7 @@ export function ChatScreen({
         senderName={actionSheetSenderName}
         onDismiss={() => setActionSheetVisible(false)}
         onReply={handleReply}
+        onSavePhotos={handleSavePhotos}
         onForward={handleForward}
         onForwardToAssistant={handleForwardToAssistant}
         onAskAssistant={handleAskAssistant}
