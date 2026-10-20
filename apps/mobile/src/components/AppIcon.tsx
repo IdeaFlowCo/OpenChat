@@ -31,6 +31,7 @@ export type AppIconName =
   | 'plus'
   | 'qr'
   | 'reply'
+  | 'rotate'
   | 'search'
   | 'settings'
   | 'share'
@@ -71,6 +72,13 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
       accessible={false}
       focusable={false}
     >
+      {name === 'rotate' && (
+        <>
+          {/* Rotate 90° clockwise: an open arc with an arrowhead. */}
+          <Path d="M20 11a8 8 0 1 1-2.34-5.66" {...common} />
+          <Polyline points="20 4 20 9 15 9" {...common} />
+        </>
+      )}
       {name === 'search' && (
         <>
           <Circle cx="11" cy="11" r="6" {...common} />

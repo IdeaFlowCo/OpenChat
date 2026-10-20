@@ -75,6 +75,8 @@ interface Props {
   onBlock: (userId: string, displayName: string) => void;
   /** Report action — called with messageId, reason, and optional freeform */
   onReport: (messageId: string, reason: string, freeform?: string) => void;
+  /** Save the message's photos to the library / downloads (OpenChat-zwt4). */
+  onSavePhotos?: (message: Message) => void;
 }
 
 const REPORT_REASONS = ['Spam', 'Inappropriate', 'Abuse', 'Other'] as const;
@@ -96,6 +98,7 @@ export function MessageActionSheet({
   onReact,
   onBlock,
   onReport,
+  onSavePhotos,
 }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -128,6 +131,14 @@ export function MessageActionSheet({
 
   // Press-and-hold → Copy (openchat-651). Uses RN's built-in Clipboard (same as
   // the rest of the app); a brief alert confirms since the sheet just closes.
+  const photoCount = (message?.attachments ?? []).filter(a => a.type !== 'audio' && /^https?:/.test(a.url)).length;
+  const saveVerb = Platform.OS === 'web' ? 'Download' : 'Save';
+  const handleSavePhotos = () => {
+    if (!message) return;
+    handleDismiss();
+    onSavePhotos?.(message);
+  };
+
   const handleCopy = () => {
     if (!message) return;
     Clipboard.setString(message.content ?? '');
@@ -409,6 +420,21 @@ export function MessageActionSheet({
               >
                 <View style={styles.actionIconBox}><AppIcon name="copy" color={c.textPrimary} size={20} /></View>
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Copy</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Save photos — photo messages only (OpenChat-zwt4) */}
+            {!message.deletedAt && photoCount > 0 && onSavePhotos && (
+              <TouchableOpacity
+                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={handleSavePhotos}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+              >
+                <View style={styles.actionIconBox}><AppIcon name="download" color={c.textPrimary} size={20} /></View>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>
+                  {photoCount === 1 ? `${saveVerb} photo` : `${saveVerb} all ${photoCount} photos`}
+                </Text>
               </TouchableOpacity>
             )}
 
