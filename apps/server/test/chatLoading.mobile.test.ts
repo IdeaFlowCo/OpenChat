@@ -102,6 +102,24 @@ it('still invalidates a browser session immediately after another tab signs out'
   expect(chat.conversations).toEqual([]);
 });
 
+it('checks native session invalidation on the periodic timer without DOM events', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.stubGlobal('window', {});
+    await act(async () => { await chat.bootstrapIfAuthed(); });
+    expect(chat.isAuthed).toBe(true);
+    const { OfflineChat } = await import('../../mobile/src/services/offlineChat');
+    const other = new OfflineChat('me');
+    await other.load();
+    await other.close(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(chat.isAuthed).toBe(false);
+    expect(chat.conversations).toEqual([]);
+    await act(async () => root.unmount());
+    expect(vi.getTimerCount()).toBe(0);
+  } finally { vi.useRealTimers(); }
+});
+
 it('keeps the selected group loading when an older thread request completes', async () => {
   const previous = pendingPage();
   const selected = pendingPage();
@@ -664,6 +682,7 @@ it('does not clear hidden unread when an earlier read receipt response arrives',
 });
 
 it('queues text while disconnected, restores it after restart, then sends the original id exactly once', async () => {
+  vi.stubGlobal('window', {});
   await openSendingThread();
   mocks.getMessages.mockResolvedValue(history);
   await act(async () => chat.retryMessages());
