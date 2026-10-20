@@ -52,7 +52,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import type { NavProp, RouteProps } from '../navigation/types';
 import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
-import { MAX_IMAGES_PER_MESSAGE, filesToAssets, pickImages, releaseAsset, takePhoto, uploadImages, PickedAsset, PhotoUploadResults } from '../services/attachments';
+import { MAX_IMAGES_PER_MESSAGE, checkPhotosForSend, filesToAssets, pickImages, releaseAsset, takePhoto, PickedAsset } from '../services/attachments';
 import { PhotoGrid } from '../components/PhotoGrid';
 import { PhotoViewer, PhotoViewerState } from '../components/PhotoViewer';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
@@ -268,11 +268,10 @@ interface ChatScreenProps {
   onOpenAgent?: () => void;
 }
 
-/** One line per failed photo, e.g. "IMG_0273.jpg: storage refused the upload". */
-function describeUploadFailures(failed: PhotoUploadResults['failed']): string {
-  if (!failed.length) return 'Something went wrong uploading.';
-  const lines = failed.slice(0, 4).map(f => `• ${f.error.fileName}: ${f.error.reason}`);
-  if (failed.length > 4) lines.push(`• and ${failed.length - 4} more`);
+/** One line per photo that can't be sent, e.g. "IMG_9.HEIC: HEIC photos aren't supported". */
+function describeRejected(rejected: { asset: PickedAsset; reason: string }[]): string {
+  const lines = rejected.slice(0, 4).map(r => `• ${r.asset.fileName}: ${r.reason}`);
+  if (rejected.length > 4) lines.push(`• and ${rejected.length - 4} more`);
   return lines.join('\n');
 }
 
@@ -1085,8 +1084,8 @@ export function ChatScreen({
     const trimmed = text.trim();
     const hasAttachment = pendingAssets.length > 0;
     if ((!trimmed && !hasAttachment) || composerBusy || sendInFlightRef.current) return;
-    if (!isConnected && (hasAttachment || editingMessage)) {
-      Alert.alert('Connection needed', 'Photos and edits need a connection. You can send text now; it will wait for reconnection.');
+    if (!isConnected && editingMessage) {
+      Alert.alert('Connection needed', 'Edits need a connection. New messages and photos can be sent now; they will wait for reconnection.');
       return;
     }
     sendInFlightRef.current = true;
@@ -1126,49 +1125,27 @@ export function ChatScreen({
     if (typingTimer.current) clearTimeout(typingTimer.current);
     reportTyping(conversationId, false);
 
-    let uploaded = !assetsToUpload.length;
-    let attachments: Attachment[] | undefined;
-    let failedUploads: PhotoUploadResults['failed'] = [];
+    // Photos join the offline outbox with the message and upload when there
+    // is signal (OpenChat-ciom). Only problems a retry can't fix (type, size)
+    // are reported here, while the user is still looking at the composer.
+    let photos = assetsToUpload;
+    let rejected: { asset: PickedAsset; reason: string }[] = [];
     if (assetsToUpload.length) {
-      setUploadingAttachment(true);
-      try {
-        // A few at a time with one retry each; keeps picked order.
-        const results = await uploadImages(assetsToUpload);
-        failedUploads = results.failed;
-        if (results.uploaded.length) {
-          attachments = results.uploaded.map(u => u.attachment);
-          uploaded = true;
-        }
-      } finally {
-        setUploadingAttachment(false);
-      }
-      if (failedUploads.length) {
-        logError('photo upload failed', failedUploads[0].error, {
-          conversationId,
-          picked: assetsToUpload.length,
-          sent: attachments?.length ?? 0,
-          failures: failedUploads.map(f => ({
-            fileName: f.asset.fileName,
-            mimeType: f.asset.mimeType,
-            pickerSize: f.asset.fileSize,
-            width: f.asset.width,
-            height: f.asset.height,
-            stage: f.error.stage,
-            status: f.error.status,
-            reason: f.error.reason,
-          })),
-        });
-      }
+      ({ ok: photos, rejected } = await checkPhotosForSend(assetsToUpload));
     }
-
-    if (!uploaded) {
-      // Nothing uploaded: put the whole draft back and say why.
+    if (rejected.length) {
+      logError('photos rejected before send', undefined, {
+        conversationId,
+        rejected: rejected.map(r => ({ fileName: r.asset.fileName, mimeType: r.asset.mimeType, reason: r.reason })),
+      });
+    }
+    if (!trimmed && !photos.length) {
+      // Nothing left to send: put the draft back and say why.
       setPendingAssets(assetsToUpload);
-      if (trimmed) setText(prev => prev || trimmed);
       if (currentReply) setReplyTo(prev => prev ?? currentReply);
       Alert.alert(
-        assetsToUpload.length > 1 ? "Photos weren't sent" : "Photo wasn't sent",
-        `${describeUploadFailures(failedUploads)}\n\nYour draft is still in the composer. Tap Send to try again.`
+        assetsToUpload.length > 1 ? "These photos can't be sent" : "This photo can't be sent",
+        describeRejected(rejected)
       );
       sendInFlightRef.current = false;
       setSending(false);
@@ -1176,25 +1153,21 @@ export function ChatScreen({
     }
 
     try {
-      await sendMessage(trimmed, currentReplyToId, attachments);
-      assetsToUpload
-        .filter(a => !failedUploads.some(f => f.asset === a))
-        .forEach(releaseAsset);
+      await sendMessage(trimmed, currentReplyToId, undefined, photos.length ? photos : undefined);
       invalidateHashtagSuggestions(conversationId);
       hapticSend();
-      if (failedUploads.length) {
-        // The rest went out; keep only the failed photos for a retry.
-        setPendingAssets(prev => [...failedUploads.map(f => f.asset), ...prev].slice(0, MAX_IMAGES_PER_MESSAGE));
+      rejected.forEach(r => releaseAsset(r.asset));
+      if (rejected.length) {
         Alert.alert(
-          `${failedUploads.length} of ${assetsToUpload.length} photos weren't sent`,
-          `${describeUploadFailures(failedUploads)}\n\nThe others were sent. The ones that failed are still in the composer; tap Send to try them again.`
+          `${rejected.length} of ${assetsToUpload.length} photos left out`,
+          `${describeRejected(rejected)}\n\nThe rest are sending.`
         );
       }
     } catch (err) {
       console.warn('[ChatScreen] send failed:', err);
-      logError('photo message save failed', err, { conversationId, photos: attachments?.length ?? 0 });
-      // Transport failures are retained by the outbox. Reaching this catch
-      // means durable storage failed; restore the original draft.
+      logError('photo message save failed', err, { conversationId, photos: photos.length });
+      // Reaching this catch means the message could not be saved on the
+      // device (storage full); restore the original draft.
       setPendingAssets(assetsToUpload);
       if (trimmed) setText(prev => prev || trimmed);
       if (currentReply) setReplyTo(prev => prev ?? currentReply);
@@ -1630,8 +1603,12 @@ export function ChatScreen({
               ))
           }
           <View style={styles.bubbleFooter}>
-            <Text style={{ color: isOwn ? ownTint(0.7) : c.textMetadata, fontSize: 10 }}>
-              {failed ? 'Failed to send' : m._delivery === 'queued' ? 'Waiting to send' : m._delivery === 'sending' ? 'Sending…' : formatTime(m.createdAt)}
+            <Text style={{ color: isOwn ? ownTint(0.7) : c.textMetadata, fontSize: 10, flexShrink: 1 }}>
+              {failed
+                ? (m._deliveryDetail ? `Failed to send — ${m._deliveryDetail}` : 'Failed to send')
+                : m._delivery === 'queued' ? (m._deliveryDetail || 'Waiting to send')
+                : m._delivery === 'sending' ? (m._deliveryDetail || 'Sending…')
+                : formatTime(m.createdAt)}
             </Text>
             {/* Edited tag (OpenChat-q9h) */}
             {!!(m.editedAt && !m.deletedAt) && (

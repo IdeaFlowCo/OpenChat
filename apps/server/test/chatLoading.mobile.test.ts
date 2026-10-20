@@ -8,6 +8,17 @@ const mocks = vi.hoisted(() => ({ getMessages: vi.fn(), getMessagesBefore: vi.fn
   getMe: vi.fn(), connect: vi.fn(), getConversations: vi.fn(),
   markRead: vi.fn(), edit: vi.fn(), remove: vi.fn(), reaction: vi.fn(),
   handlers: new Map<string, (...args: any[]) => void>(),
+  presign: vi.fn(), upload: vi.fn(), copy: vi.fn(), del: vi.fn(), mkdir: vi.fn(), info: vi.fn(),
+}));
+const ApiError = vi.hoisted(() => class ApiError extends Error {
+  constructor(public status: number, message: string, public body = '') { super(message); }
+});
+vi.mock('react-native', () => ({ Platform: { OS: 'ios', select: (v: any) => v.ios ?? v.default } }));
+vi.mock('expo-image-picker', () => ({ UIImagePickerPreferredAssetRepresentationMode: { Compatible: 'compatible' } }));
+vi.mock('expo-file-system/legacy', () => ({
+  documentDirectory: 'file:///docs/', cacheDirectory: 'file:///cache/', FileSystemUploadType: { BINARY_CONTENT: 0 },
+  copyAsync: mocks.copy, deleteAsync: mocks.del, makeDirectoryAsync: mocks.mkdir, getInfoAsync: mocks.info,
+  uploadAsync: mocks.upload, downloadAsync: vi.fn(),
 }));
 const disk = new Map<string, string>();
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: {
@@ -17,14 +28,15 @@ vi.mock('@react-native-async-storage/async-storage', () => ({ default: {
   getAllKeys: async () => [...disk.keys()],
 } }));
 const socket = { connected: true, on: (event: string, handler: (...args: any[]) => void) => mocks.handlers.set(event, handler), off: (event: string) => mocks.handlers.delete(event) };
-vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn(), logInfo: vi.fn() }));
+vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn(), logInfo: vi.fn(), logWarn: vi.fn() }));
 vi.mock('expo-crypto', () => ({ randomUUID: () => ++mocks.uuid === 1 ? 'client-message' : `client-message-${mocks.uuid}` }));
 vi.mock('../../mobile/src/services/notifications', () => ({ setUnreadBadgeCount: vi.fn(), setActiveConversationForNotifications: mocks.notificationSelection, loadMutedConvs: async () => ({}) }));
 vi.mock('../../mobile/src/api/client', () => ({
   api: { sendMessage: mocks.send, editMessage: mocks.edit, deleteMessage: mocks.remove, addReaction: mocks.reaction, markRead: mocks.markRead, getMessages: mocks.getMessages, getMessagesBefore: mocks.getMessagesBefore,
     getMe: mocks.getMe, getConversations: mocks.getConversations,
     listMatches: async () => [], getAiDisclosureStatus: async () => ({}), messagesSince: mocks.messagesSince,
-  }, getToken: async () => 'test', getUser: async () => ({ userId: mocks.account }), setSession: vi.fn(), clearSession: vi.fn(),
+    presignAttachment: mocks.presign,
+  }, ApiError, getToken: async () => 'test', getUser: async () => ({ userId: mocks.account }), setSession: vi.fn(), clearSession: vi.fn(),
   onAuthExpired: () => vi.fn(), getSessionIdentity: mocks.getMe,
   isDroppedMessageSend: (value: any) => value?.dropped === true,
 }));
@@ -58,6 +70,13 @@ beforeEach(async () => {
   mocks.connect.mockResolvedValue(socket);
   mocks.uuid = 0;
   mocks.messagesSince.mockResolvedValue({ messages: [], truncated: true });
+  mocks.info.mockResolvedValue({ exists: true, size: 4096 });
+  mocks.copy.mockResolvedValue(undefined);
+  mocks.mkdir.mockResolvedValue(undefined);
+  mocks.del.mockResolvedValue(undefined);
+  let signed = 0;
+  mocks.presign.mockImplementation(async ({ filename }: { filename: string }) => ({ putUrl: `https://put/${filename}`, getUrl: `https://cdn/${++signed}-${filename}`, key: 'k' }));
+  mocks.upload.mockResolvedValue({ status: 200 });
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   await act(async () => { root = create(React.createElement(ChatProvider, null, React.createElement(Probe))); });
 });
@@ -726,4 +745,92 @@ it('does not fall back to HTTP or recreate data after another tab signs out duri
   await act(async () => { reject(new Error('lost connection')); await sending; });
   expect(mocks.send).not.toHaveBeenCalled();
   expect([...disk.keys()].filter(key => key.startsWith('openchat:offline:'))).toEqual([]);
+});
+
+// ── Photo messages through the offline outbox (OpenChat-ciom) ──────────────
+const photo = (name: string) => ({ uri: `file:///picker/${name}`, mimeType: 'image/jpeg', width: 4, height: 3, fileName: name, fileSize: 4096 });
+const outboxEntry = () => {
+  const key = [...disk.keys()].find(k => k.includes(':outbox:'));
+  return key ? JSON.parse(disk.get(key)!) : undefined;
+};
+
+it('queues a photo message offline, survives restart, then uploads and sends the photo URLs once', async () => {
+  await openSendingThread();
+  socket.connected = false;
+  await act(async () => mocks.handlers.get('disconnect')!());
+  await act(async () => chat.sendMessage('beach day', undefined, undefined, [photo('IMG_1.jpg'), photo('IMG_2.jpg')]));
+  expect(mocks.presign).not.toHaveBeenCalled();
+  expect(mocks.copy).toHaveBeenCalledWith({ from: 'file:///picker/IMG_1.jpg', to: 'file:///docs/openchat-outbox/client-message/0-IMG_1.jpg' });
+  expect(chat.messages.at(-1)).toMatchObject({
+    _delivery: 'queued', content: 'beach day',
+    attachments: [{ url: 'file:///docs/openchat-outbox/client-message/0-IMG_1.jpg' }, { url: 'file:///docs/openchat-outbox/client-message/1-IMG_2.jpg' }],
+  });
+  expect(outboxEntry().photos).toHaveLength(2);
+
+  await act(async () => root.unmount());
+  mocks.handlers.clear();
+  await act(async () => { root = create(React.createElement(ChatProvider, null, React.createElement(Probe))); });
+  await act(async () => { await chat.bootstrapIfAuthed(); });
+  await act(async () => chat.setActiveConversation('sailing'));
+  expect(chat.messages.at(-1)).toMatchObject({ _delivery: 'queued', content: 'beach day' });
+
+  mocks.send.mockImplementation(async (_id: string, content: string, attachments: any[], id: string) => ({
+    id, content, attachments, conversationId: 'sailing', senderId: 'me', createdAt: '2026-10-20T00:00:00Z',
+  }));
+  socket.connected = true;
+  await act(async () => mocks.handlers.get('connect')!());
+  expect(mocks.upload).toHaveBeenCalledTimes(2);
+  expect(mocks.send).toHaveBeenCalledExactlyOnceWith('sailing', 'beach day', [
+    expect.objectContaining({ url: expect.stringMatching(/^https:\/\/cdn\/\d-IMG_1\.jpg$/) }),
+    expect.objectContaining({ url: expect.stringMatching(/^https:\/\/cdn\/\d-IMG_2\.jpg$/) }),
+  ], 'client-message', undefined);
+  expect(outboxEntry()).toBeUndefined();
+  expect(mocks.del).toHaveBeenCalledWith('file:///docs/openchat-outbox/client-message/', { idempotent: true });
+});
+
+it('keeps a photo message queued on weak signal and resumes without re-uploading finished photos', async () => {
+  await openSendingThread();
+  mocks.upload.mockImplementation(async (url: string) => {
+    if (url.includes('IMG_B')) throw new Error('The request timed out.');
+    return { status: 200 };
+  });
+  await act(async () => chat.sendMessage('', undefined, undefined, [photo('IMG_A.jpg'), photo('IMG_B.jpg')]));
+  expect(mocks.send).not.toHaveBeenCalled();
+  expect(chat.messages.at(-1)).toMatchObject({
+    _delivery: 'queued', _failed: false,
+    _deliveryDetail: 'Waiting for a better connection (1 of 2 photos uploaded)',
+    attachments: [{ url: expect.stringMatching(/^https:\/\/cdn\//) }, { url: expect.stringMatching(/^file:/) }],
+  });
+  expect(outboxEntry().photos[0].attachment.url).toMatch(/^https:\/\/cdn\//);
+
+  mocks.upload.mockClear();
+  mocks.upload.mockResolvedValue({ status: 200 });
+  mocks.send.mockImplementation(async (_id: string, content: string, attachments: any[], id: string) => ({
+    id, content, attachments, conversationId: 'sailing', senderId: 'me', createdAt: '2026-10-20T00:00:00Z',
+  }));
+  socket.connected = false;
+  await act(async () => mocks.handlers.get('disconnect')!());
+  socket.connected = true;
+  await act(async () => mocks.handlers.get('connect')!());
+  expect(mocks.upload).toHaveBeenCalledTimes(1);
+  expect(mocks.upload.mock.calls[0][0]).toContain('IMG_B');
+  expect(mocks.send).toHaveBeenCalledTimes(1);
+  expect(mocks.send.mock.calls[0][2]).toHaveLength(2);
+  expect(outboxEntry()).toBeUndefined();
+});
+
+it('marks a photo message failed with the reason when the server rejects a photo, and Retry resumes it', async () => {
+  await openSendingThread();
+  mocks.presign.mockRejectedValueOnce(new ApiError(400, '400: sizeBytes must be between 1 and 20971520'));
+  await act(async () => chat.sendMessage('scan', undefined, undefined, [photo('IMG_9.jpg')]));
+  expect(chat.messages.at(-1)).toMatchObject({
+    _delivery: 'failed', _failed: true,
+    _deliveryDetail: "IMG_9.jpg: the server wouldn't accept it (sizeBytes must be between 1 and 20971520)",
+  });
+  mocks.send.mockImplementation(async (_id: string, content: string, attachments: any[], id: string) => ({
+    id, content, attachments, conversationId: 'sailing', senderId: 'me', createdAt: '2026-10-20T00:00:00Z',
+  }));
+  await act(async () => chat.retryPendingMessage('client-message'));
+  expect(mocks.send).toHaveBeenCalledTimes(1);
+  expect(outboxEntry()).toBeUndefined();
 });

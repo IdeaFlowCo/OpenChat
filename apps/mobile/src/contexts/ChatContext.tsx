@@ -16,6 +16,9 @@ import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { randomUUID } from 'expo-crypto';
 import { OfflineChat, retryableSendError, type PendingMessage } from '../services/offlineChat';
+import { displayAttachments, keepPhotosForOutbox, releaseOutboxPhotos, resolveOutboxUri, type QueuedPhoto } from '../services/photoOutbox';
+import { isPermanentUploadError, uploadImages, type PickedAsset } from '../services/attachments';
+import { logWarn } from '../services/clientLogger';
 import {
   setUnreadBadgeCount,
   setActiveConversationForNotifications,
@@ -103,12 +106,13 @@ interface ChatContextValue {
   loadOlderMessages: (conversationId: string) => Promise<void>;
   hasMoreMessages: boolean;
   loadingOlderMessages: boolean;
-  sendMessage: (content: string, replyToId?: string, attachments?: Attachment[]) => Promise<void>;
+  sendMessage: (content: string, replyToId?: string, attachments?: Attachment[], photos?: PickedAsset[]) => Promise<void>;
   sendMessageToConversation: (
     conversationId: string,
     content: string,
     replyToId?: string,
-    attachments?: Attachment[]
+    attachments?: Attachment[],
+    photos?: PickedAsset[]
   ) => Promise<void>;
 
   retryPendingMessage: (clientId: string) => Promise<void>;
@@ -343,7 +347,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         cached.map(message => message.id === id ? patch(message) : message)).catch(() => {});
     }
   }, []);
-  const displayPending = useCallback((entry: PendingMessage, delivery = entry.state as Message['_delivery']) => {
+  const displayPending = useCallback((
+    entry: PendingMessage,
+    delivery = entry.state as Message['_delivery'],
+    detail = entry.detail,
+  ) => {
     const id = entry.message.conversationId;
     let retained = retainedSendsRef.current.get(id);
     if (!retained) {
@@ -355,10 +363,59 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       ?? offlineRef.current?.cache.threads[id]?.find(message => message.id === entry.clientId);
     if (existing && !existing.id.startsWith('local-')) retained.set(entry.clientId, existing);
     if (!existing || existing.id.startsWith('local-')) retained.set(entry.clientId, {
-      ...entry.message, _delivery: delivery, _failed: delivery === 'failed',
+      ...entry.message,
+      ...(entry.photos?.length ? { attachments: displayAttachments(entry.photos) } : {}),
+      _delivery: delivery, _failed: delivery === 'failed', _deliveryDetail: detail,
     });
     if (activeConvIdRef.current === id) setMessages(current => mergeMessages(id, current, []));
   }, [mergeMessages]);
+
+  // Upload a queued message's remaining photos, saving each as it lands.
+  // 'paused': weak signal, keep it queued; 'failed': a photo can't be sent.
+  const uploadQueuedPhotos = useCallback(async (
+    store: OfflineChat,
+    start: PendingMessage,
+    isCurrent: () => boolean,
+  ): Promise<'done' | 'paused' | 'failed' | 'stopped'> => {
+    let entry = start;
+    const photos = [...(entry.photos ?? [])].map(photo => ({ ...photo, local: { ...photo.local, uri: resolveOutboxUri(photo.local.uri) } }));
+    const remaining = photos.map((photo, index) => ({ photo, index })).filter(({ photo }) => !photo.attachment);
+    const total = photos.length;
+    let done = total - remaining.length;
+    const progress = () => total > 1 ? `Uploading photos… ${done} of ${total}` : 'Uploading photo…';
+    displayPending(entry, 'sending', progress());
+    let saving: Promise<void> = Promise.resolve();
+    const results = await uploadImages(remaining.map(({ photo }) => photo.local), {
+      onUploaded: (k, attachment) => {
+        const { index } = remaining[k];
+        photos[index] = { ...photos[index], attachment };
+        done++;
+        entry = { ...entry, photos: [...photos], message: { ...entry.message, attachments: displayAttachments(photos) } };
+        const snapshot = entry;
+        saving = saving.then(() => store.put(snapshot)).catch(error => console.warn('[ChatContext] photo progress not saved:', error));
+        if (isCurrent()) displayPending(snapshot, 'sending', progress());
+        return saving;
+      },
+    });
+    await saving;
+    if (!isCurrent() || !await store.isActive()) return 'stopped';
+    if (!results.failed.length) return 'done';
+    const permanent = results.failed.find(failure => isPermanentUploadError(failure.error));
+    const first = permanent ?? results.failed[0];
+    const updated: PendingMessage = permanent
+      ? { ...entry, state: 'failed', detail: `${first.error.fileName}: ${first.error.reason}` }
+      : { ...entry, state: 'queued', detail: total > 1
+        ? `Waiting for a better connection (${done} of ${total} photos uploaded)`
+        : 'Waiting for a better connection' };
+    logWarn('queued photo upload incomplete', {
+      clientId: entry.clientId, total, uploaded: done, permanent: !!permanent,
+      failures: results.failed.map(f => ({ fileName: f.error.fileName, stage: f.error.stage, status: f.error.status, reason: f.error.reason })),
+    });
+    await store.put(updated);
+    if (!isCurrent()) return 'stopped';
+    displayPending(updated);
+    return permanent ? 'failed' : 'paused';
+  }, [displayPending]);
 
   const flushPending = useCallback((): Promise<void> => {
     const store = offlineRef.current;
@@ -374,13 +431,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (!entry) return;
         const { message, clientId } = entry;
         const id = message.conversationId;
-        displayPending(entry, 'sending');
+        displayPending(entry, 'sending', undefined);
+        // Photos first (weak-signal friendly): each upload is saved as it
+        // lands, so a dropped connection or app restart resumes, not restarts.
+        const confirmedEarly = retainedSendsRef.current.get(id)?.get(clientId);
+        if (entry.photos?.some(photo => !photo.attachment)
+          && !(confirmedEarly && !confirmedEarly.id.startsWith('local-'))) {
+          const outcome = await uploadQueuedPhotos(store, entry, isCurrent);
+          if (outcome === 'stopped') return;
+          if (outcome === 'paused') return;
+          if (outcome === 'failed') continue;
+        }
+        const current = store.pending.get(clientId) ?? entry;
+        const outgoing = current.photos?.length
+          ? current.photos.map(photo => photo.attachment!).filter(Boolean)
+          : message.attachments;
         let real: Message | null = null;
         try {
           const confirmed = retainedSendsRef.current.get(id)?.get(clientId);
           if (confirmed && !confirmed.id.startsWith('local-')) real = confirmed;
-          else if (message.attachments?.length) {
-            const response = await api.sendMessage(id, message.content, message.attachments, clientId, message.replyToId);
+          else if (outgoing?.length) {
+            const response = await api.sendMessage(id, message.content, outgoing, clientId, message.replyToId);
             real = isDroppedMessageSend(response) ? null : response;
           } else {
             try { real = await wsSend(id, message.content, message.replyToId, clientId); }
@@ -397,7 +468,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           else {
             const status = (error as { status?: number })?.status;
             const state = retryableSendError(error) || status === 401 ? 'queued' : 'failed';
-            const updated: PendingMessage = { ...entry, state };
+            const latest = store.pending.get(clientId) ?? entry;
+            const updated: PendingMessage = { ...latest, state, detail: undefined };
             await store.put(updated);
             if (!isCurrent() || !await store.isActive()) return;
             displayPending(updated);
@@ -408,7 +480,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (!isCurrent() || !await store.isActive()) return;
         const sends = retainedSendsRef.current.get(id);
         const observed = sends?.get(clientId);
-        if (!observed) { await store.remove(clientId); continue; }
+        if (!observed) { await store.remove(clientId); void releaseOutboxPhotos(clientId, current.photos); continue; }
         const canonical = observed && !observed.id.startsWith('local-') ? observed
           : real ? messagePatchesRef.current.get(real.id)?.(real) ?? real : null;
         if (canonical) {
@@ -419,9 +491,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           await store.saveMessages(id, mergeMessages(id, history, [canonical]));
         } else sends?.delete(clientId);
         if (!isCurrent() || !await store.isActive()) return;
-        if (activeConvIdRef.current === id) setMessages(current => mergeCreationMessages(id,
-          current.filter(item => item.id !== message.id), canonical ? [canonical] : []));
+        if (activeConvIdRef.current === id) setMessages(shown => mergeCreationMessages(id,
+          shown.filter(item => item.id !== message.id), canonical ? [canonical] : []));
         await store.remove(clientId);
+        void releaseOutboxPhotos(clientId, current.photos);
       }
     };
     const promise = run().catch(error => {
@@ -433,7 +506,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     });
     flushingRef.current = { store, promise };
     return promise;
-  }, [chatSocket, displayPending, mergeMessages, mergeCreationMessages]);
+  }, [chatSocket, displayPending, mergeMessages, mergeCreationMessages, uploadQueuedPhotos]);
 
   useEffect(() => {
     if (!isAuthed || !isConnected) return;
@@ -1165,22 +1238,32 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     id: string,
     content: string,
     replyToId?: string,
-    attachments?: Attachment[]
+    attachments?: Attachment[],
+    photos?: PickedAsset[]
   ) => {
     const hasText = !!content.trim();
-    const hasAttachments = !!attachments?.length;
+    const hasAttachments = !!attachments?.length || !!photos?.length;
     if (!id || (!hasText && !hasAttachments)) return;
 
     const store = offlineRef.current;
     if (!store || !currentUser || store.accountId !== currentUser.userId) throw new Error('Sign in before sending');
     const clientId = randomUUID();
-    const entry: PendingMessage = { clientId, state: 'queued', message: {
+    // Not-yet-uploaded photos travel with the queued message; the outbox
+    // uploads them when there is signal (OpenChat-ciom).
+    let queuedPhotos: QueuedPhoto[] | undefined;
+    if (photos?.length) queuedPhotos = await keepPhotosForOutbox(clientId, photos);
+    const entry: PendingMessage = { clientId, state: 'queued', photos: queuedPhotos, message: {
       id: `local-${clientId}`, content, conversationId: id,
       senderId: currentUser.userId, createdAt: new Date().toISOString(),
       sender: { id: currentUser.userId, email: currentUser.email, name: currentUser.name, avatarUrl: currentUser.avatarUrl },
-      replyToId, attachments,
+      replyToId, attachments: queuedPhotos ? displayAttachments(queuedPhotos) : attachments,
     } };
-    await store.put(entry);
+    try {
+      await store.put(entry);
+    } catch (error) {
+      void releaseOutboxPhotos(clientId, queuedPhotos);
+      throw error;
+    }
     if (offlineRef.current !== store) return;
     displayPending(entry);
     setConversations(current => applyMessageToConversationList(current, entry.message).conversations);
@@ -1191,7 +1274,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const store = offlineRef.current;
     const entry = store?.pending.get(clientId);
     if (!store || !entry) return;
-    const queued: PendingMessage = { ...entry, state: 'queued' };
+    const queued: PendingMessage = { ...entry, state: 'queued', detail: undefined };
     await store.put(queued);
     if (offlineRef.current !== store) return;
     displayPending(queued);
@@ -1205,6 +1288,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // removed here; queued entries must keep their idempotency key.
     if (!store || !entry || entry.state !== 'failed') return;
     await store.remove(clientId);
+    void releaseOutboxPhotos(clientId, entry.photos);
     if (offlineRef.current !== store) return;
     retainedSendsRef.current.get(entry.message.conversationId)?.delete(clientId);
     setMessages(current => current.filter(message => message.id !== entry.message.id));
@@ -1213,11 +1297,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const sendMessage = useCallback(async (
     content: string,
     replyToId?: string,
-    attachments?: Attachment[]
+    attachments?: Attachment[],
+    photos?: PickedAsset[]
   ) => {
     const id = activeConvIdRef.current;
     if (!id) return;
-    await sendMessageToConversation(id, content, replyToId, attachments);
+    await sendMessageToConversation(id, content, replyToId, attachments, photos);
   }, [sendMessageToConversation]);
 
   const createConversation = useCallback(async (

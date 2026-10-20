@@ -146,6 +146,8 @@ export interface LinkPreview {
 export interface Message {
   /** Local-only delivery state, removed when replaced by the server message. */
   _delivery?: 'queued' | 'sending' | 'failed';
+  /** Client-only: upload progress or the reason a queued send failed. */
+  _deliveryDetail?: string;
   _failed?: boolean;
   id: string;
   content: string;
