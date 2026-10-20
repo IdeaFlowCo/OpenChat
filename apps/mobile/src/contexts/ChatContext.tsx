@@ -1156,10 +1156,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, [loadingOlderMessages, hasMoreMessages, messages, mergeMessages]);
 
-  // Optimistic send: append a local message immediately, then replace with
-  // server canonical on success. Accepts optional replyToId for threaded replies
-  // (OpenChat-uxj). Server support is a follow-up; the field is passed through
-  // in the socket payload so it round-trips once the server handles it.
+  // Persist before displaying a local message so restart/retry preserves its
+  // idempotency key and reply target until a canonical acknowledgement arrives.
   // Target-aware core used by the global voice recorder (build-90 pieces 1+2).
   // The public sendMessage wrapper below preserves the existing active-chat
   // API, while a recording can still return to the conversation where it began.

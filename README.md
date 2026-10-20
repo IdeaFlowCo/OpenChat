@@ -29,6 +29,9 @@ visible during transient failures. Reconnecting also reloads the open thread.
 If access is denied or the conversation is unavailable, cached messages are
 cleared instead.
 
+For offline reading and queued sends, see [Offline chat](docs/offline-chat.md),
+including setup, delivery states, account cleanup, and connection requirements.
+
 Open **Stream** from Chats for personal entries. The search bar filters text and
 tags. Its visible **Create** action opens an editable entry using your search
 text, even when nothing matches; with empty text it opens a blank entry. The

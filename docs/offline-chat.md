@@ -33,7 +33,8 @@ and cross-origin requests are excluded. Browser storage eviction/clearing can
 remove offline data; this cache is not a backup. Native storage uses the existing
 AsyncStorage dependency. No new dependencies or schema migrations are required.
 
-Implementation: `services/offlineChat.ts`, `contexts/ChatContext.tsx`, and
+Implementation: `apps/mobile/src/services/offlineChat.ts`,
+`apps/mobile/src/contexts/ChatContext.tsx`, and
 `infra/prepare-offline-shell.mjs`. Regression tests cover mounted-provider
 restart/reconnection/account isolation, durable storage failure and eviction,
 and service-worker fetch boundaries.
