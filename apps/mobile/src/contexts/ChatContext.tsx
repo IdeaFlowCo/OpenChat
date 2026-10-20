@@ -1,3 +1,4 @@
+import { setAuthenticatedRequestGuard } from '../api/authenticatedRequest';
 import { contextLaneManager } from '../services/contextLane';
 import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 /**
@@ -33,6 +34,7 @@ import {
   User,
   getUser,
   getToken,
+  getSessionIdentity,
   isDroppedMessageSend,
   setSession,
   clearSession,
@@ -266,6 +268,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   messagesRef.current = messages;
   const offlineRef = useRef<OfflineChat | null>(null);
   const verifiedAccountRef = useRef<string | null>(null);
+  const verifiedTokenRef = useRef<string | null>(null);
+  useEffect(() => setAuthenticatedRequestGuard(async token => {
+    const store = offlineRef.current;
+    return !!store && !!token && token === verifiedTokenRef.current
+      && verifiedAccountRef.current === store.accountId && await store.isActive()
+      && offlineRef.current === store && token === verifiedTokenRef.current
+      && verifiedAccountRef.current === store.accountId;
+  }), []);
   useEffect(() => () => {
     const store = offlineRef.current;
     offlineRef.current = null;
@@ -278,6 +288,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const resetMessageSession = useCallback((accountId: string | null) => {
     messageAccountRef.current = accountId;
     verifiedAccountRef.current = null;
+    verifiedTokenRef.current = null;
     ++sendSessionRef.current;
     retainedSendsRef.current.clear();
     visibilityRef.current = null;
@@ -568,7 +579,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       // Legacy token-only sessions need one online identity lookup before any
       // account-scoped cache can be opened.
       try {
-        const me = await api.getMe();
+        const me = await getSessionIdentity();
         u = { userId: me.id, email: me.email ?? '', name: me.name, avatarUrl: me.avatarUrl };
         await setSession(token, u);
       } catch {
@@ -599,7 +610,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setAuthInitialized(true);
     if (!isUnlinkedEmbed()) clearIdeaflowSignedOut();
     try {
-      const me = await api.getMe();
+      const me = await getSessionIdentity();
       if (session !== sendSessionRef.current || !await offlineRef.current?.isActive()) return false;
       if (me.id !== u.userId) {
         const previous = offlineRef.current;
@@ -614,6 +625,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         return false;
       }
       verifiedAccountRef.current = me.id;
+      verifiedTokenRef.current = token;
       setCurrentUser({ userId: me.id, email: me.email ?? u.email ?? '',
         name: me.name, avatarUrl: me.avatarUrl, discoveryMode: me.discoveryMode ?? 'name',
         openUserDirectoryEnabled: me.openUserDirectoryEnabled === true });
@@ -1342,15 +1354,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   // Debounced 500ms so we don't hammer the server on every incoming message
   // while the user is actively in the conversation.
   const markConversationRead = useCallback((conversationId: string) => {
-    if (!isChatVisible(conversationId)) return;
+    if (!isChatVisible(conversationId) || !verifiedAccountRef.current) return;
+    const session = sendSessionRef.current;
     const timers = markReadTimers.current;
     const existing = timers.get(conversationId);
     if (existing) clearTimeout(existing);
     const t = setTimeout(() => {
       timers.delete(conversationId);
-      if (!isChatVisible(conversationId)) return;
+      if (!isChatVisible(conversationId) || session !== sendSessionRef.current || !verifiedAccountRef.current) return;
       api.markRead(conversationId)
         .then(res => {
+          if (session !== sendSessionRef.current || !verifiedAccountRef.current) return;
           // Seed readByOthers from the response's readMap.
           setReadByOthers(prev => {
             const next = new Map(prev);

@@ -1,3 +1,4 @@
+import { authenticatedRequestLease } from './authenticatedRequest';
 import type { HostedContextPreferences, HostedContextRequest } from '../types/contextHosted';
 import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 /**
@@ -406,20 +407,62 @@ function discoveryProofHeaders(exactEmail?: string): RequestInit | undefined {
   return exactEmail ? { headers: { 'X-OpenChat-Discovery-Email': encodeURIComponent(exactEmail) } } : undefined;
 }
 
+export async function getAuthenticatedToken(): Promise<string | null> {
+  const token = await getToken();
+  await authenticatedRequestLease(token);
+  return token;
+}
+
+export async function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
+  const token = await getToken();
+  const check = await authenticatedRequestLease(token);
+  const headers: Record<string, string> = {};
+  new Headers(init?.headers).forEach((value, key) => { headers[key] = value; });
+  if (token) headers.authorization = `Bearer ${token}`;
+  const assertCurrent = async () => {
+    if (token !== await getToken()) throw new Error('Chat session ended');
+    await check();
+  };
+  await assertCurrent();
+  const response = await fetch(url, { ...init, headers });
+  await assertCurrent();
+  return new Proxy(response, {
+    get(target, key) {
+      if (key === 'json' || key === 'text' || key === 'blob' || key === 'arrayBuffer' || key === 'formData') {
+        return async () => {
+          const result = await target[key]();
+          await assertCurrent();
+          return result;
+        };
+      }
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+export function getSessionIdentity(): Promise<User> {
+  return timedRequest<User>('/api/auth/me', { identityProbe: true });
+}
+
 async function request<T>(
   path: string,
-  init?: RequestInit & { auth?: boolean; expireAuthOnForbidden?: boolean }
+  init?: RequestInit & { auth?: boolean; expireAuthOnForbidden?: boolean; identityProbe?: boolean }
 ): Promise<T> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     ...((init?.headers as Record<string, string>) || {}),
   };
-  if (init?.auth !== false) {
-    const token = await getToken();
-    if (token) headers['authorization'] = `Bearer ${token}`;
+  const { expireAuthOnForbidden = true, identityProbe = false, auth = true, ...fetchInit } = init || {};
+  let res: Response;
+  if (identityProbe || !auth) {
+    const token = identityProbe ? await getToken() : null;
+    if (token) headers.authorization = `Bearer ${token}`;
+    res = await fetch(`${OPENCHAT_URL}${path}`, { ...fetchInit, headers });
+    if (identityProbe && token !== await getToken()) throw new Error('Chat session ended');
+  } else {
+    res = await authenticatedFetch(`${OPENCHAT_URL}${path}`, { ...fetchInit, headers });
   }
-  const { expireAuthOnForbidden = true, ...fetchInit } = init || {};
-  const res = await fetch(`${OPENCHAT_URL}${path}`, { ...fetchInit, headers });
   if (!res.ok) {
     const text = await res.text();
     let msg = text;
@@ -866,7 +909,7 @@ async function requestJsonDownload(path: string, fallbackFilename: string): Prom
   const token = await getToken();
   const headers: Record<string, string> = {};
   if (token) headers.authorization = `Bearer ${token}`;
-  const res = await fetch(`${OPENCHAT_URL}${path}`, { headers });
+  const res = await authenticatedFetch(`${OPENCHAT_URL}${path}`, { headers });
   const text = await res.text();
   if (!res.ok) {
     let msg = text;
@@ -1192,7 +1235,7 @@ export const api = {
    */
   registerNativePushToken: async (token: string, platform: 'ios' | 'android') => {
     const t = await getToken();
-    const r = await fetch(`${OPENCHAT_URL}/api/push/register-native`, {
+    const r = await authenticatedFetch(`${OPENCHAT_URL}/api/push/register-native`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -1209,7 +1252,7 @@ export const api = {
   /** Deregister the Expo native push token for this device at logout. */
   deregisterNativePushToken: async (platform: 'ios' | 'android') => {
     const t = await getToken();
-    const r = await fetch(`${OPENCHAT_URL}/api/push/register-native`, {
+    const r = await authenticatedFetch(`${OPENCHAT_URL}/api/push/register-native`, {
       method: 'DELETE',
       headers: {
         'content-type': 'application/json',
@@ -1522,7 +1565,7 @@ export const api = {
       conversationTitle: string | null;
       memberCount: number;
       expiresAt: string;
-    }>(`/api/chat/invites/${token}`),
+    }>(`/api/chat/invites/${token}`, { auth: false }),
 
   /**
    * Check invite status with auth.
@@ -1551,7 +1594,7 @@ export const api = {
       name: string;
       avatarUrl: string | null;
       isBot: boolean;
-    }>(`/api/chat/public-users/${userId}`),
+    }>(`/api/chat/public-users/${userId}`, { auth: false }),
 
   // ── AddMe card (OpenChat-whxy.2) ─────────────────────────────────────────
   /** The caller's own card (token + opt-in settings + stranger preview). */
@@ -1762,7 +1805,7 @@ export const api = {
     const token = await getToken();
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (token) headers['authorization'] = `Bearer ${token}`;
-    const res = await fetch(
+    const res = await authenticatedFetch(
       `${OPENCHAT_URL}/api/thoughts/${encodeURIComponent(id)}/pin/${encodeURIComponent(conversationId)}`,
       { method: 'DELETE', headers }
     );
@@ -1787,7 +1830,7 @@ export const api = {
     const token = await getToken();
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (token) headers['authorization'] = `Bearer ${token}`;
-    const res = await fetch(`${OPENCHAT_URL}/api/thoughts/${id}`, {
+    const res = await authenticatedFetch(`${OPENCHAT_URL}/api/thoughts/${id}`, {
       method: 'DELETE',
       headers,
     });

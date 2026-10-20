@@ -25,7 +25,7 @@ vi.mock('../../mobile/src/api/client', () => ({
     getMe: mocks.getMe, getConversations: mocks.getConversations,
     listMatches: async () => [], getAiDisclosureStatus: async () => ({}), messagesSince: mocks.messagesSince,
   }, getToken: async () => 'test', getUser: async () => ({ userId: mocks.account }), setSession: vi.fn(), clearSession: vi.fn(),
-  onAuthExpired: () => vi.fn(),
+  onAuthExpired: () => vi.fn(), getSessionIdentity: mocks.getMe,
   isDroppedMessageSend: (value: any) => value?.dropped === true,
 }));
 vi.mock('../../mobile/src/api/socket', () => ({ sendMessage: mocks.wsSend, joinConversation: vi.fn(), leaveConversation: vi.fn(), connect: mocks.connect, disconnect: vi.fn(), emitPresenceUpdate: vi.fn() }));
@@ -197,6 +197,7 @@ it('applies reaction fields without restoring content edited offline', async () 
 it('only emits a read receipt while the selected Chat lane remains visible', async () => {
   vi.useFakeTimers();
   try {
+    await act(async () => { await chat.bootstrapIfAuthed(); });
     mocks.getMessages.mockResolvedValue(history);
     mocks.markRead.mockResolvedValue({ readMap: {}, onlineMap: {} });
     await act(async () => { chat.setActiveConversation('sailing'); chat.registerConversationVisibility('sailing'); });

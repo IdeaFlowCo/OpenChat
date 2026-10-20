@@ -1,8 +1,11 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: { getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() } }));
 vi.mock('expo-secure-store', () => ({ getItemAsync: vi.fn().mockResolvedValue('human-token'), setItemAsync: vi.fn(), deleteItemAsync: vi.fn() }));
+import { setAuthenticatedRequestGuard } from '../../mobile/src/api/authenticatedRequest';
 import { api, onAuthExpired } from '../../mobile/src/api/client';
-afterEach(() => { vi.unstubAllGlobals(); });
+let release: () => void;
+beforeEach(() => { release = setAuthenticatedRequestGuard(async token => token === 'human-token'); });
+afterEach(() => { release(); vi.unstubAllGlobals(); });
 it('a stale hosted Context permission displays a typed error without signing out the human', async () => {
   const expired = vi.fn(); const off = onAuthExpired(expired);
   const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'Audience changed' }), { status: 403 }));
