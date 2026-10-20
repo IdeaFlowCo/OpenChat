@@ -15,7 +15,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { uploadAsync, getInfoAsync, FileSystemUploadType } from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
-import { api, Attachment } from '../api/client';
+import { api, ApiError, Attachment } from '../api/client';
 
 // ── Audio MIME helpers ────────────────────────────────────────────────────────
 
@@ -85,6 +85,9 @@ export async function pickImages(limit = MAX_IMAGES_PER_MESSAGE): Promise<Picked
     allowsMultipleSelection: limit > 1,
     selectionLimit: limit,
     orderedSelection: true,
+    // iOS: hand back JPEG rather than HEIC; the server and browsers only take
+    // JPEG/PNG/GIF/WebP (OpenChat-wpmb upload failures).
+    preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
     quality: 0.85,
     exif: false,
   });
@@ -151,54 +154,108 @@ function imageSize(uri: string): Promise<{ width: number; height: number }> {
   });
 }
 
+/** Why one photo failed to upload, in words a person can act on. */
+export class PhotoUploadError extends Error {
+  constructor(
+    readonly fileName: string,
+    readonly stage: 'size' | 'presign' | 'upload',
+    readonly reason: string,
+    readonly status?: number,
+  ) {
+    super(`${fileName}: ${reason}`);
+    this.name = 'PhotoUploadError';
+  }
+}
+
+/** Server and storage limits, mirrored for a fast, specific error. */
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const UPLOADABLE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+
+function describeStatus(status: number): string {
+  if (status === 0) return 'the connection dropped';
+  if (status === 403) return 'storage refused the upload (signature or size mismatch)';
+  if (status === 413) return 'the photo is too large';
+  if (status >= 500) return `the server had a problem (${status})`;
+  return `upload failed (${status})`;
+}
+
 /**
  * Upload a picked asset to GCS via a presigned PUT URL.
  * Returns an Attachment descriptor ready to embed in a message.
+ * Throws PhotoUploadError naming the photo and what went wrong.
  */
 export async function uploadImage(asset: PickedAsset): Promise<Attachment> {
-  let sizeBytes = asset.fileSize;
-  let webBlob: Blob | undefined;
+  const name = asset.fileName;
+  if (!UPLOADABLE_IMAGE_TYPES.has(asset.mimeType)) {
+    const kind = asset.mimeType.split('/')[1]?.toUpperCase() || 'this';
+    throw new PhotoUploadError(name, 'presign', `${kind} photos aren't supported yet (use JPEG or PNG)`);
+  }
 
-  // Resolve true file size to ensure the presigned URL signature perfectly
-  // matches the payload we upload. expo-image-picker can omit fileSize on iOS.
-  if (Platform.OS === 'web') {
-    const res = await fetch(asset.uri);
-    webBlob = await res.blob();
-    sizeBytes = webBlob.size;
-  } else if (!sizeBytes) {
-    const fileInfo = await getInfoAsync(asset.uri);
-    if (fileInfo.exists && 'size' in fileInfo && typeof fileInfo.size === 'number') {
-      sizeBytes = fileInfo.size;
+  // The presigned URL signs the exact Content-Length, so measure the file we
+  // will actually send. The picker's fileSize can describe the original asset
+  // rather than the compressed copy.
+  let sizeBytes = 0;
+  let webBlob: Blob | undefined;
+  try {
+    if (Platform.OS === 'web') {
+      const res = await fetch(asset.uri);
+      webBlob = await res.blob();
+      sizeBytes = webBlob.size;
+    } else {
+      const fileInfo = await getInfoAsync(asset.uri);
+      if (fileInfo.exists && 'size' in fileInfo && typeof fileInfo.size === 'number') {
+        sizeBytes = fileInfo.size;
+      }
     }
+  } catch {
+    // Fall through to the picker's size below.
+  }
+  if (!sizeBytes) sizeBytes = asset.fileSize;
+  if (!sizeBytes) throw new PhotoUploadError(name, 'size', "couldn't read the photo file");
+  if (sizeBytes > MAX_IMAGE_BYTES) {
+    throw new PhotoUploadError(name, 'size', `it's ${(sizeBytes / 1024 / 1024).toFixed(1)} MB; the limit is 20 MB`);
   }
 
   // 1. Get presigned PUT URL from the server
-  const { putUrl, getUrl } = await api.presignAttachment({
-    filename: asset.fileName,
-    mimeType: asset.mimeType,
-    sizeBytes: sizeBytes || 1,
-  });
+  let putUrl: string;
+  let getUrl: string;
+  try {
+    ({ putUrl, getUrl } = await api.presignAttachment({
+      filename: name,
+      mimeType: asset.mimeType,
+      sizeBytes,
+    }));
+  } catch (err) {
+    const status = err instanceof ApiError ? err.status : undefined;
+    const detail = err instanceof Error ? err.message.replace(/^\d{3}:\s*/, '') : String(err);
+    throw new PhotoUploadError(name, 'presign', `the server wouldn't accept it (${detail})`, status);
+  }
 
   // 2. Upload to the presigned URL
-  if (Platform.OS === 'web' && webBlob) {
-    const putRes = await fetch(putUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': asset.mimeType },
-      body: webBlob,
-    });
-    if (!putRes.ok) {
-      throw new Error(`Upload failed: ${putRes.status}`);
+  let status: number;
+  try {
+    if (Platform.OS === 'web' && webBlob) {
+      const putRes = await fetch(putUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': asset.mimeType },
+        body: webBlob,
+      });
+      status = putRes.status;
+    } else {
+      // On native, use expo-file-system/legacy uploadAsync to upload binary content.
+      const uploadResult = await uploadAsync(putUrl, asset.uri, {
+        httpMethod: 'PUT',
+        uploadType: FileSystemUploadType.BINARY_CONTENT,
+        headers: { 'Content-Type': asset.mimeType },
+      });
+      status = uploadResult.status;
     }
-  } else {
-    // On native, use expo-file-system/legacy uploadAsync to upload binary content.
-    const uploadResult = await uploadAsync(putUrl, asset.uri, {
-      httpMethod: 'PUT',
-      uploadType: FileSystemUploadType.BINARY_CONTENT,
-      headers: { 'Content-Type': asset.mimeType },
-    });
-    if (uploadResult.status < 200 || uploadResult.status >= 300) {
-      throw new Error(`Upload failed: ${uploadResult.status}`);
-    }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new PhotoUploadError(name, 'upload', `the connection dropped (${detail})`, 0);
+  }
+  if (status < 200 || status >= 300) {
+    throw new PhotoUploadError(name, 'upload', describeStatus(status), status);
   }
 
   // 3. Return the public URL + metadata
@@ -208,6 +265,52 @@ export async function uploadImage(asset: PickedAsset): Promise<Attachment> {
     width: asset.width || undefined,
     height: asset.height || undefined,
   };
+}
+
+export interface PhotoUploadResults {
+  /** Uploaded photos, in picked order, for the ones that succeeded. */
+  uploaded: { asset: PickedAsset; attachment: Attachment }[];
+  failed: { asset: PickedAsset; error: PhotoUploadError }[];
+}
+
+/**
+ * Upload several photos a few at a time (a phone on cellular stalls with ten
+ * 4 MB PUTs at once), retrying each failure once. Never throws; the caller
+ * decides what to do with partial success.
+ */
+export async function uploadImages(
+  assets: PickedAsset[],
+  { concurrency = 3, retries = 1, upload = uploadImage }: { concurrency?: number; retries?: number; upload?: typeof uploadImage } = {},
+): Promise<PhotoUploadResults> {
+  const outcomes: ({ attachment: Attachment } | { error: PhotoUploadError })[] = new Array(assets.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < assets.length) {
+      const i = next++;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          outcomes[i] = { attachment: await upload(assets[i]) };
+          break;
+        } catch (err) {
+          const error = err instanceof PhotoUploadError
+            ? err
+            : new PhotoUploadError(assets[i].fileName, 'upload', err instanceof Error ? err.message : String(err));
+          // Size and type problems won't fix themselves on a retry.
+          if (attempt >= retries || error.stage === 'size' || error.reason.includes("aren't supported")) {
+            outcomes[i] = { error };
+            break;
+          }
+        }
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, assets.length) }, worker));
+  const results: PhotoUploadResults = { uploaded: [], failed: [] };
+  outcomes.forEach((o, i) => {
+    if ('attachment' in o) results.uploaded.push({ asset: assets[i], attachment: o.attachment });
+    else results.failed.push({ asset: assets[i], error: o.error });
+  });
+  return results;
 }
 
 /**

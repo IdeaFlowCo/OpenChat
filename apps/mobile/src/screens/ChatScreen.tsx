@@ -52,7 +52,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import type { NavProp, RouteProps } from '../navigation/types';
 import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
-import { MAX_IMAGES_PER_MESSAGE, filesToAssets, pickImages, releaseAsset, takePhoto, uploadImage, PickedAsset } from '../services/attachments';
+import { MAX_IMAGES_PER_MESSAGE, filesToAssets, pickImages, releaseAsset, takePhoto, uploadImages, PickedAsset, PhotoUploadResults } from '../services/attachments';
 import { PhotoGrid } from '../components/PhotoGrid';
 import { PhotoViewer, PhotoViewerState } from '../components/PhotoViewer';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
@@ -67,7 +67,7 @@ import { AgentNetworkCard } from '../components/AgentNetworkCard';
 import type { Participant } from '../api/client';
 import { ExportSheet } from '../components/ExportSheet';
 import { saveJsonDownload } from '../services/exportDownload';
-import { logError } from '../services/clientLogger';
+import { logError, logInfo } from '../services/clientLogger';
 import {
   fetchHashtagSuggestions,
   HashtagSuggestion,
@@ -268,6 +268,14 @@ interface ChatScreenProps {
   onOpenAgent?: () => void;
 }
 
+/** One line per failed photo, e.g. "IMG_0273.jpg: storage refused the upload". */
+function describeUploadFailures(failed: PhotoUploadResults['failed']): string {
+  if (!failed.length) return 'Something went wrong uploading.';
+  const lines = failed.slice(0, 4).map(f => `• ${f.error.fileName}: ${f.error.reason}`);
+  if (failed.length > 4) lines.push(`• and ${failed.length - 4} more`);
+  return lines.join('\n');
+}
+
 export function ChatScreen({
   conversationId: conversationIdProp,
   embedded = false,
@@ -402,6 +410,11 @@ export function ChatScreen({
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   // fullscreen viewer: every photo of the tapped message, opened at one
   const [photoViewer, setPhotoViewer] = useState<PhotoViewerState | null>(null);
+  const openPhotoViewer = useCallback((urls: string[], index: number, source: 'message' | 'composer') => {
+    // Temporary breadcrumb while confirming taps reach the viewer on iOS.
+    logInfo('photo viewer opened', { source, count: urls.length, index, platform: Platform.OS });
+    setPhotoViewer({ urls, index });
+  }, []);
   // Web: photos dragged over the chat (OpenChat-63zy)
   const [dropActive, setDropActive] = useState(false);
 
@@ -1114,34 +1127,80 @@ export function ChatScreen({
     reportTyping(conversationId, false);
 
     let uploaded = !assetsToUpload.length;
-    try {
-      let attachments: Attachment[] | undefined;
-      if (assetsToUpload.length) {
-        setUploadingAttachment(true);
-        try {
-          // Upload in parallel; Promise.all keeps the picked order.
-          attachments = await Promise.all(assetsToUpload.map(uploadImage));
+    let attachments: Attachment[] | undefined;
+    let failedUploads: PhotoUploadResults['failed'] = [];
+    if (assetsToUpload.length) {
+      setUploadingAttachment(true);
+      try {
+        // A few at a time with one retry each; keeps picked order.
+        const results = await uploadImages(assetsToUpload);
+        failedUploads = results.failed;
+        if (results.uploaded.length) {
+          attachments = results.uploaded.map(u => u.attachment);
           uploaded = true;
-        } finally {
-          setUploadingAttachment(false);
         }
+      } finally {
+        setUploadingAttachment(false);
       }
-      await sendMessage(trimmed, currentReplyToId, attachments);
-      assetsToUpload.forEach(releaseAsset);
-      invalidateHashtagSuggestions(conversationId);
-      hapticSend();
-    } catch (err) {
-      console.warn('[ChatScreen] send failed:', err);
-      // Transport failures are retained by the outbox. Reaching this catch
-      // means upload or durable storage failed; restore the original draft.
+      if (failedUploads.length) {
+        logError('photo upload failed', failedUploads[0].error, {
+          conversationId,
+          picked: assetsToUpload.length,
+          sent: attachments?.length ?? 0,
+          failures: failedUploads.map(f => ({
+            fileName: f.asset.fileName,
+            mimeType: f.asset.mimeType,
+            pickerSize: f.asset.fileSize,
+            width: f.asset.width,
+            height: f.asset.height,
+            stage: f.error.stage,
+            status: f.error.status,
+            reason: f.error.reason,
+          })),
+        });
+      }
+    }
+
+    if (!uploaded) {
+      // Nothing uploaded: put the whole draft back and say why.
       setPendingAssets(assetsToUpload);
       if (trimmed) setText(prev => prev || trimmed);
       if (currentReply) setReplyTo(prev => prev ?? currentReply);
       Alert.alert(
-        !uploaded ? 'Upload failed' : 'Could not save message',
-        uploaded ? 'Your draft is still in the composer. Free some device storage and try again.' : assetsToUpload.length > 1
-          ? 'Could not send the photos. Please try again.'
-          : 'Could not send the image. Please try again.'
+        assetsToUpload.length > 1 ? "Photos weren't sent" : "Photo wasn't sent",
+        `${describeUploadFailures(failedUploads)}\n\nYour draft is still in the composer. Tap Send to try again.`
+      );
+      sendInFlightRef.current = false;
+      setSending(false);
+      return;
+    }
+
+    try {
+      await sendMessage(trimmed, currentReplyToId, attachments);
+      assetsToUpload
+        .filter(a => !failedUploads.some(f => f.asset === a))
+        .forEach(releaseAsset);
+      invalidateHashtagSuggestions(conversationId);
+      hapticSend();
+      if (failedUploads.length) {
+        // The rest went out; keep only the failed photos for a retry.
+        setPendingAssets(prev => [...failedUploads.map(f => f.asset), ...prev].slice(0, MAX_IMAGES_PER_MESSAGE));
+        Alert.alert(
+          `${failedUploads.length} of ${assetsToUpload.length} photos weren't sent`,
+          `${describeUploadFailures(failedUploads)}\n\nThe others were sent. The ones that failed are still in the composer; tap Send to try them again.`
+        );
+      }
+    } catch (err) {
+      console.warn('[ChatScreen] send failed:', err);
+      logError('photo message save failed', err, { conversationId, photos: attachments?.length ?? 0 });
+      // Transport failures are retained by the outbox. Reaching this catch
+      // means durable storage failed; restore the original draft.
+      setPendingAssets(assetsToUpload);
+      if (trimmed) setText(prev => prev || trimmed);
+      if (currentReply) setReplyTo(prev => prev ?? currentReply);
+      Alert.alert(
+        'Could not save message',
+        'Your draft is still in the composer. Free some device storage and try again.'
       );
     } finally {
       sendInFlightRef.current = false;
@@ -1545,7 +1604,7 @@ export function ChatScreen({
               <PhotoGrid
                 photos={photos}
                 hasCaption={!!m.content}
-                onOpen={index => setPhotoViewer({ urls: photos.map(p => p.url), index })}
+                onOpen={index => openPhotoViewer(photos.map(p => p.url), index, 'message')}
               />
             );
           })()}
@@ -1846,11 +1905,18 @@ export function ChatScreen({
           >
             {pendingAssets.map((asset, i) => (
               <View key={`${asset.uri}-${i}`} style={styles.attachmentPreviewItem}>
-                <Image
-                  source={{ uri: asset.uri }}
-                  style={styles.attachmentPreviewThumb}
-                  resizeMode="cover"
-                />
+                <TouchableOpacity
+                  onPress={() => openPhotoViewer(pendingAssets.map(a => a.uri), i, 'composer')}
+                  activeOpacity={0.85}
+                  accessibilityRole="imagebutton"
+                  accessibilityLabel={`Preview photo ${i + 1} of ${pendingAssets.length}`}
+                >
+                  <Image
+                    source={{ uri: asset.uri }}
+                    style={styles.attachmentPreviewThumb}
+                    resizeMode="cover"
+                  />
+                </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => removePendingAsset(i)}
                   style={[styles.attachmentPreviewRemove, { backgroundColor: c.textPrimary }]}

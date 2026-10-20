@@ -157,7 +157,7 @@ export function PhotoViewer({ state, onClose }: Props) {
             <AppIcon name="chevron-right" color="white" size={28} />
           </TouchableOpacity>
         )}
-        {count > 0 && (
+        {/^https?:/.test(urls[index] ?? '') && (
           <TouchableOpacity
             style={styles.saveButton}
             onPress={handleSave}
