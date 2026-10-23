@@ -4,7 +4,8 @@ import { act, create, type ReactTestInstance } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  navigation: { navigate: vi.fn(), push: vi.fn(), setOptions: vi.fn() },
+  navigation: { navigate: vi.fn(), push: vi.fn(), setOptions: vi.fn(), addListener: vi.fn(() => () => {}) },
+  focused: true,
   route: { params: {} as Record<string, unknown> },
   api: {
     listImportedChats: vi.fn(), getImportedChat: vi.fn(), listImportedMessages: vi.fn(), listImportedPeople: vi.fn(),
@@ -17,7 +18,7 @@ vi.mock('react-native', () => ({
   FlatList: ({ data, renderItem, ListEmptyComponent, ListHeaderComponent, ListFooterComponent }: any) => React.createElement('FlatList', null, ListHeaderComponent,
     data?.length ? data.map((item: any, index: number) => React.createElement(React.Fragment, { key: index }, renderItem({ item, index }))) : ListEmptyComponent, ListFooterComponent),
 }));
-vi.mock('@react-navigation/native', () => ({ useNavigation: () => mocks.navigation, useRoute: () => mocks.route, useFocusEffect: (callback: () => void) => React.useEffect(callback, [callback]) }));
+vi.mock('@react-navigation/native', () => ({ useNavigation: () => mocks.navigation, useRoute: () => mocks.route, useFocusEffect: (callback: () => void) => React.useEffect(() => mocks.focused ? callback() : undefined, [callback]) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/api/client', () => ({ api: mocks.api }));
 vi.mock('../../mobile/src/components/Avatar', () => ({ Avatar: () => null }));
@@ -42,6 +43,7 @@ async function render(element: React.ReactElement) { await act(async () => { roo
 
 beforeEach(() => {
   vi.clearAllMocks(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  mocks.focused = true;
   mocks.api.listImportedChats.mockResolvedValue({ chats: [chat] });
   mocks.api.getImportedChat.mockResolvedValue(chat);
   mocks.api.listImportedMessages.mockResolvedValue({ nextCursor: null, messages: [
@@ -59,6 +61,17 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT; });
 
 describe('imported chats front door', () => {
+  it('loads when the phone header mounts without a focus event, and refreshes on later focus', async () => {
+    mocks.focused = false;
+    await render(React.createElement(ImportedChatsLink));
+    expect(texts()).toContain('Imported chats');
+    expect(mocks.api.listImportedChats).toHaveBeenCalledTimes(1);
+    const focus = (mocks.navigation.addListener.mock.calls as unknown[][]).find(call => call[0] === 'focus')![1] as () => void;
+    mocks.api.listImportedChats.mockResolvedValueOnce({ chats: [] });
+    await act(async () => focus());
+    expect(root!.toJSON()).toBeNull();
+  });
+
   it('stays hidden until the owner has an imported chat, then opens the list in one tap', async () => {
     mocks.api.listImportedChats.mockResolvedValueOnce({ chats: [] });
     await render(React.createElement(ImportedChatsLink));
