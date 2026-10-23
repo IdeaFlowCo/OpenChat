@@ -364,6 +364,19 @@ integration('imported chat mirrors — real Neo4j + HTTP', { timeout: 60_000 }, 
     expect((await run('MATCH (c:OpenChatImportedChat {id: $chatId}) RETURN c.lastImportedBy AS by', { chatId })).records[0]!.get('by')).toBe('agent:Importer');
   });
 
+  it('refuses imports for an account that no longer exists, even with a still-valid token', async () => {
+    const ghost = `imported-ghost-${suffix}`;
+    const before = await importedNodes();
+    for (const path of ['/import?dryRun=1', '/import']) {
+      const res = await as(token(ghost)).put(path, payload());
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe('Account not found');
+    }
+    expect(await count('MATCH (n) WHERE n.ownerUserId = $ghost RETURN count(n)', { ghost })).toBe(0);
+    expect(await count('MATCH (u:User {id: $ghost}) RETURN count(u)', { ghost })).toBe(0);
+    expect(await importedNodes()).toBe(before);
+  });
+
   it('deletes the whole mirror for its owner', async () => {
     expect((await as(token(alice)).delete(`/${chatId}`)).body).toEqual({ deleted: true });
     expect(await count('MATCH (n) WHERE n.chatId = $chatId OR n.id = $chatId RETURN count(n)', { chatId })).toBe(0);

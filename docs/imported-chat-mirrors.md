@@ -33,6 +33,9 @@ The shared Ideaflow connector, connector-delegated calls and embedded
 (Unlinked) sessions are refused. The import body is parsed only after the
 caller is authenticated, so an anonymous request never makes the server buffer
 a large payload.
+The owner's account must still exist: an import locks the owner's `User` node
+first and answers `404 Account not found` when it is gone, so a token that
+outlives a deleted account cannot recreate an archive.
 
 ## Import API
 

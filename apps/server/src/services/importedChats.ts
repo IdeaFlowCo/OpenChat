@@ -253,6 +253,13 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
   const { source, coverage } = payload;
   const now = new Date().toISOString();
   const chatImportKey = compositeKey(ownerUserId, source.network, source.accountKey, source.chatKey);
+  // The owner must still exist. A real import also write-locks the owner's User node, so it serializes with
+  // account deletion (which removes the archives in the same transaction as the User): a token that outlives
+  // its account can never recreate an orphan archive.
+  const owner = await tx.run(dryRun
+    ? 'MATCH (u:User {id: $ownerUserId}) RETURN u.id AS id'
+    : 'MATCH (u:User {id: $ownerUserId}) SET u.importedChatsRevision = coalesce(u.importedChatsRevision, 0) + 1 RETURN u.id AS id', { ownerUserId });
+  if (!owner.records.length) fail(404, 'Account not found');
   // A real import creates or touches the chat node first, taking its write lock, and only then reads it,
   // so two imports of one chat serialize and the second sees everything the first wrote.
   const chatRead = dryRun
