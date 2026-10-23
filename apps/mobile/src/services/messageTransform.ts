@@ -55,11 +55,13 @@ export const TRANSFORM_LABELS: Record<TransformType, string> = {
 };
 
 export const TRANSLATE_LANGUAGES = [
+  'English',
+  'Chinese (Simplified)',
+  'Chinese (Traditional)',
   'Spanish',
   'French',
   'German',
   'Japanese',
-  'Mandarin',
   'Hindi',
   'Arabic',
   'Portuguese',

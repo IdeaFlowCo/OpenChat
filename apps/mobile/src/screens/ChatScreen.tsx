@@ -1,3 +1,7 @@
+import { ChatTranslationBar } from '../components/TranslationControls';
+import { TranslatedMessage } from '../components/TranslatedMessage';
+import { useChatTranslation } from '../contexts/TranslationContext';
+import { likelyNeedsTranslation } from '../services/translation';
 /**
  * Chat thread — read messages, send, see typing indicator. The conversation
  * is identified by route param; we read the conversation metadata from the
@@ -341,6 +345,12 @@ export function ChatScreen({
     () => activeMessages.filter(message => message.conversationId === conversationId),
     [activeMessages, conversationId]
   );
+
+  const { preference: translationPreference } = useChatTranslation(conversationId);
+  const [translationFocused, setTranslationFocused] = useState(false);
+  useFocusEffect(useCallback(() => { setTranslationFocused(true); return () => setTranslationFocused(false); }, []));
+  const [manualTranslations, setManualTranslations] = useState<Record<string, string>>({});
+  const offerTranslation = messages.slice(-20).some(m => !m.deletedAt && m.senderId !== currentUser?.userId && likelyNeedsTranslation(m.content, translationPreference.language));
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -1690,7 +1700,11 @@ export function ChatScreen({
           {m.deletedAt
             ? <Text style={{ color: isOwn ? ownTint(0.55) : c.textMetadata, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
             : (!!m.content && (
-                // Agents write Markdown; render it rather than showing ** and backticks (OpenChat-eo3n.5).
+                <TranslatedMessage key={`${conversationId}:${m.id}`} conversationId={conversationId} content={m.content}
+                  incoming={!isOwn} requested={manualTranslations[m.id] === m.content}
+                  active={translationFocused && activeConversationId === conversationId && activeConversationLane === 'chat'} color={isOwn ? c.bubbleOwnText : c.bubbleOtherText}
+                  onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}>
+                {/* Agents keep their original Markdown rendering. */
                 !isOwn && (m.sender?.isBot || (!isGroup && other?.isBot))
                   ? <AgentMarkdown content={m.content} color={c.bubbleOtherText} linkColor={c.primary} codeBackground={c.surfaceElevated}
                       onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
@@ -1701,6 +1715,8 @@ export function ChatScreen({
                       renderPlain={isGroup ? text => renderContentWithMentions(text, mentionableParticipants,
                         isOwn ? c.bubbleOwnText : c.bubbleOtherText, scheme) : undefined}
                     />
+                }
+                </TranslatedMessage>
               ))
           }
           <View style={styles.bubbleFooter}>
@@ -1797,6 +1813,7 @@ export function ChatScreen({
       })()}
       <ConversationLaneSwitch activeLane={activeConversationLane} onChange={setActiveConversationLane} />
       {showAiDisclosure && <AiDisclosureBanner />}
+      {activeConversationLane === 'chat' && <ChatTranslationBar key={conversationId} conversationId={conversationId} suggest={offerTranslation} />}
 
       <ExportSheet
         visible={exportSheetVisible}
@@ -2304,6 +2321,8 @@ export function ChatScreen({
         senderName={actionSheetSenderName}
         onDismiss={() => setActionSheetVisible(false)}
         onReply={handleReply}
+        onTranslate={m => setManualTranslations(previous => ({ ...previous, [m.id]: m.content }))}
+        translateLanguage={translationPreference.language}
         onSavePhotos={handleSavePhotos}
         onForward={handleForward}
         onForwardToAssistant={handleForwardToAssistant}

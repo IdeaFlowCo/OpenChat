@@ -80,6 +80,8 @@ interface Props {
   onReport: (messageId: string, reason: string, freeform?: string) => void;
   /** Save the message's photos to the library / downloads (OpenChat-zwt4). */
   onSavePhotos?: (message: Message) => void;
+  onTranslate?: (message: Message) => void;
+  translateLanguage?: string;
 }
 
 const REPORT_REASONS = ['Spam', 'Inappropriate', 'Abuse', 'Other'] as const;
@@ -102,6 +104,8 @@ export function MessageActionSheet({
   onBlock,
   onReport,
   onSavePhotos,
+  onTranslate,
+  translateLanguage = 'English',
 }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -438,6 +442,13 @@ export function MessageActionSheet({
               <TouchableOpacity accessibilityRole="button" style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
                 onPress={() => setSubSheet('links')}>
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Links · Open or copy</Text>
+              </TouchableOpacity>
+            )}
+
+            {!message.deletedAt && !!message.content?.trim() && onTranslate && (
+              <TouchableOpacity accessibilityRole="button" style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={() => { handleDismiss(); onTranslate(message); }}>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Translate to {translateLanguage}</Text>
               </TouchableOpacity>
             )}
 
