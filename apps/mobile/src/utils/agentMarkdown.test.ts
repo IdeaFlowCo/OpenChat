@@ -26,6 +26,13 @@ describe('parseInline', () => {
     ]);
   });
 
+  it('links bare domains such as unlinked.ai, but not emails or file names', () => {
+    expect(parseInline('Try unlinked.ai.')).toEqual([
+      { t: 'text', v: 'Try ' }, { t: 'link', c: [{ t: 'text', v: 'unlinked.ai' }], href: 'https://unlinked.ai/' }, { t: 'text', v: '.' },
+    ]);
+    expect(parseInline('jacob@unlinked.ai notes.md Node.js')).toEqual([{ t: 'text', v: 'jacob@unlinked.ai notes.md Node.js' }]);
+  });
+
   it('renders a labelled link, and an unsafe one as plain text', () => {
     expect(parseInline('[Board](https://wit.example/b)')).toEqual([{ t: 'link', c: [{ t: 'text', v: 'Board' }], href: 'https://wit.example/b' }]);
     expect(parseInline('[x](javascript:alert(1))')).toEqual([{ t: 'text', v: '[x](javascript:alert(1))' }]);

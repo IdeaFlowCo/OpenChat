@@ -4,9 +4,10 @@
  * those characters literally is what made agent replies look broken. No
  * dependency: blocks are paragraphs, headings, bullet and numbered lists,
  * quotes and fenced code; inline is bold, italic, code, [label](url) and bare
- * URLs. Anything else stays plain text. Only http(s) links without
- * credentials become tappable.
+ * URLs (including bare domains such as unlinked.ai). Anything else stays
+ * plain text. Only http(s) links without credentials become tappable.
  */
+import { BARE_DOMAIN, isBareDomain } from './messageLinks';
 
 export type Inline =
   | { t: 'text'; v: string }
@@ -22,9 +23,9 @@ export type Block =
   | { t: 'code'; v: string }
   | { t: 'list'; ordered: boolean; start: number; items: Inline[][] };
 
-/** A tappable destination, or null. Adds https:// to www. links. */
+/** A tappable destination, or null. Adds https:// to www. links and bare domains. */
 export function safeHref(raw: string): string | null {
-  const candidate = /^www\./i.test(raw) ? `https://${raw}` : raw;
+  const candidate = /^www\./i.test(raw) || isBareDomain(raw) ? `https://${raw}` : raw;
   try {
     const url = new URL(candidate);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
@@ -46,7 +47,8 @@ function splitTrailing(url: string): [string, string] {
 export const MAX_INLINE_LENGTH = 4000;
 // Order matters: code spans first so their contents are literal. No lookbehind
 // (Safari before 16.4 cannot parse it): italics capture the preceding character.
-const INLINE_SOURCE = /`([^`\n]+)`|\[([^\]\n]{1,300})\]\(([^)\s]{1,2000})\)|\*\*(?=\S)([^*\n]*?\S)\*\*|__(?=\S)([^_\n]*?\S)__|(^|[^\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])|(^|[^\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])|(https?:\/\/[^\s<>]{1,2000}|www\.[^\s<>]{1,2000})/;
+const INLINE_SOURCE = new RegExp(/`([^`\n]+)`|\[([^\]\n]{1,300})\]\(([^)\s]{1,2000})\)|\*\*(?=\S)([^*\n]*?\S)\*\*|__(?=\S)([^_\n]*?\S)__|(^|[^\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])|(^|[^\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])/.source
+  + String.raw`|(https?:\/\/[^\s<>]{1,2000}|www\.[^\s<>]{1,2000}|${BARE_DOMAIN})`, 'i');
 
 export function parseInline(text: string): Inline[] {
   if (text.length > MAX_INLINE_LENGTH) return [{ t: 'text', v: text }];
@@ -59,7 +61,7 @@ export function parseInline(text: string): Inline[] {
   let last = 0;
   // A fresh regex per call: parseInline recurses, and a shared global
   // regex's lastIndex would be reset by the inner call.
-  const INLINE = new RegExp(INLINE_SOURCE.source, 'g');
+  const INLINE = new RegExp(INLINE_SOURCE.source, 'gi');
   for (let m = INLINE.exec(text); m; m = INLINE.exec(text)) {
     pushText(text.slice(last, m.index));
     last = m.index + m[0].length;
@@ -73,6 +75,8 @@ export function parseInline(text: string): Inline[] {
       pushText((m[6] ?? m[8]) ?? '');
       out.push({ t: 'italic', c: parseInline((m[7] ?? m[9])!) });
     } else if (m[10] !== undefined) {
+      // A domain inside an email address or a longer word stays text.
+      if (!/^(https?:|www\.)/i.test(m[10]) && m.index && /[\w@.-]/.test(text[m.index - 1]!)) { pushText(m[0]); continue; }
       // Sentence punctuation after a URL stays outside the link.
       const [raw, trail] = splitTrailing(m[10]);
       const href = safeHref(raw);
