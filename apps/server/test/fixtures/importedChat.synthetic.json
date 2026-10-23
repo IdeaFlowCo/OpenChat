@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "network": "whatsapp",
+    "accountKey": "synthetic-owner-account",
+    "chatKey": "synthetic-group-garden-club",
+    "chatType": "group",
+    "title": "Synthetic Garden Club"
+  },
+  "coverage": {
+    "asOf": "2026-10-20T12:00:00.000Z",
+    "method": "synthetic-fixture",
+    "complete": false,
+    "note": "Invented test data. Media not imported; two non-text rows omitted.",
+    "sourceRowCounts": {
+      "total": 8,
+      "text": 4,
+      "nonText": 4
+    }
+  },
+  "participants": [
+    {
+      "sourceKey": "p-owner",
+      "displayName": "Owner Example",
+      "nameSource": "owner",
+      "isOwner": true,
+      "membership": "current"
+    },
+    {
+      "sourceKey": "p-ada",
+      "displayName": "Ada Example",
+      "nameSource": "self_stated",
+      "profileFacts": [
+        {
+          "factKey": "lab",
+          "text": "Runs a soil-health lab",
+          "sourceMessageIds": [
+            "m-2"
+          ]
+        }
+      ],
+      "membership": "current",
+      "nameSourceMessageIds": [
+        "m-2"
+      ]
+    },
+    {
+      "sourceKey": "p-bo",
+      "displayName": "Bo Example",
+      "nameSource": "contact",
+      "membership": "current"
+    },
+    {
+      "sourceKey": "p-twin",
+      "displayName": "Bo Example",
+      "nameSource": "push_name",
+      "membership": "former"
+    },
+    {
+      "sourceKey": "p-unknown",
+      "nameSource": "unknown",
+      "membership": "current"
+    }
+  ],
+  "messages": [
+    {
+      "sourceMessageId": "m-1",
+      "senderKey": null,
+      "sentAt": "2026-10-01T09:00:00.000Z",
+      "kind": "system",
+      "text": "Owner Example created this group"
+    },
+    {
+      "sourceMessageId": "m-2",
+      "senderKey": "p-ada",
+      "sentAt": "2026-10-01T09:05:00.000Z",
+      "kind": "text",
+      "text": "Hi all, Ada here. I run a soil-health lab. Looking for a co-founder with field experience."
+    },
+    {
+      "sourceMessageId": "m-3",
+      "senderKey": "p-bo",
+      "sentAt": "2026-10-01T09:10:00.000Z",
+      "kind": "text",
+      "text": "Welcome! My friend Cy is hunting for compost suppliers in Oakland.",
+      "replyToSourceMessageId": "m-2"
+    },
+    {
+      "sourceMessageId": "m-4",
+      "senderKey": "p-unknown",
+      "sentAt": "2026-10-02T10:00:00.000Z",
+      "kind": "media",
+      "mediaType": "image"
+    },
+    {
+      "sourceMessageId": "m-5",
+      "senderKey": "p-twin",
+      "sentAt": "2026-10-03T11:00:00.000Z",
+      "kind": "text",
+      "text": "Same name, different person."
+    },
+    {
+      "sourceMessageId": "m-6",
+      "senderKey": "p-owner",
+      "sentAt": "2026-10-04T08:00:00.000Z",
+      "kind": "text",
+      "text": "Ada, happy to intro you to two people."
+    }
+  ],
+  "asks": [
+    {
+      "askKey": "ask-ada-cofounder",
+      "subjectKey": "p-ada",
+      "reporterKey": "p-ada",
+      "text": "Looking for a co-founder with field experience",
+      "sourceMessageIds": [
+        "m-2"
+      ],
+      "sourceStatus": "open"
+    },
+    {
+      "askKey": "ask-cy-compost",
+      "subjectKey": null,
+      "reporterKey": "p-bo",
+      "text": "Looking for compost suppliers in Oakland",
+      "sourceMessageIds": [
+        "m-3"
+      ],
+      "sourceStatus": "needs_review",
+      "subjectLabel": "Cy"
+    }
+  ]
+}

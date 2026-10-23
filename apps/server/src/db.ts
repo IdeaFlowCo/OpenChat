@@ -1,4 +1,5 @@
 import neo4j, { Driver } from 'neo4j-driver';
+import { ensureImportedChatSchema } from './services/importedChats.js';
 
 let driver: Driver | null = null;
 
@@ -145,6 +146,9 @@ export async function initDatabase(): Promise<void> {
     await session.run(`CREATE INDEX context_requests_recipient IF NOT EXISTS FOR (r:ContextAgentRequest) ON (r.agentKeyId, r.ownerUserId)`);
     await session.run(`CREATE INDEX context_requests_source IF NOT EXISTS FOR (r:ContextAgentRequest) ON (r.postId, r.sourceRevision, r.agentKeyId)`);
     await session.run(`CREATE INDEX context_requests_budget IF NOT EXISTS FOR (r:ContextAgentRequest) ON (r.requesterId, r.createdAt)`);
+
+    // Imported chat mirrors (OpenChat-061g) keep their own labels and keys.
+    await ensureImportedChatSchema(session);
 
     console.log('Database constraints and indexes initialized');
   } finally {

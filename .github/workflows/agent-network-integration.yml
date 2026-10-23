@@ -71,3 +71,5 @@ jobs:
           apps/server/test/privateGraph.people.integration.test.ts
           apps/server/test/privateGraph.provenance.integration.test.ts
           apps/server/test/privateNoteReview.integration.test.ts
+          apps/server/test/importedChats.integration.test.ts
+          apps/server/test/importedChatAccount.integration.test.ts

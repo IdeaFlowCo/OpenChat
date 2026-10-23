@@ -34,6 +34,7 @@ import { AppIcon } from '../components/AppIcon';
 import { Chip, ListRow } from '../components/ui';
 import { formatListTime, onlinePresence } from '../utils/listTime';
 import { AgentOverlayButton } from '../components/AgentOverlayButton';
+import { ImportedChatsLink } from '../components/ImportedChatsLink';
 import { HeaderBarButton } from '../components/HeaderBarButton';
 import { ConnectionStatusLine } from '../components/ConnectionStatusLine';
 import { StoriesStrip } from '../components/StoriesStrip';
@@ -287,6 +288,7 @@ export function ConversationsScreen() {
               style={[styles.peopleRow, { borderBottomColor: c.divider }]}
             />
           )}
+          {!isUnlinkedEmbed() && <ImportedChatsLink />}
           <StoriesStrip
             onCreate={() => navigation.navigate('StoryComposer')}
             onOpenStory={(story) => navigation.navigate('StoryViewer', { story })}

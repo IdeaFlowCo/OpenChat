@@ -999,6 +999,18 @@ export interface PrivateThing { id: string; kind: PrivateThingKind; name: string
 export interface PrivateThingDetail extends PrivateThing { notes: PrivateNote[]; links: PrivateLink[] }
 export interface CatchUpPerson { userId: string; name: string; avatarUrl: string | null; important: boolean; nextDueAt: string; lastContactAt: string | null }
 export type PrivateLinkTarget = { kind: 'user'; id: string } | { kind: PrivateThingKind; id?: string; name?: string };
+// Imported chat mirrors (OpenChat-061g): the owner's private, read-only copies of chats from other networks.
+export interface ImportedCoverage { asOf: string | null; method: string | null; earliestMessageAt: string | null; latestMessageAt: string | null; complete: boolean; note: string | null; sourceRowCounts?: { total: number; text: number | null; nonText: number | null } | null; lastImportAt: string | null; importCount: number }
+export interface ImportedChatSummary { id: string; network: string; chatType: 'group' | 'direct'; title: string; coverage: ImportedCoverage; counts: { messages: number; participants: number; openAsks: number } }
+export interface ImportedParticipantRef { participantId: string; label: string; displayName: string | null; isOwner: boolean }
+export interface ImportedPerson extends ImportedParticipantRef { nameSource: 'contact' | 'push_name' | 'profile' | 'self_stated' | 'owner' | 'unknown'; membership?: 'current' | 'former' | 'unknown'; messageCount: number; firstMessageAt: string | null; lastMessageAt: string | null; factCount: number; askCount: number }
+export interface ImportedMessage { id: string; sourceMessageId: string; sentAt: string; kind: 'text' | 'media' | 'system' | 'deleted'; text: string | null; mediaType: string | null; edited: boolean; editedAt: string | null; originalText: string | null; deletedAtSource: string | null; replyToSourceMessageId: string | null; sender: ImportedParticipantRef | null }
+export interface ImportedSourceExcerpt { sourceMessageId: string; sentAt: string | null; sender: ImportedParticipantRef | null; text: string | null; available: boolean }
+export type ImportedAskStatus = 'open' | 'resolved' | 'withdrawn' | 'needs_review' | 'unknown';
+export interface ImportedAsk { id: string; text: string; subject: ImportedParticipantRef | null; subjectLabel: string | null; reporter: ImportedParticipantRef | null; sourceStatus: ImportedAskStatus; ownerStatus: Exclude<ImportedAskStatus, 'unknown'> | null; status: ImportedAskStatus; stale: boolean; sources: ImportedSourceExcerpt[]; statusSources: ImportedSourceExcerpt[]; updatedAt: string }
+export interface ImportedFact { id: string; text: string; stale: boolean; sources: ImportedSourceExcerpt[] }
+export interface ImportedPersonProfile { chat: { id: string; title: string; network: string; coverage: ImportedCoverage }; person: ImportedPerson; facts: ImportedFact[]; asksAbout: ImportedAsk[]; asksReported: ImportedAsk[]; recentMessages: ImportedMessage[]; nameSources?: ImportedSourceExcerpt[] }
+const importedChatPath = (chatId: string) => `/api/imported-chats/${encodeURIComponent(chatId)}`;
 const privateSubjectPath = (subject: PrivateSubject) => `/api/private/${subject.kind === 'user' ? 'people' : 'things'}/${encodeURIComponent(subject.id)}`;
 
 export interface AddMeCardSettings {
@@ -1673,6 +1685,17 @@ export const api = {
     request<PrivateThing>('/api/private/things', { method: 'POST', body: JSON.stringify({ kind, name }) }),
   getPrivateThing: (thingId: string) => request<PrivateThingDetail>(`/api/private/things/${encodeURIComponent(thingId)}`),
   listCatchUp: () => request<{ due: CatchUpPerson[] }>('/api/private/due'),
+
+  // Imported chats — read-only; nothing here sends, invites or notifies anyone.
+  listImportedChats: () => request<{ chats: ImportedChatSummary[] }>('/api/imported-chats'),
+  getImportedChat: (chatId: string) => request<ImportedChatSummary>(importedChatPath(chatId)),
+  listImportedMessages: (chatId: string, before?: string | null, limit = 100) =>
+    request<{ messages: ImportedMessage[]; nextCursor: string | null }>(`${importedChatPath(chatId)}/messages?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`),
+  listImportedPeople: (chatId: string) => request<{ people: ImportedPerson[] }>(`${importedChatPath(chatId)}/people`),
+  getImportedPerson: (chatId: string, participantId: string) => request<ImportedPersonProfile>(`${importedChatPath(chatId)}/people/${encodeURIComponent(participantId)}`),
+  listImportedAsks: (chatId: string) => request<{ asks: ImportedAsk[] }>(`${importedChatPath(chatId)}/asks`),
+  setImportedAskStatus: (chatId: string, askId: string, ownerStatus: Exclude<ImportedAskStatus, 'unknown'> | null) =>
+    request<{ ask: ImportedAsk }>(`${importedChatPath(chatId)}/asks/${encodeURIComponent(askId)}`, { method: 'PATCH', body: JSON.stringify({ ownerStatus }) }),
 
   /**
    * Accept/join via invite token. Idempotent if already a member.
