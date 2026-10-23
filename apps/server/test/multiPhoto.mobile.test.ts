@@ -43,6 +43,7 @@ vi.mock('react-native', async () => {
   };
 });
 vi.mock('expo-image-picker', () => ({ ...picker, UIImagePickerPreferredAssetRepresentationMode: { Compatible: 'compatible' } }));
+vi.mock('expo', () => ({ requireOptionalNativeModule: () => ({}) }));
 vi.mock('expo-file-system/legacy', () => ({
   uploadAsync: fsMock.uploadAsync, getInfoAsync: fsMock.getInfoAsync, FileSystemUploadType: { BINARY_CONTENT: 0 },
   cacheDirectory: 'file:///cache/', downloadAsync: fsMock.downloadAsync,

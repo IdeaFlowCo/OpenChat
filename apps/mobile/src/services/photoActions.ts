@@ -12,6 +12,7 @@
  */
 import { Platform, Share } from 'react-native';
 import { cacheDirectory, downloadAsync } from 'expo-file-system/legacy';
+import { hasNativeModule } from '../utils/optionalNativeModule';
 
 export type PhotoActionResult = 'shared' | 'downloaded' | 'opened' | 'dismissed';
 
@@ -39,10 +40,12 @@ type MediaLibraryModule = typeof import('expo-media-library');
 type ManipulatorModule = typeof import('expo-image-manipulator');
 
 // Loaded on first use, not at startup, so an older binary without these
-// native modules still runs this JS (the import rejects and we fall back).
+// native modules still runs this JS. hasNativeModule must pass before the
+// import: a missing module throws fatally while loading, not as a rejection.
 let mediaLibrary: Promise<MediaLibraryModule | null> | undefined;
 function loadMediaLibrary(): Promise<MediaLibraryModule | null> {
   if (Platform.OS === 'web') return Promise.resolve(null);
+  if (!hasNativeModule('ExpoMediaLibrary')) return Promise.resolve(null);
   mediaLibrary ??= import('expo-media-library').then(
     mod => (typeof mod.saveToLibraryAsync === 'function' ? mod : null),
     () => null,
@@ -52,6 +55,7 @@ function loadMediaLibrary(): Promise<MediaLibraryModule | null> {
 
 let manipulator: Promise<ManipulatorModule | null> | undefined;
 function loadManipulator(): Promise<ManipulatorModule | null> {
+  if (Platform.OS !== 'web' && !hasNativeModule('ExpoImageManipulator')) return Promise.resolve(null);
   manipulator ??= import('expo-image-manipulator').then(
     mod => (typeof mod.manipulateAsync === 'function' ? mod : null),
     () => null,

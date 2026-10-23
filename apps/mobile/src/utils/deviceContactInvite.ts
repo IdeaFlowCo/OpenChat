@@ -1,10 +1,13 @@
 import { Platform } from 'react-native';
+import { hasNativeModule } from './optionalNativeModule';
 
 export type ContactAccess = 'unavailable' | 'not_requested' | 'all' | 'limited' | 'denied';
 
-// Older binaries do not contain ExpoContacts. Import at the action boundary so
-// a missing native module cannot crash the app before the fallback can render.
+// Older binaries do not contain ExpoContacts. Import at the action boundary,
+// and only once the native module is known to exist: a missing module throws
+// fatally while loading, before this catch can run.
 async function loadContacts() {
+  if (!hasNativeModule('ExpoContacts')) return null;
   try { return await import('expo-contacts'); }
   catch { return null; }
 }
