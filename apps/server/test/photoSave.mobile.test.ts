@@ -32,6 +32,7 @@ vi.mock('react-native', async () => {
     View: host('View'),
   };
 });
+vi.mock('expo', () => ({ requireOptionalNativeModule: () => ({}) }));
 vi.mock('expo-file-system/legacy', () => ({ cacheDirectory: 'file:///cache/', downloadAsync: m.download }));
 vi.mock('expo-media-library', () => ({ requestPermissionsAsync: m.perm, saveToLibraryAsync: m.save }));
 vi.mock('expo-image-manipulator', () => ({ manipulateAsync: m.rotate, SaveFormat: { JPEG: 'jpeg' } }));
