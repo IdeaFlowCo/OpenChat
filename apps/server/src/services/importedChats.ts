@@ -307,7 +307,9 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
   const knownParticipant = (key: string) => payloadParticipantKeys.has(key) || storedParticipants.has(key);
   const knownMessage = (id: string) => payloadMessageIds.has(id) || storedMessages.has(id);
   const payloadSenders = new Map(payload.messages.map(m => [m.sourceMessageId, m.senderKey]));
-  const senderOf = (id: string) => payloadSenders.has(id) ? payloadSenders.get(id) ?? null : storedMessages.get(id)?.senderKey ?? null;
+  // The effective sender: a stored message's sender is immutable (a conflicting payload sender is skipped below),
+  // so attribution checks use it; only new messages use the payload's sender.
+  const senderOf = (id: string) => storedMessages.has(id) ? storedMessages.get(id)!.senderKey ?? null : payloadSenders.get(id) ?? null;
   payload.messages.forEach((m, i) => { if (m.senderKey && !knownParticipant(m.senderKey)) issues.push({ path: `messages[${i}].senderKey`, message: `names no participant ${JSON.stringify(m.senderKey)}` }); });
   payload.asks.forEach((a, i) => {
     if (a.subjectKey && !knownParticipant(a.subjectKey)) issues.push({ path: `asks[${i}].subjectKey`, message: `names no participant ${JSON.stringify(a.subjectKey)}` });
@@ -318,7 +320,13 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
       issues.push({ path: `asks[${i}].reporterKey`, message: 'must be the sender of at least one of the ask\'s source messages' });
     }
   });
-  payload.participants.forEach((p, i) => p.nameSourceMessageIds.forEach(id => { if (!knownMessage(id)) issues.push({ path: `participants[${i}].nameSourceMessageIds`, message: `cites missing source message ${JSON.stringify(id)}` }); }));
+  payload.participants.forEach((p, i) => {
+    p.nameSourceMessageIds.forEach(id => { if (!knownMessage(id)) issues.push({ path: `participants[${i}].nameSourceMessageIds`, message: `cites missing source message ${JSON.stringify(id)}` }); });
+    // A self-stated name must be cited from that participant's own message.
+    if (p.displayName && p.nameSource === 'self_stated' && p.nameSourceMessageIds.every(knownMessage) && !p.nameSourceMessageIds.some(id => senderOf(id) === p.sourceKey)) {
+      issues.push({ path: `participants[${i}].nameSourceMessageIds`, message: 'must include a message sent by this participant for a self_stated name' });
+    }
+  });
   payload.participants.forEach((p, i) => p.profileFacts.forEach((f, j) => f.sourceMessageIds.forEach(id => { if (!knownMessage(id)) issues.push({ path: `participants[${i}].profileFacts[${j}]`, message: `cites missing source message ${JSON.stringify(id)}` }); })));
   if (issues.length) fail(400, 'The import was not saved. Fix these problems and send it again.', { errors: issues.slice(0, 200) });
 

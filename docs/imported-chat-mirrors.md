@@ -123,6 +123,10 @@ written.
 - Each ask's `reporterKey` is the sender of at least one of its
   `sourceMessageIds` (asks on someone else's behalf name that person as the
   subject; the reporter is still whoever wrote the message).
+- A `self_stated` name cites at least one message sent by that participant.
+- Attribution checks use the effective sender: the stored (immutable) sender
+  for a message already imported, even if this payload disagrees, otherwise
+  the payload's sender.
 - At most one participant has `isOwner: true`.
 - Keys are 1–200 characters. Duplicate keys within one request are rejected.
 

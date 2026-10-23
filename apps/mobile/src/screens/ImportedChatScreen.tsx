@@ -44,8 +44,9 @@ export function ImportedChatScreen() {
       <ProvenanceStrip network={chat.network} coverage={chat.coverage} />
       <View style={[styles.tabs, { borderBottomColor: r.line }]} accessibilityRole="tablist">
         {TABS.map(item => {
-          const count = item.id === 'people' ? chat.counts.participants : item.id === 'asks' ? chat.counts.openAsks : null;
-          return <Chip key={item.id} label={count ? `${item.label} ${count}` : item.label} selected={tab === item.id} accessibilityLabel={item.label} onPress={() => setTab(item.id)} />;
+          // People counts everyone; Asks says which asks it counts (only open ones, not those needing review or closed).
+          const suffix = item.id === 'people' && chat.counts.participants ? ` ${chat.counts.participants}` : item.id === 'asks' && chat.counts.openAsks ? ` · ${chat.counts.openAsks} open` : '';
+          return <Chip key={item.id} label={`${item.label}${suffix}`} selected={tab === item.id} accessibilityLabel={item.label} onPress={() => setTab(item.id)} />;
         })}
       </View>
       {tab === 'conversation' ? <ConversationTab chatId={chat.id} network={chat.network} onOpenPerson={openPerson} /> : null}

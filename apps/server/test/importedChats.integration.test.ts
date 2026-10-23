@@ -271,6 +271,26 @@ integration('imported chat mirrors — real Neo4j + HTTP', { timeout: 60_000 }, 
     expect(res.body.counts.asks.created).toBe(1);
   });
 
+  it('checks attribution against the stored sender, never a conflicting incoming one', async () => {
+    // m-3 was first imported from p-bo. A payload claiming p-ada sent it is a conflict and is skipped,
+    // so it cannot make p-ada the reporter of an ask citing m-3.
+    const body = payload();
+    body.messages[2].senderKey = 'p-ada';
+    body.asks[1] = { ...body.asks[1], reporterKey: 'p-ada' };
+    const res = await as(token(alice)).put('/import?dryRun=1', body);
+    expect(res.status).toBe(400);
+    expect(res.body.errors).toEqual([{ path: 'asks[1].reporterKey', message: "must be the sender of at least one of the ask's source messages" }]);
+    // The same rule for a self-stated name: it must cite the participant's own stored message.
+    const name = payload();
+    name.messages[2].senderKey = 'p-ada';
+    name.participants[1].nameSourceMessageIds = ['m-3'];
+    expect((await as(token(alice)).put('/import?dryRun=1', name)).body.errors).toEqual([{ path: 'participants[1].nameSourceMessageIds', message: 'must include a message sent by this participant for a self_stated name' }]);
+    // Without the conflict, the stored sender still decides: m-3 is Bo's, not Ada's.
+    const plain = payload();
+    plain.participants[1].nameSourceMessageIds = ['m-3'];
+    expect((await as(token(alice)).put('/import?dryRun=1', plain)).status).toBe(400);
+  });
+
   it('rejects a snapshot older than one already applied, and writes nothing', async () => {
     const before = await importedNodes();
     const older = payload();

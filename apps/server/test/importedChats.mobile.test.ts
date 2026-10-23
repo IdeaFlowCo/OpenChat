@@ -120,6 +120,8 @@ describe('imported chat screen', () => {
 
   it('attributes asks to subject and reporter and saves the owner’s status', async () => {
     await render(React.createElement(ImportedChatScreen));
+    expect(texts()).toContain('Asks · 1 open');
+    expect(texts()).toContain('People 2');
     await act(async () => button('Asks').props.onPress());
     const shown = texts();
     expect(shown).toContain('Cy · not in this chat');
