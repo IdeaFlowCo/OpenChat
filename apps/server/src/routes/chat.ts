@@ -1079,11 +1079,11 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     const messageContent = hasContent ? (req.connectorDelegation ? content as string : (content as string).trim()) : '';
     // attachmentsJson stored as a JSON string in Neo4j
     const attachmentsJson = hasAttachments ? JSON.stringify(attachments) : null;
-    // lastMessagePreview for image-only messages
+    // lastMessagePreview for attachment-only messages (photo / voice note / file)
     const hasAudio = hasAttachments && (attachments as { mimeType?: string }[]).some(
       (a) => typeof a?.mimeType === 'string' && a.mimeType.startsWith('audio/')
     );
-    const preview = messageContent || (hasAudio ? 'Voice note' : hasAttachments ? photoPreview((attachments as unknown[]).length) : '');
+    const preview = messageContent || (hasAttachments ? attachmentsPreview(attachments as { mimeType?: unknown; filename?: unknown }[]) : '');
 
     if (req.connectorDelegation) {
       const existing = await session.run('MATCH (m:Message {id: $id}) RETURN m { .* } AS message', { id: messageId });
@@ -1874,9 +1874,9 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
     const messageId = nanoid();
     const now = new Date().toISOString();
     const content = (sourceMsg.content as string) || '';
-    let attachmentCount = 0;
-    try { attachmentCount = attachmentsJson ? (JSON.parse(attachmentsJson) as unknown[]).length : 0; } catch { attachmentCount = 1; }
-    const preview = content || (attachmentsJson ? photoPreview(attachmentCount) : '');
+    let forwardedAttachments: { mimeType?: unknown; filename?: unknown }[] = [];
+    try { forwardedAttachments = attachmentsJson ? (JSON.parse(attachmentsJson) as typeof forwardedAttachments) : []; } catch { forwardedAttachments = [{}]; }
+    const preview = content || (attachmentsJson ? attachmentsPreview(forwardedAttachments) : '');
 
     // 5. Create the new message in the target conversation.
     const result = await session.run(`
@@ -2448,6 +2448,29 @@ function photoPreview(count: number): string {
   return count > 1 ? `${count} photos` : 'Photo';
 }
 
+/**
+ * Conversation-list preview for a caption-less attachment message, covering
+ * voice notes, photos, and general files (OpenChat-85q.1). Mirrors the
+ * mime-type based branching the client uses to pick a render for each
+ * attachment, so the preview text matches what the bubble actually shows.
+ */
+function attachmentsPreview(attachments: { mimeType?: unknown; filename?: unknown }[]): string {
+  const isAudio = (a: { mimeType?: unknown }) => typeof a.mimeType === 'string' && a.mimeType.startsWith('audio/');
+  const isImage = (a: { mimeType?: unknown }) => typeof a.mimeType === 'string' && a.mimeType.startsWith('image/');
+  if (attachments.some(isAudio)) return 'Voice note';
+  const nonImageFiles = attachments.filter((a) => !isImage(a));
+  if (nonImageFiles.length > 0) {
+    if (attachments.length === 1) {
+      const name = typeof nonImageFiles[0]?.filename === 'string' && nonImageFiles[0].filename
+        ? nonImageFiles[0].filename as string
+        : 'File';
+      return `File: ${name}`;
+    }
+    return `${attachments.length} files`;
+  }
+  return photoPreview(attachments.length);
+}
+
 // Image MIME types allowed for upload (OpenChat-6bg).
 const IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
@@ -2468,10 +2491,34 @@ const AUDIO_MIME_TYPES = new Set([
   'audio/webm',
 ]);
 
-const ALLOWED_MIME_TYPES = new Set([...IMAGE_MIME_TYPES, ...AUDIO_MIME_TYPES]);
+// Document/file MIME types allowed for general file attachments (OpenChat-85q.1).
+// This is an allowlist, not a blocklist, so executables/scripts (.exe, .sh,
+// .bat, .app, etc.) are excluded by construction — don't add them here.
+const DOCUMENT_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/msword', // .doc
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/vnd.ms-excel', // .xls
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+  'application/vnd.ms-powerpoint', // .ppt
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+  'text/csv',
+  'text/plain',
+  'application/rtf',
+  'application/zip',
+  'application/x-zip-compressed',
+]);
+
+const ALLOWED_MIME_TYPES = new Set([...IMAGE_MIME_TYPES, ...AUDIO_MIME_TYPES, ...DOCUMENT_MIME_TYPES]);
 
 const MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;  // 20 MB for images
 const MAX_AUDIO_SIZE_BYTES = 10 * 1024 * 1024;  // 10 MB for audio
+// Documents (PDF, docx, etc.) are typically larger than photos/voice notes but
+// we still cap them well below the spec's suggested 100MB ceiling, which was
+// sized for the (out-of-scope-here) video case. 50MB comfortably covers large
+// PDFs/decks/archives without inviting multi-hundred-MB uploads through the
+// chat composer.
+const MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB for documents/files
 
 // POST /api/chat/attachments/presign
 // Body: { filename: string, mimeType: string, sizeBytes: number }
@@ -2502,7 +2549,9 @@ router.post('/attachments/presign', requireAuth, async (req: Request, res: Respo
 
   const maxSize = AUDIO_MIME_TYPES.has(mimeType)
     ? MAX_AUDIO_SIZE_BYTES
-    : MAX_IMAGE_SIZE_BYTES;
+    : DOCUMENT_MIME_TYPES.has(mimeType)
+      ? MAX_DOCUMENT_SIZE_BYTES
+      : MAX_IMAGE_SIZE_BYTES;
 
   if (typeof sizeBytes !== 'number' || sizeBytes <= 0 || sizeBytes > maxSize) {
     res.status(400).json({ error: `sizeBytes must be between 1 and ${maxSize}` });

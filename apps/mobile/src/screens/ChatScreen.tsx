@@ -52,11 +52,13 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import type { NavProp, RouteProps } from '../navigation/types';
 import { hapticSend, hapticReceive } from '../services/haptics';
 import { colorForUserId } from '../utils/colorForUserId';
-import { MAX_IMAGES_PER_MESSAGE, checkPhotosForSend, filesToAssets, pickImages, releaseAsset, takePhoto, PickedAsset } from '../services/attachments';
+import { MAX_IMAGES_PER_MESSAGE, checkPhotosForSend, filesToAssets, pickImages, releaseAsset, takePhoto, PickedAsset, pickDocumentWeb, uploadFile, FileUploadError } from '../services/attachments';
 import { PhotoGrid } from '../components/PhotoGrid';
 import { PhotoViewer, PhotoViewerState } from '../components/PhotoViewer';
 import { PhotoSaveError, canRotateFiles, describeSaveResult, rotateImageFile, savePhotos } from '../services/photoActions';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
+import { FileAttachmentCard } from '../components/FileAttachmentCard';
+import { formatFileSize } from '../utils/fileSize';
 import { MentionAutocomplete, MentionCandidate } from '../components/MentionAutocomplete';
 import { HashtagAutocomplete } from '../components/HashtagAutocomplete';
 import { TransformButton } from '../components/TransformButton';
@@ -408,6 +410,11 @@ export function ChatScreen({
   // composer); several photos send as one message (OpenChat-wpmb).
   const [pendingAssets, setPendingAssets] = useState<PickedAsset[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  // pendingFile: a single general (non-image) file, picked but not yet
+  // uploaded — web only for now (OpenChat-85q.1; no document-picker native
+  // module). Mutually exclusive with pendingAssets, mirroring the frozen
+  // apps/web composer this replaces.
+  const [pendingFile, setPendingFile] = useState<{ file: File; name: string; sizeBytes: number } | null>(null);
   // fullscreen viewer: every photo of the tapped message, opened at one
   const [photoViewer, setPhotoViewer] = useState<PhotoViewerState | null>(null);
   // Rotating unsent photos needs the image-manipulator native module, which
@@ -459,7 +466,7 @@ export function ChatScreen({
 
   // Long-press › Save photo(s) (OpenChat-zwt4).
   const handleSavePhotos = useCallback(async (message: Message) => {
-    const urls = (message.attachments ?? []).filter(a => a.type !== 'audio' && /^https?:/.test(a.url)).map(a => ({ url: a.url }));
+    const urls = (message.attachments ?? []).filter(a => a.type !== 'audio' && a.type !== 'file' && /^https?:/.test(a.url)).map(a => ({ url: a.url }));
     try {
       const text = describeSaveResult(await savePhotos(urls));
       if (text) showToast(text);
@@ -992,18 +999,28 @@ export function ChatScreen({
 
   // ── Attachment pick handler (OpenChat-6bg) ────────────────────────────────
   const handlePickAttachment = useCallback(async () => {
-    if (composerBusy || uploadingAttachment) return;
+    if (composerBusy || uploadingAttachment || pendingFile) return;
     const room = MAX_IMAGES_PER_MESSAGE - pendingAssets.length;
     if (room <= 0) return;
     addPendingAssets(await pickImages(room));
-  }, [composerBusy, uploadingAttachment, pendingAssets.length, addPendingAssets]);
+  }, [composerBusy, uploadingAttachment, pendingFile, pendingAssets.length, addPendingAssets]);
 
   // ── Camera (OpenChat-p4xo) ────────────────────────────────────────────────
   const handleTakePhoto = useCallback(async () => {
-    if (composerBusy || uploadingAttachment || pendingAssets.length >= MAX_IMAGES_PER_MESSAGE) return;
+    if (composerBusy || uploadingAttachment || pendingFile || pendingAssets.length >= MAX_IMAGES_PER_MESSAGE) return;
     const photo = await takePhoto();
     if (photo) addPendingAssets([photo]);
-  }, [composerBusy, uploadingAttachment, pendingAssets.length, addPendingAssets]);
+  }, [composerBusy, uploadingAttachment, pendingFile, pendingAssets.length, addPendingAssets]);
+
+  // ── Document/file pick handler (OpenChat-85q.1) — web only ───────────────
+  const handlePickFile = useCallback(async () => {
+    if (composerBusy || uploadingAttachment || pendingAssets.length > 0) return;
+    const file = await pickDocumentWeb();
+    if (!file) return;
+    setPendingFile({ file, name: file.name, sizeBytes: file.size });
+  }, [composerBusy, uploadingAttachment, pendingAssets.length]);
+
+  const clearPendingFile = useCallback(() => setPendingFile(null), []);
 
   const removePendingAsset = useCallback((index: number) => {
     setPendingAssets(prev => {
@@ -1101,7 +1118,7 @@ export function ChatScreen({
 
   const handleSend = async () => {
     const trimmed = text.trim();
-    const hasAttachment = pendingAssets.length > 0;
+    const hasAttachment = pendingAssets.length > 0 || !!pendingFile;
     if ((!trimmed && !hasAttachment) || composerBusy || sendInFlightRef.current) return;
     if (!isConnected && editingMessage) {
       Alert.alert('Connection needed', 'Edits need a connection. New messages and photos can be sent now; they will wait for reconnection.');
@@ -1121,6 +1138,47 @@ export function ChatScreen({
         console.warn('[ChatScreen] edit failed:', err);
         Alert.alert('Error', 'Could not save your edit. Please try again.');
       } finally {
+        sendInFlightRef.current = false;
+        setSending(false);
+      }
+      return;
+    }
+
+    // General file attachment (OpenChat-85q.1) — web only, isolated from the
+    // photo pipeline below (no offline outbox; upload-then-send, same shape
+    // as voice notes in RecordingContext.tsx).
+    if (pendingFile) {
+      const fileToSend = pendingFile;
+      const fileReply = replyTo;
+      const fileReplyToId = replyTo?.messageId;
+      setText('');
+      setReplyTo(null);
+      setPendingFile(null);
+      setMentionQuery(null);
+      mentionAtOffset.current = -1;
+      setActiveHashtag(null);
+      setHashtagSuggestions([]);
+      setHashtagDismissed(true);
+      setOriginalText(null);
+      setTransformLabel('');
+      if (typingTimer.current) clearTimeout(typingTimer.current);
+      reportTyping(conversationId, false);
+      setUploadingAttachment(true);
+      try {
+        const attachment = await uploadFile(fileToSend.file);
+        await sendMessage(trimmed, fileReplyToId, [attachment]);
+        invalidateHashtagSuggestions(conversationId);
+        hapticSend();
+      } catch (err) {
+        console.warn('[ChatScreen] file send failed:', err);
+        logError('file message send failed', err, { conversationId });
+        const reason = err instanceof FileUploadError ? err.message : 'Could not upload the file. Please try again.';
+        setPendingFile(fileToSend);
+        if (trimmed) setText(prev => prev || trimmed);
+        if (fileReply) setReplyTo(prev => prev ?? fileReply);
+        Alert.alert("This file can't be sent", reason);
+      } finally {
+        setUploadingAttachment(false);
         sendInFlightRef.current = false;
         setSending(false);
       }
@@ -1573,7 +1631,7 @@ export function ChatScreen({
               {getUserDisplayName(m.sender)}
             </Text>
           )}
-          {/* Attachments: audio (OpenChat-xxc), then photos (OpenChat-6bg, OpenChat-wpmb) */}
+          {/* Attachments: audio (OpenChat-xxc), file (OpenChat-85q.1), then photos (OpenChat-6bg, OpenChat-wpmb) */}
           {m.attachments?.map((att, i) => {
             // ── Audio attachment ────────────────────────────────────
             // Voice notes are first-class text (2026-09-02): the
@@ -1604,10 +1662,14 @@ export function ChatScreen({
                 </View>
               );
             }
+            // ── General file attachment (OpenChat-85q.1) ───────────
+            if (att.type === 'file') {
+              return <FileAttachmentCard key={i} attachment={att} isOwn={isOwn} />;
+            }
             return null;
           })}
           {(() => {
-            const photos = (m.attachments ?? []).filter(att => att.type !== 'audio');
+            const photos = (m.attachments ?? []).filter(att => att.type !== 'audio' && att.type !== 'file');
             return photos.length > 0 && (
               <PhotoGrid
                 photos={photos}
@@ -1959,6 +2021,26 @@ export function ChatScreen({
         </View>
       )}
 
+      {/* Pending file preview (OpenChat-85q.1) */}
+      {pendingFile && (
+        <View style={[styles.attachmentPreviewBar, { backgroundColor: c.surface, borderColor: c.border, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 }]}>
+          <AppIcon name="file" color={c.textSecondary} size={20} />
+          <View style={{ flex: 1, marginLeft: 8, minWidth: 0 }}>
+            <Text style={{ color: c.textPrimary, ...type.label }} numberOfLines={1}>{pendingFile.name}</Text>
+            <Text style={{ color: c.textMetadata, ...type.caption }}>{formatFileSize(pendingFile.sizeBytes)}</Text>
+          </View>
+          <TouchableOpacity
+            onPress={clearPendingFile}
+            style={[styles.attachmentPreviewRemove, { backgroundColor: c.textPrimary }]}
+            hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Remove file"
+          >
+            <AppIcon name="x" color={c.background} size={12} />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* @-mention autocomplete dropdown — only shown in group chats (OpenChat-0jy) */}
       {isGroup && mentionQuery !== null && (
         <MentionAutocomplete
@@ -2067,8 +2149,8 @@ export function ChatScreen({
         {!editingMessage && !isRecording && (
           <TouchableOpacity
             onPress={handlePickAttachment}
-            disabled={composerBusy || uploadingAttachment}
-            style={[styles.attachBtn, { opacity: composerBusy || uploadingAttachment ? 0.4 : 1 }]}
+            disabled={composerBusy || uploadingAttachment || !!pendingFile}
+            style={[styles.attachBtn, { opacity: composerBusy || uploadingAttachment || !!pendingFile ? 0.4 : 1 }]}
             accessibilityLabel="Attach image"
           >
             <AppIcon name="attach" color={c.textSecondary} size={22} />
@@ -2084,6 +2166,20 @@ export function ChatScreen({
             accessibilityLabel="Take photo"
           >
             <AppIcon name="camera" color={c.textSecondary} size={22} />
+          </TouchableOpacity>
+        )}
+        {/* General file attach (OpenChat-85q.1) — web only; no document-picker
+            native module is installed, so iOS/Android file attach is a
+            tracked follow-up. */}
+        {!editingMessage && !isRecording && Platform.OS === 'web' && (
+          <TouchableOpacity
+            onPress={handlePickFile}
+            disabled={composerBusy || uploadingAttachment || pendingAssets.length > 0}
+            style={[styles.attachBtn, { opacity: composerBusy || uploadingAttachment ? 0.4 : 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Attach file"
+          >
+            <AppIcon name="file" color={c.textSecondary} size={22} />
           </TouchableOpacity>
         )}
         <TextInput
@@ -2129,7 +2225,7 @@ export function ChatScreen({
           Hold to record; drag left > 80px to cancel.
           On web, always hidden (Platform.OS === 'web').
         */}
-        {!editingMessage && !text.trim() && !pendingAssets.length && Platform.OS !== 'web'
+        {!editingMessage && !text.trim() && !pendingAssets.length && !pendingFile && Platform.OS !== 'web'
           && (!isAnyRecording || isRecording) && (
           <View
             onTouchStart={(e) => { void handleMicPressIn(e.nativeEvent.pageX); }}
@@ -2158,11 +2254,11 @@ export function ChatScreen({
           </View>
         )}
         {/* Send button: shown when there is text or a pending asset */}
-        {(!!text.trim() || pendingAssets.length > 0 || editingMessage) && (
+        {(!!text.trim() || pendingAssets.length > 0 || !!pendingFile || editingMessage) && (
           <TouchableOpacity
-            style={[styles.send, { backgroundColor: c.primary, opacity: (!text.trim() && !pendingAssets.length) || composerBusy ? 0.5 : 1 }]}
+            style={[styles.send, { backgroundColor: c.primary, opacity: (!text.trim() && !pendingAssets.length && !pendingFile) || composerBusy ? 0.5 : 1 }]}
             onPress={handleSend}
-            disabled={(!text.trim() && !pendingAssets.length) || composerBusy}
+            disabled={(!text.trim() && !pendingAssets.length && !pendingFile) || composerBusy}
             accessibilityLabel="Send message"
           >
             {(sending && uploadingAttachment) ? (

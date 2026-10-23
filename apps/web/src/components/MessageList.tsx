@@ -6,6 +6,7 @@ import { LinkPreviewCard } from './LinkPreviewCard';
 import { MessageContent } from './MessageContent';
 import { VoiceMessageBubble } from './VoiceMessageBubble';
 import { AgentNetworkCard } from './AgentNetworkCard';
+import { FileAttachmentCard } from './FileAttachmentCard';
 import { userDisplayName } from '../utils/userDisplay';
 import { api, type Message } from '../api';
 
@@ -431,9 +432,10 @@ export function MessageList() {
                     </div>
                   )}
 
-                  {/* Attachments: voice (OpenChat-xxc) or image (OpenChat-6bg) */}
+                  {/* Attachments: voice (OpenChat-xxc), image (OpenChat-6bg), or file (OpenChat-85q.1) */}
                   {!isDeleted && message.attachments?.map((att, i) => {
                     const isAudio = att.type === 'audio' || att.mimeType?.startsWith('audio/');
+                    const isImage = !isAudio && (att.mimeType?.startsWith('image/') ?? false);
                     if (isAudio) {
                       // Transcript caption (openchat-4jn): muted/italic text
                       // under the bubble once the server transcribes it. Show
@@ -459,22 +461,26 @@ export function MessageList() {
                         </div>
                       );
                     }
-                    return (
-                      <a
-                        key={i}
-                        href={att.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block mb-1"
-                      >
-                        <img
-                          src={att.url}
-                          alt="Attachment"
-                          className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity"
-                          style={att.width && att.height ? { aspectRatio: `${att.width}/${att.height}` } : undefined}
-                        />
-                      </a>
-                    );
+                    if (isImage) {
+                      return (
+                        <a
+                          key={i}
+                          href={att.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block mb-1"
+                        >
+                          <img
+                            src={att.url}
+                            alt="Attachment"
+                            className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                            style={att.width && att.height ? { aspectRatio: `${att.width}/${att.height}` } : undefined}
+                          />
+                        </a>
+                      );
+                    }
+                    // General file attachment (OpenChat-85q.1): mime icon + name + size + Download.
+                    return <FileAttachmentCard key={i} attachment={att} isOwn={isOwn} />;
                   })}
 
                   {isEditing ? (

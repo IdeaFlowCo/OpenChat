@@ -3,14 +3,37 @@ import toast from 'react-hot-toast';
 import { useChat } from '../contexts/ChatContext';
 import { Attachment, api as chatApi } from '../api';
 import { userDisplayName } from '../utils/userDisplay';
+import { formatFileSize } from '../utils/fileSize';
 import { MentionAutocomplete, MentionCandidate } from './MentionAutocomplete';
 
 // Match an in-progress @mention immediately before the cursor (bmp.8):
 // start-of-string or whitespace, then @, then the typed prefix (no spaces).
 const MENTION_RE = /(?:^|\s)@([^\s@]*)$/;
 
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+const IMAGE_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+// Document/file types (OpenChat-85q.1) — must match apps/server/src/routes/chat.ts
+// DOCUMENT_MIME_TYPES exactly, or the presign call will be rejected server-side.
+const DOCUMENT_MIME_TYPES = [
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/csv',
+  'text/plain',
+  'application/rtf',
+  'application/zip',
+  'application/x-zip-compressed',
+];
+const ALLOWED_MIME_TYPES = [...IMAGE_MIME_TYPES, ...DOCUMENT_MIME_TYPES];
+const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20 MB — must match server MAX_IMAGE_SIZE_BYTES
+const MAX_DOCUMENT_SIZE = 50 * 1024 * 1024; // 50 MB — must match server MAX_DOCUMENT_SIZE_BYTES
+
+function isImageMimeType(mimeType: string): boolean {
+  return IMAGE_MIME_TYPES.includes(mimeType);
+}
 
 export function MessageInput() {
   const [text, setText] = useState('');
@@ -99,16 +122,19 @@ export function MessageInput() {
     e.target.value = '';
 
     if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-      alert('Only images (JPEG, PNG, GIF, WEBP) are supported.');
+      alert('Unsupported file type. Images (JPEG, PNG, GIF, WEBP) and common documents (PDF, Word, Excel, PowerPoint, CSV, TXT, RTF, ZIP) are supported.');
       return;
     }
-    if (file.size > MAX_FILE_SIZE) {
-      alert('Image must be smaller than 20 MB.');
+    const isImage = isImageMimeType(file.type);
+    const maxSize = isImage ? MAX_IMAGE_SIZE : MAX_DOCUMENT_SIZE;
+    if (file.size > maxSize) {
+      alert(`File must be smaller than ${formatFileSize(maxSize)}.`);
       return;
     }
     setPendingFile(file);
-    const url = URL.createObjectURL(file);
-    setPendingPreview(url);
+    // Local blob preview (OpenChat-85q.1 spec): images get a thumbnail; other
+    // file types don't need a blob URL since the card renders by name/size.
+    setPendingPreview(isImage ? URL.createObjectURL(file) : null);
   };
 
   const clearPendingFile = () => {
@@ -289,7 +315,14 @@ export function MessageInput() {
             body: fileToUpload,
           });
           if (!putRes.ok) throw new Error(`Upload failed: ${putRes.status}`);
-          attachments = [{ url: getUrl, mimeType: fileToUpload.type }];
+          const isImage = isImageMimeType(fileToUpload.type);
+          attachments = [{
+            url: getUrl,
+            mimeType: fileToUpload.type,
+            filename: fileToUpload.name,
+            sizeBytes: fileToUpload.size,
+            ...(isImage ? {} : { type: 'file' as const }),
+          }];
         } finally {
           setUploading(false);
         }
@@ -424,12 +457,32 @@ export function MessageInput() {
         </div>
       )}
       {/* Pending image preview (OpenChat-6bg) */}
-      {pendingPreview && (
+      {pendingFile && pendingPreview && (
         <div className="flex items-center gap-2 mb-2 p-2 bg-gray-50 dark:bg-slate-800 rounded-lg">
           <img src={pendingPreview} alt="Attachment preview" className="w-12 h-12 rounded object-cover" />
           <span className="flex-1 text-sm text-gray-600 dark:text-slate-400 truncate">
-            {pendingFile?.name}
+            {pendingFile.name}
           </span>
+          <button
+            type="button"
+            onClick={clearPendingFile}
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 text-xl leading-none px-2"
+            aria-label="Remove attachment"
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {/* Pending file (non-image) preview card (OpenChat-85q.1) */}
+      {pendingFile && !pendingPreview && (
+        <div className="flex items-center gap-2 mb-2 p-2 bg-gray-50 dark:bg-slate-800 rounded-lg">
+          <span className="text-2xl" aria-hidden="true">
+            {pendingFile.type === 'application/pdf' ? '📄' : '📎'}
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm text-gray-700 dark:text-slate-300 truncate">{pendingFile.name}</div>
+            <div className="text-xs text-gray-400 dark:text-slate-500">{formatFileSize(pendingFile.size)}</div>
+          </div>
           <button
             type="button"
             onClick={clearPendingFile}
@@ -488,16 +541,16 @@ export function MessageInput() {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/jpeg,image/png,image/gif,image/webp"
+          accept={ALLOWED_MIME_TYPES.join(',')}
           className="hidden"
           onChange={handleFileChange}
         />
-        {/* Attach button (OpenChat-6bg) */}
+        {/* Attach button (OpenChat-6bg; files — OpenChat-85q.1) */}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          aria-label="Attach image"
+          aria-label="Attach image or file"
           className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-200 disabled:opacity-40 transition-colors"
         >
           <span className="text-xl">📎</span>

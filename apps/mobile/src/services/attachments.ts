@@ -441,3 +441,115 @@ export function releaseAsset(asset: PickedAsset): void {
     URL.revokeObjectURL(asset.uri);
   }
 }
+
+// ── General file attachments (OpenChat-85q.1) ──────────────────────────────
+//
+// Web-only for now: there is no document-picker native module installed
+// (expo-document-picker), so picking an arbitrary file on iOS/Android is a
+// follow-up — see the mobile note in the OpenChat-85q.1 ticket. On web,
+// react-native-web still runs in a DOM, so we reach for the browser's native
+// file input directly rather than adding a native dependency for a web-only
+// affordance.
+
+/** Must match apps/server/src/routes/chat.ts DOCUMENT_MIME_TYPES exactly. */
+export const DOCUMENT_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/csv',
+  'text/plain',
+  'application/rtf',
+  'application/zip',
+  'application/x-zip-compressed',
+]);
+
+/** Must match apps/server/src/routes/chat.ts MAX_DOCUMENT_SIZE_BYTES. */
+export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024; // 50 MB
+
+/**
+ * Open the browser's native file picker restricted to DOCUMENT_MIME_TYPES
+ * (web only). Resolves to null if the user cancels or this isn't web.
+ */
+export function pickDocumentWeb(): Promise<File | null> {
+  return new Promise((resolve) => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      resolve(null);
+      return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = Array.from(DOCUMENT_MIME_TYPES).join(',');
+    let resolved = false;
+    input.onchange = () => {
+      resolved = true;
+      resolve(input.files?.[0] ?? null);
+    };
+    // If the picker is dismissed without choosing a file, most browsers fire
+    // neither 'change' nor 'cancel' reliably across engines; 'cancel' is the
+    // modern standard event, so listen for it as a best-effort fallback.
+    input.addEventListener('cancel', () => {
+      if (!resolved) resolve(null);
+    });
+    input.click();
+  });
+}
+
+/** Why a file attachment failed to upload, in words a person can act on. */
+export class FileUploadError extends Error {
+  constructor(readonly fileName: string, reason: string) {
+    super(`${fileName}: ${reason}`);
+    this.name = 'FileUploadError';
+  }
+}
+
+/**
+ * Upload a general (non-image, non-audio) file to GCS via a presigned PUT
+ * URL (OpenChat-85q.1). Web only — see the module note above. Returns an
+ * Attachment with type:'file', ready to embed in a message.
+ */
+export async function uploadFile(file: File): Promise<Attachment> {
+  if (!DOCUMENT_MIME_TYPES.has(file.type)) {
+    const kind = file.type || 'This file type';
+    throw new FileUploadError(file.name, `${kind} isn't supported.`);
+  }
+  if (file.size > MAX_DOCUMENT_BYTES) {
+    throw new FileUploadError(
+      file.name,
+      `it's ${(file.size / 1024 / 1024).toFixed(1)} MB; the limit is ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB.`
+    );
+  }
+
+  let putUrl: string;
+  let getUrl: string;
+  try {
+    ({ putUrl, getUrl } = await api.presignAttachment({
+      filename: file.name,
+      mimeType: file.type,
+      sizeBytes: file.size,
+    }));
+  } catch (err) {
+    const detail = err instanceof ApiError ? err.message : String(err);
+    throw new FileUploadError(file.name, `the server wouldn't accept it (${detail})`);
+  }
+
+  const putRes = await fetch(putUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': file.type },
+    body: file,
+  });
+  if (!putRes.ok) {
+    throw new FileUploadError(file.name, `upload failed (${putRes.status})`);
+  }
+
+  return {
+    type: 'file',
+    url: getUrl,
+    mimeType: file.type,
+    filename: file.name,
+    sizeBytes: file.size,
+  };
+}

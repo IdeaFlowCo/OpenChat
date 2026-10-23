@@ -14,6 +14,7 @@ export type AppIconName =
   | 'download'
   | 'edit'
   | 'compose'
+  | 'file'
   | 'flag'
   | 'forward'
   | 'heart'
@@ -170,6 +171,13 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
           d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 0 1-7.78-7.78l8.49-8.49a3.67 3.67 0 0 1 5.19 5.19l-8.49 8.48a1.83 1.83 0 0 1-2.59-2.59l7.78-7.78"
           {...common}
         />
+      )}
+      {name === 'file' && (
+        /* Document with a folded top-right corner — generic file icon (OpenChat-85q.1) */
+        <>
+          <Path d="M13.5 2.5H6.5A1.5 1.5 0 0 0 5 4v16a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 20V8l-5.5-5.5z" {...common} />
+          <Path d="M13.5 2.5V8H19" {...common} />
+        </>
       )}
       {name === 'mic' && (
         <>

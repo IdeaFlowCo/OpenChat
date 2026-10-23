@@ -315,16 +315,19 @@ export interface SecretaryConfig {
   answers: SecretaryAnswer[];
 }
 
-/** Single attachment — image or audio (OpenChat-6bg, OpenChat-xxc). */
+/** Single attachment — image, audio, or general file (OpenChat-6bg, OpenChat-xxc, OpenChat-85q.1). */
 export interface Attachment {
   url: string;
   mimeType: string;
   /** For image attachments. */
   width?: number;
   height?: number;
-  /** For audio attachments (OpenChat-xxc). */
-  type?: 'audio';
+  /** For audio attachments (OpenChat-xxc); 'file' for general documents (OpenChat-85q.1). */
+  type?: 'audio' | 'file';
   durationMs?: number;
+  /** Original filename and size — used to render the file card (OpenChat-85q.1). */
+  filename?: string;
+  sizeBytes?: number;
 }
 
 export interface CurrentUser {
