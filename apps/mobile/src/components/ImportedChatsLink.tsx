@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { api } from '../api/client';
+import { useChat } from '../contexts/ChatContext';
 import { useImportedRoles } from './ImportedChatParts';
 import { Chip, ListRow } from './ui';
 import { space, type } from '../theme/tokens';
@@ -14,8 +15,13 @@ import type { NavProp } from '../navigation/types';
 export function ImportedChatsLink({ variant = 'row' }: { variant?: 'row' | 'link' | 'compact' }) {
   const navigation = useNavigation<NavProp<'ImportedChats'>>();
   const r = useImportedRoles();
+  const { isIdentityVerified, currentUser } = useChat();
   const [count, setCount] = useState(0);
   useEffect(() => {
+    setCount(0);
+    // The cached Chats screen can render before online identity verification.
+    // Its private API requests must wait for the existing account guard.
+    if (!isIdentityVerified) return;
     let active = true;
     let pending = false;
     const load = () => {
@@ -28,8 +34,8 @@ export function ImportedChatsLink({ variant = 'row' }: { variant?: 'row' | 'link
     const unsubscribe = navigation.addListener('focus', load);
     load();
     return () => { active = false; unsubscribe(); };
-  }, [navigation]);
-  if (!count) return null;
+  }, [navigation, isIdentityVerified, currentUser?.userId]);
+  if (!isIdentityVerified || !count) return null;
   const open = () => navigation.navigate('ImportedChats');
   if (variant === 'row') {
     return <ListRow icon="download" title="Imported chats" onPress={open} accessibilityLabel={`Imported chats, ${count}`}

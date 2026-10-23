@@ -755,6 +755,7 @@ it('erases cached chats and pending sends on explicit sign-out', async () => {
   await act(async () => chat.sendMessage('private pending message'));
   expect([...disk.values()].join()).toContain('private pending message');
   await act(async () => chat.signOut());
+  expect(chat.isIdentityVerified).toBe(false);
   expect([...disk.keys()].filter(key => key.startsWith('openchat:offline:'))).toEqual([]);
 });
 
@@ -765,12 +766,14 @@ it('renders saved chats while identity is pending without opening network ingest
   let boot!: Promise<boolean>;
   await act(async () => { boot = chat.bootstrapIfAuthed(); });
   expect(chat.conversations).toEqual([{ id: 'saved' }]);
+  expect(chat.isIdentityVerified).toBe(false);
   await act(async () => chat.refreshConversations());
   expect(mocks.getConversations).not.toHaveBeenCalled();
   expect(mocks.connect).not.toHaveBeenCalled();
   expect(mocks.handlers.size).toBe(0);
   await act(async () => { resolve({ id: 'other' }); await boot; });
   expect(chat.isAuthed).toBe(false);
+  expect(chat.isIdentityVerified).toBe(false);
   expect(chat.conversations).toEqual([]);
   expect(mocks.connect).not.toHaveBeenCalled();
   expect(JSON.parse(disk.get('openchat:offline:v1:me:cache')!).conversations).toEqual([{ id: 'saved' }]);
@@ -781,8 +784,10 @@ it('starts network ingestion only after the saved account identity is verified',
   mocks.getMe.mockReturnValue(new Promise(done => { resolve = done; }));
   let boot!: Promise<boolean>;
   await act(async () => { boot = chat.bootstrapIfAuthed(); });
+  expect(chat.isIdentityVerified).toBe(false);
   expect(mocks.connect).not.toHaveBeenCalled();
   await act(async () => { resolve({ id: 'me' }); await boot; });
+  expect(chat.isIdentityVerified).toBe(true);
   expect(mocks.connect).toHaveBeenCalledOnce();
   expect(mocks.getConversations).toHaveBeenCalled();
 });

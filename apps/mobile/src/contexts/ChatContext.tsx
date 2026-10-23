@@ -78,6 +78,7 @@ interface ChatContextValue {
   currentUser: CurrentUser | null;
   isAuthed: boolean;
   authInitialized: boolean;
+  isIdentityVerified: boolean;
   isConnected: boolean;
 
   // Conversations
@@ -208,6 +209,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => { contextLaneManager.setAccount(currentUser?.userId ?? null); }, [currentUser?.userId]);
   const [isAuthed, setIsAuthed] = useState(false);
   const [authInitialized, setAuthInitialized] = useState(false);
+  const [isIdentityVerified, setIsIdentityVerified] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   // Keep the concrete socket in React state. isAuthed can render before an
   // async connect() call has installed the singleton; depending only on auth
@@ -293,6 +295,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     messageAccountRef.current = accountId;
     verifiedAccountRef.current = null;
     verifiedTokenRef.current = null;
+    setIsIdentityVerified(false);
     ++sendSessionRef.current;
     retainedSendsRef.current.clear();
     visibilityRef.current = null;
@@ -699,6 +702,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
       verifiedAccountRef.current = me.id;
       verifiedTokenRef.current = token;
+      setIsIdentityVerified(true);
       setCurrentUser({ userId: me.id, email: me.email ?? u.email ?? '',
         name: me.name, avatarUrl: me.avatarUrl, discoveryMode: me.discoveryMode ?? 'name',
         openUserDirectoryEnabled: me.openUserDirectoryEnabled === true });
@@ -1568,7 +1572,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [signOut]);
 
   const value = useMemo<ChatContextValue>(() => ({
-    currentUser, isAuthed, authInitialized, isConnected,
+    currentUser, isAuthed, authInitialized, isIdentityVerified, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, registerConversationVisibility, setActiveConversation, messages, loadingMessages, messageLoadError, retryMessages,
@@ -1586,7 +1590,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     reconnectNewConvIds,
     signOut, bootstrapIfAuthed,
   }), [
-    currentUser, isAuthed, authInitialized, isConnected,
+    currentUser, isAuthed, authInitialized, isIdentityVerified, isConnected,
     conversations, conversationsLoaded, refreshConversations,
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, registerConversationVisibility, setActiveConversation, messages, loadingMessages, messageLoadError, retryMessages,
