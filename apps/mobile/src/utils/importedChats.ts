@@ -30,6 +30,16 @@ export function coverageLine(coverage: ImportedCoverage): string {
   return [coverage.asOf ? `As of ${shortDate(coverage.asOf)}` : null, span, coverage.complete ? 'Full history' : 'Partial history'].filter(Boolean).join(' · ');
 }
 
+/** "18 source rows · 5 text, 13 other" — what the source held, whatever was imported. */
+export function sourceRowsLine(coverage: ImportedCoverage): string | null {
+  const rows = coverage.sourceRowCounts;
+  if (!rows) return null;
+  const parts = [rows.text !== null ? `${rows.text} text` : null, rows.nonText !== null ? `${rows.nonText} other` : null].filter(Boolean);
+  return `${rows.total} source ${rows.total === 1 ? 'row' : 'rows'}${parts.length ? ` · ${parts.join(', ')}` : ''}`;
+}
+
+export const membershipLabel = (membership: ImportedPerson['membership']) => membership === 'current' ? 'Current member' : membership === 'former' ? 'Former member' : null;
+
 export const ASK_STATUS_LABEL: Record<ImportedAskStatus, string> = { open: 'Open', resolved: 'Resolved', withdrawn: 'Withdrawn', needs_review: 'Needs review', unknown: 'Status unknown' };
 export const OWNER_ASK_STATUSES = ['open', 'resolved', 'withdrawn', 'needs_review'] as const;
 
@@ -37,6 +47,7 @@ const NAME_SOURCE: Record<ImportedPerson['nameSource'], string> = {
   contact: 'Name from your contacts',
   push_name: 'Name they set on the network',
   profile: 'Name from their profile',
+  self_stated: 'Name from their own message',
   owner: 'You',
   unknown: 'Name not known',
 };

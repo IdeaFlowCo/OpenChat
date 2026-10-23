@@ -65,9 +65,23 @@ describe('imported chat payload validation', () => {
     expect(errorsOf(null)).toEqual([{ path: '', message: 'must be an object' }]);
   });
 
+  it('requires a cited message for self-stated names and checks row counts and membership', () => {
+    const body = clone();
+    body.participants[1].nameSourceMessageIds = [];
+    body.participants[2].membership = 'member';
+    body.coverage.sourceRowCounts = { total: 3, text: 4, nonText: 1 };
+    expect(errorsOf(body)).toEqual(expect.arrayContaining([
+      { path: 'participants[1].nameSourceMessageIds', message: 'needs at least one source message' },
+      expect.objectContaining({ path: 'participants[2].membership' }),
+      { path: 'coverage.sourceRowCounts', message: 'text and nonText add up to more than total' },
+    ]));
+    expect(parseImportPayload(clone()).coverage.sourceRowCounts).toEqual({ total: 8, text: 4, nonText: 4 });
+  });
+
   it('labels unnamed participants honestly without exposing their source key', () => {
     expect(participantLabel({ id: 'abcdefgh1234', displayName: null })).toBe('Unknown participant · 1234');
     expect(participantLabel({ id: 'abcdefgh1234', displayName: 'Ada Example' })).toBe('Ada Example');
+    expect(participantLabel({ id: 'abcdefgh1234', displayName: null, ordinal: 3 })).toBe('Unknown participant 3');
   });
 });
 

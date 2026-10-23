@@ -27,10 +27,10 @@ import { ImportedChatsScreen } from '../../mobile/src/screens/ImportedChatsScree
 import { ImportedChatScreen } from '../../mobile/src/screens/ImportedChatScreen.js';
 import { ImportedPersonScreen } from '../../mobile/src/screens/ImportedPersonScreen.js';
 
-const coverage = { asOf: '2026-10-20T12:00:00.000Z', method: 'synthetic', earliestMessageAt: '2026-10-01T09:00:00.000Z', latestMessageAt: '2026-10-04T08:00:00.000Z', complete: false, note: 'Media not imported.', lastImportAt: null, importCount: 1 };
+const coverage = { asOf: '2026-10-20T12:00:00.000Z', method: 'synthetic', earliestMessageAt: '2026-10-01T09:00:00.000Z', latestMessageAt: '2026-10-04T08:00:00.000Z', complete: false, note: 'Media not imported.', sourceRowCounts: { total: 18, text: 5, nonText: 13 }, lastImportAt: null, importCount: 1 };
 const chat = { id: 'chat-1', network: 'whatsapp', chatType: 'group', title: 'Synthetic Garden Club', coverage, counts: { messages: 3, participants: 2, openAsks: 1 } };
 const ada = { participantId: 'pa-ada1', label: 'Ada Example', displayName: 'Ada Example', isOwner: false };
-const unknown = { participantId: 'pa-ab12', label: 'Unknown participant · ab12', displayName: null, isOwner: false };
+const unknown = { participantId: 'pa-ab12', label: 'Unknown participant 3', displayName: null, isOwner: false };
 const message = (id: string, extra: Record<string, unknown>) => ({ id, sourceMessageId: id, sentAt: '2026-10-01T09:05:00.000Z', kind: 'text', text: null, mediaType: null, edited: false, editedAt: null, originalText: null, deletedAtSource: null, replyToSourceMessageId: null, sender: ada, ...extra });
 const ask = { id: 'ask-1', text: 'Looking for compost suppliers', subject: null, subjectLabel: 'Cy', reporter: ada, sourceStatus: 'open', ownerStatus: null, status: 'open', stale: false, updatedAt: '', statusSources: [],
   sources: [{ sourceMessageId: 'm-2', sentAt: '2026-10-01T09:05:00.000Z', sender: ada, text: 'My friend Cy is hunting for compost suppliers', available: true }] };
@@ -50,7 +50,7 @@ beforeEach(() => {
     message('m-1', { kind: 'system', text: 'Group created', sender: null }),
   ] });
   mocks.api.listImportedPeople.mockResolvedValue({ people: [
-    { ...ada, nameSource: 'push_name', account: null, messageCount: 2, firstMessageAt: null, lastMessageAt: null, factCount: 1, askCount: 0 },
+    { ...ada, nameSource: 'push_name', membership: 'current', account: null, messageCount: 2, firstMessageAt: null, lastMessageAt: null, factCount: 1, askCount: 0 },
     { ...unknown, nameSource: 'unknown', account: null, messageCount: 1, firstMessageAt: null, lastMessageAt: null, factCount: 0, askCount: 0 },
   ] });
   mocks.api.listImportedAsks.mockResolvedValue({ asks: [ask] });
@@ -101,6 +101,7 @@ describe('imported chat screen', () => {
     expect(shown).toContain('Deleted by the sender on WhatsApp');
     expect(shown).toContain('Group created');
     expect(shown).toContain('Read-only copy. Nothing here is sent to anyone.');
+    expect(shown).toContain('18 source rows · 5 text, 13 other');
     expect(root!.root.findAllByType('TextInput' as any)).toHaveLength(0);
     await act(async () => button('Open Ada Example').props.onPress());
     expect(mocks.navigation.navigate).toHaveBeenCalledWith('ImportedPerson', { chatId: 'chat-1', participantId: 'pa-ada1' });
@@ -110,8 +111,10 @@ describe('imported chat screen', () => {
     await render(React.createElement(ImportedChatScreen));
     await act(async () => button('People').props.onPress());
     const shown = texts();
-    expect(shown).toContain('Unknown participant · ab12');
+    expect(shown).toContain('Unknown participant 3');
+    expect(shown).toContain('Current member · 2 messages');
     expect(shown).toContain('Not linked to an OpenChat account');
+    expect(shown).not.toMatch(/@lid|@s\.whatsapp/);
     expect(shown).not.toMatch(/not on OpenChat|not a user/i);
   });
 
@@ -139,8 +142,8 @@ describe('imported person mini-profile', () => {
     });
     await render(React.createElement(ImportedPersonScreen));
     const shown = texts();
-    expect(shown).toContain('Unknown participant · ab12');
-    expect(shown).toContain('Name not known');
+    expect(shown).toContain('Unknown participant 3');
+    expect(shown).toContain('Name not known · Membership not known');
     expect(shown).toContain('Not linked to an OpenChat account');
     expect(shown).toContain('Nothing in this chat describes them yet.');
     expect(shown).toContain('image · not imported');
@@ -151,7 +154,8 @@ describe('imported person mini-profile', () => {
     mocks.route.params = { chatId: 'chat-1', participantId: 'pa-ada1' };
     mocks.api.getImportedPerson.mockResolvedValue({
       chat: { id: 'chat-1', title: 'Synthetic Garden Club', network: 'whatsapp', coverage },
-      person: { ...ada, nameSource: 'push_name', account: null, messageCount: 2, firstMessageAt: null, lastMessageAt: null, factCount: 1, askCount: 0 },
+      person: { ...ada, nameSource: 'self_stated', membership: 'current', account: null, messageCount: 2, firstMessageAt: null, lastMessageAt: null, factCount: 1, askCount: 0 },
+      nameSources: [{ sourceMessageId: 'm-2', sentAt: '2026-10-01T09:05:00.000Z', sender: ada, text: 'Hi all, Ada here.', available: true }],
       facts: [{ id: 'f1', text: 'Runs a soil-health lab', stale: false, sources: [{ sourceMessageId: 'm-2', sentAt: '2026-10-01T09:05:00.000Z', sender: ada, text: 'I run a soil-health lab.', available: true }] }],
       asksAbout: [], asksReported: [], recentMessages: [],
     });
@@ -159,6 +163,7 @@ describe('imported person mini-profile', () => {
     const shown = texts();
     expect(shown).toContain('Runs a soil-health lab');
     expect(shown).toContain('I run a soil-health lab.');
-    expect(shown).toContain('Name they set on the network');
+    expect(shown).toContain('Name from their own message · Current member');
+    expect(shown).toContain('Hi all, Ada here.');
   });
 });

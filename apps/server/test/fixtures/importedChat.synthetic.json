@@ -11,19 +11,25 @@
     "asOf": "2026-10-20T12:00:00.000Z",
     "method": "synthetic-fixture",
     "complete": false,
-    "note": "Invented test data. Media not imported."
+    "note": "Invented test data. Media not imported; two non-text rows omitted.",
+    "sourceRowCounts": {
+      "total": 8,
+      "text": 4,
+      "nonText": 4
+    }
   },
   "participants": [
     {
       "sourceKey": "p-owner",
       "displayName": "Owner Example",
       "nameSource": "owner",
-      "isOwner": true
+      "isOwner": true,
+      "membership": "current"
     },
     {
       "sourceKey": "p-ada",
       "displayName": "Ada Example",
-      "nameSource": "push_name",
+      "nameSource": "self_stated",
       "profileFacts": [
         {
           "factKey": "lab",
@@ -32,21 +38,28 @@
             "m-2"
           ]
         }
+      ],
+      "membership": "current",
+      "nameSourceMessageIds": [
+        "m-2"
       ]
     },
     {
       "sourceKey": "p-bo",
       "displayName": "Bo Example",
-      "nameSource": "contact"
+      "nameSource": "contact",
+      "membership": "current"
     },
     {
       "sourceKey": "p-twin",
       "displayName": "Bo Example",
-      "nameSource": "push_name"
+      "nameSource": "push_name",
+      "membership": "former"
     },
     {
       "sourceKey": "p-unknown",
-      "nameSource": "unknown"
+      "nameSource": "unknown",
+      "membership": "current"
     }
   ],
   "messages": [
@@ -62,7 +75,7 @@
       "senderKey": "p-ada",
       "sentAt": "2026-10-01T09:05:00.000Z",
       "kind": "text",
-      "text": "Hi all, I run a soil-health lab. Looking for a co-founder with field experience."
+      "text": "Hi all, Ada here. I run a soil-health lab. Looking for a co-founder with field experience."
     },
     {
       "sourceMessageId": "m-3",

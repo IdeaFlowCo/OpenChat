@@ -62,13 +62,16 @@ written.
     "earliestMessageAt": "2026-01-02T03:04:05Z", // optional; else derived from messages
     "latestMessageAt": "2026-10-22T09:00:00Z",   // optional; else derived
     "complete": false,                      // true only when the whole source history is included
-    "note": "Media not imported."           // optional, ≤ 500
+    "note": "Media not imported.",          // optional, ≤ 500
+    "sourceRowCounts": { "total": 18, "text": 5, "nonText": 13 } // optional: rows the source held for this chat (text = ordinary text messages; nonText = media, system, calls…), whatever was imported
   },
   "participants": [
     {
       "sourceKey": "p-1",                  // stable per source chat; never a phone number in clear unless you accept storing it
       "displayName": "Ada Example",        // optional; omit when unknown — never invent
-      "nameSource": "push_name",           // "contact" | "push_name" | "profile" | "owner" | "unknown"
+      "nameSource": "push_name",           // "contact" (owner's contact) | "push_name" (name they set) | "profile" | "self_stated" (they gave it in a message) | "owner" | "unknown"
+      "nameSourceMessageIds": [],           // required for "self_stated": the message(s) where they gave the name
+      "membership": "current",              // optional: "current" | "former" | "unknown" (roster state as of coverage.asOf)
       "isOwner": false,                    // exactly the owner's own participant, if present
       "profileFacts": [                    // optional; statements evidenced in this chat only
         { "factKey": "role", "text": "Runs a soil-health lab", "sourceMessageIds": ["m-2"] }
@@ -127,9 +130,12 @@ The dedupe key is owner + network + account + chat + `sourceMessageId`.
   the import time when the source gave none) and `revision`.
 - `kind: "deleted"` clears the stored text (the sender removed it) and records
   `deletedAtSource`; a later import cannot restore text over a deletion.
-- Participants keep their first `sourceKey`; `displayName`/`nameSource` follow
-  the latest import that supplies a name, and are never cleared by an import
-  that omits them.
+- Participants keep their first `sourceKey`; `displayName`/`nameSource`/
+  `nameSourceMessageIds` follow the latest import that supplies a name, and
+  `membership` the latest import that supplies it. An import that omits them
+  never clears them.
+- Each new participant gets the next stable number in the chat (`ordinal`,
+  payload order), used only for unnamed labels.
 - Asks: `sourceStatus`, text and evidence follow the latest import. The
   owner's own status (`ownerStatus`, set in the app or by a `write` key) is
   never overwritten by a reimport. An ask or fact that a later import does
@@ -174,8 +180,13 @@ The dedupe key is owner + network + account + chat + `sourceMessageId`.
 
 ## Display honesty
 
-- A participant without a name is **Unknown participant** with a short key
-  suffix; no bio is ever invented.
+- A participant without a name is **Unknown participant 3** (their stable
+  number in the chat); source keys such as WhatsApp JIDs are never returned by
+  the API. No bio is ever invented.
+- A name shows where it came from (*Name they set on the network*, *Name from
+  your contacts*, *Name from their own message* with that message quoted).
+- Coverage shows the source's own row count (*18 source rows · 5 text, 13
+  other*) so a partial import never reads as the whole chat.
 - Without a confirmed link a participant shows **Not linked to an OpenChat
   account**. That says nothing about whether they use OpenChat.
 - Every profile fact and ask shows the messages it came from, who said it, and

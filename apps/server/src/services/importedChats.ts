@@ -22,7 +22,10 @@ const fail = (status: number, message: string, details?: Record<string, unknown>
 
 export const IMPORT_LIMITS = { messages: 5000, participants: 2000, asks: 1000, factsPerParticipant: 50, key: 200, text: 20_000, askText: 1000, factText: 1000, name: 120, title: 200, note: 500, method: 80, sources: 50, pageSize: 200 } as const;
 export const MESSAGE_KINDS = ['text', 'media', 'system', 'deleted'] as const;
-export const NAME_SOURCES = ['contact', 'push_name', 'profile', 'owner', 'unknown'] as const;
+/** `self_stated`: the person gave this name in their own message (cite it in nameSourceMessageIds). */
+export const NAME_SOURCES = ['contact', 'push_name', 'profile', 'self_stated', 'owner', 'unknown'] as const;
+export const MEMBERSHIPS = ['current', 'former', 'unknown'] as const;
+export type Membership = typeof MEMBERSHIPS[number];
 export const SOURCE_STATUSES = ['open', 'resolved', 'withdrawn', 'needs_review', 'unknown'] as const;
 export const OWNER_STATUSES = ['open', 'resolved', 'withdrawn', 'needs_review'] as const;
 export type MessageKind = typeof MESSAGE_KINDS[number];
@@ -33,9 +36,11 @@ export type OwnerStatus = typeof OWNER_STATUSES[number];
 // ── Payload ───────────────────────────────────────────────────────────────────
 
 export interface ImportSource { network: string; accountKey: string; chatKey: string; chatType: 'group' | 'direct'; title: string }
-export interface ImportCoverage { asOf: string; method: string; earliestMessageAt: string | null; latestMessageAt: string | null; complete: boolean; note: string | null }
+/** How many rows the source held for this chat, whatever was imported: total, ordinary text messages, and everything else (media, system, calls…). */
+export interface SourceRowCounts { total: number; text: number | null; nonText: number | null }
+export interface ImportCoverage { asOf: string; method: string; earliestMessageAt: string | null; latestMessageAt: string | null; complete: boolean; note: string | null; sourceRowCounts: SourceRowCounts | null }
 export interface ImportFact { factKey: string; text: string; sourceMessageIds: string[] }
-export interface ImportParticipant { sourceKey: string; displayName: string | null; nameSource: NameSource; isOwner: boolean | null; profileFacts: ImportFact[] }
+export interface ImportParticipant { sourceKey: string; displayName: string | null; nameSource: NameSource; nameSourceMessageIds: string[]; membership: Membership | null; isOwner: boolean | null; profileFacts: ImportFact[] }
 export interface ImportMessage { sourceMessageId: string; senderKey: string | null; sentAt: string; kind: MessageKind; text: string | null; mediaType: string | null; editedAt: string | null; replyToSourceMessageId: string | null }
 export interface ImportAsk { askKey: string; subjectKey: string | null; subjectLabel: string | null; reporterKey: string; text: string; sourceMessageIds: string[]; sourceStatus: SourceStatus; statusSourceMessageIds: string[] }
 export interface ImportPayload { source: ImportSource; coverage: ImportCoverage; participants: ImportParticipant[]; messages: ImportMessage[]; asks: ImportAsk[] }
@@ -110,7 +115,19 @@ export function parseImportPayload(body: unknown): ImportPayload {
     latestMessageAt: time(c.latestMessageAt, 'coverage.latestMessageAt', false),
     complete: c.complete === true,
     note: text(c.note, 'coverage.note', IMPORT_LIMITS.note, false),
+    sourceRowCounts: null,
   };
+  if (c.sourceRowCounts !== undefined && c.sourceRowCounts !== null) {
+    const rc = obj(c.sourceRowCounts) ?? (issue('coverage.sourceRowCounts', 'must be an object'), {});
+    const count = (value: unknown, path: string, required: boolean): number | null => {
+      if (value === undefined || value === null) { if (required) issue(path, 'is required'); return null; }
+      if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 10_000_000) { issue(path, 'must be a whole number of rows'); return null; }
+      return value;
+    };
+    const counts = { total: count(rc.total, 'coverage.sourceRowCounts.total', true) ?? 0, text: count(rc.text, 'coverage.sourceRowCounts.text', false), nonText: count(rc.nonText, 'coverage.sourceRowCounts.nonText', false) };
+    if ((counts.text ?? 0) + (counts.nonText ?? 0) > counts.total) issue('coverage.sourceRowCounts', 'text and nonText add up to more than total');
+    coverage.sourceRowCounts = counts;
+  }
 
   const seen = (label: string) => { const set = new Set<string>(); return (value: string, path: string) => { if (value && set.has(value)) issue(path, `repeats ${label} ${JSON.stringify(value)}`); set.add(value); }; };
   const seenParticipant = seen('participant'), seenMessage = seen('message'), seenAsk = seen('ask');
@@ -121,6 +138,8 @@ export function parseImportPayload(body: unknown): ImportPayload {
     const sourceKey = key(p.sourceKey, `${path}.sourceKey`); seenParticipant(sourceKey, `${path}.sourceKey`);
     if (p.isOwner !== undefined && typeof p.isOwner !== 'boolean') issue(`${path}.isOwner`, 'must be true or false');
     if (p.isOwner === true) owners += 1;
+    const nameSource = oneOf(p.nameSource, NAME_SOURCES, `${path}.nameSource`, 'unknown');
+    const nameSourceMessageIds = ids(p.nameSourceMessageIds, `${path}.nameSourceMessageIds`, nameSource === 'self_stated');
     const seenFact = seen('fact');
     const profileFacts = list(p.profileFacts, `${path}.profileFacts`, IMPORT_LIMITS.factsPerParticipant).map((rawFact, j): ImportFact => {
       const f = obj(rawFact) ?? (issue(`${path}.profileFacts[${j}]`, 'must be an object'), {});
@@ -133,7 +152,8 @@ export function parseImportPayload(body: unknown): ImportPayload {
     return {
       sourceKey,
       displayName: text(p.displayName, `${path}.displayName`, IMPORT_LIMITS.name, false),
-      nameSource: oneOf(p.nameSource, NAME_SOURCES, `${path}.nameSource`, 'unknown'),
+      nameSource, nameSourceMessageIds,
+      membership: p.membership === undefined || p.membership === null ? null : oneOf(p.membership, MEMBERSHIPS, `${path}.membership`),
       isOwner: typeof p.isOwner === 'boolean' ? p.isOwner : null,
       profileFacts,
     };
@@ -199,7 +219,7 @@ export async function ensureImportedChatSchema(session: Session): Promise<void> 
 }
 
 interface StoredMessage { sourceMessageId: string; senderKey: string | null; sentAt: string; kind: MessageKind; text: string | null; originalText: string | null; editedAt: string | null; deletedAtSource: string | null }
-interface StoredParticipant { id: string; sourceKey: string; displayName: string | null; nameSource: NameSource; isOwner: boolean }
+interface StoredParticipant { id: string; sourceKey: string; displayName: string | null; nameSource: NameSource; nameSourceMessageIds: string[] | null; membership: Membership | null; isOwner: boolean }
 interface StoredClaim { importKey: string; text: string; sourceMessageIds: string[]; stale: boolean; signature: string }
 
 export interface ImportCounts {
@@ -253,7 +273,7 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
   const citedMessageIds = new Set<string>();
   for (const m of payload.messages) { if (m.senderKey) participantKeys.add(m.senderKey); }
   for (const a of payload.asks) { if (a.subjectKey) participantKeys.add(a.subjectKey); participantKeys.add(a.reporterKey); a.sourceMessageIds.forEach(id => citedMessageIds.add(id)); a.statusSourceMessageIds.forEach(id => citedMessageIds.add(id)); }
-  for (const p of payload.participants) for (const f of p.profileFacts) f.sourceMessageIds.forEach(id => citedMessageIds.add(id));
+  for (const p of payload.participants) { p.nameSourceMessageIds.forEach(id => citedMessageIds.add(id)); for (const f of p.profileFacts) f.sourceMessageIds.forEach(id => citedMessageIds.add(id)); }
   const payloadMessageIds = new Set(payload.messages.map(m => m.sourceMessageId));
   const lookupMessageIds = [...new Set([...payloadMessageIds, ...citedMessageIds])];
 
@@ -261,7 +281,7 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
   const storedMessages = new Map<string, StoredMessage>();
   if (chatId) {
     for (const p of rows<StoredParticipant>(await tx.run(
-      'MATCH (p:OpenChatImportedParticipant {chatId: $chatId, ownerUserId: $ownerUserId}) WHERE p.sourceKey IN $keys RETURN p { .id, .sourceKey, .displayName, .nameSource, .isOwner } AS p',
+      'MATCH (p:OpenChatImportedParticipant {chatId: $chatId, ownerUserId: $ownerUserId}) WHERE p.sourceKey IN $keys RETURN p { .id, .sourceKey, .displayName, .nameSource, .nameSourceMessageIds, .membership, .isOwner } AS p',
       { chatId, ownerUserId, keys: [...participantKeys] }), 'p')) storedParticipants.set(p.sourceKey, p);
     for (const m of rows<StoredMessage>(await tx.run(
       'MATCH (m:OpenChatImportedMessage) WHERE m.importKey IN $keys AND m.ownerUserId = $ownerUserId RETURN m { .sourceMessageId, .senderKey, .sentAt, .kind, .text, .originalText, .editedAt, .deletedAtSource } AS m',
@@ -279,6 +299,7 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
     if (!knownParticipant(a.reporterKey)) issues.push({ path: `asks[${i}].reporterKey`, message: `names no participant ${JSON.stringify(a.reporterKey)}` });
     [...a.sourceMessageIds, ...a.statusSourceMessageIds].forEach(id => { if (!knownMessage(id)) issues.push({ path: `asks[${i}]`, message: `cites missing source message ${JSON.stringify(id)}` }); });
   });
+  payload.participants.forEach((p, i) => p.nameSourceMessageIds.forEach(id => { if (!knownMessage(id)) issues.push({ path: `participants[${i}].nameSourceMessageIds`, message: `cites missing source message ${JSON.stringify(id)}` }); }));
   payload.participants.forEach((p, i) => p.profileFacts.forEach((f, j) => f.sourceMessageIds.forEach(id => { if (!knownMessage(id)) issues.push({ path: `participants[${i}].profileFacts[${j}]`, message: `cites missing source message ${JSON.stringify(id)}` }); })));
   if (issues.length) fail(400, 'The import was not saved. Fix these problems and send it again.', { errors: issues.slice(0, 200) });
 
@@ -290,24 +311,30 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
   };
   const conflicts: ImportConflict[] = [];
 
-  // Participants: names follow the latest import that supplies one; an import never clears a name.
+  // Participants: names (with their source) and membership follow the latest import that supplies them; an import never clears either.
+  // A new participant gets the next stable number in this chat, so unnamed people read "Unknown participant 3", never a source id.
   const participantWrites: Array<Record<string, unknown>> = [];
   const participantIds = new Map<string, string>([...storedParticipants].map(([key, p]) => [key, p.id]));
+  let nextOrdinal = chatId ? Number((await tx.run('MATCH (p:OpenChatImportedParticipant {chatId: $chatId, ownerUserId: $ownerUserId}) RETURN coalesce(max(p.ordinal), 0) AS n', { chatId, ownerUserId })).records[0]!.get('n')) + 1 : 1;
+  const sameIds = (a: string[] | null | undefined, b: string[]) => JSON.stringify(a ?? []) === JSON.stringify(b);
   for (const p of payload.participants) {
     const stored = storedParticipants.get(p.sourceKey);
     if (!stored) {
       const id = nanoid();
       participantIds.set(p.sourceKey, id);
       counts.participants.created += 1;
-      participantWrites.push({ id, importKey: scoped(p.sourceKey), sourceKey: p.sourceKey, displayName: p.displayName, nameSource: p.displayName ? p.nameSource : 'unknown', isOwner: p.isOwner === true, create: true });
+      participantWrites.push({ id, ordinal: neo4j.int(nextOrdinal++), importKey: scoped(p.sourceKey), sourceKey: p.sourceKey, displayName: p.displayName, nameSource: p.displayName ? p.nameSource : 'unknown', nameSourceMessageIds: p.displayName ? p.nameSourceMessageIds : [], membership: p.membership ?? 'unknown', isOwner: p.isOwner === true, create: true });
       continue;
     }
+    const named = !!p.displayName;
     const displayName = p.displayName ?? stored.displayName;
-    const nameSource = p.displayName ? p.nameSource : stored.nameSource;
+    const nameSource = named ? p.nameSource : stored.nameSource;
+    const nameSourceMessageIds = named ? p.nameSourceMessageIds : (stored.nameSourceMessageIds ?? []);
+    const membership = p.membership ?? stored.membership ?? 'unknown';
     const isOwner = p.isOwner ?? stored.isOwner ?? false;
-    if (displayName === stored.displayName && nameSource === stored.nameSource && isOwner === (stored.isOwner ?? false)) { counts.participants.unchanged += 1; continue; }
+    if (displayName === stored.displayName && nameSource === stored.nameSource && sameIds(stored.nameSourceMessageIds, nameSourceMessageIds) && membership === (stored.membership ?? 'unknown') && isOwner === (stored.isOwner ?? false)) { counts.participants.unchanged += 1; continue; }
     counts.participants.updated += 1;
-    participantWrites.push({ id: stored.id, importKey: scoped(p.sourceKey), sourceKey: p.sourceKey, displayName, nameSource, isOwner, create: false });
+    participantWrites.push({ id: stored.id, importKey: scoped(p.sourceKey), sourceKey: p.sourceKey, displayName, nameSource, nameSourceMessageIds, membership, isOwner, create: false });
   }
 
   // Messages: source id, sender and time are immutable; text follows the source; deletion is final.
@@ -386,8 +413,8 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
   await tx.run(
     `UNWIND $rows AS row
      MERGE (p:OpenChatImportedParticipant {importKey: row.importKey})
-     ON CREATE SET p.id = row.id, p.chatId = $chatId, p.ownerUserId = $ownerUserId, p.sourceKey = row.sourceKey, p.createdAt = $now, p.linkedUserId = null
-     SET p.displayName = row.displayName, p.nameSource = row.nameSource, p.isOwner = row.isOwner, p.updatedAt = $now`,
+     ON CREATE SET p.id = row.id, p.ordinal = row.ordinal, p.chatId = $chatId, p.ownerUserId = $ownerUserId, p.sourceKey = row.sourceKey, p.createdAt = $now, p.linkedUserId = null
+     SET p.displayName = row.displayName, p.nameSource = row.nameSource, p.nameSourceMessageIds = row.nameSourceMessageIds, p.membership = row.membership, p.isOwner = row.isOwner, p.updatedAt = $now`,
     { ...base, rows: participantWrites });
   for (let i = 0; i < messageWrites.length; i += 1000) {
     const batch = messageWrites.slice(i, i + 1000);
@@ -425,11 +452,14 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
     `MATCH (c:OpenChatImportedChat {id: $chatId, ownerUserId: $ownerUserId})
      SET c.chatType = $chatType, c.title = $title, c.asOf = CASE WHEN c.asOf IS NULL OR c.asOf < $asOf THEN $asOf ELSE c.asOf END,
          c.method = $method, c.complete = $complete, c.note = $note,
+         c.sourceRowTotal = CASE WHEN $rows IS NULL THEN c.sourceRowTotal ELSE $rows.total END,
+         c.sourceRowText = CASE WHEN $rows IS NULL THEN c.sourceRowText ELSE $rows.text END,
+         c.sourceRowNonText = CASE WHEN $rows IS NULL THEN c.sourceRowNonText ELSE $rows.nonText END,
          c.earliestMessageAt = $earliest, c.latestMessageAt = $latest,
          c.importCount = coalesce(c.importCount, 0) + 1, c.lastImportAt = $now, c.lastImportedBy = $importedBy, c.updatedAt = $now
      REMOVE c.lockedAt`,
     {
-      ...base, chatType: source.chatType, title: source.title, asOf: coverage.asOf, method: coverage.method, complete: coverage.complete, note: coverage.note, importedBy,
+      ...base, chatType: source.chatType, title: source.title, asOf: coverage.asOf, method: coverage.method, complete: coverage.complete, note: coverage.note, importedBy, rows: coverage.sourceRowCounts ? { total: neo4j.int(coverage.sourceRowCounts.total), text: coverage.sourceRowCounts.text === null ? null : neo4j.int(coverage.sourceRowCounts.text), nonText: coverage.sourceRowCounts.nonText === null ? null : neo4j.int(coverage.sourceRowCounts.nonText) } : null,
       earliest: minIso(minIso((before?.earliestMessageAt as string | null) ?? null, coverage.earliestMessageAt), earliest),
       latest: maxIso(maxIso((before?.latestMessageAt as string | null) ?? null, coverage.latestMessageAt), latest),
     });
@@ -438,11 +468,11 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
 
 // ── Reads ─────────────────────────────────────────────────────────────────────
 
-export interface Coverage { asOf: string | null; method: string | null; earliestMessageAt: string | null; latestMessageAt: string | null; complete: boolean; note: string | null; lastImportAt: string | null; importCount: number }
+export interface Coverage { asOf: string | null; method: string | null; earliestMessageAt: string | null; latestMessageAt: string | null; complete: boolean; note: string | null; sourceRowCounts: SourceRowCounts | null; lastImportAt: string | null; importCount: number }
 export interface ImportedChatSummary { id: string; network: string; chatType: 'group' | 'direct'; title: string; coverage: Coverage; counts: { messages: number; participants: number; openAsks: number } }
 export interface ParticipantRef { participantId: string; label: string; displayName: string | null; isOwner: boolean }
 export interface AccountLink { userId: string; name: string | null; linkedBy: 'owner'; linkedAt: string }
-export interface ImportedPerson extends ParticipantRef { nameSource: NameSource; account: AccountLink | null; messageCount: number; firstMessageAt: string | null; lastMessageAt: string | null; factCount: number; askCount: number }
+export interface ImportedPerson extends ParticipantRef { nameSource: NameSource; membership: Membership; account: AccountLink | null; messageCount: number; firstMessageAt: string | null; lastMessageAt: string | null; factCount: number; askCount: number }
 export interface ImportedMessageView { id: string; sourceMessageId: string; sentAt: string; kind: MessageKind; text: string | null; mediaType: string | null; edited: boolean; editedAt: string | null; originalText: string | null; deletedAtSource: string | null; replyToSourceMessageId: string | null; sender: ParticipantRef | null }
 export interface SourceExcerpt { sourceMessageId: string; sentAt: string | null; sender: ParticipantRef | null; text: string | null; available: boolean }
 export interface ImportedFactView { id: string; text: string; stale: boolean; sources: SourceExcerpt[] }
@@ -459,15 +489,19 @@ async function write<T>(work: (tx: ManagedTransaction) => Promise<T>): Promise<T
 }
 
 /** "Unknown participant" plus a short, stable suffix — never derived from the source key, which may be a phone number. */
-export function participantLabel(p: { id: string; displayName?: string | null }): string {
-  return p.displayName || `Unknown participant · ${p.id.slice(-4)}`;
+export function participantLabel(p: { id: string; displayName?: string | null; ordinal?: unknown }): string {
+  if (p.displayName) return p.displayName;
+  const ordinal = Number(p.ordinal ?? NaN);
+  return Number.isInteger(ordinal) && ordinal > 0 ? `Unknown participant ${ordinal}` : `Unknown participant · ${p.id.slice(-4)}`;
 }
 const toRef = (p: Record<string, unknown> | null | undefined): ParticipantRef | null => p && p.id
-  ? { participantId: p.id as string, label: participantLabel(p as { id: string; displayName: string | null }), displayName: (p.displayName as string | null) ?? null, isOwner: p.isOwner === true }
+  ? { participantId: p.id as string, label: participantLabel(p as { id: string; displayName: string | null; ordinal?: unknown }), displayName: (p.displayName as string | null) ?? null, isOwner: p.isOwner === true }
   : null;
 const coverageOf = (c: Record<string, unknown>): Coverage => ({
   asOf: (c.asOf as string) ?? null, method: (c.method as string) ?? null, earliestMessageAt: (c.earliestMessageAt as string) ?? null, latestMessageAt: (c.latestMessageAt as string) ?? null,
-  complete: c.complete === true, note: (c.note as string) ?? null, lastImportAt: (c.lastImportAt as string) ?? null, importCount: Number(c.importCount ?? 0),
+  complete: c.complete === true, note: (c.note as string) ?? null,
+  sourceRowCounts: c.sourceRowTotal === null || c.sourceRowTotal === undefined ? null : { total: Number(c.sourceRowTotal), text: c.sourceRowText == null ? null : Number(c.sourceRowText), nonText: c.sourceRowNonText == null ? null : Number(c.sourceRowNonText) },
+  lastImportAt: (c.lastImportAt as string) ?? null, importCount: Number(c.importCount ?? 0),
 });
 
 async function requireChat(tx: ManagedTransaction, ownerUserId: string, chatId: string): Promise<Record<string, unknown>> {
@@ -520,7 +554,7 @@ function pageSize(value: unknown, fallback: number): number {
   return Number.isInteger(n) && n >= 1 ? Math.min(n, IMPORT_LIMITS.pageSize) : fail(400, `limit must be a whole number from 1 to ${IMPORT_LIMITS.pageSize}`);
 }
 
-const MESSAGE_VIEW = `m { .id, .sourceMessageId, .sentAt, .kind, .text, .mediaType, .editedAt, .originalText, .deletedAtSource, .replyToSourceMessageId, .revision } AS m, p { .id, .displayName, .isOwner } AS p`;
+const MESSAGE_VIEW = `m { .id, .sourceMessageId, .sentAt, .kind, .text, .mediaType, .editedAt, .originalText, .deletedAtSource, .replyToSourceMessageId, .revision } AS m, p { .id, .displayName, .isOwner, .ordinal } AS p`;
 function messageView(m: Record<string, unknown>, p: Record<string, unknown> | null): ImportedMessageView {
   return {
     id: m.id as string, sourceMessageId: m.sourceMessageId as string, sentAt: m.sentAt as string, kind: m.kind as MessageKind, text: (m.text as string) ?? null, mediaType: (m.mediaType as string) ?? null,
@@ -560,7 +594,7 @@ async function accountLinks(tx: ManagedTransaction, userIds: string[]): Promise<
 function personOf(p: Record<string, unknown>, stats: Record<string, unknown>, names: Map<string, string | null>): ImportedPerson {
   const linkedUserId = (p.linkedUserId as string) ?? null;
   return {
-    ...toRef(p)!, nameSource: (p.nameSource as NameSource) ?? 'unknown',
+    ...toRef(p)!, nameSource: (p.nameSource as NameSource) ?? 'unknown', membership: (p.membership as Membership) ?? 'unknown',
     account: linkedUserId && names.has(linkedUserId) ? { userId: linkedUserId, name: names.get(linkedUserId) ?? null, linkedBy: 'owner', linkedAt: p.linkedAt as string } : null,
     messageCount: Number(stats.messageCount ?? 0), firstMessageAt: (stats.firstMessageAt as string) ?? null, lastMessageAt: (stats.lastMessageAt as string) ?? null,
     factCount: Number(stats.factCount ?? 0), askCount: Number(stats.askCount ?? 0),
@@ -604,7 +638,7 @@ async function askViews(tx: ManagedTransaction, ownerUserId: string, chatId: str
     `MATCH (a:OpenChatImportedAsk {chatId: $chatId, ownerUserId: $ownerUserId}) ${filter}
      OPTIONAL MATCH (subject:OpenChatImportedParticipant {chatId: $chatId, ownerUserId: $ownerUserId, sourceKey: a.subjectKey})
      OPTIONAL MATCH (reporter:OpenChatImportedParticipant {chatId: $chatId, ownerUserId: $ownerUserId, sourceKey: a.reporterKey})
-     RETURN a { .* } AS a, subject { .id, .displayName, .isOwner } AS subject, reporter { .id, .displayName, .isOwner } AS reporter`,
+     RETURN a { .* } AS a, subject { .id, .displayName, .isOwner, .ordinal } AS subject, reporter { .id, .displayName, .isOwner, .ordinal } AS reporter`,
     { chatId, ownerUserId, ...params });
   const raw = result.records.map(record => ({ a: record.get('a') as Record<string, unknown>, subject: record.get('subject'), reporter: record.get('reporter') }));
   const sources = await excerpts(tx, ownerUserId, chatId, raw.flatMap(r => [...(r.a.sourceMessageIds as string[] ?? []), ...(r.a.statusSourceMessageIds as string[] ?? [])]));
@@ -624,7 +658,7 @@ export async function listImportedAsks(ownerUserId: string, chatId: string): Pro
 }
 
 /** The small profile: only what this chat evidences, each statement with its source messages. */
-export async function getImportedPerson(ownerUserId: string, chatId: string, participantId: string): Promise<{ chat: { id: string; title: string; network: string; coverage: Coverage }; person: ImportedPerson; facts: ImportedFactView[]; asksAbout: ImportedAskView[]; asksReported: ImportedAskView[]; recentMessages: ImportedMessageView[] }> {
+export async function getImportedPerson(ownerUserId: string, chatId: string, participantId: string): Promise<{ chat: { id: string; title: string; network: string; coverage: Coverage }; person: ImportedPerson; facts: ImportedFactView[]; asksAbout: ImportedAskView[]; asksReported: ImportedAskView[]; recentMessages: ImportedMessageView[]; nameSources: SourceExcerpt[] }> {
   return read(async tx => {
     const chat = await requireChat(tx, ownerUserId, chatId);
     const result = await tx.run(
@@ -637,7 +671,8 @@ export async function getImportedPerson(ownerUserId: string, chatId: string, par
     const factRows = rows<Record<string, unknown>>(await tx.run(
       'MATCH (f:OpenChatImportedFact {chatId: $chatId, ownerUserId: $ownerUserId, participantId: $participantId}) RETURN f { .* } AS f ORDER BY f.stale, f.createdAt',
       { chatId, ownerUserId, participantId }), 'f');
-    const factSources = await excerpts(tx, ownerUserId, chatId, factRows.flatMap(f => (f.sourceMessageIds as string[]) ?? []));
+    const nameSourceIds = (p.nameSourceMessageIds as string[] | null) ?? [];
+    const factSources = await excerpts(tx, ownerUserId, chatId, [...nameSourceIds, ...factRows.flatMap(f => (f.sourceMessageIds as string[]) ?? [])]);
     const recent = await tx.run(
       `MATCH (m:OpenChatImportedMessage {chatId: $chatId, ownerUserId: $ownerUserId, senderParticipantId: $participantId})
        WITH m ORDER BY m.sentAt DESC LIMIT 10
@@ -646,6 +681,7 @@ export async function getImportedPerson(ownerUserId: string, chatId: string, par
     return {
       chat: { id: chat.id as string, title: (chat.title as string) ?? 'Imported chat', network: chat.network as string, coverage: coverageOf(chat) },
       person: personOf(p, record.get('stats'), names),
+      nameSources: cite(factSources, nameSourceIds),
       facts: factRows.map(f => ({ id: f.id as string, text: f.text as string, stale: f.stale === true, sources: cite(factSources, (f.sourceMessageIds as string[]) ?? []) })),
       asksAbout: await askViews(tx, ownerUserId, chatId, 'WHERE a.subjectKey = $sourceKey', { sourceKey: p.sourceKey }),
       asksReported: await askViews(tx, ownerUserId, chatId, 'WHERE a.reporterKey = $sourceKey AND coalesce(a.subjectKey, "") <> $sourceKey', { sourceKey: p.sourceKey }),

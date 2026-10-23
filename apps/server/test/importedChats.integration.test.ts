@@ -105,7 +105,7 @@ integration('imported chat mirrors — real Neo4j + HTTP', { timeout: 60_000 }, 
     const list = await as(token(alice)).get('/');
     expect(list.body.chats).toEqual([expect.objectContaining({
       id: chatId, network: 'whatsapp', title: 'Synthetic Garden Club',
-      coverage: expect.objectContaining({ asOf: '2026-10-20T12:00:00.000Z', earliestMessageAt: '2026-10-01T09:00:00.000Z', latestMessageAt: '2026-10-04T08:00:00.000Z', complete: false, method: 'synthetic-fixture', importCount: 1 }),
+      coverage: expect.objectContaining({ sourceRowCounts: { total: 8, text: 4, nonText: 4 }, asOf: '2026-10-20T12:00:00.000Z', earliestMessageAt: '2026-10-01T09:00:00.000Z', latestMessageAt: '2026-10-04T08:00:00.000Z', complete: false, method: 'synthetic-fixture', importCount: 1 }),
       counts: { messages: 6, participants: 5, openAsks: 1 },
     })]);
   });
@@ -118,17 +118,22 @@ integration('imported chat mirrors — real Neo4j + HTTP', { timeout: 60_000 }, 
     expect(bos).toHaveLength(2);
     expect(new Set(bos.map(p => p.participantId)).size).toBe(2);
     const unknown = people.find(p => p.displayName === null)!;
-    expect(unknown.label).toMatch(/^Unknown participant · .{4}$/);
+    expect(unknown.label).toBe('Unknown participant 5');
+    expect(people.find(p => p.displayName === 'Ada Example')).toMatchObject({ nameSource: 'self_stated', membership: 'current' });
+    expect(bos.map(p => p.membership).sort()).toEqual(['current', 'former']);
     expect(unknown).toMatchObject({ nameSource: 'unknown', account: null, messageCount: 1, factCount: 0 });
     expect(JSON.stringify(people)).not.toContain('p-unknown');
 
     // Reimport keeps the same ids; an import without a name never clears one.
     const body = payload();
-    body.participants = body.participants.map((p: Record<string, unknown>) => p.sourceKey === 'p-ada' ? { sourceKey: 'p-ada', nameSource: 'unknown', profileFacts: p.profileFacts } : p);
+    body.participants = body.participants.map((p: Record<string, unknown>) => p.sourceKey === 'p-ada' ? { sourceKey: 'p-ada', nameSource: 'unknown', profileFacts: p.profileFacts } : p.sourceKey === 'p-twin' ? { ...p, membership: undefined } : p);
     expect((await as(token(alice)).put('/import', body)).body.counts.participants).toEqual({ created: 0, updated: 0, unchanged: 5 });
     const again = (await as(token(alice)).get(`/${chatId}/people`)).body.people as Array<Record<string, any>>;
     expect(again.map(p => p.participantId).sort()).toEqual(people.map(p => p.participantId).sort());
-    expect(again.find(p => p.participantId === people.find(q => q.displayName === 'Ada Example')!.participantId)!.displayName).toBe('Ada Example');
+    const adaAgain = again.find(p => p.participantId === people.find(q => q.displayName === 'Ada Example')!.participantId)!;
+    expect(adaAgain).toMatchObject({ displayName: 'Ada Example', nameSource: 'self_stated' });
+    expect(again.find(p => p.displayName === null)!.label).toBe('Unknown participant 5');
+    expect(again.filter(p => p.displayName === 'Bo Example').map(p => p.membership).sort()).toEqual(['current', 'former']);
   });
 
   it('is idempotent: the same payload changes nothing and duplicates nothing', async () => {
@@ -158,6 +163,9 @@ integration('imported chat mirrors — real Neo4j + HTTP', { timeout: 60_000 }, 
     const noId = payload();
     delete noId.messages[1].sourceMessageId;
     expect((await as(token(alice)).put('/import', noId)).status).toBe(400);
+    const badName = payload();
+    badName.participants[1].nameSourceMessageIds = ['m-gone'];
+    expect((await as(token(alice)).put('/import', badName)).body.errors).toContainEqual({ path: 'participants[1].nameSourceMessageIds', message: 'cites missing source message "m-gone"' });
     const stranger = payload();
     stranger.messages[1].senderKey = 'p-stranger';
     expect((await as(token(alice)).put('/import', stranger)).body.errors).toContainEqual({ path: 'messages[1].senderKey', message: 'names no participant "p-stranger"' });
@@ -235,6 +243,7 @@ integration('imported chat mirrors — real Neo4j + HTTP', { timeout: 60_000 }, 
     expect(profile.facts).toEqual([expect.objectContaining({ text: 'Runs a soil-health lab', stale: false, sources: [expect.objectContaining({ sourceMessageId: 'm-2', available: true })] })]);
     expect(profile.asksAbout).toHaveLength(1);
     expect(profile.chat.coverage).toMatchObject({ asOf: '2026-10-20T12:00:00.000Z' });
+    expect(profile.nameSources).toEqual([expect.objectContaining({ sourceMessageId: 'm-2', available: true })]);
     const unknownProfile = (await as(token(alice)).get(`/${chatId}/people/${unknown.participantId}`)).body;
     expect(unknownProfile).toMatchObject({ facts: [], asksAbout: [], person: { displayName: null, account: null } });
     expect(unknownProfile.recentMessages).toEqual([expect.objectContaining({ kind: 'media', mediaType: 'image' })]);

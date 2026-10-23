@@ -11,7 +11,7 @@ import { Avatar } from '../components/Avatar';
 import { AskCard, participantName, SourceQuote, useImportedRoles } from '../components/ImportedChatParts';
 import { Button, Card, SectionLabel } from '../components/ui';
 import { space, type } from '../theme/tokens';
-import { accountLine, coverageLine, messageTime, mirrorLabel, nameSourceLabel, shortDate } from '../utils/importedChats';
+import { accountLine, coverageLine, membershipLabel, messageTime, mirrorLabel, nameSourceLabel, shortDate } from '../utils/importedChats';
 import type { NavProp, RouteProps } from '../navigation/types';
 
 export function ImportedPersonScreen() {
@@ -47,12 +47,13 @@ export function ImportedPersonScreen() {
         <Avatar name={person.label} size={56} />
         <View style={styles.identityText}>
           <Text style={[type.heading, { color: r.text }]} numberOfLines={2}>{participantName(person)}</Text>
-          <Text style={[type.meta, { color: r.textMeta }]}>{nameSourceLabel(person)} · in {chat.title}</Text>
+          <Text style={[type.meta, { color: r.textMeta }]}>{nameSourceLabel(person)} · {membershipLabel(person.membership) ?? 'Membership not known'} · {chat.title}</Text>
           <Text style={[type.meta, { color: r.textSecondary }]}>{accountLine(person)}</Text>
           <Text style={[type.meta, { color: r.textMeta }]}>{person.messageCount} {person.messageCount === 1 ? 'message' : 'messages'}{span}</Text>
         </View>
       </View>
       {error ? <Text accessibilityRole="alert" style={[type.body, { color: r.danger }]}>{error}</Text> : null}
+      {profile.nameSources?.map(source => <SourceQuote key={`name-${source.sourceMessageId}`} source={source} onOpenPerson={openPerson} />)}
 
       <SectionLabel icon="lock" first>From this chat</SectionLabel>
       {profile.facts.length === 0

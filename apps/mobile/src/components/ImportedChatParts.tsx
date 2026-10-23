@@ -8,7 +8,7 @@ import type { ImportedAsk, ImportedCoverage, ImportedParticipantRef, ImportedSou
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { radius, roles, space, type } from '../theme/tokens';
-import { ASK_STATUS_LABEL, coverageLine, mirrorLabel, OWNER_ASK_STATUSES, shortDate } from '../utils/importedChats';
+import { ASK_STATUS_LABEL, coverageLine, mirrorLabel, OWNER_ASK_STATUSES, shortDate, sourceRowsLine } from '../utils/importedChats';
 import { AppIcon } from './AppIcon';
 import { Button, Card, Chip } from './ui';
 
@@ -27,6 +27,7 @@ export function ProvenanceStrip({ network, coverage }: { network: string; covera
         <Text style={[type.eyebrow, { color: r.textMeta }]}>Private to you · {mirrorLabel(network)}</Text>
       </View>
       <Text style={[type.meta, { color: r.textSecondary }]}>{coverageLine(coverage)}</Text>
+      {sourceRowsLine(coverage) ? <Text style={[type.meta, { color: r.textMeta }]}>{sourceRowsLine(coverage)}</Text> : null}
       {coverage.note ? <Text style={[type.meta, { color: r.textMeta }]}>{coverage.note}</Text> : null}
     </View>
   );
