@@ -1,9 +1,13 @@
 # Links in chat messages
 
-Message text in the canonical Expo client recognizes `http://`, `https://`, and
-`www.` URLs. The same renderer serves native iOS/Android and responsive web,
-including the desktop wrapper. Tap a link to open it. `www.` destinations use
-HTTPS. Surrounding sentence punctuation and unmatched closing brackets stay in
+Message text in the canonical Expo client recognizes `http://`, `https://`,
+`www.` URLs and bare domains such as `unlinked.ai` or `chat.ideaflow.app/x`.
+Bare domains link only for a fixed list of common TLDs (`BARE_DOMAIN_TLDS` in
+`apps/mobile/src/utils/messageLinks.ts`), so file names like `notes.md` or
+`app.py`, `Node.js`, and the domain of an email address stay plain text. Agent
+messages rendered as Markdown use the same bare-domain rule. The same renderer serves native iOS/Android and responsive web,
+including the desktop wrapper. Tap a link to open it. `www.` and bare-domain
+destinations use HTTPS. Surrounding sentence punctuation and unmatched closing brackets stay in
 the message; balanced brackets within a URL remain part of its destination.
 Arbitrary schemes, malformed URLs, and URLs containing credentials remain plain
 text. Link previews use the same destination validation.

@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { Alert, Linking, Platform, Text } from 'react-native';
 import { messageLinks, safeMessageUrl } from '../utils/messageLinks';
+import { type } from '../theme/tokens';
 
 export async function openMessageLink(url: string): Promise<void> {
   const safe = safeMessageUrl(url);
@@ -45,5 +46,5 @@ export function MessageText({ content, color, renderPlain, onLongPress }: {
   }
   const rest = content.slice(cursor);
   parts.push(<React.Fragment key={`text-${cursor}`}>{renderPlain ? renderPlain(rest) : rest}</React.Fragment>);
-  return <Text selectable style={{ color, fontSize: 16 }}>{parts}</Text>;
+  return <Text selectable style={{ ...type.bubble, color }}>{parts}</Text>;
 }

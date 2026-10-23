@@ -24,6 +24,8 @@ describe('message URL detection', () => {
     ['[https://example.com/a] “https://example.org/b”', ['https://example.com/a', 'https://example.org/b']],
     ['javascript:https://example.com data:https://example.com file:///tmp/test foo@www.example.com ftp://www.example.com', []],
     ['https://user:password@example.com https:// https://bad:port https://example.com\\evil', []],
+    ['Try unlinked.ai, Chat.Ideaflow.App/x?y=1. (bbc.co.uk) foo.com:8080/a', ['https://unlinked.ai', 'https://Chat.Ideaflow.App/x?y=1', 'https://bbc.co.uk', 'https://foo.com:8080/a']],
+    ['notes.md app.py index.html Node.js e.g. 3.14 unlinked.ai.json jacob@unlinked.ai my_site.com javascript:foo.com', []],
   ])('detects usable destinations and preserves text: %s', (content, expected) => {
     const links = messageLinks(content);
     expect(links.map(x => x.url)).toEqual(expected);
