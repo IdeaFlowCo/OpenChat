@@ -131,7 +131,7 @@ export function MessageActionSheet({
 
   // Press-and-hold → Copy (openchat-651). Uses RN's built-in Clipboard (same as
   // the rest of the app); a brief alert confirms since the sheet just closes.
-  const photoCount = (message?.attachments ?? []).filter(a => a.type !== 'audio' && /^https?:/.test(a.url)).length;
+  const photoCount = (message?.attachments ?? []).filter(a => a.type !== 'audio' && a.type !== 'file' && /^https?:/.test(a.url)).length;
   const saveVerb = Platform.OS === 'web' ? 'Download' : 'Save';
   const handleSavePhotos = () => {
     if (!message) return;

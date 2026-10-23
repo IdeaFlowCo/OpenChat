@@ -47,16 +47,19 @@ export interface User {
   openUserDirectoryEnabled?: boolean;
 }
 
-/** Image or audio attachment on a message (OpenChat-6bg / voice OpenChat-xxc). */
+/** Image, audio, or general file attachment on a message (OpenChat-6bg / voice OpenChat-xxc / files OpenChat-85q.1). */
 export interface Attachment {
   url: string;
   mimeType: string;
   /** For image attachments. */
   width?: number;
   height?: number;
-  /** For audio/voice attachments (OpenChat-xxc / bmp.7). */
-  type?: 'audio';
+  /** For audio/voice attachments (OpenChat-xxc / bmp.7); 'file' for general documents (OpenChat-85q.1). */
+  type?: 'audio' | 'file';
   durationMs?: number;
+  /** Original filename and size — used to render the file card (OpenChat-85q.1). */
+  filename?: string;
+  sizeBytes?: number;
 }
 
 /** Open Graph link preview card attached to a message (OpenChat-hq2 / bmp.8). */

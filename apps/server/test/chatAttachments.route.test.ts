@@ -107,6 +107,68 @@ describe('chat attachments route', () => {
     expect(data.getUrl).toMatch(/^https:\/\/test-endpoint\/test-bucket\/attachments\/test-user\//);
     expect(data.key).toMatch(/^attachments\/test-user\/.*?\/photo\.jpg$/);
   });
+  it('returns a presigned URL for a PDF document attachment (OpenChat-85q.1)', async () => {
+    mocks.getSignedUrl.mockResolvedValue('https://presigned.url/pdf');
+
+    const res = await fetch(`${baseUrl}/api/chat/attachments/presign`, {
+      method: 'POST',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        filename: 'quarterly-report.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 5 * 1024 * 1024,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.putUrl).toBe('https://presigned.url/pdf');
+    expect(data.getUrl).toMatch(/^https:\/\/test-endpoint\/test-bucket\/attachments\/test-user\//);
+    // Unlike voice attachments, document filenames are preserved as-is (sanitised).
+    expect(data.key).toMatch(/^attachments\/test-user\/.*?\/quarterly-report\.pdf$/);
+  });
+
+  it('rejects a document attachment over the document size cap', async () => {
+    const res = await fetch(`${baseUrl}/api/chat/attachments/presign`, {
+      method: 'POST',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        filename: 'huge.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 60 * 1024 * 1024, // over the 50MB document cap
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toMatch(/sizeBytes must be between 1 and 52428800/);
+  });
+
+  it('rejects an executable mimeType (allowlist excludes it by construction)', async () => {
+    const res = await fetch(`${baseUrl}/api/chat/attachments/presign`, {
+      method: 'POST',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        filename: 'virus.exe',
+        mimeType: 'application/x-msdownload',
+        sizeBytes: 1024,
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toMatch(/mimeType must be one of/);
+  });
+
   it('rejects a message carrying more than ten attachments before touching the database', async () => {
     const photos = Array.from({ length: 11 }, (_, i) => ({
       url: `https://test-endpoint/test-bucket/attachments/test-user/${i}/photo.jpg`,
