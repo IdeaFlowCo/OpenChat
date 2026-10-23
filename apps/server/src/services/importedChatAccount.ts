@@ -22,6 +22,10 @@ export async function exportImportedChatsForUser(tx: ManagedTransaction, ownerUs
 }
 
 export async function deleteImportedChatsForUser(tx: ManagedTransaction, ownerUserId: string): Promise<void> {
+  // Share the importer's owner lock BEFORE scanning archive records. Locking
+  // only when User is deleted later would let a concurrent import slip between
+  // this scan and account deletion, leaving an orphan archive.
+  await tx.run('MATCH (u:User {id: $ownerUserId}) SET u.importedChatsRevision = coalesce(u.importedChatsRevision, 0) + 1', { ownerUserId });
   for (const label of Object.values(COLLECTIONS)) {
     await tx.run(`MATCH (n:${label} {ownerUserId: $ownerUserId}) DETACH DELETE n`, { ownerUserId });
   }
