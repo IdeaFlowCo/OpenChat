@@ -71,6 +71,10 @@ const mocks = vi.hoisted(() => {
         };
       }
 
+      if (query.includes('OpenChatImported')) {
+        return { records: [{ get: () => ({ id: 'imported-fixture', ownerUserId: params.ownerUserId }) }] };
+      }
+
       throw new Error(`Unexpected query in auth export test: ${query}`);
     }),
     sessionClose: vi.fn(async () => {}),
@@ -81,6 +85,7 @@ vi.mock('../src/db.js', () => ({
   getDriver: () => ({
     session: () => ({
       run: mocks.sessionRun,
+      executeRead: (work: (tx: { run: typeof mocks.sessionRun }) => Promise<unknown>) => work({ run: mocks.sessionRun }),
       close: mocks.sessionClose,
     }),
   }),
@@ -160,6 +165,14 @@ describe('GET /api/auth/export', () => {
     ]);
     expect(exported).toMatchObject({
       schema: 'openchat.account_export.v1',
+      importedChats: {
+        scope: 'all_time',
+        chats: [{ id: 'imported-fixture', ownerUserId: 'owner-1' }],
+        participants: [{ id: 'imported-fixture', ownerUserId: 'owner-1' }],
+        messages: [{ id: 'imported-fixture', ownerUserId: 'owner-1' }],
+        facts: [{ id: 'imported-fixture', ownerUserId: 'owner-1' }],
+        asks: [{ id: 'imported-fixture', ownerUserId: 'owner-1' }],
+      },
       intentDrafts: [{
         id: 'draft-1', ownerUserId: 'owner-1', details: 'owner-private',
         source: 'private-message', provenance: { messageId: 'source-1' },
