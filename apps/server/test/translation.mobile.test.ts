@@ -10,7 +10,7 @@ import { TranslatedMessage } from '../../mobile/src/components/TranslatedMessage
 import { TranslationQueue, likelyNeedsTranslation, readTranslationPreferences } from '../../mobile/src/services/translation.js';
 const queue = { request: state.request };
 let screen: ReturnType<typeof create>;
-const base = { conversationId: 'chat', content: '你好', incoming: true, requested: false, active: true, color: 'black', onLongPress: vi.fn() };
+const base = { conversationId: 'chat', content: '你好', incoming: true, requested: 0, active: true, color: 'black', onLongPress: vi.fn() };
 const render = (props = {}) => React.createElement(TranslatedMessage, { ...base, ...props }, React.createElement('Text', {}, (props as any).content || '你好'));
 const text = () => JSON.stringify(screen.toJSON());
 beforeEach(() => { state.mode = 'auto'; state.language = 'English'; state.ready = true; state.request.mockReset(); state.request.mockResolvedValue({ text: 'Hello', sourceLanguage: 'Chinese', translated: true }); });
@@ -28,8 +28,16 @@ describe('reading translated messages', () => {
     state.mode = mode;
     await act(async () => { screen = create(render()); });
     expect(state.request).not.toHaveBeenCalled(); expect(text()).toContain('你好');
-    await act(async () => screen.update(render({ requested: true })));
+    await act(async () => screen.update(render({ requested: 1 })));
     expect(state.request).toHaveBeenCalledOnce(); expect(text()).toContain('Translated');
+  });
+  it('an explicit Translate action shows translation again after Show original', async () => {
+    state.mode = 'off';
+    await act(async () => { screen = create(render({ requested: 1 })); });
+    await act(async () => screen.root.findByType('TouchableOpacity').props.onPress());
+    expect(text()).toContain('你好');
+    await act(async () => screen.update(render({ requested: 2 })));
+    expect(text()).toContain('Hello'); expect(text()).toContain('Show original');
   });
   it('cancels on disable, shows original immediately, and ignores late completion', async () => {
     let resolve!: (value: unknown) => void;

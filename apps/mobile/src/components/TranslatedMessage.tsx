@@ -6,7 +6,7 @@ import { space, type } from '../theme/tokens';
 import { MessageText } from './MessageText';
 
 export function TranslatedMessage({ conversationId, content, incoming, requested, active, color, onLongPress, children }: {
-  conversationId: string; content: string; incoming: boolean; requested: boolean; active: boolean;
+  conversationId: string; content: string; incoming: boolean; requested: number; active: boolean;
   color: string; onLongPress: () => void; children: ReactNode;
 }) {
   const { context, preference } = useChatTranslation(conversationId);
@@ -18,6 +18,7 @@ export function TranslatedMessage({ conversationId, content, incoming, requested
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     if (!enabled || !queue) return;
+    setOriginalKey(null);
     if (content.length > MAX_TRANSLATION_LENGTH) {
       setState({ key, error: `This message is too long to translate (limit ${MAX_TRANSLATION_LENGTH.toLocaleString()} characters).` });
       return;
@@ -30,7 +31,7 @@ export function TranslatedMessage({ conversationId, content, incoming, requested
       if (!controller.signal.aborted) setState({ key, error: error instanceof Error ? error.message : 'Could not translate.' });
     });
     return () => controller.abort();
-  }, [enabled, queue, content, preference.language, key, retry]);
+  }, [enabled, queue, content, preference.language, key, retry, requested]);
   const result = enabled && state?.key === key ? state.result : undefined;
   const error = enabled && state?.key === key ? state.error : undefined;
   const showTranslation = result?.translated && originalKey !== key;

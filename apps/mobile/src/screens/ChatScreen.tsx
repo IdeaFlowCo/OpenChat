@@ -349,7 +349,7 @@ export function ChatScreen({
   const { preference: translationPreference } = useChatTranslation(conversationId);
   const [translationFocused, setTranslationFocused] = useState(false);
   useFocusEffect(useCallback(() => { setTranslationFocused(true); return () => setTranslationFocused(false); }, []));
-  const [manualTranslations, setManualTranslations] = useState<Record<string, string>>({});
+  const [manualTranslations, setManualTranslations] = useState<Record<string, { content: string; version: number }>>({});
   const offerTranslation = messages.slice(-20).some(m => !m.deletedAt && m.senderId !== currentUser?.userId && likelyNeedsTranslation(m.content, translationPreference.language));
 
   const [text, setText] = useState('');
@@ -1701,7 +1701,7 @@ export function ChatScreen({
             ? <Text style={{ color: isOwn ? ownTint(0.55) : c.textMetadata, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
             : (!!m.content && (
                 <TranslatedMessage key={`${conversationId}:${m.id}`} conversationId={conversationId} content={m.content}
-                  incoming={!isOwn} requested={manualTranslations[m.id] === m.content}
+                  incoming={!isOwn} requested={manualTranslations[m.id]?.content === m.content ? manualTranslations[m.id].version : 0}
                   active={translationFocused && activeConversationId === conversationId && activeConversationLane === 'chat'} color={isOwn ? c.bubbleOwnText : c.bubbleOtherText}
                   onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}>
                 {/* Agents keep their original Markdown rendering. */
@@ -2321,7 +2321,7 @@ export function ChatScreen({
         senderName={actionSheetSenderName}
         onDismiss={() => setActionSheetVisible(false)}
         onReply={handleReply}
-        onTranslate={m => setManualTranslations(previous => ({ ...previous, [m.id]: m.content }))}
+        onTranslate={m => setManualTranslations(previous => ({ ...previous, [m.id]: { content: m.content, version: (previous[m.id]?.version || 0) + 1 } }))}
         translateLanguage={translationPreference.language}
         onSavePhotos={handleSavePhotos}
         onForward={handleForward}
