@@ -23,6 +23,7 @@ import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
+import { TranslationProvider } from './src/contexts/TranslationContext';
 import { PrivateNamesProvider } from './src/contexts/PrivateNamesContext';
 import { ChatProvider, useChat } from './src/contexts/ChatContext';
 import { RecordingProvider } from './src/contexts/RecordingContext';
@@ -724,6 +725,7 @@ function ShellWithBackground() {
     <View style={[styles.root, { backgroundColor: c.background }]}>
       <UpdateBanner />
       <ChatProvider>
+        <TranslationProvider>
         <PrivateNamesProvider>
           <EntryProvider>
             <SocialExperienceProvider>
@@ -733,6 +735,7 @@ function ShellWithBackground() {
             </SocialExperienceProvider>
           </EntryProvider>
         </PrivateNamesProvider>
+        </TranslationProvider>
       </ChatProvider>
     </View>
   );

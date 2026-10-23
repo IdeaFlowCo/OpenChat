@@ -1,3 +1,4 @@
+import { TranslationControls } from '../components/TranslationControls';
 import { ConnectAgentLink } from '../components/ConnectAgentLink';
 /**
  * Settings screen — theme toggle (OpenChat-bji), expo-secure-store status
@@ -670,6 +671,8 @@ export function SettingsScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      <TranslationControls />
 
       {/* Invite people (openchat-37z). Shareable QR/link points to the landing
           page (chat.ideaflow.app) which branches to iOS App Store, web, and
