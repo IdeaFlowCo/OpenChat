@@ -2,9 +2,9 @@
  * Front door to imported chats (OpenChat-061g), on the Chats list. Shown only
  * once the owner has an imported chat, so nobody else sees an empty door.
  */
-import { useCallback, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { api } from '../api/client';
 import { useImportedRoles } from './ImportedChatParts';
 import { Chip, ListRow } from './ui';
@@ -15,11 +15,20 @@ export function ImportedChatsLink({ variant = 'row' }: { variant?: 'row' | 'link
   const navigation = useNavigation<NavProp<'ImportedChats'>>();
   const r = useImportedRoles();
   const [count, setCount] = useState(0);
-  useFocusEffect(useCallback(() => {
+  useEffect(() => {
     let active = true;
-    api.listImportedChats().then(({ chats }) => { if (active) setCount(chats.length); }).catch(() => {});
-    return () => { active = false; };
-  }, []));
+    let pending = false;
+    const load = () => {
+      if (pending) return;
+      pending = true;
+      api.listImportedChats().then(({ chats }) => { if (active) setCount(chats.length); }).catch(() => {}).finally(() => { pending = false; });
+    };
+    // A phone list header can mount after its screen's focus event, including
+    // when the responsive layout changes. Load on mount as well as refocus.
+    const unsubscribe = navigation.addListener('focus', load);
+    load();
+    return () => { active = false; unsubscribe(); };
+  }, [navigation]);
   if (!count) return null;
   const open = () => navigation.navigate('ImportedChats');
   if (variant === 'row') {

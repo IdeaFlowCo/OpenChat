@@ -39,6 +39,7 @@ jobs:
           test/contextHostedReview.mobile.test.ts test/contextHostedApi.mobile.test.ts test/contextHosted.route.test.ts
           test/contextWebhookSetup.mobile.test.ts test/contextWebhooks.route.test.ts test/contextWebhookTransport.test.ts
           test/conversationContent.route.test.ts test/contextIntentions.mobile.test.ts
+          test/importedChats.mobile.test.ts test/importedChats.test.ts
       - name: Unlinked confidential exchanges (session, recipient, identities) and compose entry
         working-directory: apps/server
         run: >-
