@@ -60,6 +60,11 @@ export type RootStackParamList = {
   PrivateThing: { thingId: string };
   /** People whose catch-up date has passed. */
   CatchUp: undefined;
+  /** The owner's private, read-only copies of chats from other networks (OpenChat-061g). */
+  ImportedChats: undefined;
+  ImportedChat: { chatId: string; title?: string; tab?: 'conversation' | 'people' | 'asks' };
+  /** A small, evidenced profile of one person in an imported chat. */
+  ImportedPerson: { chatId: string; participantId: string };
   /** Agent API keys list (OpenChat-7c9). */
   AgentKeys: undefined;
   /** Create a new agent key. */

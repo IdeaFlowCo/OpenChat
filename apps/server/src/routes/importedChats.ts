@@ -37,7 +37,10 @@ const importedBy = (req: Request) => req.agentKeyId ? `agent:${(req.agentKeyLabe
 
 router.put('/import', async (req: Request, res: Response) => {
   const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
-  try { res.status(dryRun ? 200 : 201).json(await importChat(owner(req), req.body, { dryRun, importedBy: importedBy(req) })); } catch (error) { fail(error, res); }
+  try {
+    const result = await importChat(owner(req), req.body, { dryRun, importedBy: importedBy(req) });
+    res.status(result.created && !dryRun ? 201 : 200).json(result);
+  } catch (error) { fail(error, res); }
 });
 
 router.get('/', async (req: Request, res: Response) => {

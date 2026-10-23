@@ -52,6 +52,9 @@ import { CardEntryScreen } from './src/screens/CardEntryScreen';
 import { FriendsScreen } from './src/screens/FriendsScreen';
 import { PrivateThingScreen } from './src/screens/PrivateThingScreen';
 import { CatchUpScreen } from './src/screens/CatchUpScreen';
+import { ImportedChatsScreen } from './src/screens/ImportedChatsScreen';
+import { ImportedChatScreen } from './src/screens/ImportedChatScreen';
+import { ImportedPersonScreen } from './src/screens/ImportedPersonScreen';
 
 // Init crash reporting FIRST so even early-boot errors reach Sentry (OpenChat-7um).
 // No-op if EXPO_PUBLIC_SENTRY_DSN is unset.
@@ -258,6 +261,10 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       {/* Private graph: a saved company, idea, project or person, and the catch-up list */}
       <ChatsStack.Screen name="PrivateThing" component={PrivateThingScreen} options={{ title: 'Private notes' }} />
       <ChatsStack.Screen name="CatchUp" component={CatchUpScreen} options={{ title: 'Catch up' }} />
+      {/* Imported chat mirrors (OpenChat-061g): private, read-only */}
+      <ChatsStack.Screen name="ImportedChats" component={ImportedChatsScreen} options={{ title: 'Imported chats' }} />
+      <ChatsStack.Screen name="ImportedChat" component={ImportedChatScreen} options={({ route }) => ({ title: route.params.title ?? 'Imported chat' })} />
+      <ChatsStack.Screen name="ImportedPerson" component={ImportedPersonScreen} options={{ title: 'Person' }} />
       {/* Agent API keys (OpenChat-7c9) */}
       <ChatsStack.Screen
         name="AgentKeys"

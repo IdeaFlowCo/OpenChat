@@ -141,6 +141,8 @@ The dedupe key is owner + network + account + chat + `sourceMessageId`.
 
 ### Response
 
+`201` when the chat was created, `200` otherwise (including dry runs).
+
 ```jsonc
 {
   "dryRun": false,
@@ -179,6 +181,31 @@ The dedupe key is owner + network + account + chat + `sourceMessageId`.
 - Every profile fact and ask shows the messages it came from, who said it, and
   the source coverage (`asOf`, earliest/latest, complete or partial).
 - The chat header says **WhatsApp mirror · read-only** and the coverage line.
+
+## In the app
+
+Chats shows an **Imported chats** row (desktop: a sidebar link) once the owner
+has one; nobody else sees an empty door. Chats › Imported chats › a chat opens
+three sections:
+
+- **Conversation** — a transcript, not chat bubbles, under the provenance
+  strip. No composer. Edited messages say so and can show the original;
+  deleted ones say *Deleted by the sender*; media says it was not imported.
+- **People** — everyone in the chat, including unnamed participants, with
+  message counts and account state. A name opens the person's small profile:
+  name source, facts and asks with their source messages, recent messages.
+- **Asks** — each ask with whose need it is (or *Cy · not in this chat*), who
+  said it, the quoted source messages, and the owner's status chips. *Use
+  source status* clears the owner's choice.
+
+Account links are API-only for now (owner session, `PATCH …/people/:id`).
+
+## Account lifecycle
+
+Account export includes the owner's imported chats (`importedChats`, all
+time, so citations stay intact). Deleting the account deletes them, and clears
+any other owner's link that pointed at the deleted account without touching
+that owner's archive.
 
 ## Later: account claims
 

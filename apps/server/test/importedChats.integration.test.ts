@@ -280,7 +280,7 @@ integration('imported chat mirrors — real Neo4j + HTTP', { timeout: 60_000 }, 
     expect((await as(`Bearer ${readKey}`).put('/import', payload())).status).toBe(404);
     expect((await as(`Bearer ${readKey}`).delete(`/${chatId}`)).status).toBe(404);
     const res = await as(`Bearer ${writeKey}`).put('/import', payload());
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(200);
     expect(res.body.chatId).toBe(chatId);
     expect((await run('MATCH (c:OpenChatImportedChat {id: $chatId}) RETURN c.lastImportedBy AS by', { chatId })).records[0]!.get('by')).toBe('agent:Importer');
   });

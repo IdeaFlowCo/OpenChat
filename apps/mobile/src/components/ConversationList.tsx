@@ -1,4 +1,6 @@
+import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 import { ContextReviewLink } from './ContextReviewLink';
+import { ImportedChatsLink } from './ImportedChatsLink';
 import { ConnectAgentLink } from './ConnectAgentLink';
 /**
  * ConversationList — the list-of-conversations body, factored out so it can
@@ -228,7 +230,7 @@ export function ConversationList({ activeId, onSelect, onStartChat, compact, onC
       style={{ backgroundColor: c.background }}
       data={orderedConversations}
       keyExtractor={item => item.id}
-      ListHeaderComponent={<><View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>{!compact && <ConnectAgentLink />}<ContextReviewLink compact={compact} /></View>{onCreateStory && onOpenStory && onOpenReview ? (
+      ListHeaderComponent={<><View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>{!compact && <ConnectAgentLink />}<ContextReviewLink compact={compact} />{!isUnlinkedEmbed() && <ImportedChatsLink variant={compact ? 'compact' : 'link'} />}</View>{onCreateStory && onOpenStory && onOpenReview ? (
         <StoriesStrip
           compact={compact}
           onCreate={onCreateStory}
