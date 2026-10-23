@@ -30,6 +30,7 @@ jobs:
         run: >-
           npx vitest run test/groupOpen.mobile.test.ts test/chatLoading.mobile.test.ts
           test/offlineChat.test.ts test/offlineShell.test.ts
+          test/authenticatedRequests.mobile.test.ts
           test/translation.route.test.ts test/translation.mobile.test.ts
           test/notificationNavigation.mobile.test.ts test/chatScreenRouter.mobile.test.ts
           test/conversationThoughts.mobile.test.ts

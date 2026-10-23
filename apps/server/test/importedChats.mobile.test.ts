@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   navigation: { navigate: vi.fn(), push: vi.fn(), setOptions: vi.fn(), addListener: vi.fn(() => () => {}) },
   focused: true,
+  identityVerified: true,
   route: { params: {} as Record<string, unknown> },
   api: {
     listImportedChats: vi.fn(), getImportedChat: vi.fn(), listImportedMessages: vi.fn(), listImportedPeople: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock('react-native', () => ({
 }));
 vi.mock('@react-navigation/native', () => ({ useNavigation: () => mocks.navigation, useRoute: () => mocks.route, useFocusEffect: (callback: () => void) => React.useEffect(() => mocks.focused ? callback() : undefined, [callback]) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
+vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ isIdentityVerified: mocks.identityVerified }) }));
 vi.mock('../../mobile/src/api/client', () => ({ api: mocks.api }));
 vi.mock('../../mobile/src/components/Avatar', () => ({ Avatar: () => null }));
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
@@ -44,6 +46,7 @@ async function render(element: React.ReactElement) { await act(async () => { roo
 beforeEach(() => {
   vi.clearAllMocks(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.focused = true;
+  mocks.identityVerified = true;
   mocks.api.listImportedChats.mockResolvedValue({ chats: [chat] });
   mocks.api.getImportedChat.mockResolvedValue(chat);
   mocks.api.listImportedMessages.mockResolvedValue({ nextCursor: null, messages: [
@@ -61,6 +64,21 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT; });
 
 describe('imported chats front door', () => {
+  it('waits for online identity verification after cached chats render, then loads without another focus event', async () => {
+    mocks.focused = false;
+    mocks.identityVerified = false;
+    await render(React.createElement(ImportedChatsLink));
+    expect(root!.toJSON()).toBeNull();
+    expect(mocks.api.listImportedChats).not.toHaveBeenCalled();
+    mocks.identityVerified = true;
+    await act(async () => root!.update(React.createElement(ImportedChatsLink)));
+    expect(texts()).toContain('Imported chats');
+    expect(mocks.api.listImportedChats).toHaveBeenCalledTimes(1);
+    mocks.identityVerified = false;
+    await act(async () => root!.update(React.createElement(ImportedChatsLink)));
+    expect(root!.toJSON()).toBeNull();
+  });
+
   it('loads when the phone header mounts without a focus event, and refreshes on later focus', async () => {
     mocks.focused = false;
     await render(React.createElement(ImportedChatsLink));
