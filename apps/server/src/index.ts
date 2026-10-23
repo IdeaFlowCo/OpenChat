@@ -40,7 +40,7 @@ import friendsRoutes from './routes/friends.js';
 import privateGraphRoutes from './routes/privateGraph.js';
 import { ensurePrivateGraphIndexes } from './services/privateGraph.js';
 import privateNamesRoutes from './routes/privateNames.js';
-import importedChatsRoutes from './routes/importedChats.js';
+import importedChatsRoutes, { exceptImportBody } from './routes/importedChats.js';
 import { ensureAssistantUser } from './services/assistant.js';
 import { ensureGroupbrainBotUser } from './services/groupbrainBot.js';
 import { ensureWebhookIndex } from './services/webhookDispatch.js';
@@ -108,9 +108,8 @@ app.use(cors({
   credentials: true
 }));
 app.post('/api/connector/mcp', express.raw({ type:'application/json', limit:'1mb' }), handleIdeaflowConnector);
-// Imported chat payloads carry thousands of messages; only that route gets the larger body limit.
-app.put('/api/imported-chats/import', express.json({ limit: '16mb' }));
-app.use(express.json());
+// Imported chat payloads are parsed by their own route, after authentication, with a larger limit.
+app.use(exceptImportBody(express.json()));
 app.use('/api', connectorOperationGuard);
 
 // Health check

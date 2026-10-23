@@ -11,7 +11,7 @@ import { Avatar } from '../components/Avatar';
 import { AskCard, participantName, SourceQuote, useImportedRoles } from '../components/ImportedChatParts';
 import { Button, Card, SectionLabel } from '../components/ui';
 import { space, type } from '../theme/tokens';
-import { accountLine, coverageLine, membershipLabel, messageTime, mirrorLabel, nameSourceLabel, shortDate } from '../utils/importedChats';
+import { NOT_LINKED, coverageLine, membershipLabel, messageTime, mirrorLabel, nameSourceLabel, shortDate } from '../utils/importedChats';
 import type { NavProp, RouteProps } from '../navigation/types';
 
 export function ImportedPersonScreen() {
@@ -48,7 +48,7 @@ export function ImportedPersonScreen() {
         <View style={styles.identityText}>
           <Text style={[type.heading, { color: r.text }]} numberOfLines={2}>{participantName(person)}</Text>
           <Text style={[type.meta, { color: r.textMeta }]}>{nameSourceLabel(person)} · {membershipLabel(person.membership) ?? 'Membership not known'} · {chat.title}</Text>
-          <Text style={[type.meta, { color: r.textSecondary }]}>{accountLine(person)}</Text>
+          <Text style={[type.meta, { color: r.textSecondary }]}>{NOT_LINKED}</Text>
           <Text style={[type.meta, { color: r.textMeta }]}>{person.messageCount} {person.messageCount === 1 ? 'message' : 'messages'}{span}</Text>
         </View>
       </View>

@@ -11,7 +11,7 @@ import { Avatar } from '../components/Avatar';
 import { AskCard, participantName, ProvenanceStrip, useImportedRoles } from '../components/ImportedChatParts';
 import { Button, Card, Chip, ListRow } from '../components/ui';
 import { space, type } from '../theme/tokens';
-import { accountLine, membershipLabel, messageTime, networkName } from '../utils/importedChats';
+import { NOT_LINKED, membershipLabel, messageTime, networkName } from '../utils/importedChats';
 import type { NavProp, RouteProps } from '../navigation/types';
 
 export type ImportedChatTab = 'conversation' | 'people' | 'asks';
@@ -138,7 +138,7 @@ function PeopleTab({ chatId, onOpenPerson }: { chatId: string; onOpenPerson: (id
             divider={index > 0}
             leading={<Avatar name={person.label} size={36} />}
             title={participantName(person)}
-            subtitle={`${membershipLabel(person.membership) ? `${membershipLabel(person.membership)} · ` : ''}${person.messageCount} ${person.messageCount === 1 ? 'message' : 'messages'}${person.askCount ? ` · ${person.askCount} ${person.askCount === 1 ? 'ask' : 'asks'}` : ''} · ${accountLine(person)}`}
+            subtitle={`${membershipLabel(person.membership) ? `${membershipLabel(person.membership)} · ` : ''}${person.messageCount} ${person.messageCount === 1 ? 'message' : 'messages'}${person.askCount ? ` · ${person.askCount} ${person.askCount === 1 ? 'ask' : 'asks'}` : ''} · ${NOT_LINKED}`}
             onPress={() => onOpenPerson(person.participantId)}
             testID={`imported-person-${person.participantId}`}
           />

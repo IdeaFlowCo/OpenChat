@@ -19,8 +19,8 @@ Tracked in beads `OpenChat-061g`.
   a stable source key. No `User` node is created for them, and source
   membership never grants anyone access to anything.
 - **Not a merge.** Two participants with the same name stay two participants.
-  A participant is linked to an OpenChat account only when the owner confirms
-  that link in the app; an import cannot set it.
+  Participants are not linked to OpenChat accounts at all yet (see *Later:
+  account claims*); nothing in an import can set a link.
 
 ## Ownership and authentication
 
@@ -29,9 +29,10 @@ an agent key that owner issued (`read` to look, `write` to import or change
 anything). No id in a request can select another owner. Refusals, including
 another owner's chat ids, answer `404` (never `403`; the app signs out on 403).
 Two owners importing the same WhatsApp group get two separate private copies.
-
-Confirming or removing an account link needs the owner's own app session; an
-agent key cannot do it.
+The shared Ideaflow connector, connector-delegated calls and embedded
+(Unlinked) sessions are refused. The import body is parsed only after the
+caller is authenticated, so an anonymous request never makes the server buffer
+a large payload.
 
 ## Import API
 
@@ -116,6 +117,9 @@ written.
 - `reporterKey` names a participant in this payload or already imported.
   `subjectKey` does too, or is `null` with a `subjectLabel` for someone the
   reporter mentioned who is not in the chat (never guessed to be a participant).
+- Each ask's `reporterKey` is the sender of at least one of its
+  `sourceMessageIds` (asks on someone else's behalf name that person as the
+  subject; the reporter is still whoever wrote the message).
 - At most one participant has `isOwner: true`.
 - Keys are 1–200 characters. Duplicate keys within one request are rejected.
 
@@ -123,11 +127,18 @@ written.
 
 The dedupe key is owner + network + account + chat + `sourceMessageId`.
 
+Imports only move forward: a payload whose `coverage.asOf` is earlier than the
+chat's saved `asOf` is rejected with `409` (`currentAsOf` in the body) and
+nothing is written, so an old snapshot can never roll back newer text, names
+or asks. Equal `asOf` is allowed, for chunked imports of one snapshot.
+
 - A message's sender, `sentAt` and source id are immutable. A reimport that
   disagrees is reported under `conflicts` and that message is left unchanged.
 - Text follows the source. When the text changes, the message keeps the text
   first imported as `originalText` and records `editedAt` (the source's, or
-  the import time when the source gave none) and `revision`.
+  the import time when the source gave none) and `revision`. A message the
+  source already marks edited (`editedAt`) shows as edited from its first
+  import, without an original.
 - `kind: "deleted"` clears the stored text (the sender removed it) and records
   `deletedAtSource`; a later import cannot restore text over a deletion.
 - Participants keep their first `sourceKey`; `displayName`/`nameSource`/
@@ -175,7 +186,6 @@ The dedupe key is owner + network + account + chat + `sourceMessageId`.
 | `GET /api/imported-chats/:chatId/people/:participantId` | read | Mini-profile: name and its source, facts with source messages, asks, recent messages. |
 | `GET /api/imported-chats/:chatId/asks` | read | Asks with subject, reporter, source messages and statuses. |
 | `PATCH /api/imported-chats/:chatId/asks/:askId` | write | `{ "ownerStatus": "open" \| "resolved" \| "withdrawn" \| "needs_review" \| null }` |
-| `PATCH /api/imported-chats/:chatId/people/:participantId` | app session | `{ "linkedUserId": "<OpenChat user id>" \| null }` |
 | `DELETE /api/imported-chats/:chatId` | write | Removes the mirror and everything imported into it. |
 
 ## Display honesty
@@ -187,8 +197,8 @@ The dedupe key is owner + network + account + chat + `sourceMessageId`.
   your contacts*, *Name from their own message* with that message quoted).
 - Coverage shows the source's own row count (*18 source rows · 5 text, 13
   other*) so a partial import never reads as the whole chat.
-- Without a confirmed link a participant shows **Not linked to an OpenChat
-  account**. That says nothing about whether they use OpenChat.
+- Every participant shows **Not linked to an OpenChat account**. That says
+  nothing about whether they use OpenChat.
 - Every profile fact and ask shows the messages it came from, who said it, and
   the source coverage (`asOf`, earliest/latest, complete or partial).
 - The chat header says **WhatsApp mirror · read-only** and the coverage line.
@@ -209,14 +219,12 @@ three sections:
   said it, the quoted source messages, and the owner's status chips. *Use
   source status* clears the owner's choice.
 
-Account links are API-only for now (owner session, `PATCH …/people/:id`).
+Linking a participant to an OpenChat account is not offered yet.
 
 ## Account lifecycle
 
 Account export includes the owner's imported chats (`importedChats`, all
-time, so citations stay intact). Deleting the account deletes them, and clears
-any other owner's link that pointed at the deleted account without touching
-that owner's archive.
+time, so citations stay intact). Deleting the account deletes them.
 
 ## Later: account claims
 
@@ -225,8 +233,10 @@ themselves, and a claim — when built — must be verified (for example by
 proving control of the same source-network identity). A verified claim would
 let the owner see "this is now <account>". It does **not** give that person
 access to the owner's archive, does not rewrite the attribution of imported
-messages, asks or facts, and does not make imported messages live. Owner-confirmed
-links today are the owner's private assertion and are shown as **Linked by you**.
+messages, asks or facts, and does not make imported messages live. Even an
+owner-confirmed link would have to follow OpenChat's existing discoverability
+and blocking rules before it shows any account's name; until that is designed,
+no linking is offered.
 
 ## Synthetic fixture
 

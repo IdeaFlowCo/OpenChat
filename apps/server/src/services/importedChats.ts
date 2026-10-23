@@ -6,8 +6,9 @@
  * `Conversation`/`Message`/`User` nodes, so sockets, push, unread, search,
  * the OpenChat Agent, Context, matching and discovery cannot reach it. Every
  * node carries `ownerUserId` and every query is anchored on it. Imported
- * people are participants with a source key, never accounts; only the owner
- * can link one to an OpenChat account, and that link grants nothing.
+ * people are participants with a source key, never accounts. Linking a
+ * participant to an OpenChat account is deliberately not offered yet
+ * (docs/imported-chat-mirrors.md, "Later: account claims").
  */
 
 import { createHash } from 'node:crypto';
@@ -252,19 +253,24 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
   const { source, coverage } = payload;
   const now = new Date().toISOString();
   const chatImportKey = compositeKey(ownerUserId, source.network, source.accountKey, source.chatKey);
-  const existingChat = await tx.run('MATCH (c:OpenChatImportedChat {importKey: $importKey, ownerUserId: $ownerUserId}) RETURN c { .* } AS chat', { importKey: chatImportKey, ownerUserId });
-  const before = existingChat.records[0]?.get('chat') as Record<string, unknown> | undefined;
-  let chatId = (before?.id as string | undefined) ?? null;
-  if (!dryRun) {
-    // Creating or touching the chat node first takes its write lock, so two imports of one chat serialize.
-    const merged = await tx.run(
+  // A real import creates or touches the chat node first, taking its write lock, and only then reads it,
+  // so two imports of one chat serialize and the second sees everything the first wrote.
+  const chatRead = dryRun
+    ? await tx.run('MATCH (c:OpenChatImportedChat {importKey: $importKey, ownerUserId: $ownerUserId}) RETURN c { .* } AS chat', { importKey: chatImportKey, ownerUserId })
+    : await tx.run(
       `MERGE (c:OpenChatImportedChat {importKey: $importKey})
        ON CREATE SET c.id = $newId, c.ownerUserId = $ownerUserId, c.network = $network, c.accountKey = $accountKey, c.chatKey = $chatKey, c.createdAt = $now, c.importCount = 0
        SET c.lockedAt = $now
-       RETURN c.id AS id, c.ownerUserId AS ownerUserId`,
+       RETURN c { .* } AS chat`,
       { importKey: chatImportKey, newId: nanoid(), ownerUserId, network: source.network, accountKey: source.accountKey, chatKey: source.chatKey, now });
-    if (merged.records[0]!.get('ownerUserId') !== ownerUserId) fail(404, 'Imported chat not found');
-    chatId = merged.records[0]!.get('id') as string;
+  const chatNode = chatRead.records[0]?.get('chat') as Record<string, unknown> | undefined;
+  if (chatNode && chatNode.ownerUserId !== ownerUserId) fail(404, 'Imported chat not found');
+  const created = !chatNode || Number(chatNode.importCount ?? 0) === 0;
+  const before = created ? undefined : chatNode;
+  const chatId = (chatNode?.id as string | undefined) ?? null;
+  // Imports only move forward: a snapshot older than one already applied could roll back newer text, names and asks.
+  if (before?.asOf && coverage.asOf < (before.asOf as string)) {
+    fail(409, `A newer import of this chat (as of ${before.asOf as string}) is already saved. Send a snapshot as of that time or later.`, { currentAsOf: before.asOf });
   }
   const scoped = (part: string) => compositeKey(chatId ?? 'new', part);
 
@@ -293,11 +299,17 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
   const payloadParticipantKeys = new Set(payload.participants.map(p => p.sourceKey));
   const knownParticipant = (key: string) => payloadParticipantKeys.has(key) || storedParticipants.has(key);
   const knownMessage = (id: string) => payloadMessageIds.has(id) || storedMessages.has(id);
+  const payloadSenders = new Map(payload.messages.map(m => [m.sourceMessageId, m.senderKey]));
+  const senderOf = (id: string) => payloadSenders.has(id) ? payloadSenders.get(id) ?? null : storedMessages.get(id)?.senderKey ?? null;
   payload.messages.forEach((m, i) => { if (m.senderKey && !knownParticipant(m.senderKey)) issues.push({ path: `messages[${i}].senderKey`, message: `names no participant ${JSON.stringify(m.senderKey)}` }); });
   payload.asks.forEach((a, i) => {
     if (a.subjectKey && !knownParticipant(a.subjectKey)) issues.push({ path: `asks[${i}].subjectKey`, message: `names no participant ${JSON.stringify(a.subjectKey)}` });
     if (!knownParticipant(a.reporterKey)) issues.push({ path: `asks[${i}].reporterKey`, message: `names no participant ${JSON.stringify(a.reporterKey)}` });
     [...a.sourceMessageIds, ...a.statusSourceMessageIds].forEach(id => { if (!knownMessage(id)) issues.push({ path: `asks[${i}]`, message: `cites missing source message ${JSON.stringify(id)}` }); });
+    // Attribution: whoever is named as having said the ask must have sent at least one of the messages that state it.
+    if (a.sourceMessageIds.every(knownMessage) && !a.sourceMessageIds.some(id => senderOf(id) === a.reporterKey)) {
+      issues.push({ path: `asks[${i}].reporterKey`, message: 'must be the sender of at least one of the ask\'s source messages' });
+    }
   });
   payload.participants.forEach((p, i) => p.nameSourceMessageIds.forEach(id => { if (!knownMessage(id)) issues.push({ path: `participants[${i}].nameSourceMessageIds`, message: `cites missing source message ${JSON.stringify(id)}` }); }));
   payload.participants.forEach((p, i) => p.profileFacts.forEach((f, j) => f.sourceMessageIds.forEach(id => { if (!knownMessage(id)) issues.push({ path: `participants[${i}].profileFacts[${j}]`, message: `cites missing source message ${JSON.stringify(id)}` }); })));
@@ -341,8 +353,8 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
   const messageWrites: Array<Record<string, unknown>> = [];
   let earliest: string | null = null, latest: string | null = null;
   for (const m of payload.messages) {
-    earliest = minIso(earliest, m.sentAt); latest = maxIso(latest, m.sentAt);
     const stored = storedMessages.get(m.sourceMessageId);
+    if (!stored || (stored.senderKey ?? null) === m.senderKey && stored.sentAt === m.sentAt) { earliest = minIso(earliest, m.sentAt); latest = maxIso(latest, m.sentAt); }
     const senderParticipantId = m.senderKey ? participantIds.get(m.senderKey) ?? null : null;
     if (!stored) {
       counts.messages.created += 1;
@@ -388,7 +400,7 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
   const factWrites: Array<Record<string, unknown>> = [];
   const listedFacts = new Set<string>();
   for (const p of payload.participants) for (const f of p.profileFacts) {
-    const importKey = scoped(`fact:${p.sourceKey}:${f.factKey}`);
+    const importKey = scoped(compositeKey('fact', p.sourceKey, f.factKey));
     listedFacts.add(importKey);
     const stored = storedFacts.get(importKey);
     if (!stored) { counts.profileFacts.created += 1; factWrites.push({ id: nanoid(), importKey, factKey: f.factKey, participantKey: p.sourceKey, participantId: participantIds.get(p.sourceKey), text: f.text, sourceMessageIds: f.sourceMessageIds, create: true }); continue; }
@@ -402,7 +414,7 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
   const staleAsks = staleKeys(askRows, listedAsks), staleFacts = staleKeys(factRows, listedFacts);
   counts.asks.markedStale = staleAsks.length; counts.profileFacts.markedStale = staleFacts.length;
 
-  const result: ImportResult = { dryRun, chatId, created: !before, counts, conflicts };
+  const result: ImportResult = { dryRun, chatId, created, counts, conflicts };
   if (dryRun) return result;
 
   const base = { chatId, ownerUserId, now };
@@ -413,7 +425,7 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
   await tx.run(
     `UNWIND $rows AS row
      MERGE (p:OpenChatImportedParticipant {importKey: row.importKey})
-     ON CREATE SET p.id = row.id, p.ordinal = row.ordinal, p.chatId = $chatId, p.ownerUserId = $ownerUserId, p.sourceKey = row.sourceKey, p.createdAt = $now, p.linkedUserId = null
+     ON CREATE SET p.id = row.id, p.ordinal = row.ordinal, p.chatId = $chatId, p.ownerUserId = $ownerUserId, p.sourceKey = row.sourceKey, p.createdAt = $now
      SET p.displayName = row.displayName, p.nameSource = row.nameSource, p.nameSourceMessageIds = row.nameSourceMessageIds, p.membership = row.membership, p.isOwner = row.isOwner, p.updatedAt = $now`,
     { ...base, rows: participantWrites });
   for (let i = 0; i < messageWrites.length; i += 1000) {
@@ -455,7 +467,8 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
          c.sourceRowTotal = CASE WHEN $rows IS NULL THEN c.sourceRowTotal ELSE $rows.total END,
          c.sourceRowText = CASE WHEN $rows IS NULL THEN c.sourceRowText ELSE $rows.text END,
          c.sourceRowNonText = CASE WHEN $rows IS NULL THEN c.sourceRowNonText ELSE $rows.nonText END,
-         c.earliestMessageAt = $earliest, c.latestMessageAt = $latest,
+         c.earliestMessageAt = CASE WHEN c.earliestMessageAt IS NULL OR $earliest < c.earliestMessageAt THEN $earliest ELSE c.earliestMessageAt END,
+         c.latestMessageAt = CASE WHEN c.latestMessageAt IS NULL OR $latest > c.latestMessageAt THEN $latest ELSE c.latestMessageAt END,
          c.importCount = coalesce(c.importCount, 0) + 1, c.lastImportAt = $now, c.lastImportedBy = $importedBy, c.updatedAt = $now
      REMOVE c.lockedAt`,
     {
@@ -471,8 +484,7 @@ async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload:
 export interface Coverage { asOf: string | null; method: string | null; earliestMessageAt: string | null; latestMessageAt: string | null; complete: boolean; note: string | null; sourceRowCounts: SourceRowCounts | null; lastImportAt: string | null; importCount: number }
 export interface ImportedChatSummary { id: string; network: string; chatType: 'group' | 'direct'; title: string; coverage: Coverage; counts: { messages: number; participants: number; openAsks: number } }
 export interface ParticipantRef { participantId: string; label: string; displayName: string | null; isOwner: boolean }
-export interface AccountLink { userId: string; name: string | null; linkedBy: 'owner'; linkedAt: string }
-export interface ImportedPerson extends ParticipantRef { nameSource: NameSource; membership: Membership; account: AccountLink | null; messageCount: number; firstMessageAt: string | null; lastMessageAt: string | null; factCount: number; askCount: number }
+export interface ImportedPerson extends ParticipantRef { nameSource: NameSource; membership: Membership; messageCount: number; firstMessageAt: string | null; lastMessageAt: string | null; factCount: number; askCount: number }
 export interface ImportedMessageView { id: string; sourceMessageId: string; sentAt: string; kind: MessageKind; text: string | null; mediaType: string | null; edited: boolean; editedAt: string | null; originalText: string | null; deletedAtSource: string | null; replyToSourceMessageId: string | null; sender: ParticipantRef | null }
 export interface SourceExcerpt { sourceMessageId: string; sentAt: string | null; sender: ParticipantRef | null; text: string | null; available: boolean }
 export interface ImportedFactView { id: string; text: string; stale: boolean; sources: SourceExcerpt[] }
@@ -515,7 +527,7 @@ export async function listImportedChats(ownerUserId: string): Promise<{ chats: I
       `MATCH (c:OpenChatImportedChat {ownerUserId: $ownerUserId})
        CALL { WITH c MATCH (m:OpenChatImportedMessage {chatId: c.id}) RETURN count(m) AS messages }
        CALL { WITH c MATCH (p:OpenChatImportedParticipant {chatId: c.id}) RETURN count(p) AS participants }
-       CALL { WITH c MATCH (a:OpenChatImportedAsk {chatId: c.id}) WHERE coalesce(a.ownerStatus, a.sourceStatus) = 'open' RETURN count(a) AS openAsks }
+       CALL { WITH c MATCH (a:OpenChatImportedAsk {chatId: c.id}) WHERE coalesce(a.ownerStatus, a.sourceStatus) = 'open' AND coalesce(a.stale, false) = false RETURN count(a) AS openAsks }
        RETURN c { .* } AS c, messages, participants, openAsks ORDER BY coalesce(c.latestMessageAt, c.createdAt) DESC`,
       { ownerUserId });
     return { chats: result.records.map(record => summary(record.get('c'), { messages: Number(record.get('messages')), participants: Number(record.get('participants')), openAsks: Number(record.get('openAsks')) })) };
@@ -532,7 +544,7 @@ export async function getImportedChat(ownerUserId: string, chatId: string): Prom
     const result = await tx.run(
       `CALL { MATCH (m:OpenChatImportedMessage {chatId: $chatId, ownerUserId: $ownerUserId}) RETURN count(m) AS messages }
        CALL { MATCH (p:OpenChatImportedParticipant {chatId: $chatId, ownerUserId: $ownerUserId}) RETURN count(p) AS participants }
-       CALL { MATCH (a:OpenChatImportedAsk {chatId: $chatId, ownerUserId: $ownerUserId}) WHERE coalesce(a.ownerStatus, a.sourceStatus) = 'open' RETURN count(a) AS openAsks }
+       CALL { MATCH (a:OpenChatImportedAsk {chatId: $chatId, ownerUserId: $ownerUserId}) WHERE coalesce(a.ownerStatus, a.sourceStatus) = 'open' AND coalesce(a.stale, false) = false RETURN count(a) AS openAsks }
        RETURN messages, participants, openAsks`, { chatId, ownerUserId });
     const r = result.records[0]!;
     return summary(c, { messages: Number(r.get('messages')), participants: Number(r.get('participants')), openAsks: Number(r.get('openAsks')) });
@@ -558,7 +570,7 @@ const MESSAGE_VIEW = `m { .id, .sourceMessageId, .sentAt, .kind, .text, .mediaTy
 function messageView(m: Record<string, unknown>, p: Record<string, unknown> | null): ImportedMessageView {
   return {
     id: m.id as string, sourceMessageId: m.sourceMessageId as string, sentAt: m.sentAt as string, kind: m.kind as MessageKind, text: (m.text as string) ?? null, mediaType: (m.mediaType as string) ?? null,
-    edited: Number(m.revision ?? 0) > 0 && !m.deletedAtSource, editedAt: (m.editedAt as string) ?? null, originalText: (m.originalText as string) ?? null,
+    edited: (Number(m.revision ?? 0) > 0 || !!m.editedAt) && !m.deletedAtSource, editedAt: (m.editedAt as string) ?? null, originalText: (m.originalText as string) ?? null,
     deletedAtSource: (m.deletedAtSource as string) ?? null, replyToSourceMessageId: (m.replyToSourceMessageId as string) ?? null, sender: toRef(p),
   };
 }
@@ -576,7 +588,7 @@ export async function listImportedMessages(ownerUserId: string, chatId: string, 
          AND ($participantId IS NULL OR m.senderParticipantId = $participantId)
        WITH m ORDER BY m.sentAt DESC, m.sourceMessageId DESC LIMIT $limit
        OPTIONAL MATCH (p:OpenChatImportedParticipant {chatId: $chatId, ownerUserId: $ownerUserId, id: m.senderParticipantId})
-       RETURN ${MESSAGE_VIEW}`,
+       RETURN ${MESSAGE_VIEW} ORDER BY m.sentAt DESC, m.sourceMessageId DESC`,
       { chatId, ownerUserId, cursorAt: cursor?.[0] ?? null, cursorId: cursor?.[1] ?? null, participantId, limit: neo4j.int(limit + 1) });
     const page = result.records.map(record => messageView(record.get('m'), record.get('p')));
     const more = page.length > limit;
@@ -586,16 +598,9 @@ export async function listImportedMessages(ownerUserId: string, chatId: string, 
   });
 }
 
-async function accountLinks(tx: ManagedTransaction, userIds: string[]): Promise<Map<string, string | null>> {
-  if (!userIds.length) return new Map();
-  const result = await tx.run('MATCH (u:User) WHERE u.id IN $ids RETURN u.id AS id, u.name AS name', { ids: userIds });
-  return new Map(result.records.map(record => [record.get('id') as string, (record.get('name') as string) ?? null]));
-}
-function personOf(p: Record<string, unknown>, stats: Record<string, unknown>, names: Map<string, string | null>): ImportedPerson {
-  const linkedUserId = (p.linkedUserId as string) ?? null;
+function personOf(p: Record<string, unknown>, stats: Record<string, unknown>): ImportedPerson {
   return {
     ...toRef(p)!, nameSource: (p.nameSource as NameSource) ?? 'unknown', membership: (p.membership as Membership) ?? 'unknown',
-    account: linkedUserId && names.has(linkedUserId) ? { userId: linkedUserId, name: names.get(linkedUserId) ?? null, linkedBy: 'owner', linkedAt: p.linkedAt as string } : null,
     messageCount: Number(stats.messageCount ?? 0), firstMessageAt: (stats.firstMessageAt as string) ?? null, lastMessageAt: (stats.lastMessageAt as string) ?? null,
     factCount: Number(stats.factCount ?? 0), askCount: Number(stats.askCount ?? 0),
   };
@@ -613,8 +618,7 @@ export async function listImportedPeople(ownerUserId: string, chatId: string): P
        RETURN p { .* } AS p, { messageCount: messageCount, firstMessageAt: firstMessageAt, lastMessageAt: lastMessageAt, factCount: factCount, askCount: askCount } AS stats`,
       { chatId, ownerUserId });
     const raw = result.records.map(record => ({ p: record.get('p') as Record<string, unknown>, stats: record.get('stats') as Record<string, unknown> }));
-    const names = await accountLinks(tx, raw.map(r => r.p.linkedUserId as string).filter(Boolean));
-    const people = raw.map(r => personOf(r.p, r.stats, names));
+    const people = raw.map(r => personOf(r.p, r.stats));
     people.sort((a, b) => Number(b.isOwner) - Number(a.isOwner) || b.messageCount - a.messageCount || Number(!a.displayName) - Number(!b.displayName) || a.label.localeCompare(b.label));
     return { people };
   });
@@ -667,7 +671,6 @@ export async function getImportedPerson(ownerUserId: string, chatId: string, par
       { chatId, ownerUserId, participantId });
     const record = result.records[0] ?? fail(404, 'Person not found in this imported chat');
     const p = record.get('p') as Record<string, unknown>;
-    const names = await accountLinks(tx, p.linkedUserId ? [p.linkedUserId as string] : []);
     const factRows = rows<Record<string, unknown>>(await tx.run(
       'MATCH (f:OpenChatImportedFact {chatId: $chatId, ownerUserId: $ownerUserId, participantId: $participantId}) RETURN f { .* } AS f ORDER BY f.stale, f.createdAt',
       { chatId, ownerUserId, participantId }), 'f');
@@ -675,12 +678,12 @@ export async function getImportedPerson(ownerUserId: string, chatId: string, par
     const factSources = await excerpts(tx, ownerUserId, chatId, [...nameSourceIds, ...factRows.flatMap(f => (f.sourceMessageIds as string[]) ?? [])]);
     const recent = await tx.run(
       `MATCH (m:OpenChatImportedMessage {chatId: $chatId, ownerUserId: $ownerUserId, senderParticipantId: $participantId})
-       WITH m ORDER BY m.sentAt DESC LIMIT 10
+       WITH m ORDER BY m.sentAt DESC, m.sourceMessageId DESC LIMIT 10
        OPTIONAL MATCH (p:OpenChatImportedParticipant {chatId: $chatId, ownerUserId: $ownerUserId, id: m.senderParticipantId})
-       RETURN ${MESSAGE_VIEW}`, { chatId, ownerUserId, participantId });
+       RETURN ${MESSAGE_VIEW} ORDER BY m.sentAt DESC, m.sourceMessageId DESC`, { chatId, ownerUserId, participantId });
     return {
       chat: { id: chat.id as string, title: (chat.title as string) ?? 'Imported chat', network: chat.network as string, coverage: coverageOf(chat) },
-      person: personOf(p, record.get('stats'), names),
+      person: personOf(p, record.get('stats')),
       nameSources: cite(factSources, nameSourceIds),
       facts: factRows.map(f => ({ id: f.id as string, text: f.text as string, stale: f.stale === true, sources: cite(factSources, (f.sourceMessageIds as string[]) ?? []) })),
       asksAbout: await askViews(tx, ownerUserId, chatId, 'WHERE a.subjectKey = $sourceKey', { sourceKey: p.sourceKey }),
@@ -705,38 +708,6 @@ export async function setImportedAskStatus(ownerUserId: string, chatId: string, 
       { askId, chatId, ownerUserId, ownerStatus, now: new Date().toISOString() });
     if (!updated.records.length) fail(404, 'Ask not found in this imported chat');
     return (await askViews(tx, ownerUserId, chatId, 'WHERE a.id = $askId', { askId }))[0]!;
-  });
-}
-
-/**
- * The owner's own assertion that a participant is a given OpenChat account.
- * Grants that account nothing and changes no attribution. Same blocking and
- * bot rules as private names: no bots, nobody blocked either way, not missing.
- */
-export async function setParticipantLink(ownerUserId: string, chatId: string, participantId: string, body: unknown): Promise<ImportedPerson> {
-  const input = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
-  if (!('linkedUserId' in input)) fail(400, 'Give linkedUserId, or null to remove the link');
-  const linkedUserId = input.linkedUserId;
-  if (linkedUserId !== null && (typeof linkedUserId !== 'string' || !linkedUserId || linkedUserId.length > 200)) fail(400, 'linkedUserId must be an OpenChat user id or null');
-  return write(async tx => {
-    await requireChat(tx, ownerUserId, chatId);
-    if (linkedUserId) {
-      const target = await tx.run(
-        `MATCH (owner:User {id: $ownerUserId}), (target:User {id: $linkedUserId})
-         WHERE coalesce(target.isBot, false) = false AND target.deletedAt IS NULL
-           AND NOT (owner)-[:BLOCKED]->(target) AND NOT (target)-[:BLOCKED]->(owner)
-         RETURN target.id AS id`, { ownerUserId, linkedUserId });
-      if (!target.records.length) fail(404, 'OpenChat account not found');
-    }
-    const updated = await tx.run(
-      `MATCH (p:OpenChatImportedParticipant {id: $participantId, chatId: $chatId, ownerUserId: $ownerUserId})
-       SET p.linkedUserId = $linkedUserId, p.linkedAt = CASE WHEN $linkedUserId IS NULL THEN null ELSE $now END, p.updatedAt = $now
-       WITH p ${PERSON_STATS}
-       RETURN p { .* } AS p, { messageCount: messageCount, firstMessageAt: firstMessageAt, lastMessageAt: lastMessageAt, factCount: factCount, askCount: askCount } AS stats`,
-      { participantId, chatId, ownerUserId, linkedUserId, now: new Date().toISOString() });
-    const record = updated.records[0] ?? fail(404, 'Person not found in this imported chat');
-    const p = record.get('p') as Record<string, unknown>;
-    return personOf(p, record.get('stats'), await accountLinks(tx, linkedUserId ? [linkedUserId as string] : []));
   });
 }
 

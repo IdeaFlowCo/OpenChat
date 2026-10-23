@@ -53,8 +53,8 @@ const NAME_SOURCE: Record<ImportedPerson['nameSource'], string> = {
 };
 export const nameSourceLabel = (person: Pick<ImportedPerson, 'nameSource' | 'displayName'>) => person.displayName ? NAME_SOURCE[person.nameSource] : NAME_SOURCE.unknown;
 
-/** Never says the person is not on OpenChat, only whether you linked them. */
-export function accountLine(person: Pick<ImportedPerson, 'account'>): string {
-  if (!person.account) return 'Not linked to an OpenChat account';
-  return `Linked by you to ${person.account.name ?? 'an OpenChat account'}`;
-}
+/**
+ * Imported people are never linked to accounts yet (docs/imported-chat-mirrors.md,
+ * "Later: account claims"). This says only that — never that they are not on OpenChat.
+ */
+export const NOT_LINKED = 'Not linked to an OpenChat account';
