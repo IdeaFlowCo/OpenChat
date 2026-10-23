@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('react-native', () => ({ Platform: mocks.platform }));
+vi.mock('expo', () => ({ requireOptionalNativeModule: () => ({}) }));
 vi.mock('expo-contacts', () => ({
   isAvailableAsync: mocks.available,
   getPermissionsAsync: mocks.getPermissions,
