@@ -11,7 +11,6 @@ export function TranslationControls({ conversationId }: { conversationId?: strin
   const { scheme } = useTheme();
   const c = getColors(scheme);
   if (!context) return null;
-  const inherited = !!conversationId && !context.preferences.chats[conversationId]?.mode;
   const modes: { value: TranslationMode; label: string }[] = [
     { value: 'ask', label: 'Offer to translate' }, { value: 'auto', label: 'Auto-translate' }, { value: 'off', label: 'Off · manual only' },
   ];
@@ -20,14 +19,14 @@ export function TranslationControls({ conversationId }: { conversationId?: strin
     <Text style={[type.meta, { color: c.textMetadata }]}>Only you see translations. Originals are kept. Messages you translate are processed by OpenChat’s AI service (Anthropic).</Text>
     <Text style={[type.meta, { color: c.textMetadata }]}>{conversationId ? 'Overrides your default for this chat.' : 'Default for all chats, with per-chat overrides.'} Saved for your account on this device.</Text>
     <Text style={[type.bodyStrong, { color: c.textPrimary, marginTop: space[2] }]}>Incoming messages</Text>
-    {conversationId && <TouchableOpacity accessibilityRole="radio" accessibilityState={{ checked: !context.preferences.chats[conversationId], disabled: !context.ready }} disabled={!context.ready}
+    {conversationId && <TouchableOpacity accessibilityRole="button" accessibilityState={{ disabled: !context.ready }} disabled={!context.ready}
       onPress={() => context.resetChat(conversationId)} style={[styles.choice, { borderColor: c.border }]}>
-      <Text style={[type.body, { color: c.textPrimary }]}>{!context.preferences.chats[conversationId] ? '✓ ' : ''}Use global default</Text>
+      <Text style={[type.body, { color: c.textPrimary }]}>{context.preferences.chats[conversationId] ? 'Reset to global default' : 'Using global default'}</Text>
     </TouchableOpacity>}
     {modes.map(mode => <TouchableOpacity key={mode.value} accessibilityRole="radio"
-      accessibilityState={{ checked: !inherited && preference.mode === mode.value, disabled: !context.ready }} disabled={!context.ready}
-      onPress={() => context.update({ mode: mode.value }, conversationId)} style={[styles.choice, { borderColor: c.border, backgroundColor: !inherited && preference.mode === mode.value ? c.surfaceElevated : c.surface }]}>
-      <Text style={[type.body, { color: c.textPrimary }]}>{!inherited && preference.mode === mode.value ? '✓ ' : ''}{mode.label}</Text>
+      accessibilityState={{ checked: preference.mode === mode.value, disabled: !context.ready }} disabled={!context.ready}
+      onPress={() => context.update({ mode: mode.value }, conversationId)} style={[styles.choice, { borderColor: c.border, backgroundColor: preference.mode === mode.value ? c.surfaceElevated : c.surface }]}>
+      <Text style={[type.body, { color: c.textPrimary }]}>{preference.mode === mode.value ? '✓ ' : ''}{mode.label}</Text>
     </TouchableOpacity>)}
     <Text style={[type.bodyStrong, { color: c.textPrimary, marginTop: space[2] }]}>Translate to</Text>
     <View style={styles.languages}>{TRANSLATION_LANGUAGES.map(language => <TouchableOpacity key={language} accessibilityRole="radio"

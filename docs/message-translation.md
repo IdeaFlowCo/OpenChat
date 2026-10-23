@@ -24,7 +24,7 @@ automatic translation restores originals; explicitly requested translations
 remain available. Same-language messages receive no translation label.
 
 Settings contains the global default. Chat settings override mode and/or target;
-**Use global default** clears both overrides. Preferences are stored per account
+**Reset to global default** clears both overrides. Preferences are stored per account
 on this device, not synchronized between devices. Originals and translated text
 are not stored in the preference record. A failed preference save is visible.
 
