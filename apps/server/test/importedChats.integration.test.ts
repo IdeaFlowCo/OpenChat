@@ -41,7 +41,11 @@ integration('imported chat mirrors — real Neo4j + HTTP', { timeout: 60_000 }, 
   }
   const count = async (query: string, params: Record<string, unknown> = {}) => Number((await run(query, params)).records[0]!.get(0));
   const importedNodes = () => count('MATCH (n) WHERE n.ownerUserId IN $owners AND any(l IN labels(n) WHERE l STARTS WITH "OpenChatImported") RETURN count(n)', { owners: [alice, mallory] });
-  const liveFootprint = () => count('MATCH (n) WHERE (n:User OR n:Conversation OR n:Message) RETURN count(n)');
+  // Anything the fixture could have leaked into the live graph: accounts named after or keyed by its people,
+  // conversations titled after the chat, messages carrying its text. Scoped so parallel suites cannot disturb it.
+  const liveFootprint = () => count(`MATCH (n) WHERE (n:User AND (n.name IN $names OR n.id IN $keys))
+      OR (n:Conversation AND n.title = $title) OR (n:Message AND (n.content CONTAINS 'soil-health' OR n.content CONTAINS 'compost'))
+    RETURN count(n)`, { names: ['Owner Example', 'Ada Example', 'Bo Example'], keys: ['p-owner', 'p-ada', 'p-bo', 'p-twin', 'p-unknown'], title: 'Synthetic Garden Club' });
   function encrypt(plain: string) {
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(encryptionSecret, 'hex'), iv);
@@ -85,7 +89,7 @@ integration('imported chat mirrors — real Neo4j + HTTP', { timeout: 60_000 }, 
   });
 
   it('imports as the authenticated owner without creating accounts, live chats or messages', async () => {
-    const footprint = await liveFootprint();
+    expect(await liveFootprint()).toBe(0);
     const res = await as(token(alice)).put('/import', { ...payload(), ownerUserId: mallory });
     expect(res.status).toBe(201);
     expect(res.body.counts).toEqual({
@@ -95,7 +99,7 @@ integration('imported chat mirrors — real Neo4j + HTTP', { timeout: 60_000 }, 
       profileFacts: { created: 1, updated: 0, unchanged: 0, markedStale: 0 },
     });
     chatId = res.body.chatId;
-    expect(await liveFootprint()).toBe(footprint);
+    expect(await liveFootprint()).toBe(0);
     expect(await count('MATCH (c:OpenChatImportedChat {id: $chatId}) RETURN count(c)', { chatId })).toBe(1);
     expect(await count('MATCH (c:OpenChatImportedChat {id: $chatId, ownerUserId: $alice}) RETURN count(c)', { chatId, alice })).toBe(1);
     expect(await count('MATCH (n) WHERE n.ownerUserId = $mallory AND any(l IN labels(n) WHERE l STARTS WITH "OpenChatImported") RETURN count(n)', { mallory })).toBe(0);
