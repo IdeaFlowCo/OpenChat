@@ -75,6 +75,25 @@ it('offers distinct accessible open/copy actions, deduplicates destinations and 
   os.copy.mockRejectedValueOnce(new Error('denied')); await act(async () => buttons[1].props.onPress());
   expect(screen.root.findByProps({ role: 'status' }).props.children).toBe('Could not copy link');
 });
+it('renders a long message (5000+ chars) in full, with no character lost around embedded links (regression: Jacob reported truncated long messages)', async () => {
+  const paragraph = 'The quick brown fox jumps over the lazy dog near unlinked.ai and https://example.com/path?q=1 again and again. ';
+  const long = paragraph.repeat(50); // > 5000 chars, with two link candidates per repetition
+  expect(long.length).toBeGreaterThan(5000);
+  await act(async () => { screen = create(React.createElement(MessageText, { content: long, color: '#000', onLongPress: vi.fn() })); });
+  // Walk the fully-rendered tree (Fragments flattened away by React) and
+  // concatenate every text leaf back together in order; this must equal the
+  // original content exactly, not a prefix of it.
+  const flatten = (node: unknown): string => {
+    if (typeof node === 'string') return node;
+    if (Array.isArray(node)) return node.map(flatten).join('');
+    if (node && typeof node === 'object' && 'children' in node) return flatten((node as { children: unknown }).children);
+    return '';
+  };
+  const rebuilt = flatten(screen.toJSON());
+  expect(rebuilt).toBe(long);
+  expect(rebuilt.length).toBe(long.length);
+});
+
 it('reports open failures without an unhandled rejection', async () => {
   os.open.mockRejectedValueOnce(new Error('no handler')); await openMessageLink('https://example.com'); expect(os.alert).toHaveBeenCalledOnce();
 });
