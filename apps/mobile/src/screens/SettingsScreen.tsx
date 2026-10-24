@@ -31,6 +31,7 @@ import { registerForPushNotificationsAsync } from '../services/notifications';
 import { ExportSheet } from '../components/ExportSheet';
 import { FeedbackModal } from '../components/FeedbackModal';
 import { saveJsonDownload } from '../services/exportDownload';
+import { describeDesktopUpdate, useDesktopShell } from '../services/desktopShell';
 import { AppIcon } from '../components/AppIcon';
 import { isPlaceholderEmail } from '../utils/email';
 
@@ -286,9 +287,14 @@ export function SettingsScreen() {
       ? 'Bundled JS (no OTA applied)'
       : `OTA bundle ${Updates.updateId ? Updates.updateId.slice(0, 8) : 'active'}`;
   const buildDate = (Constants.expoConfig?.extra as { buildDate?: string } | undefined)?.buildDate;
+  // OpenChat for Mac: the native shell's own version + auto-update state.
+  const desktopShell = useDesktopShell();
+  const desktopSummary = desktopShell
+    ? `Mac app v${desktopShell.version} · ${describeDesktopUpdate(desktopShell)}`
+    : null;
   const provenanceSummary =
     Platform.OS === 'web'
-      ? `Web · v${appVersion}${buildDate ? ` · ${buildDate}` : ''}`
+      ? `${desktopSummary ? `${desktopSummary} · ` : ''}Web · v${appVersion}${buildDate ? ` · ${buildDate}` : ''}`
       : `v${appVersion} (build ${buildNumber})${buildDate ? ` · ${buildDate}` : ''} · channel ${updateChannel}`;
 
   const handleClearLocalData = () => {
@@ -788,7 +794,12 @@ export function SettingsScreen() {
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>App version &amp; updates</Text>
               {Platform.OS === 'web' ? (
-                <Text style={[styles.optionHint, { color: c.textSecondary }]}>Web · v{appVersion}</Text>
+                <>
+                  {desktopSummary ? (
+                    <Text style={[styles.optionHint, { color: c.textSecondary }]}>{desktopSummary}</Text>
+                  ) : null}
+                  <Text style={[styles.optionHint, { color: c.textSecondary }]}>Web · v{appVersion}</Text>
+                </>
               ) : (
                 <>
                   <Text style={[styles.optionHint, { color: c.textSecondary }]}>
@@ -863,7 +874,7 @@ export function SettingsScreen() {
       </View>
 
       <Text style={[styles.versionFooter, { color: c.textMetadata }]}>
-        OpenChat mobile · v{Constants.expoConfig?.version ?? '?'}
+        {desktopShell ? `OpenChat for Mac · v${desktopShell.version} · web ` : 'OpenChat mobile · '}v{Constants.expoConfig?.version ?? '?'}
         {Platform.OS !== 'web' && ` (${Constants.expoConfig?.ios?.buildNumber ?? Constants.expoConfig?.android?.versionCode ?? '?'})`}
         {buildDate ? ` · Built ${buildDate}` : ''}
       </Text>

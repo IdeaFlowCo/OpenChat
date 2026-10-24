@@ -2,3 +2,4 @@
 .toolchain/
 src-tauri/target/
 src-tauri/gen/
+dist/

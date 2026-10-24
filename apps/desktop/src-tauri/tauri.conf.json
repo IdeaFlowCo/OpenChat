@@ -32,5 +32,13 @@
       "minimumSystemVersion": "11.0",
       "signingIdentity": "-"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERFMEUzNDUxRjVCRDlFOTMKUldTVG5yMzFVVFFPM2hZWmFYQjBCWnVoQ1hJejZ4UHg0ei9KSzJ3L1hoODlxVGFqOWU5S3RHRnIK",
+      "endpoints": [
+        "https://github.com/IdeaFlowCo/OpenChat/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
