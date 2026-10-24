@@ -69,8 +69,10 @@ native shell updates itself (`src-tauri/src/updates.rs`):
   new bundle on disk but never swaps the running app. The new version starts on
   the next launch, or immediately via **OpenChat › Restart to Update**.
 - Verifies before installing: the updater's minisign signature
-  (`plugins.updater.pubkey`), then the extracted bundle must have the running
-  app's Developer ID Team ID, pass Gatekeeper, and carry the advertised version.
+  (`plugins.updater.pubkey`), then the archive must hold a single `.app` with no
+  unsafe paths, and that bundle must have the running app's Developer ID Team
+  ID, pass Gatekeeper, and carry the advertised version. The verified bundle is
+  repacked and installed, never the raw download.
 - Never downgrades, and never shows network failures as errors.
 - Automatic installs never trigger an admin password prompt: if the app's folder
   is not writable, the menu says an update is available and **Check for
@@ -101,8 +103,10 @@ update payload with the updater key, and publishes GitHub release
 - `OpenChat-macOS-arm64.dmg`: first install; the landing page links to
   `releases/latest/download/OpenChat-macOS-arm64.dmg`
 - `OpenChat.app.tar.gz`: the auto-update payload
-- `latest.json`: the feed installed apps poll at
-  `releases/latest/download/latest.json`
+- `latest.json`: the version manifest, which is then copied to the
+  `desktop-feed` prerelease. Installed apps poll
+  `releases/download/desktop-feed/latest.json`, so the feed moves only after
+  every asset is uploaded, and other repo releases cannot break it.
 
 Without `--publish` it stages everything in `dist/<version>/`. Configuration
 (signing host and App Store Connect API key paths) is read from

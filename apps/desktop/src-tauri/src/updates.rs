@@ -27,10 +27,12 @@ use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::{AppHandle, Manager, Wry};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-/// Release feed. The release script attaches `latest.json` to every
-/// `desktop-v*` GitHub release; `latest` resolves to the newest one.
+/// Release feed. `scripts/release.sh` publishes `desktop-v<version>` and then
+/// overwrites `latest.json` on the dedicated `desktop-feed` prerelease, so the
+/// feed never depends on which repo release GitHub calls "latest" and only
+/// moves once every asset of the new version is uploaded.
 const FEED_URL: &str =
-    "https://github.com/IdeaFlowCo/OpenChat/releases/latest/download/latest.json";
+    "https://github.com/IdeaFlowCo/OpenChat/releases/download/desktop-feed/latest.json";
 /// Lets a test build point at a local feed without rebuilding.
 const FEED_OVERRIDE_ENV: &str = "OPENCHAT_UPDATE_FEED";
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(8);
@@ -46,11 +48,17 @@ pub const MENU_AUTO: &str = "updates.auto";
 pub enum Status {
     Idle,
     Checking,
-    UpToDate { checked_at: String },
+    UpToDate {
+        #[serde(rename = "checkedAt")]
+        checked_at: String,
+    },
     Available { version: String },
     Downloading { version: String },
     Ready { version: String },
-    Failed { checked_at: String },
+    Failed {
+        #[serde(rename = "checkedAt")]
+        checked_at: String,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -141,15 +149,15 @@ pub fn install_menu(app: &AppHandle, menu: &Menu<Wry>) -> tauri::Result<()> {
         state.auto_install(),
         None::<&str>,
     )?;
-    let separator = PredefinedMenuItem::separator(app)?;
 
     if let Some(app_menu) = menu.items()?.first().and_then(|item| item.as_submenu().cloned()) {
-        // Position 0 is "About OpenChat".
-        app_menu.insert(&status, 1)?;
-        app_menu.insert(&check, 2)?;
-        app_menu.insert(&restart, 3)?;
-        app_menu.insert(&auto, 4)?;
-        app_menu.insert(&separator, 5)?;
+        // Position 0 is "About OpenChat"; insert a separator above our items.
+        app_menu.insert(&PredefinedMenuItem::separator(app)?, 1)?;
+        app_menu.insert(&status, 2)?;
+        app_menu.insert(&check, 3)?;
+        app_menu.insert(&restart, 4)?;
+        app_menu.insert(&auto, 5)?;
+        // The default menu's separator after About now follows these items.
     }
     *state.menu.lock().unwrap() = Some(MenuItems { status, check, restart });
     Ok(())
@@ -252,8 +260,11 @@ async fn install_verified(update: &Update, running: &Path) -> Result<(), String>
         .download(|_, _| {}, || {})
         .await
         .map_err(|e| format!("download failed: {e}"))?;
-    verify_bundle(&bytes, running, &update.version)?;
-    update.install(&bytes).map_err(|e| format!("install failed: {e}"))
+    // Install exactly the bundle that passed verification, repacked, rather
+    // than the downloaded archive: the plugin unpacks archives differently
+    // from `tar`, so the original bytes are not bound by the checks.
+    let verified = verify_bundle(&bytes, running, &update.version)?;
+    update.install(&verified).map_err(|e| format!("install failed: {e}"))
 }
 
 /// The `.app` directory the current executable runs from.
@@ -272,8 +283,9 @@ fn can_replace(bundle: &Path) -> bool {
 
 /// Extract the downloaded bundle to a scratch directory and check that it is
 /// signed by the same Developer ID team as the running app, passes Gatekeeper,
-/// and is the version the feed advertised.
-fn verify_bundle(archive: &[u8], running: &Path, expected_version: &str) -> Result<(), String> {
+/// and is the version the feed advertised. Returns the verified bundle
+/// repacked as the only entry of a fresh archive.
+fn verify_bundle(archive: &[u8], running: &Path, expected_version: &str) -> Result<Vec<u8>, String> {
     let expected_team = team_id(running).ok_or("running app has no Developer ID team; refusing auto-install")?;
 
     let scratch = std::env::temp_dir().join(format!("openchat-update-{}", std::process::id()));
@@ -282,12 +294,11 @@ fn verify_bundle(archive: &[u8], running: &Path, expected_version: &str) -> Resu
     let result = (|| {
         let tarball = scratch.join("update.app.tar.gz");
         std::fs::write(&tarball, archive).map_err(|e| e.to_string())?;
-        run("tar", &["-xzf", path_str(&tarball)?, "-C", path_str(&scratch)?])?;
-        let app = std::fs::read_dir(&scratch)
-            .map_err(|e| e.to_string())?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .find(|p| p.extension().map(|x| x == "app").unwrap_or(false))
-            .ok_or("archive has no .app bundle")?;
+        let top = single_app_entry(&tarball)?;
+        let extracted = scratch.join("extracted");
+        std::fs::create_dir_all(&extracted).map_err(|e| e.to_string())?;
+        run("tar", &["-xzf", path_str(&tarball)?, "-C", path_str(&extracted)?])?;
+        let app = extracted.join(&top);
 
         run("codesign", &["--verify", "--deep", "--strict", path_str(&app)?])?;
         let team = team_id(&app).ok_or("update is not Developer ID signed")?;
@@ -305,10 +316,42 @@ fn verify_bundle(archive: &[u8], running: &Path, expected_version: &str) -> Resu
         if version != expected_version {
             return Err(format!("bundle is {version}, feed advertised {expected_version}"));
         }
-        Ok(())
+
+        let repacked = scratch.join("verified.app.tar.gz");
+        let out = Command::new("tar")
+            .env("COPYFILE_DISABLE", "1")
+            .args(["-czf", path_str(&repacked)?, "-C", path_str(&extracted)?, &top])
+            .output()
+            .map_err(|e| format!("tar: {e}"))?;
+        if !out.status.success() {
+            return Err(format!("repack failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        }
+        std::fs::read(&repacked).map_err(|e| e.to_string())
     })();
     let _ = std::fs::remove_dir_all(&scratch);
     result
+}
+
+/// The archive must hold exactly one top-level `*.app` directory, with no
+/// absolute paths or `..` components anywhere.
+fn single_app_entry(tarball: &Path) -> Result<String, String> {
+    let out = Command::new("tar").args(["-tzf", path_str(tarball)?]).output().map_err(|e| format!("tar: {e}"))?;
+    if !out.status.success() {
+        return Err("unreadable update archive".into());
+    }
+    let mut top: Option<String> = None;
+    for entry in String::from_utf8_lossy(&out.stdout).lines() {
+        if entry.starts_with('/') || entry.split('/').any(|c| c == "..") {
+            return Err(format!("unsafe archive entry {entry}"));
+        }
+        let first = entry.split('/').next().unwrap_or_default().to_string();
+        match &top {
+            None => top = Some(first),
+            Some(t) if *t == first => {}
+            Some(t) => return Err(format!("archive has more than one top-level entry ({t}, {first})")),
+        }
+    }
+    top.filter(|t| t.ends_with(".app")).ok_or_else(|| "archive has no .app bundle".into())
 }
 
 fn team_id(app: &Path) -> Option<String> {

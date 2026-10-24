@@ -11,8 +11,10 @@
 #      session (`tmux -L aqua`), producing the updater tarball and the DMG;
 #   3. minisign-sign the tarball with the updater key and write latest.json;
 #   4. with --publish, create GitHub release desktop-v<version> carrying
-#      OpenChat-macOS-arm64.dmg, OpenChat.app.tar.gz and latest.json. Installed
-#      apps poll releases/latest/download/latest.json and update themselves.
+#      OpenChat-macOS-arm64.dmg, OpenChat.app.tar.gz and latest.json, then
+#      copy latest.json onto the `desktop-feed` prerelease. Installed apps poll
+#      releases/download/desktop-feed/latest.json, so the feed only moves once
+#      every asset of the new version is uploaded.
 #
 # Config (env, or ~/.config/openchat-desktop/release.env):
 #   SIGN_HOST            ssh alias of the signing Mac (default m5)
@@ -54,7 +56,15 @@ rsync -a "$out/OpenChat.app" "$here/scripts/sign-notarize.sh" "$SIGN_HOST:$remot
 ssh "$SIGN_HOST" "export PATH=/opt/homebrew/bin:\$PATH
   tmux -L aqua has-session 2>/dev/null || { echo 'no GUI tmux session (tmux -L aqua) on $SIGN_HOST' >&2; exit 1; }
   tmux -L aqua new-window -d \"cd ~/$remote && ASC_KEY_PATH='$ASC_KEY_PATH' ASC_KEY_ID='$ASC_KEY_ID' ASC_ISSUER_ID='$ASC_ISSUER_ID' bash sign-notarize.sh . > sign.log 2>&1; echo \\\$? > sign.rc\""
-until ssh "$SIGN_HOST" "test -f ~/$remote/sign.rc"; do sleep 15; done
+# Notarization usually takes a few minutes; give up after 45.
+deadline=$((SECONDS + 2700))
+until ssh "$SIGN_HOST" "test -f ~/$remote/sign.rc"; do
+  if (( SECONDS > deadline )); then
+    echo "signing did not finish in 45 min; see $SIGN_HOST:~/$remote/sign.log" >&2
+    exit 1
+  fi
+  sleep 15
+done
 rc=$(ssh "$SIGN_HOST" "cat ~/$remote/sign.rc")
 ssh "$SIGN_HOST" "tail -25 ~/$remote/sign.log"
 [[ $rc == 0 ]] || { echo "signing failed (rc=$rc); full log: $SIGN_HOST:~/$remote/sign.log" >&2; exit 1; }
@@ -83,4 +93,9 @@ if $publish; then
     "$out/OpenChat-macOS-arm64.dmg" "$out/OpenChat.app.tar.gz" "$out/latest.json" \
     --title "OpenChat for Mac $version" \
     --notes "Installed apps update automatically. First install: download OpenChat-macOS-arm64.dmg."
+  gh release view desktop-feed -R IdeaFlowCo/OpenChat > /dev/null 2>&1 ||
+    gh release create desktop-feed -R IdeaFlowCo/OpenChat --prerelease --latest=false \
+      --title "OpenChat for Mac update feed" \
+      --notes "latest.json for installed OpenChat for Mac apps. Downloads: see the newest desktop-v* release."
+  gh release upload desktop-feed "$out/latest.json" -R IdeaFlowCo/OpenChat --clobber
 fi
