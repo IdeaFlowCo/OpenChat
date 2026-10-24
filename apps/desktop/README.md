@@ -50,10 +50,9 @@ CI=true npx -y @tauri-apps/cli@2.11.2 build
 `CI=true` makes the DMG step skip its Finder AppleScript styling pass, which
 times out on a headless host. The DMG still has the Applications drop link.
 
-The bundle is ad-hoc signed (`bundle.macOS.signingIdentity: "-"`), not
-Developer ID signed or notarized. Users must allow the first launch once:
-**System Settings → Privacy & Security → Open Anyway**. Removing that step needs
-an Apple Developer ID Application certificate plus notarization.
+`tauri build` produces an unsigned bundle. Releases are Developer ID signed and
+notarized by `scripts/release.sh` (below), so first launch needs no Gatekeeper
+override.
 
 The icons in `src-tauri/icons/` are generated from `apps/mobile/assets/icon.png`
 (`npx @tauri-apps/cli@2.11.2 icon ../mobile/assets/icon.png -o src-tauri/icons`).
@@ -61,14 +60,56 @@ The icons in `src-tauri/icons/` are generated from `apps/mobile/assets/icon.png`
 The root `npm run build` deliberately skips `openchat-desktop`; build it
 explicitly from here.
 
-## Distribution
+## Versions and auto-update
 
-The landing page links to
-`https://github.com/IdeaFlowCo/OpenChat/releases/latest/download/OpenChat-macOS-arm64.dmg`.
-To ship a new build, attach the DMG to a GitHub release under exactly that asset
-name:
+The chat UI is the live `/app` client, so it updates with every web deploy. The
+native shell updates itself (`src-tauri/src/updates.rs`):
+
+- Checks on launch and every 4 hours; downloads in the background; installs the
+  new bundle on disk but never swaps the running app. The new version starts on
+  the next launch, or immediately via **OpenChat › Restart to Update**.
+- Verifies before installing: the updater's minisign signature
+  (`plugins.updater.pubkey`), then the archive must hold a single `.app` with no
+  unsafe paths, and that bundle must have the running app's Developer ID Team
+  ID, pass Gatekeeper, and carry the advertised version. The verified bundle is
+  repacked and installed, never the raw download.
+- Never downgrades, and never shows network failures as errors.
+- Automatic installs never trigger an admin password prompt: if the app's folder
+  is not writable, the menu says an update is available and **Check for
+  Updates…** installs it.
+- **OpenChat › Install Updates Automatically** turns it off; **Check for
+  Updates…** always works.
+
+The app menu shows the running version and update state ("Version 0.1.24 — up
+to date"). The same state is exposed to the client as
+`window.__OPENCHAT_DESKTOP__`, which Settings › App version & updates shows as
+"Mac app v… · Up to date". `OPENCHAT_UPDATE_FEED=<https url>` points a build at
+a test feed.
+
+## Release (one command)
 
 ```bash
-cp src-tauri/target/release/bundle/dmg/OpenChat_*_aarch64.dmg OpenChat-macOS-arm64.dmg
-gh release create desktop-v<version> OpenChat-macOS-arm64.dmg --title "OpenChat for Mac <version>"
+# Bump the version in src-tauri/tauri.conf.json, src-tauri/Cargo.toml and
+# package.json, commit, then:
+apps/desktop/scripts/release.sh --publish
 ```
+
+It builds on this host, signs and notarizes on the Mac holding the IdeaFlow
+Developer ID (`SIGN_HOST`, default `m5`; it runs inside that Mac's GUI session
+via `tmux -L aqua` because the keychain is locked over plain SSH), signs the
+update payload with the updater key, and publishes GitHub release
+`desktop-v<version>` with:
+
+- `OpenChat-macOS-arm64.dmg`: first install; the landing page links to
+  `releases/latest/download/OpenChat-macOS-arm64.dmg`
+- `OpenChat.app.tar.gz`: the auto-update payload
+- `latest.json`: the version manifest, which is then copied to the
+  `desktop-feed` prerelease. Installed apps poll
+  `releases/download/desktop-feed/latest.json`, so the feed moves only after
+  every asset is uploaded, and other repo releases cannot break it.
+
+Without `--publish` it stages everything in `dist/<version>/`. Configuration
+(signing host and App Store Connect API key paths) is read from
+`~/.config/openchat-desktop/release.env`. The updater private key is
+`~/.config/openchat-desktop/updater.key`. Losing it means installed apps can no
+longer update themselves, so keep a backup.
