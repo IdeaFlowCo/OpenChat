@@ -245,6 +245,10 @@ owner-confirmed link would have to follow OpenChat's existing discoverability
 and blocking rules before it shows any account's name; until that is designed,
 no linking is offered.
 
+The proposed [direct-chat claim and history-continuity contract](imported-chat-claim-continuity.md)
+separates verified identity linking from explicit, mutually accepted history
+sharing. It is a design document, not an implemented claim or migration API.
+
 ## Synthetic fixture
 
 `apps/server/test/fixtures/importedChat.synthetic.json` is an entirely
