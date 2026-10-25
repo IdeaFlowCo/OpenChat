@@ -53,6 +53,12 @@ export async function initDatabase(): Promise<void> {
       FOR (c:Conversation) REQUIRE c.directPairKey IS UNIQUE
     `);
 
+    // Durable actor+nonce acceptance outlives edits/deletion of message content.
+    await session.run(`CREATE CONSTRAINT connector_text_receipt_id IF NOT EXISTS
+      FOR (r:ConnectorTextReceipt) REQUIRE r.id IS UNIQUE`);
+    await session.run(`CREATE INDEX connector_text_receipt_owner IF NOT EXISTS
+      FOR (r:ConnectorTextReceipt) ON (r.ownerUserId)`);
+
     // Create indexes for common queries
     await session.run(`
       CREATE INDEX message_conversation IF NOT EXISTS

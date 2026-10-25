@@ -30,6 +30,7 @@ describe('unified OpenChat connector trust boundary',()=>{
     app.get('/api/chat/people-suggestions',resolveActor,peopleSuggestions);
     app.post('/api/chat/people-suggestions',resolveActor,peopleSuggestions);
     app.get('/api/chat/conversations',resolveActor,(req,res)=>res.json([{id:'room',userId:req.user!.userId}]));
+    app.post('/api/chat/people/:personId/messages',resolveActor,(req,res)=>{state.mutations++;res.json({personId:req.params.personId,...req.body,userId:req.user!.userId,trusted:!!getConnectorPrincipal(req)});});
     app.post('/api/chat/conversations/:id/messages',resolveActor,(req,res)=>{state.mutations++;res.json({conversationId:req.params.id,...req.body,userId:req.user!.userId});});
     app.get('/api/probe',resolveActor,(req,res)=>res.json({userId:req.user?.userId,trusted:!!getConnectorPrincipal(req)}));
     await new Promise<void>(r=>{server=app.listen(0,'127.0.0.1',r);});base=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -88,6 +89,15 @@ describe('unified OpenChat connector trust boundary',()=>{
     state.member=false;
     const denied=await (await call('tools/call',{name:'oc_list_context_posts',arguments:{conversationId:'private'}})).json() as any;
     expect(denied.result.isError).toBe(true);
+  });
+  it('exposes exact-person sending only with explicit write scope and server-derived actor',async()=>{
+    const readCatalog=await (await call('tools/list',undefined,{scope:'openchat:read'})).json() as any;
+    expect(readCatalog.result.tools.some((t:any)=>t.name==='oc_send_to_person')).toBe(false);
+    const args={personId:'Exact_Aa',content:'Explicit synthetic snapshot',clientRequestId:'stable-nonce'};
+    expect((await call('tools/call',{name:'oc_send_to_person',arguments:args},{scope:'openchat:read'})).status).toBe(403);
+    expect((await call('tools/call',{name:'oc_send_to_person',arguments:{...args,userId:'other'}})).status).toBe(400);
+    const sent=await (await call('tools/call',{name:'oc_send_to_person',arguments:args},{scope:'openchat:write'})).json() as any;
+    expect(JSON.parse(sent.result.content[0].text)).toEqual({...args,userId:'owner',trusted:true});
   });
   it('rejects unknown/extra arguments rather than exposing arbitrary routes or message types',async()=>{
     for(const args of [{conversationId:'room',content:'test',clientRequestId:'id',messageType:'card'}, {conversationId:'room',content:'test'}, {conversationId:[],content:'test',clientRequestId:'id'}]) {

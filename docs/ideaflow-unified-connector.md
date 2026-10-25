@@ -97,3 +97,43 @@ and connector attribution without sending any real messages.
 tool catalog, scope split, dispatch as the linked owner, connector provenance
 (including a malformed `client` claim being ignored) and ambiguous-name results. The Context graph
 suite runs separately against an isolated Neo4j database.
+
+## Explicit person delivery and durable text receipts (2026-10-25)
+
+`oc_send_to_person` is a write tool with exact `personId`, `content`, and
+`clientRequestId`. It serves a user-requested explicit Send, never an `@` mention.
+It checks the same current known/accepted-connection/public-name eligibility as
+the people picker, excluding bots/self and mutual blocks. An unknown hidden or
+email-only account is unavailable: a saved opaque ID does not retain an earlier
+exact-email lookup proof. No DM is created just to manufacture known status.
+
+The trusted shared connector's person and existing-conversation text sends use
+one atomic service. Pair ACL locks precede fresh eligibility/membership/block
+checks, canonical DM resolution (person mode only), message persistence and an
+immutable `ConnectorTextReceipt`. Ordinary session JWT and legacy disabled
+connector-delegation paths retain their existing behavior. Conversation mode
+preserves group/reply support and never creates a missing conversation.
+
+The native nonce is bound to the actor, independent of a token, mutable client
+label, or grant refresh. Its immutable signature covers destination kind/full ID,
+exact content and reply ID. Matching replay returns original acceptance IDs,
+even after the message was edited/deleted, the conversation removed or a later
+block added. It never restores content, recreates a conversation, or sends a
+second notification. Changed payload/destination returns a conflict. The receipt
+is deleted on actor account deletion under the same ACL lock.
+
+Responses include `accepted`, `messageId`, `conversationId`, `recipientId` (person
+mode), and `replayed`; `id` remains an alias for existing conversation-tool
+consumers. Acceptance means persisted in the inbox, not read or task completion.
+Normal socket/push/webhook/assistant/secretary/tag/embedding effects run only
+after a fresh committed message. Server-derived connector provenance keeps these
+messages out of actual-human-DM ranking evidence. A failed/uncertain response is
+not an acceptance; retry only the same nonce and exact payload.
+
+Real graph tests use only an explicit loopback `NEO4J_TEST_URI` and scoped
+synthetic fixtures. Run focused suites from `apps/server` with
+`../../node_modules/.bin/vitest run test/connectorTextSend.integration.test.ts
+test/connectorSend.route.test.ts test/ideaflowConnector.test.ts
+ test/authAccountDeletion.test.ts test/peopleSuggestions.integration.test.ts`.
+Do not append Vitest filters to `npm test`: that script builds, runs the whole
+Vitest suite, then forwards those arguments to a separate Node test command.

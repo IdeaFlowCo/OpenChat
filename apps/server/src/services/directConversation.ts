@@ -32,7 +32,7 @@ function toJS(value: unknown): unknown {
   return value;
 }
 
-function notifyParticipants(
+export function notifyDirectConversationParticipants(
   io: IOServer | undefined,
   conversation: Record<string, unknown>,
   participantIds: string[],
@@ -66,7 +66,7 @@ export async function ensureDirectConversation(
   const session = getDriver().session();
   try {
     const result = await session.executeWrite(tx => ensureDirectConversationInTransaction(tx, userId, otherId, title));
-    notifyParticipants(io, result.conversation, [...new Set([userId, otherId])].sort(), result.created);
+    notifyDirectConversationParticipants(io, result.conversation, [...new Set([userId, otherId])].sort(), result.created);
     return result;
   } finally { await session.close(); }
 }

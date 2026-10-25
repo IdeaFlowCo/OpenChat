@@ -1,3 +1,4 @@
+import { acquireContextAclLocks } from '../services/contextAccess.js';
 import { deleteContextWebhooksForUser } from '../services/contextWebhooks.js';
 import { deleteImportedChatsForUser, exportImportedChatsForUser } from '../services/importedChatAccount.js';
 import { deleteHostedContextForUser } from '../services/contextHosted.js';
@@ -1505,6 +1506,7 @@ router.delete('/me', requireAuth, requireDirectSession, async (req: Request, res
 
     // Run everything in a single write transaction for atomicity.
     await session.executeWrite(async (tx) => {
+      await acquireContextAclLocks(tx, { userIds: [userId] });
       // 1. Redact messages authored by this user.
       await tx.run(`
         MATCH (m:Message {senderId: $userId})
@@ -1595,6 +1597,9 @@ router.delete('/me', requireAuth, requireDirectSession, async (req: Request, res
       // 2g. Private graph: this person's own notes and links, and other people's about them.
       await deletePrivateGraphForUser(tx, userId);
       await deleteImportedChatsForUser(tx, userId);
+
+      await tx.run(`MATCH (receipt:ConnectorTextReceipt {ownerUserId: $userId})
+        DETACH DELETE receipt`, { userId });
 
       // 3. Delete the User node (and all its relationships).
       await tx.run(`

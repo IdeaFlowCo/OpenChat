@@ -8,7 +8,7 @@ import { connectorDelegationGuard } from '../src/routes/connectorDelegation.js';
 import { createDelegatedConnector } from '../../mcp-server/src/delegated.js';
 
 const mocks = vi.hoisted(() => ({ run: vi.fn(), effect: vi.fn() }));
-vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({ run: mocks.run, close: async () => {} }) }) }));
+vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({ run: mocks.run, executeWrite: async (fn: (tx: { run: typeof mocks.run }) => unknown) => fn({ run: mocks.run }), close: async () => {} }) }) }));
 vi.mock('../src/websocket/chatHandler.js', () => ({ broadcastMessageToParticipants: mocks.effect,
   fanoutPushForMessage: async () => mocks.effect(), joinUserSocketsToConversation: vi.fn(),
   leaveUserSocketsFromConversation: vi.fn(), isUserOnline: vi.fn() }));
@@ -20,6 +20,8 @@ vi.mock('../src/services/webhookDispatch.js', () => ({ dispatchMessageEvent: moc
 vi.mock('../src/services/embeddings.js', () => ({ embedAndStoreMessage: async () => mocks.effect(),
   semanticSearchMessages: vi.fn(), embeddingsEnabled: vi.fn() }));
 import chatRoutes from '../src/routes/chat.js';
+import { connectorOperationGuard } from '../src/routes/ideaflowConnector.js';
+import { issueConnectorOperation } from '../src/lib/ideaflowConnector.js';
 
 const callback = 'https://fixture.example.test/callback';
 const verifier = 'A'.repeat(43);
@@ -28,12 +30,14 @@ const record = (values: Record<string, unknown>) => ({ get: (key: string) => val
 describe('real delegated send route', () => {
   const messages = new Map<string, Record<string, unknown>>();
   const conversations = new Map<string, Record<string, unknown>>();
+  const receipts = new Map<string, Record<string, unknown>>();
   const service = new ConnectorDelegationService({ enabled: true,
     clients: [{ id: 'fixture', secret: 'secret', callbacks: [callback] }] });
   const app = express();
   app.use(express.json());
   app.set('io', {});
   app.use('/api', connectorDelegationGuard(service));
+  app.use(connectorOperationGuard);
   app.use('/api/chat', chatRoutes);
   const issue = (connectorGrantId = 'grant') => {
     const tx = service.start({ clientId: 'fixture', callback, connectorGrantId, connectorUserId: 'notes-alice',
@@ -48,8 +52,24 @@ describe('real delegated send route', () => {
       .set('Authorization', `Bearer ${token}`).send({ clientRequestId, content, ...extra });
 
   beforeEach(() => {
-    messages.clear(); conversations.clear(); mocks.effect.mockClear(); mocks.run.mockReset();
+    messages.clear(); conversations.clear(); receipts.clear(); mocks.effect.mockClear(); mocks.run.mockReset();
     mocks.run.mockImplementation(async (_query, params) => {
+      if (_query.includes('collect(DISTINCT person.id)')) return { records: [record({ ids: ['alice'] })] };
+      if (params.receiptId && params.content === undefined) {
+        const receipt = receipts.get(params.receiptId);
+        return { records: receipt ? [record({ receipt })] : [] };
+      }
+      if (params.actorId && params.content === undefined) return { records: [record({ id: params.actorId })] };
+      if (params.messageId) {
+        const message = { id: params.messageId, content: params.content, senderId: params.actorId,
+          conversationId: params.conversationId, createdAt: params.now, replyToId: params.replyToId };
+        messages.set(params.messageId, message);
+        receipts.set(params.receiptId, { requestHash: params.signature, messageId: params.messageId,
+          conversationId: params.conversationId, recipientId: params.recipientId });
+        conversations.set(params.conversationId, { lastMessagePreview: params.content, lastMessageAt: params.now });
+        return { records: [record({ message })] };
+      }
+
       if (params.userId) return { records: [record({ blockedRelationship: false })] };
       if (params.content === undefined) {
         const message = messages.get(params.id);
@@ -61,6 +81,37 @@ describe('real delegated send route', () => {
       conversations.set(params.conversationId, { lastMessagePreview: params.preview, lastMessageAt: params.now });
       return { records: [record({ message, participantIds: ['alice'], wasCreated: true })] };
     });
+  });
+
+  it('deduplicates a unified connector nonce across reauthorization and label changes', async () => {
+    const sendUnified = (content: string, label: string) => {
+      const path = '/api/chat/conversations/shared/messages';
+      const body = { content, clientRequestId: 'stable-unified-fixture-nonce' };
+      const token = issueConnectorOperation('alice', { method: 'POST', path, body }, ['openchat:write'], label);
+      return request(app).post(path).set('Authorization', `Bearer ${token}`).send(body);
+    };
+    const first = await sendUnified(' exact snapshot ', 'Vision');
+    expect(first.status).toBe(201);
+    const effects = mocks.effect.mock.calls.length;
+    messages.get(first.body.id)!.content = 'Message deleted';
+    const retry = await sendUnified(' exact snapshot ', 'Renamed Vision');
+    expect(retry.status).toBe(200);
+    expect(retry.body.id).toBe(first.body.id);
+    expect(messages.size).toBe(1);
+    expect(messages.get(first.body.id)!.content).toBe('Message deleted');
+    expect(mocks.effect).toHaveBeenCalledTimes(effects);
+    expect((await sendUnified('changed snapshot', 'Vision')).status).toBe(409);
+    expect(messages.size).toBe(1);
+  });
+
+  it('denies untrusted or read-only exact-person writes before storage or effects',async()=>{
+    const path='/api/chat/people/Exact_Aa/messages';
+    const body={content:'Must not send',clientRequestId:'denied'};
+    const readToken=issueConnectorOperation('alice',{method:'POST',path,body},['openchat:read'],'Fixture');
+    expect((await request(app).post(path).set('Authorization',`Bearer ${readToken}`).send(body)).status).toBe(404);
+    expect((await request(app).post(path).send({...body,userId:'alice',scopes:['openchat:write']})).status).toBe(401);
+    expect(messages.size).toBe(0);expect(receipts.size).toBe(0);
+    expect(mocks.run).not.toHaveBeenCalled();expect(mocks.effect).not.toHaveBeenCalled();
   });
 
   it('returns a fixed tool failure for a dropped send while preserving the REST anti-probe response', async () => {

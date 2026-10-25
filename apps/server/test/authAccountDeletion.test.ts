@@ -70,6 +70,11 @@ describe('DELETE /api/auth/me social-layer cleanup', () => {
     const preferenceDelete = indexOf('HAS_SOCIAL_PREFERENCE');
     const friendDelete = indexOf('MATCH (connection:OpenChatConnection)');
     const userDelete = indexOf('DETACH DELETE u');
+    const receiptDelete = indexOf('MATCH (receipt:ConnectorTextReceipt');
+    expect(receiptDelete).toBeGreaterThanOrEqual(0);
+    expect(receiptDelete).toBeLessThan(userDelete);
+    expect(queries[receiptDelete]).toContain('ownerUserId: $userId');
+    expect(queries[0]).toContain('contextAclRevision');
     const contextRequestDelete = indexOf('MATCH (r:ContextAgentRequest)');
     expect(contextRequestDelete).toBeGreaterThanOrEqual(0);
     expect(contextRequestDelete).toBeLessThan(indexOf('DETACH DELETE th'));

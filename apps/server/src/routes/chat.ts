@@ -1,3 +1,5 @@
+import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
+import { handleConnectorText } from './connectorTextSend.js';
 import { peopleSuggestions } from '../services/peopleSuggestions.js';
 import { Router, Request, Response } from 'express';
 import type { Server as IOServer } from 'socket.io';
@@ -961,8 +963,18 @@ router.patch('/conversations/:id/unread', requireAuth, async (req: Request, res:
   }
 });
 
+// Only the signed shared connector can invoke exact-person delivery. A normal
+// session or agent key cannot acquire that principal from request fields.
+router.post('/people/:personId/messages', resolveActor, async (req: Request, res: Response) => {
+  await handleConnectorText(req, res, { kind: 'person', id: req.params.personId as string });
+});
+
 // POST /api/chat/conversations/:id/messages - Send a message
 router.post('/conversations/:id/messages', resolveActor, async (req: Request, res: Response) => {
+  if (getConnectorPrincipal(req)) {
+    await handleConnectorText(req, res, { kind: 'conversation', id: req.params.id as string });
+    return;
+  }
   const userId = req.user!.userId;
   const { id: conversationId } = req.params;
   const {
