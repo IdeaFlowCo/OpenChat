@@ -4,7 +4,7 @@ import { verifyConnectorAssertion, issueConnectorOperation, consumeConnectorOper
 
 const router = Router();
 type Operation = { method: string; path: string; body?: unknown };
-type Argument = { type: 'string' | 'integer' | 'boolean' | ['integer','null']; description?: string; minLength?: number; maxLength?: number; minimum?: number; maximum?: number; enum?: string[] };
+type Argument = { type: 'string' | 'integer' | 'boolean' | 'array' | ['integer','null']; items?: {type:'string';maxLength:number}; maxItems?:number; description?: string; minLength?: number; maxLength?: number; minimum?: number; maximum?: number; enum?: string[] };
 type Tool = { name: string; description: string; scope: 'openchat:read' | 'openchat:write'; inputSchema: { type:'object'; properties:Record<string,Argument>; required:string[]; additionalProperties:false }; operation:(args:Record<string,any>)=>Operation };
 const id: Argument = {type:'string',minLength:1,maxLength:200};
 const text: Argument = {type:'string',minLength:1,maxLength:20000};
@@ -33,6 +33,7 @@ const assertion: Argument = {type:'string',enum:['stated','inferred'],descriptio
 const subjectPath = (kind:string,subjectId:string) => `/api/private/${kind==='user'?'people':kind==='unlinked'?'unlinked-people':'things'}/${encode(subjectId)}`;
 const subjectKind: Argument = {type:'string',enum:['user','thing','unlinked'],description:"'user' = an OpenChat person (user id); 'thing' = one of the owner's saved people, companies, ideas or projects (its id); 'unlinked' = an Unlinked person — a published profile id from an unlinked__ tool, a connection id from unlinked__unlinked_list_connections (an imported LinkedIn contact), or a linkedin.com/in/ address"};
 const tools:Tool[] = [
+  {name:'oc_suggest_people',description:'Find addressable people using OpenChat discovery and mutual blocks. Returns minimal identity and separate accepted-friend and actual human direct-message signals; no message bodies, email, group activity, imports or empty-thread recency. Empty queries return known people only. Never sends or creates a conversation.',scope:'openchat:read',inputSchema:schema({q:{type:'string',maxLength:100},limit,subjects:{type:'array',items:{type:'string',maxLength:512},maxItems:50}}),operation:a=>({method:'POST',path:'/api/chat/people-suggestions',body:a})},
   {name:'oc_list_conversations',description:'List conversations belonging to the linked OpenChat account.',scope:'openchat:read',inputSchema:schema({}),operation:()=>({method:'GET',path:'/api/chat/conversations'})},
   {name:'oc_get_messages',description:'Read messages in a conversation where the linked account is a participant.',scope:'openchat:read',inputSchema:schema({conversationId:id,limit,before:{type:'string',maxLength:200}},['conversationId']),operation:a=>({method:'GET',path:query(`/api/chat/conversations/${encode(a.conversationId)}/messages`,{limit:a.limit,before:a.before})})},
   {name:'oc_search',description:'Search messages, conversations and discoverable people; message access remains restricted to conversation membership.',scope:'openchat:read',inputSchema:schema({q:{type:'string',minLength:2,maxLength:200},conversationId:id,limit},['q']),operation:a=>({method:'GET',path:query('/api/chat/search',{q:a.q,conversationId:a.conversationId,scope:a.conversationId?'conversation':'global',limit:a.limit})})},
@@ -70,6 +71,7 @@ function validArguments(tool:Tool,args:unknown):args is Record<string,any> {
   if (Object.keys(values).some(k=>!Object.hasOwn(tool.inputSchema.properties,k)) || tool.inputSchema.required.some(k=>values[k]===undefined)) return false;
   return Object.entries(values).every(([key,value])=>{
     const spec=tool.inputSchema.properties[key];
+    if (spec.type==='array') return Array.isArray(value) && value.length<=(spec.maxItems??50) && value.every(v=>typeof v==='string' && v.length>0 && v.length<=(spec.items?.maxLength??512) && !Array.from(v).some(c=>c.charCodeAt(0)<32||c.charCodeAt(0)===127));
     if (spec.type==='boolean') return typeof value==='boolean';
     if (Array.isArray(spec.type) && value===null) return true;
     if (spec.type==='integer' || Array.isArray(spec.type)) return Number.isSafeInteger(value) && (spec.minimum===undefined || (value as number)>=spec.minimum) && (spec.maximum===undefined || (value as number)<=spec.maximum);
