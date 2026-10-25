@@ -17,6 +17,7 @@ vi.mock('expo-image-picker', () => ({ UIImagePickerPreferredAssetRepresentationM
 vi.mock('expo-file-system/legacy', () => ({ documentDirectory: 'file:///docs/', cacheDirectory: 'file:///cache/', FileSystemUploadType: { BINARY_CONTENT: 0 },
   copyAsync: vi.fn(), deleteAsync: vi.fn(), makeDirectoryAsync: vi.fn(), getInfoAsync: vi.fn(), uploadAsync: vi.fn(), downloadAsync: vi.fn() }));
 vi.mock('../../mobile/src/services/notifications', () => ({ setUnreadBadgeCount: vi.fn(), setActiveConversationForNotifications: vi.fn(), loadMutedConvs: async () => ({}) }));
+vi.mock('../../mobile/src/services/haptics', () => ({ hapticTickle: vi.fn() }));
 vi.mock('../../mobile/src/components/InAppMessageBanner', () => ({ showInAppBanner: vi.fn() }));
 vi.mock('../../mobile/src/api/socket', () => ({ connect: async () => ({ connected: true, on() {}, off() {} }), disconnect: vi.fn(), joinConversation: vi.fn(), leaveConversation: vi.fn(), emitPresenceUpdate: vi.fn(), sendMessage: vi.fn() }));
 

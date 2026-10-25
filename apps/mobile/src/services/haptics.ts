@@ -43,3 +43,21 @@ export function hapticSelect(): void {
     /* haptics not available on all devices/simulators */
   });
 }
+
+/**
+ * Tickle received (OpenChat-m0xp): two heavy taps, like a nudge on the
+ * shoulder. Paired with the chat's shake animation.
+ */
+export function hapticTickle(): void {
+  if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => { /* unavailable */ });
+  setTimeout(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => { /* unavailable */ });
+  }, 140);
+}
+
+/** One light tick as the held emoji send button crosses a size level (OpenChat-3aiu). */
+export function hapticGrowTick(): void {
+  if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => { /* unavailable */ });
+}

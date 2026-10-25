@@ -52,7 +52,7 @@ export interface PushPayload {
   data?: {
     conversationId?: string;
     messageId?: string;
-    type?: 'message' | 'mention' | 'group-add' | 'other';
+    type?: 'message' | 'mention' | 'group-add' | 'tickle' | 'other';
     [key: string]: unknown;
   };
   /** Override the default icon. */

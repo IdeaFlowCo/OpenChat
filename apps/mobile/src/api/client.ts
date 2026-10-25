@@ -116,6 +116,8 @@ export interface Conversation {
   lastMessage?: Partial<Message> & Pick<Message, 'senderId'>;
   updatedAt?: string;
   createdAt?: string;
+  /** The chat's emoji send button (OpenChat-3aiu); clients default when unset. */
+  quickEmoji?: string | null;
 }
 
 /** Aggregated reaction summary for one plain or semantic reaction bucket. */
@@ -192,6 +194,8 @@ export interface Message {
   transcript?: string;
   /** Owner-approved automatic reply sent by personal Secretary mode. */
   viaSecretary?: boolean;
+  /** Hold-to-grow size (1..4) of an emoji-only message (OpenChat-3aiu). */
+  emojiSize?: number | null;
 }
 
 export interface DroppedMessageSend {
@@ -1087,7 +1091,7 @@ export const api = {
     request<{ messages: Message[]; hasMore: boolean }>(
       `/api/chat/conversations/${conversationId}/messages?before=${encodeURIComponent(before)}&limit=${limit}`
     ),
-  sendMessage: (conversationId: string, content: string, attachments?: Attachment[], id?: string, replyToId?: string) =>
+  sendMessage: (conversationId: string, content: string, attachments?: Attachment[], id?: string, replyToId?: string, emojiSize?: number | null) =>
     timedRequest<Message | DroppedMessageSend>(`/api/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
       expireAuthOnForbidden: false,
@@ -1100,6 +1104,7 @@ export const api = {
         ...(attachments?.length ? { attachments } : {}),
         ...(id ? { id } : {}),
         ...(replyToId ? { replyToId } : {}),
+        ...(emojiSize ? { emojiSize } : {}),
       }),
     }),
 
@@ -1220,6 +1225,12 @@ export const api = {
     request<Conversation>(`/api/chat/conversations/${conversationId}`, {
       method: 'PATCH',
       body: JSON.stringify({ title }),
+    }),
+  /** Set (or reset with null) the chat's emoji send button (OpenChat-3aiu). */
+  setConversationQuickEmoji: (conversationId: string, quickEmoji: string | null) =>
+    request<Conversation>(`/api/chat/conversations/${conversationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ quickEmoji }),
     }),
   addParticipant: (conversationId: string, userId: string) =>
     request<Conversation>(`/api/chat/conversations/${conversationId}/participants`, {

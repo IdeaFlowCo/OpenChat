@@ -30,6 +30,7 @@ import {
 } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
+import { type } from '../theme/tokens';
 import { Message, ReactionSummary } from '../api/client';
 import { ReactionPicker } from './ReactionPicker';
 import { AppIcon } from './AppIcon';
@@ -80,6 +81,8 @@ interface Props {
   onReport: (messageId: string, reason: string, freeform?: string) => void;
   /** Save the message's photos to the library / downloads (OpenChat-zwt4). */
   onSavePhotos?: (message: Message) => void;
+  /** Tickle the sender (OpenChat-m0xp) — others' messages from people, not bots. */
+  onTickle?: (userId: string, displayName: string) => void;
 }
 
 const REPORT_REASONS = ['Spam', 'Inappropriate', 'Abuse', 'Other'] as const;
@@ -102,6 +105,7 @@ export function MessageActionSheet({
   onBlock,
   onReport,
   onSavePhotos,
+  onTickle,
 }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -578,6 +582,19 @@ export function MessageActionSheet({
               </TouchableOpacity>
             )}
 
+            {/* Tickle — others' messages from people (OpenChat-m0xp) */}
+            {!isOwn && onTickle && !message.sender?.isBot && (
+              <TouchableOpacity
+                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={() => { handleDismiss(); onTickle(message.senderId, senderName); }}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+              >
+                <View style={styles.actionIconBox}><Text style={styles.actionEmoji}>👉</Text></View>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Tickle {senderName}</Text>
+              </TouchableOpacity>
+            )}
+
             {/* Block — only on others' messages */}
             {!isOwn && (
               <TouchableOpacity
@@ -677,6 +694,7 @@ const styles = StyleSheet.create({
     width: 26,
     alignItems: 'center',
   },
+  actionEmoji: { ...type.title, fontWeight: '400' },
   actionLabel: {
     fontSize: 17,
     fontWeight: '400',

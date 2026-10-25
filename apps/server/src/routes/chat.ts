@@ -19,6 +19,7 @@ import { maybeTriggerSecretary } from '../services/secretary.js';
 import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from '../services/embeddings.js';
 import { maybeTranscribeMessage } from '../services/transcribeVoice.js';
+import { isSingleEmoji, parseEmojiSize } from '../services/emojiMessage.js';
 import { CONVERSATIONS_QUERY, UNREAD_TOTAL_QUERY } from '../queries/chatUnread.js';
 import { DirectConversationNotAllowedError, ensureDirectConversation } from '../services/directConversation.js';
 import { classifyContactDiscoveryQuery } from '../privacy/contactDiscovery.js';
@@ -418,15 +419,29 @@ router.patch('/conversations/:id', requireAuth, async (req: Request, res: Respon
   const session = getDriver().session();
   const userId = req.user!.userId;
   const id = req.params.id as string;
-  const { title } = req.body as { title?: string };
+  const { title, quickEmoji } = req.body as { title?: string; quickEmoji?: string | null };
 
-  if (typeof title !== 'string' || !title.trim()) {
+  // Two independent settings share this route: `title` (group rename, owner
+  // only) and `quickEmoji` (the chat's emoji send button, OpenChat-3aiu; any
+  // participant may change it, like Messenger's per-chat emoji). `null`
+  // resets the emoji to the client default.
+  const hasTitle = title !== undefined;
+  const hasQuickEmoji = quickEmoji !== undefined;
+  if (!hasTitle && !hasQuickEmoji) {
+    res.status(400).json({ error: 'title or quickEmoji is required' });
+    return;
+  }
+  if (hasTitle && (typeof title !== 'string' || !title.trim())) {
     res.status(400).json({ error: 'title is required' });
+    return;
+  }
+  if (hasQuickEmoji && quickEmoji !== null && !isSingleEmoji(quickEmoji)) {
+    res.status(400).json({ error: 'quickEmoji must be a single emoji or null' });
     return;
   }
 
   try {
-    // Verify owner
+    // Verify participation (and ownership for renames)
     const check = await session.run(`
       MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
       RETURN c, rel.role AS role
@@ -437,15 +452,23 @@ router.patch('/conversations/:id', requireAuth, async (req: Request, res: Respon
       return;
     }
     const role = check.records[0].get('role');
-    if (role !== 'owner') {
+    if (hasTitle && role !== 'owner') {
       res.status(403).json({ error: 'Only the group owner can rename' });
       return;
     }
 
-    await session.run(`
-      MATCH (c:Conversation {id: $id})
-      SET c.title = $title, c.updatedAt = datetime($now)
-    `, { id, title: title.trim(), now: new Date().toISOString() });
+    if (hasTitle) {
+      await session.run(`
+        MATCH (c:Conversation {id: $id})
+        SET c.title = $title, c.updatedAt = datetime($now)
+      `, { id, title: (title as string).trim(), now: new Date().toISOString() });
+    }
+    if (hasQuickEmoji) {
+      await session.run(`
+        MATCH (c:Conversation {id: $id})
+        SET c.quickEmoji = $quickEmoji
+      `, { id, quickEmoji: quickEmoji === null ? null : (quickEmoji as string).trim() });
+    }
 
     const conversation = await loadConversation(session, id);
     const io = req.app.get('io') as IOServer | undefined;
@@ -972,6 +995,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     id: clientId,
     clientRequestId,
     replyToId,
+    emojiSize: rawEmojiSize,
   } = req.body;
   const content = rawContent ?? text;
 
@@ -1004,6 +1028,13 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
   // here just rejects obvious bad input early.
   if (replyToId !== undefined && replyToId !== null && typeof replyToId !== 'string') {
     res.status(400).json({ error: 'replyToId must be a string' });
+    return;
+  }
+
+  // Hold-to-grow size of an emoji-only message (OpenChat-3aiu).
+  const emojiSize = parseEmojiSize(rawEmojiSize, content);
+  if (!emojiSize.ok) {
+    res.status(400).json({ error: emojiSize.error });
     return;
   }
 
@@ -1110,6 +1141,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         m.messageType = $messageType,
         m.attachments = $attachmentsJson,
         m.replyToId = $replyToId,
+        m.emojiSize = $emojiSize,
         m.createdAt = datetime($now),
         m._created = true
       WITH c, sender, m
@@ -1156,6 +1188,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       now,
       attachmentsJson,
       replyToId: replyToId ?? null,
+      emojiSize: hasAttachments ? null : emojiSize.size,
       preview,
     });
 

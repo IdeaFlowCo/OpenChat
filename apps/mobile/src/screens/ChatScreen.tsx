@@ -9,6 +9,7 @@ import {
   ActionSheetIOS,
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
   Image,
   Keyboard,
@@ -43,6 +44,10 @@ import { radius, space, type } from '../theme/tokens';
 import { Avatar } from '../components/Avatar';
 import { AiDisclosureBanner } from '../components/AiDisclosureBanner';
 import { AppIcon } from '../components/AppIcon';
+import { EmojiSendButton } from '../components/EmojiSendButton';
+import { QuickEmojiPicker } from '../components/QuickEmojiPicker';
+import { TickleLine } from '../components/TickleLine';
+import { DEFAULT_QUICK_EMOJI, emojiFontSize, isSingleEmoji } from '../utils/emojiMessage';
 import { usePrivateName } from '../contexts/PrivateNamesContext';
 import { ConversationHeaderContent } from '../components/ConversationHeaderContent';
 import { isPlaceholderEmail } from '../utils/email';
@@ -323,6 +328,7 @@ export function ChatScreen({
     retryPendingMessage, discardPendingMessage, currentUser, conversations, messages: activeMessages, loadingMessages, messageLoadError, retryMessages, isConnected,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     setActiveConversation, sendMessage, editMessage, deleteMessage, toggleReaction,
+    sendTickle, setQuickEmoji, lastTickle,
     presence, typingByConv, reportTyping,
     aiDisclosureAcceptedAt, mutedConvs, muteConv, blockUser,
     readByOthers, onlineUsers, markConversationRead,
@@ -554,6 +560,34 @@ export function ChatScreen({
     ? getDirectConversationParticipant(conversation, currentUser)
     : null;
   const privateName = usePrivateName(!isGroup && !isSelfDM && !other?.isBot ? other?.id : undefined);
+
+  // ── Chat emoji send button (OpenChat-3aiu) ──────────────────────────────
+  // Shared per chat (server `quickEmoji`); falls back to the product default.
+  const quickEmoji = conversation?.quickEmoji || DEFAULT_QUICK_EMOJI;
+  const [quickEmojiPickerVisible, setQuickEmojiPickerVisible] = useState(false);
+
+  // ── Tickle (OpenChat-m0xp) ──────────────────────────────────────────────
+  // Who the header-menu "Tickle" targets: the other person in a DM (never a
+  // bot or yourself). Group members are tickled from one of their messages.
+  const tickleTarget = !isGroup && !isSelfDM && other && !other.isBot ? other : null;
+  const tickleBusyRef = useRef(false);
+  const shakeX = useRef(new Animated.Value(0)).current;
+  const runShake = useCallback(() => {
+    shakeX.stopAnimation();
+    shakeX.setValue(0);
+    const step = (to: number, duration: number) => Animated.timing(shakeX, { toValue: to, duration, useNativeDriver: Platform.OS !== 'web' });
+    Animated.sequence([
+      step(-10, 50), step(10, 50), step(-8, 45), step(8, 45), step(-5, 40), step(5, 40), step(0, 40),
+    ]).start();
+  }, [shakeX]);
+  // Being tickled in the chat you are looking at shakes the thread.
+  const lastTickleSeenRef = useRef(0);
+  useEffect(() => {
+    if (!lastTickle || lastTickle.conversationId !== conversationId) return;
+    if (lastTickle.at === lastTickleSeenRef.current) return;
+    lastTickleSeenRef.current = lastTickle.at;
+    runShake();
+  }, [lastTickle, conversationId, runShake]);
   const groupAvatarMembers = useMemo(
     () => isGroup
       ? (conversation?.participants || [])
@@ -697,6 +731,42 @@ export function ChatScreen({
     setConversationMenuVisible(false);
     setExportSheetVisible(true);
   }, []);
+
+  const openQuickEmojiPicker = useCallback(() => {
+    setConversationMenuVisible(false);
+    setQuickEmojiPickerVisible(true);
+  }, []);
+
+  const handlePickQuickEmoji = useCallback(async (emoji: string | null) => {
+    setQuickEmojiPickerVisible(false);
+    try {
+      await setQuickEmoji(conversationId, emoji);
+    } catch (err) {
+      console.warn('[ChatScreen] chat emoji update failed:', err);
+      Alert.alert('Could not change the chat emoji', 'Please try again.');
+    }
+  }, [conversationId, setQuickEmoji]);
+
+  // Tickle someone in this chat (OpenChat-m0xp). The server posts the line
+  // and buzzes them; the sender just sees it land in the thread, so the
+  // sender's own feedback is a quick shake + light haptic.
+  const handleTickle = useCallback(async (userId: string, displayName: string) => {
+    setConversationMenuVisible(false);
+    if (tickleBusyRef.current) return;
+    tickleBusyRef.current = true;
+    try {
+      await sendTickle(conversationId, userId);
+      hapticSend();
+      runShake();
+    } catch (err) {
+      const copy = err instanceof Error && err.message && err.message !== 'Not connected'
+        ? err.message
+        : `Could not tickle ${displayName}. Check your connection and try again.`;
+      showToast(copy);
+    } finally {
+      tickleBusyRef.current = false;
+    }
+  }, [conversationId, runShake, sendTickle, showToast]);
 
   const moreAction = (
     <HeaderBarButton
@@ -1220,6 +1290,21 @@ export function ChatScreen({
     }
   };
 
+  // Chat emoji send (OpenChat-3aiu): tap = size 1, hold = bigger. Goes through
+  // the same outbox as text so it queues offline and replies stay attached.
+  const handleSendEmoji = useCallback(async (size: number) => {
+    if (composerBusy || sendInFlightRef.current) return;
+    const currentReplyToId = replyTo?.messageId;
+    setReplyTo(null);
+    try {
+      await sendMessage(quickEmoji, currentReplyToId, undefined, undefined, { emojiSize: size });
+      hapticSend();
+    } catch (err) {
+      console.warn('[ChatScreen] emoji send failed:', err);
+      showToast('Could not send. Please try again.');
+    }
+  }, [composerBusy, quickEmoji, replyTo?.messageId, sendMessage, showToast]);
+
   // RN Web replaces TextInput's onKeyDown with its own handler. Capture is
   // forwarded to the textarea and runs before that handler inserts a newline.
   const handleComposerWebKeyDown = (event: React.KeyboardEvent) => {
@@ -1464,6 +1549,9 @@ export function ChatScreen({
       );
     }
     const m = item.message!;
+    if (m.messageType === 'card' && m.cardKind === 'tickle') {
+      return <TickleLine message={m} myUserId={currentUser?.userId} />;
+    }
     if (m.messageType === 'card') {
       return (
         <AgentNetworkCard
@@ -1485,6 +1573,9 @@ export function ChatScreen({
     // non-last messages so the bubbles stay vertically aligned.
     const showGroupAvatar = isGroup && !isOwn;
     const senderColor = colorForUserId(m.senderId, scheme);
+    // A lone emoji (OpenChat-3aiu) renders big and without a bubble, as in
+    // iMessage; `emojiSize` from a held send makes it bigger still.
+    const emojiOnly = !m.deletedAt && !failed && !m.attachments?.length && isSingleEmoji(m.content);
     return (
       <View style={[styles.row, { justifyContent: isOwn ? 'flex-end' : 'flex-start', alignItems: 'flex-end' }]}>
         {showGroupAvatar && (
@@ -1519,12 +1610,13 @@ export function ChatScreen({
           style={[
             styles.bubble,
             {
-              backgroundColor: failed ? c.dangerMuted : (isOwn ? c.bubbleOwn : c.bubbleOther),
+              backgroundColor: failed ? c.dangerMuted : emojiOnly ? 'transparent' : (isOwn ? c.bubbleOwn : c.bubbleOther),
               borderTopRightRadius: isOwn ? 4 : 16,
               borderTopLeftRadius: isOwn ? 16 : 4,
-              borderColor: failed ? c.danger : (isOwn ? 'transparent' : c.border),
-              borderWidth: failed ? 1 : (isOwn ? 0 : StyleSheet.hairlineWidth),
+              borderColor: failed ? c.danger : (isOwn || emojiOnly ? 'transparent' : c.border),
+              borderWidth: failed ? 1 : (isOwn || emojiOnly ? 0 : StyleSheet.hairlineWidth),
             },
+            emojiOnly && { paddingHorizontal: 4, paddingVertical: 0 },
             // Reply-message accent stripe (OpenChat-imt): a 3px colored
             // bar on the bubble's leading edge gives at-a-glance
             // distinction that this message is a reply. Stripe sits on
@@ -1627,6 +1719,15 @@ export function ChatScreen({
           {/* Deleted: muted italic tombstone (OpenChat-q9h) */}
           {m.deletedAt
             ? <Text style={{ color: isOwn ? ownTint(0.55) : c.textMetadata, fontSize: 15, fontStyle: 'italic' }}>Message deleted</Text>
+            : emojiOnly
+            ? <Text
+                selectable
+                allowFontScaling={false}
+                accessibilityLabel={`${m.content.trim()}${(m.emojiSize ?? 1) > 1 ? ', sent big' : ''}`}
+                onLongPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
+                style={{ fontSize: emojiFontSize(m.emojiSize), lineHeight: emojiFontSize(m.emojiSize) * 1.2, textAlign: isOwn ? 'right' : 'left' }}>
+                {m.content.trim()}
+              </Text>
             : (!!m.content && (
                 // Agents write Markdown; render it rather than showing ** and backticks (OpenChat-eo3n.5).
                 !isOwn && (m.sender?.isBot || (!isGroup && other?.isBot))
@@ -1645,9 +1746,9 @@ export function ChatScreen({
             <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Message actions: ${m.deletedAt ? 'Deleted message' : (m.content?.slice(0, 80) || 'Attachment')}`}
               onPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
               style={{ minHeight: 44, minWidth: 44, justifyContent: 'center', marginRight: 8 }}>
-              <Text style={{ color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 12 }}>More</Text>
+              <Text style={{ color: emojiOnly ? c.textMetadata : isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 12 }}>More</Text>
             </TouchableOpacity>
-            <Text style={{ color: isOwn ? ownTint(0.7) : c.textMetadata, fontSize: 10, flexShrink: 1 }}>
+            <Text style={{ color: emojiOnly ? c.textMetadata : isOwn ? ownTint(0.7) : c.textMetadata, fontSize: 10, flexShrink: 1 }}>
               {failed
                 ? (m._deliveryDetail ? `Failed to send — ${m._deliveryDetail}` : 'Failed to send')
                 : m._delivery === 'queued' ? (m._deliveryDetail || 'Waiting to send')
@@ -1776,6 +1877,16 @@ export function ChatScreen({
               <AppIcon name="bot" color={c.primary} size={20} />
               <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>OpenChat Agent</Text>
             </TouchableOpacity>
+            {tickleTarget && (
+              <TouchableOpacity onPress={() => void handleTickle(tickleTarget.id, privateName.name || getUserDisplayName(tickleTarget))} style={styles.conversationMenuRow} accessibilityRole="menuitem">
+                <Text style={styles.conversationMenuEmoji}>👉</Text>
+                <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Tickle {privateName.name || getUserDisplayName(tickleTarget)}</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={openQuickEmojiPicker} style={styles.conversationMenuRow} accessibilityRole="menuitem">
+              <Text style={styles.conversationMenuEmoji}>{quickEmoji}</Text>
+              <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Chat emoji</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={showMuteOptions} style={styles.conversationMenuRow} accessibilityRole="menuitem">
               <AppIcon name="mute" color={c.textMetadata} size={19} strokeWidth={1.8} />
               <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>{isMuted ? 'Unmute' : 'Mute'}</Text>
@@ -1816,7 +1927,7 @@ export function ChatScreen({
         // Wrap the list + floating pill in a flex:1 relative container so the
         // pill's absolute positioning is anchored to the message-area bottom
         // (i.e. just above the composer), not to the whole KeyboardAvoidingView.
-        <View style={styles.listWrap}>
+        <Animated.View style={[styles.listWrap, { transform: [{ translateX: shakeX }] }]}>
         <FlatList
           ref={listRef}
           data={rows}
@@ -1864,7 +1975,7 @@ export function ChatScreen({
         {!isAtBottom && (
           <JumpToBottomButton unreadCount={unreadCount} onPress={handlePillPress} />
         )}
-        </View>
+        </Animated.View>
       )}
 
       {!!typingLabel && (
@@ -2166,6 +2277,12 @@ export function ChatScreen({
             <AppIcon name={isRecording ? 'stop' : 'mic'} color={isRecording ? '#fff' : c.onPrimary} size={19} />
           </View>
         )}
+        {/* Chat emoji (OpenChat-3aiu): where Send sits while the composer is
+            empty. Tap sends it; hold grows it. Hidden while editing, while a
+            voice note records, and once anything is typed or attached. */}
+        {!editingMessage && !text.trim() && !pendingAssets.length && !isRecording && (
+          <EmojiSendButton emoji={quickEmoji} disabled={composerBusy} onSend={size => { void handleSendEmoji(size); }} />
+        )}
         {/* Send button: shown when there is text or a pending asset */}
         {(!!text.trim() || pendingAssets.length > 0 || editingMessage) && (
           <TouchableOpacity
@@ -2218,6 +2335,15 @@ export function ChatScreen({
         onReact={handleReact}
         onBlock={handleBlock}
         onReport={handleReport}
+        onTickle={(userId, displayName) => { void handleTickle(userId, displayName); }}
+      />
+
+      {/* Chat emoji picker (OpenChat-3aiu) */}
+      <QuickEmojiPicker
+        visible={quickEmojiPickerVisible}
+        current={quickEmoji}
+        onPick={emoji => { void handlePickQuickEmoji(emoji); }}
+        onClose={() => setQuickEmojiPickerVisible(false)}
       />
 
       {/* In-app toast for report confirmation */}
@@ -2317,6 +2443,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   conversationMenuLabel: { fontSize: 16, fontWeight: '500' },
+  conversationMenuEmoji: { ...type.heading, fontWeight: '400', letterSpacing: 0, width: 20, textAlign: 'center' },
   listWrap: { flex: 1, position: 'relative' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   row: { flexDirection: 'row', gap: 6 },
