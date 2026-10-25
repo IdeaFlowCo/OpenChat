@@ -1,3 +1,4 @@
+import { peopleSuggestions } from '../services/peopleSuggestions.js';
 import { Router, Request, Response } from 'express';
 import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
@@ -1287,6 +1288,10 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     await session.close();
   }
 });
+
+// Minimal identity/relationship projection shared by first-party pickers.
+router.get('/people-suggestions', resolveActor, peopleSuggestions);
+router.post('/people-suggestions', resolveActor, peopleSuggestions);
 
 // GET /api/chat/contacts - Find a user for starting a conversation.
 // With OPENCHAT_OPEN_USER_DIRECTORY enabled, an empty query returns the

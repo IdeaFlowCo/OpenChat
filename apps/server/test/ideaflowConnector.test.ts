@@ -8,6 +8,7 @@ vi.mock('../src/db.js',()=>({getDriver:()=>({session:()=>({run:state.run,close:a
 import { handleIdeaflowConnector, connectorOperationGuard } from '../src/routes/ideaflowConnector.js';
 import { resolveActor } from '../src/middleware/resolveActor.js';
 import { verifyConnectorAssertion,issueConnectorOperation,getConnectorPrincipal } from '../src/lib/ideaflowConnector.js';
+import { peopleSuggestions } from '../src/services/peopleSuggestions.js';
 import contextRoutes from '../src/routes/context.js';
 import contentRoutes from '../src/routes/conversationContent.js';
 const secret='test-only-connector-secret-32-bytes-minimum';
@@ -26,6 +27,8 @@ describe('unified OpenChat connector trust boundary',()=>{
     app.use(express.json());app.use('/api',connectorOperationGuard);
     app.use('/api/chat',contentRoutes);
     app.use('/api/chat',contextRoutes);
+    app.get('/api/chat/people-suggestions',resolveActor,peopleSuggestions);
+    app.post('/api/chat/people-suggestions',resolveActor,peopleSuggestions);
     app.get('/api/chat/conversations',resolveActor,(req,res)=>res.json([{id:'room',userId:req.user!.userId}]));
     app.post('/api/chat/conversations/:id/messages',resolveActor,(req,res)=>{state.mutations++;res.json({conversationId:req.params.id,...req.body,userId:req.user!.userId});});
     app.get('/api/probe',resolveActor,(req,res)=>res.json({userId:req.user?.userId,trusted:!!getConnectorPrincipal(req)}));
@@ -91,6 +94,20 @@ describe('unified OpenChat connector trust boundary',()=>{
       expect((await call('tools/call',{name:'oc_send_message',arguments:args})).status).toBe(400);
     }
     expect((await call('tools/call',{name:'arbitrary_fetch',arguments:{path:'/api/auth/me'}})).status).toBe(400);
+    expect(state.mutations).toBe(0);
+  });
+  it('exposes metadata only through granted read tools and derives the viewer from its principal',async()=>{
+    const listing=await (await call('tools/list',undefined,{scope:'openchat:read'})).json() as any;
+    expect(listing.result.tools.find((t:any)=>t.name==='oc_suggest_people').annotations.readOnlyHint).toBe(true);
+    const response=await (await call('tools/call',{name:'oc_suggest_people',arguments:{q:'Ada'}},{scope:'openchat:read'})).json() as any;
+    expect(JSON.parse(response.result.content[0].text)).toEqual({people:[]});
+    expect(state.run.mock.calls.some(([q,p])=>q.includes('lastChattedAt')&&p.userId==='owner'&&p.name==='ada')).toBe(true);
+    expect((await call('tools/call',{name:'oc_suggest_people',arguments:{userId:'other'}},{scope:'openchat:read'})).status).toBe(400);
+    expect((await call('tools/call',{name:'oc_suggest_people',arguments:{}},{scope:'openchat:write'})).status).toBe(403);
+    const token=issueConnectorOperation('owner',{method:'GET',path:'/api/chat/people-suggestions'},['openchat:write']);
+    expect((await fetch(base+'/api/chat/people-suggestions',{headers:{Authorization:`Bearer ${token}`}})).status).toBe(404);
+    const get=issueConnectorOperation('owner',{method:'GET',path:'/api/chat/people-suggestions?subjects=a&subjects=b'},['openchat:read']);
+    expect((await fetch(base+'/api/chat/people-suggestions?subjects=a&subjects=b',{headers:{Authorization:`Bearer ${get}`}})).status).toBe(400);
     expect(state.mutations).toBe(0);
   });
   it('internal operation tokens are one-use, exact route/method/body bound, not JWTs',async()=>{
