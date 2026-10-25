@@ -66,6 +66,14 @@ until **Show more**; **Show less** folds them again. It applies with or without
 a search. Both controls affect Stream entries only, including those in the
 combined conversation feed; Context posts are unchanged.
 
+## Chat emoji and Tickle
+
+With nothing typed, the chat's emoji (default 🍓) sits where **Send** is: tap to
+send it, hold to send it bigger. **More › Chat emoji** changes it for everyone
+in the chat. **More › Tickle <name>** (or Tickle from someone's message) nudges
+them with a buzz, a shake and a line in the thread. See
+[docs/emoji-send-and-tickle.md](docs/emoji-send-and-tickle.md).
+
 ## Unexpected-error recovery
 
 If OpenChat shows **Something went wrong**, the full error message is selectable.

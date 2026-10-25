@@ -85,18 +85,22 @@ export function sendMessage(
   conversationId: string,
   content: string,
   replyToId?: string,
-  id?: string
+  id?: string,
+  emojiSize?: number | null
 ): Promise<Message | null> {
   return new Promise((resolve, reject) => {
     if (!socket?.connected) {
       reject(new Error('Not connected'));
       return;
     }
-    const payload: { conversationId: string; content: string; replyToId?: string; id?: string } = {
+    const payload: { conversationId: string; content: string; replyToId?: string; id?: string; emojiSize?: number } = {
       conversationId,
       content,
     };
     if (replyToId) payload.replyToId = replyToId;
+    // Hold-to-grow emoji size (OpenChat-3aiu); the server ignores it unless
+    // the content is a single emoji.
+    if (emojiSize) payload.emojiSize = emojiSize;
     // id is a client-generated idempotency key shared with the REST fallback so
     // a lost-ack retry collapses to one row server-side (MERGE). See OpenChat-60y.
     if (id) payload.id = id;
@@ -114,6 +118,30 @@ export function sendMessage(
         else if (response?.error) reject(new Error(response.error));
         else if (response?.message) resolve(response.message);
         else if (response?.success && response?.dropped) resolve(null);
+        else reject(new Error('No response from server'));
+      }
+    );
+  });
+}
+
+/**
+ * Tickle one participant (OpenChat-m0xp). Resolves with the server's tickle
+ * card, or null when the server dropped it (a block in either direction).
+ * Rejects with the server's user-facing copy (cooldown, not a participant).
+ */
+export function sendTickle(conversationId: string, targetUserId: string): Promise<Message | null> {
+  return new Promise((resolve, reject) => {
+    if (!socket?.connected) {
+      reject(new Error('Not connected'));
+      return;
+    }
+    socket.timeout(10000).emit(
+      'tickle:send',
+      { conversationId, targetUserId },
+      (err: Error | null, response: { success?: boolean; dropped?: boolean; message?: Message; error?: string }) => {
+        if (err) reject(new Error('Tickle timed out'));
+        else if (response?.error) reject(new Error(response.error));
+        else if (response?.success) resolve(response.dropped ? null : (response.message ?? null));
         else reject(new Error('No response from server'));
       }
     );

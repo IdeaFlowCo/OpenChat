@@ -53,6 +53,7 @@ import {
   joinConversation,
   leaveConversation,
   sendMessage as wsSend,
+  sendTickle as wsTickle,
   ConversationEvent,
   ParticipantEvent,
   PresenceEvent,
@@ -60,6 +61,8 @@ import {
   MatchEvent,
 } from '../api/socket';
 import { showInAppBanner } from '../components/InAppMessageBanner';
+import { hapticTickle } from '../services/haptics';
+import { parseTicklePayload } from '../utils/emojiMessage';
 import {
   applyMessageToConversationList,
   sortConversationsByRecent,
@@ -72,6 +75,19 @@ import { markIdeaflowAccountChoiceNative } from '../services/ideaflowNativeSignI
 import { clearIdeaflowSignedOut, markIdeaflowSignedOut } from '../services/ideaflowAutoSignIn';
 
 type Status = 'available' | 'away' | 'busy' | 'invisible';
+
+/** Optional fields a send can carry beyond content and attachments. */
+export interface SendExtras {
+  /** Hold-to-grow size of an emoji-only message (OpenChat-3aiu). */
+  emojiSize?: number;
+}
+
+export interface TickleSignal {
+  conversationId: string;
+  messageId: string;
+  fromName: string;
+  at: number;
+}
 
 interface ChatContextValue {
   // Identity / session
@@ -107,14 +123,21 @@ interface ChatContextValue {
   loadOlderMessages: (conversationId: string) => Promise<void>;
   hasMoreMessages: boolean;
   loadingOlderMessages: boolean;
-  sendMessage: (content: string, replyToId?: string, attachments?: Attachment[], photos?: PickedAsset[]) => Promise<void>;
+  sendMessage: (content: string, replyToId?: string, attachments?: Attachment[], photos?: PickedAsset[], extra?: SendExtras) => Promise<void>;
   sendMessageToConversation: (
     conversationId: string,
     content: string,
     replyToId?: string,
     attachments?: Attachment[],
-    photos?: PickedAsset[]
+    photos?: PickedAsset[],
+    extra?: SendExtras
   ) => Promise<void>;
+  /** Tickle one participant (OpenChat-m0xp). Rejects with user-facing copy. */
+  sendTickle: (conversationId: string, targetUserId: string) => Promise<void>;
+  /** The most recent tickle aimed at the signed-in user, for the chat's shake. */
+  lastTickle: TickleSignal | null;
+  /** Set (or reset with null) a chat's emoji send button (OpenChat-3aiu). */
+  setQuickEmoji: (conversationId: string, emoji: string | null) => Promise<void>;
 
   retryPendingMessage: (clientId: string) => Promise<void>;
   discardPendingMessage: (clientId: string) => Promise<void>;
@@ -457,10 +480,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             const response = await api.sendMessage(id, message.content, outgoing, clientId, message.replyToId);
             real = isDroppedMessageSend(response) ? null : response;
           } else {
-            try { real = await wsSend(id, message.content, message.replyToId, clientId); }
-            catch {
+            // Emoji-only sends carry their held size (OpenChat-3aiu); plain
+            // sends keep the exact call shape they always had.
+            try {
+              real = message.emojiSize
+                ? await wsSend(id, message.content, message.replyToId, clientId, message.emojiSize)
+                : await wsSend(id, message.content, message.replyToId, clientId);
+            } catch {
               if (!isCurrent() || !await store.isActive()) return;
-              const response = await api.sendMessage(id, message.content, undefined, clientId, message.replyToId);
+              const response = message.emojiSize
+                ? await api.sendMessage(id, message.content, undefined, clientId, message.replyToId, message.emojiSize)
+                : await api.sendMessage(id, message.content, undefined, clientId, message.replyToId);
               real = isDroppedMessageSend(response) ? null : response;
             }
           }
@@ -540,6 +570,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [presence, setPresence] = useState<Map<string, { status: string; statusMessage?: string; profileStatus?: { text?: string | null; emoji?: string | null } | null }>>(new Map());
   const [typingByConv, setTypingByConv] = useState<Map<string, Set<string>>>(new Map());
   const [unreadByConv, setUnreadByConv] = useState<Map<string, number>>(new Map());
+  const [lastTickle, setLastTickle] = useState<TickleSignal | null>(null);
   const [matches, setMatches] = useState<Map<string, AgentMatch>>(new Map());
 
   const pendingMatchCount = useMemo(
@@ -975,6 +1006,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           });
         } catch { /* swallow — banner is a nice-to-have */ }
       }
+      // Tickle aimed at me (OpenChat-m0xp): buzz now, and let the open chat shake.
+      const tickle = parseTicklePayload(msg);
+      if (tickle && currentUser?.userId && tickle.toUserId === currentUser.userId && msg.senderId !== currentUser.userId) {
+        hapticTickle();
+        setLastTickle({ conversationId: msg.conversationId, messageId: msg.id, fromName: tickle.fromName, at: Date.now() });
+      }
       // Advance the sync cursor so we don't re-fetch this message on next reconnect.
       if (msg.createdAt && msg.createdAt > lastSyncAtRef.current) {
         lastSyncAtRef.current = msg.createdAt;
@@ -1248,7 +1285,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     content: string,
     replyToId?: string,
     attachments?: Attachment[],
-    photos?: PickedAsset[]
+    photos?: PickedAsset[],
+    extra?: SendExtras
   ) => {
     const hasText = !!content.trim();
     const hasAttachments = !!attachments?.length || !!photos?.length;
@@ -1266,6 +1304,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       senderId: currentUser.userId, createdAt: new Date().toISOString(),
       sender: { id: currentUser.userId, email: currentUser.email, name: currentUser.name, avatarUrl: currentUser.avatarUrl },
       replyToId, attachments: queuedPhotos ? displayAttachments(queuedPhotos) : attachments,
+      ...(extra?.emojiSize ? { emojiSize: extra.emojiSize } : {}),
     } };
     try {
       await store.put(entry);
@@ -1307,12 +1346,35 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     content: string,
     replyToId?: string,
     attachments?: Attachment[],
-    photos?: PickedAsset[]
+    photos?: PickedAsset[],
+    extra?: SendExtras
   ) => {
     const id = activeConvIdRef.current;
     if (!id) return;
-    await sendMessageToConversation(id, content, replyToId, attachments, photos);
+    await sendMessageToConversation(id, content, replyToId, attachments, photos, extra);
   }, [sendMessageToConversation]);
+
+  // Tickle (OpenChat-m0xp): the server authors the card and broadcasts it
+  // like any message, so nothing is added locally here.
+  const sendTickle = useCallback(async (conversationId: string, targetUserId: string) => {
+    await wsTickle(conversationId, targetUserId);
+  }, []);
+
+  // Chat emoji (OpenChat-3aiu): optimistic, then the server's
+  // conversation:updated confirms for everyone in the chat.
+  const setQuickEmoji = useCallback(async (conversationId: string, emoji: string | null) => {
+    setConversations(prev => prev.map(c => (c.id === conversationId ? { ...c, quickEmoji: emoji } : c)));
+    try {
+      const updated = await api.setConversationQuickEmoji(conversationId, emoji);
+      setConversations(prev => prev.map(c => (c.id === conversationId ? { ...c, ...updated } : c)));
+    } catch (error) {
+      try {
+        const fresh = await api.getConversation(conversationId);
+        setConversations(prev => prev.map(c => (c.id === conversationId ? { ...c, ...fresh } : c)));
+      } catch { /* the next refresh corrects it */ }
+      throw error;
+    }
+  }, []);
 
   const createConversation = useCallback(async (
     participantIds: string[],
@@ -1578,6 +1640,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, registerConversationVisibility, setActiveConversation, messages, loadingMessages, messageLoadError, retryMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     sendMessage, sendMessageToConversation, retryPendingMessage, discardPendingMessage,
+    sendTickle, lastTickle, setQuickEmoji,
     editMessage, deleteMessage,
     toggleReaction,
     blockUser,
@@ -1596,6 +1659,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, registerConversationVisibility, setActiveConversation, messages, loadingMessages, messageLoadError, retryMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
     sendMessage, sendMessageToConversation, retryPendingMessage, discardPendingMessage,
+    sendTickle, lastTickle, setQuickEmoji,
     editMessage, deleteMessage,
     toggleReaction,
     blockUser,

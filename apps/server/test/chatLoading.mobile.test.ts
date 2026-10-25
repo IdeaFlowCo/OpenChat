@@ -41,6 +41,7 @@ vi.mock('../../mobile/src/api/client', () => ({
   isDroppedMessageSend: (value: any) => value?.dropped === true,
 }));
 vi.mock('../../mobile/src/api/socket', () => ({ sendMessage: mocks.wsSend, joinConversation: vi.fn(), leaveConversation: vi.fn(), connect: mocks.connect, disconnect: vi.fn(), emitPresenceUpdate: vi.fn() }));
+vi.mock('../../mobile/src/services/haptics', () => ({ hapticTickle: vi.fn() }));
 vi.mock('../../mobile/src/components/InAppMessageBanner', () => ({ showInAppBanner: mocks.banner }));
 
 import { ChatProvider, useChat } from '../../mobile/src/contexts/ChatContext.js';
