@@ -30,6 +30,13 @@ vi.mock('react-native', async () => {
     StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
     ActionSheetIOS: { showActionSheetWithOptions: vi.fn() },
     Alert: { alert: vi.fn() },
+    Animated: {
+      View: 'Animated.View',
+      Value: class { constructor(public value: number) {} setValue() {} stopAnimation() {} interpolate() { return this; } },
+      timing: () => ({ start: vi.fn() }), spring: () => ({ start: vi.fn() }), sequence: () => ({ start: vi.fn() }),
+    },
+    Easing: { out: (fn: unknown) => fn, quad: (t: number) => t },
+    Pressable: 'Pressable',
     Keyboard: { addListener: vi.fn(() => ({ remove: vi.fn() })) },
     ActivityIndicator: 'ActivityIndicator',
     Image: 'Image',
@@ -94,7 +101,7 @@ vi.mock('../../mobile/src/api/socket', () => ({
 vi.mock('../../mobile/src/services/notifications', () => ({
   setActiveConversationForNotifications: vi.fn(),
 }));
-vi.mock('../../mobile/src/services/haptics', () => ({ hapticSend: vi.fn(), hapticReceive: vi.fn() }));
+vi.mock('../../mobile/src/services/haptics', () => ({ hapticSend: vi.fn(), hapticReceive: vi.fn(), hapticGrowTick: vi.fn(), hapticTickle: vi.fn() }));
 vi.mock('../../mobile/src/services/attachments', () => ({ MAX_IMAGES_PER_MESSAGE: 10, pickImages: vi.fn(async () => []), takePhoto: vi.fn(async () => null), filesToAssets: vi.fn(async () => []), releaseAsset: vi.fn(), uploadImage: vi.fn(), uploadImages: vi.fn(async () => ({ uploaded: [], failed: [] })), checkPhotosForSend: vi.fn(async (assets: any[]) => ({ ok: assets, rejected: [] })) }));
 vi.mock('../../mobile/src/services/photoActions', () => ({ photoActionLabel: 'Save', saveOrSharePhoto: vi.fn(), savePhotos: vi.fn(), sharePhoto: vi.fn(), describeSaveResult: () => '', normalizeRotation: (d?: number) => d ?? 0, canRotateFiles: async () => false, rotateImageFile: async () => null, PhotoSaveError: class extends Error {} }));
 vi.mock('../../mobile/src/services/exportDownload', () => ({ saveJsonDownload: vi.fn() }));

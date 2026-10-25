@@ -10,6 +10,8 @@ import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
 import { maybeTriggerSecretary } from '../services/secretary.js';
 import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage } from '../services/embeddings.js';
+import { parseEmojiSize } from '../services/emojiMessage.js';
+import { sendTickle } from '../services/tickle.js';
 
 interface AuthenticatedSocket extends Socket {
   user?: AuthUser;
@@ -204,6 +206,8 @@ export function setupChatSocket(io: Server): void {
       messageType?: string;
       id?: string;
       replyToId?: string;
+      /** Hold-to-grow size of an emoji-only message (OpenChat-3aiu). */
+      emojiSize?: number;
     }, callback) => {
       const { conversationId, content, messageType = 'text', replyToId } = data;
 
@@ -215,6 +219,11 @@ export function setupChatSocket(io: Server): void {
       // sender attribution. Never accept cardKind/cardPayload over the socket.
       if (messageType !== 'text') {
         callback?.({ error: "messageType must be 'text'" });
+        return;
+      }
+      const emojiSize = parseEmojiSize(data.emojiSize, content);
+      if (!emojiSize.ok) {
+        callback?.({ error: emojiSize.error });
         return;
       }
 
@@ -314,6 +323,7 @@ export function setupChatSocket(io: Server): void {
             m.messageType = $messageType,
             m.mentions = $mentions,
             m.replyToId = $replyToId,
+            m.emojiSize = $emojiSize,
             m.createdAt = datetime($now),
             m._created = true
           MERGE (m)-[:IN_CONVERSATION]->(c)
@@ -353,6 +363,7 @@ export function setupChatSocket(io: Server): void {
           messageType,
           mentions: mentionedUserIds,
           replyToId: replyToId ?? null,
+          emojiSize: emojiSize.size,
           now
         });
 
@@ -423,6 +434,31 @@ export function setupChatSocket(io: Server): void {
         callback?.({ error: 'Failed to send message' });
       } finally {
         await session.close();
+      }
+    });
+
+    // Tickle (OpenChat-m0xp): ask the server to post a tickle card to one
+    // participant. The card itself is server-authored (see services/tickle.ts).
+    socket.on('tickle:send', async (data: { conversationId?: string; targetUserId?: string }, callback) => {
+      const conversationId = typeof data?.conversationId === 'string' ? data.conversationId : '';
+      const targetUserId = typeof data?.targetUserId === 'string' ? data.targetUserId : '';
+      if (!conversationId || !targetUserId) {
+        callback?.({ error: 'conversationId and targetUserId required' });
+        return;
+      }
+      try {
+        const result = await sendTickle(io, userId, conversationId, targetUserId);
+        if (!result.ok) {
+          const copy = result.error === 'too_soon' ? 'Give them a moment before tickling again'
+            : result.error === 'invalid_target' ? 'You can only tickle a person in this chat'
+            : 'Not a participant';
+          callback?.({ error: copy, code: result.error });
+          return;
+        }
+        callback?.({ success: true, dropped: result.dropped === true, message: result.message });
+      } catch (error) {
+        console.error('Error sending tickle:', error);
+        callback?.({ error: 'Failed to tickle' });
       }
     });
 
