@@ -1824,7 +1824,7 @@ export function ChatScreen({
             <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Message actions: ${m.deletedAt ? 'Deleted message' : (m.content?.slice(0, 80) || 'Attachment')}`}
               onPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
               style={{ minHeight: 44, minWidth: 44, justifyContent: 'center', marginRight: 8 }}>
-              <Text style={{ color: emojiOnly ? c.textMetadata : isOwn ? c.bubbleOwnText : c.bubbleOtherText, fontSize: 12 }}>More</Text>
+              <Text style={{ color: emojiOnly ? c.textMetadata : isOwn ? c.bubbleOwnText : c.bubbleOtherText, ...type.meta }}>Actions</Text>
             </TouchableOpacity>
             <Text style={{ color: emojiOnly ? c.textMetadata : isOwn ? ownTint(0.7) : c.textMetadata, fontSize: 10, flexShrink: 1 }}>
               {failed

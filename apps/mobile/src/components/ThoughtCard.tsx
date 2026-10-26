@@ -18,6 +18,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import type { Thought } from '../api/client';
 import { AppIcon } from './AppIcon';
+import { space, type } from '../theme/tokens';
 import * as Clipboard from 'expo-clipboard';
 import { originalMessageUrl } from '../utils/parseOpenChatUrl';
 import { COMPACT_VISIBLE_LINES, isLongStreamText, useStreamCompact, useThoughtCollapsed } from '../services/streamDisplay';
@@ -111,6 +112,12 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
           {formatRelativeTime(item.createdAt)}
         </Text>
         <View style={styles.headerSpacer} />
+        {item.pinned && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space[1], marginRight: space[2] }}>
+            <AppIcon name="pin" color={c.primary} size={16} strokeWidth={2.4} />
+            <Text style={{ ...type.meta, color: c.textMetadata }}>Pinned</Text>
+          </View>
+        )}
         {item.status !== 'none' && (
           <View
             style={[

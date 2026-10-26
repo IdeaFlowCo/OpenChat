@@ -17,6 +17,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import type { NavProp, RouteProps } from '../navigation/types';
 import { getColors } from '../theme/colors';
 import { capsLabel, serif } from '../theme/typography';
+import { type } from '../theme/tokens';
 
 type Expiry = 'day' | 'week';
 export type ComposerDestination = 'agents_only' | 'both' | 'stories_only';
@@ -72,6 +73,7 @@ export function StoryComposerScreen() {
     route.params?.destination ?? 'stories_only',
   );
   const [textOnlyKind, setTextOnlyKind] = useState<AgentIntentKind | null>(null);
+  const [showMatchingDetails, setShowMatchingDetails] = useState(false);
   const [expiry, setExpiry] = useState<Expiry>('day');
   const [previewing, setPreviewing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -98,6 +100,7 @@ export function StoryComposerScreen() {
       setSeeks(found.seeks.join(', '));
       setBrings(found.brings.join(', '));
       setMatchingMode(found.matchingMode);
+      setShowMatchingDetails(true);
     }).catch(() => setError('Could not load this private draft.'));
   }, [route.params?.draftId]);
 
@@ -231,7 +234,7 @@ export function StoryComposerScreen() {
       >
         <View style={styles.headingBlock}>
           <Text style={[styles.eyebrow, { color: c.primary }]}>
-            {destination === 'agents_only' ? 'SEARCH WITH AGENTS' : 'SHARE AN ASK'}
+            {destination === 'agents_only' ? 'SEARCH WITH AGENTS' : 'SHARE A STORY'}
           </Text>
           <Text style={[styles.title, { color: c.textPrimary }]}>
             {destination === 'agents_only' ? 'What should agents search for?' : 'What should your network know?'}
@@ -326,7 +329,18 @@ export function StoryComposerScreen() {
               )}
             </View>
 
-            <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>AGENT CONTEXT · OPTIONAL</Text>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Matching details (optional)"
+              accessibilityState={{ expanded: showMatchingDetails }}
+              onPress={() => setShowMatchingDetails(value => !value)}
+              style={{ minHeight: 44, justifyContent: 'center' }}
+            >
+              <Text style={{ ...type.label, color: c.textSecondary }}>
+                {showMatchingDetails ? 'Hide matching details' : 'Matching details (optional)'}
+              </Text>
+            </TouchableOpacity>
+            {showMatchingDetails && <>
             <View style={[styles.detailsCard, { backgroundColor: c.surface, borderColor: c.border }]}>
               <TextInput value={goal} onChangeText={setGoal} placeholder="Goal" placeholderTextColor={c.textMuted} style={[styles.lineInput, { color: c.textPrimary, borderBottomColor: c.border }]} />
               <TextInput value={seeks} onChangeText={setSeeks} placeholder="Looking for (comma separated)" placeholderTextColor={c.textMuted} style={[styles.lineInput, { color: c.textPrimary, borderBottomColor: c.border }]} />
@@ -339,6 +353,7 @@ export function StoryComposerScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+            </>}
 
             {quietSearch && !draft && splitList(seeks).length === 0 && splitList(brings).length === 0 && (
               <View style={styles.modeRow} accessibilityRole="radiogroup" accessibilityLabel="Quiet search direction">

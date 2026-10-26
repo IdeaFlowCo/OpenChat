@@ -130,6 +130,20 @@ function findTouchableWithText(text: string): ReactTestInstance | undefined {
 }
 
 describe('StoryComposerScreen audience destination control', () => {
+  it('keeps matching fields optional and preserves their values when hidden', async () => {
+    await act(async () => { root = create(React.createElement(StoryComposerScreen)); });
+    expect(root!.root.findAllByProps({ placeholder: 'Goal' })).toHaveLength(0);
+    expect(root!.root.findAllByProps({ accessibilityLabel: 'Quiet search direction' })).toHaveLength(0);
+    const toggle = () => root!.root.findByProps({ accessibilityLabel: 'Matching details (optional)' });
+    expect(toggle().props.accessibilityState.expanded).toBe(false);
+    await act(async () => { toggle().props.onPress(); });
+    await act(async () => { root!.root.findByProps({ placeholder: 'Goal' }).props.onChangeText('Organize the meetup'); });
+    await act(async () => { toggle().props.onPress(); });
+    expect(root!.root.findAllByProps({ placeholder: 'Goal' })).toHaveLength(0);
+    await act(async () => { toggle().props.onPress(); });
+    expect(root!.root.findByProps({ placeholder: 'Goal' }).props.value).toBe('Organize the meetup');
+  });
+
   it('displays the three destinations with plain explanatory sentences and visible words', async () => {
     await act(async () => {
       root = create(React.createElement(StoryComposerScreen));
