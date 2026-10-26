@@ -31,7 +31,7 @@ it('renders actual Stream cards with default compact clamping and saved collapse
   expect(isLongStreamText('x'.repeat(400))).toBe(true);
   expect(isLongStreamText('a\nb\nc\nd\ne')).toBe(false);
   expect(isLongStreamText('a\nb\nc\nd\ne\nf')).toBe(true);
-  const Surface = () => React.createElement(React.Fragment, null, React.createElement(StreamCompactToggle), React.createElement(ThoughtCard, { item, onOpenContext: () => undefined }), React.createElement(ThoughtCard, { item: { ...item, id: 'collapsed', collapsed: true } }));
+  const Surface = () => React.createElement(React.Fragment, null, React.createElement(StreamCompactToggle), React.createElement(ThoughtCard, { item, onOpenContext: () => undefined }), React.createElement(ThoughtCard, { item: { ...item, id: 'collapsed', collapsed: true, pinned: true } }));
   AppRegistry.registerComponent('StreamEvidence', () => Surface);
   const { element, getStyleElement } = AppRegistry.getApplication('StreamEvidence', {});
   const markup = renderToStaticMarkup(element);
@@ -39,6 +39,9 @@ it('renders actual Stream cards with default compact clamping and saved collapse
   expect(markup).toContain('Original message');
   expect(markup).toContain('aria-label="Expand entry"');
   expect(markup).toContain('-webkit-line-clamp:4');
+  // Pin visibility does not depend on edit/unpin permission or expanded text.
+  expect(markup).toContain('Pinned');
+  expect(markup).not.toContain('Unpin from this chat');
   const dir = process.env.OPENCHAT_STREAM_EVIDENCE_DIR;
   if (dir) {
     mkdirSync(dir, { recursive: true });
