@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { originalMessageUrl, parseOpenChatUrl } from './parseOpenChatUrl';
+import { conversationUrl, originalMessageUrl, parseOpenChatUrl } from './parseOpenChatUrl';
 
 describe('parseOpenChatUrl AddMe cards', () => {
   const token = 'AbCdEfGhIjKlMnOpQrStUvWx';
@@ -30,5 +30,11 @@ describe('Stream original-message links', () => {
     expect(url).toBe('https://chat.ideaflow.app/app/original/VASum6BCBCg594zj-lXkH');
     expect(parseOpenChatUrl(url)).toEqual({ type: 'original', thoughtId: 'VASum6BCBCg594zj-lXkH' });
     expect(parseOpenChatUrl('https://chat.ideaflow.app/app/original/')).toEqual({ type: 'unknown' });
+  });
+
+  it('parses a conversation web link (group default chat)', () => {
+    expect(parseOpenChatUrl('https://chat.ideaflow.app/app/chat/conv_group_1')).toEqual({ type: 'conversation', conversationId: 'conv_group_1' });
+    expect(parseOpenChatUrl('https://chat.ideaflow.app/app/chat/../x')).toEqual({ type: 'unknown' });
+    expect(conversationUrl('conv_group_1')).toBe('https://chat.ideaflow.app/app/chat/conv_group_1');
   });
 });
