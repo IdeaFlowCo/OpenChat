@@ -9,6 +9,7 @@ vi.mock('@anthropic-ai/sdk', () => ({ default: class { messages = { create: h.cr
 vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({
   close: async () => {},
   run: async (_query: string, params: Record<string, unknown>) => {
+    if ('scopeConversationId' in params) { const row = {type:'direct',participants:[params.userId,'assistant']}; return {records:[{get:(key:string) => row[key as keyof typeof row] ?? null}]}; }
     if ('content' in params) { h.replies.push(String(params.content)); return { records: [] }; }
     const row: Record<string, unknown> = { content: h.text, senderId: 'human', senderName: 'User' };
     return { records: [{ get: (key: string) => row[key] ?? null }] };

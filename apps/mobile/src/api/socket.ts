@@ -86,18 +86,20 @@ export function sendMessage(
   content: string,
   replyToId?: string,
   id?: string,
-  emojiSize?: number | null
+  emojiSize?: number | null,
+  assistantScope?: 'conversation' | 'universal'
 ): Promise<Message | null> {
   return new Promise((resolve, reject) => {
     if (!socket?.connected) {
       reject(new Error('Not connected'));
       return;
     }
-    const payload: { conversationId: string; content: string; replyToId?: string; id?: string; emojiSize?: number } = {
+    const payload: { conversationId: string; content: string; replyToId?: string; id?: string; emojiSize?: number; assistantScope?: 'conversation' | 'universal' } = {
       conversationId,
       content,
     };
     if (replyToId) payload.replyToId = replyToId;
+    if (assistantScope) payload.assistantScope = assistantScope;
     // Hold-to-grow emoji size (OpenChat-3aiu); the server ignores it unless
     // the content is a single emoji.
     if (emojiSize) payload.emojiSize = emojiSize;

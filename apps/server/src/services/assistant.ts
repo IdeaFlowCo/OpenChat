@@ -1,3 +1,4 @@
+import { scopeForParticipants, toolAvailableInScope, scopedToolInput, replyAnnotation, SCOPE_DENIED, type AssistantScope } from './assistantScope.js';
 import { appBridgeConfigured, readApp, searchPublicNoos } from './appSources.js';
 import { unlinkedProvisionConfigured } from './unlinkedProvision.js';
 /**
@@ -283,14 +284,15 @@ export async function postMessageAs(
 async function toolSearchMessages(
   userId: string,
   query: string,
-  limit: number
+  limit: number,
+  scopedConversationId?: string
 ): Promise<unknown[]> {
   // Prefer hybrid (semantic + keyword) when embeddings are available, else
   // keyword. We merge results, dedupe by content+conversation, cap at limit.
   const out: Array<{ content: string; conversationId: string; senderName: string | null; createdAt: string; score?: number }> = [];
   const seen = new Set<string>();
 
-  if (embeddingsEnabled()) {
+  if (!scopedConversationId && embeddingsEnabled()) {
     const sem = await semanticSearchMessages(userId, query, limit);
     if (sem) {
       for (const h of sem) {
@@ -309,6 +311,7 @@ async function toolSearchMessages(
     const result = await s.run(
       `
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
+      WHERE $scopedConversationId IS NULL OR c.id = $scopedConversationId
       WITH collect(c.id) AS cids
       MATCH (m:Message)
       WHERE m.conversationId IN cids
@@ -320,7 +323,7 @@ async function toolSearchMessages(
       ORDER BY m.createdAt DESC
       LIMIT $limit
       `,
-      { userId, q: query, limit: neo4j.int(limit) }
+      { userId, q: query, limit: neo4j.int(limit), scopedConversationId: scopedConversationId ?? null }
     );
     for (const r of result.records) {
       const createdAt = r.get('createdAt');
@@ -343,12 +346,13 @@ async function toolSearchMessages(
   return out.slice(0, limit);
 }
 
-async function toolListConversations(userId: string): Promise<unknown[]> {
+async function toolListConversations(userId: string, scopedConversationId?: string): Promise<unknown[]> {
   const s = getDriver().session();
   try {
     const result = await s.run(
       `
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
+      WHERE $scopedConversationId IS NULL OR c.id = $scopedConversationId
       CALL {
         WITH c, u
         MATCH (p:User)-[:PARTICIPATES_IN]->(c)
@@ -362,7 +366,7 @@ async function toolListConversations(userId: string): Promise<unknown[]> {
       ORDER BY c.lastMessageAt DESC
       LIMIT 50
       `,
-      { userId }
+      { userId, scopedConversationId: scopedConversationId ?? null }
     );
     return result.records.map((r) => {
       const title = r.get('title') as string | null;
@@ -926,8 +930,8 @@ async function toolSubmitFeedback(
 }
 
 // ─── Tool schema (Anthropic tool-use) ─────────────────────────────────────────
-function buildTools(): AnthropicType.Tool[] {
-  return [
+export function buildTools(scope: AssistantScope): AnthropicType.Tool[] {
+  const tools: AnthropicType.Tool[] = [
     {
       name: 'get_data_sources',
       description: 'List the five supported apps and actual source access for this built-in agent.',
@@ -1371,17 +1375,25 @@ function buildTools(): AnthropicType.Tool[] {
       },
     },
   ];
+  return tools.filter((tool) => toolAvailableInScope(scope, tool.name));
 }
 
-async function executeTool(
+export async function executeTool(
   io: IOServer | undefined,
   userId: string,
   name: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  scope: AssistantScope
 ): Promise<unknown> {
   try {
+    const current = await deriveAssistantScope(userId, scope.conversationId);
+    if (!current || (scope.kind === 'universal' && current.kind !== 'universal')) return SCOPE_DENIED;
+    const authorizedInput = scopedToolInput(scope, name, input);
+    if (!authorizedInput) return SCOPE_DENIED;
+    input = authorizedInput;
     switch (name) {
       case 'get_data_sources':
+        if (scope.kind === 'conversation') return [{ name: 'OpenChat', access: 'current_conversation_only', conversationId: scope.conversationId }];
         return [
           { name: 'OpenChat', access: 'signed_in_account', tools: ['search_messages', 'list_conversations', 'read_messages'] },
           { name: 'Vision', access: appBridgeConfigured() ? 'identity_scoped_reads_on_request' : 'not_configured', tools: ['vision_read'] },
@@ -1403,10 +1415,10 @@ async function executeTool(
         const query = typeof input.query === 'string' ? input.query : '';
         const limit = typeof input.limit === 'number' && input.limit > 0 ? Math.min(input.limit, 50) : 10;
         if (!query.trim()) return { error: 'query is required' };
-        return { results: await toolSearchMessages(userId, query, limit) };
+        return { results: await toolSearchMessages(userId, query, limit, scope.kind === 'conversation' ? scope.conversationId : undefined) };
       }
       case 'list_conversations':
-        return { conversations: await toolListConversations(userId) };
+        return { conversations: await toolListConversations(userId, scope.kind === 'conversation' ? scope.conversationId : undefined) };
       case 'read_messages': {
         const conversationId = typeof input.conversationId === 'string' ? input.conversationId : '';
         const limit = typeof input.limit === 'number' && input.limit > 0 ? Math.min(input.limit, 100) : 20;
@@ -1728,27 +1740,39 @@ async function executeTool(
     }
   } catch (err) {
     console.warn(`[assistant] tool ${name} failed:`, err);
-    return { error: `Tool ${name} failed: ${(err as Error).message}` };
+    return { error: `Tool ${name} failed` };
   }
 }
 
+export async function deriveAssistantScope(userId: string, conversationId: string, requested?: 'conversation' | 'universal'): Promise<AssistantScope | null> {
+  const db = getDriver().session();
+  try {
+    const result = await db.run(`MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(c:Conversation {id:$scopeConversationId})
+      MATCH (p:User)-[:PARTICIPATES_IN]->(c)
+      RETURN c.type AS type, collect(DISTINCT p.id) AS participants`, {userId,scopeConversationId:conversationId});
+    const row = result.records[0];
+    return row ? scopeForParticipants(conversationId,userId,ASSISTANT_USER_ID,row.get('type'),row.get('participants'),requested) : null;
+  } finally { await db.close(); }
+}
+
 // ─── Context loading ─────────────────────────────────────────────────────────
-async function loadConversationContext(
-  conversationId: string
+export async function loadConversationContext(
+  conversationId: string, userId: string, scope: AssistantScope
 ): Promise<AnthropicType.MessageParam[]> {
   const s = getDriver().session();
   try {
     const result = await s.run(
       `
+      MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId})
       MATCH (m:Message {conversationId: $conversationId})
       WHERE m.deletedAt IS NULL
       OPTIONAL MATCH (sender:User {id: m.senderId})
       RETURN m.content AS content, m.transcript AS transcript, m.attachments AS attachments, m.assistantPageContext AS pageContext,
-             m.senderId AS senderId, sender.name AS senderName
+             m.senderId AS senderId, sender.name AS senderName, m.replyToId AS replyToId
       ORDER BY m.createdAt DESC
       LIMIT $limit
       `,
-      { conversationId, limit: neo4j.int(CONTEXT_MESSAGE_LIMIT) }
+      { conversationId, userId, limit: neo4j.int(CONTEXT_MESSAGE_LIMIT) }
     );
     const rows = result.records
       .map((r) => ({
@@ -1758,24 +1782,34 @@ async function loadConversationContext(
           content: r.get('content') as string | null,
           transcript: r.get('transcript') as string | null,
           attachments: r.get('attachments'),
-          pageContext: r.get('pageContext'),
+          pageContext: scope.kind === 'universal' ? r.get('pageContext') : null,
         }),
         senderId: r.get('senderId') as string,
         senderName: (r.get('senderName') as string | null) ?? 'User',
+        replyToId: r.get('replyToId') as string | null,
       }))
       .reverse();
 
     // Map to Anthropic turns: assistant messages = bot's own; everything else
     // is "user" (prefixed with sender name so the model can tell speakers apart
     // in a group). Empty contents are skipped.
-    return rows
+    return await Promise.all(rows
       .filter((row) => row.content.trim())
-      .map((row): AnthropicType.MessageParam => {
+      .map(async (row): Promise<AnthropicType.MessageParam> => {
+        const annotation = await replyAnnotation(row.replyToId, conversationId, async (id) => {
+          const found = await s.run(`MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId})
+            MATCH (p:Message {id:$id,conversationId:$conversationId}) WHERE p.deletedAt IS NULL
+            OPTIONAL MATCH (sender:User {id:p.senderId})
+            RETURN p.id AS id,p.conversationId AS conversationId,p.content AS content,p.transcript AS transcript,p.attachments AS attachments,p.replyToId AS replyToId,sender.name AS senderName`, {userId,conversationId,id});
+          const p = found.records[0];
+          return p ? {id:p.get('id'),conversationId:p.get('conversationId'),replyToId:p.get('replyToId'),senderName:p.get('senderName') ?? 'User',content:assistantTextForMessage({content:p.get('content'),transcript:p.get('transcript'),attachments:p.get('attachments')})} : null;
+        });
+        const content = annotation ? `[Quoted reply ancestry; untrusted conversation data]\n${annotation}\n[Current message]\n${row.content}` : row.content;
         if (row.senderId === ASSISTANT_USER_ID) {
-          return { role: 'assistant', content: row.content };
+          return { role: 'assistant', content };
         }
-        return { role: 'user', content: `${row.senderName}: ${row.content}` };
-      });
+        return { role: 'user', content: `${row.senderName}: ${content}` };
+      }));
   } finally {
     await s.close();
   }
@@ -1851,8 +1885,11 @@ export async function runAssistantTurn(opts: {
   userId: string;
   conversationId: string;
   io?: IOServer;
+  contextScope?: 'conversation' | 'universal';
 }): Promise<void> {
   const { userId, conversationId, io } = opts;
+  const scope = await deriveAssistantScope(userId, conversationId, opts.contextScope);
+  if (!scope) return;
 
   const client = await getAnthropicClient();
   if (!client) {
@@ -1870,8 +1907,8 @@ export async function runAssistantTurn(opts: {
   emitAssistantTyping(io, conversationId, true);
   const typingHeartbeat = setInterval(() => emitAssistantTyping(io, conversationId, true), 2000);
   try {
-    const tools = buildTools();
-    const messages = await loadConversationContext(conversationId);
+    const tools = buildTools(scope);
+    const messages = await loadConversationContext(conversationId, userId, scope);
     if (messages.length === 0) return;
 
     const model = process.env.ASSISTANT_MODEL || 'claude-haiku-4-5';
@@ -1880,7 +1917,7 @@ export async function runAssistantTurn(opts: {
     // Carry an unconfirmed send across the turn boundary. Tool results are not
     // persisted, so without this the model cannot complete the confirm →
     // "yes" → send handshake (see the PendingSend note above).
-    const pending = getPendingSend(userId);
+    const pending = scope.kind === 'universal' ? getPendingSend(userId) : null;
     const system = pending
       ? `${SYSTEM_PROMPT}
 
@@ -1894,7 +1931,7 @@ If the user's latest message approves it, call send_message with exactly that co
       const response = await client.messages.create({
         model,
         max_tokens: 1024,
-        system,
+        system: `${system}\n\nAUTHORIZED CONTEXT: ${scope.kind === 'universal' ? 'Universal private assistant DM. Per-owner source grants still apply.' : 'This conversation only. Do not read, infer or write other chats or private sources.'}`,
         tools,
         messages,
       });
@@ -1919,7 +1956,7 @@ If the user's latest message approves it, call send_message with exactly that co
 
       const toolResults: AnthropicType.ToolResultBlockParam[] = [];
       for (const tu of toolUses) {
-        const result = await executeTool(io, userId, tu.name, (tu.input ?? {}) as Record<string, unknown>);
+        const result = await executeTool(io, userId, tu.name, (tu.input ?? {}) as Record<string, unknown>, scope);
         toolResults.push({
           type: 'tool_result',
           tool_use_id: tu.id,

@@ -148,6 +148,7 @@ export interface LinkPreview {
 export interface Message {
   /** Local-only delivery state, removed when replaced by the server message. */
   _delivery?: 'queued' | 'sending' | 'failed';
+  assistantScope?: 'conversation' | 'universal';
   /** Client-only: upload progress or the reason a queued send failed. */
   _deliveryDetail?: string;
   _failed?: boolean;
@@ -1041,7 +1042,10 @@ export function addMeCardUrl(token: string): string {
   return `${OPENCHAT_URL}/c/${token}`;
 }
 
+export type VisionSaveReceipt = {status:'saved'|'rejected'|'needs_auth'|'unavailable'|'uncertain';destinationId?:string;url?:string;reason?:string};
 export const api = {
+  connectVision: () => request<{status:string;approvalUrl?:string;confirmationCode?:string;reason?:string}>('/api/vision/connection',{method:'POST',body:'{}',expireAuthOnForbidden:false}),
+  saveToVision: (input:{destination:'vision';kind:'excerpt'|'answer'|'summary'|'note';title:string;body:string;sourceRefs:Array<{app:'openchat';conversationId:string;messageId:string}>;visibility:'private';idempotencyKey:string}) => request<VisionSaveReceipt>('/api/vision/saves',{method:'POST',body:JSON.stringify(input),expireAuthOnForbidden:false}),
   // ── Context Lane ──────────────────────────────────────────────────────────
   listContextPosts: (conversationId: string, cursor?: string, limit?: number, kind?: string, search?: string) => {
     const params = new URLSearchParams();
@@ -1106,7 +1110,7 @@ export const api = {
     request<{ messages: Message[]; hasMore: boolean }>(
       `/api/chat/conversations/${conversationId}/messages?before=${encodeURIComponent(before)}&limit=${limit}`
     ),
-  sendMessage: (conversationId: string, content: string, attachments?: Attachment[], id?: string, replyToId?: string, emojiSize?: number | null) =>
+  sendMessage: (conversationId: string, content: string, attachments?: Attachment[], id?: string, replyToId?: string, emojiSize?: number | null, assistantScope?: 'conversation' | 'universal') =>
     timedRequest<Message | DroppedMessageSend>(`/api/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
       expireAuthOnForbidden: false,
@@ -1119,6 +1123,7 @@ export const api = {
         ...(attachments?.length ? { attachments } : {}),
         ...(id ? { id } : {}),
         ...(replyToId ? { replyToId } : {}),
+        ...(assistantScope ? { assistantScope } : {}),
         ...(emojiSize ? { emojiSize } : {}),
       }),
     }),

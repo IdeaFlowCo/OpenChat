@@ -78,6 +78,7 @@ type Status = 'available' | 'away' | 'busy' | 'invisible';
 
 /** Optional fields a send can carry beyond content and attachments. */
 export interface SendExtras {
+  assistantScope?: 'conversation' | 'universal';
   /** Hold-to-grow size of an emoji-only message (OpenChat-3aiu). */
   emojiSize?: number;
 }
@@ -477,18 +478,24 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           const confirmed = retainedSendsRef.current.get(id)?.get(clientId);
           if (confirmed && !confirmed.id.startsWith('local-')) real = confirmed;
           else if (outgoing?.length) {
-            const response = await api.sendMessage(id, message.content, outgoing, clientId, message.replyToId);
+            const response = message.assistantScope
+              ? await api.sendMessage(id, message.content, outgoing, clientId, message.replyToId, undefined, message.assistantScope)
+              : await api.sendMessage(id, message.content, outgoing, clientId, message.replyToId);
             real = isDroppedMessageSend(response) ? null : response;
           } else {
             // Emoji-only sends carry their held size (OpenChat-3aiu); plain
             // sends keep the exact call shape they always had.
             try {
-              real = message.emojiSize
+              real = message.assistantScope
+                ? await wsSend(id, message.content, message.replyToId, clientId, message.emojiSize, message.assistantScope)
+                : message.emojiSize
                 ? await wsSend(id, message.content, message.replyToId, clientId, message.emojiSize)
                 : await wsSend(id, message.content, message.replyToId, clientId);
             } catch {
               if (!isCurrent() || !await store.isActive()) return;
-              const response = message.emojiSize
+              const response = message.assistantScope
+                ? await api.sendMessage(id, message.content, undefined, clientId, message.replyToId, message.emojiSize, message.assistantScope)
+                : message.emojiSize
                 ? await api.sendMessage(id, message.content, undefined, clientId, message.replyToId, message.emojiSize)
                 : await api.sendMessage(id, message.content, undefined, clientId, message.replyToId);
               real = isDroppedMessageSend(response) ? null : response;
@@ -1303,6 +1310,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       id: `local-${clientId}`, content, conversationId: id,
       senderId: currentUser.userId, createdAt: new Date().toISOString(),
       sender: { id: currentUser.userId, email: currentUser.email, name: currentUser.name, avatarUrl: currentUser.avatarUrl },
+      assistantScope: extra?.assistantScope,
       replyToId, attachments: queuedPhotos ? displayAttachments(queuedPhotos) : attachments,
       ...(extra?.emojiSize ? { emojiSize: extra.emojiSize } : {}),
     } };

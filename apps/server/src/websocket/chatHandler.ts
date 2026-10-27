@@ -206,11 +206,13 @@ export function setupChatSocket(io: Server): void {
       messageType?: string;
       id?: string;
       replyToId?: string;
+      assistantScope?: 'conversation' | 'universal';
       /** Hold-to-grow size of an emoji-only message (OpenChat-3aiu). */
       emojiSize?: number;
     }, callback) => {
-      const { conversationId, content, messageType = 'text', replyToId } = data;
+      const { conversationId, content, messageType = 'text', replyToId, assistantScope } = data;
 
+      if (assistantScope !== undefined && !['conversation','universal'].includes(assistantScope)) { callback?.({error:'Invalid assistant context'}); return; }
       if (!content || !conversationId) {
         callback?.({ error: 'conversationId and content required' });
         return;
@@ -323,6 +325,7 @@ export function setupChatSocket(io: Server): void {
             m.messageType = $messageType,
             m.mentions = $mentions,
             m.replyToId = $replyToId,
+            m.assistantScope = $assistantScope,
             m.emojiSize = $emojiSize,
             m.createdAt = datetime($now),
             m._created = true
@@ -363,6 +366,7 @@ export function setupChatSocket(io: Server): void {
           messageType,
           mentions: mentionedUserIds,
           replyToId: replyToId ?? null,
+          assistantScope: assistantScope ?? null,
           emojiSize: emojiSize.size,
           now
         });
@@ -413,7 +417,7 @@ export function setupChatSocket(io: Server): void {
 
         // In-app Assistant bot (openchat-bfn.3): fire an assistant turn if this
         // conversation contains the bot. No-ops when sender is the bot itself.
-        maybeTriggerAssistant({ senderId: userId, conversationId, io });
+        maybeTriggerAssistant({ senderId: userId, conversationId, io, contextScope: (message as {assistantScope?: unknown}).assistantScope === 'conversation' ? 'conversation' : undefined });
         maybeTriggerSecretary({
           senderId: userId,
           conversationId,

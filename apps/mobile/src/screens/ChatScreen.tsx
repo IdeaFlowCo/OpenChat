@@ -647,6 +647,9 @@ export function ChatScreen({
   }, [conversation, isGroup, isSelfDM, other, currentUser]);
 
   // Does this conversation include any bot participant? (OpenChat-ds3)
+  const [isolateAssistant, setIsolateAssistant] = useState(false);
+  useEffect(() => setIsolateAssistant(false), [conversationId]);
+  const isAssistantDM = !isGroup && conversation?.participants?.length === 2 && other?.id === 'assistant';
   const containsBot = useMemo(
     () => conversation?.participants?.some(p => p?.user?.isBot) ?? false,
     [conversation]
@@ -1330,7 +1333,8 @@ export function ChatScreen({
     }
 
     try {
-      await sendMessage(trimmed, currentReplyToId, undefined, photos.length ? photos : undefined);
+      if (isAssistantDM && isolateAssistant) await sendMessage(trimmed, currentReplyToId, undefined, photos.length ? photos : undefined, {assistantScope:'conversation'});
+      else await sendMessage(trimmed, currentReplyToId, undefined, photos.length ? photos : undefined);
       invalidateHashtagSuggestions(conversationId);
       hapticSend();
       rejected.forEach(r => releaseAsset(r.asset));
@@ -1371,7 +1375,7 @@ export function ChatScreen({
       console.warn('[ChatScreen] emoji send failed:', err);
       showToast('Could not send. Please try again.');
     }
-  }, [composerBusy, quickEmoji, replyTo?.messageId, sendMessage, showToast]);
+  }, [isAssistantDM, isolateAssistant, composerBusy, quickEmoji, replyTo?.messageId, sendMessage, showToast]);
 
   // RN Web replaces TextInput's onKeyDown with its own handler. Capture is
   // forwarded to the textarea and runs before that handler inserts a newline.
@@ -1534,6 +1538,30 @@ export function ChatScreen({
     (message: Message, question: string) => { void forwardToAssistant(message, question); },
     [forwardToAssistant]
   );
+
+  const handleSaveToVision = useCallback(async (message: Message, selection?: string): Promise<boolean> => {
+    const body = selection ?? message.content;
+    if (!body.trim()) return false;
+    try {
+      const crypto = await import('expo-crypto');
+      const key = await crypto.digestStringAsync(crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([message.id, body]));
+      const receipt = await api.saveToVision({destination:'vision',kind:'excerpt',title:'Saved from OpenChat',body,sourceRefs:[{app:'openchat',conversationId:message.conversationId,messageId:message.id}],visibility:'private',idempotencyKey:'openchat-save:'+key});
+      if (receipt.status === 'saved' && receipt.destinationId) {
+        Alert.alert('Saved to Vision','Private note saved. Source chat is unchanged.',[{text:'Done'},{text:'Open Vision',onPress:()=>{if(receipt.url?.startsWith('https://vision.ideaflow.app'))void Linking.openURL(receipt.url);}}]);
+        return true;
+      }
+      if (receipt.status === 'needs_auth') {
+        Alert.alert('Connect Vision',receipt.reason??'Allow Vision write access using the same Ideaflow ID. Your selection stays here.',[{text:'Keep selection',style:'cancel'},{text:'Connect Vision',onPress:()=>{void (async()=>{
+          try { const connection=await api.connectVision();
+            if(connection.approvalUrl?.startsWith('https://id.ideaflow.app/agents/approve?')) {
+              Alert.alert('Confirm your connection','Compare this code on the Ideaflow approval page: '+connection.confirmationCode+'. Select Vision write explicitly. Return here and choose Save again; the selection and save identity are retained.',[{text:'Cancel',style:'cancel'},{text:'Open Ideaflow',onPress:()=>{void Linking.openURL(connection.approvalUrl!);}}]);
+            } else Alert.alert('Vision connection',connection.reason??'Connection is ready. Choose Save again.');
+          } catch { Alert.alert('Connection unavailable','Your selection stays here.'); }
+        })();}}]);
+      } else Alert.alert(receipt.status==='uncertain'?'Check Vision before saving again':'Vision save unavailable',receipt.reason??receipt.status);
+    } catch { Alert.alert('Save receipt unavailable','Vision may have saved this. Your selection stays here. Check Vision before creating another save.'); }
+    return false;
+  },[]);
 
   // ── Save to Stream / Save & pin (unified capture affordance) ────────────
   // Saves the message text as a Thought with provenance back to this message;
@@ -2063,6 +2091,12 @@ export function ChatScreen({
         </View>
       )}
 
+      {containsBot && (
+        <View style={{paddingHorizontal:16,paddingVertical:8,backgroundColor:c.surface,borderTopWidth:1,borderColor:c.border}}>
+          {isAssistantDM ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Assistant context for next message" accessibilityValue={{text:isolateAssistant?'This chat only':'Universal'}} onPress={()=>setIsolateAssistant(value=>!value)} style={{minHeight:44,justifyContent:'center'}}><Text style={{color:c.textPrimary,...type.meta}}>Context: {isolateAssistant?'This chat only':'Universal'} · Change for next message</Text></TouchableOpacity> : <Text style={{color:c.textMetadata,...type.meta}}>Assistant context: this chat only</Text>}
+        </View>
+      )}
+
       {/* Edit mode bar — shown above composer when editing (OpenChat-q9h) */}
       {editingMessage && (
         <View style={[styles.replyBar, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -2445,6 +2479,7 @@ export function ChatScreen({
         onForwardToAssistant={handleForwardToAssistant}
         onAskAssistant={handleAskAssistant}
         onSaveToThoughts={handleSaveToThoughts}
+        onSaveToVision={handleSaveToVision}
         onEdit={handleEdit}
         onDelete={handleDelete}
         onReact={handleReact}
