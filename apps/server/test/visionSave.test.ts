@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { ID_ISSUER, parseSaveRequest, saveToVision, type SaveReceipt, type SaveRepository, type SaveRequest } from '../src/services/visionSave.js';
 const input:SaveRequest={destination:'vision',kind:'excerpt',title:'Synthetic',body:'selected synthetic text',sourceRefs:[{app:'openchat',conversationId:'chat',messageId:'message'}],visibility:'private',idempotencyKey:'synthetic-save-key'};
 let linked=true,source=true,grant=true,subject='owner-sub',writes=0,lostAck=false,finishLost=false;
+let destinationURL='https://vision.ideaflow.app/n/synthetic-destination';
 let ledger=new Map<string,{hash:string;receipt:SaveReceipt}>();
 const repo:SaveRepository={async identity(){return linked?{issuer:ID_ISSUER,subject:'owner-sub'}:null;},async source(){return source?input.body:null;},async token(){return 'synthetic-connector-grant';},async reserve(user,key,hash){const id=user+':'+key;const old=ledger.get(id);if(old)return {fresh:false,...old};const value={hash,receipt:{status:'uncertain',reason:'dispatching'} as SaveReceipt};ledger.set(id,value);return {fresh:true,...value};},async finish(user,key,receipt){if(finishLost)throw Error('receipt ack lost');ledger.get(user+':'+key)!.receipt=receipt;}};
 const fetchImpl=(async(url:string,options?:RequestInit)=>{
@@ -14,11 +15,12 @@ const fetchImpl=(async(url:string,options?:RequestInit)=>{
  expect(request.params.arguments.bodyMd).toContain('openchat-save:');
  expect(request.params.arguments.bodyMd).toContain('https://chat.ideaflow.app/app/chat/chat?message=message');
  if(lostAck)throw Error('destination ack lost');
- return new Response(JSON.stringify({result:{content:[{type:'text',text:JSON.stringify({note:{id:'synthetic-destination'},url:'https://vision.ideaflow.app/n/synthetic-destination'})}]}}),{status:200});
+ return new Response(JSON.stringify({result:{content:[{type:'text',text:JSON.stringify({note:{id:'synthetic-destination'},url:destinationURL})}]}}),{status:200});
 }) as typeof fetch;
-beforeEach(()=>{linked=true;source=true;grant=true;subject='owner-sub';writes=0;lostAck=false;finishLost=false;ledger=new Map();});
+beforeEach(()=>{destinationURL='https://vision.ideaflow.app/n/synthetic-destination';linked=true;source=true;grant=true;subject='owner-sub';writes=0;lostAck=false;finishLost=false;ledger=new Map();});
 describe('real scoped connector save contract with executable destination fixture',()=>{
  it('private save returns persisted destination receipt and retries do not write twice',async()=>{expect(await saveToVision('u',input,repo,fetchImpl)).toMatchObject({status:'saved',destinationId:'synthetic-destination'});expect(await saveToVision('u',input,repo,fetchImpl)).toMatchObject({status:'saved'});expect(writes).toBe(1);});
+ it('destination receipt cannot redirect to a lookalike Vision host',async()=>{destinationURL='https://vision.ideaflow.app.evil.example/n/synthetic';expect((await saveToVision('u',input,repo,fetchImpl)).url).toBe('https://vision.ideaflow.app/');});
  it('rejects conflicting idempotency payload',async()=>{await saveToVision('u',input,repo,fetchImpl);expect(await saveToVision('u',{...input,title:'changed'},repo,fetchImpl)).toMatchObject({status:'rejected'});expect(writes).toBe(1);});
  it('no linkage, inaccessible source, mismatched owner or revoked write grant cannot dispatch',async()=>{linked=false;expect((await saveToVision('u',input,repo,fetchImpl)).status).toBe('needs_auth');linked=true;source=false;expect((await saveToVision('u',input,repo,fetchImpl)).status).toBe('rejected');source=true;subject='foreign-owner';expect((await saveToVision('u',input,repo,fetchImpl)).status).toBe('needs_auth');subject='owner-sub';grant=false;expect((await saveToVision('u',input,repo,fetchImpl)).status).toBe('needs_auth');expect(writes).toBe(0);});
  it('lost destination acknowledgment stays uncertain after retry, no duplicate',async()=>{lostAck=true;expect((await saveToVision('u',input,repo,fetchImpl)).status).toBe('uncertain');lostAck=false;expect((await saveToVision('u',input,repo,fetchImpl)).status).toBe('uncertain');expect(writes).toBe(1);});

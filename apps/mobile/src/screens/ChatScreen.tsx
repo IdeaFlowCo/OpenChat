@@ -1547,7 +1547,7 @@ export function ChatScreen({
       const key = await crypto.digestStringAsync(crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([message.id, body]));
       const receipt = await api.saveToVision({destination:'vision',kind:'excerpt',title:'Saved from OpenChat',body,sourceRefs:[{app:'openchat',conversationId:message.conversationId,messageId:message.id}],visibility:'private',idempotencyKey:'openchat-save:'+key});
       if (receipt.status === 'saved' && receipt.destinationId) {
-        Alert.alert('Saved to Vision','Private note saved. Source chat is unchanged.',[{text:'Done'},{text:'Open Vision',onPress:()=>{if(receipt.url?.startsWith('https://vision.ideaflow.app'))void Linking.openURL(receipt.url);}}]);
+        Alert.alert('Saved to Vision','Private note saved. Source chat is unchanged.',[{text:'Done'},{text:'Open Vision',onPress:()=>{if(receipt.url&&(receipt.url==='https://vision.ideaflow.app'||receipt.url.startsWith('https://vision.ideaflow.app/')))void Linking.openURL(receipt.url);}}]);
         return true;
       }
       if (receipt.status === 'needs_auth') {

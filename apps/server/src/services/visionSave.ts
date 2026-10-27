@@ -72,7 +72,7 @@ export async function saveToVision(userId:string,input:SaveRequest,repo:SaveRepo
   // Once dispatched, an HTTP failure may hide an upstream successful note. Never replay it.
   const result=response.ok?parseResult(await response.json()):null;
   const note=result?.note;
-  if(note&&typeof note.id==='string'&&note.id){receipt={status:'saved',destinationId:note.id,url:typeof result?.url==='string'?result.url:typeof note.url==='string'?note.url:'https://vision.ideaflow.app',savedAt:new Date().toISOString()};}
+  if(note&&typeof note.id==='string'&&note.id){receipt={status:'saved',destinationId:note.id,url:typeof result?.url==='string'&&(result.url==='https://vision.ideaflow.app'||result.url.startsWith('https://vision.ideaflow.app/'))?result.url:typeof note.url==='string'&&(note.url==='https://vision.ideaflow.app'||note.url.startsWith('https://vision.ideaflow.app/'))?note.url:'https://vision.ideaflow.app/',savedAt:new Date().toISOString()};}
   else receipt={status:'uncertain',reason:'Vision acknowledgment unknown. Check Vision for '+marker+' before any new save'};
  }catch{receipt={status:'uncertain',reason:'Vision may have saved this. Check Vision for '+marker+'; no automatic resend'};}
  await repo.finish(userId,input.idempotencyKey,receipt);
