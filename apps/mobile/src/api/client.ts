@@ -1,3 +1,5 @@
+import { ApiError, errorFromResponse } from './errors';
+export { ApiError } from './errors';
 import { authenticatedRequestLease } from './authenticatedRequest';
 import type { HostedContextPreferences, HostedContextRequest } from '../types/contextHosted';
 import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
@@ -148,6 +150,7 @@ export interface LinkPreview {
 export interface Message {
   /** Local-only delivery state, removed when replaced by the server message. */
   _delivery?: 'queued' | 'sending' | 'failed';
+  assistantScope?: 'conversation' | 'universal';
   /** Client-only: upload progress or the reason a queued send failed. */
   _deliveryDetail?: string;
   _failed?: boolean;
@@ -383,18 +386,6 @@ export async function clearSession(): Promise<void> {
   try { await AsyncStorage.removeItem(USER_KEY); } catch { /* ignore */ }
 }
 
-/** Custom error class so callers / UI can branch on status without parsing. */
-export class ApiError extends Error {
-  status: number;
-  body: string;
-  constructor(status: number, message: string, body: string) {
-    super(message);
-    this.status = status;
-    this.body = body;
-    this.name = 'ApiError';
-  }
-}
-
 // Listener for global auth expiry. ChatProvider hooks this on mount so a
 // 401 from any API call cascades into a clean sign-out + return to Login.
 type AuthListener = () => void;
@@ -473,14 +464,7 @@ async function request<T>(
     res = await authenticatedFetch(`${OPENCHAT_URL}${path}`, { ...fetchInit, headers });
   }
   if (!res.ok) {
-    const text = await res.text();
-    let msg = text;
-    try {
-      const j = JSON.parse(text);
-      msg = j.error || j.message || text;
-    } catch {
-      /* not JSON */
-    }
+    const failure = await errorFromResponse(res);
     if (res.status === 401 || (res.status === 403 && expireAuthOnForbidden)) {
       // Token is invalid / expired. Cascade to sign-out so the user isn't
       // stuck on a stale screen with no recovery. Caller still gets a typed
@@ -488,7 +472,7 @@ async function request<T>(
       // already navigated us to Login).
       emitAuthExpired();
     }
-    throw new ApiError(res.status, `${res.status}: ${msg}`, text);
+    throw failure;
   }
   return (await res.json()) as T;
 }
@@ -1041,7 +1025,13 @@ export function addMeCardUrl(token: string): string {
   return `${OPENCHAT_URL}/c/${token}`;
 }
 
+export type VisionSaveReceipt = {status:'saved'|'rejected'|'needs_auth'|'unavailable'|'uncertain';destinationId?:string;url?:string;reason?:string;recoveryAvailable?:boolean};
+export type VisionSaveRequest = {destination:'vision';kind:'excerpt'|'answer'|'summary'|'note';title:string;body:string;sourceRefs:Array<{app:'openchat';conversationId:string;messageId:string;sourceDigest:string}>;visibility:'private';idempotencyKey:string;retryOf?:string};
+export type VisionSaveReview = {status:'ready';sourceRefs:VisionSaveRequest['sourceRefs'];sourceContents:string[]} | {status:'rejected'|'unavailable';reason:string};
 export const api = {
+  connectVision: () => request<{status:string;approvalUrl?:string;confirmationCode?:string;reason?:string}>('/api/vision/connection',{method:'POST',body:'{}',expireAuthOnForbidden:false}),
+  saveToVision: (input:VisionSaveRequest) => request<VisionSaveReceipt>('/api/vision/saves',{method:'POST',body:JSON.stringify(input),expireAuthOnForbidden:false}),
+  reviewVisionSave: (input:VisionSaveRequest) => request<VisionSaveReview>('/api/vision/saves/review',{method:'POST',body:JSON.stringify(input),expireAuthOnForbidden:false}),
   // ── Context Lane ──────────────────────────────────────────────────────────
   listContextPosts: (conversationId: string, cursor?: string, limit?: number, kind?: string, search?: string) => {
     const params = new URLSearchParams();
@@ -1106,7 +1096,7 @@ export const api = {
     request<{ messages: Message[]; hasMore: boolean }>(
       `/api/chat/conversations/${conversationId}/messages?before=${encodeURIComponent(before)}&limit=${limit}`
     ),
-  sendMessage: (conversationId: string, content: string, attachments?: Attachment[], id?: string, replyToId?: string, emojiSize?: number | null) =>
+  sendMessage: (conversationId: string, content: string, attachments?: Attachment[], id?: string, replyToId?: string, emojiSize?: number | null, assistantScope?: 'conversation' | 'universal') =>
     timedRequest<Message | DroppedMessageSend>(`/api/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
       expireAuthOnForbidden: false,
@@ -1119,6 +1109,7 @@ export const api = {
         ...(attachments?.length ? { attachments } : {}),
         ...(id ? { id } : {}),
         ...(replyToId ? { replyToId } : {}),
+        ...(assistantScope ? { assistantScope } : {}),
         ...(emojiSize ? { emojiSize } : {}),
       }),
     }),

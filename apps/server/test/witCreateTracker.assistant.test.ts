@@ -9,6 +9,8 @@ vi.mock('@anthropic-ai/sdk', () => ({ default: class { messages = { create: h.cr
 vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({
   close: async () => {},
   run: async (_query: string, params: Record<string, unknown>) => {
+    if ('scopeConversationId' in params) { const row = {type:'direct',participants:[params.userId,'assistant']}; return {records:[{get:(key:string) => row[key as keyof typeof row] ?? null}]}; }
+    if ('messageId' in params && !('limit' in params)) { const row = {id:params.messageId,conversationId:params.conversationId,senderId:params.userId,assistantScope:null}; return {records:[{get:(key:string) => row[key as keyof typeof row] ?? null}]}; }
     if ('content' in params) { h.replies.push(String(params.content)); return { records: [] }; }
     const row: Record<string, unknown> = { content: h.text, senderId: 'human', senderName: 'User' };
     return { records: [{ get: (key: string) => row[key] ?? null }] };
@@ -73,7 +75,7 @@ async function turn(userId: string, input: Record<string, unknown>, text = 'Crea
     // Relay observed results verbatim; do not pretend to evaluate an LLM.
     return { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(result) }] };
   });
-  await assistant.runAssistantTurn({ userId, conversationId: 'fixture-assistant-dm' });
+  await assistant.runAssistantTurn({ userId, conversationId: 'fixture-assistant-dm', messageId: 'fixture-origin' });
   expect(h.create).toHaveBeenCalledTimes(2);
   expect(h.replies.at(-1)).toBe(JSON.stringify(result));
   h.create.mockClear();

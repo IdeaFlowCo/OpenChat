@@ -1,3 +1,4 @@
+import { messageOriginMatch, messageBoundaryFilter, messageBoundaryParams, type MessageBoundary } from './messageBoundary.js';
 /**
  * Embeddings service (openchat-bfn.2) — semantic search support.
  *
@@ -146,7 +147,8 @@ export interface SemanticHit {
 export async function semanticSearchMessages(
   userId: string,
   query: string,
-  limit = 10
+  limit = 10,
+  boundary?: MessageBoundary
 ): Promise<SemanticHit[] | null> {
   const qVec = await embedText(query);
   if (!qVec) return null;
@@ -162,11 +164,14 @@ export async function semanticSearchMessages(
       `
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
       WITH collect(c.id) AS cids
+      ${messageOriginMatch}
+      WITH cids,turnOrigin
       CALL db.index.vector.queryNodes($indexName, $k, $qVec)
       YIELD node, score
-      WITH node AS m, score, cids
+      WITH node AS m, score, cids, turnOrigin
       WHERE m.conversationId IN cids
         AND m.deletedAt IS NULL
+        AND ${messageBoundaryFilter}
       OPTIONAL MATCH (sender:User {id: m.senderId})
       RETURN m.content AS content,
              m.conversationId AS conversationId,
@@ -178,6 +183,7 @@ export async function semanticSearchMessages(
       `,
       {
         userId,
+        ...messageBoundaryParams(boundary),
         indexName: VECTOR_INDEX_NAME,
         k: Math.trunc(k),
         qVec,

@@ -18,6 +18,7 @@ export function maybeTriggerAssistant(opts: {
   senderId: string;
   conversationId: string;
   io?: IOServer;
+  messageId: string;
 }): void {
   const { senderId, conversationId, io } = opts;
 
@@ -46,7 +47,7 @@ export function maybeTriggerAssistant(opts: {
 
     if (!containsBot) return;
 
-    runAssistantTurn({ userId: senderId, conversationId, io }).catch((err) =>
+    runAssistantTurn({ userId: senderId, conversationId, io, messageId: opts.messageId }).catch((err) =>
       console.error('[assistant-trigger] runAssistantTurn error:', err)
     );
   })();

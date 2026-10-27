@@ -1,3 +1,4 @@
+import visionSaveRoutes from './routes/visionSave.js';
 import contextIntentionsRoutes from './routes/contextIntentions.js';
 import conversationContentRoutes from './routes/conversationContent.js';
 import contextWebhooksRoutes from './routes/contextWebhooks.js';
@@ -460,6 +461,7 @@ app.use('/api/agent-keys', agentKeysRoutes);
 app.use('/api/webhooks', webhooksRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/assistant', assistantRoutes);
+app.use('/api/vision', visionSaveRoutes);
 app.use('/api/secretary', secretaryRoutes);
 app.use('/api', agentNetworkRoutes);
 app.use('/api', agentSocialLayerRoutes);

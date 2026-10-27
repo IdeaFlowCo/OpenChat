@@ -1,3 +1,6 @@
+import { offerVisionSaveRecovery } from '../utils/visionSaveRecovery';
+import type { VisionSaveRequest } from '../api/client';
+import { uncertainVisionAlert, presentVisionSaveFailure } from '../utils/visionSaveFeedback';
 import { ChatTranslationBar } from '../components/TranslationControls';
 import { TranslatedMessage } from '../components/TranslatedMessage';
 import { useChatTranslation } from '../contexts/TranslationContext';
@@ -333,7 +336,7 @@ export function ChatScreen({
   const {
     retryPendingMessage, discardPendingMessage, currentUser, conversations, messages: activeMessages, loadingMessages, messageLoadError, retryMessages, isConnected,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
-    setActiveConversation, sendMessage, editMessage, deleteMessage, toggleReaction,
+    setActiveConversation, sendMessage, sendMessageToConversation, assistantScopes, setAssistantScope, editMessage, deleteMessage, toggleReaction,
     sendTickle, setQuickEmoji, lastTickle,
     presence, typingByConv, reportTyping,
     aiDisclosureAcceptedAt, mutedConvs, muteConv, blockUser,
@@ -647,6 +650,8 @@ export function ChatScreen({
   }, [conversation, isGroup, isSelfDM, other, currentUser]);
 
   // Does this conversation include any bot participant? (OpenChat-ds3)
+  const isolateAssistant = assistantScopes?.[conversationId] === 'conversation';
+  const isAssistantDM = !isGroup && conversation?.participants?.length === 2 && other?.id === 'assistant';
   const containsBot = useMemo(
     () => conversation?.participants?.some(p => p?.user?.isBot) ?? false,
     [conversation]
@@ -1231,6 +1236,8 @@ export function ChatScreen({
     // General file attachment (OpenChat-85q.1) — web only, isolated from the
     // photo pipeline below (no offline outbox; upload-then-send, same shape
     // as voice notes in RecordingContext.tsx).
+    const sendConversationId = conversationId;
+    const sendExtras = { assistantScope: isAssistantDM && isolateAssistant ? 'conversation' as const : 'universal' as const };
     if (pendingFile) {
       const fileToSend = pendingFile;
       const fileReply = replyTo;
@@ -1250,7 +1257,7 @@ export function ChatScreen({
       setUploadingAttachment(true);
       try {
         const attachment = await uploadFile(fileToSend.file);
-        await sendMessage(trimmed, fileReplyToId, [attachment]);
+        await sendMessageToConversation(sendConversationId, trimmed, fileReplyToId, [attachment], undefined, sendExtras);
         invalidateHashtagSuggestions(conversationId);
         hapticSend();
       } catch (err) {
@@ -1330,7 +1337,7 @@ export function ChatScreen({
     }
 
     try {
-      await sendMessage(trimmed, currentReplyToId, undefined, photos.length ? photos : undefined);
+      await sendMessageToConversation(sendConversationId, trimmed, currentReplyToId, undefined, photos.length ? photos : undefined, sendExtras);
       invalidateHashtagSuggestions(conversationId);
       hapticSend();
       rejected.forEach(r => releaseAsset(r.asset));
@@ -1534,6 +1541,53 @@ export function ChatScreen({
     (message: Message, question: string) => { void forwardToAssistant(message, question); },
     [forwardToAssistant]
   );
+
+  const handleSaveToVision = useCallback(async (message: Message, selection?: string, newCopyKey?: string): Promise<boolean> => {
+    const body = selection ?? message.content;
+    if (!body.trim()) return false;
+    try {
+      const crypto = await import('expo-crypto');
+      const key = await crypto.digestStringAsync(crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([message.id, body]));
+      const sourceDigest = await crypto.digestStringAsync(crypto.CryptoDigestAlgorithm.SHA256, message.content || message.transcript || '');
+      const initialRequest:VisionSaveRequest = {destination:'vision',kind:'excerpt',title:'Saved from OpenChat',body,sourceRefs:[{app:'openchat',conversationId:message.conversationId,messageId:message.id,sourceDigest}],visibility:'private',idempotencyKey:newCopyKey??('openchat-save:'+key)};
+      const submit = async (input:VisionSaveRequest):Promise<boolean> => {
+        try {
+          const receipt = await api.saveToVision(input);
+          if (receipt.status === 'saved' && receipt.destinationId) {
+            Alert.alert('Saved to Vision','Private note saved. Source chat is unchanged.',[{text:'Done'},{text:'Open Vision',onPress:()=>{if(receipt.url&&(receipt.url==='https://vision.ideaflow.app'||receipt.url.startsWith('https://vision.ideaflow.app/')))void Linking.openURL(receipt.url);}}]);
+            return true;
+          }
+          if (receipt.status === 'needs_auth') {
+            Alert.alert('Connect Vision',receipt.reason??'Allow Vision write access using the same Ideaflow ID. Your selection stays here.',[{text:'Keep selection',style:'cancel'},{text:'Connect Vision',onPress:()=>{void (async()=>{
+              try { const connection=await api.connectVision();
+                if(connection.approvalUrl?.startsWith('https://id.ideaflow.app/agents/approve?')) {
+                  Alert.alert('Confirm your connection','Compare this code on the Ideaflow approval page: '+connection.confirmationCode+'. Select Vision write explicitly. Return here and choose Save again; the selection and save identity are retained.',[{text:'Cancel',style:'cancel'},{text:'Open Ideaflow',onPress:()=>{void Linking.openURL(connection.approvalUrl!);}}]);
+                } else Alert.alert('Vision connection',connection.reason??'Connection is ready. Choose Save again.');
+              } catch { Alert.alert('Connection unavailable','Your selection stays here.'); }
+            })();}}]);
+          } else if (receipt.status === 'uncertain') {
+            const alert = uncertainVisionAlert(receipt.reason);
+            Alert.alert(alert.title,alert.message,[
+              {text:'Keep selection',style:'cancel'},
+              {text:'Open Vision',onPress:()=>{void Linking.openURL('https://vision.ideaflow.app/');}},
+              {text:'Save a new copy…',onPress:()=>{Alert.alert('Create another private copy?','The previous save may already exist. This creates a new save identity and may duplicate that note.',[
+                {text:'Cancel',style:'cancel'},
+                {text:'Create new copy',onPress:()=>{void submit({...input,idempotencyKey:'openchat-copy:'+crypto.randomUUID(),retryOf:undefined});}},
+              ]);}},
+            ]);
+          } else if (!offerVisionSaveRecovery(input,receipt,{
+            alert:(title,message,buttons)=>Alert.alert(title,message,buttons),
+            review:api.reviewVisionSave,
+            newAttemptKey:()=> 'openchat-attempt:'+crypto.randomUUID(),
+            submit,
+          })) Alert.alert('Vision save unavailable',receipt.reason??receipt.status);
+        } catch (error) { presentVisionSaveFailure(error, (title, message) => Alert.alert(title, message)); }
+        return false;
+      };
+      return await submit(initialRequest);
+    } catch (error) { presentVisionSaveFailure(error, (title, message) => Alert.alert(title, message)); }
+    return false;
+  },[]);
 
   // ── Save to Stream / Save & pin (unified capture affordance) ────────────
   // Saves the message text as a Thought with provenance back to this message;
@@ -2063,6 +2117,12 @@ export function ChatScreen({
         </View>
       )}
 
+      {containsBot && (
+        <View style={{paddingHorizontal:16,paddingVertical:8,backgroundColor:c.surface,borderTopWidth:1,borderColor:c.border}}>
+          {isAssistantDM ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Assistant context for this chat" accessibilityValue={{text:isolateAssistant?'This chat only':'Universal'}} onPress={()=>setAssistantScope(conversationId,isolateAssistant?'universal':'conversation')} style={{minHeight:44,justifyContent:'center'}}><Text style={{color:c.textPrimary,...type.meta}}>Context: {isolateAssistant?'This chat only':'Universal'} · Assistant context for this chat</Text></TouchableOpacity> : <Text style={{color:c.textMetadata,...type.meta}}>Assistant context: this chat only</Text>}
+        </View>
+      )}
+
       {/* Edit mode bar — shown above composer when editing (OpenChat-q9h) */}
       {editingMessage && (
         <View style={[styles.replyBar, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -2445,6 +2505,7 @@ export function ChatScreen({
         onForwardToAssistant={handleForwardToAssistant}
         onAskAssistant={handleAskAssistant}
         onSaveToThoughts={handleSaveToThoughts}
+        onSaveToVision={handleSaveToVision}
         onEdit={handleEdit}
         onDelete={handleDelete}
         onReact={handleReact}

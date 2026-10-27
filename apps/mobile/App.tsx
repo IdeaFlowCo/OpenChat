@@ -755,7 +755,7 @@ function RecordingBridge({ children }: { children: ReactNode }) {
     isAuthed,
     conversations,
     conversationsLoaded,
-    sendMessageToConversation,
+    sendMessageToConversation, captureSendExtras,
   } = useChat();
 
   const conversationIds = useMemo(
@@ -773,6 +773,7 @@ function RecordingBridge({ children }: { children: ReactNode }) {
       conversationsLoaded={conversationsLoaded}
       conversationExists={conversationExists}
       sendMessage={sendMessageToConversation}
+      captureSendExtras={captureSendExtras}
     >
       {children}
     </RecordingProvider>

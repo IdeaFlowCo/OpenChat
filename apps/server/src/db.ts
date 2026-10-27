@@ -26,6 +26,8 @@ export async function initDatabase(): Promise<void> {
   const session = getDriver().session();
 
   try {
+    await session.run(`CREATE CONSTRAINT vision_save_receipt_key IF NOT EXISTS FOR (s:VisionSaveReceipt) REQUIRE s.key IS UNIQUE`);
+    await session.run(`CREATE CONSTRAINT vision_save_grant_owner IF NOT EXISTS FOR (g:VisionSaveGrant) REQUIRE g.userId IS UNIQUE`);
     // Create constraints for Conversation
     await session.run(`
       CREATE CONSTRAINT conversation_id IF NOT EXISTS

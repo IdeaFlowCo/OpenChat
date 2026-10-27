@@ -458,8 +458,8 @@ it.each(['success', 'failure'] as const)('settles a late send %s in its retained
 it.each(['history', 'socket'] as const)('replaces a failed placeholder from %s when both acknowledgments were lost', async delivery => {
   await openSendingThread();
   const local = await failSend();
-  expect(mocks.wsSend).toHaveBeenCalledWith('sailing', 'retained text', undefined, 'client-message');
-  expect(mocks.send).toHaveBeenCalledWith('sailing', 'retained text', undefined, 'client-message', undefined);
+  expect(mocks.wsSend).toHaveBeenCalledWith('sailing', 'retained text', undefined, 'client-message', undefined, 'universal');
+  expect(mocks.send).toHaveBeenCalledWith('sailing', 'retained text', undefined, 'client-message', undefined, undefined, 'universal');
   const real = { ...local, id: 'client-message' } as Message & { _failed?: boolean };
   delete real._failed;
   await act(async () => chat.setActiveConversation('other'));
@@ -726,7 +726,7 @@ it('queues text while disconnected, restores it after restart, then sends the or
   mocks.wsSend.mockResolvedValue(real);
   socket.connected = true;
   await act(async () => mocks.handlers.get('connect')!());
-  expect(mocks.wsSend).toHaveBeenCalledExactlyOnceWith('sailing', 'send after the flight', 'history', 'client-message');
+  expect(mocks.wsSend).toHaveBeenCalledExactlyOnceWith('sailing', 'send after the flight', 'history', 'client-message', undefined, 'universal');
   expect(chat.messages.filter(message => message.content === real.content)).toEqual([real]);
   expect([...disk.keys()].some(key => key.includes(':outbox:'))).toBe(false);
 });
@@ -844,7 +844,7 @@ it('queues a photo message offline, survives restart, then uploads and sends the
   expect(mocks.send).toHaveBeenCalledExactlyOnceWith('sailing', 'beach day', [
     expect.objectContaining({ url: expect.stringMatching(/^https:\/\/cdn\/\d-IMG_1\.jpg$/) }),
     expect.objectContaining({ url: expect.stringMatching(/^https:\/\/cdn\/\d-IMG_2\.jpg$/) }),
-  ], 'client-message', undefined);
+  ], 'client-message', undefined, undefined, 'universal');
   expect(outboxEntry()).toBeUndefined();
   expect(mocks.del).toHaveBeenCalledWith('file:///docs/openchat-outbox/client-message/', { idempotent: true });
 });

@@ -66,6 +66,34 @@ until **Show more**; **Show less** folds them again. It applies with or without
 a search. Both controls affect Stream entries only, including those in the
 combined conversation feed; Context posts are unchanged.
 
+## Assistant context and Save to Vision
+
+In your private, two-person **OpenChat Agent** chat, tap **Context: Universal**
+above the composer to switch to **This chat only**. The choice applies to
+subsequent sends in the current session until changed; changing it does not erase
+earlier context. Group assistant turns always stay within that conversation.
+
+Open a text message's **Actions**, then **Save to Vision** for the whole text,
+or paste or dictate an exact excerpt and choose **Save selected text to Vision**.
+This creates a private copy and leaves the source chat unchanged. If prompted,
+choose **Connect Vision**, compare the code on the Ideaflow approval page,
+sign in with the same Ideaflow ID, and explicitly allow Vision write. Return
+and choose Save again; the selection stays in the sheet. **Saved to Vision**
+confirms a destination receipt and offers **Open Vision**.
+
+If **Save outcome unknown** appears, search Vision for the displayed
+`openchat-save:…` marker before creating another copy. A missing search result
+does not prove nothing was saved. A returned uncertain receipt offers
+**Save a new copy…**, followed by a duplication warning and **Create new copy**;
+some unknown-outcome alerts show only the marker and warning, without copy
+actions. **Save receipt unavailable** also means the note may exist.
+Only a proven rejection before dispatch offers **Refresh and review**, then
+**Start new save attempt**; review the refreshed source first. These actions
+retain your selection and never automatically resend an uncertain save.
+
+This source change has separate live acceptance gates; see the
+[scope, save contract and release restrictions](docs/shared-capabilities-control.md).
+
 ## Chat emoji and Tickle
 
 With nothing typed, the chat's emoji (default 🍓) sits where **Send** is: tap to

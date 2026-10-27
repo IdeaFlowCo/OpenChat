@@ -63,6 +63,8 @@ interface Props {
    * then forwards both the quoted message and the question to the Assistant.
    */
   onAskAssistant: (message: Message, question: string) => void;
+  /** Keep the selection open unless the destination acknowledged a saved note. */
+  onSaveToVision?: (message: Message, selection?: string) => Promise<boolean>;
   /**
    * Save the message into the user's Stream (with provenance).
    * `pin` additionally pins the new thought to this conversation so all
@@ -100,6 +102,7 @@ export function MessageActionSheet({
   onForward,
   onForwardToAssistant,
   onAskAssistant,
+  onSaveToVision,
   onSaveToThoughts,
   onEdit,
   onDelete,
@@ -118,10 +121,18 @@ export function MessageActionSheet({
   // 'react' = emoji picker, 'assistant' = "ask about this" question prompt.
   const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react' | 'assistant' | 'links'>(null);
   const [freeformText, setFreeformText] = useState('');
+  const [visionSelection, setVisionSelection] = useState('');
+  const [visionBusy, setVisionBusy] = useState(false);
   // Separate state for the assistant-question input so it doesn't collide with
   // the report freeform field.
   const [assistantQuestion, setAssistantQuestion] = useState('');
 
+  const saveVision = async (selected?: string) => {
+    if (!message || !onSaveToVision || visionBusy) return;
+    setVisionBusy(true);
+    try { if (await onSaveToVision(message, selected)) { setVisionSelection(''); handleDismiss(); } }
+    finally { setVisionBusy(false); }
+  };
   const handleDismiss = () => {
     setSubSheet(null);
     setFreeformText('');
@@ -505,6 +516,20 @@ export function MessageActionSheet({
                 <View style={styles.actionIconBox}><AppIcon name="forward" color={c.textPrimary} size={20} /></View>
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Forward</Text>
               </TouchableOpacity>
+            )}
+
+            {!message.deletedAt && !!message.content?.trim() && onSaveToVision && (
+              <>
+                <TouchableOpacity style={[styles.actionRow,styles.actionRowBorder,{borderColor:c.divider}]} accessibilityRole="button" disabled={visionBusy} onPress={()=>{void saveVision();}}>
+                  <View style={styles.actionIconBox}><AppIcon name="thought" color={c.textPrimary} size={20}/></View>
+                  <View style={{flex:1}}><Text style={[styles.actionLabel,{color:c.textPrimary}]}>{visionBusy?'Saving…':'Save to Vision'}</Text><Text style={{color:c.textMetadata,...type.meta}}>Private copy · receipt required</Text></View>
+                </TouchableOpacity>
+                <View style={{padding:16,borderBottomWidth:1,borderColor:c.divider}}>
+                  <Text style={{color:c.textMetadata,...type.meta}}>Or select an excerpt to save</Text>
+                  <TextInput accessibilityLabel="Selected text for Vision" value={visionSelection} onChangeText={setVisionSelection} multiline placeholder="Paste or dictate an exact excerpt" placeholderTextColor={c.textMuted} style={{color:c.textPrimary,minHeight:44,paddingVertical:8}}/>
+                  <TouchableOpacity accessibilityRole="button" disabled={visionBusy||!visionSelection.trim()} onPress={()=>{void saveVision(visionSelection);}} style={{minHeight:44,justifyContent:'center'}}><Text style={{color:visionSelection.trim()?c.primary:c.textMuted}}>Save selected text to Vision</Text></TouchableOpacity>
+                </View>
+              </>
             )}
 
             {/* Save to Stream / Save & pin — the unified capture affordance.

@@ -996,9 +996,11 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     id: clientId,
     clientRequestId,
     replyToId,
+    assistantScope,
     emojiSize: rawEmojiSize,
   } = req.body;
   const content = rawContent ?? text;
+  if (assistantScope !== undefined && !['conversation','universal'].includes(assistantScope)) { res.status(400).json({error:'Invalid assistant context'}); return; }
 
   if (req.connectorDelegation && (
     typeof rawContent !== 'string' || !rawContent.trim()
@@ -1142,6 +1144,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         m.messageType = $messageType,
         m.attachments = $attachmentsJson,
         m.replyToId = $replyToId,
+        m.assistantScope = $assistantScope,
         m.emojiSize = $emojiSize,
         m.createdAt = datetime($now),
         m._created = true
@@ -1189,6 +1192,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       now,
       attachmentsJson,
       replyToId: replyToId ?? null,
+      assistantScope: assistantScope ?? null,
       emojiSize: hasAttachments ? null : emojiSize.size,
       preview,
     });
@@ -1259,7 +1263,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
           // Agents still hear about a voice note that could not be
           // transcribed, so the Assistant can say so instead of going silent.
           if (wasCreated) dispatchMessageEvent({ ...message, transcript }, participantIds);
-          maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io });
+          maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io, messageId: String(message.id) });
           if (transcript) {
             maybeTriggerSecretary({
               senderId: userId,
@@ -1303,7 +1307,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // bot, fire an assistant turn asynchronously. No-ops when the sender is the
     // bot itself (loop guard inside maybeTriggerAssistant).
     if (!isVoiceOnly) {
-      maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io });
+      maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io, messageId: String(message.id) });
       maybeTriggerSecretary({
         senderId: userId,
         conversationId: conversationId as string,
