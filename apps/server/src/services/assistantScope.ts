@@ -1,4 +1,4 @@
-/** Server-authorized context for a single turn. Default deny for every tool added later. */
+/** Server-authorized context for a single turn. Conversation scope denies new tools by default. */
 export type AssistantScope = { kind: 'universal' | 'conversation'; conversationId: string };
 export const SCOPE_DENIED = { error: "Not available in this chat's context" } as const;
 const CHAT_TOOLS = new Set(['get_data_sources', 'search_messages', 'list_conversations', 'read_messages', 'read_context']);

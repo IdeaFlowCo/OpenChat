@@ -5,13 +5,13 @@ import { unlinkedProvisionConfigured } from './unlinkedProvision.js';
 /**
  * In-app Assistant bot (openchat-bfn.3).
  *
- * A singleton bot User {id:'assistant'} can participate in direct
+ * A singleton bot User {id:'assistant'} can participate in direct or group
  * conversations flagged containsBot=true. When a human sends a message into
  * such a conversation, the send paths (REST + socket) fire runAssistantTurn()
  * asynchronously. That runs an agentic Anthropic tool-use loop: it loads the
- * recent conversation, lets the model call read/act tools (all scoped to the
- * HUMAN who owns the DM, never the bot), and finally writes the model's text
- * reply back into the conversation as a Message FROM the assistant — reusing
+ * context bounded to the originating message and lets the model call tools
+ * under that sender's server-derived scope (see docs/shared-capabilities-control.md),
+ * then writes the model's reply into the conversation as a Message FROM the assistant — reusing
  * the exact message-create Cypher so it persists + emits over the socket and
  * shows live.
  *

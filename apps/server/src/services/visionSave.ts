@@ -36,7 +36,7 @@ function recoverable(record:SaveRecord|null,input:SaveRequest,nextKey?:string):b
  return !!record&&provenRejection(record)&&record.selectionHash===selectionHash(input)&&(!record.successorKey||record.successorKey===nextKey);
 }
 function historicalReceipt(record:SaveRecord,userId:string,key:string):SaveReceipt {
- const {recoveryAvailable,...receipt}=record.receipt;
+ const {recoveryAvailable:_recoveryAvailable,...receipt}=record.receipt;
  return {...searchableReceipt(receipt,userId,key),...(provenRejection(record)?{recoveryAvailable:true}:{})};
 }
 function sealKey(token:string,userId:string):{ciphertext:string;iv:string} {

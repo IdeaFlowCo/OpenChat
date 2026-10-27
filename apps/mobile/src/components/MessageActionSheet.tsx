@@ -63,12 +63,13 @@ interface Props {
    * then forwards both the quoted message and the question to the Assistant.
    */
   onAskAssistant: (message: Message, question: string) => void;
+  /** Keep the selection open unless the destination acknowledged a saved note. */
+  onSaveToVision?: (message: Message, selection?: string) => Promise<boolean>;
   /**
    * Save the message into the user's Stream (with provenance).
    * `pin` additionally pins the new thought to this conversation so all
    * participants see it in the chat-scoped Stream view.
    */
-  onSaveToVision?: (message: Message, selection?: string) => Promise<boolean>;
   onSaveToThoughts: (message: Message, pin: boolean) => void;
   /** Edit action (own messages) — enters edit mode in composer */
   onEdit: (message: Message) => void;
