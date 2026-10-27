@@ -417,7 +417,7 @@ export function setupChatSocket(io: Server): void {
 
         // In-app Assistant bot (openchat-bfn.3): fire an assistant turn if this
         // conversation contains the bot. No-ops when sender is the bot itself.
-        maybeTriggerAssistant({ senderId: userId, conversationId, io, contextScope: (message as {assistantScope?: unknown}).assistantScope === 'conversation' ? 'conversation' : undefined });
+        maybeTriggerAssistant({ senderId: userId, conversationId, io, messageId: String((message as {id: string}).id) });
         maybeTriggerSecretary({
           senderId: userId,
           conversationId,

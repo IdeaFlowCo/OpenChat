@@ -31,7 +31,7 @@ beforeEach(() => {
   evictFromCache(key.slice(0, 11)); mocks.scopes = ['read', 'write'];
   mocks.run.mockImplementation(async (query: string) => ({ records: query.includes('keyCiphertext AS keyCiphertext') ? [{ get: (name: string) => ({ keyCiphertext: ciphertext, keyIv: iv.toString('hex'), keyId: 'key-1', ownerUserId: 'alice', expiresAt: null, scopes: mocks.scopes } as Record<string, unknown>)[name] }] : [] }));
   mocks.resolve.mockResolvedValue({ page: 'Conversation', id: 'source-room', title: 'Authoritative title', messages: [{ text: 'Owner-readable context' }] });
-  mocks.ensure.mockResolvedValue('alice-private-assistant-dm'); mocks.post.mockResolvedValue({ id: 'message-1' });
+  mocks.ensure.mockResolvedValue('alice-private-assistant-dm'); mocks.post.mockResolvedValue({ message: { id: 'message-1' }, participantIds: ['alice', 'assistant'], created: true });
 });
 
 describe('POST assistant/context-message authenticated boundary', () => {
@@ -54,7 +54,7 @@ describe('POST assistant/context-message authenticated boundary', () => {
     const [postedIo, owner, destination, text, context] = mocks.post.mock.calls[0];
     expect([postedIo, owner, destination]).toEqual([io, 'alice', 'alice-private-assistant-dm']);
     expect(text).toBe('What remains open?'); expect(context.title).toBe('Authoritative title'); expect(context.messages).toEqual([{ text: 'Owner-readable context' }]); expect(text).not.toContain('Owner-readable context');
-    expect(mocks.trigger).toHaveBeenCalledWith({ senderId: 'alice', conversationId: 'alice-private-assistant-dm', io });
+    expect(mocks.trigger).toHaveBeenCalledWith({ senderId: 'alice', conversationId: 'alice-private-assistant-dm', io, messageId: 'message-1' });
   });
   it('does not create a DM or post when authoritative page access is denied', async () => {
     mocks.resolve.mockRejectedValue(new PrivateGraphError(404, 'Conversation unavailable'));

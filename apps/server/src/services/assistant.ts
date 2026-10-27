@@ -1759,23 +1759,46 @@ export async function deriveAssistantScope(userId: string, conversationId: strin
 }
 
 // ─── Context loading ─────────────────────────────────────────────────────────
+export async function loadAssistantTurn(userId: string, conversationId: string, messageId: string) {
+  const db = getDriver().session();
+  let requested: 'conversation' | 'universal' | undefined;
+  try {
+    const result = await db.run(`MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId})
+      MATCH (origin:Message {id:$messageId,conversationId:$conversationId,senderId:$userId})
+      WHERE origin.deletedAt IS NULL
+      RETURN origin.id AS id,origin.conversationId AS conversationId,origin.senderId AS senderId,origin.assistantScope AS assistantScope`,
+      {userId,conversationId,messageId});
+    const origin = result.records[0];
+    if (!origin || origin.get('id') !== messageId || origin.get('conversationId') !== conversationId || origin.get('senderId') !== userId) return null;
+    const storedScope = origin.get('assistantScope');
+    if (storedScope != null && storedScope !== 'conversation' && storedScope !== 'universal') return null;
+    requested = storedScope ?? undefined;
+  } finally { await db.close(); }
+  const scope = await deriveAssistantScope(userId, conversationId, requested);
+  if (!scope) return null;
+  const messages = await loadConversationContext(conversationId, userId, scope, messageId);
+  return messages.length ? {scope,messages} : null;
+}
+
 export async function loadConversationContext(
-  conversationId: string, userId: string, scope: AssistantScope
+  conversationId: string, userId: string, scope: AssistantScope, messageId: string
 ): Promise<AnthropicType.MessageParam[]> {
   const s = getDriver().session();
   try {
     const result = await s.run(
       `
       MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId})
+      MATCH (origin:Message {id:$messageId,conversationId:$conversationId,senderId:$userId})
+      WHERE origin.deletedAt IS NULL
       MATCH (m:Message {conversationId: $conversationId})
-      WHERE m.deletedAt IS NULL
+      WHERE m.deletedAt IS NULL AND (m.id = origin.id OR m.createdAt < origin.createdAt)
       OPTIONAL MATCH (sender:User {id: m.senderId})
       RETURN m.content AS content, m.transcript AS transcript, m.attachments AS attachments, m.assistantPageContext AS pageContext,
              m.senderId AS senderId, sender.name AS senderName, m.replyToId AS replyToId
-      ORDER BY m.createdAt DESC
+      ORDER BY m.createdAt DESC, m.id DESC
       LIMIT $limit
       `,
-      { conversationId, userId, limit: neo4j.int(CONTEXT_MESSAGE_LIMIT) }
+      { conversationId, userId, messageId, limit: neo4j.int(CONTEXT_MESSAGE_LIMIT) }
     );
     const rows = result.records
       .map((r) => ({
@@ -1800,9 +1823,10 @@ export async function loadConversationContext(
     for (const row of rows.filter((row) => row.content.trim())) {
         const annotation = await replyAnnotation(row.replyToId, conversationId, async (id) => {
           const found = await s.run(`MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId})
-            MATCH (p:Message {id:$id,conversationId:$conversationId}) WHERE p.deletedAt IS NULL
+            MATCH (origin:Message {id:$messageId,conversationId:$conversationId,senderId:$userId}) WHERE origin.deletedAt IS NULL
+            MATCH (p:Message {id:$id,conversationId:$conversationId}) WHERE p.deletedAt IS NULL AND p.createdAt < origin.createdAt
             OPTIONAL MATCH (sender:User {id:p.senderId})
-            RETURN p.id AS id,p.conversationId AS conversationId,p.content AS content,p.transcript AS transcript,p.attachments AS attachments,p.replyToId AS replyToId,sender.name AS senderName`, {userId,conversationId,id});
+            RETURN p.id AS id,p.conversationId AS conversationId,p.content AS content,p.transcript AS transcript,p.attachments AS attachments,p.replyToId AS replyToId,sender.name AS senderName`, {userId,conversationId,messageId,id});
           const p = found.records[0];
           return p ? {id:p.get('id'),conversationId:p.get('conversationId'),replyToId:p.get('replyToId'),senderName:p.get('senderName') ?? 'User',content:assistantTextForMessage({content:p.get('content'),transcript:p.get('transcript'),attachments:p.get('attachments')})} : null;
         });
@@ -1889,11 +1913,12 @@ export async function runAssistantTurn(opts: {
   userId: string;
   conversationId: string;
   io?: IOServer;
-  contextScope?: 'conversation' | 'universal';
+  messageId: string;
 }): Promise<void> {
-  const { userId, conversationId, io } = opts;
-  const scope = await deriveAssistantScope(userId, conversationId, opts.contextScope);
-  if (!scope) return;
+  const { userId, conversationId, io, messageId } = opts;
+  const turn = await loadAssistantTurn(userId, conversationId, messageId);
+  if (!turn) return;
+  const { scope, messages } = turn;
 
   const client = await getAnthropicClient();
   if (!client) {
@@ -1912,8 +1937,6 @@ export async function runAssistantTurn(opts: {
   const typingHeartbeat = setInterval(() => emitAssistantTyping(io, conversationId, true), 2000);
   try {
     const tools = buildTools(scope);
-    const messages = await loadConversationContext(conversationId, userId, scope);
-    if (messages.length === 0) return;
 
     const model = process.env.ASSISTANT_MODEL || 'claude-haiku-4-5';
     let finalText = '';

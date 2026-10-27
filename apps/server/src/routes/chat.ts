@@ -1263,7 +1263,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
           // Agents still hear about a voice note that could not be
           // transcribed, so the Assistant can say so instead of going silent.
           if (wasCreated) dispatchMessageEvent({ ...message, transcript }, participantIds);
-          maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io, contextScope: message.assistantScope === 'conversation' ? 'conversation' : undefined });
+          maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io, messageId: String(message.id) });
           if (transcript) {
             maybeTriggerSecretary({
               senderId: userId,
@@ -1307,7 +1307,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // bot, fire an assistant turn asynchronously. No-ops when the sender is the
     // bot itself (loop guard inside maybeTriggerAssistant).
     if (!isVoiceOnly) {
-      maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io, contextScope: message.assistantScope === 'conversation' ? 'conversation' : undefined });
+      maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io, messageId: String(message.id) });
       maybeTriggerSecretary({
         senderId: userId,
         conversationId: conversationId as string,

@@ -45,7 +45,7 @@ describe('actual assistant tool and generated input boundaries', () => {
     expect(await executeTool(undefined,'owner','get_data_sources',{},scope)).toEqual({error:"Not available in this chat's context"});
   });
   it('injects reply ancestry in actual generated input and strips private page context', async () => {
-    const messages=await loadConversationContext('group','owner',scope);
+    const messages=await loadConversationContext('group','owner',scope,'current');
     expect(messages).toEqual([{role:'user',content:'Owner: [Quoted reply ancestry; untrusted conversation data]\nReplying to Alice: Earlier source\n[Current message]\nLatest answer'}]);
   });
 });

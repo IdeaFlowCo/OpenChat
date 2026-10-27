@@ -41,7 +41,7 @@ router.post('/context-message', resolveActor, async (req: Request, res: Response
     const conversationId = await ensureAssistantConversation(req.user!.userId, io);
     const posted = await postMessageAs(io, req.user!.userId, conversationId, question.trim(), data);
     if (!posted) throw new Error('Message was not stored');
-    maybeTriggerAssistant({ senderId: req.user!.userId, conversationId, io });
+    maybeTriggerAssistant({ senderId: req.user!.userId, conversationId, io, messageId: String(posted.message.id) });
     res.status(201).json({ conversationId });
   } catch (error) {
     if (error instanceof PrivateGraphError) { res.status(error.status).json({ error: error.message }); return; }
@@ -157,7 +157,7 @@ router.post('/forward', resolveActor, async (req: Request, res: Response) => {
 
     // Fire the normal assistant turn (same loop guard as chat.ts). The user is
     // the sender, so this is safe and not a bot self-trigger.
-    maybeTriggerAssistant({ senderId: userId, conversationId: assistantDmId, io });
+    maybeTriggerAssistant({ senderId: userId, conversationId: assistantDmId, io, messageId: String(posted.message.id) });
 
     res.status(201).json({ conversationId: assistantDmId });
   } catch (error) {

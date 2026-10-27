@@ -5,7 +5,7 @@ export const ID_ISSUER = 'https://id.ideaflow.app/api/auth';
 const HUB = 'https://id.ideaflow.app';
 export type SaveStatus = 'saved'|'rejected'|'needs_auth'|'unavailable'|'uncertain';
 export type SaveReceipt = {status:SaveStatus;destinationId?:string;url?:string;savedAt?:string;reason?:string};
-export type SaveRequest = {destination:'vision';kind:'answer'|'summary'|'excerpt'|'note';title:string;body:string;sourceRefs:Array<{app:string;conversationId?:string;messageId?:string}>;visibility:'private';idempotencyKey:string};
+export type SaveRequest = {destination:'vision';kind:'answer'|'summary'|'excerpt'|'note';title:string;body:string;sourceRefs:Array<{app:string;conversationId?:string;messageId?:string;sourceDigest?:string}>;visibility:'private';idempotencyKey:string};
 export type Identity = {issuer:string;subject:string};
 export interface SaveRepository {
  identity(userId:string):Promise<Identity|null>;
@@ -22,7 +22,7 @@ function searchableReceipt(receipt:SaveReceipt,userId:string,key:string):SaveRec
  const marker=visionSaveMarker(userId,key);
  return {...receipt,reason:receipt.reason?.includes(marker)?receipt.reason:(receipt.reason??'Save acknowledgment unknown')+'; check Vision for '+marker};
 }
-function canonical(input:SaveRequest):string { return JSON.stringify([input.destination,input.kind,input.title,input.body,input.sourceRefs.map(r=>[r.app,r.conversationId??null,r.messageId??null]),input.visibility]); }
+function canonical(input:SaveRequest, legacy=false):string { return JSON.stringify([input.destination,input.kind,input.title,input.body,input.sourceRefs.map(r=>[r.app,r.conversationId??null,r.messageId??null,...(!legacy&&r.sourceDigest!==undefined?[r.sourceDigest]:[])]),input.visibility]); }
 function sealKey(token:string,userId:string):{ciphertext:string;iv:string} {
  const hex=process.env.OC_KEY_ENCRYPTION_SECRET;
  if(!hex||!/^[a-f0-9]{64}$/i.test(hex))throw Error('encryption_unavailable');
@@ -57,23 +57,37 @@ function parseResult(value:unknown):Record<string,any>|null {
 export function parseSaveRequest(value:unknown):SaveRequest|null {
  const v=value as SaveRequest;
  if(!v||v.destination!=='vision'||v.visibility!=='private'||!['answer','summary','excerpt','note'].includes(v.kind)||typeof v.title!=='string'||v.title.length>200||typeof v.body!=='string'||!v.body.trim()||v.body.length>64000||typeof v.idempotencyKey!=='string'||!/^[A-Za-z0-9:_-]{8,200}$/.test(v.idempotencyKey)||!Array.isArray(v.sourceRefs)||v.sourceRefs.length<1||v.sourceRefs.length>20)return null;
- if(v.sourceRefs.some(r=>!r||r.app!=='openchat'||typeof r.conversationId!=='string'||typeof r.messageId!=='string'))return null;
- return {destination:v.destination,kind:v.kind,title:v.title,body:v.body,sourceRefs:v.sourceRefs.map(r=>({app:r.app,conversationId:r.conversationId,messageId:r.messageId})),visibility:'private',idempotencyKey:v.idempotencyKey};
+ if(v.sourceRefs.some(r=>!r||r.app!=='openchat'||typeof r.conversationId!=='string'||typeof r.messageId!=='string'||(r.sourceDigest!==undefined&&(typeof r.sourceDigest!=='string'||!/^[a-f0-9]{64}$/.test(r.sourceDigest)))))return null;
+ return {destination:v.destination,kind:v.kind,title:v.title,body:v.body,sourceRefs:v.sourceRefs.map(r=>({app:r.app,conversationId:r.conversationId,messageId:r.messageId,...(r.sourceDigest!==undefined?{sourceDigest:r.sourceDigest}:{})})),visibility:'private',idempotencyKey:v.idempotencyKey};
 }
 export async function saveToVision(userId:string,input:SaveRequest,repo:SaveRepository=neoSaveRepository,fetchImpl:typeof fetch=fetch):Promise<SaveReceipt>{
  const payloadHash=hash(canonical(input));
  // Receipt history belongs to this authenticated owner even after source deletion or grant revocation.
  const previous=await repo.lookup(userId,input.idempotencyKey);
- if(previous)return previous.hash===payloadHash?searchableReceipt(previous.receipt,userId,input.idempotencyKey):{status:'rejected',reason:'Idempotency key reused with different content'};
+ if(previous)return (previous.hash===payloadHash||previous.hash===hash(canonical(input,true)))?searchableReceipt(previous.receipt,userId,input.idempotencyKey):{status:'rejected',reason:'Idempotency key reused with different content'};
  const identity=await repo.identity(userId);
  if(!identity)return {status:'needs_auth',reason:'Sign in with Ideaflow ID to link your destination'};
- for(const ref of input.sourceRefs){const content=await repo.source(userId,ref.conversationId!,ref.messageId!);if(content===null)return {status:'rejected',reason:'Source is unavailable'};if(input.kind==='excerpt'&&!content.includes(input.body))return {status:'rejected',reason:'Selection no longer matches the source'};}
+ const validateSources=async():Promise<SaveReceipt|null>=>{
+  if(!input.sourceRefs.length)return {status:'rejected',reason:'Source references are required'};
+  for(const ref of input.sourceRefs){
+   if(!ref.sourceDigest||!/^[a-f0-9]{64}$/.test(ref.sourceDigest))return {status:'rejected',reason:'Expected source digest is required for a new save'};
+   const content=await repo.source(userId,ref.conversationId!,ref.messageId!);
+   if(content===null)return {status:'rejected',reason:'Source is unavailable'};
+   if(hash(content)!==ref.sourceDigest)return {status:'rejected',reason:'Source changed; refresh it before saving'};
+   if(input.kind==='excerpt'&&!content.includes(input.body))return {status:'rejected',reason:'Selection no longer matches the source'};
+  }
+  return null;
+ };
+ const sourceFailure=await validateSources();
+ if(sourceFailure)return sourceFailure;
  const token=await repo.token(userId);
  if(!token)return {status:'needs_auth',reason:'Connect Vision and explicitly allow write access'};
  try {if(!await freshGrant(token,identity,fetchImpl))return {status:'needs_auth',reason:'Vision write permission or account linkage is missing or revoked'};}catch{return {status:'unavailable',reason:'Could not check Vision permission; nothing dispatched'};}
  const reservation=await repo.reserve(userId,input.idempotencyKey,payloadHash);
  if(reservation.hash!==payloadHash)return {status:'rejected',reason:'Idempotency key reused with different content'};
  if(!reservation.fresh)return searchableReceipt(reservation.receipt,userId,input.idempotencyKey);
+ const dispatchFailure=await validateSources();
+ if(dispatchFailure){await repo.finish(userId,input.idempotencyKey,dispatchFailure);return dispatchFailure;}
  const marker=visionSaveMarker(userId,input.idempotencyKey);
  const refs=input.sourceRefs.map(r=>`https://chat.ideaflow.app/app/chat/${encodeURIComponent(r.conversationId!)}?message=${encodeURIComponent(r.messageId!)}`).join('\n');
  const bodyMd=[input.title?'# '+input.title:'',input.body,refs?'Source:\n'+refs:'',`<!-- ${marker} -->`].filter(Boolean).join('\n\n');

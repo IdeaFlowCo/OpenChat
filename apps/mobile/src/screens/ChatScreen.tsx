@@ -334,7 +334,7 @@ export function ChatScreen({
   const {
     retryPendingMessage, discardPendingMessage, currentUser, conversations, messages: activeMessages, loadingMessages, messageLoadError, retryMessages, isConnected,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
-    setActiveConversation, sendMessage, editMessage, deleteMessage, toggleReaction,
+    setActiveConversation, sendMessage, assistantScopes, setAssistantScope, editMessage, deleteMessage, toggleReaction,
     sendTickle, setQuickEmoji, lastTickle,
     presence, typingByConv, reportTyping,
     aiDisclosureAcceptedAt, mutedConvs, muteConv, blockUser,
@@ -648,8 +648,7 @@ export function ChatScreen({
   }, [conversation, isGroup, isSelfDM, other, currentUser]);
 
   // Does this conversation include any bot participant? (OpenChat-ds3)
-  const [isolateAssistant, setIsolateAssistant] = useState(false);
-  useEffect(() => setIsolateAssistant(false), [conversationId]);
+  const isolateAssistant = assistantScopes?.[conversationId] === 'conversation';
   const isAssistantDM = !isGroup && conversation?.participants?.length === 2 && other?.id === 'assistant';
   const containsBot = useMemo(
     () => conversation?.participants?.some(p => p?.user?.isBot) ?? false,
@@ -1235,6 +1234,7 @@ export function ChatScreen({
     // General file attachment (OpenChat-85q.1) — web only, isolated from the
     // photo pipeline below (no offline outbox; upload-then-send, same shape
     // as voice notes in RecordingContext.tsx).
+    const sendExtras = { assistantScope: isAssistantDM && isolateAssistant ? 'conversation' as const : 'universal' as const };
     if (pendingFile) {
       const fileToSend = pendingFile;
       const fileReply = replyTo;
@@ -1254,7 +1254,7 @@ export function ChatScreen({
       setUploadingAttachment(true);
       try {
         const attachment = await uploadFile(fileToSend.file);
-        await sendMessage(trimmed, fileReplyToId, [attachment]);
+        await sendMessage(trimmed, fileReplyToId, [attachment], undefined, sendExtras);
         invalidateHashtagSuggestions(conversationId);
         hapticSend();
       } catch (err) {
@@ -1334,8 +1334,7 @@ export function ChatScreen({
     }
 
     try {
-      if (isAssistantDM && isolateAssistant) await sendMessage(trimmed, currentReplyToId, undefined, photos.length ? photos : undefined, {assistantScope:'conversation'});
-      else await sendMessage(trimmed, currentReplyToId, undefined, photos.length ? photos : undefined);
+      await sendMessage(trimmed, currentReplyToId, undefined, photos.length ? photos : undefined, sendExtras);
       invalidateHashtagSuggestions(conversationId);
       hapticSend();
       rejected.forEach(r => releaseAsset(r.asset));
@@ -1376,7 +1375,7 @@ export function ChatScreen({
       console.warn('[ChatScreen] emoji send failed:', err);
       showToast('Could not send. Please try again.');
     }
-  }, [isAssistantDM, isolateAssistant, composerBusy, quickEmoji, replyTo?.messageId, sendMessage, showToast]);
+  }, [composerBusy, quickEmoji, replyTo?.messageId, sendMessage, showToast]);
 
   // RN Web replaces TextInput's onKeyDown with its own handler. Capture is
   // forwarded to the textarea and runs before that handler inserts a newline.
@@ -1546,7 +1545,8 @@ export function ChatScreen({
     try {
       const crypto = await import('expo-crypto');
       const key = await crypto.digestStringAsync(crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([message.id, body]));
-      const receipt = await api.saveToVision({destination:'vision',kind:'excerpt',title:'Saved from OpenChat',body,sourceRefs:[{app:'openchat',conversationId:message.conversationId,messageId:message.id}],visibility:'private',idempotencyKey:newCopyKey??('openchat-save:'+key)});
+      const sourceDigest = await crypto.digestStringAsync(crypto.CryptoDigestAlgorithm.SHA256, message.content || message.transcript || '');
+      const receipt = await api.saveToVision({destination:'vision',kind:'excerpt',title:'Saved from OpenChat',body,sourceRefs:[{app:'openchat',conversationId:message.conversationId,messageId:message.id,sourceDigest}],visibility:'private',idempotencyKey:newCopyKey??('openchat-save:'+key)});
       if (receipt.status === 'saved' && receipt.destinationId) {
         Alert.alert('Saved to Vision','Private note saved. Source chat is unchanged.',[{text:'Done'},{text:'Open Vision',onPress:()=>{if(receipt.url&&(receipt.url==='https://vision.ideaflow.app'||receipt.url.startsWith('https://vision.ideaflow.app/')))void Linking.openURL(receipt.url);}}]);
         return true;
@@ -2104,7 +2104,7 @@ export function ChatScreen({
 
       {containsBot && (
         <View style={{paddingHorizontal:16,paddingVertical:8,backgroundColor:c.surface,borderTopWidth:1,borderColor:c.border}}>
-          {isAssistantDM ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Assistant context for this chat" accessibilityValue={{text:isolateAssistant?'This chat only':'Universal'}} onPress={()=>setIsolateAssistant(value=>!value)} style={{minHeight:44,justifyContent:'center'}}><Text style={{color:c.textPrimary,...type.meta}}>Context: {isolateAssistant?'This chat only':'Universal'} · Assistant context for this chat</Text></TouchableOpacity> : <Text style={{color:c.textMetadata,...type.meta}}>Assistant context: this chat only</Text>}
+          {isAssistantDM ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Assistant context for this chat" accessibilityValue={{text:isolateAssistant?'This chat only':'Universal'}} onPress={()=>setAssistantScope(conversationId,isolateAssistant?'universal':'conversation')} style={{minHeight:44,justifyContent:'center'}}><Text style={{color:c.textPrimary,...type.meta}}>Context: {isolateAssistant?'This chat only':'Universal'} · Assistant context for this chat</Text></TouchableOpacity> : <Text style={{color:c.textMetadata,...type.meta}}>Assistant context: this chat only</Text>}
         </View>
       )}
 

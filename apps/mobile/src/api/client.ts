@@ -1028,7 +1028,7 @@ export function addMeCardUrl(token: string): string {
 export type VisionSaveReceipt = {status:'saved'|'rejected'|'needs_auth'|'unavailable'|'uncertain';destinationId?:string;url?:string;reason?:string};
 export const api = {
   connectVision: () => request<{status:string;approvalUrl?:string;confirmationCode?:string;reason?:string}>('/api/vision/connection',{method:'POST',body:'{}',expireAuthOnForbidden:false}),
-  saveToVision: (input:{destination:'vision';kind:'excerpt'|'answer'|'summary'|'note';title:string;body:string;sourceRefs:Array<{app:'openchat';conversationId:string;messageId:string}>;visibility:'private';idempotencyKey:string}) => request<VisionSaveReceipt>('/api/vision/saves',{method:'POST',body:JSON.stringify(input),expireAuthOnForbidden:false}),
+  saveToVision: (input:{destination:'vision';kind:'excerpt'|'answer'|'summary'|'note';title:string;body:string;sourceRefs:Array<{app:'openchat';conversationId:string;messageId:string;sourceDigest:string}>;visibility:'private';idempotencyKey:string}) => request<VisionSaveReceipt>('/api/vision/saves',{method:'POST',body:JSON.stringify(input),expireAuthOnForbidden:false}),
   // ── Context Lane ──────────────────────────────────────────────────────────
   listContextPosts: (conversationId: string, cursor?: string, limit?: number, kind?: string, search?: string) => {
     const params = new URLSearchParams();

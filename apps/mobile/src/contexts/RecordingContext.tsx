@@ -17,6 +17,7 @@ import {
   useState,
 } from 'react';
 import { Alert, Platform } from 'react-native';
+import type { SendExtras } from './ChatContext';
 import type { Attachment } from '../api/client';
 import { uploadAudio } from '../services/attachments';
 import {
@@ -45,7 +46,9 @@ type SendToConversation = (
   conversationId: string,
   content: string,
   replyToId?: string,
-  attachments?: Attachment[]
+  attachments?: Attachment[],
+  photos?: undefined,
+  extra?: SendExtras
 ) => Promise<void>;
 
 interface RecordingContextValue extends RecordingState {
@@ -78,6 +81,7 @@ interface RecordingProviderProps {
   conversationsLoaded: boolean;
   conversationExists: (conversationId: string) => boolean;
   sendMessage: SendToConversation;
+  captureSendExtras: (conversationId: string) => SendExtras;
 }
 
 const initialState: RecordingState = {
@@ -103,6 +107,7 @@ export function RecordingProvider({
   conversationsLoaded,
   conversationExists,
   sendMessage,
+  captureSendExtras,
 }: RecordingProviderProps) {
   const [state, setState] = useState<RecordingState>(initialState);
   const [finishing, setFinishing] = useState(false);
@@ -119,6 +124,7 @@ export function RecordingProvider({
   const startGenerationRef = useRef(0);
   const pressStartTimeRef = useRef(0);
   const pendingReleaseRef = useRef<{ atMs: number; cancelled: boolean } | null>(null);
+  const sendExtrasRef = useRef<SendExtras>({});
   const replyToIdRef = useRef<string | undefined>(undefined);
   const onSentRef = useRef<(() => void) | undefined>(undefined);
   const tickerRef = useRef<NodeJS.Timeout | null>(null);
@@ -168,6 +174,7 @@ export function RecordingProvider({
     const originTitle = stateRef.current.conversationTitle;
     const startedAt = stateRef.current.startedAt ?? Date.now();
     const replyToId = replyToIdRef.current;
+    const sendExtras = sendExtrasRef.current;
     const onSent = onSentRef.current;
     replyToIdRef.current = undefined;
     onSentRef.current = undefined;
@@ -247,7 +254,7 @@ export function RecordingProvider({
         );
         return false;
       }
-      await sendMessageRef.current(originId, '', replyToId, [attachment]);
+      await sendMessageRef.current(originId, '', replyToId, [attachment], undefined, sendExtras);
       logInfo('[voice] recording sent', { conversationId: originId, durationMs });
       hapticSend();
       onSent?.();
@@ -279,6 +286,7 @@ export function RecordingProvider({
       || !isAuthedRef.current
     ) return;
 
+    sendExtrasRef.current = { ...captureSendExtras(conversationId) };
     startingRef.current = true;
     const generation = ++startGenerationRef.current;
     replyToIdRef.current = replyToId;
@@ -365,7 +373,7 @@ export function RecordingProvider({
     } finally {
       startingRef.current = false;
     }
-  }, [finishing, showNotice]);
+  }, [finishing, showNotice, captureSendExtras]);
 
   const beginPress = useCallback(async (
     conversationId: string,

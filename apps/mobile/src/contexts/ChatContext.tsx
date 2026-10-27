@@ -91,6 +91,9 @@ export interface TickleSignal {
 }
 
 interface ChatContextValue {
+  assistantScopes: Record<string, NonNullable<SendExtras["assistantScope"]>>;
+  setAssistantScope: (id: string, scope: NonNullable<SendExtras["assistantScope"]>) => void;
+  captureSendExtras: (id: string) => SendExtras;
   // Identity / session
   currentUser: CurrentUser | null;
   isAuthed: boolean;
@@ -229,6 +232,15 @@ function withNewestMatch(current: Map<string, AgentMatch>, incoming: AgentMatch)
 }
 
 export function ChatProvider({ children }: { children: ReactNode }) {
+  const [assistantScopes, setAssistantScopes] = useState<Record<string, NonNullable<SendExtras['assistantScope']>>>({});
+  const assistantScopesRef = useRef(assistantScopes);
+  const setAssistantScope = useCallback((id: string, scope: NonNullable<SendExtras['assistantScope']>) => {
+    assistantScopesRef.current = { ...assistantScopesRef.current, [id]: scope };
+    setAssistantScopes(assistantScopesRef.current);
+  }, []);
+  const captureSendExtras = useCallback((id: string): SendExtras => ({
+    assistantScope: assistantScopesRef.current[id] ?? 'universal',
+  }), []);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   useEffect(() => { contextLaneManager.setAccount(currentUser?.userId ?? null); }, [currentUser?.userId]);
   const [isAuthed, setIsAuthed] = useState(false);
@@ -316,6 +328,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const messageAccountRef = useRef<string | null>(null);
   const sendSessionRef = useRef(0);
   const resetMessageSession = useCallback((accountId: string | null) => {
+    assistantScopesRef.current = {};
+    setAssistantScopes({});
     messageAccountRef.current = accountId;
     verifiedAccountRef.current = null;
     verifiedTokenRef.current = null;
@@ -1295,6 +1309,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     photos?: PickedAsset[],
     extra?: SendExtras
   ) => {
+    const sendExtras = { ...captureSendExtras(id), ...extra };
     const hasText = !!content.trim();
     const hasAttachments = !!attachments?.length || !!photos?.length;
     if (!id || (!hasText && !hasAttachments)) return;
@@ -1310,7 +1325,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       id: `local-${clientId}`, content, conversationId: id,
       senderId: currentUser.userId, createdAt: new Date().toISOString(),
       sender: { id: currentUser.userId, email: currentUser.email, name: currentUser.name, avatarUrl: currentUser.avatarUrl },
-      assistantScope: extra?.assistantScope,
+      assistantScope: sendExtras.assistantScope,
       replyToId, attachments: queuedPhotos ? displayAttachments(queuedPhotos) : attachments,
       ...(extra?.emojiSize ? { emojiSize: extra.emojiSize } : {}),
     } };
@@ -1324,7 +1339,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     displayPending(entry);
     setConversations(current => applyMessageToConversationList(current, entry.message).conversations);
     await flushPending();
-  }, [currentUser, displayPending, flushPending]);
+  }, [currentUser, displayPending, flushPending, captureSendExtras]);
 
   const retryPendingMessage = useCallback(async (clientId: string) => {
     const store = offlineRef.current;
@@ -1647,6 +1662,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, registerConversationVisibility, setActiveConversation, messages, loadingMessages, messageLoadError, retryMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
+    assistantScopes, setAssistantScope, captureSendExtras,
     sendMessage, sendMessageToConversation, retryPendingMessage, discardPendingMessage,
     sendTickle, lastTickle, setQuickEmoji,
     editMessage, deleteMessage,
@@ -1666,6 +1682,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     createConversation, renameConversation, addParticipant, removeParticipant,
     activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, registerConversationVisibility, setActiveConversation, messages, loadingMessages, messageLoadError, retryMessages,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
+    assistantScopes, setAssistantScope, captureSendExtras,
     sendMessage, sendMessageToConversation, retryPendingMessage, discardPendingMessage,
     sendTickle, lastTickle, setQuickEmoji,
     editMessage, deleteMessage,
