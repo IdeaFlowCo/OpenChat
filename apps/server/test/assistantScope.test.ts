@@ -10,11 +10,11 @@ describe('server-authorized per-turn scope', () => {
     expect(scopeForParticipants('dm','owner','bot','direct',['bot'])).toBeNull();
   });
   it('denies private cross-chat tools, including crafted names absent from catalog', () => {
-    for (const tool of ['vision_read','find_person','list_intents','unlinked_search_network','create_conversation','save_intent_draft','future_private_tool']) {
+    for (const tool of ['vision_read','find_person','list_intents','unlinked_search_network','create_conversation','save_intent_draft','future_private_tool','send_message','post_context']) {
       expect(toolAvailableInScope(group, tool)).toBe(false);
       expect(scopedToolInput(group, tool, {userId:'owner'})).toBeNull();
     }
-    for (const tool of ['read_messages','send_message','post_context','read_context']) {
+    for (const tool of ['read_messages','read_context']) {
       expect(scopedToolInput(group, tool, {conversationId:'private-dm'})).toBeNull();
       expect(scopedToolInput(group, tool, {person:'secret contact'})).toBeNull();
       expect(scopedToolInput(group, tool, {})).toEqual({conversationId:'group'});

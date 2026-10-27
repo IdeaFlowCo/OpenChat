@@ -10,6 +10,7 @@ export type Identity = {issuer:string;subject:string};
 export interface SaveRepository {
  identity(userId:string):Promise<Identity|null>;
  source(userId:string,conversationId:string,messageId:string):Promise<string|null>;
+ lookup(userId:string,key:string):Promise<{hash:string;receipt:SaveReceipt}|null>;
  reserve(userId:string,key:string,hash:string):Promise<{fresh:boolean;hash:string;receipt:SaveReceipt}>;
  finish(userId:string,key:string,receipt:SaveReceipt):Promise<void>;
  token(userId:string):Promise<string|null>;
@@ -30,6 +31,7 @@ export const neoSaveRepository:SaveRepository={
  async identity(userId){const db=getDriver().session();try{const r=await db.run('MATCH (u:User {id:$userId}) RETURN u.ideaflowIssuer AS issuer,u.ideaflowSub AS subject',{userId});const row=r.records[0];return row?.get('issuer')===ID_ISSUER&&typeof row.get('subject')==='string'?{issuer:ID_ISSUER,subject:row.get('subject')}:null;}finally{await db.close();}},
  async source(userId,conversationId,messageId){const db=getDriver().session();try{const r=await db.run(`MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId}) MATCH (m:Message {id:$messageId,conversationId:$conversationId}) WHERE m.deletedAt IS NULL RETURN m.content AS content,m.transcript AS transcript`,{userId,conversationId,messageId});const row=r.records[0];return row?String(row.get('content')||row.get('transcript')||''):null;}finally{await db.close();}},
  async token(userId){const db=getDriver().session();try{const r=await db.run('MATCH (g:VisionSaveGrant {userId:$userId}) RETURN g.ciphertext AS ciphertext,g.iv AS iv',{userId});return r.records[0]?openKey({ciphertext:r.records[0].get('ciphertext'),iv:r.records[0].get('iv')},userId):null;}finally{await db.close();}},
+ async lookup(userId,key){const db=getDriver().session();try{const r=await db.run('MATCH (s:VisionSaveReceipt {key:$key,userId:$userId}) RETURN s.hash AS hash,s.receipt AS receipt',{userId,key:JSON.stringify([userId,key])});const row=r.records[0];return row?{hash:row.get('hash'),receipt:JSON.parse(row.get('receipt'))}:null;}finally{await db.close();}},
  async reserve(userId,key,payloadHash){const db=getDriver().session();const reservation=randomBytes(16).toString('hex');try{const r=await db.run(`MERGE (s:VisionSaveReceipt {key:$key}) ON CREATE SET s.userId=$userId,s.hash=$payloadHash,s.reservation=$reservation,s.receipt=$initial RETURN s.hash AS hash,s.reservation AS reservation,s.receipt AS receipt`,{userId,key:JSON.stringify([userId,key]),payloadHash,reservation,initial:JSON.stringify({status:'uncertain',reason:'Save dispatch committed; acknowledgment not yet known'})});const row=r.records[0];return {fresh:row.get('reservation')===reservation,hash:row.get('hash'),receipt:JSON.parse(row.get('receipt'))};}finally{await db.close();}},
  async finish(userId,key,receipt){const db=getDriver().session();try{await db.run('MATCH (s:VisionSaveReceipt {key:$key,userId:$userId}) SET s.receipt=$receipt',{userId,key:JSON.stringify([userId,key]),receipt:JSON.stringify(receipt)});}finally{await db.close();}}
 };
@@ -48,18 +50,21 @@ function parseResult(value:unknown):Record<string,any>|null {
 }
 export function parseSaveRequest(value:unknown):SaveRequest|null {
  const v=value as SaveRequest;
- if(!v||v.destination!=='vision'||v.visibility!=='private'||!['answer','summary','excerpt','note'].includes(v.kind)||typeof v.title!=='string'||v.title.length>200||typeof v.body!=='string'||!v.body.trim()||v.body.length>64000||typeof v.idempotencyKey!=='string'||!/^[A-Za-z0-9:_-]{8,200}$/.test(v.idempotencyKey)||!Array.isArray(v.sourceRefs)||v.sourceRefs.length>20)return null;
+ if(!v||v.destination!=='vision'||v.visibility!=='private'||!['answer','summary','excerpt','note'].includes(v.kind)||typeof v.title!=='string'||v.title.length>200||typeof v.body!=='string'||!v.body.trim()||v.body.length>64000||typeof v.idempotencyKey!=='string'||!/^[A-Za-z0-9:_-]{8,200}$/.test(v.idempotencyKey)||!Array.isArray(v.sourceRefs)||v.sourceRefs.length<1||v.sourceRefs.length>20)return null;
  if(v.sourceRefs.some(r=>!r||r.app!=='openchat'||typeof r.conversationId!=='string'||typeof r.messageId!=='string'))return null;
  return {destination:v.destination,kind:v.kind,title:v.title,body:v.body,sourceRefs:v.sourceRefs.map(r=>({app:r.app,conversationId:r.conversationId,messageId:r.messageId})),visibility:'private',idempotencyKey:v.idempotencyKey};
 }
 export async function saveToVision(userId:string,input:SaveRequest,repo:SaveRepository=neoSaveRepository,fetchImpl:typeof fetch=fetch):Promise<SaveReceipt>{
+ const payloadHash=hash(canonical(input));
+ // Receipt history belongs to this authenticated owner even after source deletion or grant revocation.
+ const previous=await repo.lookup(userId,input.idempotencyKey);
+ if(previous)return previous.hash===payloadHash?previous.receipt:{status:'rejected',reason:'Idempotency key reused with different content'};
  const identity=await repo.identity(userId);
  if(!identity)return {status:'needs_auth',reason:'Sign in with Ideaflow ID to link your destination'};
  for(const ref of input.sourceRefs){const content=await repo.source(userId,ref.conversationId!,ref.messageId!);if(content===null)return {status:'rejected',reason:'Source is unavailable'};if(input.kind==='excerpt'&&!content.includes(input.body))return {status:'rejected',reason:'Selection no longer matches the source'};}
  const token=await repo.token(userId);
  if(!token)return {status:'needs_auth',reason:'Connect Vision and explicitly allow write access'};
  try {if(!await freshGrant(token,identity,fetchImpl))return {status:'needs_auth',reason:'Vision write permission or account linkage is missing or revoked'};}catch{return {status:'unavailable',reason:'Could not check Vision permission; nothing dispatched'};}
- const payloadHash=hash(canonical(input));
  const reservation=await repo.reserve(userId,input.idempotencyKey,payloadHash);
  if(reservation.hash!==payloadHash)return {status:'rejected',reason:'Idempotency key reused with different content'};
  if(!reservation.fresh)return reservation.receipt;

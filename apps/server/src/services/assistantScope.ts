@@ -1,7 +1,7 @@
 /** Server-authorized context for a single turn. Default deny for every tool added later. */
 export type AssistantScope = { kind: 'universal' | 'conversation'; conversationId: string };
 export const SCOPE_DENIED = { error: "Not available in this chat's context" } as const;
-const CHAT_TOOLS = new Set(['get_data_sources', 'search_messages', 'list_conversations', 'read_messages', 'send_message', 'post_context', 'read_context']);
+const CHAT_TOOLS = new Set(['get_data_sources', 'search_messages', 'list_conversations', 'read_messages', 'read_context']);
 export function toolAvailableInScope(scope: AssistantScope, name: string): boolean {
   return scope.kind === 'universal' || CHAT_TOOLS.has(name);
 }
@@ -9,7 +9,7 @@ export function scopedToolInput(scope: AssistantScope, name: string, input: Reco
   if (!toolAvailableInScope(scope, name)) return null;
   if (scope.kind === 'universal') return input;
   if (input.conversationId !== undefined && input.conversationId !== scope.conversationId) return null;
-  if (['read_messages', 'send_message', 'post_context', 'read_context'].includes(name)) {
+  if (['read_messages', 'read_context'].includes(name)) {
     if (input.person || (input.conversationId !== undefined && input.conversationId !== scope.conversationId)) return null;
     return { ...input, conversationId: scope.conversationId };
   }

@@ -1539,13 +1539,13 @@ export function ChatScreen({
     [forwardToAssistant]
   );
 
-  const handleSaveToVision = useCallback(async (message: Message, selection?: string): Promise<boolean> => {
+  const handleSaveToVision = useCallback(async (message: Message, selection?: string, newCopyKey?: string): Promise<boolean> => {
     const body = selection ?? message.content;
     if (!body.trim()) return false;
     try {
       const crypto = await import('expo-crypto');
       const key = await crypto.digestStringAsync(crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([message.id, body]));
-      const receipt = await api.saveToVision({destination:'vision',kind:'excerpt',title:'Saved from OpenChat',body,sourceRefs:[{app:'openchat',conversationId:message.conversationId,messageId:message.id}],visibility:'private',idempotencyKey:'openchat-save:'+key});
+      const receipt = await api.saveToVision({destination:'vision',kind:'excerpt',title:'Saved from OpenChat',body,sourceRefs:[{app:'openchat',conversationId:message.conversationId,messageId:message.id}],visibility:'private',idempotencyKey:newCopyKey??('openchat-save:'+key)});
       if (receipt.status === 'saved' && receipt.destinationId) {
         Alert.alert('Saved to Vision','Private note saved. Source chat is unchanged.',[{text:'Done'},{text:'Open Vision',onPress:()=>{if(receipt.url&&(receipt.url==='https://vision.ideaflow.app'||receipt.url.startsWith('https://vision.ideaflow.app/')))void Linking.openURL(receipt.url);}}]);
         return true;
@@ -1558,7 +1558,16 @@ export function ChatScreen({
             } else Alert.alert('Vision connection',connection.reason??'Connection is ready. Choose Save again.');
           } catch { Alert.alert('Connection unavailable','Your selection stays here.'); }
         })();}}]);
-      } else Alert.alert(receipt.status==='uncertain'?'Check Vision before saving again':'Vision save unavailable',receipt.reason??receipt.status);
+      } else if (receipt.status === 'uncertain') {
+        Alert.alert('Save outcome unknown','The earlier note may already exist. Check Vision first. Creating a new copy can duplicate it.',[
+          {text:'Keep selection',style:'cancel'},
+          {text:'Open Vision',onPress:()=>{void Linking.openURL('https://vision.ideaflow.app/');}},
+          {text:'Save a new copy…',onPress:()=>{Alert.alert('Create another private copy?','The previous save may already exist. This creates a new save identity and may duplicate that note.',[
+            {text:'Cancel',style:'cancel'},
+            {text:'Create new copy',onPress:()=>{void handleSaveToVision(message,body,'openchat-copy:'+crypto.randomUUID());}},
+          ]);}},
+        ]);
+      } else Alert.alert('Vision save unavailable',receipt.reason??receipt.status);
     } catch { Alert.alert('Save receipt unavailable','Vision may have saved this. Your selection stays here. Check Vision before creating another save.'); }
     return false;
   },[]);
@@ -2093,7 +2102,7 @@ export function ChatScreen({
 
       {containsBot && (
         <View style={{paddingHorizontal:16,paddingVertical:8,backgroundColor:c.surface,borderTopWidth:1,borderColor:c.border}}>
-          {isAssistantDM ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Assistant context for next message" accessibilityValue={{text:isolateAssistant?'This chat only':'Universal'}} onPress={()=>setIsolateAssistant(value=>!value)} style={{minHeight:44,justifyContent:'center'}}><Text style={{color:c.textPrimary,...type.meta}}>Context: {isolateAssistant?'This chat only':'Universal'} · Change for next message</Text></TouchableOpacity> : <Text style={{color:c.textMetadata,...type.meta}}>Assistant context: this chat only</Text>}
+          {isAssistantDM ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Assistant context for this chat" accessibilityValue={{text:isolateAssistant?'This chat only':'Universal'}} onPress={()=>setIsolateAssistant(value=>!value)} style={{minHeight:44,justifyContent:'center'}}><Text style={{color:c.textPrimary,...type.meta}}>Context: {isolateAssistant?'This chat only':'Universal'} · Assistant context for this chat</Text></TouchableOpacity> : <Text style={{color:c.textMetadata,...type.meta}}>Assistant context: this chat only</Text>}
         </View>
       )}
 

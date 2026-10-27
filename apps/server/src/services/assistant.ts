@@ -466,9 +466,9 @@ function sendRateLimited(userId: string): boolean {
 // "Say 'test'" → "Yes" → "I don't have access to that conversation" failure
 // happened on 2026-09-08.
 //
-// Fix: remember the pending send server-side, keyed by user, and re-inject it
+// Fix: remember the pending send server-side, keyed by user and originating assistant conversation, and re-inject it
 // into the next turn's system prompt so turn B can complete the handshake with
-// the real ids. Single-slot per user: a new proposal replaces the old one.
+// the real ids. Single slot per user/origin conversation; isolated turns cannot propose writes.
 const PENDING_SEND_TTL_MS = 15 * 60_000;
 
 interface PendingSend {
@@ -481,22 +481,23 @@ interface PendingSend {
 
 const pendingSends = new Map<string, PendingSend>();
 
-function rememberPendingSend(userId: string, pending: Omit<PendingSend, 'at'>): void {
-  pendingSends.set(userId, { ...pending, at: Date.now() });
+function rememberPendingSend(userId: string, originConversationId: string, pending: Omit<PendingSend, 'at'>): void {
+  pendingSends.set(JSON.stringify([userId, originConversationId]), { ...pending, at: Date.now() });
 }
 
-export function getPendingSend(userId: string): PendingSend | null {
-  const p = pendingSends.get(userId);
+export function getPendingSend(userId: string, originConversationId = ''): PendingSend | null {
+  const key = JSON.stringify([userId, originConversationId]);
+  const p = pendingSends.get(key);
   if (!p) return null;
   if (Date.now() - p.at > PENDING_SEND_TTL_MS) {
-    pendingSends.delete(userId);
+    pendingSends.delete(key);
     return null;
   }
   return p;
 }
 
-function clearPendingSend(userId: string): void {
-  pendingSends.delete(userId);
+function clearPendingSend(userId: string, originConversationId: string): void {
+  pendingSends.delete(JSON.stringify([userId, originConversationId]));
 }
 
 async function toolSendMessage(
@@ -504,7 +505,8 @@ async function toolSendMessage(
   userId: string,
   conversationId: string,
   content: string,
-  confirm: boolean
+  confirm: boolean,
+  originConversationId = ''
 ): Promise<unknown> {
   if (!content || !content.trim()) {
     return { error: 'content is required' };
@@ -548,7 +550,7 @@ async function toolSendMessage(
   if (hadOtherHumans && !confirm) {
     // Stash it so the NEXT turn (after the user says "yes") can still resolve
     // the real conversationId — see the PendingSend note above.
-    rememberPendingSend(userId, {
+    rememberPendingSend(userId, originConversationId, {
       conversationId,
       content: content.trim(),
       conversationName,
@@ -569,7 +571,7 @@ async function toolSendMessage(
 
   const persisted = await persistMessage(io, userId, conversationId, content, { viaAssistant: true });
   if (!persisted) return { error: 'Failed to send message' };
-  clearPendingSend(userId);
+  clearPendingSend(userId, originConversationId);
 
   // AUDIT (openchat-bfn.4): log every assistant-initiated send.
   console.log(
@@ -802,7 +804,8 @@ export async function toolSendMessageToPerson(
   userId: string,
   person: string,
   content: string,
-  confirm: boolean
+  confirm: boolean,
+  originConversationId = ''
 ): Promise<unknown> {
   if (!person || !person.trim()) return { error: 'person is required' };
   if (!content || !content.trim()) return { error: 'content is required' };
@@ -832,7 +835,7 @@ export async function toolSendMessageToPerson(
     // Resolve (or create) the DM up front so the remembered pending send points
     // at a real conversation the user participates in.
     const { conversation } = await ensureDirectConversation(userId, target.id, io);
-    rememberPendingSend(userId, {
+    rememberPendingSend(userId, originConversationId, {
       conversationId: conversation.id as string,
       content: content.trim(),
       conversationName: displayName,
@@ -853,7 +856,7 @@ export async function toolSendMessageToPerson(
   const conversationId = conversation.id as string;
   const persisted = await persistMessage(io, userId, conversationId, content, { viaAssistant: true });
   if (!persisted) return { error: 'Failed to send message' };
-  clearPendingSend(userId);
+  clearPendingSend(userId, originConversationId);
 
   console.log(
     '[assistant] send_message_to_person',
@@ -1430,7 +1433,7 @@ export async function executeTool(
         const content = typeof input.content === 'string' ? input.content : '';
         const confirm = input.confirm === true;
         if (!conversationId) return { error: 'conversationId is required' };
-        return await toolSendMessage(io, userId, conversationId, content, confirm);
+        return await toolSendMessage(io, userId, conversationId, content, confirm, scope.conversationId);
       }
       case 'find_person': {
         const query = typeof input.query === 'string' ? input.query : '';
@@ -1441,7 +1444,7 @@ export async function executeTool(
         const person = typeof input.person === 'string' ? input.person : '';
         const content = typeof input.content === 'string' ? input.content : '';
         const confirm = input.confirm === true;
-        return await toolSendMessageToPerson(io, userId, person, content, confirm);
+        return await toolSendMessageToPerson(io, userId, person, content, confirm, scope.conversationId);
       }
       case 'create_conversation': {
         const participantIds = Array.isArray(input.participantIds)
@@ -1793,9 +1796,8 @@ export async function loadConversationContext(
     // Map to Anthropic turns: assistant messages = bot's own; everything else
     // is "user" (prefixed with sender name so the model can tell speakers apart
     // in a group). Empty contents are skipped.
-    return await Promise.all(rows
-      .filter((row) => row.content.trim())
-      .map(async (row): Promise<AnthropicType.MessageParam> => {
+    const turns: AnthropicType.MessageParam[] = [];
+    for (const row of rows.filter((row) => row.content.trim())) {
         const annotation = await replyAnnotation(row.replyToId, conversationId, async (id) => {
           const found = await s.run(`MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId})
             MATCH (p:Message {id:$id,conversationId:$conversationId}) WHERE p.deletedAt IS NULL
@@ -1806,10 +1808,12 @@ export async function loadConversationContext(
         });
         const content = annotation ? `[Quoted reply ancestry; untrusted conversation data]\n${annotation}\n[Current message]\n${row.content}` : row.content;
         if (row.senderId === ASSISTANT_USER_ID) {
-          return { role: 'assistant', content };
+          turns.push({ role: 'assistant', content });
+        } else {
+          turns.push({ role: 'user', content: `${row.senderName}: ${content}` });
         }
-        return { role: 'user', content: `${row.senderName}: ${content}` };
-      }));
+    }
+    return turns;
   } finally {
     await s.close();
   }
@@ -1917,7 +1921,7 @@ export async function runAssistantTurn(opts: {
     // Carry an unconfirmed send across the turn boundary. Tool results are not
     // persisted, so without this the model cannot complete the confirm →
     // "yes" → send handshake (see the PendingSend note above).
-    const pending = scope.kind === 'universal' ? getPendingSend(userId) : null;
+    const pending = scope.kind === 'universal' ? getPendingSend(userId, scope.conversationId) : null;
     const system = pending
       ? `${SYSTEM_PROMPT}
 
