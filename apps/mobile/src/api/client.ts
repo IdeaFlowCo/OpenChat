@@ -1025,10 +1025,13 @@ export function addMeCardUrl(token: string): string {
   return `${OPENCHAT_URL}/c/${token}`;
 }
 
-export type VisionSaveReceipt = {status:'saved'|'rejected'|'needs_auth'|'unavailable'|'uncertain';destinationId?:string;url?:string;reason?:string};
+export type VisionSaveReceipt = {status:'saved'|'rejected'|'needs_auth'|'unavailable'|'uncertain';destinationId?:string;url?:string;reason?:string;recoveryAvailable?:boolean};
+export type VisionSaveRequest = {destination:'vision';kind:'excerpt'|'answer'|'summary'|'note';title:string;body:string;sourceRefs:Array<{app:'openchat';conversationId:string;messageId:string;sourceDigest:string}>;visibility:'private';idempotencyKey:string;retryOf?:string};
+export type VisionSaveReview = {status:'ready';sourceRefs:VisionSaveRequest['sourceRefs'];sourceContents:string[]} | {status:'rejected'|'unavailable';reason:string};
 export const api = {
   connectVision: () => request<{status:string;approvalUrl?:string;confirmationCode?:string;reason?:string}>('/api/vision/connection',{method:'POST',body:'{}',expireAuthOnForbidden:false}),
-  saveToVision: (input:{destination:'vision';kind:'excerpt'|'answer'|'summary'|'note';title:string;body:string;sourceRefs:Array<{app:'openchat';conversationId:string;messageId:string;sourceDigest:string}>;visibility:'private';idempotencyKey:string}) => request<VisionSaveReceipt>('/api/vision/saves',{method:'POST',body:JSON.stringify(input),expireAuthOnForbidden:false}),
+  saveToVision: (input:VisionSaveRequest) => request<VisionSaveReceipt>('/api/vision/saves',{method:'POST',body:JSON.stringify(input),expireAuthOnForbidden:false}),
+  reviewVisionSave: (input:VisionSaveRequest) => request<VisionSaveReview>('/api/vision/saves/review',{method:'POST',body:JSON.stringify(input),expireAuthOnForbidden:false}),
   // ── Context Lane ──────────────────────────────────────────────────────────
   listContextPosts: (conversationId: string, cursor?: string, limit?: number, kind?: string, search?: string) => {
     const params = new URLSearchParams();

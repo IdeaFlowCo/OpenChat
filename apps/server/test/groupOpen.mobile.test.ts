@@ -6,6 +6,8 @@ import type { Conversation, Message } from '../../mobile/src/api/client.js';
 const mocks = vi.hoisted(() => ({
   chat: {} as Record<string, any>,
   recording: {} as Record<string, any>,
+  vision: {saveToVision:vi.fn(),reviewVisionSave:vi.fn(),connectVision:vi.fn()},
+  uuid:vi.fn(()=>'synthetic-fresh-attempt'),
   navigation: { setOptions: vi.fn(), navigate: vi.fn() },
   route: { name: 'Chat', params: { conversationId: 'sailing' } },
   receive: vi.fn(),
@@ -59,7 +61,8 @@ vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => mocks.c
 vi.mock('../../mobile/src/contexts/SocialExperienceContext', () => ({ useSocialExperience: () => ({ enhanced: false }) }));
 vi.mock('../../mobile/src/contexts/RecordingContext', () => ({ useRecording: () => mocks.recording }));
 vi.mock('../../mobile/src/contexts/PrivateNamesContext', () => ({ usePrivateName: (id?: string) => ({ name: id ? mocks.privateName : null }) }));
-vi.mock('../../mobile/src/api/client', () => ({ api: {} }));
+vi.mock('../../mobile/src/api/client', () => ({ api: mocks.vision }));
+vi.mock('expo-crypto',async()=>{const {createHash}=await import('node:crypto');return {CryptoDigestAlgorithm:{SHA256:'sha256'},digestStringAsync:async(_algorithm:string,value:string)=>createHash('sha256').update(value).digest('hex'),randomUUID:mocks.uuid};});
 vi.mock('../../mobile/src/services/notifications', () => ({ setActiveConversationForNotifications: vi.fn() }));
 vi.mock('../../mobile/src/services/haptics', () => ({ hapticSend: vi.fn(), hapticReceive: mocks.receive, hapticGrowTick: vi.fn(), hapticTickle: vi.fn() }));
 vi.mock('../../mobile/src/services/attachments', () => ({ MAX_IMAGES_PER_MESSAGE: 10, pickDocumentWeb: vi.fn(), uploadFile: vi.fn(), FileUploadError: class extends Error {}, pickImages: vi.fn(async () => []), takePhoto: vi.fn(async () => null), filesToAssets: vi.fn(async () => []), releaseAsset: vi.fn(), uploadImage: vi.fn(), uploadImages: vi.fn(async () => ({ uploaded: [], failed: [] })), checkPhotosForSend: vi.fn(async (assets: any[]) => ({ ok: assets, rejected: [] })) }));
@@ -87,6 +90,8 @@ vi.mock('../../mobile/src/components/AgentOverlayButton', () => ({ AgentOverlayB
 vi.mock('../../mobile/src/components/ExportSheet', () => ({ ExportSheet: () => null }));
 
 import { pickDocumentWeb, uploadFile, pickImages, checkPhotosForSend } from '../../mobile/src/services/attachments';
+import { Alert } from 'react-native';
+import { ApiError, errorFromResponse } from '../../mobile/src/api/errors';
 import { ChatScreen } from '../../mobile/src/screens/ChatScreen.js';
 
 function message(id: string, overrides: Partial<Message> = {}): Message {
@@ -450,5 +455,54 @@ describe('attachment destination and scope during navigation',()=>{
     await act(async()=>{finish({ok:[photo],rejected:[]});await sending;});
     expect(mocks.chat.sendMessageToConversation).toHaveBeenCalledExactlyOnceWith('sailing','group photo caption',undefined,undefined,[photo],{assistantScope:'universal'});
     expect(mocks.chat.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('Vision recovery in the actual message action handler',()=>{
+  const selected='selected synthetic text';
+  const source=message('vision-source',{content:selected+' old context'});
+  const refreshed={app:'openchat',conversationId:'sailing',messageId:'vision-source',sourceDigest:'b'.repeat(64)};
+  function pressAlert(label:string){
+    const buttons=vi.mocked(Alert.alert).mock.calls.at(-1)![2]!;
+    const button=buttons.find(button=>button.text===label)!;
+    button.onPress?.();
+  }
+  async function save(){
+    await render();
+    let result=true;
+    await act(async()=>{result=await screen!.root.findByType('MessageActionSheet').props.onSaveToVision(source,selected);});
+    return result;
+  }
+  it('shows review first and dispatches a new identity only after the final explicit action',async()=>{
+    mocks.vision.saveToVision.mockResolvedValueOnce({status:'rejected',reason:'Source changed before dispatch',recoveryAvailable:true}).mockResolvedValueOnce({status:'saved',destinationId:'synthetic-note'});
+    mocks.vision.reviewVisionSave.mockResolvedValueOnce({status:'ready',sourceRefs:[refreshed],sourceContents:[selected+' updated context']});
+    expect(await save()).toBe(false);
+    expect(vi.mocked(Alert.alert).mock.calls.at(-1)![0]).toBe('Save rejected before dispatch');
+    expect(mocks.vision.saveToVision).toHaveBeenCalledOnce();expect(mocks.vision.reviewVisionSave).not.toHaveBeenCalled();expect(mocks.uuid).not.toHaveBeenCalled();
+    await act(async()=>{pressAlert('Refresh and review');});
+    expect(vi.mocked(Alert.alert).mock.calls.at(-1)!.slice(0,2)).toEqual(['Review refreshed source',expect.stringContaining(selected+' updated context')]);
+    expect(mocks.vision.saveToVision).toHaveBeenCalledOnce();expect(mocks.uuid).not.toHaveBeenCalled();
+    const initial=mocks.vision.saveToVision.mock.calls[0][0];
+    await act(async()=>{pressAlert('Start new save attempt');});
+    expect(mocks.vision.saveToVision).toHaveBeenCalledTimes(2);expect(mocks.uuid).toHaveBeenCalledOnce();
+    expect(mocks.vision.saveToVision.mock.calls[1][0]).toEqual({...initial,sourceRefs:[refreshed],idempotencyKey:'openchat-attempt:synthetic-fresh-attempt',retryOf:initial.idempotencyKey});
+    expect(vi.mocked(Alert.alert).mock.calls.at(-1)![0]).toBe('Saved to Vision');
+  });
+  it.each(['timeout','transport','unproven'])('does not offer a non-dispatch recovery for %s',async failure=>{
+    if(failure==='unproven')mocks.vision.saveToVision.mockResolvedValueOnce({status:'rejected',reason:'Legacy rejection'});
+    else mocks.vision.saveToVision.mockRejectedValueOnce(failure==='timeout'?new ApiError(503,'unknown',JSON.stringify({status:'uncertain',reason:'openchat-save:'+'a'.repeat(64)})):Error('connection lost'));
+    await save();
+    const calls=vi.mocked(Alert.alert).mock.calls;
+    expect(calls.at(-1)![0]).not.toBe('Save rejected before dispatch');
+    expect(mocks.vision.reviewVisionSave).not.toHaveBeenCalled();expect(mocks.uuid).not.toHaveBeenCalled();
+    expect(mocks.vision.saveToVision).toHaveBeenCalledOnce();
+  });
+  it('retains the actual Response503 to ApiError marker and warning in the nested save catch',async()=>{
+    const marker='openchat-save:'+'c'.repeat(64);
+    mocks.vision.saveToVision.mockRejectedValueOnce(await errorFromResponse(new Response(JSON.stringify({status:'uncertain',reason:marker}),{status:503})));
+    await save();
+    const alert=vi.mocked(Alert.alert).mock.calls.at(-1)!;
+    expect(alert[0]).toBe('Save outcome unknown');expect(alert[1]).toContain(marker);expect(alert[1]).toContain('duplicate');
+    expect(mocks.uuid).not.toHaveBeenCalled();
   });
 });

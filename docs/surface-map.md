@@ -100,5 +100,5 @@ visitors see **Signed in as [name]** and **Open OpenChat**; signed-out visitors
 see **Sign in**. It refreshes on return and cross-tab sign-out. Agent setup links
 to the shared `/agents` guide instead of maintaining separate MCP snippets.
 
-| Save to Vision | Chats → chat → message Actions → Save to Vision (or exact selected text) | Private note with source and destination receipt; missing consent retains selection |
+| Save to Vision | Chats → chat → message Actions → Save to Vision (or exact selected text) | Private note with source and destination receipt; missing consent retains selection; proven pre-dispatch rejections offer Refresh and review → Start new save attempt without replaying the old receipt |
 | Assistant context | Chat composer → Context control in private OpenChat Agent DM | Universal/current-chat indicator; narrowing affects the next message only; groups stay isolated |

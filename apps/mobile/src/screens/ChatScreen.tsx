@@ -1,3 +1,5 @@
+import { offerVisionSaveRecovery } from '../utils/visionSaveRecovery';
+import type { VisionSaveRequest } from '../api/client';
 import { uncertainVisionAlert, presentVisionSaveFailure } from '../utils/visionSaveFeedback';
 import { ChatTranslationBar } from '../components/TranslationControls';
 import { TranslatedMessage } from '../components/TranslatedMessage';
@@ -1547,30 +1549,42 @@ export function ChatScreen({
       const crypto = await import('expo-crypto');
       const key = await crypto.digestStringAsync(crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([message.id, body]));
       const sourceDigest = await crypto.digestStringAsync(crypto.CryptoDigestAlgorithm.SHA256, message.content || message.transcript || '');
-      const receipt = await api.saveToVision({destination:'vision',kind:'excerpt',title:'Saved from OpenChat',body,sourceRefs:[{app:'openchat',conversationId:message.conversationId,messageId:message.id,sourceDigest}],visibility:'private',idempotencyKey:newCopyKey??('openchat-save:'+key)});
-      if (receipt.status === 'saved' && receipt.destinationId) {
-        Alert.alert('Saved to Vision','Private note saved. Source chat is unchanged.',[{text:'Done'},{text:'Open Vision',onPress:()=>{if(receipt.url&&(receipt.url==='https://vision.ideaflow.app'||receipt.url.startsWith('https://vision.ideaflow.app/')))void Linking.openURL(receipt.url);}}]);
-        return true;
-      }
-      if (receipt.status === 'needs_auth') {
-        Alert.alert('Connect Vision',receipt.reason??'Allow Vision write access using the same Ideaflow ID. Your selection stays here.',[{text:'Keep selection',style:'cancel'},{text:'Connect Vision',onPress:()=>{void (async()=>{
-          try { const connection=await api.connectVision();
-            if(connection.approvalUrl?.startsWith('https://id.ideaflow.app/agents/approve?')) {
-              Alert.alert('Confirm your connection','Compare this code on the Ideaflow approval page: '+connection.confirmationCode+'. Select Vision write explicitly. Return here and choose Save again; the selection and save identity are retained.',[{text:'Cancel',style:'cancel'},{text:'Open Ideaflow',onPress:()=>{void Linking.openURL(connection.approvalUrl!);}}]);
-            } else Alert.alert('Vision connection',connection.reason??'Connection is ready. Choose Save again.');
-          } catch { Alert.alert('Connection unavailable','Your selection stays here.'); }
-        })();}}]);
-      } else if (receipt.status === 'uncertain') {
-        const alert = uncertainVisionAlert(receipt.reason);
-        Alert.alert(alert.title,alert.message,[
-          {text:'Keep selection',style:'cancel'},
-          {text:'Open Vision',onPress:()=>{void Linking.openURL('https://vision.ideaflow.app/');}},
-          {text:'Save a new copy…',onPress:()=>{Alert.alert('Create another private copy?','The previous save may already exist. This creates a new save identity and may duplicate that note.',[
-            {text:'Cancel',style:'cancel'},
-            {text:'Create new copy',onPress:()=>{void handleSaveToVision(message,body,'openchat-copy:'+crypto.randomUUID());}},
-          ]);}},
-        ]);
-      } else Alert.alert('Vision save unavailable',receipt.reason??receipt.status);
+      const initialRequest:VisionSaveRequest = {destination:'vision',kind:'excerpt',title:'Saved from OpenChat',body,sourceRefs:[{app:'openchat',conversationId:message.conversationId,messageId:message.id,sourceDigest}],visibility:'private',idempotencyKey:newCopyKey??('openchat-save:'+key)};
+      const submit = async (input:VisionSaveRequest):Promise<boolean> => {
+        try {
+          const receipt = await api.saveToVision(input);
+          if (receipt.status === 'saved' && receipt.destinationId) {
+            Alert.alert('Saved to Vision','Private note saved. Source chat is unchanged.',[{text:'Done'},{text:'Open Vision',onPress:()=>{if(receipt.url&&(receipt.url==='https://vision.ideaflow.app'||receipt.url.startsWith('https://vision.ideaflow.app/')))void Linking.openURL(receipt.url);}}]);
+            return true;
+          }
+          if (receipt.status === 'needs_auth') {
+            Alert.alert('Connect Vision',receipt.reason??'Allow Vision write access using the same Ideaflow ID. Your selection stays here.',[{text:'Keep selection',style:'cancel'},{text:'Connect Vision',onPress:()=>{void (async()=>{
+              try { const connection=await api.connectVision();
+                if(connection.approvalUrl?.startsWith('https://id.ideaflow.app/agents/approve?')) {
+                  Alert.alert('Confirm your connection','Compare this code on the Ideaflow approval page: '+connection.confirmationCode+'. Select Vision write explicitly. Return here and choose Save again; the selection and save identity are retained.',[{text:'Cancel',style:'cancel'},{text:'Open Ideaflow',onPress:()=>{void Linking.openURL(connection.approvalUrl!);}}]);
+                } else Alert.alert('Vision connection',connection.reason??'Connection is ready. Choose Save again.');
+              } catch { Alert.alert('Connection unavailable','Your selection stays here.'); }
+            })();}}]);
+          } else if (receipt.status === 'uncertain') {
+            const alert = uncertainVisionAlert(receipt.reason);
+            Alert.alert(alert.title,alert.message,[
+              {text:'Keep selection',style:'cancel'},
+              {text:'Open Vision',onPress:()=>{void Linking.openURL('https://vision.ideaflow.app/');}},
+              {text:'Save a new copy…',onPress:()=>{Alert.alert('Create another private copy?','The previous save may already exist. This creates a new save identity and may duplicate that note.',[
+                {text:'Cancel',style:'cancel'},
+                {text:'Create new copy',onPress:()=>{void submit({...input,idempotencyKey:'openchat-copy:'+crypto.randomUUID(),retryOf:undefined});}},
+              ]);}},
+            ]);
+          } else if (!offerVisionSaveRecovery(input,receipt,{
+            alert:(title,message,buttons)=>Alert.alert(title,message,buttons),
+            review:api.reviewVisionSave,
+            newAttemptKey:()=> 'openchat-attempt:'+crypto.randomUUID(),
+            submit,
+          })) Alert.alert('Vision save unavailable',receipt.reason??receipt.status);
+        } catch (error) { presentVisionSaveFailure(error, (title, message) => Alert.alert(title, message)); }
+        return false;
+      };
+      return await submit(initialRequest);
     } catch (error) { presentVisionSaveFailure(error, (title, message) => Alert.alert(title, message)); }
     return false;
   },[]);
