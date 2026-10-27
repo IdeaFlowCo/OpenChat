@@ -9,6 +9,7 @@
  *   https://chat.globalbr.ai/c/<t> → { type: 'card', token } (legacy)
  *   Both hosts also accept /u/<id>, /i/<token>, and /app/?intent=... links.
  *   https://chat.ideaflow.app/app/original/<thoughtId> → { type: 'original', thoughtId }
+ *   https://chat.ideaflow.app/app/chat/<conversationId> → { type: 'conversation', conversationId }
  *   anything else                   → { type: 'unknown' }
  */
 
@@ -19,12 +20,15 @@ export type ParsedOpenChatUrl =
   | { type: 'invite'; token: string }
   | { type: 'card'; token: string }
   | { type: 'context'; conversationId: string; entryId: string }
+  | { type: 'conversation'; conversationId: string }
   | { type: 'original'; thoughtId: string }
   | ({ type: 'compose' } & ComposeIntent)
   | { type: 'unknown' };
 
 /** Shareable web link to a Stream entry's original message (parsed back as `original`). */
 export const originalMessageUrl = (thoughtId: string) => `https://chat.ideaflow.app/app/original/${encodeURIComponent(thoughtId)}`;
+/** Shareable web link that opens a conversation (parsed back as `conversation`). */
+export const conversationUrl = (conversationId: string) => `https://chat.ideaflow.app/app/chat/${encodeURIComponent(conversationId)}`;
 
 export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
   let url: URL;
@@ -76,6 +80,11 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
     // A Stream entry's original message; the screen re-checks access on open.
     const originalMatch = url.pathname.match(/^\/app\/original\/([^\/]+)\/?$/);
     if (originalMatch?.[1]) return { type: 'original', thoughtId: decodeURIComponent(originalMatch[1]) };
+
+    // A conversation (e.g. a group's default chat linked from the Ideaflow ideas network);
+    // the Chat screen re-checks membership on open.
+    const conversationMatch = url.pathname.match(/^\/app\/chat\/([A-Za-z0-9_-]{1,80})\/?$/);
+    if (conversationMatch?.[1]) return { type: 'conversation', conversationId: conversationMatch[1] };
 
     const contextMatch = url.pathname.match(/^\/app\/context\/([^\/]+)\/([^\/]+)$/);
     if (contextMatch?.[1] && contextMatch?.[2]) return { type: 'context', conversationId: contextMatch[1], entryId: contextMatch[2] };

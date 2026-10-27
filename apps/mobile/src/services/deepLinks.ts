@@ -22,6 +22,11 @@ export function installDeepLinkHandling(): () => void {
       return;
     }
 
+    if (parsed.type === 'conversation') {
+      openConversation({ conversationId: parsed.conversationId });
+      return;
+    }
+
     if (parsed.type === 'context') {
       openConversation({ conversationId: parsed.conversationId, lane: 'context', entryId: parsed.entryId });
       return;
