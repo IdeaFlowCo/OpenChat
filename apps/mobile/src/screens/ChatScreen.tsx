@@ -1,3 +1,4 @@
+import { uncertainVisionAlert } from '../utils/visionSaveFeedback';
 import { ChatTranslationBar } from '../components/TranslationControls';
 import { TranslatedMessage } from '../components/TranslatedMessage';
 import { useChatTranslation } from '../contexts/TranslationContext';
@@ -1559,7 +1560,8 @@ export function ChatScreen({
           } catch { Alert.alert('Connection unavailable','Your selection stays here.'); }
         })();}}]);
       } else if (receipt.status === 'uncertain') {
-        Alert.alert('Save outcome unknown','The earlier note may already exist. Check Vision first. Creating a new copy can duplicate it.',[
+        const alert = uncertainVisionAlert(receipt.reason);
+        Alert.alert(alert.title,alert.message,[
           {text:'Keep selection',style:'cancel'},
           {text:'Open Vision',onPress:()=>{void Linking.openURL('https://vision.ideaflow.app/');}},
           {text:'Save a new copy…',onPress:()=>{Alert.alert('Create another private copy?','The previous save may already exist. This creates a new save identity and may duplicate that note.',[

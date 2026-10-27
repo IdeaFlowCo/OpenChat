@@ -16,6 +16,12 @@ export interface SaveRepository {
  token(userId:string):Promise<string|null>;
 }
 export const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
+export const visionSaveMarker=(userId:string,key:string)=>'openchat-save:'+hash(JSON.stringify([userId,key]));
+function searchableReceipt(receipt:SaveReceipt,userId:string,key:string):SaveReceipt {
+ if(receipt.status!=='uncertain')return receipt;
+ const marker=visionSaveMarker(userId,key);
+ return {...receipt,reason:receipt.reason?.includes(marker)?receipt.reason:(receipt.reason??'Save acknowledgment unknown')+'; check Vision for '+marker};
+}
 function canonical(input:SaveRequest):string { return JSON.stringify([input.destination,input.kind,input.title,input.body,input.sourceRefs.map(r=>[r.app,r.conversationId??null,r.messageId??null]),input.visibility]); }
 function sealKey(token:string,userId:string):{ciphertext:string;iv:string} {
  const hex=process.env.OC_KEY_ENCRYPTION_SECRET;
@@ -58,7 +64,7 @@ export async function saveToVision(userId:string,input:SaveRequest,repo:SaveRepo
  const payloadHash=hash(canonical(input));
  // Receipt history belongs to this authenticated owner even after source deletion or grant revocation.
  const previous=await repo.lookup(userId,input.idempotencyKey);
- if(previous)return previous.hash===payloadHash?previous.receipt:{status:'rejected',reason:'Idempotency key reused with different content'};
+ if(previous)return previous.hash===payloadHash?searchableReceipt(previous.receipt,userId,input.idempotencyKey):{status:'rejected',reason:'Idempotency key reused with different content'};
  const identity=await repo.identity(userId);
  if(!identity)return {status:'needs_auth',reason:'Sign in with Ideaflow ID to link your destination'};
  for(const ref of input.sourceRefs){const content=await repo.source(userId,ref.conversationId!,ref.messageId!);if(content===null)return {status:'rejected',reason:'Source is unavailable'};if(input.kind==='excerpt'&&!content.includes(input.body))return {status:'rejected',reason:'Selection no longer matches the source'};}
@@ -67,8 +73,8 @@ export async function saveToVision(userId:string,input:SaveRequest,repo:SaveRepo
  try {if(!await freshGrant(token,identity,fetchImpl))return {status:'needs_auth',reason:'Vision write permission or account linkage is missing or revoked'};}catch{return {status:'unavailable',reason:'Could not check Vision permission; nothing dispatched'};}
  const reservation=await repo.reserve(userId,input.idempotencyKey,payloadHash);
  if(reservation.hash!==payloadHash)return {status:'rejected',reason:'Idempotency key reused with different content'};
- if(!reservation.fresh)return reservation.receipt;
- const marker='openchat-save:'+hash(JSON.stringify([userId,input.idempotencyKey]));
+ if(!reservation.fresh)return searchableReceipt(reservation.receipt,userId,input.idempotencyKey);
+ const marker=visionSaveMarker(userId,input.idempotencyKey);
  const refs=input.sourceRefs.map(r=>`https://chat.ideaflow.app/app/chat/${encodeURIComponent(r.conversationId!)}?message=${encodeURIComponent(r.messageId!)}`).join('\n');
  const bodyMd=[input.title?'# '+input.title:'',input.body,refs?'Source:\n'+refs:'',`<!-- ${marker} -->`].filter(Boolean).join('\n\n');
  let receipt:SaveReceipt;
