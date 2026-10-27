@@ -1,4 +1,4 @@
-import { uncertainVisionAlert } from '../utils/visionSaveFeedback';
+import { uncertainVisionAlert, presentVisionSaveFailure } from '../utils/visionSaveFeedback';
 import { ChatTranslationBar } from '../components/TranslationControls';
 import { TranslatedMessage } from '../components/TranslatedMessage';
 import { useChatTranslation } from '../contexts/TranslationContext';
@@ -1570,7 +1570,7 @@ export function ChatScreen({
           ]);}},
         ]);
       } else Alert.alert('Vision save unavailable',receipt.reason??receipt.status);
-    } catch { Alert.alert('Save receipt unavailable','Vision may have saved this. Your selection stays here. Check Vision before creating another save.'); }
+    } catch (error) { presentVisionSaveFailure(error, (title, message) => Alert.alert(title, message)); }
     return false;
   },[]);
 

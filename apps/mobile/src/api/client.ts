@@ -1,3 +1,5 @@
+import { ApiError, errorFromResponse } from './errors';
+export { ApiError } from './errors';
 import { authenticatedRequestLease } from './authenticatedRequest';
 import type { HostedContextPreferences, HostedContextRequest } from '../types/contextHosted';
 import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
@@ -384,18 +386,6 @@ export async function clearSession(): Promise<void> {
   try { await AsyncStorage.removeItem(USER_KEY); } catch { /* ignore */ }
 }
 
-/** Custom error class so callers / UI can branch on status without parsing. */
-export class ApiError extends Error {
-  status: number;
-  body: string;
-  constructor(status: number, message: string, body: string) {
-    super(message);
-    this.status = status;
-    this.body = body;
-    this.name = 'ApiError';
-  }
-}
-
 // Listener for global auth expiry. ChatProvider hooks this on mount so a
 // 401 from any API call cascades into a clean sign-out + return to Login.
 type AuthListener = () => void;
@@ -474,14 +464,7 @@ async function request<T>(
     res = await authenticatedFetch(`${OPENCHAT_URL}${path}`, { ...fetchInit, headers });
   }
   if (!res.ok) {
-    const text = await res.text();
-    let msg = text;
-    try {
-      const j = JSON.parse(text);
-      msg = j.error || j.message || text;
-    } catch {
-      /* not JSON */
-    }
+    const failure = await errorFromResponse(res);
     if (res.status === 401 || (res.status === 403 && expireAuthOnForbidden)) {
       // Token is invalid / expired. Cascade to sign-out so the user isn't
       // stuck on a stale screen with no recovery. Caller still gets a typed
@@ -489,7 +472,7 @@ async function request<T>(
       // already navigated us to Login).
       emitAuthExpired();
     }
-    throw new ApiError(res.status, `${res.status}: ${msg}`, text);
+    throw failure;
   }
   return (await res.json()) as T;
 }
