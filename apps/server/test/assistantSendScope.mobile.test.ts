@@ -22,6 +22,7 @@ vi.mock('../../mobile/src/services/haptics', () => ({ hapticTickle: vi.fn(), hap
 vi.mock('../../mobile/src/components/InAppMessageBanner', () => ({ showInAppBanner: vi.fn() }));
 vi.mock('../../mobile/src/api/socket', () => ({ connect: async () => ({ connected: true, on() {}, off() {} }), disconnect: vi.fn(), joinConversation: vi.fn(), leaveConversation: vi.fn(), emitPresenceUpdate: vi.fn(), sendMessage: vi.fn() }));
 
+import { makeDirectoryAsync } from 'expo-file-system/legacy';
 import { clearSession, setSession } from '../../mobile/src/api/client';
 import { ChatProvider, useChat } from '../../mobile/src/contexts/ChatContext';
 import { RecordingProvider, useRecording } from '../../mobile/src/contexts/RecordingContext';
@@ -101,4 +102,29 @@ it.each([['conversation','universal'],['universal','conversation']] as const)('r
   await act(async()=>{chat.setActiveConversation('shared');});
   expect(chat.messages.at(-1)).toMatchObject({assistantScope:initial,conversationId:'shared',replyToId:'reply',attachments:[{type:'audio'}]});
   expect(chat.captureSendExtras('shared').assistantScope).toBe(next);
+});
+
+it('keeps a captured group destination and scope through asynchronous outbox photo preparation',async()=>{
+  await act(async()=>{void chat.bootstrapIfAuthed();});
+  await act(async()=>{chat.setActiveConversation('shared');chat.setAssistantScope('assistant-dm','conversation');});
+  const send=chat.sendMessageToConversation;
+  const extras=chat.captureSendExtras('shared');
+  const photo={uri:'synthetic-photo',fileName:'synthetic.jpg',mimeType:'image/jpeg',width:2,height:2,fileSize:4};
+  let finish!:()=>void;
+  vi.mocked(makeDirectoryAsync).mockImplementationOnce(()=>new Promise<void>(resolve=>{finish=resolve;}));
+  let sending!:Promise<void>;
+  await act(async()=>{sending=send('shared','group photo caption',undefined,undefined,[photo],extras);});
+  await act(async()=>{chat.setActiveConversation('assistant-dm');});
+  await act(async()=>{finish();await sending;});
+  expect(chat.messages).toHaveLength(0);
+  expect(chat.captureSendExtras('assistant-dm').assistantScope).toBe('conversation');
+  await act(async()=>{chat.setActiveConversation('shared');});
+  expect(chat.messages.at(-1)).toMatchObject({content:'group photo caption',conversationId:'shared',assistantScope:'universal',senderId:'alice',attachments:[{mimeType:'image/jpeg'}]});
+});
+it('rejects an old targeted sender after the authenticated account ends',async()=>{
+  await act(async()=>{void chat.bootstrapIfAuthed();});
+  const send=chat.sendMessageToConversation;
+  await act(async()=>{await chat.signOut({explicit:false});});
+  await expect(send('shared','old payload',undefined,undefined,undefined,{assistantScope:'universal'})).rejects.toThrow('Sign in before sending');
+  expect(chat.messages).toHaveLength(0);
 });

@@ -1,3 +1,4 @@
+import { messageOriginMatch, messageBoundaryFilter, messageAtOrBeforeOrigin, messageBoundaryParams, type MessageBoundary } from './messageBoundary.js';
 import { scopeForParticipants, toolAvailableInScope, scopedToolInput, replyAnnotation, SCOPE_DENIED, type AssistantScope } from './assistantScope.js';
 import { appBridgeConfigured, readApp, searchPublicNoos } from './appSources.js';
 import { unlinkedProvisionConfigured } from './unlinkedProvision.js';
@@ -285,7 +286,8 @@ async function toolSearchMessages(
   userId: string,
   query: string,
   limit: number,
-  scopedConversationId?: string
+  scopedConversationId?: string,
+  boundary?: MessageBoundary
 ): Promise<unknown[]> {
   // Prefer hybrid (semantic + keyword) when embeddings are available, else
   // keyword. We merge results, dedupe by content+conversation, cap at limit.
@@ -293,7 +295,7 @@ async function toolSearchMessages(
   const seen = new Set<string>();
 
   if (!scopedConversationId && embeddingsEnabled()) {
-    const sem = await semanticSearchMessages(userId, query, limit);
+    const sem = await semanticSearchMessages(userId, query, limit, boundary);
     if (sem) {
       for (const h of sem) {
         const key = `${h.conversationId}::${h.content}`;
@@ -313,9 +315,11 @@ async function toolSearchMessages(
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
       WHERE $scopedConversationId IS NULL OR c.id = $scopedConversationId
       WITH collect(c.id) AS cids
+      ${messageOriginMatch}
       MATCH (m:Message)
       WHERE m.conversationId IN cids
         AND m.deletedAt IS NULL
+        AND ${messageBoundaryFilter}
         AND toLower(m.content) CONTAINS toLower($q)
       MATCH (sender:User {id: m.senderId})
       RETURN m.content AS content, m.conversationId AS conversationId,
@@ -323,7 +327,7 @@ async function toolSearchMessages(
       ORDER BY m.createdAt DESC
       LIMIT $limit
       `,
-      { userId, q: query, limit: neo4j.int(limit), scopedConversationId: scopedConversationId ?? null }
+      { userId, q: query, limit: neo4j.int(limit), scopedConversationId: scopedConversationId ?? null, ...messageBoundaryParams(boundary) }
     );
     for (const r of result.records) {
       const createdAt = r.get('createdAt');
@@ -346,27 +350,37 @@ async function toolSearchMessages(
   return out.slice(0, limit);
 }
 
-async function toolListConversations(userId: string, scopedConversationId?: string): Promise<unknown[]> {
+async function toolListConversations(userId: string, scopedConversationId?: string, boundary?: MessageBoundary): Promise<unknown[]> {
   const s = getDriver().session();
   try {
     const result = await s.run(
       `
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
       WHERE $scopedConversationId IS NULL OR c.id = $scopedConversationId
+      ${messageOriginMatch}
       CALL {
         WITH c, u
         MATCH (p:User)-[:PARTICIPATES_IN]->(c)
         WHERE p.id <> u.id
         RETURN collect(p.name) AS otherNames
       }
+      CALL {
+        WITH c, turnOrigin
+        OPTIONAL MATCH (m:Message {conversationId:c.id})
+        WHERE $originMessageId IS NOT NULL AND c.id = $originConversationId
+          AND m.deletedAt IS NULL AND ${messageBoundaryFilter}
+        RETURN m.content AS boundedPreview, m.createdAt AS boundedLastMessageAt
+        ORDER BY m.createdAt DESC
+        LIMIT 1
+      }
       RETURN c.id AS id, c.title AS title, c.type AS type,
-             c.lastMessagePreview AS lastMessagePreview,
-             c.lastMessageAt AS lastMessageAt,
+             CASE WHEN $originMessageId IS NOT NULL AND c.id = $originConversationId THEN left(boundedPreview,100) ELSE c.lastMessagePreview END AS lastMessagePreview,
+             CASE WHEN $originMessageId IS NOT NULL AND c.id = $originConversationId THEN boundedLastMessageAt ELSE c.lastMessageAt END AS lastMessageAt,
              otherNames
-      ORDER BY c.lastMessageAt DESC
+      ORDER BY lastMessageAt DESC
       LIMIT 50
       `,
-      { userId, scopedConversationId: scopedConversationId ?? null }
+      { userId, scopedConversationId: scopedConversationId ?? null, ...messageBoundaryParams(boundary) }
     );
     return result.records.map((r) => {
       const title = r.get('title') as string | null;
@@ -392,7 +406,8 @@ async function toolListConversations(userId: string, scopedConversationId?: stri
 async function toolReadMessages(
   userId: string,
   conversationId: string,
-  limit: number
+  limit: number,
+  boundary?: MessageBoundary
 ): Promise<unknown> {
   const s = getDriver().session();
   try {
@@ -406,15 +421,17 @@ async function toolReadMessages(
     }
     const result = await s.run(
       `
+      MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId})
+      ${messageOriginMatch}
       MATCH (m:Message {conversationId: $conversationId})
-      WHERE m.deletedAt IS NULL
+      WHERE m.deletedAt IS NULL AND ${messageBoundaryFilter}
       MATCH (sender:User {id: m.senderId})
       RETURN m.content AS content, sender.name AS senderName,
              m.senderId AS senderId, m.createdAt AS createdAt
       ORDER BY m.createdAt DESC
       LIMIT $limit
       `,
-      { conversationId, limit: neo4j.int(limit) }
+      { userId, conversationId, limit: neo4j.int(limit), ...messageBoundaryParams(boundary) }
     );
     const messages = result.records
       .map((r) => {
@@ -1386,9 +1403,11 @@ export async function executeTool(
   userId: string,
   name: string,
   input: Record<string, unknown>,
-  scope: AssistantScope
+  scope: AssistantScope,
+  boundary?: MessageBoundary
 ): Promise<unknown> {
   try {
+    if (boundary && boundary.conversationId !== scope.conversationId) return SCOPE_DENIED;
     const current = await deriveAssistantScope(userId, scope.conversationId);
     if (!current || (scope.kind === 'universal' && current.kind !== 'universal')) return SCOPE_DENIED;
     const authorizedInput = scopedToolInput(scope, name, input);
@@ -1418,15 +1437,15 @@ export async function executeTool(
         const query = typeof input.query === 'string' ? input.query : '';
         const limit = typeof input.limit === 'number' && input.limit > 0 ? Math.min(input.limit, 50) : 10;
         if (!query.trim()) return { error: 'query is required' };
-        return { results: await toolSearchMessages(userId, query, limit, scope.kind === 'conversation' ? scope.conversationId : undefined) };
+        return { results: await toolSearchMessages(userId, query, limit, scope.kind === 'conversation' ? scope.conversationId : undefined, boundary) };
       }
       case 'list_conversations':
-        return { conversations: await toolListConversations(userId, scope.kind === 'conversation' ? scope.conversationId : undefined) };
+        return { conversations: await toolListConversations(userId, scope.kind === 'conversation' ? scope.conversationId : undefined, boundary) };
       case 'read_messages': {
         const conversationId = typeof input.conversationId === 'string' ? input.conversationId : '';
         const limit = typeof input.limit === 'number' && input.limit > 0 ? Math.min(input.limit, 100) : 20;
         if (!conversationId) return { error: 'conversationId is required' };
-        return await toolReadMessages(userId, conversationId, limit);
+        return await toolReadMessages(userId, conversationId, limit, boundary);
       }
       case 'send_message': {
         const conversationId = typeof input.conversationId === 'string' ? input.conversationId : '';
@@ -1788,10 +1807,10 @@ export async function loadConversationContext(
     const result = await s.run(
       `
       MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId})
-      MATCH (origin:Message {id:$messageId,conversationId:$conversationId,senderId:$userId})
-      WHERE origin.deletedAt IS NULL
+      MATCH (turnOrigin:Message {id:$messageId,conversationId:$conversationId,senderId:$userId})
+      WHERE turnOrigin.deletedAt IS NULL
       MATCH (m:Message {conversationId: $conversationId})
-      WHERE m.deletedAt IS NULL AND (m.id = origin.id OR m.createdAt < origin.createdAt)
+      WHERE m.deletedAt IS NULL AND ${messageAtOrBeforeOrigin}
       OPTIONAL MATCH (sender:User {id: m.senderId})
       RETURN m.content AS content, m.transcript AS transcript, m.attachments AS attachments, m.assistantPageContext AS pageContext,
              m.senderId AS senderId, sender.name AS senderName, m.replyToId AS replyToId
@@ -1823,8 +1842,8 @@ export async function loadConversationContext(
     for (const row of rows.filter((row) => row.content.trim())) {
         const annotation = await replyAnnotation(row.replyToId, conversationId, async (id) => {
           const found = await s.run(`MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId})
-            MATCH (origin:Message {id:$messageId,conversationId:$conversationId,senderId:$userId}) WHERE origin.deletedAt IS NULL
-            MATCH (p:Message {id:$id,conversationId:$conversationId}) WHERE p.deletedAt IS NULL AND p.createdAt < origin.createdAt
+            MATCH (turnOrigin:Message {id:$messageId,conversationId:$conversationId,senderId:$userId}) WHERE turnOrigin.deletedAt IS NULL
+            MATCH (p:Message {id:$id,conversationId:$conversationId}) WHERE p.deletedAt IS NULL AND p.createdAt < turnOrigin.createdAt
             OPTIONAL MATCH (sender:User {id:p.senderId})
             RETURN p.id AS id,p.conversationId AS conversationId,p.content AS content,p.transcript AS transcript,p.attachments AS attachments,p.replyToId AS replyToId,sender.name AS senderName`, {userId,conversationId,messageId,id});
           const p = found.records[0];
@@ -1983,7 +2002,7 @@ If the user's latest message approves it, call send_message with exactly that co
 
       const toolResults: AnthropicType.ToolResultBlockParam[] = [];
       for (const tu of toolUses) {
-        const result = await executeTool(io, userId, tu.name, (tu.input ?? {}) as Record<string, unknown>, scope);
+        const result = await executeTool(io, userId, tu.name, (tu.input ?? {}) as Record<string, unknown>, scope, {conversationId,messageId});
         toolResults.push({
           type: 'tool_result',
           tool_use_id: tu.id,

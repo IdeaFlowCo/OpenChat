@@ -7,16 +7,27 @@ vi.mock('../src/services/appSources.js',()=>({readApp:h.readApp,appBridgeConfigu
 vi.mock('../src/db.js',()=>({getDriver:()=>({session:()=>({close:async()=>{},run:async(query:string,p:Record<string,any>)=>{
   const result=(rows:Record<string,unknown>[])=>({records:rows.map(row=>({get:(key:string)=>row[key]??null}))});
   if(p.scopeConversationId)return result(h.member?[{type:'direct',participants:['owner','assistant']}]:[]);
+  if(query.includes('RETURN c LIMIT 1'))return result(h.member&&p.conversationId!=='hidden'?[{c:{id:p.conversationId}}]:[]);
+  const boundaryId=p.originMessageId??p.messageId;
+  const boundaryChat=p.originConversationId??p.conversationId;
+  const origin=h.rows.find(r=>r.id===boundaryId&&r.conversationId===boundaryChat&&r.senderId===p.userId&&!r.deletedAt);
+  const bounded=query.includes('m.createdAt < origin.createdAt')||query.includes('m.createdAt < turnOrigin.createdAt');
+  const visible=(r:Row)=>!r.deletedAt&&r.conversationId!=='hidden'&&(!bounded||r.conversationId!==boundaryChat||(origin&&(r.id===origin.id||r.createdAt<origin.createdAt)));
+  if(query.includes('AS lastMessagePreview')){
+    if(!h.member)return result([]);
+    return result(['dm','other'].filter(id=>!p.scopedConversationId||id===p.scopedConversationId).map(id=>{
+      const latest=h.rows.filter(r=>r.conversationId===id&&visible(r)).sort((a,b)=>b.createdAt-a.createdAt)[0];
+      return {id,type:'direct',title:id,otherNames:[],lastMessagePreview:latest?.content,lastMessageAt:latest?.createdAt};
+    }));
+  }
   if(p.limit){
     await h.pause?.();
-    const origin=h.rows.find(r=>r.id===p.messageId&&r.conversationId===p.conversationId&&r.senderId===p.userId&&!r.deletedAt);
     if(!h.member)return result([]);
-    const bounded=query.includes('m.createdAt < origin.createdAt');
-    if(bounded&&!origin)return result([]);
-    return result(h.rows.filter(r=>r.conversationId===p.conversationId&&!r.deletedAt&&(!bounded||r.id===origin!.id||r.createdAt<origin!.createdAt)).sort((a,b)=>b.createdAt-a.createdAt).map(r=>({...r,senderName:'Owner'})));
+    const target=p.q||p.indexName?p.scopedConversationId:p.conversationId;
+    const rows=h.rows.filter(r=>(!target||r.conversationId===target)&&visible(r)&&(!p.q||r.content.toLowerCase().includes(p.q.toLowerCase()))).sort((a,b)=>b.createdAt-a.createdAt);
+    return result(rows.slice(0,Number(p.limit)).map(r=>({...r,senderName:'Owner',score:0.9})));
   }
   if(p.messageId){
-    const origin=h.rows.find(r=>r.id===p.messageId&&r.conversationId===p.conversationId&&r.senderId===p.userId&&!r.deletedAt);
     if(p.id){
       const parent=h.rows.find(r=>r.id===p.id&&r.conversationId===p.conversationId&&!r.deletedAt&&origin&&r.createdAt<origin.createdAt);
       return result(h.member&&parent?[{...parent,senderName:'Owner'}]:[]);
@@ -25,14 +36,16 @@ vi.mock('../src/db.js',()=>({getDriver:()=>({session:()=>({close:async()=>{},run
   }
   return result([]);
 }})})}));
-import { loadAssistantTurn, runAssistantTurn } from '../src/services/assistant.js';
+import { executeTool, loadAssistantTurn, runAssistantTurn } from '../src/services/assistant.js';
 const a:Row={id:'A',conversationId:'dm',senderId:'owner',createdAt:1,content:'Universal request',assistantScope:'universal'};
 const b:Row={id:'B',conversationId:'dm',senderId:'owner',createdAt:2,content:'Isolated request search Vision notes',assistantScope:'conversation'};
 beforeEach(()=>{
   h.rows=[{...a}];h.member=true;h.pause=undefined;h.create.mockReset();h.readApp.mockReset().mockResolvedValue({results:[]});
   vi.stubEnv('ANTHROPIC_API_KEY','synthetic-local-model');
+  vi.stubEnv('OPENAI_API_KEY','');
+  vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({data:[{embedding:[0.1,0.2]}]}))));
 });
-afterEach(()=>{vi.unstubAllEnvs();});
+afterEach(()=>{vi.unstubAllEnvs();vi.unstubAllGlobals();});
 describe('persisted originating message authority and bounded model input',()=>{
   it('delayed universal A cannot consume isolated B that arrives during context loading',async()=>{
     let release!:()=>void;
@@ -79,4 +92,41 @@ describe('persisted originating message authority and bounded model input',()=>{
     h.rows[1].conversationId='dm';h.rows[1].deletedAt=3;
     expect(JSON.stringify((await loadAssistantTurn('owner','dm','A'))?.messages)).not.toContain('Old source');
   });
+  it.each([[2,false],[1,false],[2,true],[1,true]])('bounds all tool results after B arrives at timestamp %s with semantic search %s',async(time,semantic)=>{
+    if(semantic)vi.stubEnv('OPENAI_API_KEY','synthetic-embedding-key');
+    const other={...b,id:'other',conversationId:'other',createdAt:5,content:'Other request after A'};
+    h.rows.push(other);
+    const requests:any[]=[];
+    h.create.mockImplementationOnce(async(request:any)=>{
+      requests.push(structuredClone(request));
+      h.rows.push({...b,createdAt:Number(time)});
+      return {stop_reason:'tool_use',content:[
+        {type:'tool_use',id:'read-origin',name:'read_messages',input:{conversationId:'dm',limit:100,originMessageId:'B',before:'future'}},
+        {type:'tool_use',id:'search',name:'search_messages',input:{query:'request',limit:50,originMessageId:'B'}},
+        {type:'tool_use',id:'list',name:'list_conversations',input:{}},
+        {type:'tool_use',id:'read-other',name:'read_messages',input:{conversationId:'other',limit:100}},
+      ]};
+    }).mockImplementationOnce(async(request:any)=>{
+      requests.push(structuredClone(request));
+      return {stop_reason:'end_turn',content:[{type:'text',text:'Synthetic bounded answer'}]};
+    });
+    await runAssistantTurn({userId:'owner',conversationId:'dm',messageId:'A'});
+    expect(requests).toHaveLength(2);
+    const results=Object.fromEntries(requests[1].messages.at(-1).content.map((r:any)=>[r.tool_use_id,JSON.parse(r.content)]));
+    expect(results['read-origin'].messages.map((m:any)=>m.content)).toEqual([a.content]);
+    expect(results.search.results.map((m:any)=>m.content)).toEqual(expect.arrayContaining([a.content,other.content]));
+    expect(results.list.conversations.find((c:any)=>c.id==='dm').lastMessagePreview).toBe(a.content);
+    expect(results['read-other'].messages.map((m:any)=>m.content)).toEqual([other.content]);
+    expect(JSON.stringify(requests)).not.toContain(b.content);
+    if(semantic)expect(fetch).toHaveBeenCalledOnce();else expect(fetch).not.toHaveBeenCalled();
+  });
+  it('keeps the bound origin when repeated reads vary limits or model pagination input',async()=>{
+    h.rows.push({...b},{...b,id:'tie',createdAt:1});
+    for(const limit of [1,2,100]){
+      expect(await executeTool(undefined,'owner','read_messages',{conversationId:'dm',limit,after:'A',messageId:'B'},{kind:'universal',conversationId:'dm'},{conversationId:'dm',messageId:'A'})).toMatchObject({messages:[{content:a.content}]});
+    }
+    h.member=false;
+    expect(await executeTool(undefined,'owner','read_messages',{conversationId:'dm'},{kind:'universal',conversationId:'dm'},{conversationId:'dm',messageId:'A'})).toEqual({error:"Not available in this chat's context"});
+  });
+
 });

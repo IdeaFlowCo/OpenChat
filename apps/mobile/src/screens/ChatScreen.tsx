@@ -334,7 +334,7 @@ export function ChatScreen({
   const {
     retryPendingMessage, discardPendingMessage, currentUser, conversations, messages: activeMessages, loadingMessages, messageLoadError, retryMessages, isConnected,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
-    setActiveConversation, sendMessage, assistantScopes, setAssistantScope, editMessage, deleteMessage, toggleReaction,
+    setActiveConversation, sendMessage, sendMessageToConversation, assistantScopes, setAssistantScope, editMessage, deleteMessage, toggleReaction,
     sendTickle, setQuickEmoji, lastTickle,
     presence, typingByConv, reportTyping,
     aiDisclosureAcceptedAt, mutedConvs, muteConv, blockUser,
@@ -1234,6 +1234,7 @@ export function ChatScreen({
     // General file attachment (OpenChat-85q.1) — web only, isolated from the
     // photo pipeline below (no offline outbox; upload-then-send, same shape
     // as voice notes in RecordingContext.tsx).
+    const sendConversationId = conversationId;
     const sendExtras = { assistantScope: isAssistantDM && isolateAssistant ? 'conversation' as const : 'universal' as const };
     if (pendingFile) {
       const fileToSend = pendingFile;
@@ -1254,7 +1255,7 @@ export function ChatScreen({
       setUploadingAttachment(true);
       try {
         const attachment = await uploadFile(fileToSend.file);
-        await sendMessage(trimmed, fileReplyToId, [attachment], undefined, sendExtras);
+        await sendMessageToConversation(sendConversationId, trimmed, fileReplyToId, [attachment], undefined, sendExtras);
         invalidateHashtagSuggestions(conversationId);
         hapticSend();
       } catch (err) {
@@ -1334,7 +1335,7 @@ export function ChatScreen({
     }
 
     try {
-      await sendMessage(trimmed, currentReplyToId, undefined, photos.length ? photos : undefined, sendExtras);
+      await sendMessageToConversation(sendConversationId, trimmed, currentReplyToId, undefined, photos.length ? photos : undefined, sendExtras);
       invalidateHashtagSuggestions(conversationId);
       hapticSend();
       rejected.forEach(r => releaseAsset(r.asset));

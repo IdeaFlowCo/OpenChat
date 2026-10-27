@@ -35,7 +35,7 @@ vi.mock('react-native', async () => {
     Easing: { out: (fn: unknown) => fn, quad: (t: number) => t },
     Pressable: 'Pressable',
     Keyboard: { addListener: vi.fn(() => ({ remove: vi.fn() })) },
-    ActivityIndicator: 'ActivityIndicator', Image: 'Image',
+    ActivityIndicator: 'ActivityIndicator', Image: 'Image', ScrollView: 'ScrollView',
     KeyboardAvoidingView: 'KeyboardAvoidingView',
     Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View',
     Modal: ({ visible, children }: any) => visible ? children : null,
@@ -62,7 +62,7 @@ vi.mock('../../mobile/src/contexts/PrivateNamesContext', () => ({ usePrivateName
 vi.mock('../../mobile/src/api/client', () => ({ api: {} }));
 vi.mock('../../mobile/src/services/notifications', () => ({ setActiveConversationForNotifications: vi.fn() }));
 vi.mock('../../mobile/src/services/haptics', () => ({ hapticSend: vi.fn(), hapticReceive: mocks.receive, hapticGrowTick: vi.fn(), hapticTickle: vi.fn() }));
-vi.mock('../../mobile/src/services/attachments', () => ({ MAX_IMAGES_PER_MESSAGE: 10, pickImages: vi.fn(async () => []), takePhoto: vi.fn(async () => null), filesToAssets: vi.fn(async () => []), releaseAsset: vi.fn(), uploadImage: vi.fn(), uploadImages: vi.fn(async () => ({ uploaded: [], failed: [] })), checkPhotosForSend: vi.fn(async (assets: any[]) => ({ ok: assets, rejected: [] })) }));
+vi.mock('../../mobile/src/services/attachments', () => ({ MAX_IMAGES_PER_MESSAGE: 10, pickDocumentWeb: vi.fn(), uploadFile: vi.fn(), FileUploadError: class extends Error {}, pickImages: vi.fn(async () => []), takePhoto: vi.fn(async () => null), filesToAssets: vi.fn(async () => []), releaseAsset: vi.fn(), uploadImage: vi.fn(), uploadImages: vi.fn(async () => ({ uploaded: [], failed: [] })), checkPhotosForSend: vi.fn(async (assets: any[]) => ({ ok: assets, rejected: [] })) }));
 vi.mock('../../mobile/src/services/photoActions', () => ({ photoActionLabel: 'Save', saveOrSharePhoto: vi.fn(), savePhotos: vi.fn(), sharePhoto: vi.fn(), describeSaveResult: () => '', normalizeRotation: (d?: number) => d ?? 0, canRotateFiles: async () => false, rotateImageFile: async () => null, PhotoSaveError: class extends Error {} }));
 vi.mock('../../mobile/src/services/exportDownload', () => ({ saveJsonDownload: vi.fn() }));
 vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn(), logInfo: vi.fn() }));
@@ -86,6 +86,7 @@ vi.mock('../../mobile/src/components/AgentNetworkCard', () => ({ AgentNetworkCar
 vi.mock('../../mobile/src/components/AgentOverlayButton', () => ({ AgentOverlayButton: () => null }));
 vi.mock('../../mobile/src/components/ExportSheet', () => ({ ExportSheet: () => null }));
 
+import { pickDocumentWeb, uploadFile, pickImages, checkPhotosForSend } from '../../mobile/src/services/attachments';
 import { ChatScreen } from '../../mobile/src/screens/ChatScreen.js';
 
 function message(id: string, overrides: Partial<Message> = {}): Message {
@@ -127,7 +128,7 @@ beforeEach(() => {
       mocks.visibilityReleases.push(release);
       return release;
     }),
-    setActiveConversation: vi.fn(), markConversationRead: vi.fn(),
+    setActiveConversation: vi.fn(), markConversationRead: vi.fn(), sendMessageToConversation: vi.fn(async()=>{}),
     presence: new Map(), typingByConv: new Map(), readByOthers: new Map(), onlineUsers: new Map(),
     mutedConvs: {}, muteConv: vi.fn(), reportTyping: vi.fn(),
   };
@@ -271,31 +272,31 @@ describe('desktop composer input', () => {
   it('sends multiline text once and blocks pending/repeated/empty sends', async () => {
     mocks.platform = 'web';
     let resolve!: () => void;
-    mocks.chat.sendMessage = vi.fn(() => new Promise<void>(done => { resolve = done; }));
+    mocks.chat.sendMessageToConversation = vi.fn(() => new Promise<void>(done => { resolve = done; }));
     await render();
     await act(async () => screen!.root.findByType('TextInput').props.onKeyDownCapture(key()));
-    expect(mocks.chat.sendMessage).not.toHaveBeenCalled();
+    expect(mocks.chat.sendMessageToConversation).not.toHaveBeenCalled();
     await act(async () => screen!.root.findByType('TextInput').props.onChangeText('One\nTwo'));
     const handler = screen!.root.findByType('TextInput').props.onKeyDownCapture;
     await act(async () => handler(key({ repeat: true })));
-    expect(mocks.chat.sendMessage).not.toHaveBeenCalled();
+    expect(mocks.chat.sendMessageToConversation).not.toHaveBeenCalled();
     await act(async () => { handler(key()); handler(key()); });
-    expect(mocks.chat.sendMessage).toHaveBeenCalledExactlyOnceWith('One\nTwo', undefined, undefined, undefined);
+    expect(mocks.chat.sendMessageToConversation).toHaveBeenCalledExactlyOnceWith('sailing', 'One\nTwo', undefined, undefined, undefined, {assistantScope:'universal'});
     await act(async () => screen!.root.findByType('TextInput').props.onChangeText('Pending draft'));
     await act(async () => screen!.root.findByType('TextInput').props.onKeyDownCapture(key()));
-    expect(mocks.chat.sendMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.chat.sendMessageToConversation).toHaveBeenCalledTimes(1);
     await act(async () => resolve());
   });
   it.each([{ shiftKey: true }, { altKey: true }, { ctrlKey: true }, { metaKey: true },
     { nativeEvent: { isComposing: true, keyCode: 13 } },
     { nativeEvent: { isComposing: false, keyCode: 229 } }])('preserves modified/IME input: %j', async flags => {
     mocks.platform = 'web';
-    mocks.chat.sendMessage = vi.fn();
+    mocks.chat.sendMessageToConversation = vi.fn();
     await render();
     await act(async () => screen!.root.findByType('TextInput').props.onChangeText('Unsent'));
     const event = key(flags);
     await act(async () => screen!.root.findByType('TextInput').props.onKeyDownCapture(event));
-    expect(mocks.chat.sendMessage).not.toHaveBeenCalled();
+    expect(mocks.chat.sendMessageToConversation).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
   it('leaves native return intact and uses the long-press menu for web right-click', async () => {
@@ -403,4 +404,51 @@ it('renders actionable links in the real message body and preserves link context
   await act(async () => wrapper.props.onContextMenu(event));
   expect(event.preventDefault).not.toHaveBeenCalled();
   expect(screen!.root.findByType('MessageActionSheet').props.visible).toBe(false);
+});
+
+describe('attachment destination and scope during navigation',()=>{
+  function prepareAssistant(){
+    mocks.chat.conversations.push({id:'assistant-dm',type:'direct',participants:[{user:{id:'bob',name:'Bob'}},{user:{id:'assistant',name:'Assistant',isBot:true}}]});
+    mocks.chat.assistantScopes={'assistant-dm':'conversation'};
+    mocks.chat.sendMessage=vi.fn();
+  }
+  async function navigateDuringPreparation(){
+    mocks.chat.activeConversationId='assistant-dm';
+    await render('assistant-dm');
+    expect(renderedText()).toContain('This chat only');
+  }
+  async function press(label:string){
+    await act(async()=>{await screen!.root.findAllByType('TouchableOpacity').find(n=>n.props.accessibilityLabel===label)!.props.onPress();});
+  }
+  it('keeps a pending file caption in the group captured before upload',async()=>{
+    mocks.platform='web';prepareAssistant();
+    const file={name:'synthetic.txt',size:5};
+    const attachment={url:'synthetic-file',type:'file',mimeType:'text/plain',filename:file.name};
+    vi.mocked(pickDocumentWeb).mockResolvedValueOnce(file as File);
+    let finish!:(value:any)=>void;
+    vi.mocked(uploadFile).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+    await render();await press('Attach file');
+    await act(async()=>{screen!.root.findByType('TextInput').props.onChangeText('group file caption');});
+    let sending!:Promise<void>;
+    await act(async()=>{sending=screen!.root.findAllByType('TouchableOpacity').find(n=>n.props.accessibilityLabel==='Send message')!.props.onPress();});
+    await navigateDuringPreparation();
+    await act(async()=>{finish(attachment);await sending;});
+    expect(mocks.chat.sendMessageToConversation).toHaveBeenCalledExactlyOnceWith('sailing','group file caption',undefined,[attachment],undefined,{assistantScope:'universal'});
+    expect(mocks.chat.sendMessage).not.toHaveBeenCalled();
+  });
+  it('keeps photos and their caption in the group captured before photo checks',async()=>{
+    mocks.platform='web';prepareAssistant();
+    const photo={uri:'synthetic-photo',fileName:'synthetic.jpg',mimeType:'image/jpeg',width:2,height:2,fileSize:4};
+    vi.mocked(pickImages).mockResolvedValueOnce([photo]);
+    let finish!:(value:any)=>void;
+    vi.mocked(checkPhotosForSend).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+    await render();await press('Attach image');
+    await act(async()=>{screen!.root.findByType('TextInput').props.onChangeText('group photo caption');});
+    let sending!:Promise<void>;
+    await act(async()=>{sending=screen!.root.findAllByType('TouchableOpacity').find(n=>n.props.accessibilityLabel==='Send message')!.props.onPress();});
+    await navigateDuringPreparation();
+    await act(async()=>{finish({ok:[photo],rejected:[]});await sending;});
+    expect(mocks.chat.sendMessageToConversation).toHaveBeenCalledExactlyOnceWith('sailing','group photo caption',undefined,undefined,[photo],{assistantScope:'universal'});
+    expect(mocks.chat.sendMessage).not.toHaveBeenCalled();
+  });
 });
