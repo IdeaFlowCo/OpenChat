@@ -307,4 +307,13 @@ describe('reply reconciler', () => {
     expect(await reconcileVisionReplies({ session: () => db } as never)).toBe(1);
     expect(tx.run.mock.calls[1][1]).toMatchObject({ messageId: 'missed-1' });
   });
+  it('records ineligible replies so they never refill the batch, and one bad row does not stop the rest', async () => {
+    db.run.mockResolvedValueOnce({ records: [record({ id: 'bad' }), record({ id: 'gone' })] }).mockResolvedValue({ records: [] });
+    db.executeWrite.mockRejectedValueOnce(new Error('boom')).mockResolvedValueOnce(false);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await reconcileVisionReplies({ session: () => db } as never)).toBe(0);
+    const marked = db.run.mock.calls.find(([q]) => String(q).includes("'ineligible'"));
+    expect(marked?.[1]).toMatchObject({ id: 'gone' });
+    warn.mockRestore();
+  });
 });

@@ -179,6 +179,9 @@ export function ThoughtsScreen() {
     // older query's or chip's rows (and cursor) can never land on this one.
     searchSeqRef.current += 1;
     searchAbortRef.current?.abort();
+    // The old query's cursor must not page the new query.
+    setVisionCursor(null);
+    setLoadingMore(false);
     const timer = setTimeout(() => {
       load(false, query);
       if (availabilityRef.current !== 'none') void runVisionSearch(trimmed, chip);

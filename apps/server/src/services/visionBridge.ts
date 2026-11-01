@@ -200,14 +200,21 @@ export async function runVisionReplyOnce(driver: Driver, transport: VisionReplyT
 export async function reconcileVisionReplies(driver: Driver): Promise<number> {
   const s = driver.session();
   try {
+    // Indexed walk: the few recent provenance nodes, then their replies by replyToId.
     const rows = await s.run(`MATCH (p:MessageProvenance) WHERE p.createdAt > datetime() - duration('P30D')
-      MATCH (target:Message {id:p.messageId})
-      MATCH (m:Message {conversationId:target.conversationId})
-      WHERE m.replyToId = target.id AND m.createdAt > datetime() - duration('PT23H') AND m.createdAt < datetime() - duration('PT1M')
+      MATCH (m:Message {replyToId:p.messageId})
+      WHERE m.createdAt > datetime() - duration('PT23H') AND m.createdAt < datetime() - duration('PT1M') AND m.deletedAt IS NULL
         AND NOT EXISTS { MATCH (:VisionReplyDelivery {messageId:m.id}) }
-      RETURN m.id AS id LIMIT 50`);
+      RETURN m.id AS id ORDER BY m.createdAt LIMIT 50`);
     let enqueued = 0;
-    for (const row of rows.records) if (await s.executeWrite(tx => enqueueVisionReply(tx, row.get('id')))) enqueued++;
+    for (const row of rows.records) {
+      const id = row.get('id') as string;
+      try {
+        if (await s.executeWrite(tx => enqueueVisionReply(tx, id))) { enqueued++; continue; }
+        // Ineligible (owner left, a block): record it so it never refills the batch.
+        await s.run(`MERGE (d:VisionReplyDelivery {messageId:$id}) ON CREATE SET d.id=$rowId,d.status='ineligible',d.attempts=0,d.createdAt=$now,d.finishedAt=$now`, { id, rowId: nanoid(), now: new Date().toISOString() });
+      } catch { console.warn('[vision-replies] reconcile skipped one reply'); }
+    }
     return enqueued;
   } finally { await s.close(); }
 }
