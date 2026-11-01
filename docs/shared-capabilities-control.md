@@ -12,4 +12,68 @@ A saved result requires a real note ID; returned destination URLs must use the e
 
 Executable fixtures: `apps/server/test/visionSave.test.ts`, `assistantScope.test.ts`, `assistantScope.execution.test.ts`, `assistantTurnBoundary.test.ts`, `assistantSendScope.mobile.test.ts`, the asynchronous attachment cases in `groupOpen.mobile.test.ts`, and the mobile response-to-alert regression in `apps/mobile/src/utils/visionSaveFeedback.test.ts`. Current results are local fixture evidence; deployment/native/UI/real consent acceptance are separate stages. Earmark can reuse the request/receipt semantics and existing connector capability; no Control navigation or broad grant is required. G-ID production native registration remains held. Ambient stays off by default and requires explicit in-app enable plus account confirmation for the selected recording; G-AMBIENT is retired, and agents have no live Archive-write permission. No Archive mirroring or main-stream promotion is activated.
 
-Before any deployed consent/save, the F5 response-to-alert change still requires final independent review by the existing Opus reviewer, and O7 concurrent hub connect-key and least-scope behavior must be resolved. O7 is deferred only for this bounded source pipeline, not accepted for live consent. Real Neo4j, live grant/save and mobile-device behavior remain unverified. This pipeline authorizes no deployment, TestFlight, merge, live consent or personal-data write.
+Deployment gates (status 2026-11-01, branch `feat/vision-stream-bridge`, OpenChat-vwgq.2):
+
+- **O7 resolved in source.** `connectVision` is single-flight per owner. Concurrent in-process calls share one promise. Across servers, a 30-second `connectLease` on the owner's `:VisionSaveGrant` lets exactly one caller request a hub key and store it (`SET … WHERE connectLease = $lease`). A losing caller polls for the winner's approval URL and code, and never requests a second key. The approved key is therefore always the stored key. The key request asks for exactly `vision:read vision:write` (`VISION_SAVE_SCOPES`). `freshGrant` refuses any grant missing either scope or carrying any other scope. Read stays because the hub's grant status and Vision's create receipt are read-gated; dropping it needs a hub-side confirmation first. Fixtures: the "O7" cases in `apps/server/test/visionBridge.test.ts`, plus the least-scope case in `visionSave.test.ts`.
+- **Structured provenance on Save.** `vision__create_note` now also receives `provenance {platform:'openchat', link:<message permalink>, externalId:<messageId>}` and `idempotencyKey` (the same `openchat-save:<sha>` marker). The body marker stays as the fallback search key. If an older Vision answers JSON-RPC `-32602` (invalid params), meaning the tool never ran, the save is resent once without the new fields. Every other outcome keeps the no-replay rule.
+- **F5 review receipt.** The executor reviewed the F5 change (`apps/mobile/src/api/errors.ts` `errorFromResponse`, `utils/visionSaveFeedback.ts` `presentVisionSaveFailure`, both `ChatScreen.tsx` Save catch sites). Non-2xx responses keep their raw body in `ApiError`. Only a 503 whose JSON body is `status:'uncertain'` shows `uncertainVisionAlert(reason)` with the marker and duplication warning. Malformed bodies, other statuses and non-`ApiError` failures show **Save receipt unavailable** and never imply that nothing was saved. Nothing retries automatically. No defects found. **The final independent review is still required:** the orchestrator runs it on this PR and records its verdict here before live consent.
+
+Real Neo4j, live grant/save and mobile-device behavior remain unverified. Real Neo4j, live grant/save and mobile-device behavior remain unverified. This pipeline authorizes no deployment, TestFlight, merge, live consent or personal-data write.
+
+## Vision stream bridge (OpenChat-vwgq.9–.12, OpenChat-3kr.9)
+
+This is the contract with notestream-vision for Vision → OpenChat sends, replies back to Vision, and Stream search over Vision. Code: [`services/visionBridge.ts`](../apps/server/src/services/visionBridge.ts) and [`routes/visionBridge.ts`](../apps/server/src/routes/visionBridge.ts).
+
+**Partner session.** `POST /api/vision/session` mirrors `/api/unlinked/session`. It requires `Authorization: Bearer <VISION_MESSAGING_SECRET>` (≥32 characters, plus `JWT_SECRET`) and refuses any request with an `Origin` header. It allows 120 requests per minute per process. The body is exactly `{issuer:"https://id.ideaflow.app/api/auth", subject, name?}`; `name` is display-only. The route looks up the one existing OpenChat account whose `ideaflowIssuer`/`ideaflowSub` match. It never creates an account and never accepts a browser-selected identity.
+
+| Case | Response |
+|---|---|
+| Success | `200 {token, user:{userId, name, email:"vision-session@ideaflow.invalid"}, expiresIn:600}`. The token is a 10-minute JWT carrying `embedded:"vision"`. The account's real email is not disclosed. |
+| No linked account, an ambiguous identity, or a pending Unlinked shared inbox | `409 {error:"account_link_required"}` |
+| Malformed input | `400 {error:"invalid_identity"}` |
+| Wrong secret | `401` |
+| Origin header present | `403` |
+| Rate limited | `429` |
+| Not configured | `503 {error:"messaging_unavailable"}` |
+
+Like Unlinked embedded sessions, Vision sessions cannot manage keys, webhooks, push, export or account deletion (`requireDirectSession`). They also cannot use Save to Vision or Stream search over Vision, and their sockets disconnect at token expiry. Vision then uses the ordinary chat routes: `POST /api/chat/conversations` with `{type:"direct", participantIds:[<openchat userId>]}` (it reuses any existing direct chat), then `POST /api/chat/conversations/:id/messages`.
+
+**Message provenance.** `POST /api/chat/conversations/:id/messages` (and the unified connector's `oc_send_message`) accepts an optional `provenance` of `{service:"vision", noteId, noteRevision?, loopId?, ownerSubject}`, with no other keys allowed:
+
+- `noteId` and `loopId` match `[A-Za-z0-9._:-]{1,200}`.
+- `noteRevision` is a non-negative integer.
+- `ownerSubject` must equal the sender's own Ideaflow subject.
+
+Anything else gets `400`. The message stores only `m.provenanceService = "vision"`. The full object lives on `(:MessageProvenance {messageId})` so recipients, webhooks and agents never receive the note ID or owner subject. Only the sender's own copy shows the caption **from Vision**. The REST path now resolves `@mentions` exactly like the socket path ([`services/messageMentions.ts`](../apps/server/src/services/messageMentions.ts)): group chats only, a unique exact or prefix name match, stored in `m.mentions` and used for mention pushes.
+
+Unified-connector principals must send `clientRequestId`. Their message ID is `ocu_` + SHA-256 of `["ideaflow-connector", userId, conversationId, clientRequestId]`. A retry returns the original row with `200` and no second broadcast, push, webhook or assistant turn. The same key with different content returns `409`. Vision should use its SharedTo receipt ID as `clientRequestId`.
+
+**Reply delivery to Vision.** A new message (socket, REST, or the assistant's answer to a Vision-sent message in the agent DM) whose `replyToId` targets a same-conversation message with `provenanceService = "vision"` enqueues one `(:VisionReplyDelivery {messageId})`. Enqueueing is idempotent by the reply's message ID, and the payload is snapshotted at enqueue time. A worker started at boot polls every 5 seconds and claims with a 60-second lease. It sends `POST {VISION_API_BASE}/openchat/replies` with `Authorization: Bearer <OPENCHAT_VISION_SECRET>` (≥32 characters) and this body:
+
+```json
+{"noteId":"…","loopId":"…|null","ownerSubject":"…","repliedToMessageId":"…",
+ "reply":{"messageId":"…","conversationId":"…","senderUserId":"…","senderName":"…","content":"…","createdAt":"ISO-8601"}}
+```
+
+How Vision's response is handled:
+
+- **2xx** means delivered. Vision must dedupe by `reply.messageId`.
+- **408, 409, 425, 429, 5xx and network errors** are retried after 30 s, 2 min, 10 min, 30 min, and then hourly.
+- **Any other 4xx** is a permanent refusal, logged and not retried.
+- **Expiry:** after 24 hours an undelivered delivery is marked `expired` with the log line `[vision-replies] gave up after 24h: message <id>`.
+
+Finished rows are deleted after 7 days. Without both variables the worker stays idle and deliveries wait.
+
+**Agent handle.** `agent` (`AGENT_HANDLE`, displayed "Your agent") is reserved together with `openchat`, `assistant`, `system`, `support` and `feedback` (`RESERVED_USERNAMES`; the username UI is OpenChat-3ag.10). `GET /api/vision/targets/resolve?handle=agent` serves Vision sessions and unified-connector principals only, through the `oc_resolve_handle` tool under `openchat:write`. It returns `{handle:"agent", kind:"agent", displayName:"Your agent", conversationId}` for the caller's own two-member assistant DM, creating it on first use. Other handles return `404` and other sessions get `403`. The assistant's answer to a Vision-sent message replies to it, so the answer reaches Vision through the delivery above.
+
+**Stream search over Vision.** `GET /api/thoughts/vision-search?q=&chip=openchat|all&cursor=` takes a direct human session only (embedded sessions get `403`). It reads the owner's own notes through the hub read bridge (`/builtin-agent/read`, tool `search_notes`, `visibility:"my-world"`) as the account's stored Ideaflow identity, never one the client names.
+
+- **Answers:** `{status:"ok", rows, nextCursor}`, or `200 {status:"unavailable", code:"account_link_required"|"not_configured"|"source_unavailable"|"timeout", reason}`.
+- **Row shape:** `{id, text, title, createdAt, url, sourcePlatform, sourceLink, tags}`.
+- **Timing and paging:** a 2.5 s budget, 20-row pages, and a 30 s cache keyed by user, query, chip and cursor.
+- **Origin filter:** chip `openchat` passes `source:{platform:"openchat"}`. Until Vision supports it, the server filters on `sourcePlatform`, OpenChat `sourceLink`s, or the Save marker and permalink in the body. The unsupported state is remembered for 10 minutes.
+- **Paging cap:** `search_notes` returns at most 25 notes and no cursor yet, so paging stops at 25 until Vision returns `nextCursor`, which is then passed through.
+
+The client debounces 300 ms, merges local Stream results by `createdAt` under **From OpenChat**, and falls back to local search with **Vision unavailable — showing OpenChat Stream only**. The universal assistant also has a read-only `stream_read` tool over the owner's own entries; conversation-scoped turns do not receive it.
+
+Configuration: `VISION_MESSAGING_SECRET`, `VISION_API_BASE` (https, for example `https://api.vision.ideaflow.app`) and `OPENCHAT_VISION_SECRET`, forwarded by `infra/docker-compose.prod.yml`. New Neo4j schema, all additive and created in `initDatabase`: the unique constraints `message_provenance_message` and `vision_reply_delivery_message`, and the index `vision_reply_delivery_due`.
