@@ -1,14 +1,39 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import { Router } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import type { Server as IOServer } from 'socket.io';
 import { getDriver } from '../db.js';
 import { resolveActor } from '../middleware/resolveActor.js';
+import { validateToken } from '../middleware/auth.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import { ensureAssistantConversation } from '../services/assistant.js';
 import { AGENT_HANDLE, AGENT_HANDLE_DISPLAY_NAME, normalizeHandle, VISION_ISSUER, validSubject } from '../services/visionBridge.js';
 
 const router = Router();
+
+/**
+ * A Vision partner session acts for a real account, so it is deny-by-default:
+ * it may only open/reuse a direct chat, send into a conversation it belongs to,
+ * and resolve a reserved handle. Everything else (profile/email, private graph,
+ * Stream, history reads, settings, keys) needs a direct OpenChat sign-in.
+ */
+const VISION_SESSION_ROUTES: Array<[string, RegExp]> = [
+  ['POST', /^\/api\/chat\/conversations\/?$/],
+  ['POST', /^\/api\/chat\/conversations\/[^/]+\/messages\/?$/],
+  ['GET', /^\/api\/vision\/targets\/resolve\/?$/],
+];
+export function visionSessionGuard(req: Request, res: Response, next: NextFunction): void {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ') || header.startsWith('Bearer ifop_') || header.startsWith('Bearer oc_')) { next(); return; }
+  if (validateToken(header.slice(7))?.embedded !== 'vision') { next(); return; }
+  const path = req.originalUrl.split('?')[0];
+  const allowed = VISION_SESSION_ROUTES.some(([method, pattern]) => req.method === method && pattern.test(path));
+  // Vision opens direct chats only; groups and invites need the person's own client.
+  if (!allowed || (req.method === 'POST' && /^\/api\/chat\/conversations\/?$/.test(path) && (req.body?.type ?? 'direct') !== 'direct')) {
+    res.status(403).json({ error: 'Not available to a Vision session' }); return;
+  }
+  next();
+}
 
 // A confidential exchange modelled on /unlinked/session: only the authenticated
 // Vision server supplies the verified Ideaflow identity. Unlike Unlinked's shared

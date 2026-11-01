@@ -6,12 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const db = vi.hoisted(() => ({ run: vi.fn(), close: vi.fn(), executeWrite: vi.fn(), ensure: vi.fn() }));
 vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => db }) }));
 vi.mock('../src/services/assistant.js', () => ({ ensureAssistantConversation: db.ensure }));
-import router from '../src/routes/visionBridge.js';
+import router, { visionSessionGuard } from '../src/routes/visionBridge.js';
 import { connectorOperationGuard } from '../src/routes/ideaflowConnector.js';
 import { issueConnectorOperation } from '../src/lib/ideaflowConnector.js';
 import {
   enqueueVisionReply, isReservedUsername, parseMessageProvenance, replyBackoff, resetVisionSearchState, runVisionReplyOnce,
-  searchVision, decodeCursor, encodeCursor, RESERVED_USERNAMES,
+  searchVision, decodeCursor, encodeCursor, RESERVED_USERNAMES, takeVisionSearchBudget, reconcileVisionReplies,
 } from '../src/services/visionBridge.js';
 import { connectVision } from '../src/services/visionSave.js';
 
@@ -245,5 +245,66 @@ describe('O7: Vision connect is single-flight and least-scope', () => {
     const result = await connectVision('alice', fetchImpl as never, { wait: async () => {} });
     expect(result).toEqual({ status: 'needs_auth', approvalUrl: 'https://id.ideaflow.app/agents/approve?w=1', confirmationCode: 'WIN' });
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('Vision partner sessions are deny-by-default', () => {
+  const guarded = express().use(express.json()).use('/api', visionSessionGuard).all('/api/*rest', (_req, res) => res.json({ ok: true }));
+  const vision = () => jwt.sign({ userId: 'alice', email: 'vision-session@ideaflow.invalid', embedded: 'vision' }, jwtKey);
+  it.each([
+    ['post', '/api/chat/conversations', { type: 'direct', participantIds: ['bob'] }, 200],
+    ['post', '/api/chat/conversations/c1/messages', { content: 'hi' }, 200],
+    ['get', '/api/vision/targets/resolve?handle=agent', undefined, 200],
+    ['post', '/api/chat/conversations', { type: 'group', participantIds: ['bob', 'carol'] }, 403],
+    ['get', '/api/auth/me', undefined, 403],
+    ['get', '/api/private/links', undefined, 403],
+    ['get', '/api/thoughts', undefined, 403],
+    ['get', '/api/chat/conversations', undefined, 403],
+    ['get', '/api/chat/conversations/c1/messages', undefined, 403],
+    ['patch', '/api/auth/me', { name: 'x' }, 403],
+  ] as const)('%s %s → %i', async (method, path, body, status) => {
+    const req = request(guarded)[method](path).auth(vision(), { type: 'bearer' });
+    expect((await (body ? req.send(body) : req)).status).toBe(status);
+  });
+  it('leaves direct sessions and other embedded sessions to their own routes', async () => {
+    const direct = jwt.sign({ userId: 'alice', email: 'a@example.test' }, jwtKey);
+    expect((await request(guarded).get('/api/auth/me').auth(direct, { type: 'bearer' })).status).toBe(200);
+  });
+});
+
+describe('Vision search hardening', () => {
+  const owner = { issuer: 'https://id.ideaflow.app/api/auth', subject: 'alice-sub' };
+  beforeEach(() => resetVisionSearchState());
+  it('a transient failure never latches the client-side filter fallback', async () => {
+    const reader = vi.fn().mockResolvedValue({ error: 'down', code: 'source_unavailable' });
+    expect(await searchVision('alice', owner, 'q', 'openchat', null, reader)).toMatchObject({ status: 'unavailable', code: 'source_unavailable' });
+    reader.mockReset().mockResolvedValue({ notes: [] });
+    await searchVision('alice', owner, 'q2', 'openchat', null, reader);
+    expect(reader.mock.calls[0][2]).toMatchObject({ source: { platform: 'openchat' } });
+  });
+  it('returns Vision’s whole page when Vision supplies the cursor', async () => {
+    const reader = vi.fn().mockResolvedValue({ notes: Array.from({ length: 25 }, (_, i) => ({ id: 'n' + i, bodyMd: 'x' })), nextCursor: 'v-next' });
+    const result = await searchVision('alice', owner, 'q', 'all', null, reader);
+    expect(result.status === 'ok' && result.rows.length).toBe(25);
+    expect(result.status === 'ok' && decodeCursor(result.nextCursor!)).toEqual({ c: 'v-next' });
+  });
+  it('limits each user to 60 Vision searches a minute', () => {
+    const now = Date.now();
+    for (let i = 0; i < 60; i++) expect(takeVisionSearchBudget('alice', now)).toBe(true);
+    expect(takeVisionSearchBudget('alice', now)).toBe(false);
+    expect(takeVisionSearchBudget('bob', now)).toBe(true);
+    expect(takeVisionSearchBudget('alice', now + 60_000)).toBe(true);
+  });
+});
+
+describe('reply reconciler', () => {
+  it('enqueues recent replies that missed their post-commit enqueue', async () => {
+    db.run.mockResolvedValueOnce({ records: [record({ id: 'missed-1' })] });
+    const tx = { run: vi.fn().mockResolvedValueOnce({ records: [record({ provenance: JSON.stringify({ service: 'vision', noteId: 'n', ownerSubject: 's' }),
+      ownerUserId: 'alice', repliedToMessageId: 't', conversationId: 'room', senderUserId: 'bob', senderName: 'Bob', content: 'ok', createdAt: '2026-11-01T00:00:00Z' })] })
+      .mockResolvedValue({ records: [] }) };
+    db.executeWrite.mockImplementation(async (fn: (t: typeof tx) => unknown) => fn(tx));
+    expect(await reconcileVisionReplies({ session: () => db } as never)).toBe(1);
+    expect(tx.run.mock.calls[1][1]).toMatchObject({ messageId: 'missed-1' });
   });
 });

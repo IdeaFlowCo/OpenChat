@@ -128,6 +128,8 @@ export function setupChatSocket(io: Server): void {
     if (!user) {
       return next(new Error('Invalid token'));
     }
+    // Vision partner sessions send over REST only; they never get a live socket.
+    if (user.embedded === 'vision') return next(new Error('Invalid token'));
 
     socket.user = user;
     next();

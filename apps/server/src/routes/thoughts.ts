@@ -18,7 +18,7 @@ import { nanoid } from 'nanoid';
 import neo4j from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
-import { decodeCursor, ownIdentity, searchVision } from '../services/visionBridge.js';
+import { decodeCursor, ownIdentity, searchVision, takeVisionSearchBudget } from '../services/visionBridge.js';
 import { extractTagsFromMessage } from '../services/extractThoughtsFromMessage.js';
 import { COLLAPSED_REL, readableStreamExpr, streamAliasExpr, collapsedExpr, streamSearchPredicate, streamTagQuery } from '../services/streamSearch.js';
 
@@ -227,6 +227,7 @@ router.get('/vision-search', requireAuth, async (req: Request, res: Response) =>
   if (!q || q.length > 200 || (chip !== 'openchat' && chip !== 'all') || cursor === 'invalid' || (req.query.cursor !== undefined && typeof req.query.cursor !== 'string')) {
     res.status(400).json({ error: 'Invalid Vision search' }); return;
   }
+  if (!takeVisionSearchBudget(req.user!.userId)) { res.status(429).json({ error: 'Please wait a moment and search again.' }); return; }
   try {
     const identity = await ownIdentity(req.user!.userId);
     if (!identity) { res.json({ status: 'unavailable', code: 'account_link_required', reason: 'Sign in with Ideaflow ID to search Vision' }); return; }

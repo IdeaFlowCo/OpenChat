@@ -175,6 +175,10 @@ export function ThoughtsScreen() {
       const timer = setTimeout(() => { load(false, query); }, 250);
       return () => clearTimeout(timer);
     }
+    // Supersede any in-flight Vision search now, not after the debounce, so an
+    // older query's or chip's rows (and cursor) can never land on this one.
+    searchSeqRef.current += 1;
+    searchAbortRef.current?.abort();
     const timer = setTimeout(() => {
       load(false, query);
       if (availabilityRef.current !== 'none') void runVisionSearch(trimmed, chip);
@@ -186,6 +190,9 @@ export function ThoughtsScreen() {
   const selectChip = useCallback((next: VisionChip) => {
     if (next === chip) return;
     // Rows from the other filter must not linger while the new search runs.
+    searchSeqRef.current += 1;
+    searchAbortRef.current?.abort();
+    setLoadingMore(false);
     setVisionRows([]);
     setVisionCursor(null);
     setVisionOk(false);

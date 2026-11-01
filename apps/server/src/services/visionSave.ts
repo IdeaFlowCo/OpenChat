@@ -226,7 +226,9 @@ async function connectVisionOnce(userId:string,fetchImpl:typeof fetch,wait:(ms:n
   const existing=await db.run('MATCH (g:VisionSaveGrant {userId:$userId}) RETURN g.approvalUrl AS approvalUrl,g.confirmationCode AS confirmationCode,g.expires AS expires,g.ciphertext AS ciphertext',{userId});
   if(existing.records[0]?.get('ciphertext')){const row=existing.records[0];const token=await neoSaveRepository.token(userId);if(token&&await freshGrant(token,identity,fetchImpl))return {status:'connected'};if(Number(row.get('expires'))>Date.now())return {status:'needs_auth',approvalUrl:row.get('approvalUrl') as string,confirmationCode:row.get('confirmationCode') as string};}
   const lease=randomBytes(16).toString('hex');
+  // Take the node's write lock before reading the lease, so concurrent servers serialize here.
   const claimed=await db.run(`MERGE (g:VisionSaveGrant {userId:$userId})
+   SET g.connectLock=coalesce(g.connectLock,0)+1
    WITH g WHERE g.connectLease IS NULL OR g.connectLeaseUntil < $now
    SET g.connectLease=$lease,g.connectLeaseUntil=$until RETURN g.connectLease AS lease`,{userId,lease,now:Date.now(),until:Date.now()+30000});
   if(claimed.records[0]?.get('lease')!==lease){

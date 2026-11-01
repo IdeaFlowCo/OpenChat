@@ -1,5 +1,5 @@
 import visionSaveRoutes from './routes/visionSave.js';
-import visionBridgeRoutes from './routes/visionBridge.js';
+import visionBridgeRoutes, { visionSessionGuard } from './routes/visionBridge.js';
 import { startVisionReplyWorker } from './services/visionBridge.js';
 import contextIntentionsRoutes from './routes/contextIntentions.js';
 import conversationContentRoutes from './routes/conversationContent.js';
@@ -115,6 +115,8 @@ app.post('/api/connector/mcp', express.raw({ type:'application/json', limit:'1mb
 // Imported chat payloads are parsed by their own route, after authentication, with a larger limit.
 app.use(exceptImportBody(express.json()));
 app.use('/api', connectorOperationGuard);
+// Vision partner sessions are deny-by-default (see routes/visionBridge.ts).
+app.use('/api', visionSessionGuard);
 
 // Health check
 app.get('/health', (_req, res) => {

@@ -99,7 +99,11 @@ export async function enqueueVisionReply(tx: Pick<ManagedTransaction, 'run'>, me
     MATCH (target:Message {id:m.replyToId, conversationId:m.conversationId})
     WHERE target.provenanceService = 'vision'
     MATCH (p:MessageProvenance {messageId:target.id})
+    // Only while the owner still belongs to the chat, and never across a block.
+    MATCH (owner:User {id:target.senderId})-[:PARTICIPATES_IN]->(:Conversation {id:m.conversationId})
     OPTIONAL MATCH (sender:User {id:m.senderId})
+    WITH m, target, p, sender, owner
+    WHERE sender IS NULL OR sender = owner OR NOT ((owner)-[:BLOCKED]->(sender) OR (sender)-[:BLOCKED]->(owner))
     RETURN p.json AS provenance, target.senderId AS ownerUserId, target.id AS repliedToMessageId,
       m.conversationId AS conversationId, m.senderId AS senderUserId, coalesce(sender.name, '') AS senderName,
       coalesce(m.content, m.transcript, '') AS content, toString(m.createdAt) AS createdAt`, { messageId });
@@ -159,6 +163,8 @@ export async function runVisionReplyOnce(driver: Driver, transport: VisionReplyT
   try {
     const nowIso = new Date(now()).toISOString();
     const claim = await s.executeWrite(async tx => {
+      // Serializes claims across processes (as contextWebhooks does); outbound I/O happens after this short transaction.
+      await tx.run(`MERGE (w:VisionReplyWorker {id:'dispatcher'}) SET w.revision=coalesce(w.revision,0)+1`);
       const expired = await tx.run(`MATCH (d:VisionReplyDelivery) WHERE d.status IN ['pending','delivering'] AND d.expiresAt<=$now
         SET d.status='expired',d.finishedAt=$now REMOVE d.leaseToken RETURN d.messageId AS messageId, d.attempts AS attempts`, { now: nowIso });
       for (const row of expired.records) console.warn(`[vision-replies] gave up after 24h: message ${row.get('messageId')} (${Number(row.get('attempts'))} attempts)`);
@@ -186,6 +192,26 @@ export async function runVisionReplyOnce(driver: Driver, transport: VisionReplyT
   } finally { await s.close(); }
 }
 
+/**
+ * Safety net for the post-commit enqueue (crash or transient write failure):
+ * finds recent replies to Vision-sent messages that have no delivery yet.
+ * Walks from the few provenance nodes via the indexed conversationId.
+ */
+export async function reconcileVisionReplies(driver: Driver): Promise<number> {
+  const s = driver.session();
+  try {
+    const rows = await s.run(`MATCH (p:MessageProvenance) WHERE p.createdAt > datetime() - duration('P30D')
+      MATCH (target:Message {id:p.messageId})
+      MATCH (m:Message {conversationId:target.conversationId})
+      WHERE m.replyToId = target.id AND m.createdAt > datetime() - duration('PT23H') AND m.createdAt < datetime() - duration('PT1M')
+        AND NOT EXISTS { MATCH (:VisionReplyDelivery {messageId:m.id}) }
+      RETURN m.id AS id LIMIT 50`);
+    let enqueued = 0;
+    for (const row of rows.records) if (await s.executeWrite(tx => enqueueVisionReply(tx, row.get('id')))) enqueued++;
+    return enqueued;
+  } finally { await s.close(); }
+}
+
 export function startVisionReplyWorker(driver: Driver): () => void {
   let stopped = false, busy = false, ticks = 0;
   const tick = async () => {
@@ -196,6 +222,7 @@ export function startVisionReplyWorker(driver: Driver): () => void {
         try { await s.run(`MATCH (d:VisionReplyDelivery) WHERE d.finishedAt < $cutoff DETACH DELETE d`, { cutoff: new Date(Date.now() - 7 * 86400_000).toISOString() }); }
         finally { await s.close(); }
       }
+      if (ticks % 60 === 1) await reconcileVisionReplies(driver);
       // Drain a small batch per tick; each claim is its own short transaction.
       for (let i = 0; i < 5 && !stopped && await runVisionReplyOnce(driver); i++) { /* next */ }
     } catch { console.warn('[vision-replies] dispatch deferred'); }
@@ -220,7 +247,16 @@ const CACHE_TTL_MS = 30_000;
 const cache = new Map<string, { at: number; value: VisionSearchResult }>();
 /** Until Vision's `source` predicate ships, the tool rejects unknown arguments. */
 let sourcePredicateUnsupportedUntil = 0;
-export function resetVisionSearchState(): void { cache.clear(); sourcePredicateUnsupportedUntil = 0; }
+const budgets = new Map<string, { at: number; count: number }>();
+export function resetVisionSearchState(): void { cache.clear(); budgets.clear(); sourcePredicateUnsupportedUntil = 0; }
+/** 60 Vision searches per user per minute (the debounced client sends far fewer). */
+export function takeVisionSearchBudget(userId: string, now = Date.now()): boolean {
+  for (const [key, value] of budgets) if (now - value.at >= 60_000) budgets.delete(key);
+  const budget = budgets.get(userId) ?? { at: now, count: 0 };
+  if (budget.count >= 60 || (budgets.size >= 10_000 && !budgets.has(userId))) return false;
+  budget.count++; budgets.set(userId, budget);
+  return true;
+}
 
 type Cursor = { o: number } | { c: string };
 export function encodeCursor(cursor: Cursor): string { return Buffer.from(JSON.stringify(cursor)).toString('base64url'); }
@@ -300,10 +336,12 @@ export async function searchVision(userId: string, identity: AppIdentity, q: str
     let filtered = !wantSource && chip === 'openchat';
     let response = await call(wantSource);
     if (wantSource && (response.error === 'source_unavailable' || !Array.isArray(response.payload?.notes)) && !abort.aborted && response.error !== 'account_link_required' && response.error !== 'not_configured') {
-      // Older Vision: no `source` argument. Remember for 10 minutes and filter here.
-      sourcePredicateUnsupportedUntil = Date.now() + 600_000;
+      // Maybe an older Vision without the `source` argument: retry without it and
+      // filter here. Remember that only when the plain call works, so a transient
+      // hub failure never disables the server-side filter for everyone.
       filtered = true;
       response = await call(false);
+      if (Array.isArray(response.payload?.notes)) sourcePredicateUnsupportedUntil = Date.now() + 600_000;
     }
     if (abort.aborted) result = { status: 'unavailable', code: 'timeout', reason: 'Vision did not answer in time' };
     else if (response.error === 'account_link_required' || response.error === 'not_configured') result = { status: 'unavailable', code: response.error, reason: response.error === 'not_configured' ? 'Vision search is not configured' : 'Sign into Vision with the same Ideaflow account' };
@@ -315,7 +353,8 @@ export async function searchVision(userId: string, identity: AppIdentity, q: str
       if (filtered) rows = rows.filter(r => fromOpenChat(r.row, r.body));
       const visionCursor = typeof response.payload!.nextCursor === 'string' && response.payload!.nextCursor ? response.payload!.nextCursor as string : null;
       if (visionCursor) {
-        result = { status: 'ok', rows: rows.slice(0, VISION_SEARCH_PAGE).map(r => r.row), nextCursor: encodeCursor({ c: visionCursor }) };
+        // Vision pages for us: return its whole page so the cursor never skips rows.
+        result = { status: 'ok', rows: rows.map(r => r.row), nextCursor: encodeCursor({ c: visionCursor }) };
       } else {
         const offset = cursor && 'o' in cursor ? cursor.o : 0;
         const page = rows.slice(offset, offset + VISION_SEARCH_PAGE).map(r => r.row);
@@ -328,7 +367,7 @@ export async function searchVision(userId: string, identity: AppIdentity, q: str
   }
   // Cache successes and stable "no Vision" answers; transient failures retry next time.
   if (result.status === 'ok' || result.code === 'account_link_required' || result.code === 'not_configured') {
-    if (cache.size >= 5000) cache.delete(cache.keys().next().value!);
+    if (cache.size >= 1000) cache.delete(cache.keys().next().value!);
     cache.set(key, { at: Date.now(), value: result });
   }
   return result;

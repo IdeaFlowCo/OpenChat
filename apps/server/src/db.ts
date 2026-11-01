@@ -32,6 +32,7 @@ export async function initDatabase(): Promise<void> {
     await session.run(`CREATE CONSTRAINT message_provenance_message IF NOT EXISTS FOR (p:MessageProvenance) REQUIRE p.messageId IS UNIQUE`);
     await session.run(`CREATE CONSTRAINT vision_reply_delivery_message IF NOT EXISTS FOR (d:VisionReplyDelivery) REQUIRE d.messageId IS UNIQUE`);
     await session.run(`CREATE INDEX vision_reply_delivery_due IF NOT EXISTS FOR (d:VisionReplyDelivery) ON (d.status, d.nextAttemptAt)`);
+    await session.run(`CREATE CONSTRAINT vision_reply_worker_id IF NOT EXISTS FOR (w:VisionReplyWorker) REQUIRE w.id IS UNIQUE`);
     // Create constraints for Conversation
     await session.run(`
       CREATE CONSTRAINT conversation_id IF NOT EXISTS
