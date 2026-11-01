@@ -87,6 +87,10 @@ services:
       - UNLINKED_API_BASE=${UNLINKED_API_BASE:-https://www.unlinked.ai}
       - UNLINKED_ACCOUNT_TOKEN=${UNLINKED_ACCOUNT_TOKEN:-}
       - UNLINKED_MESSAGING_SECRET=${UNLINKED_MESSAGING_SECRET:-}
+      # Vision stream bridge: partner session, and reply delivery to Vision.
+      - VISION_MESSAGING_SECRET=${VISION_MESSAGING_SECRET:-}
+      - VISION_API_BASE=${VISION_API_BASE:-}
+      - OPENCHAT_VISION_SECRET=${OPENCHAT_VISION_SECRET:-}
       # Ideaflow ideas network (social.ideaflow.app) partner reads: group rosters (OpenChat-vwgq.8).
       - IDEANETWORK_PARTNER_SECRET=${IDEANETWORK_PARTNER_SECRET:-}
       - UNLINKED_MCP_URL=${UNLINKED_MCP_URL:-https://www.unlinked.ai/mcp}

@@ -89,6 +89,20 @@ describe('unified OpenChat connector trust boundary',()=>{
     const denied=await (await call('tools/call',{name:'oc_list_context_posts',arguments:{conversationId:'private'}})).json() as any;
     expect(denied.result.isError).toBe(true);
   });
+  it('passes validated Vision provenance through oc_send_message and lists oc_resolve_handle under write',async()=>{
+    const provenance={service:'vision',noteId:'note-1',loopId:'loop-1',ownerSubject:'subject'};
+    const sent=await (await call('tools/call',{name:'oc_send_message',arguments:{conversationId:'room',content:'From my note',clientRequestId:'r1',provenance}})).json() as any;
+    expect(JSON.parse(sent.result.content[0].text)).toMatchObject({conversationId:'room',content:'From my note',clientRequestId:'r1',provenance,userId:'owner'});
+    for(const bad of [{...provenance,service:'email'},{...provenance,extra:true},'vision']) {
+      expect((await call('tools/call',{name:'oc_send_message',arguments:{conversationId:'room',content:'x',clientRequestId:'r2',provenance:bad}})).status).toBe(400);
+    }
+    const listing=await (await call('tools/list')).json() as any;
+    const resolve=listing.result.tools.find((t:any)=>t.name==='oc_resolve_handle');
+    expect(resolve.inputSchema.properties.handle.enum).toEqual(['agent']);
+    expect(resolve.annotations.readOnlyHint).toBe(false);
+    const readOnly=await (await call('tools/list',undefined,{scope:'openchat:read'})).json() as any;
+    expect(readOnly.result.tools.map((t:any)=>t.name)).not.toContain('oc_resolve_handle');
+  });
   it('rejects unknown/extra arguments rather than exposing arbitrary routes or message types',async()=>{
     for(const args of [{conversationId:'room',content:'test',clientRequestId:'id',messageType:'card'}, {conversationId:'room',content:'test'}, {conversationId:[],content:'test',clientRequestId:'id'}]) {
       expect((await call('tools/call',{name:'oc_send_message',arguments:args})).status).toBe(400);

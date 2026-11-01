@@ -10,11 +10,14 @@ import { getDriver } from '../db.js';
 import { legacyEmailProjection } from '../privacy/legacyEmailCompat.js';
 import { requireAuth } from '../middleware/auth.js';
 import { resolveActor } from '../middleware/resolveActor.js';
+import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import { resolveInvitePreview, acceptInviteTransaction, InviteError } from '../services/inviteEntry.js';
 import { resolvePublicPersonProjection } from '../services/publicEntryProjection.js';
 import { joinUserSocketsToConversation, leaveUserSocketsFromConversation, isUserOnline, broadcastMessageToParticipants, fanoutPushForMessage } from '../websocket/chatHandler.js';
 import { processLinkPreviews, loadPreviewsForMessages } from '../services/linkPreview.js';
 import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
+import { resolveMentionedUserIds } from '../services/messageMentions.js';
+import { connectorMessageId, parseMessageProvenance, provenanceBelongsToSender, scheduleVisionReplyDelivery } from '../services/visionBridge.js';
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
 import { maybeTriggerSecretary } from '../services/secretary.js';
 import { dispatchMessageEvent } from '../services/webhookDispatch.js';
@@ -998,8 +1001,15 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     replyToId,
     assistantScope,
     emojiSize: rawEmojiSize,
+    provenance: rawProvenance,
   } = req.body;
   const content = rawContent ?? text;
+  // A unified-connector principal must retry with the same clientRequestId; the
+  // message id is derived from it so a retry never duplicates (OpenChat-vwgq.10).
+  const connectorPrincipal = getConnectorPrincipal(req);
+  const idempotentSend = Boolean(req.connectorDelegation || connectorPrincipal);
+  const provenance = parseMessageProvenance(rawProvenance);
+  if (provenance === 'invalid') { res.status(400).json({ error: 'Invalid message provenance' }); return; }
   if (assistantScope !== undefined && !['conversation','universal'].includes(assistantScope)) { res.status(400).json({error:'Invalid assistant context'}); return; }
 
   if (req.connectorDelegation && (
@@ -1008,6 +1018,14 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     || Object.keys(req.body).some((key) => key !== 'content' && key !== 'clientRequestId')
   )) {
     res.status(400).json({ error: 'Delegated sends require content and a stable message id' });
+    return;
+  }
+  if (connectorPrincipal && (
+    typeof rawContent !== 'string' || !rawContent.trim()
+    || typeof clientRequestId !== 'string' || clientRequestId.length < 1 || clientRequestId.length > 200
+    || Object.keys(req.body).some((key) => !['content', 'clientRequestId', 'replyToId', 'provenance'].includes(key))
+  )) {
+    res.status(400).json({ error: 'Connector sends require content and a stable clientRequestId' });
     return;
   }
 
@@ -1099,6 +1117,13 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       }
     }
 
+    // Provenance names the sender's own Vision note; it is never accepted for
+    // someone else's identity, so replies cannot be routed to another owner.
+    if (provenance && !(await provenanceBelongsToSender(session, userId, provenance))) {
+      res.status(400).json({ error: 'Message provenance must name your own linked Ideaflow account' });
+      return;
+    }
+
     // Idempotency: use the client-supplied id (shared with the WebSocket path)
     // so a WS send whose ack was lost, then retried over this REST fallback,
     // collapses to one row via MERGE instead of persisting a duplicate with a
@@ -1107,10 +1132,12 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       ? 'ocd_' + createHash('sha256').update(JSON.stringify([req.connectorDelegation.clientId,
         req.connectorDelegation.connectorGrantId, req.connectorDelegation.connectorUserId,
         req.connectorDelegation.openChatUserId, clientRequestId])).digest('hex')
-      : (typeof clientId === 'string' && clientId) || nanoid();
+      : connectorPrincipal
+        ? connectorMessageId(userId, conversationId as string, clientRequestId as string)
+        : (typeof clientId === 'string' && clientId) || nanoid();
     const now = new Date().toISOString();
     // Use caption or fallback for preview
-    const messageContent = hasContent ? (req.connectorDelegation ? content as string : (content as string).trim()) : '';
+    const messageContent = hasContent ? (idempotentSend ? content as string : (content as string).trim()) : '';
     // attachmentsJson stored as a JSON string in Neo4j
     const attachmentsJson = hasAttachments ? JSON.stringify(attachments) : null;
     // lastMessagePreview for attachment-only messages (photo / voice note / file)
@@ -1119,7 +1146,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     );
     const preview = messageContent || (hasAttachments ? attachmentsPreview(attachments as { mimeType?: unknown; filename?: unknown }[]) : '');
 
-    if (req.connectorDelegation) {
+    if (idempotentSend) {
       const existing = await session.run('MATCH (m:Message {id: $id}) RETURN m { .* } AS message', { id: messageId });
       if (existing.records.length) {
         const message = toJS(existing.records[0].get('message')) as Record<string, unknown>;
@@ -1133,6 +1160,12 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       }
     }
 
+    // Same @mention resolution as the socket path, so REST and partner sends
+    // (Vision, connectors) notify mentioned people too.
+    const mentionedUserIds = messageContent
+      ? await resolveMentionedUserIds(session, conversationId as string, userId, messageContent)
+      : [];
+
     const result = await session.run(`
       MATCH (c:Conversation {id: $conversationId})
       MATCH (sender:User {id: $senderId})
@@ -1143,6 +1176,8 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         m.conversationId = $conversationId,
         m.messageType = $messageType,
         m.attachments = $attachmentsJson,
+        m.mentions = $mentions,
+        m.provenanceService = $provenanceService,
         m.replyToId = $replyToId,
         m.assistantScope = $assistantScope,
         m.emojiSize = $emojiSize,
@@ -1157,6 +1192,12 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         SET c.updatedAt = datetime($now),
             c.lastMessageAt = datetime($now),
             c.lastMessagePreview = left($preview, 100))
+      // Full provenance lives beside the message, never in message projections
+      // that recipients, webhooks and agents receive.
+      FOREACH (_ IN CASE WHEN coalesce(m._created, false) AND $provenanceJson IS NOT NULL THEN [1] ELSE [] END |
+        MERGE (pr:MessageProvenance {messageId: m.id})
+        ON CREATE SET pr.json = $provenanceJson, pr.service = $provenanceService,
+          pr.senderId = $senderId, pr.createdAt = datetime($now))
       // OpenChat-uxj: hydrate the reply target so clients can render the
       // quote bubble without an extra fetch. OpenChat-60y: also return the
       // participant ids so we can fan out to per-user rooms.
@@ -1184,7 +1225,10 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       wasCreated
     `, {
       id: messageId,
-      delegated: Boolean(req.connectorDelegation),
+      delegated: idempotentSend,
+      mentions: mentionedUserIds,
+      provenanceService: provenance ? provenance.service : null,
+      provenanceJson: provenance ? JSON.stringify(provenance) : null,
       content: messageContent,
       senderId: userId,
       conversationId,
@@ -1197,14 +1241,14 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       preview,
     });
 
-    if (req.connectorDelegation && result.records.length === 0) {
+    if (idempotentSend && result.records.length === 0) {
       res.status(409).json({ error: 'Idempotency key already used' });
       return;
     }
     const message = toJS(result.records[0].get('message')) as Record<string, unknown>;
     const participantIds = result.records[0].get('participantIds') as string[];
     const wasCreated = result.records[0].get('wasCreated') === true;
-    if (req.connectorDelegation && !wasCreated) {
+    if (idempotentSend && !wasCreated) {
       // Connector retries return the original row without another broadcast,
       // push, webhook, assistant turn, or thought extraction.
       if (message.senderId !== userId || message.conversationId !== conversationId
@@ -1235,7 +1279,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // second one did" report. Guarded on wasCreated so a client retry of the
     // same message id doesn't notify twice.
     if (wasCreated) {
-      void fanoutPushForMessage(conversationId as string, userId, message).catch((err) =>
+      void fanoutPushForMessage(conversationId as string, userId, message, mentionedUserIds).catch((err) =>
         console.warn('[push] REST fanout error:', err)
       );
     }
@@ -1246,6 +1290,8 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // Outbound webhooks (openchat bot-channel): push the message to any external
     // subscriber (e.g. groupbrain). Fire-and-forget, no-ops when no subscription.
     if (wasCreated && !isVoiceOnly) dispatchMessageEvent(message, participantIds);
+    // A reply to a message sent from Vision goes back to the sender's Vision.
+    if (wasCreated) scheduleVisionReplyDelivery(String(message.id), replyToId);
     // Async link preview fetch — non-blocking (OpenChat-hq2)
     if (io) {
       processLinkPreviews(io, message.id as string, conversationId as string, messageContent);

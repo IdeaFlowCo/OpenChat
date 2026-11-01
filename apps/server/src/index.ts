@@ -1,4 +1,6 @@
 import visionSaveRoutes from './routes/visionSave.js';
+import visionBridgeRoutes from './routes/visionBridge.js';
+import { startVisionReplyWorker } from './services/visionBridge.js';
 import contextIntentionsRoutes from './routes/contextIntentions.js';
 import conversationContentRoutes from './routes/conversationContent.js';
 import contextWebhooksRoutes from './routes/contextWebhooks.js';
@@ -461,6 +463,8 @@ app.use('/api/agent-keys', agentKeysRoutes);
 app.use('/api/webhooks', webhooksRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/assistant', assistantRoutes);
+// Partner session + handle resolver first: the Save router refuses agent principals.
+app.use('/api', visionBridgeRoutes);
 app.use('/api/vision', visionSaveRoutes);
 app.use('/api/secretary', secretaryRoutes);
 app.use('/api', agentNetworkRoutes);
@@ -630,6 +634,7 @@ const PORT = parseInt(process.env.PORT || '41851', 10);
 
 let stopContextWebhookWorker: (()=>void) | undefined;
 let stopHostedContextWorker: (()=>void) | undefined;
+let stopVisionReplyWorker: (()=>void) | undefined;
 async function start() {
   try {
     await initDatabase();
@@ -638,6 +643,7 @@ async function start() {
     stopContextWebhookWorker = startContextWebhookWorker(getDriver());
     await ensureHostedContextIndexes(getDriver());
     stopHostedContextWorker = startHostedContextWorker(getDriver());
+    stopVisionReplyWorker = startVisionReplyWorker(getDriver());
 
     const sanitizedNames = await sanitizeLegacyPublicDisplayNames();
     if (sanitizedNames > 0) {
@@ -710,6 +716,7 @@ process.on('SIGTERM', async () => {
   console.log('Shutting down...');
   stopContextWebhookWorker?.();
   stopHostedContextWorker?.();
+  stopVisionReplyWorker?.();
   await closeDatabase();
   process.exit(0);
 });
@@ -718,6 +725,7 @@ process.on('SIGINT', async () => {
   console.log('Shutting down...');
   stopContextWebhookWorker?.();
   stopHostedContextWorker?.();
+  stopVisionReplyWorker?.();
   await closeDatabase();
   process.exit(0);
 });
