@@ -10,7 +10,7 @@
  * - Pull-to-refresh
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -25,10 +25,25 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useChat } from '../contexts/ChatContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
-import { fetchThoughts, createThought, updateThought, deleteThought, Thought } from '../services/thoughts';
+import { fetchThoughts, createThought, updateThought, deleteThought, searchVision, Thought } from '../services/thoughts';
 import { getSocket } from '../api/socket';
 import { StreamEditor } from '../components/StreamEditor';
 import { ThoughtCard } from '../components/ThoughtCard';
+import { VisionNoteCard } from '../components/VisionNoteCard';
+import { Button, Chip } from '../components/ui';
+import { space, type } from '../theme/tokens';
+import {
+  VISION_SEARCH_DEBOUNCE_MS,
+  VISION_UNAVAILABLE_NOTICE,
+  appendVisionRows,
+  classifyUnavailable,
+  mergeStreamItems,
+  nextAvailability,
+  type StreamItem,
+  type VisionAvailability,
+  type VisionChip,
+  type VisionSearchRow,
+} from '../utils/visionSearch';
 import { ThoughtsSearchBar } from '../components/ThoughtsSearchBar';
 import { StreamCompactToggle } from '../components/StreamCompactToggle';
 import { applyCollapsed, ingestStreamCollapsed } from '../services/streamDisplay';
@@ -51,13 +66,29 @@ export function ThoughtsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const mountedRef = useRef(true);
+
+  // ── Vision-backed search ──────────────────────────────────────────────────
+  // `availability` is remembered for the screen session: once the server says
+  // the user has no Vision we stop calling it on every keystroke.
+  const [availability, setAvailability] = useState<VisionAvailability>('unknown');
+  const availabilityRef = useRef<VisionAvailability>('unknown');
+  const [chip, setChip] = useState<VisionChip>('openchat');
+  const [visionRows, setVisionRows] = useState<VisionSearchRow[]>([]);
+  const [visionCursor, setVisionCursor] = useState<string | null>(null);
+  // True only when the latest search for the current query got rows from Vision.
+  const [visionOk, setVisionOk] = useState(false);
+  const [visionNotice, setVisionNotice] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreFailed, setLoadMoreFailed] = useState(false);
+  const searchSeqRef = useRef(0);
+  const searchAbortRef = useRef<AbortController | null>(null);
   // The query currently reflected in `thoughts`. Used so socket-pushed
   // thought:created events only prepend when we're showing the full list.
   const activeQueryRef = useRef('');
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => { mountedRef.current = false; searchAbortRef.current?.abort(); };
   }, []);
 
   const load = useCallback(async (isRefresh = false, q = '') => {
@@ -89,18 +120,96 @@ export function ThoughtsScreen() {
   queryRef.current = query;
   useFocusEffect(useCallback(() => { load(false, queryRef.current); }, [load]));
 
-  // Debounced search: refetch with `q` ~250ms after typing stops. Clearing
-  // the input falls back to the normal full list. Skipped on first mount —
-  // the focus effect already did the initial load.
+  // Debounced search. A non-empty query waits 300 ms, then runs the local
+  // :Thought search and (unless the user has no Vision) the Vision search in
+  // parallel. Clearing the input falls back to the normal full list. Skipped
+  // on first mount — the focus effect already did the initial load.
+  const resetVision = useCallback(() => {
+    searchSeqRef.current += 1;
+    searchAbortRef.current?.abort();
+    searchAbortRef.current = null;
+    setVisionRows([]);
+    setVisionCursor(null);
+    setVisionOk(false);
+    setVisionNotice(false);
+    setLoadingMore(false);
+    setLoadMoreFailed(false);
+  }, []);
+
+  const runVisionSearch = useCallback(async (q: string, which: VisionChip) => {
+    const seq = ++searchSeqRef.current;
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    setLoadMoreFailed(false);
+    setLoadingMore(false);
+    const result = await searchVision({ q, chip: which }, controller.signal);
+    // Stale (aborted, superseded or unmounted): ignore.
+    if (!result || seq !== searchSeqRef.current || !mountedRef.current) return;
+    const next = nextAvailability(availabilityRef.current, result);
+    availabilityRef.current = next;
+    setAvailability(next);
+    if (result.status === 'ok') {
+      setVisionRows(result.rows);
+      setVisionCursor(result.nextCursor);
+      setVisionOk(true);
+      setVisionNotice(false);
+    } else {
+      setVisionRows([]);
+      setVisionCursor(null);
+      setVisionOk(false);
+      // No Vision at all is silent; any other failure is called out.
+      setVisionNotice(classifyUnavailable(result.code) === 'degraded');
+    }
+  }, []);
+
   const didMountRef = useRef(false);
   useEffect(() => {
     if (!didMountRef.current) {
       didMountRef.current = true;
       return;
     }
-    const timer = setTimeout(() => { load(false, query); }, 250);
+    const trimmed = query.trim();
+    if (!trimmed) {
+      resetVision();
+      const timer = setTimeout(() => { load(false, query); }, 250);
+      return () => clearTimeout(timer);
+    }
+    const timer = setTimeout(() => {
+      load(false, query);
+      if (availabilityRef.current !== 'none') void runVisionSearch(trimmed, chip);
+      else resetVision();
+    }, VISION_SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [query, load]);
+  }, [query, chip, load, runVisionSearch, resetVision]);
+
+  const selectChip = useCallback((next: VisionChip) => {
+    if (next === chip) return;
+    // Rows from the other filter must not linger while the new search runs.
+    setVisionRows([]);
+    setVisionCursor(null);
+    setVisionOk(false);
+    setChip(next);
+  }, [chip]);
+
+  const loadMoreVision = useCallback(async () => {
+    const trimmed = query.trim();
+    if (!visionCursor || loadingMore || !trimmed) return;
+    const seq = searchSeqRef.current;
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    setLoadingMore(true);
+    setLoadMoreFailed(false);
+    const result = await searchVision({ q: trimmed, chip, cursor: visionCursor }, controller.signal);
+    if (!result || seq !== searchSeqRef.current || !mountedRef.current) return;
+    setLoadingMore(false);
+    if (result.status === 'ok') {
+      setVisionRows((prev) => appendVisionRows(prev, result.rows));
+      setVisionCursor(result.nextCursor);
+    } else {
+      setLoadMoreFailed(true);
+    }
+  }, [query, visionCursor, loadingMore, chip]);
 
   // Live update on tag-generated Thoughts: server emits 'thought:created'
   // when a chat message with a hashtag spawns a new Thought. Prepend so
@@ -219,10 +328,20 @@ export function ThoughtsScreen() {
     setQuery(tag.replace(/^#/, ''));
   }, []);
 
+  // What the list shows. Vision rows only count when the latest search for
+  // this query succeeded; otherwise it is the plain local Stream search.
+  const searching = query.trim().length > 0;
+  const vision = searching && visionOk;
+  const items: StreamItem<Thought>[] = useMemo(() => {
+    if (vision && chip === 'all') return mergeStreamItems(visionRows, []);
+    if (vision) return mergeStreamItems(visionRows, thoughts);
+    return thoughts.map((thought): StreamItem<Thought> => ({ source: 'local', id: thought.id, createdAt: thought.createdAt, thought }));
+  }, [vision, chip, visionRows, thoughts]);
+  const showChips = searching && availability === 'available';
+
   // Empty state — distinct copy for "no results for a search" vs "no thoughts yet".
   const renderEmpty = () => {
     if (loading) return null;
-    const searching = query.trim().length > 0;
     return (
       <View style={styles.emptyContainer}>
         <Text style={[styles.emptyText, { color: c.textMetadata }]}>
@@ -254,17 +373,30 @@ export function ThoughtsScreen() {
         onCreate={text => openAdd(text)}
         placeholder="Search or create a Stream entry"
       />
+      {showChips && (
+        <View style={styles.chipRow} accessibilityRole="radiogroup">
+          <Chip label="From OpenChat" selected={chip === 'openchat'} accessibilityRole="radio" onPress={() => selectChip('openchat')} testID="vision-chip-openchat" />
+          <Chip label="All my notes" selected={chip === 'all'} accessibilityRole="radio" onPress={() => selectChip('all')} testID="vision-chip-all" />
+        </View>
+      )}
+      {searching && visionNotice && (
+        <Text accessibilityRole="alert" testID="vision-unavailable-notice" style={[styles.notice, { color: c.textMetadata }]}>
+          {VISION_UNAVAILABLE_NOTICE}
+        </Text>
+      )}
       <View style={styles.displayRow}>
         <StreamCompactToggle />
       </View>
 
       <FlatList
-        data={thoughts}
-        keyExtractor={(t) => t.id}
+        data={items}
+        keyExtractor={(entry) => entry.id}
         contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"
-        renderItem={({ item }) =>
-          item.id === editingId ? (
+        renderItem={({ item: entry }) => {
+          if (entry.source === 'vision') return <VisionNoteCard row={entry.row} />;
+          const item = entry.thought;
+          return item.id === editingId ? (
             renderEditorCard(editDraft, setEditDraft, () => void commitEdit())
           ) : (
             <ThoughtCard
@@ -275,7 +407,15 @@ export function ThoughtsScreen() {
               onTagPress={handleTagPress}
               subtitle={item.sourceConversationName ? `from ${item.sourceConversationName}` : null}
             />
-          )
+          );
+        }}
+        ListFooterComponent={
+          vision && visionCursor ? (
+            <View style={styles.loadMore}>
+              <Button label="Load more" variant="secondary" size="sm" loading={loadingMore} onPress={() => void loadMoreVision()} testID="vision-load-more" />
+              {loadMoreFailed && <Text style={[styles.notice, { color: c.textMetadata }]}>Could not load more from Vision.</Text>}
+            </View>
+          ) : null
         }
         ListHeaderComponent={
           creating ? renderEditorCard(newDraft, text => { draftRevision.current += 1; setNewDraft(text); }, () => void commitNew(), 'New Stream entry…') : null
@@ -308,6 +448,9 @@ export function ThoughtsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   displayRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 12 },
+  chipRow: { flexDirection: 'row', gap: space[2], paddingHorizontal: space[4], paddingTop: space[2] },
+  notice: { ...type.meta, paddingHorizontal: space[4], paddingTop: space[2] },
+  loadMore: { alignItems: 'center', paddingVertical: space[3], gap: space[2] },
   searchWrap: {
     padding: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,

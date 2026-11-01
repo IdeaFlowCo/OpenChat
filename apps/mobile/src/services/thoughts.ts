@@ -4,6 +4,12 @@
  * and to give a single place to add caching in the future. (OpenChat-zi1)
  */
 
+import {
+  decodeVisionSearchResponse,
+  VISION_SEARCH_TIMEOUT_MS,
+  type VisionChip,
+  type VisionSearchResult,
+} from '../utils/visionSearch';
 import { api, ConversationThoughts, Thought, ThoughtKind, ThoughtStatus } from '../api/client';
 
 export type { ConversationThoughts, Thought, ThoughtKind, ThoughtStatus };
@@ -48,4 +54,33 @@ export async function updateThought(
 
 export async function deleteThought(id: string): Promise<void> {
   return api.deleteThought(id);
+}
+
+/**
+ * Search Vision notes. Never throws for Vision problems: a timeout (client
+ * backstop of 3 s) or any network/server error resolves to an `unavailable`
+ * result so the caller can fall back to local search. Resolves `null` only when
+ * the caller aborted `signal` (stale request).
+ */
+export async function searchVision(
+  params: { q: string; chip: VisionChip; cursor?: string },
+  signal?: AbortSignal,
+  timeoutMs: number = VISION_SEARCH_TIMEOUT_MS
+): Promise<VisionSearchResult | null> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const onAbort = () => controller.abort();
+  if (signal?.aborted) return null;
+  signal?.addEventListener('abort', onAbort);
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  try {
+    return decodeVisionSearchResponse(await api.visionSearchThoughts(params, controller.signal));
+  } catch (e) {
+    if (signal?.aborted) return null;
+    if (timedOut) return { status: 'unavailable', code: 'timeout', reason: 'Vision search timed out' };
+    return { status: 'unavailable', code: 'source_unavailable', reason: e instanceof Error ? e.message : 'Vision search failed' };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  }
 }
