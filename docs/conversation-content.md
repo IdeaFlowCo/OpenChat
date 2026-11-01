@@ -19,3 +19,7 @@ Intention tracking is described in [Context intention lifecycle](context-intenti
 Tests: `conversationContent.integration.test.ts` uses an isolated Neo4j fixture for mixed pagination, aliases, private visibility, key revocation, source redaction, reviewed pin races and membership loss. `conversationContent.route.test.ts` covers actor gating. Mobile tests cover the compatibility Stream door, search/tag/socket refresh, private entry creation and sharing, stale preview rejection, account replacement, permission loss and unchanged filter selection.
 
 Stream entries carry `collapsed`, the reading user's own preference, set with `PUT /api/thoughts/:id/collapsed {collapsed}` on any entry the user can read (own, pinned to a chat they belong to, or a tag capture from such a chat); it is stored as `(:User)-[:COLLAPSED_THOUGHT]->(:Thought)` and emits `thought:collapsed` to that user only. For user-facing search and display controls, see [Messages and Stream](../README.md#messages-and-stream).
+
+## Vision provenance and Vision search
+
+Messages sent from Vision carry only `provenanceService:"vision"`. The note reference stays server-side, and only the sender sees the **from Vision** caption. A reply to such a message is delivered to the sender's Vision, never into this feed. Personal Stream search can include the owner's own Vision notes (**From OpenChat** / **All my notes**); conversation content never returns Vision notes. See the [Vision stream bridge contract](shared-capabilities-control.md#vision-stream-bridge-openchat-vwgq9-12-openchat-3kr9).

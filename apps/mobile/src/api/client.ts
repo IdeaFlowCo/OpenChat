@@ -199,6 +199,8 @@ export interface Message {
   viaSecretary?: boolean;
   /** Hold-to-grow size (1..4) of an emoji-only message (OpenChat-3aiu). */
   emojiSize?: number | null;
+  /** Originating service for messages sent from elsewhere; 'vision' = sent from Vision. */
+  provenanceService?: string | null;
 }
 
 export interface DroppedMessageSend {
@@ -1772,6 +1774,16 @@ export const api = {
     if (opts?.q) qs.set('q', opts.q);
     const q = qs.toString();
     return request<Thought[]>(`/api/thoughts${q ? `?${q}` : ''}`);
+  },
+
+  /**
+   * Search the caller's Vision notes (server-side, bounded to 2.5 s). Returns
+   * the raw payload; decode with `decodeVisionSearchResponse`.
+   */
+  visionSearchThoughts: (params: { q: string; chip: 'openchat' | 'all'; cursor?: string }, signal?: AbortSignal) => {
+    const qs = new URLSearchParams({ q: params.q, chip: params.chip });
+    if (params.cursor) qs.set('cursor', params.cursor);
+    return request<unknown>(`/api/thoughts/vision-search?${qs.toString()}`, { signal, expireAuthOnForbidden: false });
   },
 
   /**

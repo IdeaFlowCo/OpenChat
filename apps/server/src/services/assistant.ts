@@ -1,6 +1,8 @@
 import { messageOriginMatch, messageBoundaryFilter, messageAtOrBeforeOrigin, messageBoundaryParams, type MessageBoundary } from './messageBoundary.js';
 import { scopeForParticipants, toolAvailableInScope, scopedToolInput, replyAnnotation, SCOPE_DENIED, type AssistantScope } from './assistantScope.js';
 import { appBridgeConfigured, readApp, searchPublicNoos } from './appSources.js';
+import { scheduleVisionReplyDelivery } from './visionBridge.js';
+import { streamSearchPredicate, streamTagQuery } from './streamSearch.js';
 import { unlinkedProvisionConfigured } from './unlinkedProvision.js';
 /**
  * In-app Assistant bot (openchat-bfn.3).
@@ -155,6 +157,8 @@ export async function persistMessage(
     matchContextKey?: string;
     agentDeliveryKey?: string;
     assistantPageContext?: string;
+    /** Same-conversation message this one answers (validated by the caller). */
+    replyToId?: string;
   }
 ): Promise<{ message: Record<string, unknown>; participantIds: string[]; created: boolean } | null> {
   const messageId = opts?.messageId ?? nanoid();
@@ -194,6 +198,7 @@ export async function persistMessage(
         m.cardKind = $cardKind,
         m.cardPayload = $cardPayload,
         m.viaAssistant = $viaAssistant,
+        m.replyToId = $replyToId,
         m.createdAt = datetime($now),
         m.creationToken = $creationToken
       MERGE (m)-[:IN_CONVERSATION]->(c)
@@ -224,6 +229,7 @@ export async function persistMessage(
         cardPayload,
         matchContextKey: matchContextKey ?? null,
         agentDeliveryKey: agentDeliveryKey ?? null,
+        replyToId: opts?.replyToId ?? null,
         creationToken,
       }
     );
@@ -238,6 +244,7 @@ export async function persistMessage(
       processLinkPreviews(io, message.id as string, conversationId, messageContent);
     }
     if (created) dispatchMessageEvent(message, participantIds);
+    if (created) scheduleVisionReplyDelivery(String(message.id), opts?.replyToId);
 
     if (created) {
       void embedAndStoreMessage(message.id as string, messageContent).catch(() => { /* best-effort */ });
@@ -963,6 +970,11 @@ export function buildTools(scope: AssistantScope): AnthropicType.Tool[] {
       input_schema: { type: 'object', properties: { tool: { type: 'string' }, arguments: { type: 'object', additionalProperties: true } }, required: ['tool', 'arguments'] },
     },
     {
+      name: 'stream_read',
+      description: "Read the user's own Stream (their captured thoughts and #tagged entries), newest first, optionally filtered by text or tag. Read-only; never other people's entries.",
+      input_schema: { type: 'object', properties: { query: { type: 'string', description: 'Optional text or #tag filter' }, limit: { type: 'number', description: 'Max entries (default 20, max 50)' } } },
+    },
+    {
       name: 'search_noos_public',
       description: 'Search public Noos knowledge graph nodes by keyword. Private nodes are unavailable.',
       input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
@@ -1418,11 +1430,16 @@ export async function executeTool(
         if (scope.kind === 'conversation') return [{ name: 'OpenChat', access: 'current_conversation_only', conversationId: scope.conversationId }];
         return [
           { name: 'OpenChat', access: 'signed_in_account', tools: ['search_messages', 'list_conversations', 'read_messages'] },
+          { name: 'OpenChat Stream', access: 'own_entries_read_only', tools: ['stream_read'] },
           { name: 'Vision', access: appBridgeConfigured() ? 'identity_scoped_reads_on_request' : 'not_configured', tools: ['vision_read'] },
           { name: 'Unlinked', access: unlinkedProvisionConfigured() ? 'identity_scoped_search_on_request' : 'not_configured', tools: ['unlinked_search_network', 'unlinked_search_everyone'] },
           { name: 'Noos', access: 'public_only', tools: ['search_noos_public'] },
           { name: 'World Issue Tracker', access: 'public_only', tools: ['wit_list_issues', 'wit_get_issue', 'wit_list_trackers'] },
         ];
+      case 'stream_read': {
+        const limit = typeof input.limit === 'number' && input.limit > 0 ? Math.min(Math.floor(input.limit), 50) : 20;
+        return await toolStreamRead(userId, typeof input.query === 'string' ? input.query : '', limit);
+      }
       case 'search_noos_public':
         return searchPublicNoos(typeof input.query === 'string' ? input.query : '');
       case 'vision_read': {
@@ -1928,6 +1945,29 @@ function friendlyAssistantError(err: unknown): string {
   return '⚠️ Sorry, I ran into a problem and couldn’t finish that. Mind trying again?';
 }
 
+async function visionOriginMessage(conversationId: string, messageId: string): Promise<string | undefined> {
+  const s = getDriver().session({ defaultAccessMode: 'READ' });
+  try {
+    const r = await s.run(`MATCH (m:Message {id:$messageId, conversationId:$conversationId}) WHERE m.provenanceService = 'vision' RETURN m.id AS id`, { messageId, conversationId });
+    return r.records[0]?.get('id') ?? undefined;
+  } finally { await s.close(); }
+}
+
+/** The owner's OWN Stream entries only (design D14: agents may read your thoughts).
+ * Universal turns only; never other people's pinned or captured entries. */
+async function toolStreamRead(userId: string, query: string, limit: number): Promise<unknown> {
+  const s = getDriver().session({ defaultAccessMode: 'READ' });
+  try {
+    const q = query.trim().slice(0, 200);
+    const r = await s.run(`MATCH (:User {id:$userId})-[:HAS_THOUGHT]->(t:Thought)
+      WHERE t.userId = $userId AND (t.lane IS NULL OR t.lane <> 'context') AND t.deletedAt IS NULL
+        ${q ? `AND ${streamSearchPredicate()}` : ''}
+      RETURN t.id AS id, left(t.text, 2000) AS text, coalesce(t.tags, []) AS tags, t.kind AS kind, t.status AS status, toString(t.createdAt) AS createdAt
+      ORDER BY t.createdAt DESC LIMIT $limit`, { userId, q, tagQ: streamTagQuery(q), limit: neo4j.int(limit) });
+    return { scope: 'own_stream', entries: r.records.map(row => ({ id: row.get('id'), text: row.get('text'), tags: row.get('tags'), kind: row.get('kind') ?? null, status: row.get('status') ?? null, createdAt: row.get('createdAt') })) };
+  } finally { await s.close(); }
+}
+
 export async function runAssistantTurn(opts: {
   userId: string;
   conversationId: string;
@@ -2021,7 +2061,10 @@ If the user's latest message approves it, call send_message with exactly that co
     if (!finalText) {
       finalText = "I couldn’t put together a response — mind rephrasing or trying again?";
     }
-    await persistMessage(io, ASSISTANT_USER_ID, conversationId, plainChatText(finalText));
+    // A message sent from Vision gets its answer as a reply, so it flows back to
+    // the sender's Vision note like any other reply (OpenChat-vwgq.11).
+    const replyToId = await visionOriginMessage(conversationId, messageId).catch(() => undefined);
+    await persistMessage(io, ASSISTANT_USER_ID, conversationId, plainChatText(finalText), replyToId ? { replyToId } : undefined);
   } catch (err) {
     console.error('[assistant] runAssistantTurn failed:', err);
     // Report errors intelligently: surface a friendly message in the chat

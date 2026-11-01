@@ -9,6 +9,8 @@ import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMe
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
 import { maybeTriggerSecretary } from '../services/secretary.js';
 import { dispatchMessageEvent } from '../services/webhookDispatch.js';
+import { resolveMentionedUserIds } from '../services/messageMentions.js';
+import { scheduleVisionReplyDelivery } from '../services/visionBridge.js';
 import { embedAndStoreMessage } from '../services/embeddings.js';
 import { parseEmojiSize } from '../services/emojiMessage.js';
 import { sendTickle } from '../services/tickle.js';
@@ -126,6 +128,8 @@ export function setupChatSocket(io: Server): void {
     if (!user) {
       return next(new Error('Invalid token'));
     }
+    // Vision partner sessions send over REST only; they never get a live socket.
+    if (user.embedded === 'vision') return next(new Error('Invalid token'));
 
     socket.user = user;
     next();
@@ -133,7 +137,7 @@ export function setupChatSocket(io: Server): void {
 
   io.on('connection', (socket: AuthenticatedSocket) => {
     const userId = socket.user!.userId;
-    if (socket.user?.embedded === 'unlinked' && socket.user.exp) {
+    if (socket.user?.embedded && socket.user.exp) {
       const expiry = setTimeout(() => socket.disconnect(true), Math.max(0, socket.user.exp * 1000 - Date.now()));
       socket.once('disconnect', () => clearTimeout(expiry));
     }
@@ -270,49 +274,8 @@ export function setupChatSocket(io: Server): void {
         const messageId = (typeof data.id === 'string' && data.id) || nanoid();
         const now = new Date().toISOString();
 
-        // --- Mention parsing (OpenChat-0jy) ---
-        // Only parse mentions in group conversations; DMs don't need them.
-        // We resolve @Name tokens to participant userIds by name match so the
-        // stored list survives display-name changes in rendering logic.
-        const convCheckResult = await session.run(`
-          MATCH (c:Conversation {id: $conversationId})
-          RETURN c.type AS convType
-        `, { conversationId });
-        const convType = convCheckResult.records[0]?.get('convType') as string | null;
-        const isGroupConv = convType === 'group';
-
-        const mentionedUserIds: string[] = [];
-        if (isGroupConv) {
-          const mentionTokens = [...content.matchAll(/@([\w-]+(?:\s+[\w-]+)?)/g)].map(m => m[1]);
-          if (mentionTokens.length > 0) {
-            // Resolve each token to a participant by case-insensitive name match.
-            // We fetch all participants at once and do the match in JS to avoid
-            // multiple round-trips. Names with spaces are intentionally supported
-            // (e.g. "@Alice Smith") but single-word tokens (e.g. "@alice") also work.
-            const participantsResult = await session.run(`
-              MATCH (p:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-              WHERE p.id <> $senderId
-              RETURN p.id AS pid, p.name AS pname
-            `, { conversationId, senderId: userId });
-            const participants = participantsResult.records.map(r => ({
-              id: r.get('pid') as string,
-              name: (r.get('pname') as string | null) || '',
-            }));
-            for (const token of mentionTokens) {
-              const lower = token.toLowerCase();
-              const exact = participants.filter(p => p.name.toLowerCase() === lower);
-              const candidates = exact.length > 0
-                ? exact
-                : participants.filter(p => p.name.toLowerCase().startsWith(lower));
-              // Duplicate names are common (especially for neutral fallback
-              // names). Never guess which participant should be notified.
-              const matched = candidates.length === 1 ? candidates[0] : undefined;
-              if (matched && !mentionedUserIds.includes(matched.id)) {
-                mentionedUserIds.push(matched.id);
-              }
-            }
-          }
-        }
+        // --- Mention parsing (OpenChat-0jy), shared with the REST path ---
+        const mentionedUserIds = await resolveMentionedUserIds(session, conversationId, userId, content);
 
         const result = await session.run(`
           MATCH (c:Conversation {id: $conversationId})
@@ -382,6 +345,8 @@ export function setupChatSocket(io: Server): void {
         // Outbound webhooks (openchat bot-channel): push to external subscribers
         // (e.g. groupbrain). Fire-and-forget, no-ops when no subscription.
         if (wasCreated) dispatchMessageEvent(message as Record<string, unknown>, participantIds);
+        // A reply to a message sent from Vision goes back to the sender's Vision.
+        if (wasCreated) scheduleVisionReplyDelivery(messageId, replyToId);
 
         // Async link preview fetch — non-blocking (OpenChat-hq2)
         processLinkPreviews(io, messageId, conversationId, content);

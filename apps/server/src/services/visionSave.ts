@@ -3,6 +3,9 @@ import { getDriver } from '../db.js';
 
 export const ID_ISSUER = 'https://id.ideaflow.app/api/auth';
 const HUB = 'https://id.ideaflow.app';
+/** Least scope for Save (O7): Vision read+write only. Read stays because the hub's
+ * grant status and Vision's create_note receipt are read-gated; nothing broader. */
+export const VISION_SAVE_SCOPES = ['vision:read','vision:write'] as const;
 export type SaveStatus = 'saved'|'rejected'|'needs_auth'|'unavailable'|'uncertain';
 export type SaveReceipt = {status:SaveStatus;destinationId?:string;url?:string;savedAt?:string;reason?:string;recoveryAvailable?:boolean};
 export type SaveRequest = {destination:'vision';kind:'answer'|'summary'|'excerpt'|'note';title:string;body:string;sourceRefs:Array<{app:string;conversationId?:string;messageId?:string;sourceDigest?:string}>;visibility:'private';idempotencyKey:string;retryOf?:string};
@@ -108,7 +111,8 @@ async function freshGrant(token:string,identity:Identity,fetchImpl:typeof fetch)
  const response=await fetchImpl(HUB+'/agent/keys/status',{headers:{Authorization:'Bearer '+token},redirect:'error',signal:AbortSignal.timeout(15000)});
  if(!response.ok)return false;
  const state=await response.json() as {identity?:Identity;scopes?:string[];status?:string};
- return state.status==='active'&&state.identity?.issuer===identity.issuer&&state.identity?.subject===identity.subject&&state.scopes?.includes('vision:write')===true&&state.scopes.includes('vision:read');
+ // Least scope: exactly the requested Vision scopes. A broader grant is refused, not used.
+ return state.status==='active'&&state.identity?.issuer===identity.issuer&&state.identity?.subject===identity.subject&&Array.isArray(state.scopes)&&VISION_SAVE_SCOPES.every(scope=>state.scopes!.includes(scope))&&state.scopes.every(scope=>(VISION_SAVE_SCOPES as readonly string[]).includes(scope));
 }
 function parseResult(value:unknown):Record<string,any>|null {
  const rpc=value as {result?:{structuredContent?:unknown;content?:Array<{type:string;text?:string}>;isError?:boolean}};
@@ -178,9 +182,18 @@ export async function saveToVision(userId:string,input:SaveRequest,repo:SaveRepo
  const bodyMd=[input.title?'# '+input.title:'',input.body,refs?'Source:\n'+refs:'',`<!-- ${marker} -->`].filter(Boolean).join('\n\n');
  let receipt:SaveReceipt;
  try{
-  const response=await fetchImpl(HUB+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},redirect:'error',signal:AbortSignal.timeout(55000),body:JSON.stringify({jsonrpc:'2.0',id:marker,method:'tools/call',params:{name:'vision__create_note',arguments:{bodyMd,visibility:'private'}}})});
+  const first=input.sourceRefs[0];
+  // Structured provenance + idempotency (Vision c9i). The body marker stays as the
+  // fallback search key for older Vision builds and historical notes.
+  const structured={provenance:{platform:'openchat',link:`https://chat.ideaflow.app/app/chat/${encodeURIComponent(first.conversationId!)}?message=${encodeURIComponent(first.messageId!)}`,externalId:first.messageId!},idempotencyKey:marker};
+  const call=(extra:Record<string,unknown>)=>fetchImpl(HUB+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},redirect:'error',signal:AbortSignal.timeout(55000),body:JSON.stringify({jsonrpc:'2.0',id:marker,method:'tools/call',params:{name:'vision__create_note',arguments:{bodyMd,visibility:'private',...extra}}})});
+  let response=await call(structured);
+  let rpc:unknown=response.ok?await response.json():null;
+  // A JSON-RPC invalid-params error is raised before the tool runs, so nothing was
+  // created: an older Vision without these fields. Resend once with the marker only.
+  if((rpc as {error?:{code?:number}}|null)?.error?.code===-32602){response=await call({});rpc=response.ok?await response.json():null;}
   // Once dispatched, an HTTP failure may hide an upstream successful note. Never replay it.
-  const result=response.ok?parseResult(await response.json()):null;
+  const result=response.ok?parseResult(rpc):null;
   const note=result?.note;
   if(note&&typeof note.id==='string'&&note.id){receipt={status:'saved',destinationId:note.id,url:typeof result?.url==='string'&&(result.url==='https://vision.ideaflow.app'||result.url.startsWith('https://vision.ideaflow.app/'))?result.url:typeof note.url==='string'&&(note.url==='https://vision.ideaflow.app'||note.url.startsWith('https://vision.ideaflow.app/'))?note.url:'https://vision.ideaflow.app/',savedAt:new Date().toISOString()};}
   else receipt={status:'uncertain',reason:'Vision acknowledgment unknown. Check Vision for '+marker+' before any new save'};
@@ -188,18 +201,50 @@ export async function saveToVision(userId:string,input:SaveRequest,repo:SaveRepo
  await repo.finish(userId,input.idempotencyKey,receipt,reservation.reservationId);
  return receipt;
 }
-export async function connectVision(userId:string,fetchImpl:typeof fetch=fetch){
- if(!await neoSaveRepository.identity(userId))return {status:'needs_auth',reason:'Sign in with Ideaflow ID first'};
+export type ConnectResult={status:'connected'}|{status:'needs_auth';approvalUrl?:string;confirmationCode?:string;reason?:string}|{status:'unavailable';reason?:string};
+// O7: one key request per owner at a time. In-process callers share one promise;
+// across processes a short Neo4j lease decides which caller requests a key, so the
+// key the owner approves is always the key stored (never overwritten by a racer).
+const inflight=new Map<string,Promise<ConnectResult>>();
+export function connectVision(userId:string,fetchImpl:typeof fetch=fetch,deps:{wait?:(ms:number)=>Promise<void>}={}):Promise<ConnectResult>{
+ const running=inflight.get(userId);
+ if(running)return running;
+ const attempt=connectVisionOnce(userId,fetchImpl,deps.wait??(ms=>new Promise(r=>setTimeout(r,ms)))).finally(()=>inflight.delete(userId));
+ inflight.set(userId,attempt);
+ return attempt;
+}
+async function pendingApproval(db:{run:(q:string,p:Record<string,unknown>)=>Promise<{records:Array<{get:(k:string)=>unknown}>}>},userId:string):Promise<ConnectResult|null>{
+ const r=await db.run('MATCH (g:VisionSaveGrant {userId:$userId}) WHERE g.ciphertext IS NOT NULL AND g.expires > $now RETURN g.approvalUrl AS approvalUrl,g.confirmationCode AS confirmationCode',{userId,now:Date.now()});
+ const row=r.records[0];
+ return row&&typeof row.get('approvalUrl')==='string'?{status:'needs_auth',approvalUrl:row.get('approvalUrl') as string,confirmationCode:row.get('confirmationCode') as string}:null;
+}
+async function connectVisionOnce(userId:string,fetchImpl:typeof fetch,wait:(ms:number)=>Promise<void>):Promise<ConnectResult>{
+ const identity=await neoSaveRepository.identity(userId);
+ if(!identity)return {status:'needs_auth',reason:'Sign in with Ideaflow ID first'};
  const db=getDriver().session();
  try{
-  const existing=await db.run('MATCH (g:VisionSaveGrant {userId:$userId}) RETURN g.approvalUrl AS approvalUrl,g.confirmationCode AS confirmationCode,g.expires AS expires',{userId});
-  if(existing.records[0]){const row=existing.records[0];const token=await neoSaveRepository.token(userId);if(token&&await freshGrant(token,(await neoSaveRepository.identity(userId))!,fetchImpl))return {status:'connected'};if(Number(row.get('expires'))>Date.now())return {status:'needs_auth',approvalUrl:row.get('approvalUrl'),confirmationCode:row.get('confirmationCode')};}
-  const token='ifk_'+randomBytes(32).toString('base64url'),sealed=sealKey(token,userId);
-  const response=await fetchImpl(HUB+'/agent/keys/request',{method:'POST',headers:{'Content-Type':'application/json'},redirect:'error',signal:AbortSignal.timeout(15000),body:JSON.stringify({name:'OpenChat · Save to Vision',scope:'vision:read vision:write',key_hash:hash(token)})});
-  if(!response.ok)return {status:'unavailable',reason:'Vision connection could not be requested'};
-  const body=await response.json() as {approval_url:string;confirmation_code:string;expires_in:number};
-  if(!body.approval_url.startsWith(HUB+'/agents/approve?')||typeof body.confirmation_code!=='string')return {status:'unavailable'};
-  await db.run(`MERGE (g:VisionSaveGrant {userId:$userId}) SET g.ciphertext=$ciphertext,g.iv=$iv,g.approvalUrl=$approvalUrl,g.confirmationCode=$confirmationCode,g.expires=$expires`,{userId,...sealed,approvalUrl:body.approval_url,confirmationCode:body.confirmation_code,expires:Date.now()+Math.min(body.expires_in,1800)*1000});
-  return {status:'needs_auth',approvalUrl:body.approval_url,confirmationCode:body.confirmation_code};
+  const existing=await db.run('MATCH (g:VisionSaveGrant {userId:$userId}) RETURN g.approvalUrl AS approvalUrl,g.confirmationCode AS confirmationCode,g.expires AS expires,g.ciphertext AS ciphertext',{userId});
+  if(existing.records[0]?.get('ciphertext')){const row=existing.records[0];const token=await neoSaveRepository.token(userId);if(token&&await freshGrant(token,identity,fetchImpl))return {status:'connected'};if(Number(row.get('expires'))>Date.now())return {status:'needs_auth',approvalUrl:row.get('approvalUrl') as string,confirmationCode:row.get('confirmationCode') as string};}
+  const lease=randomBytes(16).toString('hex');
+  // Take the node's write lock before reading the lease, so concurrent servers serialize here.
+  const claimed=await db.run(`MERGE (g:VisionSaveGrant {userId:$userId})
+   SET g.connectLock=coalesce(g.connectLock,0)+1
+   WITH g WHERE g.connectLease IS NULL OR g.connectLeaseUntil < $now
+   SET g.connectLease=$lease,g.connectLeaseUntil=$until RETURN g.connectLease AS lease`,{userId,lease,now:Date.now(),until:Date.now()+30000});
+  if(claimed.records[0]?.get('lease')!==lease){
+   // Another server is requesting this owner's key: show its approval, never a second key.
+   for(let i=0;i<10;i++){await wait(500);const pending=await pendingApproval(db,userId);if(pending)return pending;}
+   return {status:'unavailable',reason:'A Vision connection request is already in progress; try again shortly'};
+  }
+  try{
+   const token='ifk_'+randomBytes(32).toString('base64url'),sealed=sealKey(token,userId);
+   const response=await fetchImpl(HUB+'/agent/keys/request',{method:'POST',headers:{'Content-Type':'application/json'},redirect:'error',signal:AbortSignal.timeout(15000),body:JSON.stringify({name:'OpenChat · Save to Vision',scope:VISION_SAVE_SCOPES.join(' '),key_hash:hash(token)})});
+   if(!response.ok)return {status:'unavailable',reason:'Vision connection could not be requested'};
+   const body=await response.json() as {approval_url:string;confirmation_code:string;expires_in:number};
+   if(typeof body.approval_url!=='string'||!body.approval_url.startsWith(HUB+'/agents/approve?')||typeof body.confirmation_code!=='string')return {status:'unavailable'};
+   const stored=await db.run(`MATCH (g:VisionSaveGrant {userId:$userId,connectLease:$lease}) SET g.ciphertext=$ciphertext,g.iv=$iv,g.approvalUrl=$approvalUrl,g.confirmationCode=$confirmationCode,g.expires=$expires RETURN g.userId AS userId`,{userId,lease,...sealed,approvalUrl:body.approval_url,confirmationCode:body.confirmation_code,expires:Date.now()+Math.min(Number(body.expires_in)||0,1800)*1000});
+   if(!stored.records.length)return {status:'unavailable',reason:'Vision connection request was superseded; try again'};
+   return {status:'needs_auth',approvalUrl:body.approval_url,confirmationCode:body.confirmation_code};
+  }finally{await db.run('MATCH (g:VisionSaveGrant {userId:$userId,connectLease:$lease}) REMOVE g.connectLease,g.connectLeaseUntil',{userId,lease}).catch(()=>{});}
  }finally{await db.close();}
 }

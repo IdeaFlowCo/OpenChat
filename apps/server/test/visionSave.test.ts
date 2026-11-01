@@ -6,6 +6,7 @@ const input:SaveRequest={destination:'vision',kind:'excerpt',title:'Synthetic',b
 let currentSource=input.body;
 let changeDuringGrant=false,changeDuringReservation=false,rejectLost=false,beginLost=false;
 let linked=true,source=true,grant=true,subject='owner-sub',writes=0,lostAck=false,finishLost=false;
+let legacyVision=false;
 let destinationURL='https://vision.ideaflow.app/n/synthetic-destination';
 let ledger=new Map<string,SaveRecord & {reservationId?:string}>();
 let nextReservation=0;
@@ -48,15 +49,30 @@ const fetchImpl=(async(url:string,options?:RequestInit)=>{
  writes++;
  const request=JSON.parse(String(options?.body));
  expect(request.params).toMatchObject({name:'vision__create_note',arguments:{visibility:'private'}});
- expect(Object.keys(request.params.arguments).sort()).toEqual(['bodyMd','visibility']);
+ if(legacyVision&&request.params.arguments.provenance){writes--;return new Response(JSON.stringify({jsonrpc:'2.0',id:request.id,error:{code:-32602,message:'Unknown argument provenance'}}),{status:200});}
+ expect(Object.keys(request.params.arguments).sort()).toEqual(legacyVision?['bodyMd','visibility']:['bodyMd','idempotencyKey','provenance','visibility']);
+ if(!legacyVision){
+  expect(request.params.arguments.provenance).toEqual({platform:'openchat',link:'https://chat.ideaflow.app/app/chat/chat?message=message',externalId:'message'});
+  expect(request.params.arguments.idempotencyKey).toMatch(/^openchat-save:[a-f0-9]{64}$/);
+  expect(request.params.arguments.bodyMd).toContain('<!-- '+request.params.arguments.idempotencyKey+' -->');
+ }
  expect(request.params.arguments.bodyMd).toContain(input.body);
  expect(request.params.arguments.bodyMd).toContain('openchat-save:');
  expect(request.params.arguments.bodyMd).toContain('https://chat.ideaflow.app/app/chat/chat?message=message');
  if(lostAck)throw Error('destination ack lost');
  return new Response(JSON.stringify({result:{content:[{type:'text',text:JSON.stringify({note:{id:'synthetic-destination'},url:destinationURL})}]}}),{status:200});
 }) as typeof fetch;
-beforeEach(()=>{currentSource=input.body;changeDuringGrant=false;changeDuringReservation=false;rejectLost=false;beginLost=false;nextReservation=0;destinationURL='https://vision.ideaflow.app/n/synthetic-destination';linked=true;source=true;grant=true;subject='owner-sub';writes=0;lostAck=false;finishLost=false;ledger=new Map();});
+beforeEach(()=>{legacyVision=false;currentSource=input.body;changeDuringGrant=false;changeDuringReservation=false;rejectLost=false;beginLost=false;nextReservation=0;destinationURL='https://vision.ideaflow.app/n/synthetic-destination';linked=true;source=true;grant=true;subject='owner-sub';writes=0;lostAck=false;finishLost=false;ledger=new Map();});
 describe('real scoped connector save contract with executable destination fixture',()=>{
+ it('sends structured provenance and an idempotency key, falling back to the marker on an older Vision',async()=>{
+  expect(await saveToVision('u',input,repo,fetchImpl)).toMatchObject({status:'saved'});expect(writes).toBe(1);
+  ledger=new Map();legacyVision=true;
+  expect(await saveToVision('u',{...input,idempotencyKey:'legacy-vision-save'},repo,fetchImpl)).toMatchObject({status:'saved'});expect(writes).toBe(2);
+ });
+ it('least scope: a grant broader than vision read/write is refused before dispatch',async()=>{
+  const broad=(async(url:string,options?:RequestInit)=>url.endsWith('/agent/keys/status')?new Response(JSON.stringify({status:'active',identity:{issuer:ID_ISSUER,subject:'owner-sub'},scopes:['vision:read','vision:write','openchat:write']}),{status:200}):fetchImpl(url,options)) as typeof fetch;
+  expect((await saveToVision('u',input,repo,broad)).status).toBe('needs_auth');expect(writes).toBe(0);
+ });
  it('private save returns persisted destination receipt and retries do not write twice',async()=>{expect(await saveToVision('u',input,repo,fetchImpl)).toMatchObject({status:'saved',destinationId:'synthetic-destination'});expect(await saveToVision('u',input,repo,fetchImpl)).toMatchObject({status:'saved'});expect(writes).toBe(1);});
  it('destination receipt cannot redirect to a lookalike Vision host',async()=>{destinationURL='https://vision.ideaflow.app.evil.example/n/synthetic';expect((await saveToVision('u',input,repo,fetchImpl)).url).toBe('https://vision.ideaflow.app/');});
  it('rejects conflicting idempotency payload',async()=>{await saveToVision('u',input,repo,fetchImpl);expect(await saveToVision('u',{...input,title:'changed'},repo,fetchImpl)).toMatchObject({status:'rejected'});expect(writes).toBe(1);});

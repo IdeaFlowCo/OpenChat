@@ -124,6 +124,33 @@ Physical iPhone APNs/Expo delivery still needs a device smoke check; the mocked
 notification tests do not establish delivery reliability. Context refresh and
 quiet delivery are described in [Context back-channel](docs/context-backchannel.md).
 
+## Vision in your Stream and chats
+
+When you are signed in with Ideaflow ID and use Vision, searching **Stream**
+also searches your Vision notes. **From OpenChat** (the default) shows notes
+that came from OpenChat alongside your Stream entries, newest first. **All my
+notes** searches all of your Vision notes. Each Vision result offers
+**Open in Vision**; **Load more** fetches the next page. If Vision does not
+answer, Stream shows **Vision unavailable — showing OpenChat Stream only** and
+searches your Stream alone.
+
+A message you send from Vision shows **from Vision** under it in your own copy;
+recipients see an ordinary message. Replies to it appear back in Vision. Your
+OpenChat Agent can also read your own Stream when you ask it in your private
+agent chat.
+
+Server configuration (production compose forwards these; never commit values):
+
+| Variable | Purpose |
+|---|---|
+| `VISION_MESSAGING_SECRET` | Bearer secret (≥32 chars) Vision's server uses for `POST /api/vision/session`. Unset means the route answers 503. |
+| `VISION_API_BASE` | Vision API origin (https) that receives replies at `/openchat/replies`. |
+| `OPENCHAT_VISION_SECRET` | Bearer secret (≥32 chars) OpenChat sends with each reply. Reply delivery stays idle without it and `VISION_API_BASE`. |
+
+Stream search over Vision also needs the existing `IDEAFLOW_BUILTIN_CLIENT_ID` /
+`IDEAFLOW_BUILTIN_CLIENT_SECRET`. See the
+[Vision stream bridge contract](docs/shared-capabilities-control.md#vision-stream-bridge-openchat-vwgq9-12-openchat-3kr9).
+
 ## Message with OpenChat from Unlinked
 
 An Unlinked **Message** link opens the person's normal conversation, reusing

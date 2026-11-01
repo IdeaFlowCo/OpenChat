@@ -18,6 +18,7 @@ import { nanoid } from 'nanoid';
 import neo4j from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { decodeCursor, ownIdentity, searchVision, takeVisionSearchBudget } from '../services/visionBridge.js';
 import { extractTagsFromMessage } from '../services/extractThoughtsFromMessage.js';
 import { COLLAPSED_REL, readableStreamExpr, streamAliasExpr, collapsedExpr, streamSearchPredicate, streamTagQuery } from '../services/streamSearch.js';
 
@@ -210,6 +211,32 @@ router.get('/tags/suggestions', requireAuth, async (req: Request, res: Response)
  * GET /api/thoughts?limit=50&before=<ISO createdAt>
  * List the current user's thoughts, newest first.
  */
+/**
+ * GET /api/thoughts/vision-search?q=&chip=openchat|all&cursor= (OpenChat-3kr.9)
+ * The signed-in owner's own Vision notes, read through the hub's read bridge as
+ * that owner's Ideaflow identity (never a client-chosen identity). Vision
+ * problems answer 200 {status:'unavailable', code} so the client falls back to
+ * local Stream search. Direct human sessions only.
+ */
+router.get('/vision-search', requireAuth, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (req.user?.embedded) { res.status(403).json({ error: 'Sign in to OpenChat directly to search Vision' }); return; }
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const chip = req.query.chip === undefined ? 'openchat' : req.query.chip;
+  const cursor = decodeCursor(typeof req.query.cursor === 'string' ? req.query.cursor : undefined);
+  if (!q || q.length > 200 || (chip !== 'openchat' && chip !== 'all') || cursor === 'invalid' || (req.query.cursor !== undefined && typeof req.query.cursor !== 'string')) {
+    res.status(400).json({ error: 'Invalid Vision search' }); return;
+  }
+  if (!takeVisionSearchBudget(req.user!.userId)) { res.status(429).json({ error: 'Please wait a moment and search again.' }); return; }
+  try {
+    const identity = await ownIdentity(req.user!.userId);
+    if (!identity) { res.json({ status: 'unavailable', code: 'account_link_required', reason: 'Sign in with Ideaflow ID to search Vision' }); return; }
+    res.json(await searchVision(req.user!.userId, identity, q, chip, cursor));
+  } catch {
+    res.json({ status: 'unavailable', code: 'source_unavailable', reason: 'Vision search is unavailable' });
+  }
+});
+
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const limit = Math.min(parseInt(String(req.query.limit || '50'), 10) || 50, 200);

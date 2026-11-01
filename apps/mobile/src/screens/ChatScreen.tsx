@@ -103,6 +103,7 @@ import {
   isSelfDirectConversation,
 } from '../utils/conversationDisplay';
 import { shouldShowGroupSenderLabel } from '../utils/conversationPresentation';
+import { showsVisionCaption, VISION_CAPTION } from '../utils/messageProvenance';
 
 // react-navigation's web header caps a left-aligned title's width assuming a
 // ~52pt headerRight and never lets it shrink, so a long chat name ran under the
@@ -1890,6 +1891,10 @@ export function ChatScreen({
             {/* Edited tag (OpenChat-q9h) */}
             {!!(m.editedAt && !m.deletedAt) && (
               <Text style={{ color: isOwn ? ownTint(0.6) : c.textMetadata, fontSize: 10, marginLeft: 4, fontStyle: 'italic' }}>edited</Text>
+            )}
+            {/* Sender-only provenance: sent from Vision. Recipients see nothing. */}
+            {showsVisionCaption(m, currentUser?.userId) && (
+              <Text style={{ color: emojiOnly || !isOwn ? c.textMetadata : ownTint(0.7), ...type.caption, marginLeft: 4 }}>{VISION_CAPTION}</Text>
             )}
             {/* Tick marks for own DM messages (OpenChat-0nj). Only shown
                 after the local-optimistic id is replaced by a real server id. */}
