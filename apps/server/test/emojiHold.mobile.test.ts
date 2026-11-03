@@ -10,6 +10,7 @@ type PressProps = {
   cancelable?: boolean;
   style?: unknown;
   children?: React.ReactNode;
+  ref?: React.Ref<unknown>;
 };
 const rn = vi.hoisted(() => ({ os: 'web' as string, press: null as PressProps | null, text: null as Record<string, unknown> | null }));
 vi.mock('react-native', async () => {
@@ -19,7 +20,7 @@ vi.mock('react-native', async () => {
     stopAnimation() {}
     interpolate() { return this; }
   }
-  const Pressable = (props: PressProps & { ref?: React.Ref<unknown> }) => { rn.press = props; return ReactActual.createElement('pressable', { ref: props.ref }, props.children); };
+  const Pressable = (props: PressProps) => { rn.press = props; return ReactActual.createElement('pressable', { ref: (node: unknown) => { if (typeof props.ref === 'function') props.ref(node); } }, props.children); };
   const Text = (props: Record<string, unknown>) => { rn.text = props; return ReactActual.createElement('text', null, props.children as React.ReactNode); };
   const View = (props: { children?: React.ReactNode }) => ReactActual.createElement('view', null, props.children);
   return {
@@ -131,6 +132,29 @@ describe('EmojiSendButton hold-to-grow', () => {
     await act(async () => { rn.press!.onPressIn?.({ type: 'keydown', key: ' ' }); rn.press!.onPressOut?.(responder('keyup')); });
     expect(onSend).toHaveBeenCalledTimes(2);
     expect(onSend).toHaveBeenLastCalledWith(1);
+  });
+  it('finishes a terminated keyboard hold and accepts another', async () => {
+    await mount();
+    await act(async () => { rn.press!.onPressIn?.(responder('keydown')); vi.advanceTimersByTime(1000); terminateResponder('selectionchange'); });
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(3);
+    await act(async () => { rn.press!.onPressOut?.({ type: 'keyup', key: 'Enter' }); rn.press!.onPressIn?.(responder('keydown')); rn.press!.onPressOut?.({ type: 'keyup', key: 'Enter' }); });
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend).toHaveBeenLastCalledWith(1);
+  });
+  it('replaces host listeners on ref detachment and reattachment', async () => {
+    await mount();
+    const ref = rn.press!.ref as (node: unknown) => void;
+    await act(async () => { pointer(host, 'pointerdown'); ref(null); ref(host); ref(host); });
+    expect(host.releasePointerCapture).toHaveBeenCalledWith(1);
+    removed(winAdd, winRemove); removed(docAdd, docRemove);
+    expect(hostAdd.mock.calls.filter(call => call[0] === 'pointerdown')).toHaveLength(2);
+    expect(hostRemove.mock.calls.filter(call => call[0] === 'pointerdown')).toHaveLength(1);
+    await act(async () => { pointer(host, 'pointerdown'); pointer(win, 'pointerup'); });
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(1);
+    act(() => root.unmount());
+    removed(hostAdd, hostRemove);
+    pointer(host, 'pointerdown'); pointer(win, 'pointerup');
+    expect(onSend).toHaveBeenCalledTimes(1);
   });
   it('cleans up an active hold on unmount', async () => {
     await mount();

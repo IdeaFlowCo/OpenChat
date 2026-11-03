@@ -37,12 +37,20 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
   const activeInput = useRef<'pointer' | 'keyboard' | 'native' | null>(null);
   const beginRef = useRef<() => void>(() => {});
   const finishRef = useRef<(send: boolean) => void>(() => {});
+  const hostRef = useRef<HTMLElement | null>(null);
+  const removeHostListener = useRef<(() => void) | null>(null);
   const disabledRef = useRef(disabled);
   disabledRef.current = disabled;
 
   const buttonRef = useCallback((node: View | null) => {
-    if (Platform.OS !== 'web' || !node) return;
-    const host = node as unknown as HTMLElement;
+    if (Platform.OS !== 'web') return;
+    const host = node as unknown as HTMLElement | null;
+    if (hostRef.current === host) return;
+    removeHostListener.current?.();
+    removeHostListener.current = null;
+    hostRef.current = host;
+    if (activeInput.current === 'pointer') finishRef.current(false);
+    if (!host) return;
     const pointerDown = (event: PointerEvent) => {
       if (disabledRef.current || heldSince.current !== null || (event.pointerType === 'mouse' && event.button !== 0)) return;
       const pointerId = event.pointerId;
@@ -68,10 +76,7 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
       try { host.setPointerCapture(pointerId); } catch {}
     };
     host.addEventListener('pointerdown', pointerDown);
-    return () => {
-      host.removeEventListener('pointerdown', pointerDown);
-      removePointerListeners.current?.();
-    };
+    removeHostListener.current = () => host.removeEventListener('pointerdown', pointerDown);
   }, []);
 
   const stopTicker = () => {
@@ -81,6 +86,9 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
   useEffect(() => () => {
     stopTicker();
     removePointerListeners.current?.();
+    removeHostListener.current?.();
+    removeHostListener.current = null;
+    hostRef.current = null;
   }, []);
 
   const begin = () => {
@@ -140,8 +148,8 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
           activeInput.current = Platform.OS === 'web' ? 'keyboard' : 'native';
           begin();
         }}
-        onPressOut={(event) => {
-          if (Platform.OS === 'web' && (!keyboardEvent(event) || activeInput.current !== 'keyboard')) return;
+        onPressOut={() => {
+          if (Platform.OS === 'web' && activeInput.current !== 'keyboard') return;
           finish(true);
         }}
         onLongPress={claimLongPress}
