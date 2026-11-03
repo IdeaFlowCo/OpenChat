@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { securityEvent } from '../services/securityEvent.js';
 import jwt from 'jsonwebtoken';
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import type { Server as IOServer } from 'socket.io';
@@ -46,7 +47,7 @@ router.post('/vision/session', async (req, res) => {
   if (!secret || secret.length < 32 || !process.env.JWT_SECRET) { res.status(503).json({ error: 'messaging_unavailable' }); return; }
   if (req.headers.origin) { res.status(403).json({ error: 'forbidden' }); return; }
   const digest = (value: string) => createHash('sha256').update(value).digest();
-  if (!timingSafeEqual(digest(req.headers.authorization ?? ''), digest(`Bearer ${secret}`))) { res.status(401).json({ error: 'unauthorized' }); return; }
+  if (!timingSafeEqual(digest(req.headers.authorization ?? ''), digest(`Bearer ${secret}`))) { securityEvent('partner_auth', 'failure', { req, partner: 'visionBridge', reason: 'invalid_partner_secret' }); res.status(401).json({ error: 'unauthorized' }); return; }
   if (Date.now() - sessionWindow >= 60000) { sessionWindow = Date.now(); sessionRequests = 0; }
   if (++sessionRequests > 120) { res.status(429).json({ error: 'rate_limited' }); return; }
   const input = req.body;

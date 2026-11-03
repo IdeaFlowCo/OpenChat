@@ -1,5 +1,6 @@
 import visionSaveRoutes from './routes/visionSave.js';
 import visionBridgeRoutes, { visionSessionGuard } from './routes/visionBridge.js';
+import { securityRateLimitMonitor, TRUSTED_PROXY_SETTING } from './services/securityEvent.js';
 import { startVisionReplyWorker } from './services/visionBridge.js';
 import contextIntentionsRoutes from './routes/contextIntentions.js';
 import conversationContentRoutes from './routes/conversationContent.js';
@@ -76,11 +77,13 @@ const connectorDelegation = createConnectorDelegation();
 
 const app = express();
 
-// Behind Cloudflare → nginx → docker. Trust forwarded headers so req.protocol
-// and req.ip reflect the real client, not the immediate hop. Without this the
-// default redirect_uri built by /api/auth/google/url falls back to http://
-// even when the user came in over HTTPS (OpenChat-9jm).
-app.set('trust proxy', true);
+// Behind Cloudflare/GCP LB → noos_nginx → docker. Trust forwarded headers from
+// our own private proxy hops so req.protocol reflects the edge scheme
+// (OpenChat-9jm: /api/auth/google/url redirect_uri) and req.ip is the address
+// nginx saw. `true` trusted every hop, so req.ip was the client-chosen leftmost
+// X-Forwarded-For entry. See services/securityEvent.ts.
+app.set('trust proxy', TRUSTED_PROXY_SETTING);
+app.use(securityRateLimitMonitor);
 
 const httpServer = createServer(app);
 

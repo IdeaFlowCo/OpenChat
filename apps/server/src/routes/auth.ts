@@ -1,5 +1,6 @@
 import { deleteContextWebhooksForUser } from '../services/contextWebhooks.js';
 import { deleteImportedChatsForUser, exportImportedChatsForUser } from '../services/importedChatAccount.js';
+import { securityEvent } from '../services/securityEvent.js';
 import { deleteHostedContextForUser } from '../services/contextHosted.js';
 import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
@@ -173,6 +174,7 @@ export function createBridgeExchangeHandler(
       !authHeader?.startsWith('Bearer ')
       || !bridgeSecretsMatch(authHeader.slice(7), bridgeSecret)
     ) {
+      securityEvent('bridge_exchange', 'failure', { req, reason: 'invalid_bridge_credentials' });
       res.status(401).json({ error: 'Invalid bridge credentials' });
       return;
     }
@@ -264,6 +266,7 @@ export function createBridgeExchangeHandler(
         { expiresIn: ttlSeconds }
       );
 
+      securityEvent('bridge_exchange', 'success', { req, user_id: user.id, app });
       res.status(201).json({ token, user });
     } catch (error) {
       console.error('Error in bridge exchange:', error);
@@ -517,6 +520,7 @@ router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('IdeaFlow ID token exchange failed:', error);
+    securityEvent('login', 'failure', { req, method: 'ideaflow', reason: 'token_exchange_or_verify_failed' });
     res.status(401).json({ error: 'Ideaflow sign-in could not be verified' });
     return;
   }
@@ -530,6 +534,7 @@ router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
       getJwtSecret(),
       { expiresIn: '7d' },
     );
+    securityEvent('login', 'success', { req, user_id: user.id, method: 'ideaflow' });
     res.json({
       token,
       user,
@@ -538,6 +543,7 @@ router.post('/ideaflow/exchange', async (req: Request, res: Response) => {
     });
   } catch (error) {
     const collision = error instanceof Error && error.message.includes('COLLISION');
+    securityEvent('login', 'failure', { req, method: 'ideaflow', reason: collision ? 'link_collision' : 'link_failed' });
     console.error('IdeaFlow ID account linking failed:', error);
     res.status(collision ? 409 : 500).json({
       error: collision
@@ -1036,6 +1042,7 @@ router.patch('/me', requireAuth, async (req: Request, res: Response) => {
     }
 
     const user = toJS(result.records[0].get('user')) as Record<string, unknown>;
+    securityEvent('account_update', 'success', { req, fields: Object.keys(req.body ?? {}).slice(0, 10).join(',') });
 
     // Broadcast to anyone who shares a conversation with this user so their
     // participant lists and DM headers update in real time.
@@ -1119,6 +1126,7 @@ router.put('/me/status', requireAuth, async (req: Request, res: Response) => {
     }
 
     const user = toJS(result.records[0].get('user')) as Record<string, unknown>;
+    securityEvent('account_update', 'success', { req, fields: Object.keys(req.body ?? {}).slice(0, 10).join(',') });
 
     // Broadcast to anyone who shares a conversation with this user
     const io = req.app.get('io') as unknown as import('socket.io').Server | undefined;
@@ -1163,6 +1171,7 @@ router.post('/logout', requireAuth, async (req: Request, res: Response) => {
           u.lastSeenAt = datetime()
     `, { userId });
 
+    securityEvent('logout', 'success', { req });
     res.json({ success: true });
   } catch (error) {
     console.error('Error logging out:', error);
@@ -1333,6 +1342,7 @@ router.post('/google/exchange', rejectGoogleLinking, async (req: Request, res: R
     if (!tokenRes.ok) {
       const errText = await tokenRes.text().catch(() => '');
       console.error('Google token exchange failed:', tokenRes.status, errText.slice(0, 400));
+      securityEvent('login', 'failure', { req, method: 'google', reason: 'token_exchange_failed' });
       res.status(401).json({ error: 'Google token exchange failed' });
       return;
     }
@@ -1352,6 +1362,7 @@ router.post('/google/exchange', rejectGoogleLinking, async (req: Request, res: R
     if (!uRes.ok) {
       const errText = await uRes.text().catch(() => '');
       console.error('Google userinfo failed:', uRes.status, errText.slice(0, 400));
+      securityEvent('login', 'failure', { req, method: 'google', reason: 'userinfo_failed' });
       res.status(401).json({ error: 'Google userinfo lookup failed' });
       return;
     }
@@ -1376,6 +1387,7 @@ router.post('/google/exchange', rejectGoogleLinking, async (req: Request, res: R
       { expiresIn: '7d' }
     );
 
+    securityEvent('login', 'success', { req, user_id: user.id, method: 'google' });
     res.json({
       token,
       user,
@@ -1384,6 +1396,7 @@ router.post('/google/exchange', rejectGoogleLinking, async (req: Request, res: R
     });
   } catch (e) {
     if (e instanceof GoogleIdentityError) {
+      securityEvent('login', 'failure', { req, method: 'google', reason: 'identity_rejected', status: e.status });
       res.status(e.status).json({ error: e.message });
       return;
     }
@@ -1444,6 +1457,7 @@ router.post('/google/idtoken-exchange', rejectGoogleLinking, async (req: Request
     payload = ticket.getPayload();
   } catch (e) {
     console.error('Google ID token verify failed:', e instanceof Error ? e.message : e);
+    securityEvent('login', 'failure', { req, method: 'google-ios', reason: 'invalid_id_token' });
     res.status(401).json({ error: 'Invalid Google ID token' });
     return;
   }
@@ -1467,6 +1481,7 @@ router.post('/google/idtoken-exchange', rejectGoogleLinking, async (req: Request
       { expiresIn: '7d' }
     );
 
+    securityEvent('login', 'success', { req, user_id: user.id, method: 'google-ios' });
     res.json({
       token,
       user,
@@ -1475,6 +1490,7 @@ router.post('/google/idtoken-exchange', rejectGoogleLinking, async (req: Request
     });
   } catch (e) {
     if (e instanceof GoogleIdentityError) {
+      securityEvent('login', 'failure', { req, method: 'google', reason: 'identity_rejected', status: e.status });
       res.status(e.status).json({ error: e.message });
       return;
     }
@@ -1614,9 +1630,11 @@ router.delete('/me', requireAuth, requireDirectSession, async (req: Request, res
       io.emit('user:deleted', { userId });
     }
 
+    securityEvent('account_delete', 'success', { req, user_id: userId });
     res.status(204).send();
   } catch (error) {
     console.error('Error deleting account:', error);
+    securityEvent('account_delete', 'failure', { req, reason: 'error' });
     res.status(500).json({ error: 'Account deletion failed' });
   } finally {
     await session.close();
@@ -1665,6 +1683,7 @@ router.post('/apple/idtoken-exchange', async (req: Request, res: Response) => {
     payload = p as Record<string, unknown>;
   } catch (e) {
     console.error('Apple ID token verify failed:', e instanceof Error ? e.message : e);
+    securityEvent('login', 'failure', { req, method: 'apple', reason: 'invalid_identity_token' });
     res.status(401).json({ error: 'Invalid Apple identity token' });
     return;
   }
@@ -1756,6 +1775,7 @@ router.post('/apple/idtoken-exchange', async (req: Request, res: Response) => {
       { expiresIn: '7d' }
     );
 
+    securityEvent('login', 'success', { req, user_id: user.id, method: 'apple' });
     res.json({
       token,
       user,
