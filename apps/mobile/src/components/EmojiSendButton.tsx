@@ -8,8 +8,8 @@
  *
  */
 
-import { useCallback, useEffect, useRef } from 'react';
-import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View, type ViewStyle, type GestureResponderEvent } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { hapticGrowTick } from '../services/haptics';
 import { type } from '../theme/tokens';
 import { HOLD_LEVEL_MS, MAX_EMOJI_SIZE, holdLevelForDuration, holdScaleForDuration } from '../utils/emojiMessage';
@@ -33,63 +33,11 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
   const heldSince = useRef<number | null>(null);
   const level = useRef(1);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
-  const removePointerListeners = useRef<(() => void) | null>(null);
-  const activeInput = useRef<'pointer' | 'keyboard' | 'native' | null>(null);
-  const beginRef = useRef<() => void>(() => {});
-  const finishRef = useRef<(send: boolean) => void>(() => {});
-  const hostRef = useRef<HTMLElement | null>(null);
-  const removeHostListener = useRef<(() => void) | null>(null);
-  const disabledRef = useRef(disabled);
-  disabledRef.current = disabled;
-
-  const buttonRef = useCallback((node: View | null) => {
-    if (Platform.OS !== 'web') return;
-    const host = node as unknown as HTMLElement | null;
-    if (hostRef.current === host) return;
-    removeHostListener.current?.();
-    removeHostListener.current = null;
-    hostRef.current = host;
-    if (activeInput.current === 'pointer') finishRef.current(false);
-    if (!host) return;
-    const pointerDown = (event: PointerEvent) => {
-      if (disabledRef.current || heldSince.current !== null || (event.pointerType === 'mouse' && event.button !== 0)) return;
-      const pointerId = event.pointerId;
-      activeInput.current = 'pointer';
-      beginRef.current();
-      const release = (e: PointerEvent) => { if (e.pointerId === pointerId) finishRef.current(true); };
-      const blur = () => finishRef.current(true);
-      const visibility = () => { if (document.visibilityState === 'hidden') finishRef.current(true); };
-      window.addEventListener('pointerup', release);
-      window.addEventListener('pointercancel', release);
-      host.addEventListener('lostpointercapture', release);
-      window.addEventListener('blur', blur);
-      document.addEventListener('visibilitychange', visibility);
-      removePointerListeners.current = () => {
-        removePointerListeners.current = null;
-        window.removeEventListener('pointerup', release);
-        window.removeEventListener('pointercancel', release);
-        host.removeEventListener('lostpointercapture', release);
-        window.removeEventListener('blur', blur);
-        document.removeEventListener('visibilitychange', visibility);
-        try { host.releasePointerCapture(pointerId); } catch {}
-      };
-      try { host.setPointerCapture(pointerId); } catch {}
-    };
-    host.addEventListener('pointerdown', pointerDown);
-    removeHostListener.current = () => host.removeEventListener('pointerdown', pointerDown);
-  }, []);
-
   const stopTicker = () => {
     if (ticker.current) clearInterval(ticker.current);
     ticker.current = null;
   };
-  useEffect(() => () => {
-    stopTicker();
-    removePointerListeners.current?.();
-    removeHostListener.current?.();
-    removeHostListener.current = null;
-    hostRef.current = null;
-  }, []);
+  useEffect(() => () => stopTicker(), []);
 
   const begin = () => {
     if (disabled || heldSince.current !== null) return;
@@ -114,24 +62,13 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
   };
 
   const finish = (send: boolean) => {
-    removePointerListeners.current?.();
     stopTicker();
     if (heldSince.current === null) return;
     const heldMs = Date.now() - heldSince.current;
     heldSince.current = null;
-    activeInput.current = null;
     scale.stopAnimation();
     Animated.spring(scale, { toValue: 1, friction: 5, tension: 120, useNativeDriver: Platform.OS !== 'web' }).start();
     if (send) onSend(holdLevelForDuration(heldMs));
-  };
-
-  beginRef.current = begin;
-  finishRef.current = finish;
-
-  const keyboardEvent = (event: GestureResponderEvent) => {
-    const wrapped = event as unknown as { nativeEvent?: { type?: string; key?: string }; type?: string; key?: string };
-    const native = wrapped.nativeEvent ?? wrapped;
-    return native.type === 'keydown' || native.type === 'keyup' || native.key != null;
   };
 
   // Grow upward from the button's footprint: a plain scale would spill under
@@ -141,17 +78,8 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
   return (
     <View style={styles.slot}>
       <Pressable
-        ref={buttonRef}
-        onPressIn={(event) => {
-          if (Platform.OS === 'web' && !keyboardEvent(event)) return;
-          if (heldSince.current !== null || disabled) return;
-          activeInput.current = Platform.OS === 'web' ? 'keyboard' : 'native';
-          begin();
-        }}
-        onPressOut={() => {
-          if (Platform.OS === 'web' && activeInput.current !== 'keyboard') return;
-          finish(true);
-        }}
+        onPressIn={begin}
+        onPressOut={() => finish(true)}
         onLongPress={claimLongPress}
         cancelable={false}
         disabled={disabled}
