@@ -10,6 +10,7 @@ const graph = vi.hoisted(() => ({
   addLink: vi.fn(), addNote: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), deletePrivateThing: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
   getUnlinkedPersonOverlay: vi.fn(), listDue: vi.fn(), resolvePrivateThing: vi.fn(), listOwnerLinks: vi.fn(), listThings: vi.fn(), updatePersonCard: vi.fn(),
   updateLink: vi.fn(), searchPrivate: vi.fn(), getNeighbourhood: vi.fn(), updatePrivateThing: vi.fn(),
+  saveAsk: vi.fn(), listAsks: vi.fn(), getAsk: vi.fn(), updateAsk: vi.fn(), deleteAsk: vi.fn(),
 }));
 vi.mock('../src/services/privateGraph.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/privateGraph.js')>('../src/services/privateGraph.js');
@@ -71,7 +72,7 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
       expect(all.find((value: any) => value.name === name).description, name).toMatch(/author .*source .*assertion/);
     }
     const search = all.find((value: any) => value.name === 'oc_search_private');
-    expect(search.inputSchema.properties.relationType.enum).toEqual(['knows', 'family', 'worked_with', 'works_at', 'works_on', 'attended', 'interested_in', 'part_of', 'about', 'related']);
+    expect(search.inputSchema.properties.relationType.enum).toEqual(['knows', 'family', 'worked_with', 'works_at', 'works_on', 'attended', 'interested_in', 'part_of', 'about', 'asks', 'related']);
     expect(search.inputSchema.properties.kind.enum).toEqual(['person', 'company', 'idea', 'project', 'topic']);
     const add = all.find((value: any) => value.name === 'oc_add_private_link');
     expect(Object.keys(add.inputSchema.properties)).toEqual(expect.arrayContaining(['relationType', 'since', 'until', 'context']));
@@ -88,6 +89,54 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     expect(remove.description).toMatch(/undo for oc_save_private_thing/);
     expect(remove.description).toMatch(/private notes and every private relation/);
     expect(all.find((value: any) => value.name === 'oc_save_private_thing').annotations.destructiveHint).toBe(false);
+  });
+
+  it('ask tools: owner-only, mapped onto the ask routes with the connector as author', async () => {
+    const read = (await (await call('tools/list', {}, 'openchat:read')).json() as any).result.tools.map((value: any) => value.name);
+    expect(read).toContain('oc_list_asks');
+    expect(read.some((name: string) => ['oc_save_ask', 'oc_update_ask', 'oc_delete_ask'].includes(name))).toBe(false);
+    const all = (await (await call('tools/list', {})).json() as any).result.tools;
+    for (const name of ['oc_save_ask', 'oc_list_asks', 'oc_update_ask', 'oc_delete_ask']) {
+      const entry = all.find((value: any) => value.name === name);
+      expect(entry, name).toBeDefined();
+      expect(entry.description).toMatch(/only the owner ever sees them/);
+      expect(entry.description).toMatch(/nothing is shown to anyone else/);
+    }
+    expect(all.find((value: any) => value.name === 'oc_delete_ask').annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(all.find((value: any) => value.name === 'oc_list_asks').annotations.readOnlyHint).toBe(true);
+    expect(all.find((value: any) => value.name === 'oc_save_ask').inputSchema.required).toEqual(['askerKind', 'text']);
+
+    graph.saveAsk.mockResolvedValue({ ask: { id: 'ask-1' }, created: true });
+    const saved = await tool('oc_save_ask', { askerKind: 'thing', askerId: 'thing-1', text: 'SF chiropractor for neck pain', horizon: 'short', evidenceLabel: 'Facebook post', evidenceSeenAt: '2026-10-29', assertion: 'inferred' }, undefined, 'Friends asks monitor');
+    expect(JSON.parse(saved.result.content[0].text)).toEqual({ ask: { id: 'ask-1' }, created: true });
+    expect(graph.saveAsk).toHaveBeenCalledWith('owner', { asker: { kind: 'thing', id: 'thing-1' }, text: 'SF chiropractor for neck pain', horizon: 'short', assertion: 'inferred',
+      evidence: { label: 'Facebook post', seenAt: '2026-10-29' } }, { author: 'agent:Friends asks monitor', source: 'connector', assertion: 'inferred' });
+    await tool('oc_save_ask', { askerKind: 'self', text: 'Heal my TFCC', horizon: 'evergreen' });
+    expect(graph.saveAsk).toHaveBeenLastCalledWith('owner', { asker: 'self', text: 'Heal my TFCC', horizon: 'evergreen' }, CONNECTOR);
+    expect((await call('tools/call', { name: 'oc_save_ask', arguments: { askerKind: 'self', text: 'x', exposure: 'everyone' } })).status).toBe(400);
+    expect((await call('tools/call', { name: 'oc_save_ask', arguments: { askerKind: 'self', text: 'x' } }, 'openchat:read')).status).toBe(403);
+
+    graph.listAsks.mockResolvedValue({ asks: [], truncated: false });
+    await tool('oc_list_asks', { asker: 'others', status: 'all', query: 'chiro', needsRecheck: true }, 'openchat:read');
+    expect(graph.listAsks).toHaveBeenCalledWith('owner', { asker: 'others', status: 'all', q: 'chiro', needsRecheck: 'true' });
+    await tool('oc_list_asks', { askerKind: 'user', askerId: 'bob' }, 'openchat:read');
+    expect(graph.listAsks).toHaveBeenLastCalledWith('owner', { askerKind: 'user', askerId: 'bob' });
+
+    graph.updateAsk.mockResolvedValue({ id: 'ask-1', status: 'fulfilled' });
+    await tool('oc_update_ask', { askId: 'ask-1', status: 'fulfilled', recheckedNow: true });
+    expect(graph.updateAsk).toHaveBeenCalledWith('owner', 'ask-1', { status: 'fulfilled', recheckedNow: true }, CONNECTOR);
+    await tool('oc_update_ask', { askId: 'ask-1', clearEvidence: true, evidenceLabel: 'ignored' });
+    expect(graph.updateAsk).toHaveBeenLastCalledWith('owner', 'ask-1', { evidence: null }, CONNECTOR);
+    await tool('oc_update_ask', { askId: 'ask-1', exposure: 'this_chat', exposureConversationId: 'conv-1' });
+    expect(graph.updateAsk).toHaveBeenLastCalledWith('owner', 'ask-1', { exposure: 'this_chat', exposureConversationId: 'conv-1' }, CONNECTOR);
+
+    graph.deleteAsk.mockResolvedValue({ deleted: true, id: 'ask-1' });
+    await tool('oc_delete_ask', { askId: 'ask-1' });
+    expect(graph.deleteAsk).toHaveBeenCalledWith('owner', 'ask-1');
+    graph.getAsk.mockRejectedValue(new PrivateGraphError(404, 'Not found'));
+    graph.updateAsk.mockRejectedValue(new PrivateGraphError(404, 'Not found'));
+    const missing = await tool('oc_update_ask', { askId: 'someone-elses', status: 'withdrawn' });
+    expect(missing.result.isError).toBe(true);
   });
 
   it('dispatches reads and writes to the private routes as the linked owner', async () => {

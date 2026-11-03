@@ -17,6 +17,7 @@ import type { AsksNavProp } from '../navigation/types';
 import { getColors } from '../theme/colors';
 import { capsLabel, serif } from '../theme/typography';
 import { AppIcon } from '../components/AppIcon';
+import { PeopleAsks } from '../components/PeopleAsks';
 
 type InventoryItem =
   | { key: string; kind: 'draft'; draft: IntentDraft }
@@ -155,6 +156,7 @@ function AsksInventory() {
         <FlatList
           data={items}
           keyExtractor={item => item.key}
+          ListHeaderComponent={<PeopleAsks onOpenAsker={asker => asker.kind === 'user' ? navigation.navigate('ContactProfile', { userId: asker.id }) : navigation.navigate('PrivateThing', { thingId: asker.id })} />}
           contentContainerStyle={items.length ? styles.list : styles.emptyList}
           ListEmptyComponent={
             <View style={[styles.empty, { backgroundColor: c.surface, borderColor: c.border }]}>

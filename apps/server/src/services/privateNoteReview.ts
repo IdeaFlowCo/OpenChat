@@ -11,13 +11,32 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { getDriver } from '../db.js';
 import { cleanText, cleanRelation, nameKey, LIMITS, THING_KINDS, OWNER_PROVENANCE, privateReviewSubject, privateReviewPrincipal, PrivateGraphError } from './privateGraph.js';
 import type { PrivateNote, Provenance, ThingKind } from './privateGraph.js';
-import { OverlayError } from './overlay/contract.js';
-import { addLinkIn, addNoteIn, deleteLinkIn, resolveIn } from './overlay/store.js';
+import { ASKER_KINDS, OverlayError, parseAskInput } from './overlay/contract.js';
+import type { AskStatus, Provenance as OverlayProvenance } from './overlay/contract.js';
+import { addLinkIn, addNoteIn, askIn, deleteEntityIn, deleteLinkIn, listAsksIn, resolveIn, saveAskIn } from './overlay/store.js';
 
 export type ReviewSubject = { kind: 'user' | 'thing'; id: string };
 /** `target.id` (set only by an owner's edit) picks one of the owner's existing saved things when a name is shared. */
 export interface Suggestion { id: string; kind: 'ask' | 'connection'; text: string; relation?: string; target?: { kind: ThingKind; name: string; id?: string }; evidence: string; duplicate?: boolean; similar?: boolean }
-export interface PrivateAsk { id: string; text: string; sourceNoteId: string; createdAt: string; reviewId: string; status: 'active' | 'paused' | 'closed' }
+/**
+ * A standing ask about a subject, as a profile card lists it. Since 2026-11-03
+ * (OpenChat-2fsy.1) asks live in the Noos overlay as `ask` entities with the
+ * subject as asker; `status` keeps the card's old three words and `askStatus`
+ * is the overlay's own.
+ */
+export interface PrivateAsk { id: string; text: string; sourceNoteId: string | null; createdAt: string; reviewId: string | null; status: 'active' | 'paused' | 'closed'; askStatus: AskStatus; needsRecheck: boolean }
+const LEGACY_STATUS: Record<AskStatus, PrivateAsk['status']> = { open: 'active', stale: 'paused', fulfilled: 'closed', withdrawn: 'closed' };
+type Runner = Parameters<typeof listAsksIn>[0];
+/** Every ask the subject made, any status. */
+/** The asks a card shows: the subject's own asks, or for a topic (which cannot ask) the owner's asks linked to it ('is about'). */
+async function subjectAsks(tx: Runner, ownerKey: string, entityId: string) {
+  const asked = await listAsksIn(tx, ownerKey, { status: null, own: null, askerId: entityId, q: '', needsRecheck: false, limit: 200 });
+  const about = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})-[l:OVERLAY_LINK {relation: 'is about'}]->(:OverlayEntity {id: $entityId, ownerKey: $ownerKey})
+    WHERE l.ownerKey = $ownerKey AND a.askerId IS NULL RETURN a.id AS id LIMIT 200`, { ownerKey, entityId });
+  const linked = await Promise.all(about.records.map(record => askIn(tx, ownerKey, String(record.get('id')))));
+  return { asks: [...asked.asks, ...linked], truncated: asked.truncated };
+}
+const subjectAskTexts = async (tx: Runner, ownerKey: string, entityId: string) => (await subjectAsks(tx, ownerKey, entityId)).asks.map(ask => ask.text);
 export interface NoteReview { id: string; subject: ReviewSubject; note: PrivateNote; status: 'saved' | 'ready' | 'unavailable' | 'failed' | 'applied' | 'undone'; suggestions: Suggestion[]; appliedIds: string[]; createdAt: string; appliedAt?: string; sourceNoteAvailable?: boolean; asStandingAsk?: boolean; createdRecords?: {id: string; kind: 'ask' | 'connection'; suggestionId: string}[] }
 const fail = (status: number, message: string): never => { throw new PrivateGraphError(status, message); };
 const session = () => getDriver().session({ database: process.env.NEO4J_DATABASE || 'neo4j' });
@@ -117,8 +136,7 @@ export async function captureNoteReview(ownerId: string, subject: ReviewSubject,
       const now = new Date().toISOString();
       const review: NoteReview = { id: nanoid(), subject, note, status: asStandingAsk ? 'ready' : 'saved', suggestions: asStandingAsk ? [{ id: nanoid(), kind: 'ask', text, evidence: text }] : [], appliedIds: [], createdAt: now, asStandingAsk };
       if (asStandingAsk) {
-        const asks = await tx.run('MATCH (a:OpenChatPrivateAsk {ownerKey:$ownerKey,entityId:$entityId}) RETURN a.text AS text', { ownerKey: principal.ownerKey, entityId });
-        const existing = asks.records.map(r => String(r.get('text')));
+        const existing = await subjectAskTexts(tx, principal.ownerKey, entityId);
         review.suggestions[0]!.duplicate = existing.some(t => nameKey(t) === nameKey(text));
         review.suggestions[0]!.similar = !review.suggestions[0]!.duplicate && existing.some(t => similarAsk(t, text));
       }
@@ -133,10 +151,15 @@ export async function listNoteReviews(ownerId: string, subject: ReviewSubject): 
   const db = session();
   try {
     const reviews = await db.run('MATCH (r:OpenChatNoteReview {ownerKey:$ownerKey,entityId:$entityId}) RETURN r.payload AS payload ORDER BY r.id', { ownerKey: principal.ownerKey, entityId });
-    const asks = await db.run('MATCH (a:OpenChatPrivateAsk {ownerKey:$ownerKey,entityId:$entityId}) RETURN a { .id,.text,.sourceNoteId,.createdAt,.reviewId,.status } AS ask ORDER BY a.createdAt DESC', { ownerKey: principal.ownerKey, entityId });
+    const asks = (await db.executeRead(tx => subjectAsks(tx, principal.ownerKey, entityId))).asks.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const notes = await db.run('MATCH (n:OverlayNote {ownerKey:$ownerKey,entityId:$entityId}) RETURN n.id AS id', { ownerKey: principal.ownerKey, entityId });
     const noteIds = new Set(notes.records.map(r => String(r.get('id'))));
-    return { reviews: reviews.records.map(r => decode(r.get('payload'))).map(r => ({ ...r, sourceNoteAvailable: noteIds.has(r.note.id) })).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,50), asks: asks.records.map(r => r.get('ask') as PrivateAsk) };
+    const all = reviews.records.map(r => decode(r.get('payload')));
+    const reviewOf = new Map(all.flatMap(r => (r.createdRecords ?? []).filter(record => record.kind === 'ask').map(record => [record.id, r.id] as const)));
+    return {
+      reviews: all.map(r => ({ ...r, sourceNoteAvailable: noteIds.has(r.note.id) })).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,50),
+      asks: asks.map(ask => ({ id: ask.id, text: ask.text, sourceNoteId: ask.evidence?.noteId ?? null, createdAt: ask.createdAt, reviewId: reviewOf.get(ask.id) ?? null, status: LEGACY_STATUS[ask.status], askStatus: ask.status, needsRecheck: ask.needsRecheck })),
+    };
   } finally { await db.close(); }
 }
 
@@ -153,8 +176,7 @@ export async function suggestNoteReview(ownerId: string, reviewId: string): Prom
       const suggestions = await extractNoteSuggestions(review.note.text, name);
       review.status = suggestions === null ? 'unavailable' : 'ready';
       review.suggestions = suggestions ?? [];
-      const asks = await db.run('MATCH (a:OpenChatPrivateAsk {ownerKey:$ownerKey,entityId:$entityId}) RETURN a.text AS text', { ownerKey: principal.ownerKey, entityId });
-      const existing = asks.records.map(r => String(r.get('text')));
+      const existing = await db.executeRead(tx => subjectAskTexts(tx, principal.ownerKey, entityId));
       const links = await db.run('MATCH (:OverlayEntity {id:$entityId,ownerKey:$ownerKey})-[l:OVERLAY_LINK]->(e:OverlayEntity {ownerKey:$ownerKey}) RETURN l.relation AS relation,e.kind AS kind,e.nameKey AS nameKey', { ownerKey: principal.ownerKey, entityId });
       for (const suggestion of review.suggestions.filter(s => s.kind === 'connection')) suggestion.duplicate = links.records.some(r => r.get('relation') === suggestion.relation && r.get('kind') === suggestion.target?.kind && r.get('nameKey') === nameKey(suggestion.target!.name));
       for (const suggestion of review.suggestions.filter(s => s.kind === 'ask')) {
@@ -211,12 +233,20 @@ export async function applyNoteReview(ownerId: string, reviewId: string, raw: un
       const ownerKey = principal.ownerKey, entityId = subject.entityId, now = new Date().toISOString();
       // Lock subject, serializing duplicate checks across different batches and manual overlay link writes.
       await tx.run('MATCH (e:OverlayEntity {id:$entityId,ownerKey:$ownerKey}) SET e._lock=true REMOVE e._lock', { entityId, ownerKey });
+      const subjectKind = String((await tx.run('MATCH (e:OverlayEntity {id:$entityId,ownerKey:$ownerKey}) RETURN e.kind AS kind', { entityId, ownerKey })).records[0]?.get('kind'));
       for (const suggestion of review.suggestions.filter(s => selected.has(s.id))) {
-        const id = nanoid();
         if (suggestion.kind === 'ask') {
-          const existing = await tx.run('MATCH (a:OpenChatPrivateAsk {ownerKey:$ownerKey,entityId:$entityId,textKey:$textKey}) RETURN a.id AS id', { ownerKey, entityId, textKey: nameKey(suggestion.text) });
-          if (existing.records.length) continue;
-          await tx.run('CREATE (a:OpenChatPrivateAsk {id:$id,ownerKey:$ownerKey,entityId:$entityId,text:$text,textKey:$textKey,audience:"owner",status:"active",revision:0,sourceNoteId:$sourceNoteId,reviewId:$reviewId,createdAt:$now,updatedAt:$now})', { id, ownerKey, entityId, text: suggestion.text, textKey: nameKey(suggestion.text), sourceNoteId: review.note.id, reviewId, now });
+          // The overlay's ask kind: the subject asks it. A topic cannot ask, so its ask becomes the owner's own, linked to the topic.
+          // Evidence names the source note, never copies it: deleting the note leaves no copy behind.
+          const asksItself = (ASKER_KINDS as readonly string[]).includes(subjectKind);
+          const input = parseAskInput({ text: suggestion.text, asker: asksItself ? { id: entityId } : 'owner', evidence: { noteId: review.note.id, label: review.asStandingAsk ? 'Standing ask on a private card' : 'Private note review' } });
+          const askProvenance: OverlayProvenance = review.asStandingAsk ? by : { author: by.author, source: 'suggestion', assertion: 'inferred' };
+          const saved = await saveAskIn(tx, ownerKey, input, askProvenance).catch(overlayRefusal);
+          // A topic's ask is linked to it even when the owner already had that ask (from another card); only a created ask is this review's to undo.
+          if (!asksItself) await addLinkIn(tx, ownerKey, saved.ask.id, 'is about', entityId, askProvenance).catch(overlayRefusal);
+          if (!saved.created) continue;
+          review.createdRecords.push({ id: saved.ask.id, kind: 'ask', suggestionId: suggestion.id });
+          continue;
         } else {
           const target = suggestion.target!, relation = suggestion.relation!;
           // The overlay resolves the name (never merging same-named people) and owns link identity.
@@ -232,7 +262,6 @@ export async function applyNoteReview(ownerId: string, reviewId: string, raw: un
           review.createdRecords.push({ id: added.link.id, kind: suggestion.kind, suggestionId: suggestion.id });
           continue;
         }
-        review.createdRecords.push({ id, kind: suggestion.kind, suggestionId: suggestion.id });
       }
       review.appliedIds = [...selected]; review.appliedAt = now; review.status = 'applied';
       await tx.run('MATCH (r:OpenChatNoteReview {id:$id,ownerKey:$ownerKey}) SET r.payload=$payload', { id: reviewId, ownerKey, payload: JSON.stringify(review) });
@@ -250,27 +279,29 @@ export async function undoNoteReview(ownerId: string, reviewId: string): Promise
       const review = decode(row.records[0]!.get('payload'));
       if (review.status === 'undone') return review;
       if (review.status !== 'applied') return fail(409, 'Nothing to undo');
-      await tx.run('MATCH (a:OpenChatPrivateAsk {ownerKey:$ownerKey,reviewId:$reviewId}) WITH a ORDER BY a.id SET a._lock=true REMOVE a._lock', { ownerKey: principal.ownerKey, reviewId });
-      const changed = await tx.run('MATCH (a:OpenChatPrivateAsk {ownerKey:$ownerKey,reviewId:$reviewId}) WHERE coalesce(a.revision,0) > 0 RETURN count(a) AS total', { ownerKey: principal.ownerKey, reviewId });
+      const ownerKey = principal.ownerKey, askIds = (review.createdRecords ?? []).filter(record => record.kind === 'ask').map(record => record.id);
+      // Asks made before they moved into the overlay (until the migration rewrites these ids).
+      await tx.run('MATCH (a:OpenChatPrivateAsk {ownerKey:$ownerKey,reviewId:$reviewId}) WITH a ORDER BY a.id SET a._lock=true REMOVE a._lock', { ownerKey, reviewId });
+      const changed = await tx.run('MATCH (a:OpenChatPrivateAsk {ownerKey:$ownerKey,reviewId:$reviewId}) WHERE coalesce(a.revision,0) > 0 RETURN count(a) AS total', { ownerKey, reviewId });
       if (Number(changed.records[0]?.get('total') ?? 0)) return fail(409, 'An ask in this batch was edited after import. Undo would erase that edit.');
+      const present: string[] = [];
+      for (const id of askIds) {
+        const ask = await askIn(tx, ownerKey, id).catch(error => { if (error instanceof OverlayError && error.status === 404) return null; throw error; });
+        if (!ask) continue;
+        if (ask.revision > 0) return fail(409, 'An ask in this batch was edited after import. Undo would erase that edit.');
+        present.push(id);
+      }
       for (const record of review.createdRecords ?? []) {
-        if (record.kind === 'ask') await tx.run('MATCH (a:OpenChatPrivateAsk {id:$id,ownerKey:$ownerKey,reviewId:$reviewId}) DETACH DELETE a', { id: record.id, ownerKey: principal.ownerKey, reviewId });
+        if (record.kind === 'ask') {
+          if (present.includes(record.id)) await deleteEntityIn(tx, ownerKey, record.id);
+          else await tx.run('MATCH (a:OpenChatPrivateAsk {id:$id,ownerKey:$ownerKey,reviewId:$reviewId}) DETACH DELETE a', { id: record.id, ownerKey, reviewId });
+        }
         // Already removed by hand is fine: undo removes what is still there.
-        else await deleteLinkIn(tx, principal.ownerKey, record.id).catch(error => { if (!(error instanceof OverlayError && error.status === 404)) throw error; });
+        else await deleteLinkIn(tx, ownerKey, record.id).catch(error => { if (!(error instanceof OverlayError && error.status === 404)) throw error; });
       }
       review.status = 'undone';
       await tx.run('MATCH (r:OpenChatNoteReview {id:$id,ownerKey:$ownerKey}) SET r.payload=$payload', { id: reviewId, ownerKey: principal.ownerKey, payload: JSON.stringify(review) });
       return review;
     });
-  } finally { await db.close(); }
-}
-export async function updatePrivateAsk(ownerId: string, askId: string, raw: unknown): Promise<PrivateAsk> {
-  const status = (raw as {status?: unknown})?.status;
-  if (!['active','paused','closed'].includes(status as string)) return fail(400, 'Choose active, paused or closed');
-  const principal = await privateReviewPrincipal(ownerId), db = session();
-  try {
-    const row = await db.run('MATCH (a:OpenChatPrivateAsk {id:$id,ownerKey:$ownerKey}) SET a.status=$status,a.updatedAt=$now,a.revision=coalesce(a.revision,0)+1 RETURN a { .id,.text,.sourceNoteId,.createdAt,.reviewId,.status } AS ask', { id: askId, ownerKey: principal.ownerKey, status, now: new Date().toISOString() });
-    if (!row.records.length) return fail(404, 'Not found');
-    return row.records[0]!.get('ask') as PrivateAsk;
   } finally { await db.close(); }
 }

@@ -18,10 +18,16 @@ import { createHash } from 'node:crypto';
 /**
  * `topic` is a thing in the world that people and projects are about (ADHD,
  * coherence, Neo4j); `idea` and `project` are things the owner might do.
- * `company` also covers schools and other organisations.
+ * `company` also covers schools and other organisations. `ask` (added
+ * 2026-11-03) is a standing need or request, the owner's own or someone
+ * else's ("Laurence wants a chiropractor in SF"); asks are saved and edited
+ * only through the ask operations (`saveAsk`, `updateAsk`), never by name.
  */
-export const ENTITY_KINDS = ['person', 'company', 'idea', 'project', 'topic'] as const;
+export const ENTITY_KINDS = ['person', 'company', 'idea', 'project', 'topic', 'ask'] as const;
 export type EntityKind = (typeof ENTITY_KINDS)[number];
+/** The kinds saved, resolved and re-kinded by name: everything but `ask`. */
+export const NAMED_KINDS = ['person', 'company', 'idea', 'project', 'topic'] as const;
+export type NamedKind = (typeof NAMED_KINDS)[number];
 export type CadenceMode = 'fixed' | 'expanding';
 
 export interface Card {
@@ -32,8 +38,11 @@ export interface Card {
   lastContactAt: string | null;
   nextDueAt: string | null;
 }
-/** `description` is a one-line summary (280 characters or fewer), null when none was given. */
-export interface Entity { id: string; kind: EntityKind; name: string; description: string | null; refs: string[]; card: Card }
+/**
+ * `description` is a one-line summary (280 characters or fewer), null when none was given.
+ * `ask` is present only on entities of kind `ask` (their ask fields, without the asker).
+ */
+export interface Entity { id: string; kind: EntityKind; name: string; description: string | null; refs: string[]; card: Card; ask?: AskFields }
 
 /**
  * Who wrote a note or link and how. All optional on storage: records written
@@ -56,7 +65,7 @@ export const OWNER_PROVENANCE: Provenance = { author: 'owner', source: 'app', as
  * replaced `other`, which old links and old callers still use and which reads
  * back as `related`.
  */
-export const RELATION_TYPES = ['knows', 'family', 'worked_with', 'works_at', 'works_on', 'attended', 'interested_in', 'part_of', 'about', 'related'] as const;
+export const RELATION_TYPES = ['knows', 'family', 'worked_with', 'works_at', 'works_on', 'attended', 'interested_in', 'part_of', 'about', 'asks', 'related'] as const;
 export type RelationType = (typeof RELATION_TYPES)[number];
 
 export interface Note extends Provenance { id: string; text: string; createdAt: string; updatedAt: string }
@@ -93,6 +102,7 @@ export const LIMITS = {
   noteLength: 4000, notesPerEntity: 200, linksPerOwner: 5000, entitiesPerOwner: 5000,
   relationLength: 60, nameLength: 120, cadenceDays: 3650, refsPerEntity: 8,
   descriptionLength: 280, contextLength: 280, dateTextLength: 20,
+  askLength: 1000, asksPerOwner: 2000, quoteLength: 1000, urlLength: 2000, labelLength: 280,
 } as const;
 const EXPANDING_FACTOR = 1.6;
 const EXPANDING_CEILING_DAYS = 365;
@@ -153,8 +163,13 @@ export const nameKey = (name: string): string => name.normalize('NFKC').toLowerC
 export const cleanName = (value: unknown): string => cleanText(value, LIMITS.nameLength, 'invalid_name').replace(/\s+/g, ' ');
 /** The relation is the owner's own words ("knows", "works at", "interested in"). */
 export const cleanRelation = (value: unknown): string => cleanText(value, LIMITS.relationLength, 'invalid_relation').replace(/\s+/g, ' ').toLowerCase();
+/** Any kind, for filters (list, search). */
 export function cleanKind(value: unknown): EntityKind {
   return ENTITY_KINDS.includes(value as EntityKind) ? value as EntityKind : fail(400, 'invalid_kind');
+}
+/** A kind saved by name (ensure, resolve, re-kind): an ask is saved only through `saveAsk`. */
+export function cleanNamedKind(value: unknown): NamedKind {
+  return NAMED_KINDS.includes(value as NamedKind) ? value as NamedKind : fail(400, 'invalid_kind');
 }
 /**
  * One optional line of free text: null, undefined or blank is "none";
@@ -243,12 +258,13 @@ const RELATION_PATTERNS: Array<[RelationType, Ends | null, RegExp]> = [
   ['works_at', [[['person'], ['company']]], /\b(work(s|ed|ing)? (at|for)|employ\w*|job at|hired (at|by)|(ceo|cto|cfo|coo|cpo|vp|founder|co-?founder|cofounder|president|director|engineer|manager|intern|partner|advisor|investor|board member|staff|head|lead) (at|of)|founded|runs|joined)\b/],
   ['attended', [[['person'], ['company', 'topic']]], /\b(attend(s|ed|ing)?|went to|goes to|stud(y|ies|ied|ying) at|alumn(us|a|i|ae)|graduat\w*|student at|class of|enrolled|school|college|university|classmate)\b/],
   ['part_of', [[['project', 'idea', 'company'], ['project', 'company']]], /\b(part of|idea for|belongs? to|subsidiary of|division of|component of|feature of|module of|spin-?off of|sub-?project of|within|under)\b/],
+  ['asks', [[['person', 'company', 'project', 'idea'], ['ask']]], /\b(asks?|asked|asking|needs?|needed|wants?|wanted|looking for|seeks?|seeking|requests?|requested)\b/],
   ['interested_in', [[['person'], ['topic', 'idea', 'project', 'company']]], /\b(interest(s|ed)?|likes?|loves?|into|cares? about|passionate|fan of|curious about|excited about|follows|wants|cares)\b/],
-  ['about', [[['person', 'company', 'idea', 'project', 'topic'], ['topic']]], /\b(about|has|had|have|tagged|topic|concerns?|regarding|re|diagnosed with|lives with|deals with|struggles with|focus(es|ed)? on|on)\b/],
+  ['about', [[['person', 'company', 'idea', 'project', 'topic', 'ask'], ['topic']]], /\b(about|has|had|have|tagged|topic|concerns?|regarding|re|diagnosed with|lives with|deals with|struggles with|focus(es|ed)? on|on)\b/],
   ['knows', PEOPLE, /\b(knows?|knew|friends?|met|acquaint\w*|introduc\w*|mentor(s|ed|ing|ee)?|neighbou?r|roommate|room ?mate|housemate|connected|contact|close to|dated|dating|ex)\b/],
 ];
-/** Types added with end kinds (`part_of`, `about`) need the kinds; without them only the original word patterns apply. */
-const NEEDS_KINDS: readonly RelationType[] = ['part_of', 'about'];
+/** Types added with end kinds (`part_of`, `about`, `asks`) need the kinds; without them only the original word patterns apply. */
+const NEEDS_KINDS: readonly RelationType[] = ['part_of', 'about', 'asks'];
 const endsFit = (type: RelationType, ends: Ends | null, from?: EntityKind, to?: EntityKind): boolean =>
   from === undefined || to === undefined ? !NEEDS_KINDS.includes(type)
     : !ends || ends.some(([a, b]) => (a.includes(from) && b.includes(to)) || (a.includes(to) && b.includes(from)));
@@ -347,3 +363,154 @@ export function parseCardPatch(body: unknown): CardPatch {
   if (!Object.keys(patch).length) return fail(400, 'invalid_card');
   return patch;
 }
+
+/**
+ * Asks (2026-11-03): a standing need or request, the owner's own or someone
+ * else's, as one overlay entity of kind `ask`. The asker is a link from a
+ * person (or company, project or idea) entity to the ask (relation `asks`, type `asks`); an
+ * ask with no asker is the owner's own (`own: true`).
+ *
+ * - `horizon` is how fast the ask goes stale: `event` (tied to a date),
+ *   `short`, `medium`, `evergreen`. It sets the default `recheckAfter`.
+ *   Nothing closes an ask automatically: past `recheckAfter` an open ask
+ *   reads `needsRecheck: true` until the owner (or a sweeper acting for them)
+ *   rechecks it or changes its status.
+ * - `status`: `open`, `fulfilled`, `withdrawn`, or `stale` (no longer known to
+ *   be current, not closed).
+ * - `exposure` is who the owner means it for: `only_me` (the default),
+ *   `this_chat` (with `exposureChat`, the ref of one conversation),
+ *   `friends`, `public`. Stored only: in v1 every read is the owner's own,
+ *   and no ask is shown to anyone else whatever its exposure. Widening it is
+ *   a later, explicit act, like `audience`.
+ * - `evidence` is where it came from: a short quote, a URL, a label ("Facebook
+ *   post, friends audience"), when it was seen, and the overlay note it was
+ *   recorded in, all optional.
+ *
+ * The same asker (or the owner) and the same text is one ask: a repeated save
+ * returns the existing ask, so retries and re-imports never double it.
+ */
+/** Who can ask: a person, or a company, project or idea (an organisation's or a project's need); never a topic or another ask. */
+export const ASKER_KINDS: readonly EntityKind[] = ['person', 'company', 'project', 'idea'];
+export const ASK_HORIZONS = ['event', 'short', 'medium', 'evergreen'] as const;
+export type AskHorizon = (typeof ASK_HORIZONS)[number];
+/** Default days until an ask is due for a recheck, by horizon. */
+export const ASK_RECHECK_DAYS: Readonly<Record<AskHorizon, number>> = { event: 7, short: 14, medium: 60, evergreen: 90 };
+export const ASK_STATUSES = ['open', 'fulfilled', 'withdrawn', 'stale'] as const;
+export type AskStatus = (typeof ASK_STATUSES)[number];
+export const ASK_EXPOSURES = ['only_me', 'this_chat', 'friends', 'public'] as const;
+export type AskExposure = (typeof ASK_EXPOSURES)[number];
+export interface AskEvidence { quote: string | null; url: string | null; label: string | null; seenAt: string | null; noteId: string | null }
+/** The ask's own fields, as an `ask` entity carries them. */
+export interface AskFields extends Provenance {
+  text: string; own: boolean; horizon: AskHorizon; recheckAfter: string; needsRecheck: boolean; status: AskStatus;
+  exposure: AskExposure; exposureChat: string | null; evidence: AskEvidence | null;
+  createdAt: string; updatedAt: string; updatedBy: string | null; closedAt: string | null; checkedAt: string | null; revision: number;
+}
+/** An ask as listed: its fields, its id and its asker (null for the owner's own, or an asker since forgotten). */
+export interface Ask extends AskFields { id: string; asker: LinkEnd | null }
+/** Who asks: the owner themself, or one of the owner's person, company, project or idea entities. */
+export type AskAsker = { own: true } | { id: string };
+export interface AskInput {
+  text: string; asker: AskAsker; horizon: AskHorizon; recheckAfter: string | null; status: AskStatus;
+  exposure: AskExposure; exposureChat: string | null; evidence: AskEvidence | null;
+}
+export interface AskPatch {
+  text?: string; horizon?: AskHorizon; recheckAfter?: string | null; status?: AskStatus; exposure?: AskExposure;
+  exposureChat?: string | null; evidence?: AskEvidence | null; recheckedNow?: true;
+}
+export interface AskFilter { status: AskStatus[] | null; own: boolean | null; askerId: string | null; q: string; needsRecheck: boolean; limit: number }
+
+const oneOf = <T extends string>(values: readonly T[], value: unknown, code: string): T => values.includes(value as T) ? value as T : fail(400, code);
+/** Ask text: up to 1,000 characters, control characters stripped, whitespace collapsed. */
+export const cleanAskText = (value: unknown): string => cleanText(value, LIMITS.askLength, 'invalid_ask').replace(/\s+/g, ' ');
+/** A date or date-time, stored as an ISO instant (a bare date is midnight UTC). */
+export function cleanInstant(value: unknown, code: string): string {
+  if (typeof value !== 'string' || value.length > 40 || !/^\d{4}-\d{2}-\d{2}([T ][0-9:.]+(Z|[+-]\d{2}:?\d{2})?)?$/.test(value.trim())) return fail(400, code);
+  const at = Date.parse(value.trim().length === 10 ? `${value.trim()}T00:00:00.000Z` : value.trim());
+  return Number.isFinite(at) ? new Date(at).toISOString() : fail(400, code);
+}
+export function cleanAskEvidence(value: unknown): AskEvidence | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) return fail(400, 'invalid_evidence');
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some(key => !['quote', 'url', 'label', 'seenAt', 'noteId'].includes(key))) return fail(400, 'invalid_evidence');
+  const quote = input.quote === undefined || input.quote === null || input.quote === '' ? null : cleanText(input.quote, LIMITS.quoteLength, 'invalid_evidence');
+  let url: string | null = null;
+  if (input.url !== undefined && input.url !== null && input.url !== '') {
+    if (typeof input.url !== 'string' || input.url.length > LIMITS.urlLength || /\s/.test(input.url)) return fail(400, 'invalid_evidence');
+    try { const parsed = new URL(input.url); if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return fail(400, 'invalid_evidence'); } catch { return fail(400, 'invalid_evidence'); }
+    url = input.url;
+  }
+  const label = cleanLine(input.label, LIMITS.labelLength, 'invalid_evidence');
+  const seenAt = cleanLine(input.seenAt, LIMITS.dateTextLength, 'invalid_evidence');
+  const noteId = input.noteId === undefined || input.noteId === null || input.noteId === '' ? null : isId(input.noteId) ? input.noteId : fail(400, 'invalid_evidence');
+  return quote || url || label || seenAt || noteId ? { quote, url, label, seenAt, noteId } : null;
+}
+function cleanExposure(exposure: unknown, chat: unknown): { exposure: AskExposure; exposureChat: string | null } {
+  const value = exposure === undefined || exposure === null ? 'only_me' : oneOf(ASK_EXPOSURES, exposure, 'invalid_exposure');
+  if (value !== 'this_chat') return chat === undefined || chat === null || chat === '' ? { exposure: value, exposureChat: null } : fail(400, 'invalid_exposure');
+  return { exposure: value, exposureChat: cleanRef(chat) };
+}
+/** A new ask. `asker` is `'owner'` (or `{own: true}`) for the owner's own ask, or `{id}` of the owner's person, company, project or idea entity. */
+export function parseAskInput(value: unknown): AskInput {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(400, 'invalid_ask');
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some(key => !['text', 'asker', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureChat', 'evidence'].includes(key))) return fail(400, 'invalid_ask');
+  const raw = input.asker;
+  const asker: AskAsker = raw === 'owner' || (raw && typeof raw === 'object' && (raw as Record<string, unknown>).own === true && Object.keys(raw).length === 1) ? { own: true }
+    : raw && typeof raw === 'object' && !Array.isArray(raw) && Object.keys(raw).length === 1 && isId((raw as Record<string, unknown>).id) ? { id: (raw as { id: string }).id }
+      : fail(400, 'invalid_asker');
+  return {
+    text: cleanAskText(input.text), asker,
+    horizon: input.horizon === undefined || input.horizon === null ? 'medium' : oneOf(ASK_HORIZONS, input.horizon, 'invalid_horizon'),
+    recheckAfter: input.recheckAfter === undefined || input.recheckAfter === null ? null : cleanInstant(input.recheckAfter, 'invalid_recheck_after'),
+    status: input.status === undefined || input.status === null ? 'open' : oneOf(ASK_STATUSES, input.status, 'invalid_status'),
+    ...cleanExposure(input.exposure, input.exposureChat), evidence: cleanAskEvidence(input.evidence),
+  };
+}
+/** An edit to an ask. Absent leaves a field; `recheckAfter: null` returns to the horizon's default; `evidence: null` clears it. */
+export function parseAskPatch(value: unknown): AskPatch {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(400, 'invalid_ask');
+  const input = value as Record<string, unknown>, patch: AskPatch = {};
+  if (Object.keys(input).some(key => !['text', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureChat', 'evidence', 'recheckedNow'].includes(key))) return fail(400, 'invalid_ask');
+  if (input.text !== undefined) patch.text = cleanAskText(input.text);
+  if (input.horizon !== undefined) patch.horizon = oneOf(ASK_HORIZONS, input.horizon, 'invalid_horizon');
+  if (input.recheckAfter !== undefined) patch.recheckAfter = input.recheckAfter === null ? null : cleanInstant(input.recheckAfter, 'invalid_recheck_after');
+  if (input.status !== undefined) patch.status = oneOf(ASK_STATUSES, input.status, 'invalid_status');
+  if (input.exposure !== undefined || input.exposureChat !== undefined) {
+    if (input.exposure === undefined) return fail(400, 'invalid_exposure');
+    Object.assign(patch, cleanExposure(input.exposure, input.exposureChat));
+  }
+  if (input.evidence !== undefined) patch.evidence = cleanAskEvidence(input.evidence);
+  if (input.recheckedNow !== undefined) {
+    if (input.recheckedNow !== true) return fail(400, 'invalid_ask');
+    patch.recheckedNow = true;
+  }
+  if (!Object.keys(patch).length) return fail(400, 'nothing_to_change');
+  return patch;
+}
+/** A list filter: `status` one value or comma-separated (default open and stale; `all` for every status), `asker` `owner` | `others` | an entity id. */
+export function parseAskFilter(value: { status?: unknown; asker?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown } = {}): AskFilter {
+  let status: AskStatus[] | null = ['open', 'stale'];
+  if (value.status === 'all') status = null;
+  else if (typeof value.status === 'string' && value.status) status = [...new Set(value.status.split(',').map(part => oneOf(ASK_STATUSES, part.trim(), 'invalid_status')))];
+  else if (value.status !== undefined && value.status !== null && value.status !== '') return fail(400, 'invalid_status');
+  let own: boolean | null = null, askerId: string | null = null;
+  if (value.asker === 'owner') own = true;
+  else if (value.asker === 'others') own = false;
+  else if (isId(value.asker)) askerId = value.asker;
+  else if (value.asker !== undefined && value.asker !== null && value.asker !== '') return fail(400, 'invalid_asker');
+  const q = typeof value.q === 'string' ? nameKey(value.q).slice(0, LIMITS.nameLength) : '';
+  const needsRecheck = value.needsRecheck === true || value.needsRecheck === 'true';
+  const raw = typeof value.limit === 'string' && /^\d{1,3}$/.test(value.limit) ? Number(value.limit) : value.limit;
+  const limit = typeof raw === 'number' && Number.isInteger(raw) && raw >= 1 ? Math.min(raw, 200) : 100;
+  return { status, own, askerId, q, needsRecheck, limit };
+}
+/** When an ask is next due for a recheck: the given instant, or the horizon's default days from `from`. */
+export const askRecheckAfter = (horizon: AskHorizon, from: string, given: string | null = null): string =>
+  given ?? new Date(Date.parse(from) + ASK_RECHECK_DAYS[horizon] * DAY_MS).toISOString();
+/** An ask's display name: its text, cut to a name's length. */
+export const askName = (text: string): string => text.length <= LIMITS.nameLength ? text : `${text.slice(0, LIMITS.nameLength - 1).trimEnd()}\u2026`;
+/** The identity of an ask for one owner: who asks and what, so the same ask saved twice is one. */
+export const askKeyOf = (asker: AskAsker, text: string): string =>
+  createHash('sha256').update(`${'own' in asker ? 'owner' : `entity:${asker.id}`}\n${nameKey(text)}`).digest('hex');

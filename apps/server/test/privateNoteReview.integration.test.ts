@@ -92,7 +92,10 @@ integration('private note review transaction integration', () => {
   it('protects subsequent ask edits and marks deleted source notes explicitly', async () => {
     const batch=await seedReady('An ongoing private ask','edited-one');
     const applied=await review.applyNoteReview(owner,batch.id,{suggestionIds:['ask-one']});
-    await review.updatePrivateAsk(owner,applied.createdRecords![0]!.id,{status:'paused'});
+    const edited=await graph.updateAsk(owner,applied.createdRecords![0]!.id,{status:'paused'});
+    expect([edited.status,edited.revision]).toEqual(['stale',1]);
+    const card=(await review.listNoteReviews(owner,{kind:'user',id:person})).asks.find(a=>a.id===edited.id)!;
+    expect([card.status,card.askStatus,card.sourceNoteId,card.reviewId]).toEqual(['paused','stale',batch.note.id,batch.id]);
     await expect(review.undoNoteReview(owner,batch.id)).rejects.toMatchObject({status:409});
     await graph.deleteNote(owner,batch.note.id);
     const stored=(await review.listNoteReviews(owner,{kind:'user',id:person})).reviews.find(r=>r.id===batch.id)!;

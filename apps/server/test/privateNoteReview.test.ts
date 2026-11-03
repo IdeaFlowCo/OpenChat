@@ -41,7 +41,8 @@ describe('durable batch operations', () => {
     expect(mocks.addNote).not.toHaveBeenCalled();
   });
   it('undo after reload deletes only ledger-created records and preserves the raw note', async () => {
-    mocks.run.mockImplementation(async (query: string) => query.includes('RETURN r.payload') ? rows({payload:JSON.stringify(review)}) : {records:[]});
+    // The vendored deleteLinkIn reads the link first (an ask's asker link is refused, Noos 2026-11-03).
+    mocks.run.mockImplementation(async (query: string) => query.includes('RETURN r.payload') ? rows({payload:JSON.stringify(review)}) : query.includes('AS askerLink') ? rows({askerLink:false}) : {records:[]});
     const undone = await undoNoteReview('alice','review-id');
     expect(undone.status).toBe('undone');
     const deletes = mocks.run.mock.calls.filter(([query]) => query.includes('DELETE'));

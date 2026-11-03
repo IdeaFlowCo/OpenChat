@@ -326,6 +326,8 @@ function AsksNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <AsksStack.Screen name="StoryViewer" component={StoryViewerScreen} options={({ route }) => ({ title: route.params.story.author.name || 'Story' })} />
       <AsksStack.Screen name="SocialReview" component={SocialReviewScreen} options={{ title: 'Review' }} />
       <AsksStack.Screen name="Chat" component={ChatScreenRouter} options={{ title: '' }} />
+      <AsksStack.Screen name="ContactProfile" component={ContactProfileScreen} options={{ title: 'Contact info' }} />
+      <AsksStack.Screen name="PrivateThing" component={PrivateThingScreen} options={{ title: 'Private notes' }} />
     </AsksStack.Navigator>
   );
 }
