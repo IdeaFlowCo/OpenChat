@@ -47,18 +47,57 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
   const begin = (event: GestureResponderEvent) => {
     if (disabled || heldSince.current !== null) return;
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const nativeEvent = event.nativeEvent as unknown as { type?: string; pointerId?: number };
-      if (nativeEvent.type && /^(pointerdown|mousedown|touchstart)$/.test(nativeEvent.type)) {
-        const pointerId = nativeEvent.pointerId;
-        const release = (e: PointerEvent) => {
-          if (pointerId !== undefined && e.pointerId !== pointerId) return;
-          finish(true);
+      const nativeEvent = event.nativeEvent as unknown as {
+        type?: string;
+        pointerId?: number;
+        changedTouches?: ArrayLike<{ identifier: number }>;
+      };
+      const touchId = nativeEvent.type === 'touchstart' ? nativeEvent.changedTouches?.[0]?.identifier : undefined;
+      const isTouch = nativeEvent.type === 'touchstart' && touchId !== undefined;
+      const isPointer = nativeEvent.type === 'pointerdown' && nativeEvent.pointerId !== undefined;
+      const isMouse = nativeEvent.type === 'mousedown';
+      if (isTouch || isPointer || isMouse) {
+        const releaseTouch = (e: TouchEvent) => {
+          if (Array.from(e.changedTouches).some(touch => touch.identifier === touchId)) finish(true);
         };
-        window.addEventListener('pointerup', release);
-        window.addEventListener('pointercancel', release);
+        const releasePointer = (e: PointerEvent) => {
+          if (isPointer ? e.pointerId === nativeEvent.pointerId : e.pointerType === 'mouse') finish(true);
+        };
+        const blur = () => finish(true);
+        const visibility = () => { if (document.visibilityState === 'hidden') finish(true); };
+        let leftWindow = false;
+        const leave = () => { leftWindow = true; };
+        const enter = (e: PointerEvent | MouseEvent) => {
+          if (leftWindow && e.buttons === 0) finish(true);
+          leftWindow = false;
+        };
+        if (isTouch) {
+          window.addEventListener('touchend', releaseTouch);
+          window.addEventListener('touchcancel', releaseTouch);
+        } else {
+          window.addEventListener('pointerup', releasePointer);
+          window.addEventListener('pointercancel', releasePointer);
+          window.addEventListener('pointerleave', leave);
+          window.addEventListener('mouseleave', leave);
+          window.addEventListener('pointerenter', enter);
+          window.addEventListener('mouseenter', enter);
+        }
+        window.addEventListener('blur', blur);
+        document.addEventListener('visibilitychange', visibility);
         removePointerListeners.current = () => {
-          window.removeEventListener('pointerup', release);
-          window.removeEventListener('pointercancel', release);
+          if (isTouch) {
+            window.removeEventListener('touchend', releaseTouch);
+            window.removeEventListener('touchcancel', releaseTouch);
+          } else {
+            window.removeEventListener('pointerup', releasePointer);
+            window.removeEventListener('pointercancel', releasePointer);
+            window.removeEventListener('pointerleave', leave);
+            window.removeEventListener('mouseleave', leave);
+            window.removeEventListener('pointerenter', enter);
+            window.removeEventListener('mouseenter', enter);
+          }
+          window.removeEventListener('blur', blur);
+          document.removeEventListener('visibilitychange', visibility);
           removePointerListeners.current = null;
         };
       }

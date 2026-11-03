@@ -6,7 +6,7 @@ import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type PressProps = {
-  onPressIn?: (event: { nativeEvent: { type: string; pointerId?: number } }) => void;
+  onPressIn?: (event: { nativeEvent: { type: string; pointerId?: number; changedTouches?: Array<{ identifier: number }> } }) => void;
   onPressOut?: () => void;
   onLongPress?: () => void;
   cancelable?: boolean;
@@ -45,12 +45,26 @@ function browserLongPress(props: PressProps, event: 'contextmenu' | 'selectionch
 }
 
 let windowTarget: EventTarget;
+let documentTarget: EventTarget & { visibilityState: string };
+let documentAdd: ReturnType<typeof vi.spyOn>;
+let documentRemove: ReturnType<typeof vi.spyOn>;
 let addListener: ReturnType<typeof vi.spyOn>;
 let removeListener: ReturnType<typeof vi.spyOn>;
 function pointerEvent(type: string, pointerId = 1) {
   const event = new Event(type);
   Object.defineProperty(event, 'pointerId', { value: pointerId });
   windowTarget.dispatchEvent(event);
+}
+
+function touchEvent(type: string, ...identifiers: number[]) {
+  const event = new Event(type);
+  Object.defineProperty(event, 'changedTouches', { value: identifiers.map(identifier => ({ identifier })) });
+  windowTarget.dispatchEvent(event);
+}
+
+function expectListenersRemoved() {
+  expect(removeListener.mock.calls.map(call => call[0]).sort()).toEqual(addListener.mock.calls.map(call => call[0]).sort());
+  expect(documentRemove.mock.calls.map(call => call[0]).sort()).toEqual(documentAdd.mock.calls.map(call => call[0]).sort());
 }
 
 let onSend: ReturnType<typeof vi.fn>;
@@ -80,6 +94,10 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-11-03T00:00:00Z'));
   windowTarget = new EventTarget();
   vi.stubGlobal('window', windowTarget);
+  documentTarget = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+  vi.stubGlobal('document', documentTarget);
+  documentAdd = vi.spyOn(documentTarget, 'addEventListener');
+  documentRemove = vi.spyOn(documentTarget, 'removeEventListener');
   addListener = vi.spyOn(windowTarget, 'addEventListener');
   removeListener = vi.spyOn(windowTarget, 'removeEventListener');
   rn.os = 'web';
@@ -132,10 +150,10 @@ describe('EmojiSendButton hold-to-grow', () => {
     await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'pointerdown', pointerId: 1 } }); });
     await act(async () => { pointerEvent('pointercancel'); });
     expect(onSend).toHaveBeenCalledExactlyOnceWith(1);
-    expect(removeListener).toHaveBeenCalledTimes(2);
+    expectListenersRemoved();
     await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'pointerdown', pointerId: 1 } }); });
     act(() => root.unmount());
-    expect(removeListener).toHaveBeenCalledTimes(4);
+    expectListenersRemoved();
     pointerEvent('pointerup');
     expect(onSend).toHaveBeenCalledTimes(1);
   });
@@ -147,7 +165,52 @@ describe('EmojiSendButton hold-to-grow', () => {
     expect(onSend).not.toHaveBeenCalled();
     await act(async () => { pointerEvent('pointerup'); });
     expect(onSend).toHaveBeenCalledExactlyOnceWith(1);
-    expect(removeListener).toHaveBeenCalledTimes(2);
+    expectListenersRemoved();
+  });
+
+  it('waits for the initiating touch and ignores other fingers', async () => {
+    await mount();
+    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'touchstart', changedTouches: [{ identifier: 7 }] } }); });
+    await act(async () => { vi.advanceTimersByTime(500); browserLongPress(rn.press!, 'selectionchange'); touchEvent('touchend', 8); });
+    expect(onSend).not.toHaveBeenCalled();
+    await act(async () => { vi.advanceTimersByTime(1200); touchEvent('touchend', 7); });
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(MAX_EMOJI_SIZE);
+    expectListenersRemoved();
+  });
+
+  it('ends on blur and ignores later releases', async () => {
+    await mount();
+    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'pointerdown', pointerId: 1 } }); });
+    await act(async () => { vi.advanceTimersByTime(1000); windowTarget.dispatchEvent(new Event('blur')); });
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(3);
+    expectListenersRemoved();
+    await act(async () => { pointerEvent('pointerup'); rn.press!.onPressOut?.(); });
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('ends when hidden or when a released mouse re-enters', async () => {
+    await mount();
+    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'mousedown' } }); });
+    await act(async () => { documentTarget.visibilityState = 'hidden'; documentTarget.dispatchEvent(new Event('visibilitychange')); });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expectListenersRemoved();
+    documentTarget.visibilityState = 'visible';
+    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'mousedown' } }); });
+    await act(async () => {
+      windowTarget.dispatchEvent(new Event('mouseleave'));
+      const enter = new Event('mouseenter');
+      Object.defineProperty(enter, 'buttons', { value: 1 });
+      windowTarget.dispatchEvent(enter);
+    });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      windowTarget.dispatchEvent(new Event('mouseleave'));
+      const enter = new Event('mouseenter');
+      Object.defineProperty(enter, 'buttons', { value: 0 });
+      windowTarget.dispatchEvent(enter);
+    });
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expectListenersRemoved();
   });
 
   it('on web the button forbids panning, selection and the iOS callout, and the glyph is not selectable', async () => {
