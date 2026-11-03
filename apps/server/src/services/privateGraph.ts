@@ -20,7 +20,7 @@
 
 import { getDriver } from '../db.js';
 import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
-import { ASK_EXPOSURES, ASK_HORIZONS, ASK_STATUSES, linkedinHashOf, linkedinRef, OverlayError, OWNER_PROVENANCE, ownerKeyFor, RELATION_TYPES } from './overlay/contract.js';
+import { ASK_EXPOSURES, ASK_HORIZONS, ASK_STATUSES, linkedinHashOf, parseAskInput, parseAskPatch, linkedinRef, OverlayError, OWNER_PROVENANCE, ownerKeyFor, RELATION_TYPES } from './overlay/contract.js';
 import type { Ask, AskEvidence, AskExposure, AskHorizon, AskStatus, Candidate, Edge, Entity, EntityDetail, Link as OverlayLink, LinkEnd as OverlayLinkEnd, OverlayPrincipal, Provenance, RelationType } from './overlay/contract.js';
 import { deleteEntityIn, deleteNoteIn, deleteOwnerIn, OverlayStore, purgeRefIn } from './overlay/store.js';
 import { lookupUnlinkedContactForIdentity, lookupUnlinkedContactsByHash } from './unlinkedProvision.js';
@@ -655,7 +655,8 @@ export async function searchPrivate(ownerId: string, input: { q?: unknown; relat
   const found = await overlayCall(overlay => overlay.search(principal, { q: input.q, relationType: input.relationType, kind, limit: input.limit }));
   const hidden = await blockedUserIds(ownerId, [...found.entities, ...found.links.flatMap(link => [link.from, link.to])]);
   const names = await userNames([...found.entities, ...found.links.flatMap(link => [link.from, link.to])]);
-  const visible = (end: { refs: string[] }) => { const userId = userIdOf(end.refs); return userId === null || !hidden.has(userId); };
+  const hiddenAsks = await hiddenAskIds(ownerId, principal, [...found.entities, ...found.links.flatMap(link => [link.from, link.to])]);
+  const visible = (end: { id: string; refs: string[] }) => { const userId = userIdOf(end.refs); return (userId === null || !hidden.has(userId)) && !hiddenAsks.has(end.id); };
   const connections = await connectionsFor(ownerId, [...found.entities, ...found.links.flatMap(link => [link.from, link.to])].filter(visible));
   return {
     things: found.entities.filter(visible).map(entity => ({ ...endOf(entity, names, connections), matched: entity.matched.filter((value): value is 'name' | 'description' | 'note' => value !== 'link') })),
@@ -695,8 +696,9 @@ export async function getNeighbourhood(ownerId: string, subject: Subject, rawDep
   const all: Entity[] = [around.center, ...around.entities];
   const hidden = await blockedUserIds(ownerId, all);
   const names = await userNames(all);
+  const hiddenAsks = await hiddenAskIds(ownerId, principal, all);
   const byId = new Map(all.map(entity => [entity.id, entity]));
-  const visible = (entity: Entity | undefined): entity is Entity => { const userId = entity ? userIdOf(entity.refs) : null; return !!entity && (userId === null || !hidden.has(userId)); };
+  const visible = (entity: Entity | undefined): entity is Entity => { const userId = entity ? userIdOf(entity.refs) : null; return !!entity && (userId === null || !hidden.has(userId)) && !hiddenAsks.has(entity.id); };
   const connections = await connectionsFor(ownerId, all.filter(visible));
   return {
     center: endOf(around.center, names, connections), depth,
@@ -957,20 +959,29 @@ async function conversationRef(ownerId: string, conversationId: unknown, message
 async function overlayParty(ownerId: string, party: AskPartyInput): Promise<'self' | { id: string }> {
   return party.kind === 'self' ? 'self' : { id: (await subjectEntity(ownerId, party)).entityId };
 }
-/** Placements as the overlay takes them: a party, or `{kind: 'conversation', id}` the owner is in. */
-async function overlayPlacements(ownerId: string, value: unknown): Promise<unknown[]> {
+type PlacementInput = { conversationRef: string } | AskPartyInput;
+/** Placements as given: a party, or `{kind: 'conversation', id}` the owner is in (checked here; nothing is written). */
+async function parsePlacements(ownerId: string, value: unknown): Promise<PlacementInput[]> {
   if (!Array.isArray(value) || value.length > 8) return fail(400, MESSAGES.invalid_placement!);
-  const result: unknown[] = [];
+  const result: PlacementInput[] = [];
   for (const item of value) {
-    if (item && typeof item === 'object' && (item as Record<string, unknown>).kind === 'conversation') result.push({ ref: await conversationRef(ownerId, (item as Record<string, unknown>).id, MESSAGES.invalid_placement) });
-    else result.push(await overlayParty(ownerId, parseAskParty(item, MESSAGES.invalid_placement)));
+    if (item && typeof item === 'object' && (item as Record<string, unknown>).kind === 'conversation') result.push({ conversationRef: await conversationRef(ownerId, (item as Record<string, unknown>).id, MESSAGES.invalid_placement) });
+    else result.push(parseAskParty(item, MESSAGES.invalid_placement));
   }
   return result;
+}
+const isEnd = (party: unknown): party is OverlayLinkEnd => !!party && typeof party === 'object' && Array.isArray((party as { refs?: unknown }).refs);
+/** Asks among these entities whose author or carrier is someone blocked either way, or gone: search and neighbourhood leave them out, as the ask lists do. */
+async function hiddenAskIds(ownerId: string, principal: OverlayPrincipal, entities: Array<{ id: string; kind: string }>): Promise<Set<string>> {
+  const ids = [...new Set(entities.filter(entity => entity.kind === 'ask').map(entity => entity.id))];
+  if (!ids.length) return new Set();
+  const asks = (await Promise.all(ids.map(id => overlayCall(overlay => overlay.getAsk(principal, id)).catch(() => null)))).filter((ask): ask is Ask => ask !== null);
+  const blocked = await blockedUserIds(ownerId, asks.flatMap(ask => [ask.author, ask.carrier].filter(isEnd)));
+  return new Set(asks.filter(ask => [ask.author, ask.carrier].some(party => { const userId = isEnd(party) ? userIdOf(party.refs) : null; return userId !== null && blocked.has(userId); })).map(ask => ask.id));
 }
 
 /** Asks as the app shows them. An ask by (or carried by) someone blocked either way, or gone, is left out; such a placement is dropped. */
 async function askViews(ownerId: string, asks: Ask[]): Promise<PrivateAskView[]> {
-  const isEnd = (party: unknown): party is OverlayLinkEnd => !!party && typeof party === 'object' && Array.isArray((party as { refs?: unknown }).refs);
   const ends = asks.flatMap(ask => [ask.author, ask.carrier, ...ask.placements].filter(isEnd));
   const hidden = await blockedUserIds(ownerId, ends), names = await userNames(ends), connections = await connectionsFor(ownerId, ends);
   const blocked = (party: unknown) => { const userId = isEnd(party) ? userIdOf(party.refs) : null; return userId !== null && hidden.has(userId); };
@@ -988,19 +999,34 @@ async function askViews(ownerId: string, asks: Ask[]): Promise<PrivateAskView[]>
 const oneView = async (ownerId: string, ask: Ask): Promise<PrivateAskView> => (await askViews(ownerId, [ask]))[0] ?? fail(404, 'Not found');
 
 /**
- * The app's ask fields as the overlay takes them: parties become entity ids
- * (or `self`), conversations become refs, `exposureConversationId` becomes the
- * `this_chat` ref, and legacy statuses are read as overlay ones.
+ * The app's ask fields, checked before anything is written: legacy statuses
+ * are read as overlay ones, `exposureConversationId` becomes the `this_chat`
+ * ref, and the carrier and placements are parsed (conversations checked) but
+ * not yet resolved, so a request refused for any other reason creates no
+ * person card.
  */
-async function askFields(ownerId: string, raw: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function askFields(ownerId: string, raw: Record<string, unknown>): Promise<{ fields: Record<string, unknown>; carrier?: AskPartyInput | null; placements?: PlacementInput[] }> {
   const { exposureConversationId, exposureChat, assertion: _assertion, carrier, placements, ...fields } = raw;
   if (exposureChat !== undefined) fail(400, MESSAGES.invalid_exposure!);
   if (typeof fields.status === 'string' && LEGACY_ASK_STATUS[fields.status]) fields.status = LEGACY_ASK_STATUS[fields.status];
   if (fields.exposure === 'this_chat') fields.exposureChat = await conversationRef(ownerId, exposureConversationId);
   else if (exposureConversationId !== undefined && exposureConversationId !== null && exposureConversationId !== '') fail(400, MESSAGES.invalid_exposure!);
-  if (carrier !== undefined) fields.carrier = carrier === null ? null : await overlayParty(ownerId, parseAskParty(carrier, MESSAGES.invalid_carrier));
-  if (placements !== undefined) fields.placements = await overlayPlacements(ownerId, placements);
-  return fields;
+  return {
+    fields,
+    ...(carrier !== undefined ? { carrier: carrier === null ? null : parseAskParty(carrier, MESSAGES.invalid_carrier) } : {}),
+    ...(placements !== undefined ? { placements: await parsePlacements(ownerId, placements) } : {}),
+  };
+}
+/** The parsed parties as the overlay takes them; a person named for the first time gets an entity here, after every other check passed. */
+async function resolveParties(ownerId: string, parsed: { carrier?: AskPartyInput | null; placements?: PlacementInput[] }): Promise<Record<string, unknown>> {
+  const result: Record<string, unknown> = {};
+  if (parsed.carrier !== undefined) result.carrier = parsed.carrier === null ? null : await overlayParty(ownerId, parsed.carrier);
+  if (parsed.placements !== undefined) {
+    const placements: unknown[] = [];
+    for (const place of parsed.placements) placements.push('conversationRef' in place ? { ref: place.conversationRef } : await overlayParty(ownerId, place));
+    result.placements = placements;
+  }
+  return result;
 }
 
 /**
@@ -1015,9 +1041,12 @@ export async function saveAsk(ownerId: string, raw: unknown, by: Provenance = OW
   const { author: rawAuthor, asker, ...rest } = raw as Record<string, unknown>;
   const author = parseAskParty(rawAuthor ?? asker);
   const principal = await ownerPrincipal(ownerId);
-  const fields = await askFields(ownerId, rest);
+  const parsed = await askFields(ownerId, rest);
+  // Every check that needs no person card first: a refused ask leaves nothing behind.
+  await overlayCall(async () => parseAskInput({ ...parsed.fields, author: 'self' }));
   const overlayAuthor = await overlayParty(ownerId, author);
-  const result = await overlayCall(overlay => overlay.saveAsk(principal, { ...fields, author: overlayAuthor }, by));
+  const parties = await resolveParties(ownerId, parsed);
+  const result = await overlayCall(overlay => overlay.saveAsk(principal, { ...parsed.fields, ...parties, author: overlayAuthor }, by));
   return { ask: await oneView(ownerId, result.ask), created: result.created };
 }
 
@@ -1065,8 +1094,12 @@ export async function updateAsk(ownerId: string, askId: string, raw: unknown, by
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail(400, 'Nothing to change');
   if ('author' in raw || 'asker' in raw) fail(400, MESSAGES.author_fixed!);
   const principal = await ownerPrincipal(ownerId);
-  const fields = await askFields(ownerId, raw as Record<string, unknown>);
-  return oneView(ownerId, await overlayCall(overlay => overlay.updateAsk(principal, askId, fields, by)));
+  const parsed = await askFields(ownerId, raw as Record<string, unknown>);
+  // The ask must be the owner's, and the rest of the edit valid, before any person card is made.
+  await overlayCall(overlay => overlay.getAsk(principal, askId));
+  if (Object.keys(parsed.fields).length) await overlayCall(async () => parseAskPatch(parsed.fields));
+  const parties = await resolveParties(ownerId, parsed);
+  return oneView(ownerId, await overlayCall(overlay => overlay.updateAsk(principal, askId, { ...parsed.fields, ...parties }, by)));
 }
 
 /** Forget an ask with its notes and links (the undo for saveAsk). Anything that is not one of the owner's asks is 404. */

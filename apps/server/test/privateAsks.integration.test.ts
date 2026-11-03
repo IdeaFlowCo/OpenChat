@@ -230,4 +230,34 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
     await graph.deletePrivateThing(alice, other.id);
     expect(await status(() => graph.getAsk(alice, onOther[0]!.id))).toBe(404);
   });
+
+  it('a refused ask leaves no person card; search hides a blocked author’s ask; undo removes a topic link it added', async () => {
+    const review = await import('../src/services/privateNoteReview.js');
+    const ownerKey = (await graph.privateReviewPrincipal(alice)).ownerKey;
+    const refs = async (userId: string) => {
+      const session = driver.session();
+      try { return Number((await session.run('MATCH (r:OverlayRef {ownerKey: $ownerKey, ref: $ref}) RETURN count(r) AS n', { ownerKey, ref: `openchat:user:${userId}` })).records[0]!.get('n')); } finally { await session.close(); }
+    };
+    expect(await refs(carol)).toBe(0);
+    expect(await status(() => graph.saveAsk(alice, { author: { kind: 'user', id: carol }, text: '   ' }))).toBe(400);
+    expect(await status(() => graph.saveAsk(alice, { author: 'self', carrier: { kind: 'user', id: carol }, text: 'x', horizon: 'soon' }))).toBe(400);
+    expect(await status(() => graph.updateAsk(alice, 'no-such-ask-id', { carrier: { kind: 'user', id: carol } }))).toBe(404);
+    expect(await refs(carol)).toBe(0);
+
+    // The blocked person's ask (saved before the block) is out of search as it is out of the lists.
+    const hidden = (await graph.listAsks(alice, { status: 'all', q: 'x' })).asks;
+    expect(hidden.every(ask => !(ask.author.kind === 'user' && ask.author.id === blocked))).toBe(true);
+    expect((await graph.searchPrivate(alice, { kind: 'ask' })).things.some(thing => thing.name === 'x')).toBe(false);
+
+    // A topic card adopting an ask the owner already had: undo removes only that link.
+    const topic = await graph.resolvePrivateThing(alice, { kind: 'topic', name: `Fresh ${suffix}` });
+    await graph.saveAsk(alice, { author: 'self', text: 'Learn to sail' });
+    const batch = await review.captureNoteReview(alice, { kind: 'thing', id: topic.id }, { text: 'Learn to sail', requestId: 'adopt-1', asStandingAsk: true });
+    const applied = await review.applyNoteReview(alice, batch.id, { suggestionIds: [batch.suggestions[0]!.id] });
+    expect(applied.createdRecords?.map(record => record.kind)).toEqual(['connection']);
+    expect((await review.listNoteReviews(alice, { kind: 'thing', id: topic.id })).asks.map(ask => ask.text)).toEqual(['Learn to sail']);
+    await review.undoNoteReview(alice, batch.id);
+    expect((await review.listNoteReviews(alice, { kind: 'thing', id: topic.id })).asks).toEqual([]);
+    expect((await graph.listAsks(alice, { direction: 'from_me', q: 'sail' })).asks).toHaveLength(1);
+  });
 });

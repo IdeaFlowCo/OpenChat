@@ -245,8 +245,12 @@ export async function applyNoteReview(ownerId: string, reviewId: string, raw: un
           const askProvenance: OverlayProvenance = review.asStandingAsk ? by : { author: by.author, source: 'suggestion', assertion: 'inferred' };
           const saved = await saveAskIn(tx, ownerKey, input, askProvenance).catch(overlayRefusal);
           // A topic's ask is linked to it even when the owner already had that ask (from another card); only a created ask is this review's to undo.
-          if (!asksItself) await addLinkIn(tx, ownerKey, saved.ask.id, 'is about', entityId, askProvenance).catch(overlayRefusal);
-          if (!saved.created) continue;
+          const topicLink = asksItself ? null : await addLinkIn(tx, ownerKey, saved.ask.id, 'is about', entityId, askProvenance).catch(overlayRefusal);
+          if (!saved.created) {
+            // The ask already existed (from another card): only the link to this topic is this review's to undo.
+            if (topicLink?.created) review.createdRecords.push({ id: topicLink.link.id, kind: 'connection', suggestionId: suggestion.id });
+            continue;
+          }
           review.createdRecords.push({ id: saved.ask.id, kind: 'ask', suggestionId: suggestion.id });
           continue;
         } else {

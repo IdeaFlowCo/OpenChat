@@ -15,7 +15,7 @@
  * Every write goes through the vendored Noos store's transaction forms.
  */
 import type { Driver, ManagedTransaction } from 'neo4j-driver';
-import { ASK_HORIZONS, ASK_STATUSES, ASKER_KINDS, LIMITS, parseAskInput, readProvenance } from './overlay/contract.js';
+import { ASK_HORIZONS, ASK_STATUSES, ASKER_KINDS, LIMITS, OverlayError, parseAskInput, readProvenance } from './overlay/contract.js';
 import type { AskHorizon, AskStatus, EntityKind, Provenance } from './overlay/contract.js';
 import { addLinkIn, OverlayStore, saveAskIn, updateAskIn } from './overlay/store.js';
 
@@ -95,6 +95,7 @@ export async function migrateAsksToOverlay(driver: Driver, database: string, opt
       const noteId = String(record.get('id')), ownerKey = String(record.get('ownerKey')), entityId = String(record.get('entityId'));
       const parsed = parseFriendAskNote(String(record.get('text')));
       if (!parsed) { report.friendAskNotes.skipped.push({ noteId, reason: 'no ask text' }); continue; }
+      try {
       if (!ASKER_KINDS.includes(record.get('kind') as EntityKind)) { report.friendAskNotes.skipped.push({ noteId, reason: `note is on a ${String(record.get('kind'))}, which cannot ask` }); continue; }
       const stored = readProvenance({ author: record.get('author'), source: record.get('source'), assertion: record.get('assertion') });
       const by: Provenance = { author: stored.author ?? 'owner', source: stored.source ?? 'app', assertion: stored.assertion ?? 'stated' };
@@ -118,6 +119,10 @@ export async function migrateAsksToOverlay(driver: Driver, database: string, opt
       });
       // Counted after the commit, so a retried transaction never counts twice.
       if (outcome) { report.friendAskNotes.created++; report.created.push({ askId: outcome, from: `note:${noteId}` }); } else report.friendAskNotes.existing++;
+      } catch (error) {
+        // One bad record never stops the rest; it is reported (code only, never text) and a re-run retries it.
+        report.friendAskNotes.skipped.push({ noteId, reason: `refused: ${error instanceof OverlayError ? error.code : 'unexpected error'}` });
+      }
     }
 
     const legacy = (await session.run(`MATCH (a:OpenChatPrivateAsk) WHERE a.migratedTo IS NULL
@@ -129,6 +134,7 @@ export async function migrateAsksToOverlay(driver: Driver, database: string, opt
       const ask = record.get('ask') as { id: string; ownerKey: string; entityId: string; text: string; status?: string; revision?: unknown; reviewId?: string; createdAt?: string; sourceNoteId?: string };
       const kind = record.get('kind') as string | null;
       if (!kind) { report.legacyAsks.skipped.push({ id: ask.id, reason: 'its subject no longer exists' }); continue; }
+      try {
       const asksItself = ASKER_KINDS.includes(kind as EntityKind), status = LEGACY_STATUS[ask.status ?? 'active'] ?? 'open';
       const input = parseAskInput({ text: cut(String(ask.text ?? '').replace(/\s+/g, ' ').trim() || '(empty)', LIMITS.askLength), author: asksItself ? { id: ask.entityId } : 'self', status,
         evidence: { label: 'Private note review', seenAt: typeof ask.createdAt === 'string' ? ask.createdAt.slice(0, 10) : null, noteId: record.get('noteExists') ? ask.sourceNoteId ?? null : null } });
@@ -159,6 +165,9 @@ export async function migrateAsksToOverlay(driver: Driver, database: string, opt
       });
       report.legacyAsks.reviewsRepointed += outcome.repointed;
       if (outcome.created) { report.legacyAsks.created++; report.created.push({ askId: outcome.askId, from: `OpenChatPrivateAsk:${ask.id}` }); } else report.legacyAsks.existing++;
+      } catch (error) {
+        report.legacyAsks.skipped.push({ id: ask.id, reason: `refused: ${error instanceof OverlayError ? error.code : 'unexpected error'}` });
+      }
     }
   } finally { await session.close(); }
   return report;

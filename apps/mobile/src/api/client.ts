@@ -1693,8 +1693,9 @@ export const api = {
     request<{ ask: OverlayAsk }>(`/api/private/asks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   // Asks in the owner's people overlay: their own and the people they know (OpenChat-2fsy.1). Owner-only.
   listAsks: (filter: { direction?: 'from_me' | 'for_me' | 'from_others'; status?: string; q?: string; needsRecheck?: boolean; limit?: number } = {}) => {
-    const params = new URLSearchParams(Object.entries(filter).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]));
-    return request<{ asks: OverlayAsk[]; truncated: boolean }>(`/api/private/asks${params.size ? `?${params}` : ''}`);
+    // Built by hand: React Native's URLSearchParams lacks size and array-of-pairs input.
+    const query = Object.entries(filter).filter(([, value]) => value !== undefined).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`).join('&');
+    return request<{ asks: OverlayAsk[]; truncated: boolean }>(`/api/private/asks${query ? `?${query}` : ''}`);
   },
   saveAsk: (body: { author: 'self' | { kind: 'user' | 'thing' | 'unlinked'; id: string }; text: string; horizon?: OverlayAskHorizon; recheckAfter?: string }) =>
     request<{ ask: OverlayAsk; created: boolean }>('/api/private/asks', { method: 'POST', body: JSON.stringify(body) }),

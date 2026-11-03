@@ -464,6 +464,9 @@ export async function purgeRefIn(tx: Pick<ManagedTransaction, 'run'>, rawRef: un
   const going = await tx.run(`MATCH (r:OverlayRef {ref: $ref})-[:REF_OF]->(e:OverlayEntity)
     WHERE NOT EXISTS { MATCH (other:OverlayRef)-[:REF_OF]->(e) WHERE other.ref <> $ref } RETURN DISTINCT e.ownerKey AS ownerKey, e.id AS id`, { ref });
   for (const record of going.records) await releaseAskPartyIn(tx, String(record.get('ownerKey')), String(record.get('id')));
+  // Asks placed on the departed ref itself (an app ref placement) lose that placement.
+  await tx.run(`MATCH (a:OverlayEntity {kind: 'ask'}) WHERE $ref IN coalesce(a.placements, [])
+    SET a.placements = [placement IN a.placements WHERE placement <> $ref]`, { ref });
   const only = await tx.run(`MATCH (r:OverlayRef {ref: $ref})-[:REF_OF]->(e:OverlayEntity)
     WHERE NOT EXISTS { MATCH (other:OverlayRef)-[:REF_OF]->(e) WHERE other.ref <> $ref }
     WITH DISTINCT e
