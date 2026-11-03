@@ -1,12 +1,14 @@
 /**
- * The owner's asks from their people overlay (OpenChat-2fsy.1): what the
- * people they know are asking for, and their own asks. One home for asks;
- * only the owner ever sees this section, whatever an ask's exposure says.
+ * The owner's asks from their people overlay (OpenChat-2fsy.1), by
+ * direction: asks for you (placed on your stream, or you carry them), your
+ * friends' asks, and your own. Who cares, who carries and where an ask was
+ * placed are separate facts. One home for asks; only the owner ever sees
+ * this section, whatever an ask's exposure says.
  */
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { api, type OverlayAsk, type OverlayAskStatus } from '../api/client';
+import { api, type OverlayAsk, type OverlayAskParty, type OverlayAskPlacement, type OverlayAskStatus } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { capsLabel, serif } from '../theme/typography';
@@ -22,7 +24,21 @@ export function askMeta(ask: OverlayAsk): string {
   return [HORIZON_LABEL[ask.horizon], timing, EXPOSURE_LABEL[ask.exposure]].join(' · ');
 }
 
-export function PeopleAsks({ onOpenAsker }: { onOpenAsker: (asker: NonNullable<OverlayAsk['asker']>) => void }) {
+type Person = Exclude<OverlayAskParty, { kind: 'self' }>;
+const isPerson = (party: OverlayAskPlacement | null | undefined): party is Person => !!party && party.kind !== 'self' && party.kind !== 'conversation' && party.kind !== 'ref';
+/** Who carries it and where it was placed, in a few words. */
+export function askParties(ask: OverlayAsk): string {
+  const parts: string[] = [];
+  if (ask.carrier) parts.push(isPerson(ask.carrier) ? `${ask.carrier.name} carries it` : 'You carry it');
+  if (ask.placements.some(place => place.kind === 'self')) parts.push('On your stream');
+  const chats = ask.placements.filter(place => place.kind === 'conversation').length;
+  if (chats) parts.push(`In ${chats} chat${chats === 1 ? '' : 's'}`);
+  const people = ask.placements.filter(isPerson);
+  if (people.length) parts.push(`Placed with ${people.map(place => place.name).join(', ')}`);
+  return parts.join(' · ');
+}
+
+export function PeopleAsks({ onOpenPerson }: { onOpenPerson: (person: Person) => void }) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const [asks, setAsks] = useState<OverlayAsk[]>([]);
@@ -50,7 +66,7 @@ export function PeopleAsks({ onOpenAsker }: { onOpenAsker: (asker: NonNullable<O
   }, []);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
-  const change = async (ask: OverlayAsk, patch: { status?: OverlayAskStatus; recheckedNow?: true }) => {
+  const change = async (ask: OverlayAsk, patch: { status?: OverlayAskStatus; recheckedNow?: true; carrier?: 'self' | null }) => {
     setBusyId(ask.id);
     try {
       await api.updateAsk(ask.id, patch);
@@ -66,7 +82,7 @@ export function PeopleAsks({ onOpenAsker }: { onOpenAsker: (asker: NonNullable<O
     if (!text) return;
     setBusyId('new');
     try {
-      const saved = await api.saveAsk({ asker: 'self', text });
+      const saved = await api.saveAsk({ author: 'self', text });
       // The same ask saved before and since closed: saving it again reopens it.
       if (!saved.created && (saved.ask.status === 'fulfilled' || saved.ask.status === 'withdrawn')) await api.updateAsk(saved.ask.id, { status: 'open' });
       setDraft('');
@@ -78,8 +94,9 @@ export function PeopleAsks({ onOpenAsker }: { onOpenAsker: (asker: NonNullable<O
     }
   };
 
-  const friends = asks.filter(ask => !ask.own), own = asks.filter(ask => ask.own);
-  const action = (label: string, ask: OverlayAsk, patch: { status?: OverlayAskStatus; recheckedNow?: true }, primary = false) => (
+  // By direction: for you (someone else's, on your stream or carried by you), friends' (someone else cares), yours (you care).
+  const forYou = asks.filter(ask => ask.forMe && !ask.fromMe), friends = asks.filter(ask => !ask.fromMe && !ask.forMe), own = asks.filter(ask => ask.fromMe);
+  const action = (label: string, ask: OverlayAsk, patch: { status?: OverlayAskStatus; recheckedNow?: true; carrier?: 'self' | null }, primary = false) => (
     <TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={`${label}: ${ask.text}`} disabled={busyId === ask.id} onPress={() => void change(ask, patch)}
       style={[styles.action, { borderColor: primary ? c.primary : c.border, backgroundColor: primary ? c.primaryMuted : c.surface, opacity: busyId === ask.id ? 0.5 : 1 }]}>
       <Text style={{ ...type.label, fontWeight: '600', color: primary ? c.primary : c.textSecondary }}>{label}</Text>
@@ -89,14 +106,14 @@ export function PeopleAsks({ onOpenAsker }: { onOpenAsker: (asker: NonNullable<O
     const closed = ask.status === 'fulfilled' || ask.status === 'withdrawn';
     return (
       <View key={ask.id} style={[styles.row, { borderColor: c.border, backgroundColor: c.surface }]}>
-        {ask.asker && (
-          <TouchableOpacity accessibilityRole="link" accessibilityLabel={`Open ${ask.asker.name}`} onPress={() => onOpenAsker(ask.asker!)} style={styles.askerButton}>
-            <Text style={[styles.asker, { color: c.primary }]} numberOfLines={1}>{ask.asker.name}</Text>
+        {isPerson(ask.author) && (
+          <TouchableOpacity accessibilityRole="link" accessibilityLabel={`Open ${ask.author.name}`} onPress={() => onOpenPerson(ask.author as Person)} style={styles.askerButton}>
+            <Text style={[styles.asker, { color: c.primary }]} numberOfLines={1}>{ask.author.name}</Text>
           </TouchableOpacity>
         )}
-        {!ask.asker && !ask.own && <Text style={[styles.asker, { color: c.textMetadata }]}>Someone you no longer keep a card for</Text>}
         <Text style={[styles.text, { color: closed ? c.textSecondary : c.textPrimary }]}>{ask.text}</Text>
         <Text style={[styles.meta, { color: ask.needsRecheck ? c.primary : c.textMetadata }]}>{askMeta(ask)}{ask.status === 'stale' ? ` · ${STATUS_LABEL.stale}` : ''}</Text>
+        {askParties(ask) ? <Text style={[styles.meta, { color: c.textSecondary }]}>{askParties(ask)}</Text> : null}
         {ask.evidence && (ask.evidence.label || ask.evidence.url) && (
           ask.evidence.url
             ? <Text accessibilityRole="link" onPress={() => void Linking.openURL(ask.evidence!.url!)} style={[styles.meta, { color: c.primary }]} numberOfLines={1}>{ask.evidence.label ?? 'Source'}{ask.evidence.seenAt ? ` · seen ${ask.evidence.seenAt}` : ''}</Text>
@@ -105,6 +122,7 @@ export function PeopleAsks({ onOpenAsker }: { onOpenAsker: (asker: NonNullable<O
         <View style={styles.actions}>
           {closed ? action('Reopen', ask, { status: 'open' }) : [
             ask.needsRecheck ? action('Still open', ask, { recheckedNow: true }, true) : null,
+            !ask.fromMe && !(ask.carrier && ask.carrier.kind === 'self') ? action('I\u2019ll carry it', ask, { carrier: 'self' }) : null,
             action('Fulfilled', ask, { status: 'fulfilled' }),
             action('Withdrawn', ask, { status: 'withdrawn' }),
           ]}
@@ -123,6 +141,10 @@ export function PeopleAsks({ onOpenAsker }: { onOpenAsker: (asker: NonNullable<O
       </View>
       {loading && !asks.length ? <ActivityIndicator color={c.primary} style={{ marginVertical: 16 }} /> : (
         <>
+          {forYou.length > 0 && <>
+            <Text style={[styles.section, { color: c.textPrimary }]}>For you</Text>
+            {forYou.map(row)}
+          </>}
           <Text style={[styles.section, { color: c.textPrimary }]}>Friends' asks</Text>
           {friends.length ? friends.map(row) : (
             <Text style={[styles.empty, { color: c.textSecondary }]}>None yet. Tell OpenChat Agent what someone is looking for, for example “Maya needs a physio in Oakland.” Nobody is notified.</Text>

@@ -21,7 +21,7 @@
 import { getDriver } from '../db.js';
 import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
 import { ASK_EXPOSURES, ASK_HORIZONS, ASK_STATUSES, linkedinHashOf, linkedinRef, OverlayError, OWNER_PROVENANCE, ownerKeyFor, RELATION_TYPES } from './overlay/contract.js';
-import type { Ask, AskEvidence, AskExposure, AskHorizon, AskStatus, Candidate, Edge, Entity, EntityDetail, Link as OverlayLink, OverlayPrincipal, Provenance, RelationType } from './overlay/contract.js';
+import type { Ask, AskEvidence, AskExposure, AskHorizon, AskStatus, Candidate, Edge, Entity, EntityDetail, Link as OverlayLink, LinkEnd as OverlayLinkEnd, OverlayPrincipal, Provenance, RelationType } from './overlay/contract.js';
 import { deleteEntityIn, deleteNoteIn, deleteOwnerIn, OverlayStore, purgeRefIn } from './overlay/store.js';
 import { lookupUnlinkedContactForIdentity, lookupUnlinkedContactsByHash } from './unlinkedProvision.js';
 import type { UnlinkedContact } from './unlinkedProvision.js';
@@ -221,7 +221,12 @@ const MESSAGES: Record<string, string> = {
   invalid_description: 'Description must be one line of 280 characters or fewer', invalid_since: 'since must be 20 characters or fewer, for example 2019 or 2024-03',
   invalid_until: 'until must be 20 characters or fewer, for example 2021', invalid_context: 'context must be 280 characters or fewer',
   invalid_link: 'Unknown link field', nothing_to_change: 'Nothing to change',
-  invalid_ask: 'An ask needs its text (1000 characters or fewer) and only known fields', invalid_asker: 'Choose who asks: yourself, an OpenChat person, an Unlinked person, or a saved person, company, project or idea',
+  invalid_ask: 'An ask needs its text (1000 characters or fewer) and only known fields',
+  invalid_author: 'Choose who cares about it: yourself, an OpenChat person, an Unlinked person, or a saved person, company, project or idea',
+  invalid_asker: 'Choose who cares about it: yourself, an OpenChat person, an Unlinked person, or a saved person, company, project or idea',
+  invalid_carrier: 'Choose who carries it: yourself, an OpenChat person, an Unlinked person, or a saved person or company',
+  invalid_placement: 'Place it on your own stream, a person, a saved company, project or idea, or a conversation you are in (8 at most)',
+  invalid_direction: 'direction must be from_me, for_me or from_others', author_fixed: 'Who cares about an ask stays as it is; save a new ask instead',
   invalid_horizon: `horizon must be one of ${ASK_HORIZONS.join(', ')}`, invalid_status: `status must be one of ${ASK_STATUSES.join(', ')}`,
   invalid_exposure: `exposure must be one of ${ASK_EXPOSURES.join(', ')}; this_chat needs exposureConversationId`, invalid_recheck_after: 'recheckAfter must be a date such as 2026-12-29',
   invalid_evidence: 'evidence takes quote, url (http or https), label, seenAt and noteId (one of your private notes)', duplicate_ask: 'That person already has an ask with this text',
@@ -743,7 +748,7 @@ export async function deletePrivateThing(ownerId: string, thingId: string): Prom
       for (const label of ['OpenChatNoteReview', 'OpenChatPrivateAsk']) await tx.run(`MATCH (n:${label} {ownerKey: $ownerKey, entityId: $thingId}) DETACH DELETE n`, { ownerKey, thingId });
       // A topic's card asks (the owner's own, captured on that card and linked to no other subject) go with it, as they did before asks moved into the overlay.
       const cardAsks = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})-[:OVERLAY_LINK {relation: 'is about'}]->(:OverlayEntity {id: $thingId, ownerKey: $ownerKey})
-        WHERE a.askerId IS NULL AND a.evidenceLabel IN $labels AND NOT EXISTS { MATCH (a)-[:OVERLAY_LINK {relation: 'is about'}]->(other:OverlayEntity) WHERE other.id <> $thingId }
+        WHERE a.askAuthorSelf = true AND a.evidenceLabel IN $labels AND NOT EXISTS { MATCH (a)-[:OVERLAY_LINK {relation: 'is about'}]->(other:OverlayEntity) WHERE other.id <> $thingId }
         RETURN a.id AS id`, { ownerKey, thingId, labels: ['Private note review', 'Standing ask on a private card'] });
       for (const record of cardAsks.records) await deleteEntityIn(tx, ownerKey, String(record.get('id')));
       return deleteEntityIn(tx, ownerKey, thingId);
@@ -903,37 +908,43 @@ export { ownerPrincipal as privateReviewPrincipal };
 
 // ---- asks: the Noos overlay's `ask` kind (OpenChat-2fsy.1, 2026-11-03) ----
 
+/** A party as the app names it: the owner (`self`) or an end like any other (OpenChat person by user id, Unlinked person, saved thing by id). */
+export type AskPartyView = { kind: 'self' } | LinkEnd;
+/** A place an ask was put: the owner's stream, a person or thing, a conversation, or another app's ref. */
+export type AskPlacementView = AskPartyView | { kind: 'conversation'; conversationId: string } | { kind: 'ref'; ref: string };
 /**
- * An ask as the app and agent tools see it: the overlay's ask with its asker
- * named the way every other end is (an OpenChat person by user id, an Unlinked
- * person by profile or connection, a saved thing by id), and the conversation
- * of a `this_chat` exposure by its id. Owner-only, like everything here:
- * `exposure` records whom the owner means it for and widens nothing yet.
+ * An ask as the app and agent tools see it. Who cares (`author`, always set),
+ * who acts (`carrier`, optional) and where it was placed (`placements`) are
+ * separate facts, as in the Gestalt Box model; `fromMe` and `forMe` follow
+ * from them. Owner-only, like everything here: `exposure` records whom the
+ * owner means it for and widens nothing yet.
  */
-export interface PrivateAskView extends Provenance {
-  id: string; text: string; own: boolean; asker: LinkEnd | null; horizon: AskHorizon; recheckAfter: string; needsRecheck: boolean; status: AskStatus;
+export interface PrivateAskView {
+  id: string; text: string; author: AskPartyView; carrier: AskPartyView | null; placements: AskPlacementView[]; fromMe: boolean; forMe: boolean;
+  horizon: AskHorizon; recheckAfter: string; needsRecheck: boolean; status: AskStatus;
   exposure: AskExposure; exposureConversationId: string | null; evidence: AskEvidence | null;
   createdAt: string; updatedAt: string; updatedBy: string | null; closedAt: string | null; checkedAt: string | null; revision: number;
+  recordedBy: string | null; recordedVia: string | null; assertion: string | null;
 }
-/** Who asks: the owner (`self`), or a subject as notes and links name it. */
-export type AskAsker = { kind: 'self' } | Subject;
+/** A party as given: the owner (`self`), or a subject as notes and links name it. */
+export type AskPartyInput = { kind: 'self' } | Subject;
 /** The note-review statuses the app used before asks moved into the overlay, read as overlay statuses. */
 export const LEGACY_ASK_STATUS: Record<string, AskStatus> = { active: 'open', paused: 'stale', closed: 'withdrawn' };
 const CONVERSATION_REF = 'openchat:conversation:';
 const conversationIdOf = (ref: string | null): string | null => ref?.startsWith(CONVERSATION_REF) ? decodeURIComponent(ref.slice(CONVERSATION_REF.length)) : null;
 
-export function parseAskAsker(value: unknown): AskAsker {
+export function parseAskParty(value: unknown, message: string = MESSAGES.invalid_author!): AskPartyInput {
   if (value === 'self' || value === 'owner') return { kind: 'self' };
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(400, MESSAGES.invalid_asker);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(400, message);
   const input = value as Record<string, unknown>;
   if (input.kind === 'self') return { kind: 'self' };
-  if ((input.kind !== 'user' && input.kind !== 'thing' && input.kind !== 'unlinked') || typeof input.id !== 'string' || !input.id || input.id.length > 512) return fail(400, MESSAGES.invalid_asker);
+  if ((input.kind !== 'user' && input.kind !== 'thing' && input.kind !== 'unlinked') || typeof input.id !== 'string' || !input.id || input.id.length > 512) return fail(400, message);
   return { kind: input.kind, id: input.id };
 }
 
-/** A conversation the owner is in, as an overlay ref for a `this_chat` exposure. */
-async function conversationRef(ownerId: string, conversationId: unknown): Promise<string> {
-  if (typeof conversationId !== 'string' || !conversationId || conversationId.length > 200) return fail(400, MESSAGES.invalid_exposure);
+/** A conversation the owner is in, as an overlay ref (a `this_chat` exposure, or a placement). */
+async function conversationRef(ownerId: string, conversationId: unknown, message: string = MESSAGES.invalid_exposure!): Promise<string> {
+  if (typeof conversationId !== 'string' || !conversationId || conversationId.length > 200) return fail(400, message);
   const session = getDriver().session();
   try {
     const found = await session.run('MATCH (:User {id: $ownerId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId}) RETURN c.id AS id LIMIT 1', { ownerId, conversationId });
@@ -942,67 +953,105 @@ async function conversationRef(ownerId: string, conversationId: unknown): Promis
   return `${CONVERSATION_REF}${refValue(conversationId)}`;
 }
 
-/** Asks as the app shows them; an ask whose asker is someone blocked (either way) or gone is left out. */
+/** A party as the overlay takes it (`'self'` or `{id}`); a person named for the first time gets an entity, as notes and links do. */
+async function overlayParty(ownerId: string, party: AskPartyInput): Promise<'self' | { id: string }> {
+  return party.kind === 'self' ? 'self' : { id: (await subjectEntity(ownerId, party)).entityId };
+}
+/** Placements as the overlay takes them: a party, or `{kind: 'conversation', id}` the owner is in. */
+async function overlayPlacements(ownerId: string, value: unknown): Promise<unknown[]> {
+  if (!Array.isArray(value) || value.length > 8) return fail(400, MESSAGES.invalid_placement!);
+  const result: unknown[] = [];
+  for (const item of value) {
+    if (item && typeof item === 'object' && (item as Record<string, unknown>).kind === 'conversation') result.push({ ref: await conversationRef(ownerId, (item as Record<string, unknown>).id, MESSAGES.invalid_placement) });
+    else result.push(await overlayParty(ownerId, parseAskParty(item, MESSAGES.invalid_placement)));
+  }
+  return result;
+}
+
+/** Asks as the app shows them. An ask by (or carried by) someone blocked either way, or gone, is left out; such a placement is dropped. */
 async function askViews(ownerId: string, asks: Ask[]): Promise<PrivateAskView[]> {
-  const ends = asks.flatMap(ask => ask.asker ? [ask.asker] : []);
+  const isEnd = (party: unknown): party is OverlayLinkEnd => !!party && typeof party === 'object' && Array.isArray((party as { refs?: unknown }).refs);
+  const ends = asks.flatMap(ask => [ask.author, ask.carrier, ...ask.placements].filter(isEnd));
   const hidden = await blockedUserIds(ownerId, ends), names = await userNames(ends), connections = await connectionsFor(ownerId, ends);
-  return asks.filter(ask => { const userId = ask.asker ? userIdOf(ask.asker.refs) : null; return userId === null || !hidden.has(userId); }).map(ask => ({
-    id: ask.id, text: ask.text, own: ask.own, asker: ask.asker ? endOf(ask.asker, names, connections) : null, horizon: ask.horizon, recheckAfter: ask.recheckAfter,
+  const blocked = (party: unknown) => { const userId = isEnd(party) ? userIdOf(party.refs) : null; return userId !== null && hidden.has(userId); };
+  const party = (value: Ask['author']): AskPartyView | null => value === null ? null : isEnd(value) ? endOf(value, names, connections) : { kind: 'self' };
+  return asks.filter(ask => ask.author !== null && !blocked(ask.author) && !blocked(ask.carrier)).map(ask => ({
+    id: ask.id, text: ask.text, author: party(ask.author)!, carrier: party(ask.carrier),
+    placements: ask.placements.filter(place => !blocked(place)).map((place): AskPlacementView => place.kind === 'ref'
+      ? (conversationIdOf(place.ref) !== null ? { kind: 'conversation', conversationId: conversationIdOf(place.ref)! } : { kind: 'ref', ref: place.ref }) : party(place as Ask['author'])!),
+    fromMe: ask.fromMe, forMe: ask.forMe, horizon: ask.horizon, recheckAfter: ask.recheckAfter,
     needsRecheck: ask.needsRecheck, status: ask.status, exposure: ask.exposure, exposureConversationId: conversationIdOf(ask.exposureChat), evidence: ask.evidence,
-    createdAt: ask.createdAt, updatedAt: ask.updatedAt, updatedBy: ask.updatedBy, closedAt: ask.closedAt, checkedAt: ask.checkedAt, revision: ask.revision, ...provenanceOf(ask),
+    createdAt: ask.createdAt, updatedAt: ask.updatedAt, updatedBy: ask.updatedBy, closedAt: ask.closedAt, checkedAt: ask.checkedAt, revision: ask.revision,
+    recordedBy: ask.recordedBy, recordedVia: ask.recordedVia, assertion: ask.assertion,
   }));
 }
 const oneView = async (ownerId: string, ask: Ask): Promise<PrivateAskView> => (await askViews(ownerId, [ask]))[0] ?? fail(404, 'Not found');
 
-/** The app's ask fields as the overlay takes them: `exposureConversationId` becomes a conversation ref; legacy statuses are read as overlay ones. */
+/**
+ * The app's ask fields as the overlay takes them: parties become entity ids
+ * (or `self`), conversations become refs, `exposureConversationId` becomes the
+ * `this_chat` ref, and legacy statuses are read as overlay ones.
+ */
 async function askFields(ownerId: string, raw: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { exposureConversationId, exposureChat, assertion: _assertion, ...fields } = raw;
-  if (exposureChat !== undefined) fail(400, MESSAGES.invalid_exposure);
+  const { exposureConversationId, exposureChat, assertion: _assertion, carrier, placements, ...fields } = raw;
+  if (exposureChat !== undefined) fail(400, MESSAGES.invalid_exposure!);
   if (typeof fields.status === 'string' && LEGACY_ASK_STATUS[fields.status]) fields.status = LEGACY_ASK_STATUS[fields.status];
   if (fields.exposure === 'this_chat') fields.exposureChat = await conversationRef(ownerId, exposureConversationId);
-  else if (exposureConversationId !== undefined && exposureConversationId !== null && exposureConversationId !== '') fail(400, MESSAGES.invalid_exposure);
+  else if (exposureConversationId !== undefined && exposureConversationId !== null && exposureConversationId !== '') fail(400, MESSAGES.invalid_exposure!);
+  if (carrier !== undefined) fields.carrier = carrier === null ? null : await overlayParty(ownerId, parseAskParty(carrier, MESSAGES.invalid_carrier));
+  if (placements !== undefined) fields.placements = await overlayPlacements(ownerId, placements);
   return fields;
 }
 
 /**
- * Save an ask: the owner's own (`asker: 'self'`) or someone's (an OpenChat
- * person by user id, an Unlinked person, or a saved person, company, project
- * or idea by id). The same asker and text is one ask (`created: false`).
+ * Save an ask. `author` is who cares (required): `'self'`, an OpenChat person
+ * by user id, an Unlinked person, or a saved person, company, project or idea.
+ * `carrier` (who acts) and `placements` (the owner's stream, a person or
+ * thing, a conversation) are optional. The same author and text is one ask
+ * (`created: false`). `asker` is read as `author` (earlier clients).
  */
 export async function saveAsk(ownerId: string, raw: unknown, by: Provenance = OWNER_PROVENANCE): Promise<{ ask: PrivateAskView; created: boolean }> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail(400, MESSAGES.invalid_ask);
-  const { asker: rawAsker, ...rest } = raw as Record<string, unknown>;
-  const asker = parseAskAsker(rawAsker);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail(400, MESSAGES.invalid_ask!);
+  const { author: rawAuthor, asker, ...rest } = raw as Record<string, unknown>;
+  const author = parseAskParty(rawAuthor ?? asker);
+  const principal = await ownerPrincipal(ownerId);
   const fields = await askFields(ownerId, rest);
-  const { principal, entityId } = asker.kind === 'self' ? { principal: await ownerPrincipal(ownerId), entityId: null } : await subjectEntity(ownerId, asker);
-  const result = await overlayCall(overlay => overlay.saveAsk(principal, { ...fields, asker: entityId === null ? 'owner' : { id: entityId } }, by));
+  const overlayAuthor = await overlayParty(ownerId, author);
+  const result = await overlayCall(overlay => overlay.saveAsk(principal, { ...fields, author: overlayAuthor }, by));
   return { ask: await oneView(ownerId, result.ask), created: result.created };
+}
+
+/** The owner's entity for a subject, without creating one; null when nobody has written about it. */
+async function existingEntity(ownerId: string, principal: OverlayPrincipal, subject: Subject): Promise<string | null> {
+  if (subject.kind === 'user') { await assertPerson(ownerId, subject.id); return (await overlayCall(overlay => overlay.lookup(principal, userRef(subject.id))))?.id ?? null; }
+  if (subject.kind === 'unlinked') return (await findUnlinkedEntity(ownerId, principal, subject.id)).found?.id ?? null;
+  return subject.id;
 }
 
 /**
  * The owner's asks: open and stale first, by when they are due for a
- * recheck. `asker` is `self` (the owner's own), `others`, or a subject
- * (`askerKind` user/thing/unlinked with `askerId`); a subject nobody has
- * written about has none. `status` is one or a comma list, or `all`.
+ * recheck. `direction` is `from_me` (I care), `for_me` (placed on my stream,
+ * or I carry it) or `from_others`; `aboutKind` + `aboutId` (user, thing or
+ * unlinked) keeps asks that person or thing cares about, carries or is
+ * placed on. `status` is one or a comma list, or `all`.
  */
-export async function listAsks(ownerId: string, input: { status?: unknown; asker?: unknown; askerKind?: unknown; askerId?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown }): Promise<{ asks: PrivateAskView[]; truncated: boolean }> {
+export async function listAsks(ownerId: string, input: { status?: unknown; direction?: unknown; aboutKind?: unknown; aboutId?: unknown; asker?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown }): Promise<{ asks: PrivateAskView[]; truncated: boolean }> {
   const principal = await ownerPrincipal(ownerId);
-  let asker: unknown = input.asker === 'self' || input.asker === 'owner' ? 'owner' : input.asker === 'others' ? 'others' : undefined;
-  if (input.asker !== undefined && input.asker !== '' && asker === undefined) fail(400, MESSAGES.invalid_asker);
-  if (input.askerKind !== undefined || input.askerId !== undefined) {
-    const subject = parseAskAsker({ kind: input.askerKind, id: input.askerId });
-    if (subject.kind === 'self') asker = 'owner';
+  // Earlier clients: asker=self|others.
+  let direction: unknown = input.direction ?? (input.asker === 'self' || input.asker === 'owner' ? 'from_me' : input.asker === 'others' ? 'from_others' : input.asker);
+  if (direction !== undefined && direction !== '' && direction !== 'from_me' && direction !== 'for_me' && direction !== 'from_others') fail(400, MESSAGES.invalid_direction!);
+  if (input.aboutKind !== undefined || input.aboutId !== undefined) {
+    if (direction) fail(400, 'Give a direction or an aboutKind and aboutId, not both');
+    const subject = parseAskParty({ kind: input.aboutKind, id: input.aboutId }, 'Choose who the asks are about: aboutKind user, thing or unlinked, and its id');
+    if (subject.kind === 'self') direction = 'from_me';
     else {
-      let entityId: string | null;
-      if (subject.kind === 'user') { await assertPerson(ownerId, subject.id); entityId = (await overlayCall(overlay => overlay.lookup(principal, userRef(subject.id))))?.id ?? null; }
-      else if (subject.kind === 'unlinked') entityId = (await findUnlinkedEntity(ownerId, principal, subject.id)).found?.id ?? null;
-      else entityId = subject.id;
+      const entityId = await existingEntity(ownerId, principal, subject);
       if (!entityId) return { asks: [], truncated: false };
-      asker = entityId;
+      direction = `about:${entityId}`;
     }
   }
   const status = typeof input.status === 'string' ? input.status.split(',').map(value => LEGACY_ASK_STATUS[value.trim()] ?? value.trim()).join(',') : input.status;
-  const found = await overlayCall(overlay => overlay.listAsks(principal, { status, asker, q: input.q, needsRecheck: input.needsRecheck, limit: input.limit }));
+  const found = await overlayCall(overlay => overlay.listAsks(principal, { status, direction, q: input.q, needsRecheck: input.needsRecheck, limit: input.limit }));
   return { asks: await askViews(ownerId, found.asks), truncated: found.truncated };
 }
 
@@ -1011,10 +1060,10 @@ export async function getAsk(ownerId: string, askId: string): Promise<PrivateAsk
   return oneView(ownerId, await overlayCall(overlay => overlay.getAsk(principal, askId)));
 }
 
-/** Edit an ask in place (text, horizon, recheckAfter, status, exposure, evidence, recheckedNow); `updatedBy` records the editor. */
+/** Edit an ask in place (text, carrier, placements, horizon, recheckAfter, status, exposure, evidence, recheckedNow); `updatedBy` records the editor. The author never changes. */
 export async function updateAsk(ownerId: string, askId: string, raw: unknown, by: Provenance = OWNER_PROVENANCE): Promise<PrivateAskView> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail(400, 'Nothing to change');
-  if ('asker' in raw) fail(400, 'The asker of an ask stays as it is; save a new ask instead');
+  if ('author' in raw || 'asker' in raw) fail(400, MESSAGES.author_fixed!);
   const principal = await ownerPrincipal(ownerId);
   const fields = await askFields(ownerId, raw as Record<string, unknown>);
   return oneView(ownerId, await overlayCall(overlay => overlay.updateAsk(principal, askId, fields, by)));

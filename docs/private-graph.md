@@ -189,21 +189,31 @@ entities that knew them only as an OpenChat account.
 ## Asks
 
 Since 2026-11-03 (OpenChat-2fsy.1) asks have one home: the overlay's `ask`
-kind (Noos `docs/PEOPLE_OVERLAY.md`, "Asks"). An ask is the owner's own
-(`asker: 'self'`) or a person's they know (an OpenChat person, an Unlinked
-person, or a saved person, company, project or idea), with a `horizon`
-(`event`/`short`/`medium`/`evergreen`: 7/14/60/90 days to `recheckAfter`),
-`status` (`open`, `fulfilled`, `withdrawn`, `stale`), `exposure` (`only_me` by
-default) and optional `evidence`. Only the owner ever sees an ask: `exposure`
-records whom they mean it for and widens nothing yet. The same asker and text
-is one ask. An asker's card lists their asks as `asks` links; deleting a saved
-person deletes the asks they made.
+kind (Noos `docs/PEOPLE_OVERLAY.md`, "Asks"). Every person is implicitly a
+gestalt box, so an ask someone posts anywhere is also theirs. As in the
+Gestalt Box model and WIT's "by me / to me" personal tracker, three facts stay
+separate:
+
+- **who cares**: `author`, always set. It is `self` (the owner) or an OpenChat person, an Unlinked person, or a saved person, company, project or idea. It is fixed.
+- **who acts**: `carrier`, optional. It is `self` or a person or company. Handing an ask over sets it.
+- **where it was placed**: `placements`, beyond the author's own box. It can be `self` (the owner's stream: addressed to them), a person or saved thing, or a conversation the owner is in.
+
+`fromMe` and `forMe` (on my stream, or I carry it) follow from these.
+`direction` filters by `from_me`, `for_me` or `from_others`, and
+`aboutKind` + `aboutId` filters by any ask a person or thing cares about,
+carries or is placed on.
+
+Each ask also has a `horizon` (`event`/`short`/`medium`/`evergreen`: 7/14/60/90 days to `recheckAfter`), a `status` (`open`, `fulfilled`, `withdrawn`, `stale`), an `exposure` (`only_me` by default) and optional `evidence`. Record provenance is `recordedBy`/`recordedVia`/`assertion`.
+
+Only the owner ever sees an ask: `exposure` records whom they mean it for and widens nothing yet.
+
+The same author and text is one ask. An author's card lists their asks as `asks` links. Deleting a saved person deletes the asks they authored, clears them as carrier and drops them from placements.
 
 | Route | Does |
 |---|---|
-| `GET /api/private/asks?asker=self\|others&askerKind=&askerId=&status=&q=&needsRecheck=&limit=` | Open and stale asks first, by recheck date; `status` one value, a comma list or `all`. |
-| `POST /api/private/asks` `{asker, text, horizon?, recheckAfter?, status?, exposure?, exposureConversationId?, evidence?}` | Save; 201 created, 200 existing. `asker` is `'self'` or `{kind: user\|thing\|unlinked, id}`. `this_chat` needs a conversation the owner is in. |
-| `GET /api/private/asks/:id`, `PATCH /api/private/asks/:id`, `DELETE /api/private/asks/:id` | Read, edit (`recheckedNow: true` records a recheck), forget. PATCH also takes the card's old statuses `active`/`paused`/`closed` (open/stale/withdrawn). |
+| `GET /api/private/asks?direction=from_me\|for_me\|from_others&aboutKind=&aboutId=&status=&q=&needsRecheck=&limit=` | Open and stale asks first, by recheck date; `status` one value, a comma list or `all`. `asker=self\|others` still works (earlier clients). |
+| `POST /api/private/asks` `{author, text, carrier?, placements?, horizon?, recheckAfter?, status?, exposure?, exposureConversationId?, evidence?}` | Save; 201 created, 200 existing. `author`/`carrier` are `'self'` or `{kind: user\|thing\|unlinked, id}`; a placement is one of those or `{kind: 'conversation', id}`. `this_chat` and conversation placements need a conversation the owner is in. (`asker` is read as `author`.) |
+| `GET /api/private/asks/:id`, `PATCH /api/private/asks/:id`, `DELETE /api/private/asks/:id` | Read, edit (`carrier` hands over or, `null`, takes back; `placements` replaces; `recheckedNow: true` records a recheck; the author never changes), forget. PATCH also takes the card's old statuses `active`/`paused`/`closed` (open/stale/withdrawn). |
 
 Standing asks captured on a private card, and asks a note review extracts,
 are saved as overlay asks by that card's subject (a topic's become the
@@ -213,10 +223,13 @@ never copies it. `scripts/migrate-asks-to-overlay.mjs` (dry run unless
 monitor's `[friend-ask v1]` notes into overlay asks, keeping both sources, and
 must run right after the release that ships this.
 
-The **Asks** tab opens with **People's asks · only you see these**: friends'
-asks (each naming who asks, linking to their card), then the owner's own with
-an add field, with Still open / Fulfilled / Withdrawn actions and a closed-asks
-toggle. Agent tools: `oc_save_ask`, `oc_list_asks`, `oc_update_ask`,
+The **Asks** tab opens with **People's asks · only you see these**, by
+direction:
+- **For you**: someone else's asks placed on your stream or carried by you.
+- **Friends' asks**: each one names who cares and links to their card.
+- **Your asks**: your own, with a field to add one.
+
+Each row shows who carries the ask and where it was placed. The actions are Still open, I'll carry it, Fulfilled and Withdrawn, and a toggle shows closed asks. Agent tools: `oc_save_ask`, `oc_list_asks`, `oc_update_ask`,
 `oc_delete_ask` (connector and agent-key MCP server).
 
 ## In the app and for agents

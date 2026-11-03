@@ -98,10 +98,10 @@ export async function migrateAsksToOverlay(driver: Driver, database: string, opt
       if (!ASKER_KINDS.includes(record.get('kind') as EntityKind)) { report.friendAskNotes.skipped.push({ noteId, reason: `note is on a ${String(record.get('kind'))}, which cannot ask` }); continue; }
       const stored = readProvenance({ author: record.get('author'), source: record.get('source'), assertion: record.get('assertion') });
       const by: Provenance = { author: stored.author ?? 'owner', source: stored.source ?? 'app', assertion: stored.assertion ?? 'stated' };
-      const input = parseAskInput({ text: parsed.text, asker: { id: entityId }, horizon: parsed.horizon, recheckAfter: parsed.recheckAfter, status: parsed.status,
+      const input = parseAskInput({ text: parsed.text, author: { id: entityId }, horizon: parsed.horizon, recheckAfter: parsed.recheckAfter, status: parsed.status,
         evidence: { label: parsed.label, seenAt: parsed.seenAt, url: parsed.url, noteId } });
       // A note already migrated (even if the owner has since edited that ask's text) is never migrated again.
-      const migrated = async (tx: Pick<ManagedTransaction, 'run'>) => (await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask', askerId: $entityId}) WHERE a.evidenceNoteId = $noteId RETURN a.id AS id`, { ownerKey, entityId, noteId })).records.length > 0;
+      const migrated = async (tx: Pick<ManagedTransaction, 'run'>) => (await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask', askAuthorId: $entityId}) WHERE a.evidenceNoteId = $noteId RETURN a.id AS id`, { ownerKey, entityId, noteId })).records.length > 0;
       if (!options.apply) {
         if (await session.executeRead(migrated)) report.friendAskNotes.existing++; else report.friendAskNotes.created++;
         continue;
@@ -130,7 +130,7 @@ export async function migrateAsksToOverlay(driver: Driver, database: string, opt
       const kind = record.get('kind') as string | null;
       if (!kind) { report.legacyAsks.skipped.push({ id: ask.id, reason: 'its subject no longer exists' }); continue; }
       const asksItself = ASKER_KINDS.includes(kind as EntityKind), status = LEGACY_STATUS[ask.status ?? 'active'] ?? 'open';
-      const input = parseAskInput({ text: cut(String(ask.text ?? '').replace(/\s+/g, ' ').trim() || '(empty)', LIMITS.askLength), asker: asksItself ? { id: ask.entityId } : 'owner', status,
+      const input = parseAskInput({ text: cut(String(ask.text ?? '').replace(/\s+/g, ' ').trim() || '(empty)', LIMITS.askLength), author: asksItself ? { id: ask.entityId } : 'self', status,
         evidence: { label: 'Private note review', seenAt: typeof ask.createdAt === 'string' ? ask.createdAt.slice(0, 10) : null, noteId: record.get('noteExists') ? ask.sourceNoteId ?? null : null } });
       if (!options.apply) { report.legacyAsks.created++; continue; }
       const outcome = await session.executeWrite(async tx => {

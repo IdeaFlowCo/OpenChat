@@ -1148,7 +1148,10 @@ export function buildServer(
   const READ_ONLY_PRIVATE = new Set(['oc_search_private', 'oc_get_neighbourhood', 'oc_list_asks']);
   const ASK_PRIVATE = "Asks are private people knowledge: only the owner ever sees them, in OpenChat's Asks section and on their private cards. exposure records whom the owner means an ask for (only_me by default) but nothing is shown to anyone else yet, whatever its exposure. Never notifies anyone.";
   const ASK_FIELDS = "horizon: event (7 days; give recheckAfter = the event date), short (14), medium (60, default), evergreen (90); it sets recheckAfter unless you give one. status: open, fulfilled, withdrawn or stale. evidence fields are optional.";
-  const askerKindSchema = z.enum(['self', 'user', 'thing', 'unlinked']).describe("'self' = the owner's own ask; 'user' = an OpenChat person (askerId = user id); 'thing' = a saved person, company, project or idea (askerId = its id); 'unlinked' = an Unlinked person (profile id, connection id or linkedin.com/in/ address)");
+  const partyKindSchema = z.enum(['self', 'user', 'thing', 'unlinked']).describe("'self' = the owner; 'user' = an OpenChat person (id = user id); 'thing' = a saved person, company, project or idea (id = its id); 'unlinked' = an Unlinked person (profile id, connection id or linkedin.com/in/ address)");
+  const party = (kind: unknown, id: unknown) => kind === 'self' ? 'self' : { kind, id };
+  const placementsSchema = z.array(z.string().max(600)).max(8).optional().describe("Where it was placed, beyond the author's own box: 'self' (your stream: addressed to you), 'user:<id>', 'thing:<id>', 'unlinked:<id>' or 'conversation:<id>'");
+  const placementsOf = (values: string[]) => values.map(value => { if (value === 'self') return 'self'; const at = value.indexOf(':'), kind = value.slice(0, at), id = value.slice(at + 1); return { kind, id }; });
   const askFieldSchemas = {
     text: z.string().min(1).max(1000),
     horizon: z.enum(['event', 'short', 'medium', 'evergreen']).optional(),
@@ -1266,19 +1269,19 @@ export function buildServer(
     { thingId: z.string().min(1).max(64) }, ({ thingId }) => api.getPrivateThing(thingId));
 
   privateTool('oc_save_ask', "Save an ask (the owner's own or a person's)",
-    `Save a standing need or request: the owner's own (askerKind self) or one of a person's they know. This is the one home for asks; do not record them as notes. The same asker and text is one ask (retries return it with created false). ${ASK_FIELDS} ${ASK_PRIVATE}`,
-    { askerKind: askerKindSchema, askerId: z.string().min(1).max(512).optional(), ...askFieldSchemas, assertion: assertionSchema },
-    ({ askerKind, askerId, ...input }) => api.saveAsk({ asker: askerKind === 'self' ? 'self' : { kind: askerKind, id: askerId }, ...given(input, ['text', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureConversationId', 'assertion']), ...evidenceOf(input) }));
+    `Save a standing need or request. Who cares (authorKind/authorId; 'self' for the owner's own), who carries it (carrierKind/carrierId, optional) and where it was placed (placements, optional; 'self' when addressed to the owner) are separate facts. This is the one home for asks; do not record them as notes. The same author and text is one ask (retries return it with created false; reopen a closed one with oc_update_ask). ${ASK_FIELDS} ${ASK_PRIVATE}`,
+    { authorKind: partyKindSchema, authorId: z.string().min(1).max(512).optional(), carrierKind: partyKindSchema.optional(), carrierId: z.string().min(1).max(512).optional(), placements: placementsSchema, ...askFieldSchemas, assertion: assertionSchema },
+    ({ authorKind, authorId, carrierKind, carrierId, placements, ...input }) => api.saveAsk({ author: party(authorKind, authorId), ...(carrierKind ? { carrier: party(carrierKind, carrierId) } : {}), ...(placements ? { placements: placementsOf(placements) } : {}), ...given(input, ['text', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureConversationId', 'assertion']), ...evidenceOf(input) }));
 
   privateTool('oc_list_asks', "List the owner's asks",
-    `List asks, open and stale first by recheck date (needsRecheck when past it). Filter by asker (self, others, or askerKind + askerId), status (one, a comma list, or all; default open,stale), query and needsRecheck. ${ASK_PRIVATE}`,
-    { asker: z.enum(['self', 'others']).optional(), askerKind: askerKindSchema.optional(), askerId: z.string().min(1).max(512).optional(), status: z.string().max(60).optional(), query: z.string().max(120).optional(), needsRecheck: z.boolean().optional(), limit: z.number().int().min(1).max(200).optional() },
+    `List asks, open and stale first by recheck date (needsRecheck when past it), with author, carrier, placements, fromMe and forMe. direction: from_me (you care), for_me (placed on your stream or you carry it), from_others; or aboutKind + aboutId for every ask a person or thing cares about, carries or is placed on. Also status (one, a comma list, or all; default open,stale), query and needsRecheck. ${ASK_PRIVATE}`,
+    { direction: z.enum(['from_me', 'for_me', 'from_others']).optional(), aboutKind: z.enum(['user', 'thing', 'unlinked']).optional(), aboutId: z.string().min(1).max(512).optional(), status: z.string().max(60).optional(), query: z.string().max(120).optional(), needsRecheck: z.boolean().optional(), limit: z.number().int().min(1).max(200).optional() },
     ({ query, ...input }) => api.listAsks({ ...input, q: query }));
 
   privateTool('oc_update_ask', 'Edit an ask',
-    `Edit one of the owner's asks by id: status fulfilled or withdrawn when it no longer stands, stale when unsure; recheckedNow true records a check today. Any evidence field replaces the evidence; clearEvidence true removes it. The asker stays. ${ASK_FIELDS} ${ASK_PRIVATE}`,
-    { askId: z.string().min(1).max(64), ...askFieldSchemas, text: askFieldSchemas.text.optional(), recheckedNow: z.boolean().optional(), clearEvidence: z.boolean().optional() },
-    ({ askId, clearEvidence, ...input }) => api.updateAsk(askId, { ...given(input, ['text', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureConversationId', 'recheckedNow']), ...(clearEvidence ? { evidence: null } : evidenceOf(input)) }));
+    `Edit one of the owner's asks by id: status fulfilled or withdrawn when it no longer stands, stale when unsure; recheckedNow true records a check today. Hand it over with carrierKind/carrierId (clearCarrier true when nobody carries it); placements replaces where it is placed. Any evidence field replaces the evidence; clearEvidence true removes it. The author stays. ${ASK_FIELDS} ${ASK_PRIVATE}`,
+    { askId: z.string().min(1).max(64), ...askFieldSchemas, text: askFieldSchemas.text.optional(), carrierKind: partyKindSchema.optional(), carrierId: z.string().min(1).max(512).optional(), clearCarrier: z.boolean().optional(), placements: placementsSchema, recheckedNow: z.boolean().optional(), clearEvidence: z.boolean().optional() },
+    ({ askId, clearEvidence, clearCarrier, carrierKind, carrierId, placements, ...input }) => api.updateAsk(askId, { ...given(input, ['text', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureConversationId', 'recheckedNow']), ...(clearCarrier ? { carrier: null } : carrierKind ? { carrier: party(carrierKind, carrierId) } : {}), ...(placements ? { placements: placementsOf(placements) } : {}), ...(clearEvidence ? { evidence: null } : evidenceOf(input)) }));
 
   privateTool('oc_delete_ask', 'Delete an ask',
     `Delete (undo) one of the owner's asks by id with its notes and links; prefer oc_update_ask status fulfilled or withdrawn for one that no longer stands. ${ASK_PRIVATE}`,

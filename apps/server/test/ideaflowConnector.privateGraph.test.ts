@@ -104,23 +104,29 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     }
     expect(all.find((value: any) => value.name === 'oc_delete_ask').annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(all.find((value: any) => value.name === 'oc_list_asks').annotations.readOnlyHint).toBe(true);
-    expect(all.find((value: any) => value.name === 'oc_save_ask').inputSchema.required).toEqual(['askerKind', 'text']);
+    expect(all.find((value: any) => value.name === 'oc_save_ask').inputSchema.required).toEqual(['authorKind', 'text']);
+    expect(all.find((value: any) => value.name === 'oc_list_asks').inputSchema.properties.direction.enum).toEqual(['from_me', 'for_me', 'from_others']);
 
     graph.saveAsk.mockResolvedValue({ ask: { id: 'ask-1' }, created: true });
-    const saved = await tool('oc_save_ask', { askerKind: 'thing', askerId: 'thing-1', text: 'SF chiropractor for neck pain', horizon: 'short', evidenceLabel: 'Facebook post', evidenceSeenAt: '2026-10-29', assertion: 'inferred' }, undefined, 'Friends asks monitor');
+    const saved = await tool('oc_save_ask', { authorKind: 'thing', authorId: 'thing-1', text: 'SF chiropractor for neck pain', horizon: 'short', evidenceLabel: 'Facebook post', evidenceSeenAt: '2026-10-29', assertion: 'inferred' }, undefined, 'Friends asks monitor');
     expect(JSON.parse(saved.result.content[0].text)).toEqual({ ask: { id: 'ask-1' }, created: true });
-    expect(graph.saveAsk).toHaveBeenCalledWith('owner', { asker: { kind: 'thing', id: 'thing-1' }, text: 'SF chiropractor for neck pain', horizon: 'short', assertion: 'inferred',
+    expect(graph.saveAsk).toHaveBeenCalledWith('owner', { author: { kind: 'thing', id: 'thing-1' }, text: 'SF chiropractor for neck pain', horizon: 'short', assertion: 'inferred',
       evidence: { label: 'Facebook post', seenAt: '2026-10-29' } }, { author: 'agent:Friends asks monitor', source: 'connector', assertion: 'inferred' });
-    await tool('oc_save_ask', { askerKind: 'self', text: 'Heal my TFCC', horizon: 'evergreen' });
-    expect(graph.saveAsk).toHaveBeenLastCalledWith('owner', { asker: 'self', text: 'Heal my TFCC', horizon: 'evergreen' }, CONNECTOR);
-    expect((await call('tools/call', { name: 'oc_save_ask', arguments: { askerKind: 'self', text: 'x', exposure: 'everyone' } })).status).toBe(400);
-    expect((await call('tools/call', { name: 'oc_save_ask', arguments: { askerKind: 'self', text: 'x' } }, 'openchat:read')).status).toBe(403);
+    await tool('oc_save_ask', { authorKind: 'self', text: 'Heal my TFCC', horizon: 'evergreen' });
+    expect(graph.saveAsk).toHaveBeenLastCalledWith('owner', { author: 'self', text: 'Heal my TFCC', horizon: 'evergreen' }, CONNECTOR);
+    // Who cares, who carries and where it was placed travel as separate facts.
+    await tool('oc_save_ask', { authorKind: 'user', authorId: 'bo', carrierKind: 'self', placements: ['self', 'conversation:c7', 'thing:board-1'], text: 'Intro to a sound engineer' });
+    expect(graph.saveAsk).toHaveBeenLastCalledWith('owner', { author: { kind: 'user', id: 'bo' }, carrier: 'self', placements: ['self', { kind: 'conversation', id: 'c7' }, { kind: 'thing', id: 'board-1' }], text: 'Intro to a sound engineer' }, CONNECTOR);
+    expect((await call('tools/call', { name: 'oc_save_ask', arguments: { authorKind: 'self', text: 'x', exposure: 'everyone' } })).status).toBe(400);
+    expect((await call('tools/call', { name: 'oc_save_ask', arguments: { askerKind: 'self', text: 'x' } })).status).toBe(400);
+    expect((await call('tools/call', { name: 'oc_save_ask', arguments: { authorKind: 'self', text: 'x' } }, 'openchat:read')).status).toBe(403);
 
     graph.listAsks.mockResolvedValue({ asks: [], truncated: false });
-    await tool('oc_list_asks', { asker: 'others', status: 'all', query: 'chiro', needsRecheck: true }, 'openchat:read');
-    expect(graph.listAsks).toHaveBeenCalledWith('owner', { asker: 'others', status: 'all', q: 'chiro', needsRecheck: 'true' });
-    await tool('oc_list_asks', { askerKind: 'user', askerId: 'bob' }, 'openchat:read');
-    expect(graph.listAsks).toHaveBeenLastCalledWith('owner', { askerKind: 'user', askerId: 'bob' });
+    await tool('oc_list_asks', { direction: 'for_me', status: 'all', query: 'chiro', needsRecheck: true }, 'openchat:read');
+    expect(graph.listAsks).toHaveBeenCalledWith('owner', { direction: 'for_me', status: 'all', q: 'chiro', needsRecheck: 'true' });
+    await tool('oc_list_asks', { aboutKind: 'user', aboutId: 'bob' }, 'openchat:read');
+    expect(graph.listAsks).toHaveBeenLastCalledWith('owner', { aboutKind: 'user', aboutId: 'bob' });
+    expect((await call('tools/call', { name: 'oc_list_asks', arguments: { direction: 'to_me' } }, 'openchat:read')).status).toBe(400);
 
     graph.updateAsk.mockResolvedValue({ id: 'ask-1', status: 'fulfilled' });
     await tool('oc_update_ask', { askId: 'ask-1', status: 'fulfilled', recheckedNow: true });
@@ -129,6 +135,10 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     expect(graph.updateAsk).toHaveBeenLastCalledWith('owner', 'ask-1', { evidence: null }, CONNECTOR);
     await tool('oc_update_ask', { askId: 'ask-1', exposure: 'this_chat', exposureConversationId: 'conv-1' });
     expect(graph.updateAsk).toHaveBeenLastCalledWith('owner', 'ask-1', { exposure: 'this_chat', exposureConversationId: 'conv-1' }, CONNECTOR);
+    await tool('oc_update_ask', { askId: 'ask-1', carrierKind: 'user', carrierId: 'alice', placements: [] });
+    expect(graph.updateAsk).toHaveBeenLastCalledWith('owner', 'ask-1', { carrier: { kind: 'user', id: 'alice' }, placements: [] }, CONNECTOR);
+    await tool('oc_update_ask', { askId: 'ask-1', clearCarrier: true });
+    expect(graph.updateAsk).toHaveBeenLastCalledWith('owner', 'ask-1', { carrier: null }, CONNECTOR);
 
     graph.deleteAsk.mockResolvedValue({ deleted: true, id: 'ask-1' });
     await tool('oc_delete_ask', { askId: 'ask-1' });

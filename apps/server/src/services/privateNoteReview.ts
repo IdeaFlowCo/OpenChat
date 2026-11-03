@@ -30,10 +30,12 @@ type Runner = Parameters<typeof listAsksIn>[0];
 /** Every ask the subject made, any status. */
 /** The asks a card shows: the subject's own asks, or for a topic (which cannot ask) the owner's asks linked to it ('is about'). */
 async function subjectAsks(tx: Runner, ownerKey: string, entityId: string) {
-  const asked = await listAsksIn(tx, ownerKey, { status: null, own: null, askerId: entityId, q: '', needsRecheck: false, limit: 200 });
-  const about = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})-[l:OVERLAY_LINK {relation: 'is about'}]->(:OverlayEntity {id: $entityId, ownerKey: $ownerKey})
-    WHERE l.ownerKey = $ownerKey AND a.askerId IS NULL RETURN a.id AS id LIMIT 200`, { ownerKey, entityId });
-  const linked = await Promise.all(about.records.map(record => askIn(tx, ownerKey, String(record.get('id')))));
+  // Asks this subject cares about (it is their author), not ones it merely carries or is placed on.
+  const about = await listAsksIn(tx, ownerKey, { status: null, direction: null, about: entityId, q: '', needsRecheck: false, limit: 200 });
+  const asked = { ...about, asks: about.asks.filter(ask => ask.author !== null && 'id' in ask.author && ask.author.id === entityId) };
+  const topicAsks = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})-[l:OVERLAY_LINK {relation: 'is about'}]->(:OverlayEntity {id: $entityId, ownerKey: $ownerKey})
+    WHERE l.ownerKey = $ownerKey AND a.askAuthorSelf = true RETURN a.id AS id LIMIT 200`, { ownerKey, entityId });
+  const linked = await Promise.all(topicAsks.records.map(record => askIn(tx, ownerKey, String(record.get('id')))));
   return { asks: [...asked.asks, ...linked], truncated: asked.truncated };
 }
 const subjectAskTexts = async (tx: Runner, ownerKey: string, entityId: string) => (await subjectAsks(tx, ownerKey, entityId)).asks.map(ask => ask.text);
@@ -239,7 +241,7 @@ export async function applyNoteReview(ownerId: string, reviewId: string, raw: un
           // The overlay's ask kind: the subject asks it. A topic cannot ask, so its ask becomes the owner's own, linked to the topic.
           // Evidence names the source note, never copies it: deleting the note leaves no copy behind.
           const asksItself = (ASKER_KINDS as readonly string[]).includes(subjectKind);
-          const input = parseAskInput({ text: suggestion.text, asker: asksItself ? { id: entityId } : 'owner', evidence: { noteId: review.note.id, label: review.asStandingAsk ? 'Standing ask on a private card' : 'Private note review' } });
+          const input = parseAskInput({ text: suggestion.text, author: asksItself ? { id: entityId } : 'self', evidence: { noteId: review.note.id, label: review.asStandingAsk ? 'Standing ask on a private card' : 'Private note review' } });
           const askProvenance: OverlayProvenance = review.asStandingAsk ? by : { author: by.author, source: 'suggestion', assertion: 'inferred' };
           const saved = await saveAskIn(tx, ownerKey, input, askProvenance).catch(overlayRefusal);
           // A topic's ask is linked to it even when the owner already had that ask (from another card); only a created ask is this review's to undo.
