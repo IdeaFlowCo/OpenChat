@@ -1128,7 +1128,7 @@ export function buildServer(
   const PRIVATE_PEOPLE = "Private people knowledge: only the owner sees it, shown in OpenChat and on the owner's Unlinked person and contact pages; it never notifies anyone or changes a public profile.";
   const PROVENANCE = "Notes and relations carry author ('owner' or 'agent:<name>'), source ('app', 'connector', 'direct-key' or 'suggestion') and assertion ('stated' or 'inferred'), null on records made before provenance was kept; relations also carry relationType, since, until and context (null when not given) and updatedBy (who last edited them in place).";
   // Noos overlay relation types (2026-10-10). 'related' is the generic fallback; the retired 'other' still reads as 'related'.
-  const RELATION_TYPES = ['knows', 'family', 'worked_with', 'works_at', 'works_on', 'attended', 'interested_in', 'part_of', 'about', 'related'] as const;
+  const RELATION_TYPES = ['knows', 'family', 'worked_with', 'works_at', 'works_on', 'attended', 'interested_in', 'part_of', 'about', 'asks', 'related'] as const;
   const THING_KINDS = ['person', 'company', 'idea', 'project', 'topic'] as const;
   const KINDS_TEXT = 'person, company, idea, project or topic (a thing in the world people and projects are about, such as ADHD or coherence)';
   const relationTypeSchema = z.enum(RELATION_TYPES).optional().describe("Canonical type for querying; omit to derive it from the relation's words and what it connects (knows/family/worked_with only between two people; 'related' when nothing fits)");
@@ -1144,8 +1144,23 @@ export function buildServer(
     subjectKind: z.enum(['user', 'thing', 'unlinked']).describe("'user' for a person on OpenChat (use their user id), 'thing' for one of the owner's saved companies, ideas, projects or people (use its id), 'unlinked' for an Unlinked person (a published profile id, a connection id from unlinked_list_connections for an imported LinkedIn contact, or a linkedin.com/in/ address)"),
     subjectId: z.string().min(1).max(200).describe('The user id, saved-thing id, or Unlinked profile id / connection id / LinkedIn address'),
   };
-  const DESTRUCTIVE_PRIVATE = new Set(['oc_delete_private_note', 'oc_delete_private_link', 'oc_delete_private_thing']);
-  const READ_ONLY_PRIVATE = new Set(['oc_search_private', 'oc_get_neighbourhood']);
+  const DESTRUCTIVE_PRIVATE = new Set(['oc_delete_private_note', 'oc_delete_private_link', 'oc_delete_private_thing', 'oc_delete_ask']);
+  const READ_ONLY_PRIVATE = new Set(['oc_search_private', 'oc_get_neighbourhood', 'oc_list_asks']);
+  const ASK_PRIVATE = "Asks are private people knowledge: only the owner ever sees them, in OpenChat's Asks section and on their private cards. exposure records whom the owner means an ask for (only_me by default) but nothing is shown to anyone else yet, whatever its exposure. Never notifies anyone.";
+  const ASK_FIELDS = "horizon: event (7 days; give recheckAfter = the event date), short (14), medium (60, default), evergreen (90); it sets recheckAfter unless you give one. status: open, fulfilled, withdrawn or stale. evidence fields are optional.";
+  const askerKindSchema = z.enum(['self', 'user', 'thing', 'unlinked']).describe("'self' = the owner's own ask; 'user' = an OpenChat person (askerId = user id); 'thing' = a saved person, company, project or idea (askerId = its id); 'unlinked' = an Unlinked person (profile id, connection id or linkedin.com/in/ address)");
+  const askFieldSchemas = {
+    text: z.string().min(1).max(1000),
+    horizon: z.enum(['event', 'short', 'medium', 'evergreen']).optional(),
+    recheckAfter: z.string().max(40).optional().describe("A date such as '2026-12-29'"),
+    status: z.enum(['open', 'fulfilled', 'withdrawn', 'stale']).optional(),
+    exposure: z.enum(['only_me', 'this_chat', 'friends', 'public']).optional().describe('Stored only; default only_me'),
+    exposureConversationId: z.string().min(1).max(200).optional(),
+    evidenceQuote: z.string().max(1000).optional(), evidenceUrl: z.string().max(2000).optional(), evidenceLabel: z.string().max(280).optional(),
+    evidenceSeenAt: z.string().max(20).optional(), evidenceNoteId: z.string().min(1).max(64).optional(),
+  };
+  const evidenceOf = (input: Record<string, unknown>) => ['evidenceQuote', 'evidenceUrl', 'evidenceLabel', 'evidenceSeenAt', 'evidenceNoteId'].some(key => input[key] !== undefined)
+    ? { evidence: { quote: input.evidenceQuote, url: input.evidenceUrl, label: input.evidenceLabel, seenAt: input.evidenceSeenAt, noteId: input.evidenceNoteId } } : {};
   const privateTool = (name: string, title: string, description: string, inputSchema: Record<string, z.ZodTypeAny>, run: (input: any) => Promise<unknown>) =>
     server.registerTool(name, { title, description, inputSchema, ...(DESTRUCTIVE_PRIVATE.has(name) ? { annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } } : READ_ONLY_PRIVATE.has(name) ? { annotations: { readOnlyHint: true, openWorldHint: false } } : {}) }, async (input: any) => {
       try { requireApiKey(api, title); return jsonResult(await run(input)); } catch (e) { return errorResult(e); }
@@ -1249,6 +1264,25 @@ export function buildServer(
   privateTool('oc_get_private_thing', 'Read a saved company, idea, project or person',
     "Read one of the owner's saved things with its private notes and everything linked to it.",
     { thingId: z.string().min(1).max(64) }, ({ thingId }) => api.getPrivateThing(thingId));
+
+  privateTool('oc_save_ask', "Save an ask (the owner's own or a person's)",
+    `Save a standing need or request: the owner's own (askerKind self) or one of a person's they know. This is the one home for asks; do not record them as notes. The same asker and text is one ask (retries return it with created false). ${ASK_FIELDS} ${ASK_PRIVATE}`,
+    { askerKind: askerKindSchema, askerId: z.string().min(1).max(512).optional(), ...askFieldSchemas, assertion: assertionSchema },
+    ({ askerKind, askerId, ...input }) => api.saveAsk({ asker: askerKind === 'self' ? 'self' : { kind: askerKind, id: askerId }, ...given(input, ['text', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureConversationId', 'assertion']), ...evidenceOf(input) }));
+
+  privateTool('oc_list_asks', "List the owner's asks",
+    `List asks, open and stale first by recheck date (needsRecheck when past it). Filter by asker (self, others, or askerKind + askerId), status (one, a comma list, or all; default open,stale), query and needsRecheck. ${ASK_PRIVATE}`,
+    { asker: z.enum(['self', 'others']).optional(), askerKind: askerKindSchema.optional(), askerId: z.string().min(1).max(512).optional(), status: z.string().max(60).optional(), query: z.string().max(120).optional(), needsRecheck: z.boolean().optional(), limit: z.number().int().min(1).max(200).optional() },
+    ({ query, ...input }) => api.listAsks({ ...input, q: query }));
+
+  privateTool('oc_update_ask', 'Edit an ask',
+    `Edit one of the owner's asks by id: status fulfilled or withdrawn when it no longer stands, stale when unsure; recheckedNow true records a check today. Any evidence field replaces the evidence; clearEvidence true removes it. The asker stays. ${ASK_FIELDS} ${ASK_PRIVATE}`,
+    { askId: z.string().min(1).max(64), ...askFieldSchemas, text: askFieldSchemas.text.optional(), recheckedNow: z.boolean().optional(), clearEvidence: z.boolean().optional() },
+    ({ askId, clearEvidence, ...input }) => api.updateAsk(askId, { ...given(input, ['text', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureConversationId', 'recheckedNow']), ...(clearEvidence ? { evidence: null } : evidenceOf(input)) }));
+
+  privateTool('oc_delete_ask', 'Delete an ask',
+    `Delete (undo) one of the owner's asks by id with its notes and links; prefer oc_update_ask status fulfilled or withdrawn for one that no longer stands. ${ASK_PRIVATE}`,
+    { askId: z.string().min(1).max(64) }, ({ askId }) => api.deleteAsk(askId));
 
   privateTool('oc_list_catch_up', 'List people due for a catch-up',
     "List the people whose catch-up date has passed, soonest first, from the owner's private cadence settings.",

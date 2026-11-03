@@ -980,7 +980,24 @@ export interface AgentPageContext { kind: 'person' | 'thing' | 'conversation' | 
 export interface ProfileNoteSuggestion { id: string; kind: 'ask' | 'connection'; text: string; relation?: string; target?: { kind: PrivateThingKind; name: string }; evidence: string; duplicate?: boolean; similar?: boolean }
 export interface ProfileNoteEdit { id: string; text?: string; relation?: string; target?: { kind: PrivateThingKind; name: string } }
 export interface ProfileNoteReview { id: string; subject: PrivateSubject; note: PrivateNote; status: 'saved' | 'ready' | 'unavailable' | 'failed' | 'applied' | 'undone'; suggestions: ProfileNoteSuggestion[]; appliedIds: string[]; createdAt: string; appliedAt?: string; createdRecords?: { id: string; kind: 'ask' | 'connection'; suggestionId: string }[]; sourceNoteAvailable?: boolean }
-export interface PrivateAsk { id: string; text: string; status: 'active' | 'paused' | 'closed'; sourceNoteId: string; reviewId: string; createdAt: string; updatedAt: string }
+/** A standing ask on a private card (stored as an overlay ask since 2026-11-03; `status` keeps the card's three words). */
+export interface PrivateAsk { id: string; text: string; status: 'active' | 'paused' | 'closed'; askStatus?: OverlayAskStatus; needsRecheck?: boolean; sourceNoteId: string | null; reviewId: string | null; createdAt: string }
+export type OverlayAskStatus = 'open' | 'fulfilled' | 'withdrawn' | 'stale';
+export type OverlayAskHorizon = 'event' | 'short' | 'medium' | 'evergreen';
+export type OverlayAskExposure = 'only_me' | 'this_chat' | 'friends' | 'public';
+/** Who asks, named as private links name their ends: an OpenChat person by user id, anything else by its saved id. */
+export interface OverlayAskAsker { kind: PrivateNodeKind | 'ask'; id: string; name: string; description?: string; unlinkedProfileId?: string }
+/**
+ * An ask in the owner's people overlay (OpenChat-2fsy.1): their own (`own`)
+ * or a person's they know. Only the owner ever sees it; `exposure` is stored
+ * but widens nothing yet.
+ */
+export interface OverlayAsk {
+  id: string; text: string; own: boolean; asker: OverlayAskAsker | null; horizon: OverlayAskHorizon; recheckAfter: string; needsRecheck: boolean; status: OverlayAskStatus;
+  exposure: OverlayAskExposure; exposureConversationId: string | null;
+  evidence: { quote: string | null; url: string | null; label: string | null; seenAt: string | null; noteId: string | null } | null;
+  createdAt: string; updatedAt: string; closedAt: string | null; checkedAt: string | null; author: string | null; source: string | null; assertion: string | null;
+}
 export interface PrivateNote { id: string; text: string; createdAt: string; updatedAt: string }
 export interface PrivateLink { id: string; relation: string; direction: 'out' | 'in'; other: { kind: PrivateNodeKind; id: string; name: string }; createdAt: string }
 export interface PrivatePersonOverlay { userId: string; person?: { id: string; name: string; avatarUrl: string | null }; card: PrivatePersonCard; notes: PrivateNote[]; links: PrivateLink[] }
@@ -1671,7 +1688,16 @@ export const api = {
   undoProfileNoteReview: (id: string) =>
     request<ProfileNoteReview>(`/api/private/note-reviews/${encodeURIComponent(id)}/undo`, { method: 'POST', body: '{}' }),
   updatePrivateAsk: (id: string, status: PrivateAsk['status']) =>
-    request<PrivateAsk>(`/api/private/asks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+    request<{ ask: OverlayAsk }>(`/api/private/asks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  // Asks in the owner's people overlay: their own and the people they know (OpenChat-2fsy.1). Owner-only.
+  listAsks: (filter: { asker?: 'self' | 'others'; status?: string; q?: string; needsRecheck?: boolean; limit?: number } = {}) => {
+    const params = new URLSearchParams(Object.entries(filter).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]));
+    return request<{ asks: OverlayAsk[]; truncated: boolean }>(`/api/private/asks${params.size ? `?${params}` : ''}`);
+  },
+  saveAsk: (body: { asker: 'self' | { kind: 'user' | 'thing' | 'unlinked'; id: string }; text: string; horizon?: OverlayAskHorizon; recheckAfter?: string }) =>
+    request<{ ask: OverlayAsk; created: boolean }>('/api/private/asks', { method: 'POST', body: JSON.stringify(body) }),
+  updateAsk: (id: string, patch: { status?: OverlayAskStatus; recheckedNow?: true; text?: string; horizon?: OverlayAskHorizon }) =>
+    request<{ ask: OverlayAsk }>(`/api/private/asks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 
   // Private graph — notes, importance, catch-up cadence and links that only the owner sees.
   getPrivatePerson: (userId: string) => request<PrivatePersonOverlay>(`/api/private/people/${encodeURIComponent(userId)}`),

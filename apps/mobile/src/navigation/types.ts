@@ -99,6 +99,9 @@ export type AsksStackParamList = {
   StoryComposer: { draftId?: string; initialText?: string; destination?: 'agents_only' | 'both' | 'stories_only' } | undefined;
   StoryViewer: { story: FeedStory };
   SocialReview: undefined;
+  /** An asker from the people-asks section: an OpenChat person, or a saved person, company, project or idea. */
+  ContactProfile: { userId: string; exactEmail?: string };
+  PrivateThing: { thingId: string };
 };
 
 export type NavProp<T extends keyof RootStackParamList> = NativeStackNavigationProp<RootStackParamList, T>;

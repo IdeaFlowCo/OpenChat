@@ -2,12 +2,13 @@ import neo4j from 'neo4j-driver';
 import type { Driver, ManagedTransaction } from 'neo4j-driver';
 import { nanoid } from 'nanoid';
 import {
-  cleanDescription, cleanKind, cleanLinkAttributes, cleanName, cleanProvenance, cleanRef, cleanRelation, cleanRelationType, cleanRequestId, cleanText, EMPTY_CARD, fail,
-  intervalAfterContact, isId, isOwnerKey, isSeparateRef, LIMITS, nameKey, nextDue, OverlayError, parseLinkPatch, readProvenance, readRelationType, relationTypeOf, separateRef,
+  ASK_EXPOSURES, ASK_HORIZONS, ASK_STATUSES, ASKER_KINDS, askKeyOf, askName, askRecheckAfter, cleanDescription, cleanKind, cleanLinkAttributes, cleanName, cleanNamedKind, cleanProvenance, cleanRef,
+  cleanRelation, cleanRelationType, cleanRequestId, cleanText, EMPTY_CARD, fail, intervalAfterContact, isId, isOwnerKey, isSeparateRef, LIMITS, nameKey, nextDue, OverlayError,
+  parseAskFilter, parseAskInput, parseAskPatch, parseLinkPatch, readProvenance, readRelationType, relationTypeOf, separateRef,
 } from './contract.js';
 import type {
-  Candidate, Card, CardPatch, DueEntity, Edge, Entity, EntityDetail, EntityKind, Link, LinkAttributeInput, LinkEnd, LinkPatch, Neighbourhood, Note, OverlayPrincipal,
-  Provenance, RelationType, SearchHit, SearchResult,
+  Ask, AskEvidence, AskExposure, AskFields, AskFilter, AskHorizon, AskInput, AskPatch, AskStatus, Candidate, Card, CardPatch, DueEntity, Edge, Entity, EntityDetail, EntityKind, Link,
+  LinkAttributeInput, LinkEnd, LinkPatch, NamedKind, Neighbourhood, Note, OverlayPrincipal, Provenance, RelationType, SearchHit, SearchResult,
 } from './contract.js';
 
 /**
@@ -36,6 +37,8 @@ export class OverlayStore {
         'CREATE CONSTRAINT overlay_ref_key IF NOT EXISTS FOR (r:OverlayRef) REQUIRE (r.ownerKey, r.ref) IS UNIQUE',
         'CREATE CONSTRAINT overlay_note_id IF NOT EXISTS FOR (n:OverlayNote) REQUIRE n.id IS UNIQUE',
         'CREATE CONSTRAINT overlay_link_key IF NOT EXISTS FOR ()-[l:OVERLAY_LINK]-() REQUIRE l.linkKey IS UNIQUE',
+        // One ask per owner, asker and text; entities that are not asks leave askKey null.
+        'CREATE CONSTRAINT overlay_ask_key IF NOT EXISTS FOR (e:OverlayEntity) REQUIRE (e.ownerKey, e.askKey) IS UNIQUE',
         'CREATE INDEX overlay_entity_owner IF NOT EXISTS FOR (e:OverlayEntity) ON (e.ownerKey, e.kind, e.nameKey)',
         'CREATE INDEX overlay_note_entity IF NOT EXISTS FOR (n:OverlayNote) ON (n.ownerKey, n.entityId)',
         'CREATE INDEX overlay_ref_ref IF NOT EXISTS FOR (r:OverlayRef) ON (r.ref)',
@@ -82,7 +85,7 @@ export class OverlayStore {
    * a person's words use `resolve`, which never merges same-named entities.
    */
   async ensure(principal: OverlayPrincipal | null, input: { kind?: unknown; name?: unknown; ref?: unknown; description?: unknown }): Promise<{ entity: Entity; created: boolean }> {
-    const ownerKey = this.owner(principal), kind = cleanKind(input?.kind), name = cleanName(input?.name), description = cleanDescription(input?.description);
+    const ownerKey = this.owner(principal), kind = cleanNamedKind(input?.kind), name = cleanName(input?.name), description = cleanDescription(input?.description);
     const ref = input.ref === undefined || input.ref === null ? null : cleanRef(input.ref);
     return retryOnce(() => this.write(tx => ensureIn(tx, ownerKey, { kind, name, ref, description })));
   }
@@ -98,7 +101,7 @@ export class OverlayStore {
    * `unattached`, as is any ref beyond the per-entity ref limit.
    */
   async ensureRefs(principal: OverlayPrincipal | null, input: { kind?: unknown; name?: unknown; refs?: unknown; description?: unknown }): Promise<{ entity: Entity; created: boolean; unattached: string[] }> {
-    const ownerKey = this.owner(principal), kind = cleanKind(input?.kind), name = cleanName(input?.name), description = cleanDescription(input?.description);
+    const ownerKey = this.owner(principal), kind = cleanNamedKind(input?.kind), name = cleanName(input?.name), description = cleanDescription(input?.description);
     if (!Array.isArray(input.refs) || !input.refs.length || input.refs.length > LIMITS.refsPerEntity) return fail(400, 'invalid_ref');
     const refs = [...new Set(input.refs.map(cleanRef))];
     return retryOnce(() => this.write(tx => ensureRefsIn(tx, ownerKey, { kind, name, refs, description })));
@@ -131,10 +134,12 @@ export class OverlayStore {
     const name = patch.name === undefined ? undefined : cleanName(patch.name);
     const addRef = patch.addRef === undefined ? undefined : cleanRef(patch.addRef);
     const description = patch.description === undefined ? undefined : cleanDescription(patch.description);
-    const kind = patch.kind === undefined ? undefined : cleanKind(patch.kind);
+    const kind = patch.kind === undefined ? undefined : cleanNamedKind(patch.kind);
     if (name === undefined && addRef === undefined && !patch.card && description === undefined && kind === undefined) return fail(400, 'nothing_to_change');
     return this.write(async tx => {
       const current = await entity(tx, ownerKey, id), now = new Date().toISOString();
+      // An ask's name follows its text and it has no refs: edit it with updateAsk.
+      if (current.kind === 'ask' && (name !== undefined || kind !== undefined || addRef !== undefined)) fail(409, 'ask_fields');
       const nextName = name ?? current.name, nextKind = kind ?? current.kind;
       if (nextKind !== current.kind && !current.refs.every(isSeparateRef)) fail(409, 'kind_fixed');
       if (nextName !== current.name || nextKind !== current.kind) {
@@ -228,7 +233,7 @@ export class OverlayStore {
    * An owner action: forget one entity entirely, with its notes, its links in
    * both directions and its refs. Missing and someone else's are both 404.
    */
-  async deleteEntity(principal: OverlayPrincipal | null, id: unknown): Promise<{ notesRemoved: number; linksRemoved: number; refsRemoved: number }> {
+  async deleteEntity(principal: OverlayPrincipal | null, id: unknown): Promise<{ notesRemoved: number; linksRemoved: number; refsRemoved: number; asksRemoved: number }> {
     const ownerKey = this.owner(principal);
     if (!isId(id)) return fail(404, 'not_found');
     return this.write(tx => deleteEntityIn(tx, ownerKey, id));
@@ -263,7 +268,7 @@ export class OverlayStore {
       if (q || (kind && !relationType)) {
         const found = await tx.run(`MATCH (e:OverlayEntity {ownerKey: $ownerKey})
           WHERE ($kind IS NULL OR e.kind = $kind)
-          WITH e, ($q = '' OR e.nameKey CONTAINS $q) AS byName,
+          WITH e, ($q = '' OR e.nameKey CONTAINS $q OR toLower(coalesce(e.askText, '')) CONTAINS $q) AS byName,
             ($q <> '' AND toLower(coalesce(e.description, '')) CONTAINS $q) AS byDescription,
             ($q <> '' AND EXISTS { MATCH (n:OverlayNote {ownerKey: $ownerKey, entityId: e.id}) WHERE toLower(n.text) CONTAINS $q }) AS byNote
           WHERE byName OR byDescription OR byNote
@@ -339,13 +344,54 @@ export class OverlayStore {
     });
   }
 
+  /**
+   * Save an ask (see "Asks" in contract.ts): the owner's own (`asker: 'owner'`)
+   * or someone else's (`asker: {id}` of the owner's person or company entity,
+   * linked to the ask as `asks`). The same asker and text is one ask: a
+   * repeated save returns it unchanged with `created: false`.
+   */
+  async saveAsk(principal: OverlayPrincipal | null, input: unknown, provenance?: unknown): Promise<{ ask: Ask; created: boolean }> {
+    const ownerKey = this.owner(principal), ask = parseAskInput(input), by = cleanProvenance(provenance);
+    return retryOnce(() => this.write(tx => saveAskIn(tx, ownerKey, ask, by)));
+  }
+
+  /** One ask with its asker. Anything that is not one of the owner's asks is 404. */
+  async getAsk(principal: OverlayPrincipal | null, id: unknown): Promise<Ask> {
+    const ownerKey = this.owner(principal);
+    if (!isId(id)) return fail(404, 'not_found');
+    return this.read(tx => askIn(tx, ownerKey, id));
+  }
+
+  /**
+   * Edit an ask: text, horizon, recheckAfter, status, exposure (with
+   * exposureChat), evidence, or `recheckedNow` (checked today: the next recheck
+   * moves a horizon ahead and a stale ask is open again). Every edit counts
+   * in `revision`; `updatedBy` records the editor, the original author stays.
+   */
+  async updateAsk(principal: OverlayPrincipal | null, id: unknown, patch: unknown, provenance?: unknown): Promise<Ask> {
+    const ownerKey = this.owner(principal), change = parseAskPatch(patch), by = cleanProvenance(provenance);
+    if (!isId(id)) return fail(404, 'not_found');
+    return this.write(tx => updateAskIn(tx, ownerKey, id, change, by));
+  }
+
+  /**
+   * The owner's asks, open and stale ones first by when they are due for a
+   * recheck. Filter by `status` (default open and stale; `all`), `asker`
+   * (`owner`, `others`, or an entity id), text, and `needsRecheck`.
+   */
+  async listAsks(principal: OverlayPrincipal | null, filter: { status?: unknown; asker?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown } = {}): Promise<{ asks: Ask[]; truncated: boolean }> {
+    const ownerKey = this.owner(principal), parsed = parseAskFilter(filter);
+    return this.read(tx => listAsksIn(tx, ownerKey, parsed));
+  }
+
   /** The owner's whole overlay as plain rows. */
   async exportOwner(principal: OverlayPrincipal | null): Promise<{ entities: unknown[]; notes: unknown[]; links: unknown[] }> {
     const ownerKey = this.owner(principal);
     return this.read(async tx => {
       const rows = async (query: string) => (await tx.run(query, { ownerKey })).records.map(record => record.get('row'));
       return {
-        entities: await rows(`MATCH (e:OverlayEntity {ownerKey: $ownerKey}) RETURN e { .id, .kind, .name, .description, .important, .cadenceDays, .cadenceMode, .intervalDays, .lastContactAt, .createdAt, .updatedAt, refs: [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] } AS row ORDER BY e.createdAt`),
+        entities: await rows(`MATCH (e:OverlayEntity {ownerKey: $ownerKey}) RETURN e { .id, .kind, .name, .description, .important, .cadenceDays, .cadenceMode, .intervalDays, .lastContactAt, .createdAt, .updatedAt,
+          ${ASK_PROPERTIES}, refs: [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] } AS row ORDER BY e.createdAt`),
         notes: await rows('MATCH (n:OverlayNote {ownerKey: $ownerKey}) RETURN n { .id, .entityId, .text, .createdAt, .updatedAt, .author, .source, .assertion } AS row ORDER BY n.createdAt'),
         links: (await rows(`MATCH (a:OverlayEntity {ownerKey: $ownerKey})-[l:OVERLAY_LINK]->(b) RETURN { id: l.id, fromId: a.id, relation: l.relation, relationType: l.relationType, toId: b.id,
           createdAt: l.createdAt, updatedAt: l.updatedAt, updatedBy: l.updatedBy, author: l.author, source: l.source, assertion: l.assertion, since: l.since, until: l.until, context: l.context } AS row ORDER BY l.createdAt`))
@@ -401,6 +447,14 @@ export async function deleteOwnerIn(tx: Pick<ManagedTransaction, 'run'>, ownerKe
 
 export async function purgeRefIn(tx: Pick<ManagedTransaction, 'run'>, rawRef: unknown): Promise<{ entitiesRemoved: number; refsRemoved: number }> {
   const ref = cleanRef(rawRef);
+  // The asks of an entity that goes go with it (and their notes).
+  await tx.run(`MATCH (r:OverlayRef {ref: $ref})-[:REF_OF]->(e:OverlayEntity)
+    WHERE NOT EXISTS { MATCH (other:OverlayRef)-[:REF_OF]->(e) WHERE other.ref <> $ref }
+    MATCH (a:OverlayEntity {ownerKey: e.ownerKey, kind: 'ask', askerId: e.id})
+    OPTIONAL MATCH (n:OverlayNote)-[:NOTE_ABOUT]->(a)
+    WITH a, collect(n) AS notes
+    FOREACH (note IN notes | DETACH DELETE note)
+    DETACH DELETE a`, { ref });
   const only = await tx.run(`MATCH (r:OverlayRef {ref: $ref})-[:REF_OF]->(e:OverlayEntity)
     WHERE NOT EXISTS { MATCH (other:OverlayRef)-[:REF_OF]->(e) WHERE other.ref <> $ref }
     WITH DISTINCT e
@@ -413,18 +467,28 @@ export async function purgeRefIn(tx: Pick<ManagedTransaction, 'run'>, rawRef: un
   return { entitiesRemoved: number(only.records[0]?.get('removed')), refsRemoved: number(refs.records[0]?.get('removed')) };
 }
 
-/** For callers that remove an entity together with their own records about it, in one transaction. */
-export async function deleteEntityIn(tx: Runner, ownerKey: string, id: string): Promise<{ notesRemoved: number; linksRemoved: number; refsRemoved: number }> {
+/**
+ * For callers that remove an entity together with their own records about it,
+ * in one transaction. The asks that entity made go with it (with their notes
+ * and links): an ask is about its asker.
+ */
+export async function deleteEntityIn(tx: Runner, ownerKey: string, id: string): Promise<{ notesRemoved: number; linksRemoved: number; refsRemoved: number; asksRemoved: number }> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
   if (!isId(id)) return fail(404, 'not_found');
   // Locks the entity so a concurrent note or link cannot land on it mid-delete.
   const found = await tx.run(`MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey}) SET e._lock = true REMOVE e._lock
     RETURN size([(e)-[l:OVERLAY_LINK]-(:OverlayEntity {ownerKey: $ownerKey}) | l]) AS links`, { id, ownerKey });
   if (!found.records.length) return fail(404, 'not_found');
+  const asks = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask', askerId: $id})
+    OPTIONAL MATCH (n:OverlayNote {ownerKey: $ownerKey})-[:NOTE_ABOUT]->(a)
+    WITH a, collect(n) AS notes
+    FOREACH (note IN notes | DETACH DELETE note)
+    DETACH DELETE a
+    RETURN count(*) AS removed`, { id, ownerKey });
   const notes = await tx.run('MATCH (n:OverlayNote {ownerKey: $ownerKey, entityId: $id}) DETACH DELETE n RETURN count(*) AS removed', { id, ownerKey });
   const refs = await tx.run('MATCH (r:OverlayRef {ownerKey: $ownerKey, entityId: $id}) DETACH DELETE r RETURN count(*) AS removed', { id, ownerKey });
   await tx.run('MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey}) DETACH DELETE e', { id, ownerKey });
-  return { notesRemoved: number(notes.records[0]?.get('removed')), linksRemoved: number(found.records[0]?.get('links')), refsRemoved: number(refs.records[0]?.get('removed')) };
+  return { notesRemoved: number(notes.records[0]?.get('removed')), linksRemoved: number(found.records[0]?.get('links')), refsRemoved: number(refs.records[0]?.get('removed')), asksRemoved: number(asks.records[0]?.get('removed')) };
 }
 
 /**
@@ -434,6 +498,8 @@ export async function deleteEntityIn(tx: Runner, ownerKey: string, id: string): 
  */
 export async function ensureIn(tx: Runner, ownerKey: string, input: { kind: EntityKind; name: string; ref: string | null; description?: string | null }): Promise<{ entity: Entity; created: boolean }> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
+  // Asks are saved only through saveAskIn (their name follows their text and they never merge by name).
+  if (input.kind === 'ask') return fail(400, 'invalid_kind');
   const { kind, name, ref } = input, description = input.description ?? null, now = new Date().toISOString();
   let existingId: string | undefined;
   if (ref) {
@@ -484,9 +550,9 @@ export async function ensureRefsIn(tx: Runner, ownerKey: string, input: { kind: 
   return { entity: await entity(tx, ownerKey, current.id), created, unattached };
 }
 
-export interface ResolveTarget { kind: EntityKind; name: string; requestId: string | null; description?: string | null }
+export interface ResolveTarget { kind: NamedKind; name: string; requestId: string | null; description?: string | null }
 export function cleanResolve(input: { kind?: unknown; name?: unknown; createNew?: unknown; clientRequestId?: unknown; description?: unknown }): ResolveTarget {
-  const kind = cleanKind(input?.kind), name = cleanName(input?.name), description = cleanDescription(input?.description);
+  const kind = cleanNamedKind(input?.kind), name = cleanName(input?.name), description = cleanDescription(input?.description);
   if (input.createNew === undefined || input.createNew === null || input.createNew === false) return { kind, name, requestId: null, description };
   // A deliberately separate entity needs a request id so a retry finds it instead of making a third.
   if (input.createNew !== true) return fail(400, 'invalid_create_new');
@@ -631,7 +697,9 @@ async function retryOnce<T>(attempt: () => Promise<T>): Promise<T> {
     return attempt();
   }
 }
-const ENTITY = 'e { .id, .kind, .name, .description, .important, .cadenceDays, .cadenceMode, .intervalDays, .lastContactAt, .cadenceSetAt, .createdAt, refs: [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] }';
+/** The fields only `ask` entities carry (author, source and assertion too: an ask records who saved it). */
+const ASK_PROPERTIES = '.askText, .askOwn, .askerId, .horizon, .recheckAfter, .askStatus, .exposure, .exposureChat, .evidenceQuote, .evidenceUrl, .evidenceLabel, .evidenceSeenAt, .evidenceNoteId, .closedAt, .checkedAt, .revision, .author, .source, .assertion, .updatedAt, .updatedBy';
+const ENTITY = `e { .id, .kind, .name, .description, .important, .cadenceDays, .cadenceMode, .intervalDays, .lastContactAt, .cadenceSetAt, .createdAt, ${ASK_PROPERTIES}, refs: [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] }`;
 const NOTE = 'n { .id, .text, .createdAt, .updatedAt, .author, .source, .assertion }';
 const edge = (name: string) => `${name} { .id, .relation, .relationType, .createdAt, .updatedAt, .updatedBy, .author, .source, .assertion, .since, .until, .context }`;
 const EDGE = edge('l');
@@ -675,7 +743,138 @@ function entityFrom(value: Record<string, unknown>): Entity {
     intervalDays: optional(value.intervalDays), lastContactAt: typeof value.lastContactAt === 'string' ? value.lastContactAt : null,
   };
   const anchor = typeof value.cadenceSetAt === 'string' ? value.cadenceSetAt : String(value.createdAt);
-  return { id: String(value.id), kind: value.kind as EntityKind, name: String(value.name), description: textOrNull(value.description), refs: (value.refs as string[]).slice().sort(), card: { ...card, nextDueAt: nextDue(card, anchor) } };
+  return {
+    id: String(value.id), kind: value.kind as EntityKind, name: String(value.name), description: textOrNull(value.description), refs: (value.refs as string[]).slice().sort(), card: { ...card, nextDueAt: nextDue(card, anchor) },
+    ...(value.kind === 'ask' ? { ask: askFieldsFrom(value) } : {}),
+  };
+}
+
+/** An ask entity's fields as read back; anything unrecognised reads as its default. */
+function askFieldsFrom(value: Record<string, unknown>, now = Date.now()): AskFields {
+  const status = ASK_STATUSES.includes(value.askStatus as AskStatus) ? value.askStatus as AskStatus : 'open';
+  const createdAt = String(value.createdAt), recheckAfter = textOrNull(value.recheckAfter) ?? createdAt;
+  const evidence: AskEvidence = { quote: textOrNull(value.evidenceQuote), url: textOrNull(value.evidenceUrl), label: textOrNull(value.evidenceLabel), seenAt: textOrNull(value.evidenceSeenAt), noteId: textOrNull(value.evidenceNoteId) };
+  return {
+    text: textOrNull(value.askText) ?? String(value.name), own: value.askOwn === true,
+    horizon: ASK_HORIZONS.includes(value.horizon as AskHorizon) ? value.horizon as AskHorizon : 'medium',
+    recheckAfter, needsRecheck: status === 'stale' || (status === 'open' && Date.parse(recheckAfter) <= now), status,
+    exposure: ASK_EXPOSURES.includes(value.exposure as AskExposure) ? value.exposure as AskExposure : 'only_me', exposureChat: textOrNull(value.exposureChat),
+    evidence: Object.values(evidence).some(item => item !== null) ? evidence : null,
+    createdAt, updatedAt: textOrNull(value.updatedAt) ?? createdAt, updatedBy: textOrNull(value.updatedBy), closedAt: textOrNull(value.closedAt), checkedAt: textOrNull(value.checkedAt),
+    revision: number(value.revision), ...readProvenance(value),
+  };
+}
+function askFrom(value: Record<string, unknown>, asker: Record<string, unknown> | null): Ask {
+  return { id: String(value.id), ...askFieldsFrom(value), asker: asker ? endFrom(asker) : null };
+}
+/** Evidence as stored properties; null clears them all. */
+const evidenceProperties = (evidence: AskEvidence | null) => ({
+  evidenceQuote: evidence?.quote ?? null, evidenceUrl: evidence?.url ?? null, evidenceLabel: evidence?.label ?? null, evidenceSeenAt: evidence?.seenAt ?? null, evidenceNoteId: evidence?.noteId ?? null,
+});
+async function assertOwnNote(tx: Runner, ownerKey: string, evidence: AskEvidence | null | undefined): Promise<void> {
+  if (!evidence?.noteId) return;
+  const found = await tx.run('MATCH (n:OverlayNote {id: $id, ownerKey: $ownerKey}) RETURN n.id AS id', { id: evidence.noteId, ownerKey });
+  if (!found.records.length) fail(400, 'invalid_evidence');
+}
+const ASK_ROW = `${ENTITY} AS entity, CASE WHEN a IS NULL THEN null ELSE ${end('a')} END AS asker`;
+
+/** One of the owner's asks with its asker, inside a transaction. */
+export async function askIn(tx: Runner, ownerKey: string, id: string): Promise<Ask> {
+  if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
+  const found = await tx.run(`MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey, kind: 'ask'})
+    OPTIONAL MATCH (a:OverlayEntity {ownerKey: $ownerKey, id: e.askerId}) RETURN ${ASK_ROW}`, { id, ownerKey });
+  const row = found.records[0];
+  return row ? askFrom(row.get('entity') as Record<string, unknown>, row.get('asker') as Record<string, unknown> | null) : fail(404, 'not_found');
+}
+
+/** `saveAsk` inside the caller's transaction (OpenChat's note reviews). `input` as `parseAskInput` returns it. */
+export async function saveAskIn(tx: Runner, ownerKey: string, input: AskInput, provenance: Provenance): Promise<{ ask: Ask; created: boolean }> {
+  if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
+  const askKey = askKeyOf(input.asker, input.text);
+  let askerId: string | null = null;
+  if ('id' in input.asker) {
+    // Locks the asker: the same ask saved twice at once is still one.
+    const asker = await tx.run('MATCH (a:OverlayEntity {id: $id, ownerKey: $ownerKey}) SET a._lock = true REMOVE a._lock RETURN a.kind AS kind', { id: input.asker.id, ownerKey });
+    const kind = asker.records[0]?.get('kind');
+    if (kind === undefined) return fail(404, 'not_found');
+    if (!ASKER_KINDS.includes(kind as EntityKind)) return fail(400, 'invalid_asker');
+    askerId = input.asker.id;
+  }
+  const existing = await tx.run('MATCH (e:OverlayEntity {ownerKey: $ownerKey, askKey: $askKey}) RETURN e.id AS id', { ownerKey, askKey });
+  if (existing.records.length) return { ask: await askIn(tx, ownerKey, String(existing.records[0]!.get('id'))), created: false };
+  await assertOwnNote(tx, ownerKey, input.evidence);
+  await limit(tx, "MATCH (e:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'}) RETURN count(e) AS total", ownerKey, LIMITS.asksPerOwner, 'ask_limit');
+  await limit(tx, 'MATCH (e:OverlayEntity {ownerKey: $ownerKey}) RETURN count(e) AS total', ownerKey, LIMITS.entitiesPerOwner, 'entity_limit');
+  const id = nanoid(), now = new Date().toISOString(), name = askName(input.text);
+  const closed = input.status === 'fulfilled' || input.status === 'withdrawn';
+  await tx.run(`CREATE (e:OverlayEntity {id: $id, ownerKey: $ownerKey, kind: 'ask', name: $name, nameKey: $nameKey, nameSlot: null, description: null,
+    audience: 'owner', important: false, cadenceMode: 'fixed', createdAt: $now, updatedAt: $now})
+    SET e += $fields`, {
+    id, ownerKey, name, nameKey: nameKey(name), now,
+    fields: {
+      askText: input.text, askKey, askOwn: askerId === null, askerId, horizon: input.horizon, recheckAfter: askRecheckAfter(input.horizon, now, input.recheckAfter),
+      askStatus: input.status, exposure: input.exposure, exposureChat: input.exposureChat, ...evidenceProperties(input.evidence),
+      closedAt: closed ? now : null, revision: neo4j.int(0), author: provenance.author, source: provenance.source, assertion: provenance.assertion,
+    },
+  });
+  if (askerId !== null) await addLinkIn(tx, ownerKey, askerId, 'asks', id, provenance, { relationType: 'asks' });
+  return { ask: await askIn(tx, ownerKey, id), created: true };
+}
+
+/** `updateAsk` inside the caller's transaction. `patch` as `parseAskPatch` returns it. */
+export async function updateAskIn(tx: Runner, ownerKey: string, id: string, patch: AskPatch, provenance: Provenance): Promise<Ask> {
+  if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
+  if (!isId(id)) return fail(404, 'not_found');
+  const locked = await tx.run("MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey, kind: 'ask'}) SET e._lock = true REMOVE e._lock RETURN e.askerId AS askerId", { id, ownerKey });
+  if (!locked.records.length) return fail(404, 'not_found');
+  const current = await askIn(tx, ownerKey, id), now = new Date().toISOString();
+  const values: Record<string, unknown> = {};
+  if (patch.text !== undefined && patch.text !== current.text) {
+    const storedAsker = locked.records[0]!.get('askerId') as string | null;
+    const askKey = askKeyOf(storedAsker ? { id: storedAsker } : { own: true }, patch.text);
+    const clash = await tx.run('MATCH (e:OverlayEntity {ownerKey: $ownerKey, askKey: $askKey}) WHERE e.id <> $id RETURN e.id AS id', { ownerKey, askKey, id });
+    if (clash.records.length) fail(409, 'duplicate_ask', { askId: String(clash.records[0]!.get('id')) });
+    const name = askName(patch.text);
+    Object.assign(values, { askText: patch.text, askKey, name, nameKey: nameKey(name) });
+  }
+  const horizon = patch.horizon ?? current.horizon;
+  if (patch.horizon !== undefined) values.horizon = patch.horizon;
+  let status = patch.status ?? current.status;
+  if (patch.recheckedNow) {
+    values.checkedAt = now;
+    if (current.status === 'stale' && patch.status === undefined) status = 'open';
+  }
+  if (patch.recheckAfter !== undefined || patch.recheckedNow || patch.horizon !== undefined) values.recheckAfter = askRecheckAfter(horizon, now, patch.recheckAfter ?? null);
+  if (status !== current.status) {
+    values.askStatus = status;
+    values.closedAt = status === 'fulfilled' || status === 'withdrawn' ? (current.closedAt ?? now) : null;
+  }
+  if (patch.exposure !== undefined) Object.assign(values, { exposure: patch.exposure, exposureChat: patch.exposureChat ?? null });
+  if (patch.evidence !== undefined) {
+    await assertOwnNote(tx, ownerKey, patch.evidence);
+    Object.assign(values, evidenceProperties(patch.evidence));
+  }
+  Object.assign(values, { updatedAt: now, updatedBy: provenance.author, revision: neo4j.int(current.revision + 1) });
+  await tx.run('MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey}) SET e += $values', { id, ownerKey, values });
+  return askIn(tx, ownerKey, id);
+}
+
+/** `listAsks` inside a transaction. `filter` as `parseAskFilter` returns it. */
+export async function listAsksIn(tx: Runner, ownerKey: string, filter: AskFilter, now = new Date()): Promise<{ asks: Ask[]; truncated: boolean }> {
+  if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
+  const found = await tx.run(`MATCH (e:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})
+    WITH e, coalesce(e.askStatus, 'open') AS status
+    WHERE ($statuses IS NULL OR status IN $statuses) AND ($own IS NULL OR coalesce(e.askOwn, false) = $own) AND ($askerId IS NULL OR e.askerId = $askerId)
+      AND ($q = '' OR toLower(coalesce(e.askText, e.name)) CONTAINS $q)
+      AND (NOT $needsRecheck OR status = 'stale' OR (status = 'open' AND coalesce(e.recheckAfter, e.createdAt) <= $now))
+    OPTIONAL MATCH (a:OverlayEntity {ownerKey: $ownerKey, id: e.askerId})
+    RETURN ${ASK_ROW}
+    ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'stale' THEN 1 ELSE 2 END, CASE WHEN status IN ['open', 'stale'] THEN coalesce(e.recheckAfter, e.createdAt) ELSE '' END,
+      coalesce(e.updatedAt, e.createdAt) DESC, e.id
+    LIMIT $limit`,
+  { ownerKey, statuses: filter.status, own: filter.own, askerId: filter.askerId, q: filter.q, needsRecheck: filter.needsRecheck, now: now.toISOString(), limit: neo4j.int(filter.limit + 1) });
+  const asks = found.records.slice(0, filter.limit).map(record => askFrom(record.get('entity') as Record<string, unknown>, record.get('asker') as Record<string, unknown> | null));
+  return { asks, truncated: found.records.length > filter.limit };
 }
 
 async function entity(tx: Runner, ownerKey: string, id: string): Promise<Entity> {
