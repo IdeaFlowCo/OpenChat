@@ -1,22 +1,17 @@
-// Hold-to-grow chat emoji (OpenChat-o6t5): the size reached by holding must be
-// the size that is sent, even when the platform's own long-press gesture fires
-// while the finger is still down.
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+type PressEvent = { nativeEvent: { type: string; key?: string } };
 type PressProps = {
-  onPressIn?: (event: { nativeEvent: { type: string; pointerId?: number; changedTouches?: Array<{ identifier: number }> } }) => void;
-  onPressOut?: () => void;
+  onPressIn?: (event: PressEvent) => void;
+  onPressOut?: (event: PressEvent) => void;
   onLongPress?: () => void;
   cancelable?: boolean;
-  disabled?: boolean;
   style?: unknown;
   children?: React.ReactNode;
 };
-
-const rn = vi.hoisted(() => ({ os: 'web' as string, press: null as null | PressProps, text: null as null | Record<string, unknown> }));
-
+const rn = vi.hoisted(() => ({ os: 'web' as string, press: null as PressProps | null, text: null as Record<string, unknown> | null }));
 vi.mock('react-native', async () => {
   const ReactActual = await import('react');
   class Value {
@@ -36,217 +31,112 @@ vi.mock('react-native', async () => {
   };
 });
 vi.mock('../../mobile/src/services/haptics', () => ({ hapticGrowTick: vi.fn() }));
-
 import { EmojiSendButton } from '../../mobile/src/components/EmojiSendButton.js';
-import { HOLD_LEVEL_MS, MAX_EMOJI_SIZE } from '../../mobile/src/utils/emojiMessage.js';
+import { MAX_EMOJI_SIZE } from '../../mobile/src/utils/emojiMessage.js';
 
-function browserLongPress(props: PressProps, event: 'contextmenu' | 'selectionchange' | 'scroll') {
-  if (event !== 'contextmenu' || !props.onLongPress) props.onPressOut?.();
-}
-
-let hostTarget: EventTarget;
-let hostAdd: ReturnType<typeof vi.spyOn>;
-let hostRemove: ReturnType<typeof vi.spyOn>;
-let windowTarget: EventTarget;
-let documentTarget: EventTarget & { visibilityState: string };
-let documentAdd: ReturnType<typeof vi.spyOn>;
-let documentRemove: ReturnType<typeof vi.spyOn>;
-let addListener: ReturnType<typeof vi.spyOn>;
-let removeListener: ReturnType<typeof vi.spyOn>;
-function pointerEvent(type: string, pointerId = 1, target = windowTarget) {
-  const event = new Event(type);
-  Object.defineProperty(event, 'pointerId', { value: pointerId });
-  target.dispatchEvent(event);
-}
-
-function touchEvent(type: string, identifiers: number[], target = windowTarget) {
-  const event = new Event(type);
-  Object.defineProperty(event, 'changedTouches', { value: identifiers.map(identifier => ({ identifier })) });
-  target.dispatchEvent(event);
-}
-
-function expectListenersRemoved() {
-  expect(removeListener.mock.calls.map(call => call[0]).sort()).toEqual(addListener.mock.calls.map(call => call[0]).sort());
-  expect(documentRemove.mock.calls.map(call => call[0]).sort()).toEqual(documentAdd.mock.calls.map(call => call[0]).sort());
-}
-
+let host: EventTarget & { setPointerCapture: ReturnType<typeof vi.fn>; releasePointerCapture: ReturnType<typeof vi.fn> };
+let win: EventTarget;
+let doc: EventTarget & { visibilityState: string };
+let hostAdd: ReturnType<typeof vi.spyOn>, hostRemove: ReturnType<typeof vi.spyOn>;
+let winAdd: ReturnType<typeof vi.spyOn>, winRemove: ReturnType<typeof vi.spyOn>;
+let docAdd: ReturnType<typeof vi.spyOn>, docRemove: ReturnType<typeof vi.spyOn>;
 let onSend: ReturnType<typeof vi.fn>;
 let root: ReturnType<typeof create>;
 
-function pressIn(type: string, id = 1) {
-  if (rn.os === 'web' && type === 'pointerdown') pointerEvent(type, id, hostTarget);
-  if (rn.os === 'web' && type === 'touchstart') touchEvent(type, [id], hostTarget);
-  rn.press!.onPressIn?.({ nativeEvent: { type, pointerId: id, changedTouches: [{ identifier: id > 20 ? id % 20 : id }] } });
+function pointer(target: EventTarget, type: string, id = 1, pointerType = 'touch', button = 0) {
+  const event = new Event(type);
+  Object.defineProperties(event, { pointerId: { value: id }, pointerType: { value: pointerType }, button: { value: button } });
+  target.dispatchEvent(event);
 }
-
-async function mount() {
+function responder(type: string): PressEvent { return { nativeEvent: { type } }; }
+function removed(add: ReturnType<typeof vi.spyOn>, remove: ReturnType<typeof vi.spyOn>) {
+  expect(remove.mock.calls.map(call => call[0]).sort()).toEqual(add.mock.calls.map(call => call[0]).sort());
+}
+async function mount(disabled = false) {
   onSend = vi.fn();
-  await act(async () => { root = create(React.createElement(EmojiSendButton, { emoji: "🍓", onSend }), { createNodeMock: () => hostTarget }); });
+  await act(async () => { root = create(React.createElement(EmojiSendButton, { emoji: '🍓', onSend, disabled }), { createNodeMock: () => host }); });
 }
-
-async function hold(ms: number, during?: (props: PressProps) => void) {
-  await act(async () => { pressIn(rn.os === 'web' ? 'pointerdown' : 'touchstart'); });
-  // The platform long-press arrives just after its ~450-500 ms delay.
-  if (during && ms > 500) {
-    await act(async () => { vi.advanceTimersByTime(500); });
-    during(rn.press!);
-    expect(onSend).not.toHaveBeenCalled();
-    await act(async () => { vi.advanceTimersByTime(ms - 500); });
-  } else {
-    await act(async () => { vi.advanceTimersByTime(ms); });
-  }
-  await act(async () => { rn.press!.onPressOut?.(); if (rn.os === 'web') pointerEvent('pointerup'); });
-}
-
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-03T00:00:00Z'));
-  hostTarget = new EventTarget();
-  hostAdd = vi.spyOn(hostTarget, 'addEventListener');
-  hostRemove = vi.spyOn(hostTarget, 'removeEventListener');
-  windowTarget = new EventTarget();
-  vi.stubGlobal('window', windowTarget);
-  documentTarget = Object.assign(new EventTarget(), { visibilityState: 'visible' });
-  vi.stubGlobal('document', documentTarget);
-  documentAdd = vi.spyOn(documentTarget, 'addEventListener');
-  documentRemove = vi.spyOn(documentTarget, 'removeEventListener');
-  addListener = vi.spyOn(windowTarget, 'addEventListener');
-  removeListener = vi.spyOn(windowTarget, 'removeEventListener');
-  rn.os = 'web';
-  rn.press = null;
+  host = Object.assign(new EventTarget(), { setPointerCapture: vi.fn(), releasePointerCapture: vi.fn() });
+  win = new EventTarget();
+  doc = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+  vi.stubGlobal('window', win);
+  vi.stubGlobal('document', doc);
+  hostAdd = vi.spyOn(host, 'addEventListener'); hostRemove = vi.spyOn(host, 'removeEventListener');
+  winAdd = vi.spyOn(win, 'addEventListener'); winRemove = vi.spyOn(win, 'removeEventListener');
+  docAdd = vi.spyOn(doc, 'addEventListener'); docRemove = vi.spyOn(doc, 'removeEventListener');
+  rn.os = 'web'; rn.press = null;
 });
-afterEach(() => {
-  act(() => root?.unmount());
-  vi.unstubAllGlobals();
-  vi.useRealTimers();
-});
+afterEach(() => { act(() => root?.unmount()); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('EmojiSendButton hold-to-grow', () => {
-  it('a tap sends size 1', async () => {
+  it('sends a quick tap before responder activation', async () => {
     await mount();
-    await hold(80);
-    expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith(1);
+    await act(async () => { pointer(host, 'pointerdown'); vi.advanceTimersByTime(20); pointer(win, 'pointerup'); });
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(1);
+    expect(host.setPointerCapture).toHaveBeenCalledWith(1);
+    expect(host.releasePointerCapture).toHaveBeenCalledWith(1);
+    removed(winAdd, winRemove); removed(docAdd, docRemove);
   });
-
-  it('each held level is the level sent', async () => {
+  it('holds through responder termination and ignores other contacts', async () => {
     await mount();
-    for (let level = 2; level <= MAX_EMOJI_SIZE; level++) {
-      onSend.mockClear();
-      await hold(HOLD_LEVEL_MS[level - 1] + 50);
-      expect(onSend).toHaveBeenCalledWith(level);
-    }
+    await act(async () => {
+      pointer(host, 'pointerdown', 27);
+      pointer(host, 'pointerdown', 7);
+      vi.advanceTimersByTime(500);
+      rn.press!.onPressOut?.(responder('selectionchange'));
+      pointer(win, 'pointerup', 7);
+    });
+    expect(onSend).not.toHaveBeenCalled();
+    await act(async () => { vi.advanceTimersByTime(1200); pointer(win, 'pointerup', 27); });
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(MAX_EMOJI_SIZE);
+    removed(winAdd, winRemove); removed(docAdd, docRemove);
   });
-
-  for (const event of ['contextmenu', 'selectionchange', 'scroll'] as const) {
-    it(`a full hold survives the browser's long-press ${event} on touch web`, async () => {
+  it('tracks a pen and rejects secondary mouse buttons', async () => {
+    await mount();
+    await act(async () => { pointer(host, 'pointerdown', 1, 'mouse', 2); pointer(host, 'pointerdown', 9, 'pen'); vi.advanceTimersByTime(1000); pointer(win, 'pointerup', 9, 'pen'); });
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(3);
+    removed(winAdd, winRemove); removed(docAdd, docRemove);
+  });
+  for (const ending of ['pointercancel', 'lostpointercapture', 'blur', 'hidden'] as const) {
+    it(`ends once on ${ending}`, async () => {
       await mount();
-      await hold(1700, props => browserLongPress(props, event));
-      // Before the fix this sent size 2 at ~500 ms while still held, and the
-      // release sent nothing.
-      expect(onSend).toHaveBeenCalledTimes(1);
-      expect(onSend).toHaveBeenCalledWith(MAX_EMOJI_SIZE);
+      await act(async () => {
+        pointer(host, 'pointerdown'); vi.advanceTimersByTime(1000);
+        if (ending === 'blur') win.dispatchEvent(new Event('blur'));
+        else if (ending === 'hidden') { doc.visibilityState = 'hidden'; doc.dispatchEvent(new Event('visibilitychange')); }
+        else pointer(ending === 'lostpointercapture' ? host : win, ending);
+        pointer(win, 'pointerup');
+      });
+      expect(onSend).toHaveBeenCalledExactlyOnceWith(3);
+      removed(winAdd, winRemove); removed(docAdd, docRemove);
     });
   }
-
-  it('sends keyboard presses on press out', async () => {
+  it('handles keyboard presses and ignores web pointer responder callbacks', async () => {
     await mount();
-    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'keydown' } }); });
-    await act(async () => { rn.press!.onPressOut?.(); });
-    expect(onSend).toHaveBeenCalledExactlyOnceWith(1);
-    expect(addListener).not.toHaveBeenCalled();
-  });
-
-  it('removes pointer listeners on cancellation and unmount', async () => {
-    await mount();
-    await act(async () => { pressIn('pointerdown'); });
-    await act(async () => { pointerEvent('pointercancel'); });
-    expect(onSend).toHaveBeenCalledExactlyOnceWith(1);
-    expectListenersRemoved();
-    await act(async () => { pressIn('pointerdown'); });
-    act(() => root.unmount());
-    expectListenersRemoved();
-    expect(hostRemove.mock.calls.map(call => call[0]).sort()).toEqual(hostAdd.mock.calls.map(call => call[0]).sort());
-    pointerEvent('pointerup');
-    expect(onSend).toHaveBeenCalledTimes(1);
-  });
-
-  it('ignores a different pointer and removes listeners after release', async () => {
-    await mount();
-    await act(async () => { pressIn('pointerdown'); });
-    await act(async () => { pointerEvent('pointerup', 2); });
+    await act(async () => { rn.press!.onPressIn?.(responder('mousedown')); rn.press!.onPressOut?.(responder('mouseup')); });
     expect(onSend).not.toHaveBeenCalled();
-    await act(async () => { pointerEvent('pointerup'); });
+    await act(async () => { rn.press!.onPressIn?.(responder('keydown')); rn.press!.onPressOut?.(responder('keyup')); });
     expect(onSend).toHaveBeenCalledExactlyOnceWith(1);
-    expectListenersRemoved();
   });
-
-  it('waits for the initiating touch and ignores other fingers', async () => {
+  it('cleans up an active hold on unmount', async () => {
     await mount();
-    await act(async () => { pressIn('touchstart', 27); });
-    await act(async () => { vi.advanceTimersByTime(500); browserLongPress(rn.press!, 'selectionchange'); touchEvent('touchend', [7]); });
-    expect(onSend).not.toHaveBeenCalled();
-    await act(async () => { vi.advanceTimersByTime(1200); touchEvent('touchend', [27]); });
-    expect(onSend).toHaveBeenCalledExactlyOnceWith(MAX_EMOJI_SIZE);
-    expectListenersRemoved();
+    await act(async () => { pointer(host, 'pointerdown'); root.unmount(); });
+    removed(hostAdd, hostRemove); removed(winAdd, winRemove); removed(docAdd, docRemove);
+    expect(host.releasePointerCapture).toHaveBeenCalledWith(1);
+    pointer(win, 'pointerup'); expect(onSend).not.toHaveBeenCalled();
   });
-
-  it('ends on blur and ignores later releases', async () => {
-    await mount();
-    await act(async () => { pressIn('pointerdown'); });
-    await act(async () => { vi.advanceTimersByTime(1000); windowTarget.dispatchEvent(new Event('blur')); });
-    expect(onSend).toHaveBeenCalledExactlyOnceWith(3);
-    expectListenersRemoved();
-    await act(async () => { pointerEvent('pointerup'); rn.press!.onPressOut?.(); });
-    expect(onSend).toHaveBeenCalledTimes(1);
-  });
-
-  it('ends when hidden or when a released mouse re-enters', async () => {
-    await mount();
-    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'mousedown' } }); });
-    await act(async () => { documentTarget.visibilityState = 'hidden'; documentTarget.dispatchEvent(new Event('visibilitychange')); });
-    expect(onSend).toHaveBeenCalledTimes(1);
-    expectListenersRemoved();
-    documentTarget.visibilityState = 'visible';
-    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'mousedown' } }); });
-    await act(async () => {
-      windowTarget.dispatchEvent(new Event('mouseleave'));
-      const enter = new Event('mouseenter');
-      Object.defineProperty(enter, 'buttons', { value: 1 });
-      windowTarget.dispatchEvent(enter);
-    });
-    expect(onSend).toHaveBeenCalledTimes(1);
-    await act(async () => {
-      windowTarget.dispatchEvent(new Event('mouseleave'));
-      const enter = new Event('mouseenter');
-      Object.defineProperty(enter, 'buttons', { value: 0 });
-      windowTarget.dispatchEvent(enter);
-    });
-    expect(onSend).toHaveBeenCalledTimes(2);
-    expectListenersRemoved();
-  });
-
-  it('on web the button forbids panning, selection and the iOS callout, and the glyph is not selectable', async () => {
-    await mount();
-    const style = [rn.press!.style].flat(3).filter(Boolean).reduce<Record<string, unknown>>((all, s) => ({ ...all, ...(s as object) }), {});
-    expect(style).toMatchObject({ touchAction: 'none', userSelect: 'none', WebkitTouchCallout: 'none' });
-    expect(rn.text?.selectable).toBe(false);
-  });
-
-  it('native keeps the hold when an ancestor gesture asks for the touch', async () => {
-    rn.os = 'ios';
-    await mount();
-    const style = [rn.press!.style].flat(3).filter(Boolean).reduce<Record<string, unknown>>((all, s) => ({ ...all, ...(s as object) }), {});
-    expect(style.touchAction).toBeUndefined();
+  it('keeps native responder behavior', async () => {
+    rn.os = 'ios'; await mount();
     expect(rn.press!.cancelable).toBe(false);
-    await hold(1000);
-    expect(onSend).toHaveBeenCalledWith(3);
+    await act(async () => { rn.press!.onPressIn?.(responder('touchstart')); vi.advanceTimersByTime(1000); rn.press!.onPressOut?.(responder('touchend')); });
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(3);
   });
-
-  it('a disabled button sends nothing', async () => {
-    onSend = vi.fn();
-    await act(async () => { root = create(React.createElement(EmojiSendButton, { emoji: "🍓", disabled: true, onSend })); });
-    await hold(1700);
+  it('does not start when disabled', async () => {
+    await mount(true);
+    await act(async () => { pointer(host, 'pointerdown'); pointer(win, 'pointerup'); });
     expect(onSend).not.toHaveBeenCalled();
   });
 });

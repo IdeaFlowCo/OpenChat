@@ -33,25 +33,44 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
   const heldSince = useRef<number | null>(null);
   const level = useRef(1);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
-  const rawTouch = useRef<number | undefined>(undefined);
-  const rawPointer = useRef<number | undefined>(undefined);
-  const removeHostListeners = useRef<(() => void) | null>(null);
+  const removePointerListeners = useRef<(() => void) | null>(null);
+  const activeInput = useRef<'pointer' | 'keyboard' | 'native' | null>(null);
+  const beginRef = useRef<() => void>(() => {});
+  const finishRef = useRef<(send: boolean) => void>(() => {});
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
+
   const buttonRef = useCallback((node: View | null) => {
-    removeHostListeners.current?.();
     if (Platform.OS !== 'web' || !node) return;
     const host = node as unknown as HTMLElement;
-    const touchStart = (event: TouchEvent) => {
-      if (heldSince.current === null) rawTouch.current = event.changedTouches[0]?.identifier;
-    };
     const pointerDown = (event: PointerEvent) => {
-      if (heldSince.current === null) rawPointer.current = event.pointerId;
+      if (disabledRef.current || heldSince.current !== null || (event.pointerType === 'mouse' && event.button !== 0)) return;
+      const pointerId = event.pointerId;
+      activeInput.current = 'pointer';
+      beginRef.current();
+      const release = (e: PointerEvent) => { if (e.pointerId === pointerId) finishRef.current(true); };
+      const blur = () => finishRef.current(true);
+      const visibility = () => { if (document.visibilityState === 'hidden') finishRef.current(true); };
+      window.addEventListener('pointerup', release);
+      window.addEventListener('pointercancel', release);
+      host.addEventListener('lostpointercapture', release);
+      window.addEventListener('blur', blur);
+      document.addEventListener('visibilitychange', visibility);
+      removePointerListeners.current = () => {
+        removePointerListeners.current = null;
+        window.removeEventListener('pointerup', release);
+        window.removeEventListener('pointercancel', release);
+        host.removeEventListener('lostpointercapture', release);
+        window.removeEventListener('blur', blur);
+        document.removeEventListener('visibilitychange', visibility);
+        try { host.releasePointerCapture(pointerId); } catch {}
+      };
+      try { host.setPointerCapture(pointerId); } catch {}
     };
-    host.addEventListener('touchstart', touchStart, true);
-    host.addEventListener('pointerdown', pointerDown, true);
-    removeHostListeners.current = () => {
-      host.removeEventListener('touchstart', touchStart, true);
-      host.removeEventListener('pointerdown', pointerDown, true);
-      removeHostListeners.current = null;
+    host.addEventListener('pointerdown', pointerDown);
+    return () => {
+      host.removeEventListener('pointerdown', pointerDown);
+      removePointerListeners.current?.();
     };
   }, []);
 
@@ -59,71 +78,13 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
     if (ticker.current) clearInterval(ticker.current);
     ticker.current = null;
   };
-  const removePointerListeners = useRef<(() => void) | null>(null);
   useEffect(() => () => {
     stopTicker();
     removePointerListeners.current?.();
   }, []);
 
-  const begin = (event: GestureResponderEvent) => {
+  const begin = () => {
     if (disabled || heldSince.current !== null) return;
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const nativeEvent = event.nativeEvent as unknown as {
-        type?: string;
-        pointerId?: number;
-        changedTouches?: ArrayLike<{ identifier: number }>;
-      };
-      const touchId = nativeEvent.type === 'touchstart' ? rawTouch.current : undefined;
-      const isTouch = nativeEvent.type === 'touchstart' && touchId !== undefined;
-      const isPointer = nativeEvent.type === 'pointerdown' && rawPointer.current !== undefined;
-      const pointerId = rawPointer.current;
-      const isMouse = nativeEvent.type === 'mousedown';
-      if (isTouch || isPointer || isMouse) {
-        const releaseTouch = (e: TouchEvent) => {
-          if (Array.from(e.changedTouches).some(touch => touch.identifier === touchId)) finish(true);
-        };
-        const releasePointer = (e: PointerEvent) => {
-          if (isPointer ? e.pointerId === pointerId : e.pointerType === 'mouse') finish(true);
-        };
-        const blur = () => finish(true);
-        const visibility = () => { if (document.visibilityState === 'hidden') finish(true); };
-        let leftWindow = false;
-        const leave = () => { leftWindow = true; };
-        const enter = (e: PointerEvent | MouseEvent) => {
-          if (leftWindow && e.buttons === 0) finish(true);
-          leftWindow = false;
-        };
-        if (isTouch) {
-          window.addEventListener('touchend', releaseTouch);
-          window.addEventListener('touchcancel', releaseTouch);
-        } else {
-          window.addEventListener('pointerup', releasePointer);
-          window.addEventListener('pointercancel', releasePointer);
-          window.addEventListener('pointerleave', leave);
-          window.addEventListener('mouseleave', leave);
-          window.addEventListener('pointerenter', enter);
-          window.addEventListener('mouseenter', enter);
-        }
-        window.addEventListener('blur', blur);
-        document.addEventListener('visibilitychange', visibility);
-        removePointerListeners.current = () => {
-          if (isTouch) {
-            window.removeEventListener('touchend', releaseTouch);
-            window.removeEventListener('touchcancel', releaseTouch);
-          } else {
-            window.removeEventListener('pointerup', releasePointer);
-            window.removeEventListener('pointercancel', releasePointer);
-            window.removeEventListener('pointerleave', leave);
-            window.removeEventListener('mouseleave', leave);
-            window.removeEventListener('pointerenter', enter);
-            window.removeEventListener('mouseenter', enter);
-          }
-          window.removeEventListener('blur', blur);
-          document.removeEventListener('visibilitychange', visibility);
-          removePointerListeners.current = null;
-        };
-      }
-    }
     heldSince.current = Date.now();
     level.current = 1;
     scale.stopAnimation();
@@ -150,11 +111,18 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
     if (heldSince.current === null) return;
     const heldMs = Date.now() - heldSince.current;
     heldSince.current = null;
-    rawTouch.current = undefined;
-    rawPointer.current = undefined;
+    activeInput.current = null;
     scale.stopAnimation();
     Animated.spring(scale, { toValue: 1, friction: 5, tension: 120, useNativeDriver: Platform.OS !== 'web' }).start();
     if (send) onSend(holdLevelForDuration(heldMs));
+  };
+
+  beginRef.current = begin;
+  finishRef.current = finish;
+
+  const keyboardEvent = (event: GestureResponderEvent) => {
+    const native = event.nativeEvent as unknown as { type?: string; key?: string };
+    return native.type === 'keydown' || native.type === 'keyup' || native.key != null;
   };
 
   // Grow upward from the button's footprint: a plain scale would spill under
@@ -165,8 +133,16 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
     <View style={styles.slot}>
       <Pressable
         ref={buttonRef}
-        onPressIn={begin}
-        onPressOut={() => { if (!removePointerListeners.current) finish(true); }}
+        onPressIn={(event) => {
+          if (Platform.OS === 'web' && !keyboardEvent(event)) return;
+          if (heldSince.current !== null || disabled) return;
+          activeInput.current = Platform.OS === 'web' ? 'keyboard' : 'native';
+          begin();
+        }}
+        onPressOut={(event) => {
+          if (Platform.OS === 'web' && (!keyboardEvent(event) || activeInput.current !== 'keyboard')) return;
+          finish(true);
+        }}
         onLongPress={claimLongPress}
         cancelable={false}
         disabled={disabled}
