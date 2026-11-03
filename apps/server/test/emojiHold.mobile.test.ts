@@ -2,7 +2,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-type PressEvent = { nativeEvent: { type: string; key?: string } };
+type PressEvent = { nativeEvent: { type: string; key?: string } } | { type: string; key?: string };
 type PressProps = {
   onPressIn?: (event: PressEvent) => void;
   onPressOut?: (event: PressEvent) => void;
@@ -49,6 +49,13 @@ function pointer(target: EventTarget, type: string, id = 1, pointerType = 'touch
   target.dispatchEvent(event);
 }
 function responder(type: string): PressEvent { return { nativeEvent: { type } }; }
+
+// RN-web ResponderSystem.js and PressResponder.js terminate on selectionchange
+// or touchcancel despite cancelable on Pressable, but refuse contextmenu when
+// onLongPress exists. Before the fix, termination sent size 2 at 500 ms.
+function terminateResponder(type: 'contextmenu' | 'selectionchange' | 'touchcancel') {
+  if (type !== 'contextmenu' || !rn.press!.onLongPress) rn.press!.onPressOut?.(responder(type));
+}
 function removed(add: ReturnType<typeof vi.spyOn>, remove: ReturnType<typeof vi.spyOn>) {
   expect(remove.mock.calls.map(call => call[0]).sort()).toEqual(add.mock.calls.map(call => call[0]).sort());
 }
@@ -86,7 +93,8 @@ describe('EmojiSendButton hold-to-grow', () => {
       pointer(host, 'pointerdown', 27);
       pointer(host, 'pointerdown', 7);
       vi.advanceTimersByTime(500);
-      rn.press!.onPressOut?.(responder('selectionchange'));
+      terminateResponder('contextmenu');
+      terminateResponder('selectionchange');
       pointer(win, 'pointerup', 7);
     });
     expect(onSend).not.toHaveBeenCalled();
@@ -118,8 +126,11 @@ describe('EmojiSendButton hold-to-grow', () => {
     await mount();
     await act(async () => { rn.press!.onPressIn?.(responder('mousedown')); rn.press!.onPressOut?.(responder('mouseup')); });
     expect(onSend).not.toHaveBeenCalled();
-    await act(async () => { rn.press!.onPressIn?.(responder('keydown')); rn.press!.onPressOut?.(responder('keyup')); });
+    await act(async () => { rn.press!.onPressIn?.(responder('keydown')); rn.press!.onPressOut?.({ type: 'keyup', key: 'Enter' }); });
     expect(onSend).toHaveBeenCalledExactlyOnceWith(1);
+    await act(async () => { rn.press!.onPressIn?.({ type: 'keydown', key: ' ' }); rn.press!.onPressOut?.(responder('keyup')); });
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend).toHaveBeenLastCalledWith(1);
   });
   it('cleans up an active hold on unmount', async () => {
     await mount();

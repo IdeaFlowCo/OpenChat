@@ -121,7 +121,8 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
   finishRef.current = finish;
 
   const keyboardEvent = (event: GestureResponderEvent) => {
-    const native = event.nativeEvent as unknown as { type?: string; key?: string };
+    const wrapped = event as unknown as { nativeEvent?: { type?: string; key?: string }; type?: string; key?: string };
+    const native = wrapped.nativeEvent ?? wrapped;
     return native.type === 'keydown' || native.type === 'keyup' || native.key != null;
   };
 
