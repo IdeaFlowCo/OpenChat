@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { securityEvent } from '../services/securityEvent.js';
 import jwt from 'jsonwebtoken';
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
@@ -29,7 +30,7 @@ router.post('/unlinked/session', async (req, res) => {
   if (!secret || secret.length < 32 || !process.env.JWT_SECRET) { res.status(503).json({ error: 'messaging_unavailable' }); return; }
   if (req.headers.origin) { res.status(403).json({ error: 'forbidden' }); return; }
   const digest = (value: string) => createHash('sha256').update(value).digest();
-  if (!timingSafeEqual(digest(req.headers.authorization ?? ''), digest(`Bearer ${secret}`))) { res.status(401).json({ error: 'unauthorized' }); return; }
+  if (!timingSafeEqual(digest(req.headers.authorization ?? ''), digest(`Bearer ${secret}`))) { securityEvent('partner_auth', 'failure', { req, partner: 'unlinkedMessaging', reason: 'invalid_partner_secret' }); res.status(401).json({ error: 'unauthorized' }); return; }
   if (Date.now() - sessionWindow >= 60000) { sessionWindow = Date.now(); sessionRequests = 0; }
   if (++sessionRequests > 120) { res.status(429).json({ error: 'rate_limited' }); return; }
   const input = req.body;
@@ -59,7 +60,7 @@ router.post('/unlinked/identities', async (req, res) => {
   if (!secret || secret.length < 32) { res.status(503).json({ error: 'messaging_unavailable' }); return; }
   if (req.headers.origin) { res.status(403).json({ error: 'forbidden' }); return; }
   const digest = (value: string) => createHash('sha256').update(value).digest();
-  if (!timingSafeEqual(digest(req.headers.authorization ?? ''), digest(`Bearer ${secret}`))) { res.status(401).json({ error: 'unauthorized' }); return; }
+  if (!timingSafeEqual(digest(req.headers.authorization ?? ''), digest(`Bearer ${secret}`))) { securityEvent('partner_auth', 'failure', { req, partner: 'unlinkedMessaging', reason: 'invalid_partner_secret' }); res.status(401).json({ error: 'unauthorized' }); return; }
   if (Date.now() - identitiesWindow >= 60000) { identitiesWindow = Date.now(); identitiesRequests = 0; }
   if (++identitiesRequests > 600) { res.status(429).json({ error: 'rate_limited' }); return; }
   const input = req.body;
