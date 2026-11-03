@@ -122,6 +122,21 @@ export function loginSurface(input: {
 }
 
 /**
+ * Web only (OpenChat-wj1p): when "Sign in with Ideaflow" would be the only
+ * control on the page, the login screen leaves for the provider as soon as it
+ * mounts instead of rendering a page whose sole content is that button. The
+ * page is still rendered for error states (the button becomes the retry) and
+ * whenever another method is offered (legacy fallback, native Apple).
+ */
+export function startsIdeaflowRedirectDirectly(surface: LoginSurface, platform: string): boolean {
+  return platform === 'web'
+    && !surface.pending
+    && surface.ideaflow
+    && !surface.legacy
+    && !surface.apple;
+}
+
+/**
  * Readable, fixed copy for an Ideaflow redirect that came back without a
  * usable code. Provider-supplied error text is never shown verbatim.
  */

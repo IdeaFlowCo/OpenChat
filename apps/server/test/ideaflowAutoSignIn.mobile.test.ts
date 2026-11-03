@@ -195,11 +195,29 @@ describe('automatic sign-in attempt', () => {
     await render();
     await settle();
     await settle();
-    expect(fakeWindow.location.replace).not.toHaveBeenCalled();
-    expect(starts()).toHaveLength(0);
-    expect(labels()).toEqual(mocks.config !== 'hang' && (mocks.config as { enabled?: boolean }).enabled === false
-      ? expect.arrayContaining(['Continue with Google'])
-      : ['Sign in with Ideaflow']);
+    if (mocks.config !== 'hang' && (mocks.config as { enabled?: boolean }).enabled === false) {
+      // Legacy methods offered: a real page, no redirect of any kind.
+      expect(fakeWindow.location.replace).not.toHaveBeenCalled();
+      expect(starts()).toHaveLength(0);
+      expect(labels()).toEqual(expect.arrayContaining(['Continue with Google']));
+      return;
+    }
+    // No silent hop; the direct redirect (OpenChat-wj1p) still leaves for the
+    // provider's own sign-in, with a full (non-silent) start.
+    await settleUntil(() => fakeWindow.location.replace.mock.calls.length > 0);
+    expect(fakeWindow.location.replace).toHaveBeenCalledTimes(1);
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0].searchParams.getAll('prompt')).not.toContain('none');
+    expect(stored().silent).toBeUndefined();
+    expect(labels()).toEqual([]);
+  });
+
+  it('after an explicit sign-out the direct redirect asks the provider which account to use', async () => {
+    fakeWindow.localStorage.setItem('openchat_ideaflow_choose_account', '1');
+    await render();
+    await settleUntil(() => fakeWindow.location.replace.mock.calls.length > 0);
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0].searchParams.getAll('prompt')).toEqual(['select_account']);
   });
 
   it('never attempts on native', async () => {
@@ -217,30 +235,32 @@ describe('returning from the silent attempt', () => {
     state: 'S', nonce: 'N', codeVerifier: 'V', silent: true, returnTo: '/app/c/abc?x=1#m-9', ...extra,
   });
 
-  it('login_required: back on the original URL, signed out, no error and no second hop', async () => {
+  it('login_required: original URL restored, signed out, no error, then on to the provider sign-in (not silent)', async () => {
     jar.set('ideaflow_auto_signin', '1');
     fakeWindow.sessionStorage.setItem('openchat_ideaflow_web', silentRecord());
     at('/app/?provider=ideaflow&error=login_required&state=S&iss=https%3A%2F%2Fid.ideaflow.app%2Fapi%2Fauth');
     await render();
-    await settle();
-    await settle();
+    await settleUntil(() => fakeWindow.location.replace.mock.calls.length > 0);
     expect(fakeWindow.history.replaceState).toHaveBeenCalledWith({}, '', '/app/c/abc?x=1#m-9');
     expect(inlineErrors()).toEqual([]);
     expect(mocks.alert).not.toHaveBeenCalled();
     expect(mocks.exchange).not.toHaveBeenCalled();
-    expect(starts()).toHaveLength(0);
-    expect(fakeWindow.location.replace).not.toHaveBeenCalled();
-    expect(labels()).toEqual(['Sign in with Ideaflow']);
-    expect(stored()).toBeNull();
+    // OpenChat-wj1p: Ideaflow is the only option, so the direct redirect leaves
+    // for the provider's sign-in page. Never another prompt=none hop.
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0].searchParams.getAll('prompt')).not.toContain('none');
+    expect(stored().silent).toBeUndefined();
+    expect(fakeWindow.location.replace).toHaveBeenCalledTimes(1);
+    expect(labels()).toEqual([]);
   });
 
-  it('even if the session cookie was lost, a callback load never starts another hop', async () => {
+  it('even if the session cookie was lost, a callback load never starts another silent hop', async () => {
     fakeWindow.sessionStorage.setItem('openchat_ideaflow_web', silentRecord());
     at('/app/?provider=ideaflow&error=login_required&state=S');
     await render();
-    await settle();
-    await settle();
-    expect(starts()).toHaveLength(0);
+    await settleUntil(() => fakeWindow.location.replace.mock.calls.length > 0);
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0].searchParams.getAll('prompt')).not.toContain('none');
     expect(jar.get('ideaflow_auto_signin')).toBe('1');
   });
 
@@ -274,14 +294,17 @@ describe('returning from the silent attempt', () => {
     fakeWindow.sessionStorage.setItem('openchat_ideaflow_web', silentRecord());
     at('/app/?provider=ideaflow&code=CODE&state=S');
     await render();
-    await settleUntil(() => labels().length > 0);
+    await settleUntil(() => fakeWindow.location.replace.mock.calls.length > 0);
     expect(mocks.exchange).toHaveBeenCalledTimes(1);
     expect(mocks.bootstrap).not.toHaveBeenCalled();
     expect(inlineErrors()).toEqual([]);
     expect(mocks.alert).not.toHaveBeenCalled();
-    expect(labels()).toEqual(['Sign in with Ideaflow']);
     expect(fakeWindow.history.replaceState).toHaveBeenCalledWith({}, '', '/app/c/abc?x=1#m-9');
-    expect(starts()).toHaveLength(0);
+    // Then the direct redirect (OpenChat-wj1p) takes over with a full start,
+    // only after the silent exchange has settled.
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0].searchParams.getAll('prompt')).not.toContain('none');
+    expect(labels()).toEqual([]);
   });
 
   it('a mismatched state is never redeemed and stays quiet', async () => {
@@ -293,13 +316,14 @@ describe('returning from the silent attempt', () => {
     expect(inlineErrors()).toEqual([]);
   });
 
-  it('an error with no stored state lands on the app, signed out, no error', async () => {
+  it('an error with no stored state lands on the app, signed out, no error, and never a silent hop', async () => {
     at('/app/?provider=ideaflow&error=login_required&state=unknown');
     await render();
     await settle();
+    await settle();
     expect(fakeWindow.history.replaceState).toHaveBeenCalledWith({}, '', '/app/');
     expect(inlineErrors()).toEqual([]);
-    expect(starts()).toHaveLength(0);
+    expect(starts().filter(u => u.searchParams.getAll('prompt').includes('none'))).toHaveLength(0);
   });
 
   it('never restores an off-site return URL', async () => {
@@ -320,6 +344,7 @@ describe('the explicit button keeps its interactive flow', () => {
     await settle();
     expect(inlineErrors()).toEqual(['Sign-in was cancelled. You can try again.']);
     expect(starts()).toHaveLength(0);
+    expect(fakeWindow.location.replace).not.toHaveBeenCalled();
     expect(jar.get('ideaflow_auto_signin')).toBe('1');
   });
 
@@ -332,15 +357,27 @@ describe('the explicit button keeps its interactive flow', () => {
     expect(inlineErrors()).toEqual(['This Ideaflow account could not be linked automatically. Contact support@ideaflow.app.']);
   });
 
-  it('the explicit button remembers the page it was pressed on', async () => {
+  it('the direct redirect remembers the page it left from', async () => {
     jar.set('ideaflow_auto_signin', '1');
     at('/app/i/invite-token?ref=x');
-    Object.assign(fakeWindow.location, { href: 'https://chat.ideaflow.app/app/i/invite-token?ref=x' });
     await render();
-    await settle();
+    await settleUntil(() => fakeWindow.location.replace.mock.calls.length > 0);
+    expect(starts()[0].searchParams.has('prompt')).toBe(false);
+    expect(stored()).toMatchObject({ returnTo: '/app/i/invite-token?ref=x' });
+    expect(stored().silent).toBeUndefined();
+  });
+
+  it('the explicit retry button remembers the page it was pressed on', async () => {
+    jar.set('ideaflow_auto_signin', '1');
+    fakeWindow.sessionStorage.setItem('openchat_ideaflow_web', JSON.stringify({ state: 'S', nonce: 'N', codeVerifier: 'V', returnTo: '/app/i/invite-token?ref=x' }));
+    at('/app/?provider=ideaflow&error=access_denied&state=S');
+    await render();
+    await settleUntil(() => inlineErrors().length > 0);
+    Object.assign(fakeWindow.location, { pathname: '/app/i/invite-token', search: '?ref=x', hash: '', href: 'https://chat.ideaflow.app/app/i/invite-token?ref=x' });
     const button = screen!.root.find(n => n.type === 'TouchableOpacity' && n.props.accessibilityLabel === 'Sign in with Ideaflow');
     await act(async () => { await button.props.onPress(); });
     await settleUntil(() => fakeWindow.location.href === mocks.authorizeUrl);
+    expect(starts()).toHaveLength(1);
     expect(starts()[0].searchParams.has('prompt')).toBe(false);
     expect(stored()).toMatchObject({ returnTo: '/app/i/invite-token?ref=x' });
     expect(stored().silent).toBeUndefined();

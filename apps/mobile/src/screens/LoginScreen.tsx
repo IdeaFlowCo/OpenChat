@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -37,6 +37,7 @@ import {
   ideaflowCallbackErrorMessage,
   loginSurface,
   prepareIdeaflowWebSignIn,
+  startsIdeaflowRedirectDirectly,
   takeIdeaflowAccountChoice,
 } from '../services/ideaflowSignIn';
 import { signInWithIdeaflowNative } from '../services/ideaflowNativeSignIn';
@@ -121,6 +122,17 @@ export function LoginScreen() {
   const autoSignIn = useIdeaflowAutoSignIn(ideaflowConfig);
   // Redeeming the code from a silent attempt: keep the neutral loading state.
   const [silentExchange, setSilentExchange] = useState(false);
+  // Web, Ideaflow the only method (OpenChat-wj1p): leave for the provider on
+  // mount instead of showing a one-button page. Fires once per mount, only
+  // after the silent attempt has run or been skipped and after any callback
+  // on this URL has settled; a failure or an OIDC error keeps the page with
+  // the button as the retry.
+  const directRedirect = startsIdeaflowRedirectDirectly(surface, Platform.OS);
+  const [directRedirecting, setDirectRedirecting] = useState(false);
+  const directRedirectFired = useRef(false);
+  // Set synchronously by the callback effect below (state updates from the same
+  // commit are not visible to the direct-redirect effect yet).
+  const callbackHoldsPage = useRef(false);
 
   // Web: finish the Ideaflow ID redirect. The callback route adds a provider
   // marker because Google and OIDC both use standard `code` and `state` keys.
@@ -143,11 +155,13 @@ export function LoginScreen() {
 
     if (action.kind === 'quiet') return;
     if (action.kind === 'error') {
+      callbackHoldsPage.current = true;
       reportIdeaflowError(ideaflowCallbackErrorMessage({ stateMatched: action.stateMatched, error: action.error }));
       return;
     }
 
     const { silent } = action;
+    callbackHoldsPage.current = true;
     if (silent) setSilentExchange(true);
     else setIdeaflowLoading(true);
     (async () => {
@@ -160,6 +174,9 @@ export function LoginScreen() {
         // Silent attempt: duplicate email (409), linking, anything -> stay
         // signed out on the same URL, no error. The button keeps the full flow.
         if (!silent) reportIdeaflowError(err instanceof Error ? err.message : String(err));
+        // A failed silent exchange releases the page: the direct redirect
+        // below then takes the visitor to the provider's own sign-in.
+        else callbackHoldsPage.current = false;
       } finally {
         if (silent) setSilentExchange(false);
         else setIdeaflowLoading(false);
@@ -347,7 +364,7 @@ export function LoginScreen() {
     }
   };
 
-  const handleIdeaflowSignIn = async () => {
+  const handleIdeaflowSignIn = async (opts: { replace?: boolean } = {}) => {
     if (ideaflowLoading || loading) return;
     if (!isWeb) {
       // Native: system auth session (ASWebAuthenticationSession / Custom
@@ -372,15 +389,30 @@ export function LoginScreen() {
     // provider for its account chooser (prompt=select_account).
     const selectAccount = takeIdeaflowAccountChoice();
     try {
-      window.location.href = await prepareIdeaflowWebSignIn(OPENCHAT_URL, {
+      const url = await prepareIdeaflowWebSignIn(OPENCHAT_URL, {
         selectAccount,
         returnTo: currentReturnPath(window.location),
       });
+      // The automatic hop replaces the history entry so Back never bounces
+      // through a page that only redirects again.
+      if (opts.replace) window.location.replace(url);
+      else window.location.href = url;
     } catch {
       reportIdeaflowError("Couldn't reach Ideaflow. Please try again in a moment.");
       setIdeaflowLoading(false);
+      setDirectRedirecting(false);
     }
   };
+
+  useEffect(() => {
+    if (!isWeb || !directRedirect || directRedirectFired.current) return;
+    if (autoSignIn.pending || silentExchange || ideaflowLoading || ideaflowError) return;
+    if (callbackHoldsPage.current) return;
+    directRedirectFired.current = true;
+    setDirectRedirecting(true);
+    void handleIdeaflowSignIn({ replace: true });
+    // handleIdeaflowSignIn is recreated every render; the ref guards re-entry.
+  }, [isWeb, directRedirect, autoSignIn.pending, silentExchange, ideaflowLoading, ideaflowError]);
 
   const doLogin = async (e: string, p: string): Promise<void> => {
     setLoading(true);
@@ -456,9 +488,10 @@ export function LoginScreen() {
     )
   );
 
-  if (isWeb && (autoSignIn.pending || silentExchange)) {
-    // Neutral state while the automatic sign-in decides or completes; never
-    // flash the sign-in page for someone who is about to be signed in.
+  if (isWeb && (autoSignIn.pending || silentExchange || directRedirecting)) {
+    // Neutral state while the automatic sign-in decides or completes, or while
+    // the direct redirect leaves for the provider; never flash the sign-in
+    // page for someone who is about to be signed in.
     return (
       <View
         style={[styles.root, styles.autoSignInPending, { backgroundColor: c.background }]}

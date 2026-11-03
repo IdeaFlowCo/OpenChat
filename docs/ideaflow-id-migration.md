@@ -106,6 +106,14 @@ button since 2026-10-03, code-xbh.3). On RN-web, while
   email/password, sign-up and password reset all happen on id.ideaflow.app.
   Nothing is rendered until the capability check answers (8-second ceiling),
   so Google never flashes first;
+- no one-button interstitial (OpenChat-wj1p): when that button would be the
+  only control, the login screen leaves for the provider as soon as it mounts
+  (`location.replace`, so Back never bounces through it), after the automatic
+  attempt below has run or been skipped and any callback on the URL has
+  settled. The page with the button is rendered only for start failures and
+  OIDC errors (the button is the retry), for the legacy fallback, and on native
+  (iOS also offers Apple). `startsIdeaflowRedirectDirectly` in
+  `apps/mobile/src/services/ideaflowSignIn.ts`;
 - existing OpenChat users are not stranded: the exchange links an existing
   user by issuer+subject, else by a single strictly verified email match
   (`linkIdeaflowIdentity`, contract above), else creates a new user. Noos

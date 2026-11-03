@@ -4,6 +4,7 @@ import {
   ideaflowCallbackErrorMessage,
   ideaflowStartQuery,
   loginSurface,
+  startsIdeaflowRedirectDirectly,
   markIdeaflowAccountChoice,
   prepareIdeaflowWebSignIn,
   takeIdeaflowAccountChoice,
@@ -61,6 +62,23 @@ describe('loginSurface', () => {
     expect(loginSurface({ platform: 'android', config: disabled })).toEqual({
       pending: false, ideaflow: false, legacy: true, legacyFooter: true, apple: false,
     });
+  });
+});
+
+describe('startsIdeaflowRedirectDirectly', () => {
+  it('leaves for the provider on web when Ideaflow is the only method', () => {
+    expect(startsIdeaflowRedirectDirectly(loginSurface({ platform: 'web', config: enabled }), 'web')).toBe(true);
+  });
+
+  it('keeps the page while the capability check is pending or when legacy methods show', () => {
+    expect(startsIdeaflowRedirectDirectly(loginSurface({ platform: 'web', config: { status: 'loading' } }), 'web')).toBe(false);
+    expect(startsIdeaflowRedirectDirectly(loginSurface({ platform: 'web', config: disabled }), 'web')).toBe(false);
+  });
+
+  it('never fires on native, including iOS where Apple sign-in sits beside Ideaflow', () => {
+    expect(startsIdeaflowRedirectDirectly(loginSurface({ platform: 'ios', config: enabled }), 'ios')).toBe(false);
+    expect(startsIdeaflowRedirectDirectly(loginSurface({ platform: 'ios', config: enabled, keepNativeApple: false }), 'ios')).toBe(false);
+    expect(startsIdeaflowRedirectDirectly(loginSurface({ platform: 'android', config: enabled }), 'android')).toBe(false);
   });
 });
 

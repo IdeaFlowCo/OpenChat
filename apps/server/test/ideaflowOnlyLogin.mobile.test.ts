@@ -8,6 +8,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // only as the kill-switch fallback. Native (code-xbh.14) shows the same button
 // and runs the system-browser flow; iOS keeps Sign in with Apple until
 // Ideaflow ID offers Apple (code-xbh.13).
+//
+// OpenChat-wj1p: on web, when that button would be the only control, the
+// screen leaves for id.ideaflow.app on mount (location.replace) instead of
+// rendering a one-button page; the page with the button remains for error
+// states (the button is the retry).
 
 const mocks = vi.hoisted(() => ({
   platform: { OS: 'web' as string },
@@ -59,7 +64,7 @@ import { LoginScreen } from '../../mobile/src/screens/LoginScreen';
 
 let screen: ReturnType<typeof create> | undefined;
 let fakeWindow: {
-  location: { search: string; pathname: string; origin: string; href: string };
+  location: { search: string; pathname: string; origin: string; href: string; replace: ReturnType<typeof vi.fn> };
   history: { replaceState: ReturnType<typeof vi.fn> };
   sessionStorage: Map<string, string> & { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };
   localStorage: Map<string, string> & { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };
@@ -113,7 +118,7 @@ beforeEach(() => {
     return new Response('{}', { status: 404 });
   });
   fakeWindow = {
-    location: { search: '', pathname: '/app/', origin: 'https://chat.ideaflow.app', href: 'https://chat.ideaflow.app/app/' },
+    location: { search: '', pathname: '/app/', origin: 'https://chat.ideaflow.app', href: 'https://chat.ideaflow.app/app/', replace: vi.fn() },
     history: { replaceState: vi.fn() },
     sessionStorage: makeStorage(),
     localStorage: makeStorage(),
@@ -140,13 +145,18 @@ describe('web login with Ideaflow ID enabled', () => {
     expect(screen!.root.findAll(n => n.props.accessibilityLabel === 'Loading sign-in options').length).toBeGreaterThan(0);
   });
 
-  it('shows exactly one sign-in control, Sign in with Ideaflow, plus the new-account hint', async () => {
+  it('leaves for Ideaflow on mount with location.replace instead of showing a one-button page', async () => {
     await render();
-    await settle();
-    expect(labels()).toEqual(['Sign in with Ideaflow']);
-    expect(hasText('Sign in with Ideaflow')).toBe(true);
-    expect(hasText('New here? You can create an account on the next screen.')).toBe(true);
+    await settleUntil(() => fakeWindow.location.replace.mock.calls.length > 0);
+
+    expect(fakeWindow.location.replace).toHaveBeenCalledTimes(1);
+    expect(fakeWindow.location.replace).toHaveBeenCalledWith(mocks.authorizeUrl);
+    expect(fakeWindow.location.href).toBe('https://chat.ideaflow.app/app/');
+    // Neutral state throughout: the sign-in page never flashes.
+    expect(labels()).toEqual([]);
     expect(inputs()).toEqual([]);
+    expect(hasText('Sign in with Ideaflow')).toBe(false);
+    expect(screen!.root.findAll(n => n.props.accessibilityLabel === 'Signing you in').length).toBeGreaterThan(0);
     for (const gone of [
       'Continue with Ideaflow', 'Continue with Google', 'Other sign-in options', 'Use another Ideaflow account',
       "Don't have an account? Create one", 'Create account', 'Uses your Noos credentials', 'Phone sign-in coming soon',
@@ -157,44 +167,53 @@ describe('web login with Ideaflow ID enabled', () => {
 
   it('starts ordinary Ideaflow sign-in without any prompt so SSO stays silent', async () => {
     await render();
-    await settle();
-    await act(async () => { await button('Sign in with Ideaflow').props.onPress(); });
-    await settleUntil(() => fakeWindow.location.href === mocks.authorizeUrl);
+    await settleUntil(() => fakeWindow.location.replace.mock.calls.length > 0);
 
-    const start = requestedUrls().find(u => u.pathname === '/api/auth/ideaflow/url')!;
-    expect(start).toBeDefined();
+    const starts = requestedUrls().filter(u => u.pathname === '/api/auth/ideaflow/url');
+    expect(starts).toHaveLength(1);
+    const [start] = starts;
     expect(start.searchParams.has('prompt')).toBe(false);
     expect(start.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(fakeWindow.location.href).toBe(mocks.authorizeUrl);
     const stored = JSON.parse(fakeWindow.sessionStorage.getItem('openchat_ideaflow_web')!);
     expect(stored.state).toBe(start.searchParams.get('state'));
     expect(stored.nonce).toBe(start.searchParams.get('nonce'));
     expect(stored.codeVerifier).toMatch(/^[A-Za-z0-9_-]{64}$/);
+    expect(stored.silent).toBeUndefined();
+    expect(stored.returnTo).toBe('/app/');
   });
 
   it('asks for the Ideaflow account chooser once after an explicit sign-out', async () => {
     fakeWindow.localStorage.setItem('openchat_ideaflow_choose_account', '1');
     await render();
-    await settle();
-    await act(async () => { await button('Sign in with Ideaflow').props.onPress(); });
-    await settleUntil(() => fakeWindow.location.href === mocks.authorizeUrl);
+    await settleUntil(() => fakeWindow.location.replace.mock.calls.length > 0);
 
     const starts = requestedUrls().filter(u => u.pathname === '/api/auth/ideaflow/url');
     expect(starts).toHaveLength(1);
     expect(starts[0].searchParams.getAll('prompt')).toEqual(['select_account']);
     expect(fakeWindow.localStorage.getItem('openchat_ideaflow_choose_account')).toBeNull();
   });
+
+  it('redirects only once per mount', async () => {
+    await render();
+    await settleUntil(() => fakeWindow.location.replace.mock.calls.length > 0);
+    await settle();
+    await settle();
+    expect(fakeWindow.location.replace).toHaveBeenCalledTimes(1);
+    expect(requestedUrls().filter(u => u.pathname === '/api/auth/ideaflow/url')).toHaveLength(1);
+  });
 });
 
 describe('web Ideaflow failures are visible (RN-web Alert is a no-op)', () => {
   const inlineErrors = () => screen!.root.findAll(n => n.type === 'Text' && n.props.accessibilityRole === 'alert').map(textOf);
 
-  it('shows a stale or mismatched callback inline with fixed copy', async () => {
+  it('shows a stale or mismatched callback inline with fixed copy, and keeps the page (no redirect)', async () => {
     fakeWindow.location.search = '?provider=ideaflow&code=c&state=unknown-state';
     await render();
     await settle();
+    await settle();
     expect(inlineErrors()).toEqual(['That sign-in took too long or was interrupted. Please try again.']);
     expect(labels()).toEqual(['Sign in with Ideaflow']);
+    expect(fakeWindow.location.replace).not.toHaveBeenCalled();
   });
 
   it('explains a cancelled sign-in without echoing provider text', async () => {
@@ -202,23 +221,35 @@ describe('web Ideaflow failures are visible (RN-web Alert is a no-op)', () => {
     fakeWindow.location.search = '?provider=ideaflow&error=access_denied&error_description=raw+provider+text&state=S';
     await render();
     await settle();
+    await settle();
     expect(inlineErrors()).toEqual(['Sign-in was cancelled. You can try again.']);
     expect(hasText('raw provider text')).toBe(false);
+    expect(labels()).toEqual(['Sign in with Ideaflow']);
+    expect(fakeWindow.location.replace).not.toHaveBeenCalled();
   });
 
-  it('shows a start failure inline and clears it on retry', async () => {
+  it('a blocked direct redirect falls back to the page with the button as the retry', async () => {
     mocks.fetch.mockImplementation(async (input: string) => {
       const url = new URL(input);
       if (url.pathname === '/api/auth/ideaflow/config') return new Response(JSON.stringify({ enabled: true }), { status: 200 });
       return new Response('{}', { status: 502 });
     });
     await render();
-    await settle();
-    await act(async () => { await button('Sign in with Ideaflow').props.onPress(); });
     await settleUntil(() => inlineErrors().length > 0);
     expect(inlineErrors()).toEqual(["Couldn't reach Ideaflow. Please try again in a moment."]);
     expect(button('Sign in with Ideaflow').props.disabled).toBe(false);
+    expect(fakeWindow.location.replace).not.toHaveBeenCalled();
     expect(fakeWindow.location.href).toBe('https://chat.ideaflow.app/app/');
+
+    // The retry is the explicit button: it clears the error and starts again.
+    mocks.fetch.mockImplementation(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/api/auth/ideaflow/url') return new Response(JSON.stringify({ url: mocks.authorizeUrl }), { status: 200 });
+      return new Response('{}', { status: 404 });
+    });
+    await act(async () => { await button('Sign in with Ideaflow').props.onPress(); });
+    await settleUntil(() => fakeWindow.location.href === mocks.authorizeUrl);
+    expect(fakeWindow.location.href).toBe(mocks.authorizeUrl);
   });
 });
 
