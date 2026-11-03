@@ -28,7 +28,14 @@ export interface PrivateAsk { id: string; text: string; sourceNoteId: string | n
 const LEGACY_STATUS: Record<AskStatus, PrivateAsk['status']> = { open: 'active', stale: 'paused', fulfilled: 'closed', withdrawn: 'closed' };
 type Runner = Parameters<typeof listAsksIn>[0];
 /** Every ask the subject made, any status. */
-const subjectAsks = (tx: Runner, ownerKey: string, entityId: string) => listAsksIn(tx, ownerKey, { status: null, own: null, askerId: entityId, q: '', needsRecheck: false, limit: 200 });
+/** The asks a card shows: the subject's own asks, or for a topic (which cannot ask) the owner's asks linked to it ('is about'). */
+async function subjectAsks(tx: Runner, ownerKey: string, entityId: string) {
+  const asked = await listAsksIn(tx, ownerKey, { status: null, own: null, askerId: entityId, q: '', needsRecheck: false, limit: 200 });
+  const about = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})-[l:OVERLAY_LINK {relation: 'is about'}]->(:OverlayEntity {id: $entityId, ownerKey: $ownerKey})
+    WHERE l.ownerKey = $ownerKey AND a.askerId IS NULL RETURN a.id AS id LIMIT 200`, { ownerKey, entityId });
+  const linked = await Promise.all(about.records.map(record => askIn(tx, ownerKey, String(record.get('id')))));
+  return { asks: [...asked.asks, ...linked], truncated: asked.truncated };
+}
 const subjectAskTexts = async (tx: Runner, ownerKey: string, entityId: string) => (await subjectAsks(tx, ownerKey, entityId)).asks.map(ask => ask.text);
 export interface NoteReview { id: string; subject: ReviewSubject; note: PrivateNote; status: 'saved' | 'ready' | 'unavailable' | 'failed' | 'applied' | 'undone'; suggestions: Suggestion[]; appliedIds: string[]; createdAt: string; appliedAt?: string; sourceNoteAvailable?: boolean; asStandingAsk?: boolean; createdRecords?: {id: string; kind: 'ask' | 'connection'; suggestionId: string}[] }
 const fail = (status: number, message: string): never => { throw new PrivateGraphError(status, message); };
@@ -235,8 +242,9 @@ export async function applyNoteReview(ownerId: string, reviewId: string, raw: un
           const input = parseAskInput({ text: suggestion.text, asker: asksItself ? { id: entityId } : 'owner', evidence: { noteId: review.note.id, label: review.asStandingAsk ? 'Standing ask on a private card' : 'Private note review' } });
           const askProvenance: OverlayProvenance = review.asStandingAsk ? by : { author: by.author, source: 'suggestion', assertion: 'inferred' };
           const saved = await saveAskIn(tx, ownerKey, input, askProvenance).catch(overlayRefusal);
-          if (!saved.created) continue;
+          // A topic's ask is linked to it even when the owner already had that ask (from another card); only a created ask is this review's to undo.
           if (!asksItself) await addLinkIn(tx, ownerKey, saved.ask.id, 'is about', entityId, askProvenance).catch(overlayRefusal);
+          if (!saved.created) continue;
           review.createdRecords.push({ id: saved.ask.id, kind: 'ask', suggestionId: suggestion.id });
           continue;
         } else {

@@ -225,7 +225,8 @@ const MESSAGES: Record<string, string> = {
   invalid_horizon: `horizon must be one of ${ASK_HORIZONS.join(', ')}`, invalid_status: `status must be one of ${ASK_STATUSES.join(', ')}`,
   invalid_exposure: `exposure must be one of ${ASK_EXPOSURES.join(', ')}; this_chat needs exposureConversationId`, invalid_recheck_after: 'recheckAfter must be a date such as 2026-12-29',
   invalid_evidence: 'evidence takes quote, url (http or https), label, seenAt and noteId (one of your private notes)', duplicate_ask: 'That person already has an ask with this text',
-  ask_limit: 'You have reached the limit for asks', ask_fields: 'Edit an ask through the ask tools',
+  ask_limit: 'You have reached the limit for asks', ask_fields: 'Edit or delete an ask (and who asks it) through the ask tools',
+  has_asks: 'This one has asks; a topic cannot ask, so its kind stays as it is',
 };
 /** Overlay refusals become the app's own wording; anything else stays an unexpected error. */
 async function overlayCall<T>(work: (overlay: OverlayStore) => Promise<T>): Promise<T> {
@@ -740,6 +741,11 @@ export async function deletePrivateThing(ownerId: string, thingId: string): Prom
       const refs = found.records[0]?.get('refs') as string[] | undefined;
       if (!refs || userIdOf(refs) !== null) return fail(404, 'Not found');
       for (const label of ['OpenChatNoteReview', 'OpenChatPrivateAsk']) await tx.run(`MATCH (n:${label} {ownerKey: $ownerKey, entityId: $thingId}) DETACH DELETE n`, { ownerKey, thingId });
+      // A topic's card asks (the owner's own, captured on that card and linked to no other subject) go with it, as they did before asks moved into the overlay.
+      const cardAsks = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})-[:OVERLAY_LINK {relation: 'is about'}]->(:OverlayEntity {id: $thingId, ownerKey: $ownerKey})
+        WHERE a.askerId IS NULL AND a.evidenceLabel IN $labels AND NOT EXISTS { MATCH (a)-[:OVERLAY_LINK {relation: 'is about'}]->(other:OverlayEntity) WHERE other.id <> $thingId }
+        RETURN a.id AS id`, { ownerKey, thingId, labels: ['Private note review', 'Standing ask on a private card'] });
+      for (const record of cardAsks.records) await deleteEntityIn(tx, ownerKey, String(record.get('id')));
       return deleteEntityIn(tx, ownerKey, thingId);
     });
     return { deleted: true, id: thingId, notesRemoved: removed.notesRemoved, linksRemoved: removed.linksRemoved };

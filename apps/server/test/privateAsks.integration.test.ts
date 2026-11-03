@@ -163,4 +163,42 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
     expect([second.created, second.legacyAsks.seen, second.friendAskNotes.created]).toEqual([[], 0, 0]);
     expect((await graph.listAsks(alice, { askerKind: 'thing', askerId: friend.id, status: 'all' })).asks).toHaveLength(3);
   });
+
+  it('a migrated ask that already existed leaves its review ledger alone, so undo never deletes it', async () => {
+    const { migrateAsksToOverlay } = await import('../src/services/askMigration.js');
+    const review = await import('../src/services/privateNoteReview.js');
+    const person = await graph.resolvePrivateThing(alice, { kind: 'person', name: `Kim ${suffix}` });
+    const existing = await graph.saveAsk(alice, { asker: { kind: 'thing', id: person.id }, text: 'Find a climbing partner' });
+    const ownerKey = (await graph.privateReviewPrincipal(alice)).ownerKey;
+    const legacyId = `legacy-dup-${suffix}`, reviewId = `review-dup-${suffix}`;
+    const session = driver.session();
+    try {
+      await session.run(`CREATE (:OpenChatPrivateAsk {id: $legacyId, ownerKey: $ownerKey, entityId: $entityId, text: 'Find a climbing partner', audience: 'owner', status: 'active', revision: 0, reviewId: $reviewId, createdAt: '2026-10-21T00:00:00.000Z'}),
+        (:OpenChatNoteReview {id: $reviewId, ownerKey: $ownerKey, entityId: $entityId, requestId: $reviewId, audience: 'owner', payload: $payload})`,
+      { legacyId, ownerKey, entityId: person.id, reviewId, payload: JSON.stringify({ id: reviewId, subject: { kind: 'thing', id: person.id }, status: 'applied', createdRecords: [{ id: legacyId, kind: 'ask', suggestionId: 's1' }] }) });
+    } finally { await session.close(); }
+    const report = await migrateAsksToOverlay(driver, 'neo4j', { apply: true });
+    expect(report.legacyAsks.existing).toBe(1);
+    await review.undoNoteReview(alice, reviewId);
+    expect((await graph.getAsk(alice, existing.ask.id)).text).toBe('Find a climbing partner');
+  });
+
+  it('a topic card keeps its asks: listed on the card, linked, and gone with the topic', async () => {
+    const review = await import('../src/services/privateNoteReview.js');
+    const topic = await graph.resolvePrivateThing(alice, { kind: 'topic', name: `Bouldering ${suffix}` });
+    const other = await graph.resolvePrivateThing(alice, { kind: 'topic', name: `Climbing ${suffix}` });
+    for (const [subject, key] of [[topic, 'topic-a'], [other, 'topic-b']] as const) {
+      const batch = await review.captureNoteReview(alice, { kind: 'thing', id: subject.id }, { text: 'Find a bouldering gym', requestId: key, asStandingAsk: true });
+      await review.applyNoteReview(alice, batch.id, { suggestionIds: [batch.suggestions[0]!.id] });
+    }
+    const onTopic = (await review.listNoteReviews(alice, { kind: 'thing', id: topic.id })).asks;
+    const onOther = (await review.listNoteReviews(alice, { kind: 'thing', id: other.id })).asks;
+    expect(onTopic.map(ask => ask.text)).toEqual(['Find a bouldering gym']);
+    expect(onOther.map(ask => ask.id)).toEqual(onTopic.map(ask => ask.id));
+    // Linked to two topics: deleting one keeps it; deleting the last takes it.
+    await graph.deletePrivateThing(alice, topic.id);
+    expect((await graph.getAsk(alice, onOther[0]!.id)).own).toBe(true);
+    await graph.deletePrivateThing(alice, other.id);
+    expect(await status(() => graph.getAsk(alice, onOther[0]!.id))).toBe(404);
+  });
 });

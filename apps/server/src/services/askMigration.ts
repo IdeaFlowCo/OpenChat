@@ -14,7 +14,7 @@
  * skipped, so a second run changes nothing. Dry-run unless `apply` is set.
  * Every write goes through the vendored Noos store's transaction forms.
  */
-import type { Driver } from 'neo4j-driver';
+import type { Driver, ManagedTransaction } from 'neo4j-driver';
 import { ASK_HORIZONS, ASK_STATUSES, ASKER_KINDS, LIMITS, parseAskInput, readProvenance } from './overlay/contract.js';
 import type { AskHorizon, AskStatus, EntityKind, Provenance } from './overlay/contract.js';
 import { addLinkIn, OverlayStore, saveAskIn, updateAskIn } from './overlay/store.js';
@@ -100,21 +100,24 @@ export async function migrateAsksToOverlay(driver: Driver, database: string, opt
       const by: Provenance = { author: stored.author ?? 'owner', source: stored.source ?? 'app', assertion: stored.assertion ?? 'stated' };
       const input = parseAskInput({ text: parsed.text, asker: { id: entityId }, horizon: parsed.horizon, recheckAfter: parsed.recheckAfter, status: parsed.status,
         evidence: { label: parsed.label, seenAt: parsed.seenAt, url: parsed.url, noteId } });
+      // A note already migrated (even if the owner has since edited that ask's text) is never migrated again.
+      const migrated = async (tx: Pick<ManagedTransaction, 'run'>) => (await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask', askerId: $entityId}) WHERE a.evidenceNoteId = $noteId RETURN a.id AS id`, { ownerKey, entityId, noteId })).records.length > 0;
       if (!options.apply) {
-        const exists = await session.executeRead(async tx => (await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask', askerId: $entityId}) WHERE a.evidenceNoteId = $noteId RETURN a.id AS id`, { ownerKey, entityId, noteId })).records.length);
-        if (exists) report.friendAskNotes.existing++; else report.friendAskNotes.created++;
+        if (await session.executeRead(migrated)) report.friendAskNotes.existing++; else report.friendAskNotes.created++;
         continue;
       }
-      await session.executeWrite(async tx => {
+      const outcome = await session.executeWrite(async tx => {
+        if (await migrated(tx)) return null;
         const saved = await saveAskIn(tx, ownerKey, input, by);
-        if (!saved.created) { report.friendAskNotes.existing++; return; }
-        report.friendAskNotes.created++;
-        report.created.push({ askId: saved.ask.id, from: `note:${noteId}` });
+        if (!saved.created) return null;
         // An asker the monitor linked to a project tracking its asks: link the ask there too.
         const trackers = await tx.run(`MATCH (:OverlayEntity {id: $entityId, ownerKey: $ownerKey})-[l:OVERLAY_LINK]->(p:OverlayEntity {ownerKey: $ownerKey, kind: 'project'})
           WHERE l.ownerKey = $ownerKey AND l.relation CONTAINS 'ask' RETURN DISTINCT p.id AS id`, { entityId, ownerKey });
         for (const tracker of trackers.records) await addLinkIn(tx, ownerKey, saved.ask.id, 'tracked in', String(tracker.get('id')), by);
+        return saved.ask.id;
       });
+      // Counted after the commit, so a retried transaction never counts twice.
+      if (outcome) { report.friendAskNotes.created++; report.created.push({ askId: outcome, from: `note:${noteId}` }); } else report.friendAskNotes.existing++;
     }
 
     const legacy = (await session.run(`MATCH (a:OpenChatPrivateAsk) WHERE a.migratedTo IS NULL
@@ -130,30 +133,32 @@ export async function migrateAsksToOverlay(driver: Driver, database: string, opt
       const input = parseAskInput({ text: cut(String(ask.text ?? '').replace(/\s+/g, ' ').trim() || '(empty)', LIMITS.askLength), asker: asksItself ? { id: ask.entityId } : 'owner', status,
         evidence: { label: 'Private note review', seenAt: typeof ask.createdAt === 'string' ? ask.createdAt.slice(0, 10) : null, noteId: record.get('noteExists') ? ask.sourceNoteId ?? null : null } });
       if (!options.apply) { report.legacyAsks.created++; continue; }
-      await session.executeWrite(async tx => {
+      const outcome = await session.executeWrite(async tx => {
         const by: Provenance = { author: 'owner', source: 'suggestion', assertion: 'inferred' };
         const saved = await saveAskIn(tx, ask.ownerKey, input, by);
-        if (saved.created) {
-          report.legacyAsks.created++;
-          report.created.push({ askId: saved.ask.id, from: `OpenChatPrivateAsk:${ask.id}` });
-          if (!asksItself) await addLinkIn(tx, ask.ownerKey, saved.ask.id, 'is about', ask.entityId, by);
-          // An ask the owner had edited stays protected from its review's undo.
-          if (Number(ask.revision ?? 0) > 0) await updateAskIn(tx, ask.ownerKey, saved.ask.id, { status }, { author: 'owner', source: 'app', assertion: 'stated' });
-        } else report.legacyAsks.existing++;
+        // A topic's ask is the owner's own, linked to the topic (also when that ask already existed, from another card).
+        if (!asksItself) await addLinkIn(tx, ask.ownerKey, saved.ask.id, 'is about', ask.entityId, by);
+        // An ask the owner had edited stays protected from its review's undo.
+        if (saved.created && Number(ask.revision ?? 0) > 0) await updateAskIn(tx, ask.ownerKey, saved.ask.id, { status }, { author: 'owner', source: 'app', assertion: 'stated' });
         await tx.run('MATCH (a:OpenChatPrivateAsk {id: $id, ownerKey: $ownerKey}) SET a.migratedTo = $askId', { id: ask.id, ownerKey: ask.ownerKey, askId: saved.ask.id });
+        let repointed = 0;
         if (ask.reviewId) {
           const reviews = await tx.run('MATCH (r:OpenChatNoteReview {id: $reviewId, ownerKey: $ownerKey}) RETURN r.payload AS payload', { reviewId: ask.reviewId, ownerKey: ask.ownerKey });
           for (const row of reviews.records) {
             const payload = JSON.parse(String(row.get('payload'))) as { createdRecords?: Array<{ id: string; kind: string }> };
-            let changed = false;
-            for (const created of payload.createdRecords ?? []) if (created.kind === 'ask' && created.id === ask.id) { created.id = saved.ask.id; changed = true; }
-            if (changed) {
+            const before = JSON.stringify(payload.createdRecords ?? []);
+            // Undo removes only what the review created: an ask that already existed leaves its ledger.
+            payload.createdRecords = (payload.createdRecords ?? []).flatMap(created => created.kind !== 'ask' || created.id !== ask.id ? [created] : saved.created ? [{ ...created, id: saved.ask.id }] : []);
+            if (JSON.stringify(payload.createdRecords) !== before) {
               await tx.run('MATCH (r:OpenChatNoteReview {id: $reviewId, ownerKey: $ownerKey}) SET r.payload = $payload', { reviewId: ask.reviewId, ownerKey: ask.ownerKey, payload: JSON.stringify(payload) });
-              report.legacyAsks.reviewsRepointed++;
+              repointed++;
             }
           }
         }
+        return { askId: saved.ask.id, created: saved.created, repointed };
       });
+      report.legacyAsks.reviewsRepointed += outcome.repointed;
+      if (outcome.created) { report.legacyAsks.created++; report.created.push({ askId: outcome.askId, from: `OpenChatPrivateAsk:${ask.id}` }); } else report.legacyAsks.existing++;
     }
   } finally { await session.close(); }
   return report;

@@ -3,7 +3,7 @@
  * people they know are asking for, and their own asks. One home for asks;
  * only the owner ever sees this section, whatever an ask's exposure says.
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { api, type OverlayAsk, type OverlayAskStatus } from '../api/client';
@@ -32,18 +32,22 @@ export function PeopleAsks({ onOpenAsker }: { onOpenAsker: (asker: NonNullable<O
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (closed = showClosed) => {
+  // Only the latest load may set the list, and every reload uses the current closed-asks choice.
+  const latest = useRef(0), closedRef = useRef(showClosed);
+  const load = useCallback(async (closed = closedRef.current) => {
+    const request = ++latest.current;
     setLoading(true);
     try {
       const result = await api.listAsks({ status: closed ? 'all' : 'open,stale', limit: 200 });
+      if (request !== latest.current) return;
       setAsks(result.asks);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load asks.');
+      if (request === latest.current) setError(err instanceof Error ? err.message : 'Could not load asks.');
     } finally {
-      setLoading(false);
+      if (request === latest.current) setLoading(false);
     }
-  }, [showClosed]);
+  }, []);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const change = async (ask: OverlayAsk, patch: { status?: OverlayAskStatus; recheckedNow?: true }) => {
@@ -62,7 +66,9 @@ export function PeopleAsks({ onOpenAsker }: { onOpenAsker: (asker: NonNullable<O
     if (!text) return;
     setBusyId('new');
     try {
-      await api.saveAsk({ asker: 'self', text });
+      const saved = await api.saveAsk({ asker: 'self', text });
+      // The same ask saved before and since closed: saving it again reopens it.
+      if (!saved.created && (saved.ask.status === 'fulfilled' || saved.ask.status === 'withdrawn')) await api.updateAsk(saved.ask.id, { status: 'open' });
       setDraft('');
       await load();
     } catch (err) {
@@ -111,7 +117,7 @@ export function PeopleAsks({ onOpenAsker }: { onOpenAsker: (asker: NonNullable<O
     <View style={styles.root}>
       <View style={styles.heading}>
         <Text style={[styles.eyebrow, { color: c.primary }]}>PEOPLE'S ASKS · ONLY YOU SEE THESE</Text>
-        <TouchableOpacity accessibilityRole="switch" accessibilityState={{ checked: showClosed }} onPress={() => { const next = !showClosed; setShowClosed(next); void load(next); }} style={styles.toggle}>
+        <TouchableOpacity accessibilityRole="switch" accessibilityState={{ checked: showClosed }} onPress={() => { const next = !showClosed; closedRef.current = next; setShowClosed(next); void load(next); }} style={styles.toggle}>
           <Text style={{ ...type.label, fontWeight: '600', color: c.textSecondary }}>{showClosed ? 'Hide closed' : 'Show closed'}</Text>
         </TouchableOpacity>
       </View>

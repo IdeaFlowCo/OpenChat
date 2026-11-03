@@ -139,7 +139,12 @@ export class OverlayStore {
     return this.write(async tx => {
       const current = await entity(tx, ownerKey, id), now = new Date().toISOString();
       // An ask's name follows its text and it has no refs: edit it with updateAsk.
-      if (current.kind === 'ask' && (name !== undefined || kind !== undefined || addRef !== undefined)) fail(409, 'ask_fields');
+      if (current.kind === 'ask' && (name !== undefined || kind !== undefined || addRef !== undefined || patch.card)) fail(409, 'ask_fields');
+      // An asker keeps a kind that can ask while it has asks.
+      if (kind !== undefined && kind !== current.kind && !ASKER_KINDS.includes(kind)) {
+        const asks = await tx.run("MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask', askerId: $id}) RETURN count(a) AS total", { ownerKey, id });
+        if (number(asks.records[0]?.get('total'))) fail(409, 'has_asks');
+      }
       const nextName = name ?? current.name, nextKind = kind ?? current.kind;
       if (nextKind !== current.kind && !current.refs.every(isSeparateRef)) fail(409, 'kind_fixed');
       if (nextName !== current.name || nextKind !== current.kind) {
@@ -245,7 +250,7 @@ export class OverlayStore {
     const kind = filter.kind === undefined || filter.kind === null || filter.kind === '' ? null : cleanKind(filter.kind);
     return this.read(async tx => {
       const result = await tx.run(`MATCH (e:OverlayEntity {ownerKey: $ownerKey})
-        WHERE ($kind IS NULL OR e.kind = $kind) AND ($q = '' OR e.nameKey CONTAINS $q)
+        WHERE (CASE WHEN $kind IS NULL THEN e.kind <> 'ask' ELSE e.kind = $kind END) AND ($q = '' OR e.nameKey CONTAINS $q)
         RETURN ${ENTITY} AS entity ORDER BY e.nameKey LIMIT 50`, { ownerKey, q, kind });
       return result.records.map(record => entityFrom(record.get('entity') as Record<string, unknown>));
     });
@@ -335,7 +340,7 @@ export class OverlayStore {
   async due(principal: OverlayPrincipal | null, now = new Date()): Promise<DueEntity[]> {
     const ownerKey = this.owner(principal);
     return this.read(async tx => {
-      const result = await tx.run(`MATCH (e:OverlayEntity {ownerKey: $ownerKey}) WHERE e.cadenceDays IS NOT NULL
+      const result = await tx.run(`MATCH (e:OverlayEntity {ownerKey: $ownerKey}) WHERE e.cadenceDays IS NOT NULL AND e.kind <> 'ask'
         RETURN ${ENTITY} AS entity LIMIT 5000`, { ownerKey });
       return result.records.map(record => entityFrom(record.get('entity') as Record<string, unknown>))
         .filter(value => value.card.nextDueAt !== null && Date.parse(value.card.nextDueAt) <= now.getTime())
@@ -371,7 +376,12 @@ export class OverlayStore {
   async updateAsk(principal: OverlayPrincipal | null, id: unknown, patch: unknown, provenance?: unknown): Promise<Ask> {
     const ownerKey = this.owner(principal), change = parseAskPatch(patch), by = cleanProvenance(provenance);
     if (!isId(id)) return fail(404, 'not_found');
-    return this.write(tx => updateAskIn(tx, ownerKey, id, change, by));
+    try { return await this.write(tx => updateAskIn(tx, ownerKey, id, change, by)); }
+    catch (error) {
+      // Two edits racing to give two asks of one asker the same text: the loser is a duplicate, not an outage.
+      if ((error as { code?: string })?.code === 'Neo.ClientError.Schema.ConstraintValidationFailed') return fail(409, 'duplicate_ask');
+      throw error;
+    }
   }
 
   /**
@@ -638,9 +648,10 @@ export async function updateLinkIn(tx: Runner, ownerKey: string, linkId: string,
   if (!isId(linkId)) return fail(404, 'not_found');
   const patch = parseLinkPatch(change);
   const found = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey})-[l:OVERLAY_LINK {id: $linkId}]->(b:OverlayEntity {ownerKey: $ownerKey})
-    WHERE l.ownerKey = $ownerKey SET a._lock = true REMOVE a._lock RETURN a.id AS fromId, b.id AS toId, a.kind AS fromKind, l.relation AS relation`, { ownerKey, linkId });
+    WHERE l.ownerKey = $ownerKey SET a._lock = true REMOVE a._lock RETURN a.id AS fromId, b.id AS toId, a.kind AS fromKind, l.relation AS relation, ${ASKER_LINK} AS askerLink`, { ownerKey, linkId });
   const row = found.records[0];
   if (!row) return fail(404, 'not_found');
+  if (row.get('askerLink') === true) fail(409, 'ask_fields');
   const fromId = String(row.get('fromId')), toId = String(row.get('toId')), fromKind = row.get('fromKind') as EntityKind, other = await entity(tx, ownerKey, toId);
   const now = new Date().toISOString();
   // Fields edited in place; a null value removes the property (reads back as null).
@@ -676,9 +687,14 @@ export async function updateLinkIn(tx: Runner, ownerKey: string, linkId: string,
 export async function deleteLinkIn(tx: Runner, ownerKey: string, linkId: string): Promise<void> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
   if (!isId(linkId)) return fail(404, 'not_found');
-  const result = await tx.run('MATCH ()-[l:OVERLAY_LINK {id: $linkId}]->() WHERE l.ownerKey = $ownerKey DELETE l RETURN count(*) AS removed', { linkId, ownerKey });
-  if (!number(result.records[0]?.get('removed'))) fail(404, 'not_found');
+  const found = await tx.run(`MATCH (a:OverlayEntity)-[l:OVERLAY_LINK {id: $linkId}]->(b:OverlayEntity) WHERE l.ownerKey = $ownerKey RETURN ${ASKER_LINK} AS askerLink`, { linkId, ownerKey });
+  if (!found.records.length) return fail(404, 'not_found');
+  // The asker link goes only with its ask (or its asker).
+  if (found.records[0]!.get('askerLink') === true) fail(409, 'ask_fields');
+  await tx.run('MATCH ()-[l:OVERLAY_LINK {id: $linkId}]->() WHERE l.ownerKey = $ownerKey DELETE l', { linkId, ownerKey });
 }
+/** Whether link `l` from `a` to `b` is an ask's asker link (kept in step with the ask's askerId). */
+const ASKER_LINK = "(b.kind = 'ask' AND b.askerId = a.id AND l.relation = 'asks')";
 
 type Runner = Pick<ManagedTransaction, 'run'>;
 const NEIGHBOURHOOD = { entities: 100, links: 200 } as const;
