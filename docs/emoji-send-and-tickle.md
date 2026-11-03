@@ -11,16 +11,16 @@ emoji sits where **Send** is.
 - **Press and hold** and it swells out of the composer; release to send it at
   the size reached. There are four sizes (`HOLD_LEVEL_MS` in
   `apps/mobile/src/utils/emojiMessage.ts`: 0 / 350 / 900 / 1600 ms), each
-  crossing gives a light haptic tick on native. The hold belongs to the button
-  until the finger lifts: the press is not cancelable, and on touch web the
-  browser may not take it over with its own long-press (context menu, text
-  selection, callout or pan), which used to send the emoji early at size 1–2
-  (OpenChat-o6t5; `apps/server/test/emojiHold.mobile.test.ts`).
+  crossing gives a light haptic tick on native. The button resists responder
+  cancellation and suppresses browser long-press and touch gestures on web;
+  if a press is terminated, it still sends at the size reached. See
+  `apps/server/test/emojiHold.mobile.test.ts`.
 - The button disappears as soon as anything is typed or attached, while a
   message is being edited, and while a voice note records. On native it sits
   beside the mic.
 - A message that is exactly one emoji renders large and without a bubble (as in
-  iMessage); a held send renders larger still.
+  iMessage); a held send renders larger still, including after reloading the
+  conversation. Older messages without a size render at size 1.
 
 ### Choosing the emoji
 
