@@ -6,19 +6,10 @@
  * Levels follow HOLD_LEVEL_MS in utils/emojiMessage.ts; each crossing gives a
  * light haptic tick so the growth can be felt without looking.
  *
- * The hold must belong to this button until the finger lifts (OpenChat-o6t5).
- * On touch web, react-native-web ends a Pressable's press when the browser's
- * own long-press starts (context menu, text selection, a pan that cancels the
- * touch), ~450 ms in. That fired onPressOut early, so the emoji was sent at
- * size 1-2 while the user was still holding and every later growth step was
- * lost. So: the press cannot be cancelled by an ancestor or the browser
- * (`cancelable={false}`), a long press is claimed (`onLongPress`, which also
- * makes react-native-web suppress the touch context menu), the glyph is not
- * selectable, and on web the browser may not pan, select or show a callout.
  */
 
 import { useEffect, useRef } from 'react';
-import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View, type ViewStyle, type GestureResponderEvent } from 'react-native';
 import { hapticGrowTick } from '../services/haptics';
 import { type } from '../theme/tokens';
 import { HOLD_LEVEL_MS, MAX_EMOJI_SIZE, holdLevelForDuration, holdScaleForDuration } from '../utils/emojiMessage';
@@ -47,10 +38,31 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
     if (ticker.current) clearInterval(ticker.current);
     ticker.current = null;
   };
-  useEffect(() => stopTicker, []);
+  const removePointerListeners = useRef<(() => void) | null>(null);
+  useEffect(() => () => {
+    stopTicker();
+    removePointerListeners.current?.();
+  }, []);
 
-  const begin = () => {
+  const begin = (event: GestureResponderEvent) => {
     if (disabled || heldSince.current !== null) return;
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const nativeEvent = event.nativeEvent as unknown as { type?: string; pointerId?: number };
+      if (nativeEvent.type && /^(pointerdown|mousedown|touchstart)$/.test(nativeEvent.type)) {
+        const pointerId = nativeEvent.pointerId;
+        const release = (e: PointerEvent) => {
+          if (pointerId !== undefined && e.pointerId !== pointerId) return;
+          finish(true);
+        };
+        window.addEventListener('pointerup', release);
+        window.addEventListener('pointercancel', release);
+        removePointerListeners.current = () => {
+          window.removeEventListener('pointerup', release);
+          window.removeEventListener('pointercancel', release);
+          removePointerListeners.current = null;
+        };
+      }
+    }
     heldSince.current = Date.now();
     level.current = 1;
     scale.stopAnimation();
@@ -72,6 +84,7 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
   };
 
   const finish = (send: boolean) => {
+    removePointerListeners.current?.();
     stopTicker();
     if (heldSince.current === null) return;
     const heldMs = Date.now() - heldSince.current;
@@ -89,7 +102,7 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
     <View style={styles.slot}>
       <Pressable
         onPressIn={begin}
-        onPressOut={() => finish(true)}
+        onPressOut={() => { if (!removePointerListeners.current) finish(true); }}
         onLongPress={claimLongPress}
         cancelable={false}
         disabled={disabled}

@@ -6,7 +6,7 @@ import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type PressProps = {
-  onPressIn?: () => void;
+  onPressIn?: (event: { nativeEvent: { type: string; pointerId?: number } }) => void;
   onPressOut?: () => void;
   onLongPress?: () => void;
   cancelable?: boolean;
@@ -40,19 +40,17 @@ vi.mock('../../mobile/src/services/haptics', () => ({ hapticGrowTick: vi.fn() })
 import { EmojiSendButton } from '../../mobile/src/components/EmojiSendButton.js';
 import { HOLD_LEVEL_MS, MAX_EMOJI_SIZE } from '../../mobile/src/utils/emojiMessage.js';
 
-/**
- * What react-native-web does when the browser starts its own long-press
- * gesture on a touch screen while a Pressable is held: ResponderSystem treats
- * `contextmenu` and `selectionchange` as terminate events that the responder
- * may refuse, and PressResponder's onResponderTerminationRequest refuses only
- * when the Pressable is `cancelable={false}` (or, for contextmenu on touch,
- * when it has an `onLongPress`). A terminated press deactivates, which calls
- * onPressOut — while the finger is still on the glass.
- */
-function browserLongPress(props: PressProps, event: 'contextmenu' | 'selectionchange') {
-  const refusedByLongPress = event === 'contextmenu' && props.onLongPress != null;
-  const refused = refusedByLongPress || props.cancelable === false;
-  if (!refused) props.onPressOut?.();
+function browserLongPress(props: PressProps, event: 'contextmenu' | 'selectionchange' | 'scroll') {
+  if (event !== 'contextmenu' || !props.onLongPress) props.onPressOut?.();
+}
+
+let windowTarget: EventTarget;
+let addListener: ReturnType<typeof vi.spyOn>;
+let removeListener: ReturnType<typeof vi.spyOn>;
+function pointerEvent(type: string, pointerId = 1) {
+  const event = new Event(type);
+  Object.defineProperty(event, 'pointerId', { value: pointerId });
+  windowTarget.dispatchEvent(event);
 }
 
 let onSend: ReturnType<typeof vi.fn>;
@@ -64,26 +62,32 @@ async function mount() {
 }
 
 async function hold(ms: number, during?: (props: PressProps) => void) {
-  await act(async () => { rn.press!.onPressIn?.(); });
+  await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: rn.os === 'web' ? 'pointerdown' : 'touchstart', pointerId: 1 } }); });
   // The platform long-press arrives just after its ~450-500 ms delay.
   if (during && ms > 500) {
     await act(async () => { vi.advanceTimersByTime(500); });
     during(rn.press!);
+    expect(onSend).not.toHaveBeenCalled();
     await act(async () => { vi.advanceTimersByTime(ms - 500); });
   } else {
     await act(async () => { vi.advanceTimersByTime(ms); });
   }
-  await act(async () => { rn.press!.onPressOut?.(); });
+  await act(async () => { rn.press!.onPressOut?.(); if (rn.os === 'web') pointerEvent('pointerup'); });
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-03T00:00:00Z'));
+  windowTarget = new EventTarget();
+  vi.stubGlobal('window', windowTarget);
+  addListener = vi.spyOn(windowTarget, 'addEventListener');
+  removeListener = vi.spyOn(windowTarget, 'removeEventListener');
   rn.os = 'web';
   rn.press = null;
 });
 afterEach(() => {
   act(() => root?.unmount());
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -104,7 +108,7 @@ describe('EmojiSendButton hold-to-grow', () => {
     }
   });
 
-  for (const event of ['contextmenu', 'selectionchange'] as const) {
+  for (const event of ['contextmenu', 'selectionchange', 'scroll'] as const) {
     it(`a full hold survives the browser's long-press ${event} on touch web`, async () => {
       await mount();
       await hold(1700, props => browserLongPress(props, event));
@@ -114,6 +118,37 @@ describe('EmojiSendButton hold-to-grow', () => {
       expect(onSend).toHaveBeenCalledWith(MAX_EMOJI_SIZE);
     });
   }
+
+  it('sends keyboard presses on press out', async () => {
+    await mount();
+    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'keydown' } }); });
+    await act(async () => { rn.press!.onPressOut?.(); });
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(1);
+    expect(addListener).not.toHaveBeenCalled();
+  });
+
+  it('removes pointer listeners on cancellation and unmount', async () => {
+    await mount();
+    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'pointerdown', pointerId: 1 } }); });
+    await act(async () => { pointerEvent('pointercancel'); });
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(1);
+    expect(removeListener).toHaveBeenCalledTimes(2);
+    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'pointerdown', pointerId: 1 } }); });
+    act(() => root.unmount());
+    expect(removeListener).toHaveBeenCalledTimes(4);
+    pointerEvent('pointerup');
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a different pointer and removes listeners after release', async () => {
+    await mount();
+    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'pointerdown', pointerId: 1 } }); });
+    await act(async () => { pointerEvent('pointerup', 2); });
+    expect(onSend).not.toHaveBeenCalled();
+    await act(async () => { pointerEvent('pointerup'); });
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(1);
+    expect(removeListener).toHaveBeenCalledTimes(2);
+  });
 
   it('on web the button forbids panning, selection and the iOS callout, and the glyph is not selectable', async () => {
     await mount();
