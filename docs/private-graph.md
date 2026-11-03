@@ -186,6 +186,39 @@ Account export includes the owner's private graph under `privateGraph`
 kept, under either identity that can name them, and removes other owners'
 entities that knew them only as an OpenChat account.
 
+## Asks
+
+Since 2026-11-03 (OpenChat-2fsy.1) asks have one home: the overlay's `ask`
+kind (Noos `docs/PEOPLE_OVERLAY.md`, "Asks"). An ask is the owner's own
+(`asker: 'self'`) or a person's they know (an OpenChat person, an Unlinked
+person, or a saved person, company, project or idea), with a `horizon`
+(`event`/`short`/`medium`/`evergreen`: 7/14/60/90 days to `recheckAfter`),
+`status` (`open`, `fulfilled`, `withdrawn`, `stale`), `exposure` (`only_me` by
+default) and optional `evidence`. Only the owner ever sees an ask: `exposure`
+records whom they mean it for and widens nothing yet. The same asker and text
+is one ask. An asker's card lists their asks as `asks` links; deleting a saved
+person deletes the asks they made.
+
+| Route | Does |
+|---|---|
+| `GET /api/private/asks?asker=self\|others&askerKind=&askerId=&status=&q=&needsRecheck=&limit=` | Open and stale asks first, by recheck date; `status` one value, a comma list or `all`. |
+| `POST /api/private/asks` `{asker, text, horizon?, recheckAfter?, status?, exposure?, exposureConversationId?, evidence?}` | Save; 201 created, 200 existing. `asker` is `'self'` or `{kind: user\|thing\|unlinked, id}`. `this_chat` needs a conversation the owner is in. |
+| `GET /api/private/asks/:id`, `PATCH /api/private/asks/:id`, `DELETE /api/private/asks/:id` | Read, edit (`recheckedNow: true` records a recheck), forget. PATCH also takes the card's old statuses `active`/`paused`/`closed` (open/stale/withdrawn). |
+
+Standing asks captured on a private card, and asks a note review extracts,
+are saved as overlay asks by that card's subject (a topic's become the
+owner's own, linked `is about`); their evidence names the source note and
+never copies it. `scripts/migrate-asks-to-overlay.mjs` (dry run unless
+`--apply`) moves the earlier `OpenChatPrivateAsk` records and the friends'-asks
+monitor's `[friend-ask v1]` notes into overlay asks, keeping both sources, and
+must run right after the release that ships this.
+
+The **Asks** tab opens with **People's asks · only you see these**: friends'
+asks (each naming who asks, linking to their card), then the owner's own with
+an add field, with Still open / Fulfilled / Withdrawn actions and a closed-asks
+toggle. Agent tools: `oc_save_ask`, `oc_list_asks`, `oc_update_ask`,
+`oc_delete_ask` (connector and agent-key MCP server).
+
 ## In the app and for agents
 
 The contact profile shows a collapsed **Private to you** card. Opened, it keeps
@@ -217,6 +250,7 @@ so. Unlinked people, including imported LinkedIn contacts, are reached with
 `overlayVendor.test.ts` (vendored files match the pinned Noos commit),
 and `privateGraph.integration.test.ts`, `privateGraph.people.integration.test.ts`,
 `privateGraph.provenance.integration.test.ts` (provenance, legacy records,
-relation edits, search, neighbourhood) and `privateNoteReview.integration.test.ts`,
+relation edits, search, neighbourhood), `privateNoteReview.integration.test.ts` and
+`privateAsks.integration.test.ts` (asks, owner isolation, the migration),
 which run against a real Neo4j when
 `NEO4J_TEST_URI`, `NEO4J_TEST_USER` and `NEO4J_TEST_PASSWORD` are set.

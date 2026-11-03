@@ -8,12 +8,12 @@ import { Router, type Request, type Response } from 'express';
 import { resolveActor } from '../middleware/resolveActor.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import {
-  addLink, addNote, createPrivateThing, deleteLink, deleteNote, deletePrivateThing, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
+  addLink, addNote, createPrivateThing, deleteAsk, deleteLink, deleteNote, deletePrivateThing, getAsk, listAsks, saveAsk, updateAsk, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
   parseCardPatch, PrivateGraphError, searchPrivate, updateLink, updateNote, updatePersonCard, updatePrivateThing,
 } from '../services/privateGraph.js';
 import type { Provenance } from '../services/privateGraph.js';
 
-import { captureNoteReview, listNoteReviews, suggestNoteReview, applyNoteReview, undoNoteReview, updatePrivateAsk } from '../services/privateNoteReview.js';
+import { captureNoteReview, listNoteReviews, suggestNoteReview, applyNoteReview, undoNoteReview } from '../services/privateNoteReview.js';
 
 const router = Router();
 // The owner's session, or an agent key the owner issued. A key needs `read` to
@@ -179,7 +179,27 @@ router.post('/note-reviews/:reviewId/apply', async (req: Request, res: Response)
 router.post('/note-reviews/:reviewId/undo', async (req: Request, res: Response) => {
   try { res.json(await undoNoteReview(owner(req), id(req, 'reviewId'))); } catch (error) { fail(error, res); }
 });
+// Asks: the overlay's `ask` kind, the owner's own and the people they know (OpenChat-2fsy.1). Owner-only.
+router.get('/asks', async (req: Request, res: Response) => {
+  try {
+    const { status, asker, askerKind, askerId, q, needsRecheck, limit } = req.query;
+    res.json(await listAsks(owner(req), { status, asker, askerKind, askerId, q, needsRecheck, limit }));
+  } catch (error) { fail(error, res); }
+});
+router.post('/asks', async (req: Request, res: Response) => {
+  try {
+    const result = await saveAsk(owner(req), req.body, provenanceFor(req));
+    res.status(result.created ? 201 : 200).json(result);
+  } catch (error) { fail(error, res); }
+});
+router.get('/asks/:askId', async (req: Request, res: Response) => {
+  try { res.json({ ask: await getAsk(owner(req), id(req, 'askId')) }); } catch (error) { fail(error, res); }
+});
+// Also takes the note-review statuses the app used before (active, paused, closed).
 router.patch('/asks/:askId', async (req: Request, res: Response) => {
-  try { res.json(await updatePrivateAsk(owner(req), id(req, 'askId'), req.body)); } catch (error) { fail(error, res); }
+  try { res.json({ ask: await updateAsk(owner(req), id(req, 'askId'), req.body, provenanceFor(req)) }); } catch (error) { fail(error, res); }
+});
+router.delete('/asks/:askId', async (req: Request, res: Response) => {
+  try { res.json(await deleteAsk(owner(req), id(req, 'askId'))); } catch (error) { fail(error, res); }
 });
 export default router;
