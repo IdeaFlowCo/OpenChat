@@ -12,6 +12,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
+import { securityEvent } from '../services/securityEvent.js';
 import crypto from 'node:crypto';
 import { getDriver } from '../db.js';
 import { validateToken } from './auth.js';
@@ -176,6 +177,7 @@ export async function resolveActor(
   // expiry and named user. Never reinterpret its bearer as a legacy API key.
   if (req.connectorDelegation) {
     if (req.user?.userId !== req.connectorDelegation.openChatUserId) {
+      securityEvent('api_auth', 'denied', { req, via: 'connector_delegation', reason: 'delegation_user_mismatch' });
       res.status(403).json({ error: 'Delegation denied' });
       return;
     }
@@ -185,6 +187,7 @@ export async function resolveActor(
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith('Bearer ')) {
+    securityEvent('api_auth', 'denied', { req, reason: 'missing_credentials' });
     res.status(401).json({ error: 'Authorization header required' });
     return;
   }
@@ -195,6 +198,7 @@ export async function resolveActor(
   if (!token.startsWith('oc_')) {
     const user = validateToken(token);
     if (!user) {
+      securityEvent('api_auth', 'failure', { req, via: 'jwt', reason: 'invalid_or_expired' });
       res.status(401).json({ error: 'Invalid or expired token' });
       return;
     }
@@ -213,6 +217,7 @@ export async function resolveActor(
   try {
     const resolved = await resolveAgentKey(token);
     if (!resolved) {
+      securityEvent('api_auth', 'failure', { req, via: 'agent_key', reason: 'invalid_expired_or_revoked' });
       res.status(401).json({ error: 'Invalid, expired, or revoked agent key' });
       return;
     }

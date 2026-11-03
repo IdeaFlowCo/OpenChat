@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { securityEvent } from '../services/securityEvent.js';
 import { Router } from 'express';
 import { getDriver } from '../db.js';
 
@@ -31,7 +32,7 @@ router.post('/partners/ideanetwork/group-roster', async (req, res) => {
   if (!secret || secret.length < 32) { res.status(503).json({ error: 'partner_unavailable' }); return; }
   if (req.headers.origin) { res.status(403).json({ error: 'forbidden' }); return; }
   const digest = (value: string) => createHash('sha256').update(value).digest();
-  if (!timingSafeEqual(digest(req.headers.authorization ?? ''), digest(`Bearer ${secret}`))) { res.status(401).json({ error: 'unauthorized' }); return; }
+  if (!timingSafeEqual(digest(req.headers.authorization ?? ''), digest(`Bearer ${secret}`))) { securityEvent('partner_auth', 'failure', { req, partner: 'partnerGroups', reason: 'invalid_partner_secret' }); res.status(401).json({ error: 'unauthorized' }); return; }
   if (Date.now() - window >= 60000) { window = Date.now(); requests = 0; }
   if (++requests > 600) { res.status(429).json({ error: 'rate_limited' }); return; }
   const input = req.body;

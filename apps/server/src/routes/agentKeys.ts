@@ -16,6 +16,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { securityEvent } from '../services/securityEvent.js';
 import crypto from 'node:crypto';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
@@ -149,6 +150,7 @@ router.post('/', requireAuth, requireDirectSession, async (req: Request, res: Re
     await session.close();
   }
 
+  securityEvent('agent_key_create', 'success', { req, key_id: id, key_prefix: keyPrefix, scopes: resolvedScopes, expires_at: expiresAt ?? null });
   res.status(201).json({
     id,
     name: name.trim(),
@@ -201,6 +203,7 @@ router.get('/:id/reveal', requireAuth, requireDirectSession, async (req: Request
     );
 
     if (result.records.length === 0) {
+      securityEvent('agent_key_reveal', 'failure', { req, key_id: id, reason: 'not_found' });
       res.status(404).json({ error: 'Key not found' });
       return;
     }
@@ -216,10 +219,9 @@ router.get('/:id/reveal', requireAuth, requireDirectSession, async (req: Request
       return;
     }
 
-    // Write audit log entry.
-    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
-      || req.socket.remoteAddress
-      || 'unknown';
+    // Write audit log entry. req.ip honours only our trusted proxy hops
+    // (see TRUSTED_PROXY_SETTING); the leftmost X-Forwarded-For is client-chosen.
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const userAgent = req.headers['user-agent'] ?? 'unknown';
 
     await session.run(
@@ -242,6 +244,7 @@ router.get('/:id/reveal', requireAuth, requireDirectSession, async (req: Request
       }
     );
 
+    securityEvent('agent_key_reveal', 'success', { req, key_id: id });
     res.json({ id, name, key: plainKey });
   } finally {
     await session.close();
@@ -300,6 +303,7 @@ router.patch('/:id', requireAuth, requireDirectSession, async (req: Request, res
     }
 
     const keyData = result.records[0].get('key');
+    securityEvent('agent_key_update', 'success', { req, key_id: id, scopes_changed: scopes !== undefined });
     if (scopes !== undefined) {
       evictFromCache(keyData.keyPrefix);
     }
@@ -334,6 +338,7 @@ router.delete('/:id', requireAuth, requireDirectSession, async (req: Request, re
     });
 
     if (result.records.length === 0) {
+      securityEvent('agent_key_revoke', 'failure', { req, key_id: id, reason: 'not_found' });
       res.status(404).json({ error: 'Key not found or already revoked' });
       return;
     }
@@ -342,6 +347,7 @@ router.delete('/:id', requireAuth, requireDirectSession, async (req: Request, re
     const keyPrefix = result.records[0].get('keyPrefix') as string;
     evictFromCache(keyPrefix);
 
+    securityEvent('agent_key_revoke', 'success', { req, key_id: id, key_prefix: keyPrefix });
     res.json({ ok: true });
   } finally {
     await session.close();

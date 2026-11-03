@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { securityEvent } from '../services/securityEvent.js';
 
 export interface AuthUser {
   userId: string;
@@ -58,6 +59,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith('Bearer ')) {
+    securityEvent('api_auth', 'denied', { req, reason: 'missing_credentials' });
     res.status(401).json({ error: 'Authorization header required' });
     return;
   }
@@ -66,6 +68,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   const user = validateToken(token);
 
   if (!user) {
+    securityEvent('api_auth', 'failure', { req, via: 'jwt', reason: 'invalid_or_expired' });
     res.status(401).json({ error: 'Invalid or expired token' });
     return;
   }
@@ -81,6 +84,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
  */
 export function requireDirectSession(req: Request, res: Response, next: NextFunction): void {
   if (req.user?.embedded) {
+    securityEvent('api_auth', 'denied', { req, reason: 'embedded_session' });
     res.status(403).json({ error: 'Sign in to OpenChat directly to do this' });
     return;
   }
