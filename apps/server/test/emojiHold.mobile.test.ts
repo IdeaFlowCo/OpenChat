@@ -24,7 +24,7 @@ vi.mock('react-native', async () => {
     stopAnimation() {}
     interpolate() { return this; }
   }
-  const Pressable = (props: PressProps) => { rn.press = props; return ReactActual.createElement('pressable', null, props.children); };
+  const Pressable = (props: PressProps & { ref?: React.Ref<unknown> }) => { rn.press = props; return ReactActual.createElement('pressable', { ref: props.ref }, props.children); };
   const Text = (props: Record<string, unknown>) => { rn.text = props; return ReactActual.createElement('text', null, props.children as React.ReactNode); };
   const View = (props: { children?: React.ReactNode }) => ReactActual.createElement('view', null, props.children);
   return {
@@ -44,22 +44,25 @@ function browserLongPress(props: PressProps, event: 'contextmenu' | 'selectionch
   if (event !== 'contextmenu' || !props.onLongPress) props.onPressOut?.();
 }
 
+let hostTarget: EventTarget;
+let hostAdd: ReturnType<typeof vi.spyOn>;
+let hostRemove: ReturnType<typeof vi.spyOn>;
 let windowTarget: EventTarget;
 let documentTarget: EventTarget & { visibilityState: string };
 let documentAdd: ReturnType<typeof vi.spyOn>;
 let documentRemove: ReturnType<typeof vi.spyOn>;
 let addListener: ReturnType<typeof vi.spyOn>;
 let removeListener: ReturnType<typeof vi.spyOn>;
-function pointerEvent(type: string, pointerId = 1) {
+function pointerEvent(type: string, pointerId = 1, target = windowTarget) {
   const event = new Event(type);
   Object.defineProperty(event, 'pointerId', { value: pointerId });
-  windowTarget.dispatchEvent(event);
+  target.dispatchEvent(event);
 }
 
-function touchEvent(type: string, ...identifiers: number[]) {
+function touchEvent(type: string, identifiers: number[], target = windowTarget) {
   const event = new Event(type);
   Object.defineProperty(event, 'changedTouches', { value: identifiers.map(identifier => ({ identifier })) });
-  windowTarget.dispatchEvent(event);
+  target.dispatchEvent(event);
 }
 
 function expectListenersRemoved() {
@@ -70,13 +73,19 @@ function expectListenersRemoved() {
 let onSend: ReturnType<typeof vi.fn>;
 let root: ReturnType<typeof create>;
 
+function pressIn(type: string, id = 1) {
+  if (rn.os === 'web' && type === 'pointerdown') pointerEvent(type, id, hostTarget);
+  if (rn.os === 'web' && type === 'touchstart') touchEvent(type, [id], hostTarget);
+  rn.press!.onPressIn?.({ nativeEvent: { type, pointerId: id, changedTouches: [{ identifier: id > 20 ? id % 20 : id }] } });
+}
+
 async function mount() {
   onSend = vi.fn();
-  await act(async () => { root = create(React.createElement(EmojiSendButton, { emoji: "🍓", onSend })); });
+  await act(async () => { root = create(React.createElement(EmojiSendButton, { emoji: "🍓", onSend }), { createNodeMock: () => hostTarget }); });
 }
 
 async function hold(ms: number, during?: (props: PressProps) => void) {
-  await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: rn.os === 'web' ? 'pointerdown' : 'touchstart', pointerId: 1 } }); });
+  await act(async () => { pressIn(rn.os === 'web' ? 'pointerdown' : 'touchstart'); });
   // The platform long-press arrives just after its ~450-500 ms delay.
   if (during && ms > 500) {
     await act(async () => { vi.advanceTimersByTime(500); });
@@ -92,6 +101,9 @@ async function hold(ms: number, during?: (props: PressProps) => void) {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-03T00:00:00Z'));
+  hostTarget = new EventTarget();
+  hostAdd = vi.spyOn(hostTarget, 'addEventListener');
+  hostRemove = vi.spyOn(hostTarget, 'removeEventListener');
   windowTarget = new EventTarget();
   vi.stubGlobal('window', windowTarget);
   documentTarget = Object.assign(new EventTarget(), { visibilityState: 'visible' });
@@ -147,20 +159,21 @@ describe('EmojiSendButton hold-to-grow', () => {
 
   it('removes pointer listeners on cancellation and unmount', async () => {
     await mount();
-    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'pointerdown', pointerId: 1 } }); });
+    await act(async () => { pressIn('pointerdown'); });
     await act(async () => { pointerEvent('pointercancel'); });
     expect(onSend).toHaveBeenCalledExactlyOnceWith(1);
     expectListenersRemoved();
-    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'pointerdown', pointerId: 1 } }); });
+    await act(async () => { pressIn('pointerdown'); });
     act(() => root.unmount());
     expectListenersRemoved();
+    expect(hostRemove.mock.calls.map(call => call[0]).sort()).toEqual(hostAdd.mock.calls.map(call => call[0]).sort());
     pointerEvent('pointerup');
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
   it('ignores a different pointer and removes listeners after release', async () => {
     await mount();
-    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'pointerdown', pointerId: 1 } }); });
+    await act(async () => { pressIn('pointerdown'); });
     await act(async () => { pointerEvent('pointerup', 2); });
     expect(onSend).not.toHaveBeenCalled();
     await act(async () => { pointerEvent('pointerup'); });
@@ -170,17 +183,17 @@ describe('EmojiSendButton hold-to-grow', () => {
 
   it('waits for the initiating touch and ignores other fingers', async () => {
     await mount();
-    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'touchstart', changedTouches: [{ identifier: 7 }] } }); });
-    await act(async () => { vi.advanceTimersByTime(500); browserLongPress(rn.press!, 'selectionchange'); touchEvent('touchend', 8); });
+    await act(async () => { pressIn('touchstart', 27); });
+    await act(async () => { vi.advanceTimersByTime(500); browserLongPress(rn.press!, 'selectionchange'); touchEvent('touchend', [7]); });
     expect(onSend).not.toHaveBeenCalled();
-    await act(async () => { vi.advanceTimersByTime(1200); touchEvent('touchend', 7); });
+    await act(async () => { vi.advanceTimersByTime(1200); touchEvent('touchend', [27]); });
     expect(onSend).toHaveBeenCalledExactlyOnceWith(MAX_EMOJI_SIZE);
     expectListenersRemoved();
   });
 
   it('ends on blur and ignores later releases', async () => {
     await mount();
-    await act(async () => { rn.press!.onPressIn?.({ nativeEvent: { type: 'pointerdown', pointerId: 1 } }); });
+    await act(async () => { pressIn('pointerdown'); });
     await act(async () => { vi.advanceTimersByTime(1000); windowTarget.dispatchEvent(new Event('blur')); });
     expect(onSend).toHaveBeenCalledExactlyOnceWith(3);
     expectListenersRemoved();

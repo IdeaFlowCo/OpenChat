@@ -8,7 +8,7 @@
  *
  */
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View, type ViewStyle, type GestureResponderEvent } from 'react-native';
 import { hapticGrowTick } from '../services/haptics';
 import { type } from '../theme/tokens';
@@ -33,6 +33,27 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
   const heldSince = useRef<number | null>(null);
   const level = useRef(1);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rawTouch = useRef<number | undefined>(undefined);
+  const rawPointer = useRef<number | undefined>(undefined);
+  const removeHostListeners = useRef<(() => void) | null>(null);
+  const buttonRef = useCallback((node: View | null) => {
+    removeHostListeners.current?.();
+    if (Platform.OS !== 'web' || !node) return;
+    const host = node as unknown as HTMLElement;
+    const touchStart = (event: TouchEvent) => {
+      if (heldSince.current === null) rawTouch.current = event.changedTouches[0]?.identifier;
+    };
+    const pointerDown = (event: PointerEvent) => {
+      if (heldSince.current === null) rawPointer.current = event.pointerId;
+    };
+    host.addEventListener('touchstart', touchStart, true);
+    host.addEventListener('pointerdown', pointerDown, true);
+    removeHostListeners.current = () => {
+      host.removeEventListener('touchstart', touchStart, true);
+      host.removeEventListener('pointerdown', pointerDown, true);
+      removeHostListeners.current = null;
+    };
+  }, []);
 
   const stopTicker = () => {
     if (ticker.current) clearInterval(ticker.current);
@@ -52,16 +73,17 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
         pointerId?: number;
         changedTouches?: ArrayLike<{ identifier: number }>;
       };
-      const touchId = nativeEvent.type === 'touchstart' ? nativeEvent.changedTouches?.[0]?.identifier : undefined;
+      const touchId = nativeEvent.type === 'touchstart' ? rawTouch.current : undefined;
       const isTouch = nativeEvent.type === 'touchstart' && touchId !== undefined;
-      const isPointer = nativeEvent.type === 'pointerdown' && nativeEvent.pointerId !== undefined;
+      const isPointer = nativeEvent.type === 'pointerdown' && rawPointer.current !== undefined;
+      const pointerId = rawPointer.current;
       const isMouse = nativeEvent.type === 'mousedown';
       if (isTouch || isPointer || isMouse) {
         const releaseTouch = (e: TouchEvent) => {
           if (Array.from(e.changedTouches).some(touch => touch.identifier === touchId)) finish(true);
         };
         const releasePointer = (e: PointerEvent) => {
-          if (isPointer ? e.pointerId === nativeEvent.pointerId : e.pointerType === 'mouse') finish(true);
+          if (isPointer ? e.pointerId === pointerId : e.pointerType === 'mouse') finish(true);
         };
         const blur = () => finish(true);
         const visibility = () => { if (document.visibilityState === 'hidden') finish(true); };
@@ -128,6 +150,8 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
     if (heldSince.current === null) return;
     const heldMs = Date.now() - heldSince.current;
     heldSince.current = null;
+    rawTouch.current = undefined;
+    rawPointer.current = undefined;
     scale.stopAnimation();
     Animated.spring(scale, { toValue: 1, friction: 5, tension: 120, useNativeDriver: Platform.OS !== 'web' }).start();
     if (send) onSend(holdLevelForDuration(heldMs));
@@ -140,6 +164,7 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
   return (
     <View style={styles.slot}>
       <Pressable
+        ref={buttonRef}
         onPressIn={begin}
         onPressOut={() => { if (!removePointerListeners.current) finish(true); }}
         onLongPress={claimLongPress}
