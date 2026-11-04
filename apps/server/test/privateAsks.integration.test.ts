@@ -138,7 +138,7 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
     expect(await graph.deleteAsk(alice, mine.ask.id)).toEqual({ deleted: true, id: mine.ask.id });
     expect(await status(() => graph.getAsk(alice, mine.ask.id))).toBe(404);
     const [mayas] = (await graph.listAsks(alice, { q: 'chiropractor' })).asks;
-    await graph.deletePrivateThing(alice, (mayas!.author as { id: string }).id);
+    await graph.deletePrivateThing(alice, (mayas!.authorParty as { id: string }).id);
     expect(await status(() => graph.getAsk(alice, mayas!.id))).toBe(404);
     // A thing that is not an ask is not deleted through the ask route.
     const topic = await graph.resolvePrivateThing(alice, { kind: 'topic', name: `Keep ${suffix}` });
