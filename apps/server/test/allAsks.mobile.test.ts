@@ -41,7 +41,7 @@ describe('canonical All asks in the native client', () => {
     expect(mocks.listAsks).toHaveBeenCalledWith({ direction: 'from_me', status: 'all', q: '', limit: 200 });
     expect(text()).toContain('Only you can currently see this · intended for Only synthetic Vlad');
     await press('Details & sources'); expect(mocks.navigate).toHaveBeenLastCalledWith('AskDetail', { askId: 'canonical-1' });
-    await press('Open source message'); expect(mocks.navigate).toHaveBeenLastCalledWith('Chat', { conversationId: 'agent-chat', entryId: 'source-message' });
+    await press('Open source conversation'); expect(mocks.navigate).toHaveBeenLastCalledWith('Chat', { conversationId: 'agent-chat' });
     await press('Hide closed'); expect(mocks.listAsks).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'open,stale' }));
     await press('For me'); expect(mocks.listAsks).toHaveBeenLastCalledWith(expect.objectContaining({ direction: 'for_me', status: 'open,stale' }));
   });

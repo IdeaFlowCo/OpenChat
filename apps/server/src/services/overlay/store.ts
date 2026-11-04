@@ -871,7 +871,7 @@ export async function saveAskIn(tx: Runner, ownerKey: string, input: AskInput, p
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
   const receipt = input.sourceReceipt;
   const sourceKey = receipt ? createHash('sha256').update(JSON.stringify([receipt.app, receipt.conversationId, receipt.sourceMessageId ?? receipt.messageId, receipt.itemIndex])).digest('hex') : null;
-  const requestHash = receipt ? createHash('sha256').update(JSON.stringify({ ...input, sourceReceipt: { ...receipt, messageId: receipt.sourceMessageId ?? receipt.messageId } })).digest('hex') : null;
+  const requestHash = receipt ? createHash('sha256').update(JSON.stringify({ ...input, sourceReceipt: { ...receipt, sourceMessageId: receipt.sourceMessageId ?? receipt.messageId, messageId: receipt.sourceMessageId ?? receipt.messageId } })).digest('hex') : null;
   if (sourceKey) {
     const locked = await tx.run(`MERGE (s:OverlayAskSource {ownerKey: $ownerKey, sourceKey: $sourceKey})
       SET s._lock = true REMOVE s._lock RETURN s.askId AS askId, s.requestHash AS requestHash`, { ownerKey, sourceKey });

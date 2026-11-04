@@ -125,7 +125,7 @@ export function PeopleAsks({ onOpenPerson, onOpenAsk, onOpenSource }: { onOpenPe
         {onOpenAsk && <TouchableOpacity accessibilityRole="link" onPress={() => onOpenAsk(ask.id)} style={styles.toggle}><Text style={{ ...type.label, color: c.primary }}>Details & sources</Text></TouchableOpacity>}
         {ask.sources?.map(source => <View key={`${source.app}:${source.conversationId}:${source.messageId}:${source.itemIndex}`}>
           <Text style={[styles.meta, { color: c.textMetadata }]}>{source.assertion === 'inferred' ? 'Inferred from' : 'From'} {source.app} · {source.excerpt}</Text>
-          {source.app === 'openchat' && onOpenSource && <TouchableOpacity accessibilityRole="link" onPress={() => onOpenSource(source.conversationId, source.sourceMessageId ?? source.messageId)} style={styles.toggle}><Text style={{ ...type.label, color: c.primary }}>Open source message</Text></TouchableOpacity>}
+          {source.app === 'openchat' && onOpenSource && <TouchableOpacity accessibilityRole="link" onPress={() => onOpenSource(source.conversationId, source.sourceMessageId ?? source.messageId)} style={styles.toggle}><Text style={{ ...type.label, color: c.primary }}>Open source conversation</Text></TouchableOpacity>}
         </View>)}
         <View style={styles.actions}>
           {closed ? action('Reopen', ask, { status: 'open' }) : [
