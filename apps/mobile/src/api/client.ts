@@ -995,7 +995,7 @@ export type OverlayAskPlacement = OverlayAskParty | { kind: 'conversation'; conv
  * carry it) follow. Only the owner ever sees it; `exposure` widens nothing yet.
  */
 export interface OverlayAsk {
-  id: string; text: string; author: OverlayAskParty; carrier: OverlayAskParty | null; placements: OverlayAskPlacement[]; fromMe: boolean; forMe: boolean; horizon: OverlayAskHorizon; recheckAfter: string; needsRecheck: boolean; status: OverlayAskStatus;
+  id: string; text: string; authorParty: OverlayAskParty; author: string | null; own: boolean; asker: OverlayAskParty | null; sources?: { app: string; conversationId: string; messageId: string; itemIndex: number; sourceMessageId?: string | null; excerpt: string; assertion: string; audienceIntent: string | null; recordedAt: string }[]; carrier: OverlayAskParty | null; placements: OverlayAskPlacement[]; fromMe: boolean; forMe: boolean; horizon: OverlayAskHorizon; recheckAfter: string; needsRecheck: boolean; status: OverlayAskStatus;
   exposure: OverlayAskExposure; exposureConversationId: string | null;
   evidence: { quote: string | null; url: string | null; label: string | null; seenAt: string | null; noteId: string | null } | null;
   createdAt: string; updatedAt: string; closedAt: string | null; checkedAt: string | null; recordedBy: string | null; recordedVia: string | null; assertion: string | null;
@@ -1697,6 +1697,7 @@ export const api = {
     const query = Object.entries(filter).filter(([, value]) => value !== undefined).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`).join('&');
     return request<{ asks: OverlayAsk[]; truncated: boolean }>(`/api/private/asks${query ? `?${query}` : ''}`);
   },
+  getAsk: (id: string) => request<{ ask: OverlayAsk }>(`/api/private/asks/${encodeURIComponent(id)}`),
   saveAsk: (body: { author: 'self' | { kind: 'user' | 'thing' | 'unlinked'; id: string }; text: string; horizon?: OverlayAskHorizon; recheckAfter?: string }) =>
     request<{ ask: OverlayAsk; created: boolean }>('/api/private/asks', { method: 'POST', body: JSON.stringify(body) }),
   updateAsk: (id: string, patch: { status?: OverlayAskStatus; recheckedNow?: true; text?: string; horizon?: OverlayAskHorizon; carrier?: 'self' | null }) =>

@@ -104,7 +104,7 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     }
     expect(all.find((value: any) => value.name === 'oc_delete_ask').annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(all.find((value: any) => value.name === 'oc_list_asks').annotations.readOnlyHint).toBe(true);
-    expect(all.find((value: any) => value.name === 'oc_save_ask').inputSchema.required).toEqual(['authorKind', 'text']);
+    expect(all.find((value: any) => value.name === 'oc_save_ask').inputSchema.required).toEqual(['text']);
     expect(all.find((value: any) => value.name === 'oc_list_asks').inputSchema.properties.direction.enum).toEqual(['from_me', 'for_me', 'from_others']);
 
     graph.saveAsk.mockResolvedValue({ ask: { id: 'ask-1' }, created: true });
@@ -118,7 +118,10 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     await tool('oc_save_ask', { authorKind: 'user', authorId: 'bo', carrierKind: 'self', placements: ['self', 'conversation:c7', 'thing:board-1'], text: 'Intro to a sound engineer' });
     expect(graph.saveAsk).toHaveBeenLastCalledWith('owner', { author: { kind: 'user', id: 'bo' }, carrier: 'self', placements: ['self', { kind: 'conversation', id: 'c7' }, { kind: 'thing', id: 'board-1' }], text: 'Intro to a sound engineer' }, CONNECTOR);
     expect((await call('tools/call', { name: 'oc_save_ask', arguments: { authorKind: 'self', text: 'x', exposure: 'everyone' } })).status).toBe(400);
-    expect((await call('tools/call', { name: 'oc_save_ask', arguments: { askerKind: 'self', text: 'x' } })).status).toBe(400);
+    await tool('oc_save_ask', { askerKind: 'self', text: 'legacy own ask' });
+    expect(graph.saveAsk).toHaveBeenLastCalledWith('owner', { asker: 'self', text: 'legacy own ask' }, CONNECTOR);
+    await tool('oc_save_ask', { askerKind: 'user', askerId: 'legacy-bob', text: 'legacy person ask' });
+    expect(graph.saveAsk).toHaveBeenLastCalledWith('owner', { asker: { kind: 'user', id: 'legacy-bob' }, text: 'legacy person ask' }, CONNECTOR);
     expect((await call('tools/call', { name: 'oc_save_ask', arguments: { authorKind: 'self', text: 'x' } }, 'openchat:read')).status).toBe(403);
 
     graph.listAsks.mockResolvedValue({ asks: [], truncated: false });
@@ -126,6 +129,10 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     expect(graph.listAsks).toHaveBeenCalledWith('owner', { direction: 'for_me', status: 'all', q: 'chiro', needsRecheck: 'true' });
     await tool('oc_list_asks', { aboutKind: 'user', aboutId: 'bob' }, 'openchat:read');
     expect(graph.listAsks).toHaveBeenLastCalledWith('owner', { aboutKind: 'user', aboutId: 'bob' });
+    await tool('oc_list_asks', { askerKind: 'user', askerId: 'legacy-bob' }, 'openchat:read');
+    expect(graph.listAsks).toHaveBeenLastCalledWith('owner', { askerKind: 'user', askerId: 'legacy-bob' });
+    await tool('oc_list_asks', { asker: 'self' }, 'openchat:read');
+    expect(graph.listAsks).toHaveBeenLastCalledWith('owner', { asker: 'self' });
     expect((await call('tools/call', { name: 'oc_list_asks', arguments: { direction: 'to_me' } }, 'openchat:read')).status).toBe(400);
 
     graph.updateAsk.mockResolvedValue({ id: 'ask-1', status: 'fulfilled' });

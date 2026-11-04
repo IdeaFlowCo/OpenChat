@@ -169,6 +169,14 @@ async function settleUntil(condition: () => boolean, attempts = 50) {
 }
 
 describe('Profile (MyCard) sign out', () => {
+  it('opens All asks from the owner profile even without a public card or enhanced mode', async () => {
+    mocks.getMyCard.mockRejectedValueOnce(new Error('No public profile/card'));
+    const tree = create(React.createElement(MyCardScreen));
+    await flush();
+    expect(hasText(tree.root, 'All asks')).toBe(true);
+    await act(async () => { buttonLabelled(tree.root, 'All asks').props.onPress(); });
+    expect(mocks.navigation.navigate).toHaveBeenLastCalledWith('AsksList');
+  });
   it('offers Sign out and Settings even when the card request fails', async () => {
     mocks.getMyCard.mockRejectedValueOnce(new Error('boom'));
     const tree = create(React.createElement(MyCardScreen));

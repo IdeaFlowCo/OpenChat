@@ -750,7 +750,7 @@ export async function deletePrivateThing(ownerId: string, thingId: string): Prom
       for (const label of ['OpenChatNoteReview', 'OpenChatPrivateAsk']) await tx.run(`MATCH (n:${label} {ownerKey: $ownerKey, entityId: $thingId}) DETACH DELETE n`, { ownerKey, thingId });
       // A topic's card asks (the owner's own, captured on that card and linked to no other subject) go with it, as they did before asks moved into the overlay.
       const cardAsks = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})-[:OVERLAY_LINK {relation: 'is about'}]->(:OverlayEntity {id: $thingId, ownerKey: $ownerKey})
-        WHERE a.askAuthorSelf = true AND a.evidenceLabel IN $labels AND NOT EXISTS { MATCH (a)-[:OVERLAY_LINK {relation: 'is about'}]->(other:OverlayEntity) WHERE other.id <> $thingId }
+        WHERE coalesce(a.askAuthorSelf, a.askOwn, false) = true AND a.evidenceLabel IN $labels AND NOT EXISTS { MATCH (a)-[:OVERLAY_LINK {relation: 'is about'}]->(other:OverlayEntity) WHERE other.id <> $thingId }
         RETURN a.id AS id`, { ownerKey, thingId, labels: ['Private note review', 'Standing ask on a private card'] });
       for (const record of cardAsks.records) await deleteEntityIn(tx, ownerKey, String(record.get('id')));
       return deleteEntityIn(tx, ownerKey, thingId);
@@ -922,7 +922,7 @@ export type AskPlacementView = AskPartyView | { kind: 'conversation'; conversati
  * owner means it for and widens nothing yet.
  */
 export interface PrivateAskView {
-  id: string; text: string; author: AskPartyView; carrier: AskPartyView | null; placements: AskPlacementView[]; fromMe: boolean; forMe: boolean;
+  id: string; text: string; authorParty: AskPartyView; author: string | null; source: string | null; own: boolean; asker: Exclude<AskPartyView, { kind: 'self' }> | null; sources: Ask['sources']; carrier: AskPartyView | null; placements: AskPlacementView[]; fromMe: boolean; forMe: boolean;
   horizon: AskHorizon; recheckAfter: string; needsRecheck: boolean; status: AskStatus;
   exposure: AskExposure; exposureConversationId: string | null; evidence: AskEvidence | null;
   createdAt: string; updatedAt: string; updatedBy: string | null; closedAt: string | null; checkedAt: string | null; revision: number;
@@ -936,7 +936,7 @@ const CONVERSATION_REF = 'openchat:conversation:';
 const conversationIdOf = (ref: string | null): string | null => ref?.startsWith(CONVERSATION_REF) ? decodeURIComponent(ref.slice(CONVERSATION_REF.length)) : null;
 
 export function parseAskParty(value: unknown, message: string = MESSAGES.invalid_author!): AskPartyInput {
-  if (value === 'self' || value === 'owner') return { kind: 'self' };
+  if (value === 'self' || value === 'owner' || value === 'owner') return { kind: 'self' };
   if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(400, message);
   const input = value as Record<string, unknown>;
   if (input.kind === 'self') return { kind: 'self' };
@@ -987,7 +987,7 @@ async function askViews(ownerId: string, asks: Ask[]): Promise<PrivateAskView[]>
   const blocked = (party: unknown) => { const userId = isEnd(party) ? userIdOf(party.refs) : null; return userId !== null && hidden.has(userId); };
   const party = (value: Ask['author']): AskPartyView | null => value === null ? null : isEnd(value) ? endOf(value, names, connections) : { kind: 'self' };
   return asks.filter(ask => ask.author !== null && !blocked(ask.author) && !blocked(ask.carrier)).map(ask => ({
-    id: ask.id, text: ask.text, author: party(ask.author)!, carrier: party(ask.carrier),
+    id: ask.id, text: ask.text, authorParty: party(ask.author)!, author: ask.recordedBy, source: ask.recordedVia, own: ask.fromMe, asker: ask.fromMe ? null : party(ask.author) as Exclude<AskPartyView, { kind: 'self' }>, sources: ask.sources, carrier: party(ask.carrier),
     placements: ask.placements.filter(place => !blocked(place)).map((place): AskPlacementView => place.kind === 'ref'
       ? (conversationIdOf(place.ref) !== null ? { kind: 'conversation', conversationId: conversationIdOf(place.ref)! } : { kind: 'ref', ref: place.ref }) : party(place as Ask['author'])!),
     fromMe: ask.fromMe, forMe: ask.forMe, horizon: ask.horizon, recheckAfter: ask.recheckAfter,
@@ -1039,6 +1039,7 @@ async function resolveParties(ownerId: string, parsed: { carrier?: AskPartyInput
 export async function saveAsk(ownerId: string, raw: unknown, by: Provenance = OWNER_PROVENANCE): Promise<{ ask: PrivateAskView; created: boolean }> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail(400, MESSAGES.invalid_ask!);
   const { author: rawAuthor, asker, ...rest } = raw as Record<string, unknown>;
+  if (rawAuthor !== undefined && asker !== undefined) fail(400, 'Give author or asker, not both');
   const author = parseAskParty(rawAuthor ?? asker);
   const principal = await ownerPrincipal(ownerId);
   const parsed = await askFields(ownerId, rest);
@@ -1064,10 +1065,21 @@ async function existingEntity(ownerId: string, principal: OverlayPrincipal, subj
  * unlinked) keeps asks that person or thing cares about, carries or is
  * placed on. `status` is one or a comma list, or `all`.
  */
-export async function listAsks(ownerId: string, input: { status?: unknown; direction?: unknown; aboutKind?: unknown; aboutId?: unknown; asker?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown }): Promise<{ asks: PrivateAskView[]; truncated: boolean }> {
+export async function listAsks(ownerId: string, input: { status?: unknown; direction?: unknown; aboutKind?: unknown; aboutId?: unknown; askerKind?: unknown; askerId?: unknown; asker?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown }): Promise<{ asks: PrivateAskView[]; truncated: boolean }> {
   const principal = await ownerPrincipal(ownerId);
-  // Earlier clients: asker=self|others.
-  let direction: unknown = input.direction ?? (input.asker === 'self' || input.asker === 'owner' ? 'from_me' : input.asker === 'others' ? 'from_others' : input.asker);
+  const hasLegacy = input.asker !== undefined || input.askerKind !== undefined || input.askerId !== undefined;
+  if (hasLegacy && (input.direction !== undefined || input.aboutKind !== undefined || input.aboutId !== undefined)) fail(400, 'Give a legacy asker filter or a direction/about filter, not both');
+  let direction: unknown = input.direction;
+  let legacyAsker: unknown;
+  if (input.askerKind !== undefined || input.askerId !== undefined) {
+    if (input.asker !== undefined) fail(400, 'Give asker or askerKind/askerId, not both');
+    const subject = parseAskParty({ kind: input.askerKind, id: input.askerId });
+    legacyAsker = subject.kind === 'self' ? 'owner' : await existingEntity(ownerId, principal, subject);
+    if (!legacyAsker) return { asks: [], truncated: false };
+  } else if (input.asker !== undefined) {
+    if (input.asker !== 'self' && input.asker !== 'owner' && input.asker !== 'others') fail(400, MESSAGES.invalid_direction!);
+    legacyAsker = input.asker === 'self' ? 'owner' : input.asker;
+  }
   if (direction !== undefined && direction !== '' && direction !== 'from_me' && direction !== 'for_me' && direction !== 'from_others') fail(400, MESSAGES.invalid_direction!);
   if (input.aboutKind !== undefined || input.aboutId !== undefined) {
     if (direction) fail(400, 'Give a direction or an aboutKind and aboutId, not both');
@@ -1080,7 +1092,7 @@ export async function listAsks(ownerId: string, input: { status?: unknown; direc
     }
   }
   const status = typeof input.status === 'string' ? input.status.split(',').map(value => LEGACY_ASK_STATUS[value.trim()] ?? value.trim()).join(',') : input.status;
-  const found = await overlayCall(overlay => overlay.listAsks(principal, { status, direction, q: input.q, needsRecheck: input.needsRecheck, limit: input.limit }));
+  const found = await overlayCall(overlay => overlay.listAsks(principal, { status, direction, asker: legacyAsker, q: input.q, needsRecheck: input.needsRecheck, limit: input.limit }));
   return { asks: await askViews(ownerId, found.asks), truncated: found.truncated };
 }
 

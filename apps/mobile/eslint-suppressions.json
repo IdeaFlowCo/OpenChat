@@ -279,11 +279,6 @@
       "count": 28
     }
   },
-  "src/screens/AsksScreen.tsx": {
-    "no-restricted-syntax": {
-      "count": 16
-    }
-  },
   "src/screens/BlockedUsersScreen.tsx": {
     "no-restricted-syntax": {
       "count": 6

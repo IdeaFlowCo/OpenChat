@@ -419,6 +419,17 @@ export const ASK_EXPOSURES = ['only_me', 'this_chat', 'friends', 'public'] as co
 export type AskExposure = (typeof ASK_EXPOSURES)[number];
 export const ASK_DIRECTIONS = ['from_me', 'for_me', 'from_others'] as const;
 export type AskDirection = (typeof ASK_DIRECTIONS)[number];
+/** A source operation is immutable: itemIndex distinguishes separate asks in one message. */
+export interface AskSourceInput { app: string; conversationId: string; messageId: string; itemIndex: number; excerpt: string; assertion: Assertion; audienceIntent: string | null; sourceCreatedAt: string | null; sourceMessageId: string | null }
+export interface AskSourceReceipt extends AskSourceInput { recordedAt: string; recordedBy: string | null }
+export function cleanAskSource(value: unknown): AskSourceInput | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) return fail(400, 'invalid_ask_source');
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some(key => !['app', 'conversationId', 'messageId', 'itemIndex', 'excerpt', 'assertion', 'audienceIntent', 'sourceCreatedAt', 'sourceMessageId'].includes(key))) return fail(400, 'invalid_ask_source');
+  if (!Number.isInteger(input.itemIndex) || Number(input.itemIndex) < 0 || Number(input.itemIndex) > 99) return fail(400, 'invalid_ask_source');
+  return { sourceMessageId: input.sourceMessageId == null ? null : cleanText(input.sourceMessageId, 200, 'invalid_ask_source'), sourceCreatedAt: input.sourceCreatedAt == null ? null : cleanInstant(input.sourceCreatedAt, 'invalid_ask_source'), app: cleanText(input.app, 80, 'invalid_ask_source'), conversationId: cleanText(input.conversationId, 200, 'invalid_ask_source'), messageId: cleanText(input.messageId, 200, 'invalid_ask_source'), itemIndex: Number(input.itemIndex), excerpt: cleanText(input.excerpt, LIMITS.quoteLength, 'invalid_ask_source'), assertion: oneOf(['stated', 'inferred'] as const, input.assertion, 'invalid_ask_source'), audienceIntent: input.audienceIntent == null ? null : cleanText(input.audienceIntent, 300, 'invalid_ask_source') };
+}
 export interface AskEvidence { quote: string | null; url: string | null; label: string | null; seenAt: string | null; noteId: string | null }
 /** A party to an ask: the owner, or one of their entities. */
 export type AskParty = { kind: 'self' } | LinkEnd;
@@ -428,6 +439,7 @@ export type AskPlacement = { kind: 'self' } | LinkEnd | { kind: 'ref'; ref: stri
 export interface AskRecord { recordedBy: string | null; recordedVia: ProvenanceSource | null; assertion: Assertion | null }
 /** The ask's own fields, as an `ask` entity carries them (parties as stored ids; `Ask` resolves them). */
 export interface AskFields extends AskRecord {
+  sources: AskSourceReceipt[];
   text: string; fromMe: boolean; forMe: boolean; horizon: AskHorizon; recheckAfter: string; needsRecheck: boolean; status: AskStatus;
   exposure: AskExposure; exposureChat: string | null; evidence: AskEvidence | null;
   createdAt: string; updatedAt: string; updatedBy: string | null; closedAt: string | null; checkedAt: string | null; revision: number;
@@ -443,6 +455,7 @@ export type AskPartyRef = { self: true } | { id: string };
 /** Where an ask is placed: the owner's stream, an entity, or an app ref. Stored as `self`, `entity:<id>` or the ref itself. */
 export type AskPlacementRef = { self: true } | { id: string } | { ref: string };
 export interface AskInput {
+  sourceReceipt: AskSourceInput | null;
   text: string; author: AskPartyRef; carrier: AskPartyRef | null; placements: AskPlacementRef[]; horizon: AskHorizon; recheckAfter: string | null; status: AskStatus;
   exposure: AskExposure; exposureChat: string | null; evidence: AskEvidence | null;
 }
@@ -450,7 +463,7 @@ export interface AskPatch {
   text?: string; carrier?: AskPartyRef | null; placements?: AskPlacementRef[]; horizon?: AskHorizon; recheckAfter?: string | null; status?: AskStatus; exposure?: AskExposure;
   exposureChat?: string | null; evidence?: AskEvidence | null; recheckedNow?: true;
 }
-export interface AskFilter { status: AskStatus[] | null; direction: AskDirection | null; about: string | null; q: string; needsRecheck: boolean; limit: number }
+export interface AskFilter { status: AskStatus[] | null; direction: AskDirection | null; about: string | null; authorId?: string; q: string; needsRecheck: boolean; limit: number }
 
 const oneOf = <T extends string>(values: readonly T[], value: unknown, code: string): T => values.includes(value as T) ? value as T : fail(400, code);
 /** Ask text: up to 1,000 characters, control characters stripped, whitespace collapsed. */
@@ -485,7 +498,7 @@ function cleanExposure(exposure: unknown, chat: unknown): { exposure: AskExposur
 }
 /** A party: `'self'` (or `{self: true}`) for the owner, or `{id}` of one of their entities. */
 export function cleanAskParty(value: unknown, code: string): AskPartyRef {
-  if (value === 'self' || (value && typeof value === 'object' && !Array.isArray(value) && (value as Record<string, unknown>).self === true && Object.keys(value).length === 1)) return { self: true };
+  if (value === 'self' || value === 'owner' || (value && typeof value === 'object' && !Array.isArray(value) && ((value as Record<string, unknown>).self === true || (value as Record<string, unknown>).own === true) && Object.keys(value).length === 1)) return { self: true };
   if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 1 && isId((value as Record<string, unknown>).id)) return { id: (value as { id: string }).id };
   return fail(400, code);
 }
@@ -504,14 +517,15 @@ export function cleanAskPlacements(value: unknown): AskPlacementRef[] {
 }
 /** How a placement is stored: `self`, `entity:<id>`, or the ref (refs always contain two colons; `self` and `entity:` never do). */
 export const placementKey = (placement: AskPlacementRef): string => 'self' in placement ? 'self' : 'id' in placement ? `entity:${placement.id}` : placement.ref;
-const ASK_INPUT_KEYS = ['text', 'author', 'carrier', 'placements', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureChat', 'evidence'];
+const ASK_INPUT_KEYS = ['text', 'author', 'asker', 'carrier', 'placements', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureChat', 'evidence', 'sourceReceipt'];
 /** A new ask. `author` (who cares) is required: `'self'` or `{id}`; `carrier` and `placements` are optional. */
 export function parseAskInput(value: unknown): AskInput {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(400, 'invalid_ask');
   const input = value as Record<string, unknown>;
   if (Object.keys(input).some(key => !ASK_INPUT_KEYS.includes(key))) return fail(400, 'invalid_ask');
+  if (input.author !== undefined && input.asker !== undefined) return fail(400, 'invalid_ask');
   return {
-    text: cleanAskText(input.text), author: cleanAskParty(input.author, 'invalid_author'),
+    sourceReceipt: cleanAskSource(input.sourceReceipt), text: cleanAskText(input.text), author: cleanAskParty(input.author ?? input.asker, 'invalid_author'),
     carrier: input.carrier === undefined || input.carrier === null ? null : cleanAskParty(input.carrier, 'invalid_carrier'),
     placements: cleanAskPlacements(input.placements),
     horizon: input.horizon === undefined || input.horizon === null ? 'medium' : oneOf(ASK_HORIZONS, input.horizon, 'invalid_horizon'),
@@ -554,7 +568,7 @@ export function parseAskPatch(value: unknown): AskPatch {
  * `from_others` or `about:<entity id>` (that entity is the author, the
  * carrier or a placement).
  */
-export function parseAskFilter(value: { status?: unknown; direction?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown } = {}): AskFilter {
+export function parseAskFilter(value: { status?: unknown; direction?: unknown; asker?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown } = {}): AskFilter {
   let status: AskStatus[] | null = ['open', 'stale'];
   if (value.status === 'all') status = null;
   else if (typeof value.status === 'string' && value.status) status = [...new Set(value.status.split(',').map(part => oneOf(ASK_STATUSES, part.trim(), 'invalid_status')))];
@@ -562,11 +576,19 @@ export function parseAskFilter(value: { status?: unknown; direction?: unknown; q
   let direction: AskDirection | null = null, about: string | null = null;
   if (typeof value.direction === 'string' && value.direction.startsWith('about:')) about = isId(value.direction.slice(6)) ? value.direction.slice(6) : fail(400, 'invalid_direction');
   else if (value.direction !== undefined && value.direction !== null && value.direction !== '') direction = oneOf(ASK_DIRECTIONS, value.direction, 'invalid_direction');
+  let authorId: string | undefined;
+  if (value.asker !== undefined && value.asker !== null && value.asker !== '') {
+    if (value.direction !== undefined && value.direction !== null && value.direction !== '') return fail(400, 'invalid_direction');
+    if (value.asker === 'owner' || value.asker === 'self') direction = 'from_me';
+    else if (value.asker === 'others') direction = 'from_others';
+    else if (isId(value.asker)) authorId = value.asker;
+    else return fail(400, 'invalid_asker');
+  }
   const q = typeof value.q === 'string' ? nameKey(value.q).slice(0, LIMITS.nameLength) : '';
   const needsRecheck = value.needsRecheck === true || value.needsRecheck === 'true';
   const raw = typeof value.limit === 'string' && /^\d{1,3}$/.test(value.limit) ? Number(value.limit) : value.limit;
   const limit = typeof raw === 'number' && Number.isInteger(raw) && raw >= 1 ? Math.min(raw, 200) : 100;
-  return { status, direction, about, q, needsRecheck, limit };
+  return { status, direction, about, ...(authorId ? { authorId } : {}), q, needsRecheck, limit };
 }
 /** When an ask is next due for a recheck: the given instant, or the horizon's default days from `from`. */
 export const askRecheckAfter = (horizon: AskHorizon, from: string, given: string | null = null): string =>
@@ -576,3 +598,22 @@ export const askName = (text: string): string => text.length <= LIMITS.nameLengt
 /** The identity of an ask for one owner: who cares and what, so the same ask saved twice is one. */
 export const askKeyOf = (author: AskPartyRef, text: string): string =>
   createHash('sha256').update(`${'self' in author ? 'owner' : `entity:${author.id}`}\n${nameKey(text)}`).digest('hex');
+
+/** Unversioned HTTP remains additive for installed clients. Domain author is a party. */
+export function askToWire(ask: Ask) {
+  return { ...ask, authorParty: ask.author, own: ask.fromMe, asker: ask.author?.kind === 'self' ? null : ask.author,
+    author: ask.recordedBy, source: ask.recordedVia };
+}
+
+/** Apply legacy AskFields aliases on generic entities/search/neighbourhood DTOs too. */
+export function overlayToWire(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(overlayToWire);
+  if (!value || typeof value !== 'object') return value;
+  const record = value as Record<string, unknown>;
+  const result = Object.fromEntries(Object.entries(record).map(([key, child]) => [key, overlayToWire(child)]));
+  if (typeof record.fromMe === 'boolean' && typeof record.text === 'string' && 'recordedBy' in record) {
+    Object.assign(result, { own: record.fromMe, author: record.recordedBy, source: record.recordedVia });
+    if (record.author && typeof record.author === 'object') result.authorParty = overlayToWire(record.author);
+  }
+  return result;
+}

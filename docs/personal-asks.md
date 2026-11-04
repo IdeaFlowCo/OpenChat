@@ -1,0 +1,15 @@
+# Personal asks: one owner inventory
+
+The canonical writer is the Noos overlay `ask` service. Profile → **All asks** is reachable in basic mode, including accounts with no public Unlinked profile. It defaults to My asks and includes closed history, sources and lifecycle controls. For me and People’s asks are separate direction filters; each query applies its direction before the bounded 200-row limit. A truncated result is labeled partial and search narrows it. Legacy intention drafts, Context intentions and Stories retain their own IDs/lifecycles; exact activation IDs collapse known draft/intent/Story lineage, never fuzzy text matches. No historical extraction or importer data is automatically promoted.
+
+The hosted private assistant exposes `save_ask`, `list_asks`, `get_ask`, `update_ask`, through privateGraph and server-derived owner identity. Shared-chat scope denies these tools, including crafted calls. Saving an explicitly requested personal need requires no activation/permission question; offers and matching retain their separate existing intent workflow. Saving never sends, assigns a carrier, publishes, notifies, or activates matching. Audience wording such as “Only Vlad” stays in owner-only source evidence even before a recipient identity resolves. Public/exposure labels describe intent; actual access remains owner-only in this slice.
+
+Source IDs, original date, exact excerpt and recorder provenance come from the authenticated originating message. Stable itemIndex distinguishes three asks in one message. The Noos transaction keeps an immutable source-operation payload hash and appends receipts to a canonical ask. Replaying the same operation returns its current record (including fulfilled/withdrawn state); changing that operation returns 409. A new source for an existing author/text appends evidence but leaves fields unchanged; use an explicit update for changes.
+
+## Installed-client compatibility
+
+Internal overlay `Ask.author` is the party whose need it is. Unversioned API responses retain legacy recorder `author:string|null`, `source`, `own`, and `asker`; new clients read `authorParty`, `recordedBy`, `recordedVia`, `fromMe`, `forMe`, `carrier`, `placements`, and `sources`. Existing `askOwn`/`askerId` rows remain readable and new saves dual-write those fields while versions coexist. Legacy `askerKind`/`askerId` filtering remains AUTHOR-only before LIMIT, separate from the new about filter (author/carrier/placement). Conflicting legacy/new inputs fail. Connector and standalone MCP keep the old arguments under the same tool names.
+
+## Release and remaining boundaries
+
+This change is source code, not production availability. Noos and OpenChat must be reviewed and released together from refreshed source/deployed-SHA evidence under the existing release gate. Real selected-person/public publication requires the separate snapshot/publication ACL boundary. An `exposure` value or placement alone does not implement access. Cross-app source adapters and authorized viewer reads are separate work; no public Social bullets, WIT issues or Gestalt prototype records are copied into the private ask store.

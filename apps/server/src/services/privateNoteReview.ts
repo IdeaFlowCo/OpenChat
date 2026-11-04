@@ -31,10 +31,9 @@ type Runner = Parameters<typeof listAsksIn>[0];
 /** The asks a card shows: the subject's own asks, or for a topic (which cannot ask) the owner's asks linked to it ('is about'). */
 async function subjectAsks(tx: Runner, ownerKey: string, entityId: string) {
   // Asks this subject cares about (it is their author), not ones it merely carries or is placed on.
-  const about = await listAsksIn(tx, ownerKey, { status: null, direction: null, about: entityId, q: '', needsRecheck: false, limit: 200 });
-  const asked = { ...about, asks: about.asks.filter(ask => ask.author !== null && 'id' in ask.author && ask.author.id === entityId) };
+  const asked = await listAsksIn(tx, ownerKey, { status: null, direction: null, about: null, authorId: entityId, q: '', needsRecheck: false, limit: 200 });
   const topicAsks = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})-[l:OVERLAY_LINK {relation: 'is about'}]->(:OverlayEntity {id: $entityId, ownerKey: $ownerKey})
-    WHERE l.ownerKey = $ownerKey AND a.askAuthorSelf = true RETURN a.id AS id LIMIT 200`, { ownerKey, entityId });
+    WHERE l.ownerKey = $ownerKey AND coalesce(a.askAuthorSelf, a.askOwn, false) = true RETURN a.id AS id LIMIT 200`, { ownerKey, entityId });
   const linked = await Promise.all(topicAsks.records.map(record => askIn(tx, ownerKey, String(record.get('id')))));
   return { asks: [...asked.asks, ...linked], truncated: asked.truncated };
 }

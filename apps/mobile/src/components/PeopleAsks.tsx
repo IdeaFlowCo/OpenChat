@@ -21,7 +21,8 @@ const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month
 
 export function askMeta(ask: OverlayAsk): string {
   const timing = ask.status === 'open' || ask.status === 'stale' ? ask.needsRecheck ? 'Due for a recheck' : `Recheck ${day(ask.recheckAfter)}` : ask.closedAt ? `Closed ${day(ask.closedAt)}` : STATUS_LABEL[ask.status];
-  return [HORIZON_LABEL[ask.horizon], timing, EXPOSURE_LABEL[ask.exposure]].join(' · ');
+  const intended = ask.sources?.at(-1)?.audienceIntent;
+  return [STATUS_LABEL[ask.status], HORIZON_LABEL[ask.horizon], timing, intended ? `Only you can currently see this · intended for ${intended}` : EXPOSURE_LABEL[ask.exposure]].join(' · ');
 }
 
 type Person = Exclude<OverlayAskParty, { kind: 'self' }>;
@@ -38,11 +39,14 @@ export function askParties(ask: OverlayAsk): string {
   return parts.join(' · ');
 }
 
-export function PeopleAsks({ onOpenPerson }: { onOpenPerson: (person: Person) => void }) {
+export function PeopleAsks({ onOpenPerson, onOpenAsk, onOpenSource }: { onOpenPerson: (person: Person) => void; onOpenAsk?: (askId: string) => void; onOpenSource?: (conversationId: string, messageId: string) => void }) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const [asks, setAsks] = useState<OverlayAsk[]>([]);
-  const [showClosed, setShowClosed] = useState(false);
+  const [showClosed, setShowClosed] = useState(true);
+  const [direction, setDirection] = useState<'from_me' | 'for_me' | 'from_others'>('from_me');
+  const [query, setQuery] = useState('');
+  const [truncated, setTruncated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -54,16 +58,17 @@ export function PeopleAsks({ onOpenPerson }: { onOpenPerson: (person: Person) =>
     const request = ++latest.current;
     setLoading(true);
     try {
-      const result = await api.listAsks({ status: closed ? 'all' : 'open,stale', limit: 200 });
+      const result = await api.listAsks({ status: closed ? 'all' : 'open,stale', direction, q: query, limit: 200 });
       if (request !== latest.current) return;
       setAsks(result.asks);
+      setTruncated(result.truncated);
       setError(null);
     } catch (err) {
       if (request === latest.current) setError(err instanceof Error ? err.message : 'Could not load asks.');
     } finally {
       if (request === latest.current) setLoading(false);
     }
-  }, []);
+  }, [direction, query]);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const change = async (ask: OverlayAsk, patch: { status?: OverlayAskStatus; recheckedNow?: true; carrier?: 'self' | null }) => {
@@ -82,9 +87,7 @@ export function PeopleAsks({ onOpenPerson }: { onOpenPerson: (person: Person) =>
     if (!text) return;
     setBusyId('new');
     try {
-      const saved = await api.saveAsk({ author: 'self', text });
-      // The same ask saved before and since closed: saving it again reopens it.
-      if (!saved.created && (saved.ask.status === 'fulfilled' || saved.ask.status === 'withdrawn')) await api.updateAsk(saved.ask.id, { status: 'open' });
+      await api.saveAsk({ author: 'self', text });
       setDraft('');
       await load();
     } catch (err) {
@@ -106,9 +109,9 @@ export function PeopleAsks({ onOpenPerson }: { onOpenPerson: (person: Person) =>
     const closed = ask.status === 'fulfilled' || ask.status === 'withdrawn';
     return (
       <View key={ask.id} style={[styles.row, { borderColor: c.border, backgroundColor: c.surface }]}>
-        {isPerson(ask.author) && (
-          <TouchableOpacity accessibilityRole="link" accessibilityLabel={`Open ${ask.author.name}`} onPress={() => onOpenPerson(ask.author as Person)} style={styles.askerButton}>
-            <Text style={[styles.asker, { color: c.primary }]} numberOfLines={1}>{ask.author.name}</Text>
+        {isPerson(ask.authorParty) && (
+          <TouchableOpacity accessibilityRole="link" accessibilityLabel={`Open ${ask.authorParty.name}`} onPress={() => onOpenPerson(ask.authorParty as Person)} style={styles.askerButton}>
+            <Text style={[styles.asker, { color: c.primary }]} numberOfLines={1}>{ask.authorParty.name}</Text>
           </TouchableOpacity>
         )}
         <Text style={[styles.text, { color: closed ? c.textSecondary : c.textPrimary }]}>{ask.text}</Text>
@@ -119,6 +122,11 @@ export function PeopleAsks({ onOpenPerson }: { onOpenPerson: (person: Person) =>
             ? <Text accessibilityRole="link" onPress={() => void Linking.openURL(ask.evidence!.url!)} style={[styles.meta, { color: c.primary }]} numberOfLines={1}>{ask.evidence.label ?? 'Source'}{ask.evidence.seenAt ? ` · seen ${ask.evidence.seenAt}` : ''}</Text>
             : <Text style={[styles.meta, { color: c.textMetadata }]} numberOfLines={2}>{ask.evidence.label}{ask.evidence.seenAt && !ask.evidence.label?.includes(ask.evidence.seenAt) ? ` · seen ${ask.evidence.seenAt}` : ''}</Text>
         )}
+        {onOpenAsk && <TouchableOpacity accessibilityRole="link" onPress={() => onOpenAsk(ask.id)} style={styles.toggle}><Text style={{ ...type.label, color: c.primary }}>Details & sources</Text></TouchableOpacity>}
+        {ask.sources?.map(source => <View key={`${source.app}:${source.conversationId}:${source.messageId}:${source.itemIndex}`}>
+          <Text style={[styles.meta, { color: c.textMetadata }]}>{source.assertion === 'inferred' ? 'Inferred from' : 'From'} {source.app} · {source.excerpt}</Text>
+          {source.app === 'openchat' && onOpenSource && <TouchableOpacity accessibilityRole="link" onPress={() => onOpenSource(source.conversationId, source.sourceMessageId ?? source.messageId)} style={styles.toggle}><Text style={{ ...type.label, color: c.primary }}>Open source message</Text></TouchableOpacity>}
+        </View>)}
         <View style={styles.actions}>
           {closed ? action('Reopen', ask, { status: 'open' }) : [
             ask.needsRecheck ? action('Still open', ask, { recheckedNow: true }, true) : null,
@@ -134,22 +142,27 @@ export function PeopleAsks({ onOpenPerson }: { onOpenPerson: (person: Person) =>
   return (
     <View style={styles.root}>
       <View style={styles.heading}>
-        <Text style={[styles.eyebrow, { color: c.primary }]}>PEOPLE'S ASKS · ONLY YOU SEE THESE</Text>
+        <Text style={[styles.eyebrow, { color: c.primary }]}>PERSONAL ASKS · ONLY YOU SEE THESE</Text>
         <TouchableOpacity accessibilityRole="switch" accessibilityState={{ checked: showClosed }} onPress={() => { const next = !showClosed; closedRef.current = next; setShowClosed(next); void load(next); }} style={styles.toggle}>
           <Text style={{ ...type.label, fontWeight: '600', color: c.textSecondary }}>{showClosed ? 'Hide closed' : 'Show closed'}</Text>
         </TouchableOpacity>
       </View>
+      <View style={styles.actions}>
+        {([['from_me', 'My asks'], ['for_me', 'For me'], ['from_others', "People’s asks"]] as const).map(([value, label]) => <TouchableOpacity key={value} accessibilityRole="tab" accessibilityState={{ selected: direction === value }} onPress={() => { setAsks([]); setDirection(value); }} style={[styles.action, { borderColor: direction === value ? c.primary : c.border }]}><Text style={{ ...type.label, color: direction === value ? c.primary : c.textSecondary }}>{label}</Text></TouchableOpacity>)}
+      </View>
+      <TextInput accessibilityLabel="Search asks" placeholder="Search asks" placeholderTextColor={c.textMetadata} value={query} onChangeText={setQuery} style={[styles.input, { color: c.textPrimary }]} />
+      {truncated && <Text accessibilityRole="alert" style={[styles.meta, { color: c.textMetadata }]}>Showing the first 200 matching asks. Search or change the view to narrow this partial inventory.</Text>}
       {loading && !asks.length ? <ActivityIndicator color={c.primary} style={{ marginVertical: 16 }} /> : (
         <>
           {forYou.length > 0 && <>
             <Text style={[styles.section, { color: c.textPrimary }]}>For you</Text>
             {forYou.map(row)}
           </>}
-          <Text style={[styles.section, { color: c.textPrimary }]}>Friends' asks</Text>
-          {friends.length ? friends.map(row) : (
+          {direction === 'from_others' && <Text style={[styles.section, { color: c.textPrimary }]}>People’s asks</Text>}
+          {friends.length ? friends.map(row) : direction === 'from_others' ? (
             <Text style={[styles.empty, { color: c.textSecondary }]}>None yet. Tell OpenChat Agent what someone is looking for, for example “Maya needs a physio in Oakland.” Nobody is notified.</Text>
-          )}
-          <Text style={[styles.section, { color: c.textPrimary }]}>Your asks</Text>
+          ) : null}
+          {direction === 'from_me' && <Text style={[styles.section, { color: c.textPrimary }]}>My asks</Text>}
           {own.map(row)}
           <View style={[styles.addRow, { borderColor: c.border, backgroundColor: c.surface }]}>
             <TextInput value={draft} onChangeText={setDraft} placeholder="Add one of your own asks" placeholderTextColor={c.textMetadata} maxLength={1000}

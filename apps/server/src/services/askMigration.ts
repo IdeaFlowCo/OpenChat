@@ -102,7 +102,7 @@ export async function migrateAsksToOverlay(driver: Driver, database: string, opt
       const input = parseAskInput({ text: parsed.text, author: { id: entityId }, horizon: parsed.horizon, recheckAfter: parsed.recheckAfter, status: parsed.status,
         evidence: { label: parsed.label, seenAt: parsed.seenAt, url: parsed.url, noteId } });
       // A note already migrated (even if the owner has since edited that ask's text) is never migrated again.
-      const migrated = async (tx: Pick<ManagedTransaction, 'run'>) => (await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask', askAuthorId: $entityId}) WHERE a.evidenceNoteId = $noteId RETURN a.id AS id`, { ownerKey, entityId, noteId })).records.length > 0;
+      const migrated = async (tx: Pick<ManagedTransaction, 'run'>) => (await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'}) WHERE coalesce(a.askAuthorId, a.askerId) = $entityId AND a.evidenceNoteId = $noteId RETURN a.id AS id`, { ownerKey, entityId, noteId })).records.length > 0;
       if (!options.apply) {
         if (await session.executeRead(migrated)) report.friendAskNotes.existing++; else report.friendAskNotes.created++;
         continue;

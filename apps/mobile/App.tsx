@@ -1,3 +1,4 @@
+import { AskDetailScreen } from './src/screens/AskDetailScreen';
 import { chatBackOptions } from './src/navigation/chatBackOptions';
 import { flushConversationNavigation } from './src/navigation/conversationNavigation';
 import { isUnlinkedEmbed } from './src/services/unlinkedEmbed';
@@ -205,6 +206,8 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
           presentation: Platform.OS === 'ios' ? 'formSheet' : 'modal',
         }}
       />
+      <ChatsStack.Screen name="AsksList" component={AsksScreen} options={{ title: 'All asks' }} />
+      <ChatsStack.Screen name="AskDetail" component={AskDetailScreen} options={{ title: 'Ask details' }} />
       <ChatsStack.Screen
         name="MyCard"
         component={MyCardScreen}
@@ -320,7 +323,8 @@ function AsksNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         contentStyle: { backgroundColor: c.background },
       }}
     >
-      <AsksStack.Screen name="AsksList" component={AsksScreen} options={{ title: 'Asks' }} />
+      <AsksStack.Screen name="AsksList" component={AsksScreen} options={{ title: 'All asks' }} />
+      <AsksStack.Screen name="AskDetail" component={AskDetailScreen} options={{ title: 'Ask details' }} />
       <AsksStack.Screen name="AgentOverlay" component={AgentOverlayScreen} options={{ title: 'OpenChat Agent', presentation: 'modal' }} />
       <AsksStack.Screen name="StoryComposer" component={StoryComposerScreen} options={{ title: 'Share a Story', presentation: 'modal' }} />
       <AsksStack.Screen name="StoryViewer" component={StoryViewerScreen} options={({ route }) => ({ title: route.params.story.author.name || 'Story' })} />

@@ -44,19 +44,19 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
   it('saves the owner\'s own asks and people\'s asks once each, with only_me by default', async () => {
     const own = await graph.saveAsk(alice, { author: 'self', text: 'Heal my TFCC', horizon: 'evergreen' });
     expect(own.created).toBe(true);
-    expect(own.ask).toMatchObject({ fromMe: true, forMe: false, author: { kind: 'self' }, carrier: null, placements: [], exposure: 'only_me', status: 'open', horizon: 'evergreen', exposureConversationId: null, recordedBy: 'owner', recordedVia: 'app' });
+    expect(own.ask).toMatchObject({ fromMe: true, forMe: false, authorParty: { kind: 'self' }, carrier: null, placements: [], exposure: 'only_me', status: 'open', horizon: 'evergreen', exposureConversationId: null, recordedBy: 'owner', recordedVia: 'app' });
     const again = await graph.saveAsk(alice, { author: { kind: 'self' }, text: 'heal my  TFCC' });
     expect([again.created, again.ask.id]).toEqual([false, own.ask.id]);
 
     const bobs = await graph.saveAsk(alice, { author: { kind: 'user', id: bob }, text: 'Looking for a co-founder', evidence: { label: 'Told me at dinner', seenAt: '2026-11-01' } },
       { author: 'agent:Test', source: 'connector', assertion: 'inferred' });
-    expect(bobs.ask).toMatchObject({ fromMe: false, author: { kind: 'user', id: bob, name: bob }, recordedBy: 'agent:Test', assertion: 'inferred', evidence: { label: 'Told me at dinner', seenAt: '2026-11-01', quote: null, url: null, noteId: null } });
+    expect(bobs.ask).toMatchObject({ fromMe: false, authorParty: { kind: 'user', id: bob, name: bob }, recordedBy: 'agent:Test', assertion: 'inferred', evidence: { label: 'Told me at dinner', seenAt: '2026-11-01', quote: null, url: null, noteId: null } });
     // The author's card shows the ask as a link.
     expect((await graph.getPersonOverlay(alice, bob)).links.map(link => [link.relation, link.relationType, link.other.kind])).toEqual([['asks', 'asks', 'ask']]);
 
     const maya = await graph.resolvePrivateThing(alice, { kind: 'person', name: `Maya ${suffix}` });
     const mayas = await graph.saveAsk(alice, { author: { kind: 'thing', id: maya.id }, text: 'Chiropractor in SF', horizon: 'short' });
-    expect(mayas.ask.author).toMatchObject({ kind: 'person', id: maya.id });
+    expect(mayas.ask.authorParty).toMatchObject({ kind: 'person', id: maya.id });
     const topic = await graph.resolvePrivateThing(alice, { kind: 'topic', name: `Neck pain ${suffix}` });
     expect(await status(() => graph.saveAsk(alice, { author: { kind: 'thing', id: topic.id }, text: 'x' }))).toBe(400);
     expect(await status(() => graph.saveAsk(alice, { author: { kind: 'user', id: alice }, text: 'x' }))).toBe(400);
@@ -246,7 +246,7 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
 
     // The blocked person's ask (saved before the block) is out of search as it is out of the lists.
     const hidden = (await graph.listAsks(alice, { status: 'all', q: 'x' })).asks;
-    expect(hidden.every(ask => !(ask.author.kind === 'user' && ask.author.id === blocked))).toBe(true);
+    expect(hidden.every(ask => !(ask.authorParty.kind === 'user' && ask.authorParty.id === blocked))).toBe(true);
     expect((await graph.searchPrivate(alice, { kind: 'ask' })).things.some(thing => thing.name === 'x')).toBe(false);
 
     // A topic card adopting an ask the owner already had: undo removes only that link.

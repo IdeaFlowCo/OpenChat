@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import neo4j from 'neo4j-driver';
 import type { Driver, ManagedTransaction } from 'neo4j-driver';
 import { nanoid } from 'nanoid';
@@ -7,7 +8,7 @@ import {
   parseAskFilter, parseAskInput, parseAskPatch, parseLinkPatch, readProvenance, readRelationType, relationTypeOf, separateRef,
 } from './contract.js';
 import type {
-  Ask, AskEvidence, AskExposure, AskFields, AskFilter, AskHorizon, AskInput, AskPartyRef, AskPatch, AskPlacement, AskPlacementRef, AskStatus, Candidate, Card, CardPatch, DueEntity, Edge, Entity, EntityDetail, EntityKind, Link,
+  Ask, AskSourceReceipt, AskEvidence, AskExposure, AskFields, AskFilter, AskHorizon, AskInput, AskPartyRef, AskPatch, AskPlacement, AskPlacementRef, AskStatus, Candidate, Card, CardPatch, DueEntity, Edge, Entity, EntityDetail, EntityKind, Link,
   LinkAttributeInput, LinkEnd, LinkPatch, NamedKind, Neighbourhood, Note, OverlayPrincipal, Provenance, RelationType, SearchHit, SearchResult,
 } from './contract.js';
 
@@ -38,6 +39,7 @@ export class OverlayStore {
         'CREATE CONSTRAINT overlay_note_id IF NOT EXISTS FOR (n:OverlayNote) REQUIRE n.id IS UNIQUE',
         'CREATE CONSTRAINT overlay_link_key IF NOT EXISTS FOR ()-[l:OVERLAY_LINK]-() REQUIRE l.linkKey IS UNIQUE',
         // One ask per owner, author and text; entities that are not asks leave askKey null.
+        'CREATE CONSTRAINT overlay_ask_source IF NOT EXISTS FOR (s:OverlayAskSource) REQUIRE (s.ownerKey, s.sourceKey) IS UNIQUE',
         'CREATE CONSTRAINT overlay_ask_key IF NOT EXISTS FOR (e:OverlayEntity) REQUIRE (e.ownerKey, e.askKey) IS UNIQUE',
         'CREATE INDEX overlay_entity_owner IF NOT EXISTS FOR (e:OverlayEntity) ON (e.ownerKey, e.kind, e.nameKey)',
         'CREATE INDEX overlay_note_entity IF NOT EXISTS FOR (n:OverlayNote) ON (n.ownerKey, n.entityId)',
@@ -143,8 +145,8 @@ export class OverlayStore {
       // A party to asks keeps a kind that can play its part: an author or placement stays a kind that can ask, a carrier one that can act.
       if (kind !== undefined && kind !== current.kind) {
         const parts = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})
-          WHERE a.askAuthorId = $id OR a.carrierId = $id OR ('entity:' + $id) IN coalesce(a.placements, [])
-          RETURN sum(CASE WHEN a.askAuthorId = $id OR ('entity:' + $id) IN coalesce(a.placements, []) THEN 1 ELSE 0 END) AS cares, sum(CASE WHEN a.carrierId = $id THEN 1 ELSE 0 END) AS carries`, { ownerKey, id });
+          WHERE coalesce(a.askAuthorId, a.askerId) = $id OR a.carrierId = $id OR ('entity:' + $id) IN coalesce(a.placements, [])
+          RETURN sum(CASE WHEN coalesce(a.askAuthorId, a.askerId) = $id OR ('entity:' + $id) IN coalesce(a.placements, []) THEN 1 ELSE 0 END) AS cares, sum(CASE WHEN a.carrierId = $id THEN 1 ELSE 0 END) AS carries`, { ownerKey, id });
         const row = parts.records[0];
         if ((number(row?.get('cares')) && !ASKER_KINDS.includes(kind)) || (number(row?.get('carries')) && !CARRIER_KINDS.includes(kind))) fail(409, 'has_asks');
       }
@@ -360,6 +362,7 @@ export class OverlayStore {
    */
   async saveAsk(principal: OverlayPrincipal | null, input: unknown, provenance?: unknown): Promise<{ ask: Ask; created: boolean }> {
     const ownerKey = this.owner(principal), ask = parseAskInput(input), by = cleanProvenance(provenance);
+    if (ask.sourceReceipt && ask.sourceReceipt.app !== principal!.app) return fail(400, 'invalid_ask_source');
     return retryOnce(() => this.write(tx => saveAskIn(tx, ownerKey, ask, by)));
   }
 
@@ -392,7 +395,7 @@ export class OverlayStore {
    * recheck. Filter by `status` (default open and stale; `all`), `direction`
    * (`from_me`, `for_me`, `from_others`, `about:<entity id>`), text, and `needsRecheck`.
    */
-  async listAsks(principal: OverlayPrincipal | null, filter: { status?: unknown; direction?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown } = {}): Promise<{ asks: Ask[]; truncated: boolean }> {
+  async listAsks(principal: OverlayPrincipal | null, filter: { status?: unknown; direction?: unknown; asker?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown } = {}): Promise<{ asks: Ask[]; truncated: boolean }> {
     const ownerKey = this.owner(principal), parsed = parseAskFilter(filter);
     return this.read(tx => listAsksIn(tx, ownerKey, parsed));
   }
@@ -433,7 +436,7 @@ export class OverlayStore {
         OPTIONAL MATCH (b:OverlayEntity {ownerKey: $toKey}) RETURN source, count(b) AS target`, { fromKey, toKey });
       if (!number(counts.records[0]?.get('source'))) return { moved: false };
       if (number(counts.records[0]?.get('target'))) return fail(409, 'owner_conflict');
-      for (const label of ['OverlayNote', 'OverlayRef', 'OverlayEntity']) await tx.run(`MATCH (n:${label} {ownerKey: $fromKey}) SET n.ownerKey = $toKey`, { fromKey, toKey });
+      for (const label of ['OverlayAskSource', 'OverlayNote', 'OverlayRef', 'OverlayEntity']) await tx.run(`MATCH (n:${label} {ownerKey: $fromKey}) SET n.ownerKey = $toKey`, { fromKey, toKey });
       await tx.run('MATCH (:OverlayEntity {ownerKey: $toKey})-[l:OVERLAY_LINK]->() SET l.ownerKey = $toKey', { toKey });
       return { moved: true };
     });
@@ -455,7 +458,7 @@ export class OverlayStore {
 /** For callers that must erase inside their own transaction (account deletion). */
 export async function deleteOwnerIn(tx: Pick<ManagedTransaction, 'run'>, ownerKey: string): Promise<void> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
-  for (const label of ['OverlayNote', 'OverlayRef', 'OverlayEntity']) await tx.run(`MATCH (n:${label} {ownerKey: $ownerKey}) DETACH DELETE n`, { ownerKey });
+  for (const label of ['OverlayAskSource', 'OverlayNote', 'OverlayRef', 'OverlayEntity']) await tx.run(`MATCH (n:${label} {ownerKey: $ownerKey}) DETACH DELETE n`, { ownerKey });
 }
 
 export async function purgeRefIn(tx: Pick<ManagedTransaction, 'run'>, rawRef: unknown): Promise<{ entitiesRemoved: number; refsRemoved: number }> {
@@ -485,7 +488,9 @@ export async function purgeRefIn(tx: Pick<ManagedTransaction, 'run'>, rawRef: un
  * from the placements of the rest. Returns how many asks went.
  */
 async function releaseAskPartyIn(tx: Pick<ManagedTransaction, 'run'>, ownerKey: string, id: string): Promise<number> {
-  const asks = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask', askAuthorId: $id})
+  await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'}) WHERE coalesce(a.askAuthorId, a.askerId) = $id
+    MATCH (s:OverlayAskSource {ownerKey: $ownerKey}) WHERE s.askId = a.id DETACH DELETE s`, { ownerKey, id });
+  const asks = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'}) WHERE coalesce(a.askAuthorId, a.askerId) = $id
     OPTIONAL MATCH (n:OverlayNote {ownerKey: $ownerKey})-[:NOTE_ABOUT]->(a)
     WITH a, collect(n) AS notes
     FOREACH (note IN notes | DETACH DELETE note)
@@ -513,6 +518,7 @@ export async function deleteEntityIn(tx: Runner, ownerKey: string, id: string): 
   const asksRemoved = await releaseAskPartyIn(tx, ownerKey, id);
   const notes = await tx.run('MATCH (n:OverlayNote {ownerKey: $ownerKey, entityId: $id}) DETACH DELETE n RETURN count(*) AS removed', { id, ownerKey });
   const refs = await tx.run('MATCH (r:OverlayRef {ownerKey: $ownerKey, entityId: $id}) DETACH DELETE r RETURN count(*) AS removed', { id, ownerKey });
+  await tx.run('MATCH (s:OverlayAskSource {ownerKey: $ownerKey, askId: $id}) DETACH DELETE s', { ownerKey, id });
   await tx.run('MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey}) DETACH DELETE e', { id, ownerKey });
   return { notesRemoved: number(notes.records[0]?.get('removed')), linksRemoved: number(found.records[0]?.get('links')), refsRemoved: number(refs.records[0]?.get('removed')), asksRemoved };
 }
@@ -710,7 +716,7 @@ export async function deleteLinkIn(tx: Runner, ownerKey: string, linkId: string)
   await tx.run('MATCH ()-[l:OVERLAY_LINK {id: $linkId}]->() WHERE l.ownerKey = $ownerKey DELETE l', { linkId, ownerKey });
 }
 /** Whether link `l` from `a` to `b` is an ask's author link (kept in step with the ask's askAuthorId). */
-const ASKER_LINK = "(b.kind = 'ask' AND b.askAuthorId = a.id AND l.relation = 'asks')";
+const ASKER_LINK = "(b.kind = 'ask' AND coalesce(b.askAuthorId, b.askerId) = a.id AND l.relation = 'asks')";
 
 type Runner = Pick<ManagedTransaction, 'run'>;
 const NEIGHBOURHOOD = { entities: 100, links: 200 } as const;
@@ -730,7 +736,7 @@ async function retryOnce<T>(attempt: () => Promise<T>): Promise<T> {
   }
 }
 /** The fields only `ask` entities carry (author, source and assertion too: an ask records who saved it). */
-const ASK_PROPERTIES = '.askText, .askAuthorSelf, .askAuthorId, .carrierSelf, .carrierId, .placements, .horizon, .recheckAfter, .askStatus, .exposure, .exposureChat, .evidenceQuote, .evidenceUrl, .evidenceLabel, .evidenceSeenAt, .evidenceNoteId, .closedAt, .checkedAt, .revision, .author, .source, .assertion, .updatedAt, .updatedBy';
+const ASK_PROPERTIES = '.askOwn, .askerId, .askSources, .askText, .askAuthorSelf, .askAuthorId, .carrierSelf, .carrierId, .placements, .horizon, .recheckAfter, .askStatus, .exposure, .exposureChat, .evidenceQuote, .evidenceUrl, .evidenceLabel, .evidenceSeenAt, .evidenceNoteId, .closedAt, .checkedAt, .revision, .author, .source, .assertion, .updatedAt, .updatedBy';
 const ENTITY = `e { .id, .kind, .name, .description, .important, .cadenceDays, .cadenceMode, .intervalDays, .lastContactAt, .cadenceSetAt, .createdAt, ${ASK_PROPERTIES}, refs: [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] }`;
 const NOTE = 'n { .id, .text, .createdAt, .updatedAt, .author, .source, .assertion }';
 const edge = (name: string) => `${name} { .id, .relation, .relationType, .createdAt, .updatedAt, .updatedBy, .author, .source, .assertion, .since, .until, .context }`;
@@ -789,7 +795,8 @@ function askFieldsFrom(value: Record<string, unknown>, now = Date.now()): AskFie
   const placements = Array.isArray(value.placements) ? value.placements as string[] : [];
   const record = readProvenance(value);
   return {
-    text: textOrNull(value.askText) ?? String(value.name), fromMe: value.askAuthorSelf === true, forMe: placements.includes('self') || value.carrierSelf === true,
+    sources: ((value.askSources as string[] | undefined) ?? []).map(raw => JSON.parse(raw) as AskSourceReceipt),
+    text: textOrNull(value.askText) ?? String(value.name), fromMe: (value.askAuthorSelf ?? value.askOwn) === true, forMe: placements.includes('self') || value.carrierSelf === true,
     horizon: ASK_HORIZONS.includes(value.horizon as AskHorizon) ? value.horizon as AskHorizon : 'medium',
     recheckAfter, needsRecheck: status === 'stale' || (status === 'open' && Date.parse(recheckAfter) <= now), status,
     exposure: ASK_EXPOSURES.includes(value.exposure as AskExposure) ? value.exposure as AskExposure : 'only_me', exposureChat: textOrNull(value.exposureChat),
@@ -805,7 +812,7 @@ function askFrom(value: Record<string, unknown>, author: Record<string, unknown>
     stored === 'self' ? [SELF] : stored.startsWith('entity:') ? (ends.has(stored.slice(7)) ? [ends.get(stored.slice(7))!] : []) : [{ kind: 'ref', ref: stored }]);
   return {
     id: String(value.id), ...askFieldsFrom(value),
-    author: value.askAuthorSelf === true ? SELF : author ? endFrom(author) : null,
+    author: (value.askAuthorSelf ?? value.askOwn) === true ? SELF : author ? endFrom(author) : null,
     carrier: value.carrierSelf === true ? SELF : carrier ? endFrom(carrier) : null,
     placements,
   };
@@ -837,7 +844,7 @@ const partyProperties = (prefix: 'carrier', party: AskPartyRef | null) => ({ [`$
  * in scope (for ordering).
  */
 const askRows = (carry = '') => `
-  OPTIONAL MATCH (author:OverlayEntity {ownerKey: $ownerKey, id: e.askAuthorId})
+  OPTIONAL MATCH (author:OverlayEntity {ownerKey: $ownerKey}) WHERE author.id = coalesce(e.askAuthorId, e.askerId)
   OPTIONAL MATCH (carrier:OverlayEntity {ownerKey: $ownerKey, id: e.carrierId})
   CALL {
     WITH e
@@ -862,12 +869,40 @@ export async function askIn(tx: Runner, ownerKey: string, id: string): Promise<A
 /** `saveAsk` inside the caller's transaction (OpenChat's note reviews). `input` as `parseAskInput` returns it. */
 export async function saveAskIn(tx: Runner, ownerKey: string, input: AskInput, provenance: Provenance): Promise<{ ask: Ask; created: boolean }> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
+  const receipt = input.sourceReceipt;
+  const sourceKey = receipt ? createHash('sha256').update(JSON.stringify([receipt.app, receipt.conversationId, receipt.messageId, receipt.itemIndex])).digest('hex') : null;
+  const requestHash = receipt ? createHash('sha256').update(JSON.stringify(input)).digest('hex') : null;
+  if (sourceKey) {
+    const locked = await tx.run(`MERGE (s:OverlayAskSource {ownerKey: $ownerKey, sourceKey: $sourceKey})
+      SET s._lock = true REMOVE s._lock RETURN s.askId AS askId, s.requestHash AS requestHash`, { ownerKey, sourceKey });
+    const savedId = locked.records[0]?.get('askId');
+    if (savedId) {
+      if (locked.records[0]!.get('requestHash') !== requestHash) return fail(409, 'source_operation_conflict', { askId: savedId });
+      return { ask: await askIn(tx, ownerKey, String(savedId)), created: false };
+    }
+  }
+  const appendSource = async (id: string) => {
+    if (!receipt) return;
+    await tx.run('MATCH (e:OverlayEntity {ownerKey: $ownerKey, id: $id}) SET e._lock = true REMOVE e._lock', { ownerKey, id });
+    const current = await askIn(tx, ownerKey, id);
+    if (current.sources.length >= 100) return fail(409, 'ask_source_limit');
+    const source: AskSourceReceipt = { ...receipt, recordedAt: new Date().toISOString(), recordedBy: provenance.author };
+    await tx.run(`MATCH (e:OverlayEntity {ownerKey: $ownerKey, id: $id})
+      SET e._lock = true REMOVE e._lock
+      SET e.askSources = coalesce(e.askSources, []) + $source
+      WITH e MATCH (s:OverlayAskSource {ownerKey: $ownerKey, sourceKey: $sourceKey})
+      SET s.askId = e.id, s.requestHash = $requestHash`, { ownerKey, id, sourceKey, requestHash, source: JSON.stringify(source) });
+  };
   const askKey = askKeyOf(input.author, input.text);
   // Locks the author: the same ask saved twice at once is still one.
   const authorId = 'id' in input.author ? input.author.id : null;
   if (authorId !== null) await assertParty(tx, ownerKey, authorId, ASKER_KINDS, 'invalid_author', true);
   const existing = await tx.run('MATCH (e:OverlayEntity {ownerKey: $ownerKey, askKey: $askKey}) RETURN e.id AS id', { ownerKey, askKey });
-  if (existing.records.length) return { ask: await askIn(tx, ownerKey, String(existing.records[0]!.get('id'))), created: false };
+  if (existing.records.length) {
+    const id = String(existing.records[0]!.get('id'));
+    await appendSource(id);
+    return { ask: await askIn(tx, ownerKey, id), created: false };
+  }
   if (input.carrier && 'id' in input.carrier) await assertParty(tx, ownerKey, input.carrier.id, CARRIER_KINDS, 'invalid_carrier');
   const placements = await cleanPlacementsIn(tx, ownerKey, input.placements);
   await assertOwnNote(tx, ownerKey, input.evidence);
@@ -880,13 +915,14 @@ export async function saveAskIn(tx: Runner, ownerKey: string, input: AskInput, p
     SET e += $fields`, {
     id, ownerKey, name, nameKey: nameKey(name), now,
     fields: {
-      askText: input.text, askKey, askAuthorSelf: authorId === null, askAuthorId: authorId, ...partyProperties('carrier', input.carrier), placements,
+      askText: input.text, askKey, askOwn: authorId === null, askerId: authorId, askAuthorSelf: authorId === null, askAuthorId: authorId, ...partyProperties('carrier', input.carrier), placements,
       horizon: input.horizon, recheckAfter: askRecheckAfter(input.horizon, now, input.recheckAfter),
       askStatus: input.status, exposure: input.exposure, exposureChat: input.exposureChat, ...evidenceProperties(input.evidence),
       closedAt: closed ? now : null, revision: neo4j.int(0), author: provenance.author, source: provenance.source, assertion: provenance.assertion,
     },
   });
   if (authorId !== null) await addLinkIn(tx, ownerKey, authorId, 'asks', id, provenance, { relationType: 'asks' });
+  await appendSource(id);
   return { ask: await askIn(tx, ownerKey, id), created: true };
 }
 
@@ -894,7 +930,7 @@ export async function saveAskIn(tx: Runner, ownerKey: string, input: AskInput, p
 export async function updateAskIn(tx: Runner, ownerKey: string, id: string, patch: AskPatch, provenance: Provenance): Promise<Ask> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
   if (!isId(id)) return fail(404, 'not_found');
-  const locked = await tx.run("MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey, kind: 'ask'}) SET e._lock = true REMOVE e._lock RETURN e.askAuthorId AS authorId", { id, ownerKey });
+  const locked = await tx.run("MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey, kind: 'ask'}) SET e._lock = true REMOVE e._lock RETURN coalesce(e.askAuthorId, e.askerId) AS authorId", { id, ownerKey });
   if (!locked.records.length) return fail(404, 'not_found');
   const current = await askIn(tx, ownerKey, id), now = new Date().toISOString();
   const values: Record<string, unknown> = {};
@@ -937,18 +973,19 @@ export async function updateAskIn(tx: Runner, ownerKey: string, id: string, patc
 export async function listAsksIn(tx: Runner, ownerKey: string, filter: AskFilter, now = new Date()): Promise<{ asks: Ask[]; truncated: boolean }> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
   const found = await tx.run(`MATCH (e:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})
-    WITH e, coalesce(e.askStatus, 'open') AS status, coalesce(e.askAuthorSelf, false) AS fromMe,
+    WITH e, coalesce(e.askStatus, 'open') AS status, coalesce(e.askAuthorSelf, e.askOwn, false) AS fromMe,
       ('self' IN coalesce(e.placements, []) OR coalesce(e.carrierSelf, false)) AS forMe
     WHERE ($statuses IS NULL OR status IN $statuses)
       AND ($direction IS NULL OR ($direction = 'from_me' AND fromMe) OR ($direction = 'from_others' AND NOT fromMe) OR ($direction = 'for_me' AND forMe))
-      AND ($about IS NULL OR e.askAuthorId = $about OR e.carrierId = $about OR ('entity:' + $about) IN coalesce(e.placements, []))
+      AND ($authorId IS NULL OR coalesce(e.askAuthorId, e.askerId) = $authorId)
+      AND ($about IS NULL OR coalesce(e.askAuthorId, e.askerId) = $about OR e.carrierId = $about OR ('entity:' + $about) IN coalesce(e.placements, []))
       AND ($q = '' OR toLower(coalesce(e.askText, e.name)) CONTAINS $q)
       AND (NOT $needsRecheck OR status = 'stale' OR (status = 'open' AND coalesce(e.recheckAfter, e.createdAt) <= $now))
     ${askRows('status, ')}
     ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'stale' THEN 1 ELSE 2 END, CASE WHEN status IN ['open', 'stale'] THEN coalesce(e.recheckAfter, e.createdAt) ELSE '' END,
       coalesce(e.updatedAt, e.createdAt) DESC, e.id
     LIMIT $limit`,
-  { ownerKey, statuses: filter.status, direction: filter.direction, about: filter.about, q: filter.q, needsRecheck: filter.needsRecheck, now: now.toISOString(), limit: neo4j.int(filter.limit + 1) });
+  { ownerKey, statuses: filter.status, direction: filter.direction, about: filter.about, authorId: filter.authorId ?? null, q: filter.q, needsRecheck: filter.needsRecheck, now: now.toISOString(), limit: neo4j.int(filter.limit + 1) });
   return { asks: found.records.slice(0, filter.limit).map(askOfRow), truncated: found.records.length > filter.limit };
 }
 
