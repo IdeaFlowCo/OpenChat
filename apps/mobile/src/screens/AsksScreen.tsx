@@ -157,7 +157,7 @@ function AsksInventory() {
         <FlatList
           data={items}
           keyExtractor={item => item.key}
-          ListHeaderComponent={<PeopleAsks onOpenAsk={askId => navigation.navigate('AskDetail', { askId })} onOpenSource={(conversationId, entryId) => navigation.navigate('Chat', { conversationId, entryId })} onOpenPerson={person => person.kind === 'user' ? navigation.navigate('ContactProfile', { userId: person.id }) : navigation.navigate('PrivateThing', { thingId: person.id })} />}
+          ListHeaderComponent={<PeopleAsks onOpenAsk={askId => navigation.navigate('AskDetail', { askId })} onOpenSource={conversationId => navigation.navigate('Chat', { conversationId })} onOpenPerson={person => person.kind === 'user' ? navigation.navigate('ContactProfile', { userId: person.id }) : navigation.navigate('PrivateThing', { thingId: person.id })} />}
           contentContainerStyle={items.length ? styles.list : styles.emptyList}
           ListEmptyComponent={
             <View style={[styles.empty, { backgroundColor: c.surface, borderColor: c.border }]}>

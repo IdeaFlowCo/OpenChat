@@ -33,10 +33,10 @@ function AskDetail({ askId }: { askId: string }) {
       {ask.evidence?.quote && <Text style={{ ...type.body, color: c.textSecondary }}>{ask.evidence.quote}</Text>}
       <Text style={{ ...type.heading, color: c.textPrimary }}>Sources</Text>
       {!ask.sources?.length && <Text style={{ ...type.body, color: c.textMetadata }}>No message receipt was recorded by the original client.</Text>}
-      {ask.sources?.map(source => <TouchableOpacity key={`${source.app}:${source.conversationId}:${source.messageId}:${source.itemIndex}`} accessibilityRole="link" disabled={source.app !== 'openchat'} onPress={() => navigation.navigate('Chat', { conversationId: source.conversationId, entryId: source.sourceMessageId ?? source.messageId })} style={{ paddingVertical: space[3], gap: space[2] }}>
+      {ask.sources?.map(source => <TouchableOpacity key={`${source.app}:${source.conversationId}:${source.messageId}:${source.itemIndex}`} accessibilityRole="link" disabled={source.app !== 'openchat'} onPress={() => navigation.navigate('Chat', { conversationId: source.conversationId })} style={{ paddingVertical: space[3], gap: space[2] }}>
         <Text style={{ ...type.body, color: c.textPrimary }}>{source.excerpt}</Text>
         <Text style={{ ...type.meta, color: c.textMetadata }}>{source.assertion} · {source.app} · {new Date(source.recordedAt).toLocaleDateString()}</Text>
-        <Text style={{ ...type.label, color: c.primary }}>{source.app === 'openchat' ? 'Open source message' : source.app}</Text>
+        <Text style={{ ...type.label, color: c.primary }}>{source.app === 'openchat' ? 'Open source conversation' : source.app}</Text>
       </TouchableOpacity>)}
     </>}
   </ScrollView>;
