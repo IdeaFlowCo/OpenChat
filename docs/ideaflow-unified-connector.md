@@ -45,6 +45,17 @@ Read scope exposes `oc_list_conversations`, `oc_get_messages`, `oc_search`, and
 not advertised. Unknown fields and tools are rejected. Write scope does not imply
 read scope.
 
+### Shared Story feed
+
+`oc_list_story_feed` uses `openchat:read` to call `GET /api/stories/feed`
+as the exact linked OpenChat viewer. Optional `authorId` narrows the feed to
+one OpenChat user. The existing route enforces audience, membership, blocks,
+status and expiry, and returns the human projection: Story text, author,
+creation time and Story expiry. Agent-search structured terms are excluded.
+This read neither publishes nor sends. Owner-private standing asks are a
+separate source; their stored exposure does not publish them (see
+[private graph asks](private-graph.md#asks)).
+
 ### Private people knowledge
 
 The owner's [private graph](private-graph.md) (the shared Noos people overlay,
