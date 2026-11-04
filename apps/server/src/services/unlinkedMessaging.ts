@@ -20,7 +20,9 @@ export function unlinkedProfileId(value: unknown): string | null {
 export type UnlinkedRecipient = { status: 'ready'; recipient: { id: string; name: string } }
   | { status: 'unclaimed'; name: string } | { status: 'unavailable' };
 
-export async function resolveUnlinkedRecipient(profileId: string): Promise<UnlinkedRecipient> {
+export type UnlinkedIdentityRecipient = { status: 'member'; identity: { issuer: string; subject: string }; name: string } | { status: 'unclaimed'; name: string } | { status: 'unavailable' };
+/** Read-only identity resolution: never creates an account, inbox or conversation. */
+export async function resolveUnlinkedIdentity(profileId: string): Promise<UnlinkedIdentityRecipient> {
   const secret = process.env.UNLINKED_MESSAGING_SECRET;
   if (!secret || secret.length < 32) throw new Error('messaging_unavailable');
   const response = await fetch(RESOLVER, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(8000),
@@ -35,7 +37,13 @@ export async function resolveUnlinkedRecipient(profileId: string): Promise<Unlin
   const identity = value?.identity;
   if (value?.status !== 'member' || identity?.issuer !== ISSUER || typeof identity.subject !== 'string' ||
       !identity.subject || identity.subject.length > 512 || /[\x00-\x1f\x7f]/.test(identity.subject)) throw new Error('messaging_unavailable');
-  const recipient = await ensureSharedInbox(identity, name);
+  return { status: 'member', identity: { issuer: identity.issuer, subject: identity.subject }, name };
+}
+
+export async function resolveUnlinkedRecipient(profileId: string): Promise<UnlinkedRecipient> {
+  const resolved = await resolveUnlinkedIdentity(profileId);
+  if (resolved.status !== 'member') return resolved;
+  const recipient = await ensureSharedInbox(resolved.identity, resolved.name);
   return { status: 'ready', recipient };
 }
 
