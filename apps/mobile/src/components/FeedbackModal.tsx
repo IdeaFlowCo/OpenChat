@@ -20,7 +20,7 @@
  *   - Optional screenshot from the photo library, removable before sending
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
@@ -57,6 +57,15 @@ export function FeedbackModal({ visible, sending, filerName, onSubmit, onCancel 
   const [message, setMessage] = useState('');
   const [anonymous, setAnonymous] = useState(false);
   const [screenshot, setScreenshot] = useState<FeedbackScreenshot | null>(null);
+
+  // Start fresh each time the sheet closes (after a send or a cancel); a
+  // failed send keeps the sheet open, so the draft survives for a retry.
+  useEffect(() => {
+    if (visible) return;
+    setMessage('');
+    setAnonymous(false);
+    setScreenshot(null);
+  }, [visible]);
 
   const pickScreenshot = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
