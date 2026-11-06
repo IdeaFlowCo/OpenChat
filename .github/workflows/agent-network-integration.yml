@@ -66,9 +66,15 @@ jobs:
           apps/server/test/assistantAskPublication.test.ts
           apps/server/test/assistantAsks.test.ts
           apps/server/test/assistantTurnBoundary.test.ts
-          apps/server/test/askPublication.mobile.test.ts
-          apps/server/test/allAsks.mobile.test.ts
           apps/server/test/unlinkedProvision.test.ts
+
+      # Native render suites require the server's automatic JSX transform.
+      - name: Run canonical ask native render regressions
+        working-directory: apps/server
+        run: >-
+          ../../node_modules/.bin/vitest run --no-file-parallelism
+          test/askPublication.mobile.test.ts
+          test/allAsks.mobile.test.ts
 
       # The overlay suites create schema on start; one file at a time avoids lock contention.
       - name: Run private-graph overlay suites against Neo4j
