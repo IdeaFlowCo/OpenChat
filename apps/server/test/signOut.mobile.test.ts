@@ -277,7 +277,7 @@ describe('Desktop sidebar account menu', () => {
 
     const avatar = buttonLabelled(tree.root, 'Account menu');
     await act(async () => { avatar.props.onPress(); });
-    expect(menuItems(tree.root)).toEqual(['Profile', 'Settings', 'Sign out']);
+    expect(menuItems(tree.root)).toEqual(['Profile', 'Settings', 'Send feedback', 'Sign out']);
     expect(hasText(tree.root, 'jacob@example.com')).toBe(true);
 
     const signOut = tree.root.find(n => n.type === 'Pressable' && n.props.accessibilityLabel === 'Sign out');
@@ -310,7 +310,7 @@ describe('Switch account (web, Ideaflow ID enabled)', () => {
     await settle();
 
     await act(async () => { buttonLabelled(tree.root, 'Account menu').props.onPress(); });
-    expect(menuItems(tree.root)).toEqual(['Profile', 'Settings', 'Switch account', 'Sign out']);
+    expect(menuItems(tree.root)).toEqual(['Profile', 'Settings', 'Send feedback', 'Switch account', 'Sign out']);
 
     const item = tree.root.find(n => n.type === 'Pressable' && n.props.accessibilityLabel === 'Switch account');
     await act(async () => { item.props.onPress(); });
@@ -363,6 +363,6 @@ describe('Switch account (web, Ideaflow ID enabled)', () => {
     const tree = create(React.createElement(MasterDetailLayout));
     await settle();
     await act(async () => { buttonLabelled(tree.root, 'Account menu').props.onPress(); });
-    expect(menuItems(tree.root)).toEqual(['Profile', 'Settings', 'Sign out']);
+    expect(menuItems(tree.root)).toEqual(['Profile', 'Settings', 'Send feedback', 'Sign out']);
   });
 });
