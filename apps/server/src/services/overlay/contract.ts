@@ -23,10 +23,10 @@ import { createHash } from 'node:crypto';
  * else's ("Laurence wants a chiropractor in SF"); asks are saved and edited
  * only through the ask operations (`saveAsk`, `updateAsk`), never by name.
  */
-export const ENTITY_KINDS = ['person', 'company', 'idea', 'project', 'topic', 'ask'] as const;
+export const ENTITY_KINDS = ['person', 'company', 'idea', 'project', 'topic', 'list', 'ask'] as const;
 export type EntityKind = (typeof ENTITY_KINDS)[number];
 /** The kinds saved, resolved and re-kinded by name: everything but `ask`. */
-export const NAMED_KINDS = ['person', 'company', 'idea', 'project', 'topic'] as const;
+export const NAMED_KINDS = ['person', 'company', 'idea', 'project', 'topic', 'list'] as const;
 export type NamedKind = (typeof NAMED_KINDS)[number];
 export type CadenceMode = 'fixed' | 'expanding';
 
@@ -260,7 +260,7 @@ const RELATION_PATTERNS: Array<[RelationType, Ends | null, RegExp]> = [
   ['part_of', [[['project', 'idea', 'company'], ['project', 'company']]], /\b(part of|idea for|belongs? to|subsidiary of|division of|component of|feature of|module of|spin-?off of|sub-?project of|within|under)\b/],
   ['asks', [[['person', 'company', 'project', 'idea'], ['ask']]], /\b(asks?|asked|asking|needs?|needed|wants?|wanted|looking for|seeks?|seeking|requests?|requested)\b/],
   ['interested_in', [[['person'], ['topic', 'idea', 'project', 'company']]], /\b(interest(s|ed)?|likes?|loves?|into|cares? about|passionate|fan of|curious about|excited about|follows|wants|cares)\b/],
-  ['about', [[['person', 'company', 'idea', 'project', 'topic', 'ask'], ['topic']]], /\b(about|has|had|have|tagged|topic|concerns?|regarding|re|diagnosed with|lives with|deals with|struggles with|focus(es|ed)? on|on)\b/],
+  ['about', [[['person', 'company', 'idea', 'project', 'topic', 'list', 'ask'], ['topic']]], /\b(about|has|had|have|tagged|topic|concerns?|regarding|re|diagnosed with|lives with|deals with|struggles with|focus(es|ed)? on|on)\b/],
   ['knows', PEOPLE, /\b(knows?|knew|friends?|met|acquaint\w*|introduc\w*|mentor(s|ed|ing|ee)?|neighbou?r|roommate|room ?mate|housemate|connected|contact|close to|dated|dating|ex)\b/],
 ];
 /** Types added with end kinds (`part_of`, `about`, `asks`) need the kinds; without them only the original word patterns apply. */

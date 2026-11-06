@@ -443,6 +443,10 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
     deletePrivateThing: (thingId: string) =>
       request<unknown>('DELETE', `/api/private/things/${encodeURIComponent(thingId)}`),
     listCatchUp: () => request<unknown>('GET', '/api/private/due'),
+    // Lists (Noos #105): owner-private collections of people.
+    listMembers: (listId: string, query: { after?: string; limit?: number }) => request<unknown>('GET', `/api/private/lists/${encodeURIComponent(listId)}/members`, { query }),
+    addListMember: (listId: string, body: Record<string, unknown>) => request<unknown>('POST', `/api/private/lists/${encodeURIComponent(listId)}/members`, { body }),
+    removeListMember: (listId: string, linkId: string) => request<unknown>('DELETE', `/api/private/lists/${encodeURIComponent(listId)}/members/${encodeURIComponent(linkId)}`),
     // Asks: the Noos overlay's ask kind (OpenChat-2fsy.1).
     saveAsk: (body: Record<string, unknown>) => request<unknown>('POST', '/api/private/asks', { body }),
     listAsks: (query: Record<string, string | number | boolean | undefined>) => request<unknown>('GET', '/api/private/asks', { query }),

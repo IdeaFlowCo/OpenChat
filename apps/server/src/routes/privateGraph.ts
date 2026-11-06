@@ -8,7 +8,7 @@ import { Router, type Request, type Response } from 'express';
 import { resolveActor } from '../middleware/resolveActor.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import {
-  addLink, addNote, createPrivateThing, deleteAsk, deleteLink, deleteNote, deletePrivateThing, getAsk, listAsks, saveAsk, updateAsk, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
+  addLink, addListMember, addNote, createPrivateThing, listMembers, removeListMember, deleteAsk, deleteLink, deleteNote, deletePrivateThing, getAsk, listAsks, saveAsk, updateAsk, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
   parseCardPatch, PrivateGraphError, searchPrivate, updateLink, updateNote, updatePersonCard, updatePrivateThing,
 } from '../services/privateGraph.js';
 import type { Provenance } from '../services/privateGraph.js';
@@ -201,5 +201,15 @@ router.patch('/asks/:askId', async (req: Request, res: Response) => {
 });
 router.delete('/asks/:askId', async (req: Request, res: Response) => {
   try { res.json(await deleteAsk(owner(req), id(req, 'askId'))); } catch (error) { fail(error, res); }
+});
+// Lists (Noos #105): owner-private collections; members are outgoing `contains` links to people.
+router.get('/lists/:listId/members', async (req: Request, res: Response) => {
+  try { res.json(await listMembers(owner(req), id(req, 'listId'), { after: req.query.after, limit: req.query.limit })); } catch (error) { fail(error, res); }
+});
+router.post('/lists/:listId/members', async (req: Request, res: Response) => {
+  try { res.status(201).json(await addListMember(owner(req), id(req, 'listId'), req.body, provenanceFor(req))); } catch (error) { fail(error, res); }
+});
+router.delete('/lists/:listId/members/:linkId', async (req: Request, res: Response) => {
+  try { res.json(await removeListMember(owner(req), id(req, 'listId'), id(req, 'linkId'))); } catch (error) { fail(error, res); }
 });
 export default router;
