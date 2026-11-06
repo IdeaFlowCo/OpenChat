@@ -24,7 +24,9 @@ const WIT_AUDIENCE = 'https://worldissuetracker.com';
 export const witApiBase = (): string =>
   process.env.WIT_API_BASE || 'https://api.worldissuetracker.com/functions/v1';
 const witSite = (): string => process.env.WIT_SITE_URL || 'https://worldissuetracker.com';
-const trackerSlug = (): string => process.env.WIT_FEEDBACK_TRACKER_SLUG || 'openchat';
+// Same board as OpenChat web (#215) and native (#217) in-app feedback.
+// The old 'openchat' board is being retired (world-issue-tracker-julr).
+const trackerSlug = (): string => process.env.WIT_FEEDBACK_TRACKER_SLUG || 'openchat-feedback';
 const delegationUrl = (): string =>
   process.env.IDEAFLOW_DELEGATION_URL || 'https://id.ideaflow.app/builtin-agent/delegated-token';
 
