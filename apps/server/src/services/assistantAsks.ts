@@ -30,13 +30,15 @@ export async function executeAskTool(ownerId: string, name: string, input: Recor
   if (name === 'publish_ask') {
     if (!boundary) return { error:'An authenticated user turn is required for publication review' };
     const db=getDriver().session();
+    let authorizedMessageCreatedAt:unknown=null;
     try {
       const origin=await db.run(`MATCH (:User {id:$ownerId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
         MATCH (m:Message {id:$messageId,conversationId:c.id,senderId:$ownerId})
-        WHERE m.deletedAt IS NULL AND (m.assistantScope IS NULL OR m.assistantScope='universal') RETURN m.id AS id`,{ownerId,...boundary});
+        WHERE m.deletedAt IS NULL AND (m.assistantScope IS NULL OR m.assistantScope='universal') RETURN m.id AS id,m.createdAt AS createdAt`,{ownerId,...boundary});
       if(!origin.records[0])return {error:'Originating publication request is unavailable'};
+      authorizedMessageCreatedAt=origin.records[0].get('createdAt');
     } finally {await db.close();}
-    if(input.confirm===true&&!askPublicationReviewMatches(ownerId,boundary.conversationId,boundary.messageId,input))return {error:'Publication needs its exact pending review and explicit approval on a later user turn. Prepare a fresh review if it expired or changed.'};
+    if(input.confirm===true&&!askPublicationReviewMatches(ownerId,boundary.conversationId,boundary.messageId,input,authorizedMessageCreatedAt))return {error:'Publication needs its exact pending review and explicit approval on a later user turn. Prepare a fresh review if it expired or changed.'};
     const {askId,...payload}=input;
     const result=await publishAsk(ownerId,`${ownerId}:assistant`,String(askId??''),payload);
     if('approvalGrant' in result&&typeof result.approvalGrant==='string')rememberAskPublicationReview(ownerId,boundary.conversationId,boundary.messageId,input,result.approvalGrant,result.preview);

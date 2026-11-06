@@ -51,11 +51,15 @@ describe('persisted originating message authority and bounded model input',()=>{
   it('reinjects pending publication payloads only into the universal private model turn',async()=>{
     rememberAskPublicationReview('owner','dm','earlier-source',{askId:'pending-ask',requestId:'pending-request',expectedAskRevision:0,expectedPublicationRevision:null,text:'Exact approved excerpt',audience:{kind:'public'},confirm:false},'private-review-token',{text:'Exact approved excerpt',audience:'public'});
     try{
+      h.rows[0].createdAt=Date.now()+1000;
       h.create.mockResolvedValue({stop_reason:'end_turn',content:[{type:'text',text:'Review reply'}]});
       await runAssistantTurn({userId:'owner',conversationId:'dm',messageId:'A'});
       expect(h.create.mock.calls[0][0].system).toContain('private-review-token');
       expect(h.create.mock.calls[0][0].system).toContain('Exact approved excerpt');
       h.create.mockClear();h.rows[0].assistantScope='conversation';
+      await runAssistantTurn({userId:'owner',conversationId:'dm',messageId:'A'});
+      expect(h.create.mock.calls[0][0].system).not.toContain('private-review-token');
+      h.create.mockClear();h.rows[0].assistantScope='universal';h.rows[0].createdAt=Date.now()-10_000;
       await runAssistantTurn({userId:'owner',conversationId:'dm',messageId:'A'});
       expect(h.create.mock.calls[0][0].system).not.toContain('private-review-token');
     }finally{clearAskPublicationReview('owner','dm','pending-ask');}
