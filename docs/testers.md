@@ -204,9 +204,24 @@ Feedback from inside OpenChat creates a **WorldIssueTracker** issue
 (`worldissuetracker.com`) labeled `openchat-feedback`, so the team sees it in
 one place.
 
-Three entry points share one filing path (`apps/server/src/services/witFeedback.ts`):
+**Web (`/app`): the WIT widget, menu-launched.** On web, **Send feedback** in the
+desktop account menu (avatar → Send feedback) and in Settings opens the World Issue Tracker panel
+in place (`src/services/witWidget.ts`; the loader is injected on first open with
+`data-trigger="none"`, so nothing floats over the app). Reports go to the unlisted
+board `openchat-feedback`, tagged `App: OpenChat v<version>` with page URL and
+device, and screenshots can be attached. Signed-in reports carry a verified sender:
+the widget's token getter calls `POST /api/feedback/wit-token` (OpenChat JWT only).
+The server reuses the delegation below to mint a WIT-audience token for the person
+and exchanges it at WIT `/functions/v1/feedback-token` for a 15-minute `wfb1.`
+token that can only create issues. No Ideaflow ID token is stored, and nothing
+long-lived reaches the browser; `{ token: null }` means file anonymously
+(no Ideaflow identity, or delegation unavailable). This bearer path needs no
+WIT client-ID allowlist. OpenChat's Ideaflow OIDC client ID is
+`cZwBKeVlLfMPdDbJNngYUzNGRUqZfxSO`, should the ID-token path ever be used.
 
-1. **Settings → "Send feedback"** — type what's working/broken/missing; on
+Native entry points share one filing path (`apps/server/src/services/witFeedback.ts`):
+
+1. **Settings → "Send feedback"** (native) — type what's working/broken/missing; on
    submit the app confirms who it was posted as and links to the issue.
    (`SettingsScreen.tsx` → `api.submitFeedback` → `POST /api/feedback`.)
 2. **Assistant → "file feedback"** — tell the in-app Assistant and it files the

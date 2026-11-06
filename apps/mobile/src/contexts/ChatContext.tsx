@@ -19,6 +19,7 @@ import { OfflineChat, retryableSendError, type PendingMessage } from '../service
 import { displayAttachments, keepPhotosForOutbox, releaseOutboxPhotos, resolveOutboxUri, type QueuedPhoto } from '../services/photoOutbox';
 import { isPermanentUploadError, uploadImages, type PickedAsset } from '../services/attachments';
 import { logWarn } from '../services/clientLogger';
+import { setWitFeedbackUser } from '../services/witWidget';
 import {
   setUnreadBadgeCount,
   setActiveConversationForNotifications,
@@ -244,6 +245,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   useEffect(() => { contextLaneManager.setAccount(currentUser?.userId ?? null); }, [currentUser?.userId]);
   const [isAuthed, setIsAuthed] = useState(false);
+  // Web feedback widget: signed-in reports carry a verified sender (witWidget.ts).
+  useEffect(() => { setWitFeedbackUser(isAuthed ? () => api.witFeedbackToken() : null); }, [isAuthed, currentUser?.userId]);
   const [authInitialized, setAuthInitialized] = useState(false);
   const [isIdentityVerified, setIsIdentityVerified] = useState(false);
   const [isConnected, setIsConnected] = useState(false);

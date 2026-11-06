@@ -13,9 +13,20 @@
  */
 import { Router, Request, Response } from 'express';
 import { resolveActor } from '../middleware/resolveActor.js';
-import { FEEDBACK_MAX_MESSAGE, fileFeedback } from '../services/witFeedback.js';
+import { requireAuth } from '../middleware/auth.js';
+import { FEEDBACK_MAX_MESSAGE, fileFeedback, witWidgetToken } from '../services/witFeedback.js';
 
 const router = Router();
+
+// POST /api/feedback/wit-token — a 15-minute, create-issue-only WIT token for
+// the web feedback widget's setUserToken getter (signed-in OpenChat sessions
+// only; agent keys never). { token: null } means "file anonymously".
+router.post('/wit-token', requireAuth, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, private');
+  const userId = req.user?.userId;
+  const result = userId ? await witWidgetToken(userId) : null;
+  res.json(result ?? { token: null });
+});
 
 // POST /api/feedback — create a WIT issue from a user's feedback message.
 // Filed under the filer's unified Ideaflow account unless anonymous:true.
