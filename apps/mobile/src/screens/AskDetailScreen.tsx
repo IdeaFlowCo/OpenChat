@@ -1,3 +1,4 @@
+import { AskPublicationControls } from '../components/AskPublicationControls';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TouchableOpacity } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
@@ -31,6 +32,7 @@ function AskDetail({ askId }: { askId: string }) {
       {!!askParties(ask) && <Text style={{ ...type.body, color: c.textSecondary }}>{askParties(ask)}</Text>}
       <Text style={{ ...type.label, color: c.textMetadata }}>Recorded by {ask.recordedBy ?? 'unknown'} · {ask.recordedVia ?? 'unknown source'}</Text>
       {ask.evidence?.quote && <Text style={{ ...type.body, color: c.textSecondary }}>{ask.evidence.quote}</Text>}
+      <AskPublicationControls ask={ask} />
       <Text style={{ ...type.heading, color: c.textPrimary }}>Sources</Text>
       {!ask.sources?.length && <Text style={{ ...type.body, color: c.textMetadata }}>No message receipt was recorded by the original client.</Text>}
       {ask.sources?.map(source => <TouchableOpacity key={`${source.app}:${source.conversationId}:${source.messageId}:${source.itemIndex}`} accessibilityRole="link" disabled={source.app !== 'openchat'} onPress={() => navigation.navigate('Chat', { conversationId: source.conversationId })} style={{ paddingVertical: space[3], gap: space[2] }}>

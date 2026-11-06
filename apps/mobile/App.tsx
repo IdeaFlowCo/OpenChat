@@ -1,3 +1,4 @@
+import { SharedAsksScreen } from './src/screens/SharedAsksScreen';
 import { AskDetailScreen } from './src/screens/AskDetailScreen';
 import { chatBackOptions } from './src/navigation/chatBackOptions';
 import { flushConversationNavigation } from './src/navigation/conversationNavigation';
@@ -207,6 +208,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         }}
       />
       <ChatsStack.Screen name="AsksList" component={AsksScreen} options={{ title: 'All asks' }} />
+      <ChatsStack.Screen name="SharedAsks" component={SharedAsksScreen} options={{ title: 'Shared with me' }} />
       <ChatsStack.Screen name="AskDetail" component={AskDetailScreen} options={{ title: 'Ask details' }} />
       <ChatsStack.Screen
         name="MyCard"
@@ -324,6 +326,7 @@ function AsksNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       }}
     >
       <AsksStack.Screen name="AsksList" component={AsksScreen} options={{ title: 'All asks' }} />
+      <AsksStack.Screen name="SharedAsks" component={SharedAsksScreen} options={{ title: 'Shared with me' }} />
       <AsksStack.Screen name="AskDetail" component={AskDetailScreen} options={{ title: 'Ask details' }} />
       <AsksStack.Screen name="AgentOverlay" component={AgentOverlayScreen} options={{ title: 'OpenChat Agent', presentation: 'modal' }} />
       <AsksStack.Screen name="StoryComposer" component={StoryComposerScreen} options={{ title: 'Share a Story', presentation: 'modal' }} />

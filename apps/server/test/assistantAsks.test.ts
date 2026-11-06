@@ -35,7 +35,7 @@ describe('hosted canonical asks under server turn authority', () => {
   });
   it('denies shared-chat tools, missing origin, mismatched origin and invented evidence before saves', async () => {
     const group = { kind: 'conversation', conversationId: 'private-agent' } as const;
-    for (const name of ['save_ask', 'list_asks', 'get_ask', 'update_ask']) {
+    for (const name of ['save_ask', 'list_asks', 'get_ask', 'update_ask', 'publish_ask', 'get_ask_publication', 'revoke_ask_publication']) {
       expect(buildTools(group).map(tool => tool.name)).not.toContain(name);
       expect(await executeTool(undefined, 'synthetic-owner', name, {}, group, boundary)).toHaveProperty('error');
       expect(buildTools(scope).map(tool => tool.name)).toContain(name);

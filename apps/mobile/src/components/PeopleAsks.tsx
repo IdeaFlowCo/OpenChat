@@ -22,7 +22,8 @@ const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month
 export function askMeta(ask: OverlayAsk): string {
   const timing = ask.status === 'open' || ask.status === 'stale' ? ask.needsRecheck ? 'Due for a recheck' : `Recheck ${day(ask.recheckAfter)}` : ask.closedAt ? `Closed ${day(ask.closedAt)}` : STATUS_LABEL[ask.status];
   const intended = ask.sources?.at(-1)?.audienceIntent;
-  return [STATUS_LABEL[ask.status], HORIZON_LABEL[ask.horizon], timing, intended ? `Only you can currently see this · intended for ${intended}` : EXPOSURE_LABEL[ask.exposure]].join(' · ');
+  const access = ask.publication?.state === 'active' ? `${ask.publication.audienceKind === 'public' ? 'Public' : 'Shared with selected people'}${ask.publication.sourceRevision !== ask.revision ? ' · Private version changed' : ''}` : intended ? `Only you can currently see this · intended for ${intended}` : EXPOSURE_LABEL[ask.exposure];
+  return [STATUS_LABEL[ask.status], HORIZON_LABEL[ask.horizon], timing, access].join(' · ');
 }
 
 type Person = Exclude<OverlayAskParty, { kind: 'self' }>;
@@ -142,7 +143,7 @@ export function PeopleAsks({ onOpenPerson, onOpenAsk, onOpenSource }: { onOpenPe
   return (
     <View style={styles.root}>
       <View style={styles.heading}>
-        <Text style={[styles.eyebrow, { color: c.primary }]}>PERSONAL ASKS · ONLY YOU SEE THESE</Text>
+        <Text style={[styles.eyebrow, { color: c.primary }]}>PERSONAL ASKS</Text>
         <TouchableOpacity accessibilityRole="switch" accessibilityState={{ checked: showClosed }} onPress={() => { const next = !showClosed; closedRef.current = next; setShowClosed(next); void load(next); }} style={styles.toggle}>
           <Text style={{ ...type.label, fontWeight: '600', color: c.textSecondary }}>{showClosed ? 'Hide closed' : 'Show closed'}</Text>
         </TouchableOpacity>

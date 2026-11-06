@@ -36,7 +36,7 @@ export const THING_KINDS = ['person', 'company', 'idea', 'project', 'topic'] as 
 const KIND_CHOICE = 'Choose a person, company, idea, project or topic';
 export type ThingKind = typeof THING_KINDS[number];
 /** `ask` ends appear on links to an ask (a person `asks` it) and in search; asks are saved through the ask routes, never as things. */
-export type NodeKind = 'user' | ThingKind | 'ask';
+export type NodeKind = 'user' | Entity['kind'];
 export type CadenceMode = 'fixed' | 'expanding';
 
 export interface PersonCard {
@@ -397,7 +397,7 @@ async function userNames(ends: Array<{ refs: string[] }>): Promise<Map<string, s
   } finally { await session.close(); }
   return names;
 }
-function endOf(entity: { id: string; kind: ThingKind | 'ask'; name: string; refs: string[]; description?: string | null }, names: Map<string, string> = new Map(), connections: Connections = new Map()): LinkEnd {
+function endOf(entity: { id: string; kind: Entity['kind']; name: string; refs: string[]; description?: string | null }, names: Map<string, string> = new Map(), connections: Connections = new Map()): LinkEnd {
   const userId = userIdOf(entity.refs), description = entity.description ? { description: entity.description } : {};
   if (userId !== null) return { kind: 'user', id: userId, name: names.get(userId) ?? entity.name, ...description };
   return { kind: entity.kind, id: entity.id, name: entity.name, ...description, ...unlinkedFields(entity.refs, connections) };
@@ -634,7 +634,7 @@ export async function listOwnerLinks(ownerId: string, rawQuery: unknown): Promis
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
   return { links: links.slice(0, 200), total: links.length };
 }
-type End = { id: string; kind: ThingKind | 'ask'; name: string; refs: string[]; description?: string | null };
+type End = { id: string; kind: Entity['kind']; name: string; refs: string[]; description?: string | null };
 function ownerLink(link: Edge, from: End, to: End, names: Map<string, string>, connections: Connections = new Map()): OwnerLink {
   return {
     id: link.id, relation: link.relation, relationType: link.relationType, from: endOf(from, names, connections), to: endOf(to, names, connections), createdAt: link.createdAt,
@@ -927,6 +927,7 @@ export interface PrivateAskView {
   exposure: AskExposure; exposureConversationId: string | null; evidence: AskEvidence | null;
   createdAt: string; updatedAt: string; updatedBy: string | null; closedAt: string | null; checkedAt: string | null; revision: number;
   recordedBy: string | null; recordedVia: string | null; assertion: string | null;
+  publication: { state: 'active' | 'revoked'; audienceKind: 'public' | 'people'; sourceRevision: number } | null;
 }
 /** A party as given: the owner (`self`), or a subject as notes and links name it. */
 export type AskPartyInput = { kind: 'self' } | Subject;
@@ -982,6 +983,15 @@ async function hiddenAskIds(ownerId: string, principal: OverlayPrincipal, entiti
 
 /** Asks as the app shows them. An ask by (or carried by) someone blocked either way, or gone, is left out; such a placement is dropped. */
 async function askViews(ownerId: string, asks: Ask[]): Promise<PrivateAskView[]> {
+  const publications = new Map<string, PrivateAskView['publication']>();
+  if (asks.length) {
+    const { ownerKey } = await ownerPrincipal(ownerId), db = getDriver().session();
+    try {
+      const result = await db.run('MATCH (p:OverlayAskPublication {ownerKey:$ownerKey}) WHERE p.askId IN $ids RETURN p.askId AS askId,p.state AS state,p.audienceKind AS audienceKind,p.sourceRevision AS sourceRevision', { ownerKey, ids: asks.map(ask => ask.id) });
+      for (const row of result.records) publications.set(String(row.get('askId')), { state: row.get('state'), audienceKind: row.get('audienceKind'), sourceRevision: Number(row.get('sourceRevision')?.toString() ?? 0) });
+    } finally { await db.close(); }
+  }
+
   const ends = asks.flatMap(ask => [ask.author, ask.carrier, ...ask.placements].filter(isEnd));
   const hidden = await blockedUserIds(ownerId, ends), names = await userNames(ends), connections = await connectionsFor(ownerId, ends);
   const blocked = (party: unknown) => { const userId = isEnd(party) ? userIdOf(party.refs) : null; return userId !== null && hidden.has(userId); };
@@ -993,7 +1003,7 @@ async function askViews(ownerId: string, asks: Ask[]): Promise<PrivateAskView[]>
     fromMe: ask.fromMe, forMe: ask.forMe, horizon: ask.horizon, recheckAfter: ask.recheckAfter,
     needsRecheck: ask.needsRecheck, status: ask.status, exposure: ask.exposure, exposureConversationId: conversationIdOf(ask.exposureChat), evidence: ask.evidence,
     createdAt: ask.createdAt, updatedAt: ask.updatedAt, updatedBy: ask.updatedBy, closedAt: ask.closedAt, checkedAt: ask.checkedAt, revision: ask.revision,
-    recordedBy: ask.recordedBy, recordedVia: ask.recordedVia, assertion: ask.assertion,
+    recordedBy: ask.recordedBy, recordedVia: ask.recordedVia, assertion: ask.assertion, publication: publications.get(ask.id) ?? null,
   }));
 }
 const oneView = async (ownerId: string, ask: Ask): Promise<PrivateAskView> => (await askViews(ownerId, [ask]))[0] ?? fail(404, 'Not found');

@@ -42,6 +42,7 @@ export type RootStackParamList = {
   MyCard: undefined;
   AsksList: undefined;
   AskDetail: { askId: string };
+  SharedAsks: undefined;
   ScanQr: undefined;
   /** Blocked users management screen (OpenChat-46p). */
   BlockedUsers: undefined;
@@ -96,6 +97,7 @@ export type ThoughtsStackParamList = {
 
 export type AsksStackParamList = {
   AskDetail: { askId: string };
+  SharedAsks: undefined;
   AsksList: undefined;
   Chat: { conversationId: string; lane?: 'chat' | 'context'; entryId?: string };
   AgentOverlay: { prompt?: string; context?: AgentPageContext } | undefined;

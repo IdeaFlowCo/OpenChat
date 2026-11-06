@@ -1,3 +1,4 @@
+import { getAskPublication, publishAsk, revokeAskPublication } from './askPublications.js';
 /** Canonical personal asks. All authority and source IDs come from the server turn. */
 import type Anthropic from '@anthropic-ai/sdk';
 import { getDriver } from '../db.js';
@@ -6,6 +7,9 @@ import { getAsk, listAsks, saveAsk, updateAsk } from './privateGraph.js';
 import type { MessageBoundary } from './messageBoundary.js';
 
 export const ASK_TOOLS: Anthropic.Tool[] = [
+  { name: 'publish_ask', description: 'Prepare or commit durable public or selected-account profile visibility for an already saved OWN ask. First confirm:false returns exact text, audience names and approvalGrant; show that review and wait for explicit approval, then repeat identical payload with confirm:true and grant. Never grants matching, sends or notifies. Names/emails are not ACL targets; resolve exact account/profile IDs first. Private sources remain private.', input_schema: { type: 'object', properties: { askId: { type: 'string' }, requestId: { type: 'string' }, expectedAskRevision: { type: 'integer' }, expectedPublicationRevision: { type: ['integer','null'] }, text: { type: 'string' }, audience: { type: 'object', properties: { kind: { type: 'string', enum: ['public','people'] }, targets: { type: 'array', maxItems: 20, items: { type: 'object', properties: { kind: { type: 'string', enum: ['openchat_user','unlinked_profile'] }, id: { type: 'string' } }, required: ['kind','id'] } } }, required: ['kind'] }, confirm: { type: 'boolean' }, approvalGrant: { type: 'string' } }, required: ['askId','requestId','expectedAskRevision','expectedPublicationRevision','text','audience','confirm'] } },
+  { name: 'get_ask_publication', description: 'Read the authenticated owner’s current ask publication and compare it with the private source revision. Does not publish.', input_schema: { type: 'object', properties: { askId: { type: 'string' } }, required: ['askId'] } },
+  { name: 'revoke_ask_publication', description: 'Revoke a durable ask publication without deleting the private ask. Narrows access immediately on subsequent reads. Does not retract previously read/downloaded text.', input_schema: { type: 'object', properties: { askId: { type: 'string' }, expectedPublicationRevision: { type: 'integer' } }, required: ['askId','expectedPublicationRevision'] } },
   { name: 'save_ask', description: 'Save an explicitly requested personal need immediately in the canonical owner inventory (Profile → All asks). Saving is private; audienceIntent preserves Public or a named person without publishing, sending, assigning a carrier, or activating matching. itemIndex is the stable zero-based position of the distinct ask within its ORIGINAL ask-bearing source message, never its order in the latest follow-up; reuse on retries. Return the saved ID and actual access. Existing author/text returns unchanged; use update_ask explicitly for edits.', input_schema: { type: 'object', properties: {
     text: { type: 'string', maxLength: 1000 }, itemIndex: { type: 'integer', minimum: 0, maximum: 99 },
     excerpt: { type: 'string', description: 'Short exact excerpt containing the ask from this user’s current or earlier message in this conversation.' },
@@ -20,6 +24,9 @@ export const ASK_TOOLS: Anthropic.Tool[] = [
 ];
 const by = { author: 'agent:OpenChat', source: 'app', assertion: 'stated' } as const;
 export async function executeAskTool(ownerId: string, name: string, input: Record<string, unknown>, boundary?: MessageBoundary): Promise<unknown> {
+  if (name === 'get_ask_publication') return getAskPublication(ownerId, String(input.askId ?? ''));
+  if (name === 'publish_ask') { const { askId, ...payload } = input; return publishAsk(ownerId, `${ownerId}:assistant`, String(askId ?? ''), payload); }
+  if (name === 'revoke_ask_publication') return revokeAskPublication(ownerId, String(input.askId ?? ''), input.expectedPublicationRevision);
   if (name === 'list_asks') return listAsks(ownerId, { status: input.status ?? 'all', direction: input.direction, q: input.q, limit: input.limit });
   if (name === 'get_ask') return { ask: await getAsk(ownerId, String(input.askId ?? '')) };
   if (name === 'update_ask') {

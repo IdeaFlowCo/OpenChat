@@ -1,3 +1,4 @@
+import { OverlayError } from '../services/overlay/contract.js';
 import { getAskPublication, publishAsk, revokeAskPublication } from '../services/askPublications.js';
 /**
  * Private graph API — the signed-in person's own notes, importance, catch-up
@@ -29,6 +30,7 @@ router.use((req: Request, res: Response, next) => {
 });
 
 function fail(error: unknown, res: Response): void {
+  if (error instanceof OverlayError) { res.status(error.status).json({ error: error.code }); return; }
   if (error instanceof PrivateGraphError) { res.status(error.status).json({ ...(error.details ?? {}), error: error.message }); return; }
   console.error('Private graph request failed:', error instanceof Error ? error.message : 'unknown error');
   res.status(500).json({ error: 'Could not save that. Try again.' });

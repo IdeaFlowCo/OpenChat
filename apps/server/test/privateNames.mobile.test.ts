@@ -23,6 +23,7 @@ vi.mock('../../mobile/src/components/ProfileActions', () => ({ ProfileActions: (
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 // The asks list and the private card have their own suites. The private name row lives
 // inside the (collapsed) private card, so the stand-in renders just that row.
+vi.mock('../../mobile/src/components/PublishedAsks', () => ({ PublishedAsks: () => null }));
 vi.mock('../../mobile/src/components/ProfileAsks', () => ({ ProfileAsks: () => null }));
 vi.mock('../../mobile/src/components/PrivateGraph', () => ({ PrivateCard: ({ nameRow }: any) => nameRow ?? null }));
 import { PrivateNamesProvider, usePrivateName } from '../../mobile/src/contexts/PrivateNamesContext.js';

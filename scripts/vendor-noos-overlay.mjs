@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-const FILES = ['contract.ts', 'store.ts'];
+const FILES = ['contract.ts', 'store.ts', 'publications.ts'];
 const noos = process.argv[2];
 if (!noos) { console.error('usage: node scripts/vendor-noos-overlay.mjs <path-to-noos-checkout>'); process.exit(2); }
 const git = (...args) => execFileSync('git', ['-C', noos, ...args], { encoding: 'utf8' }).trim();

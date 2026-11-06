@@ -265,6 +265,40 @@ export class OverlayStore {
     });
   }
 
+  /** Keyset pages over immutable IDs. Reads never create entities or relationships.
+   * Cursors are scoped to the owner and filter by the route's caller; a changed
+   * graph can add/remove results, so consumers reconcile against import receipts.
+   */
+  async listPage(principal: OverlayPrincipal | null, filter: { kind?: unknown; after?: unknown; limit?: unknown } = {}): Promise<{ entities: Entity[]; nextCursor: string | null }> {
+    const ownerKey = this.owner(principal);
+    const kind = filter.kind === undefined ? null : cleanKind(filter.kind);
+    const scope = pageScope([ownerKey, 'entities', kind]);
+    const { after, limit } = pageInput(filter, scope);
+    return this.read(async tx => {
+      const result = await tx.run(`MATCH (e:OverlayEntity {ownerKey: $ownerKey})
+        WHERE ($kind IS NULL OR e.kind = $kind) AND e.id > $after
+        RETURN ${ENTITY} AS entity ORDER BY e.id LIMIT $limit`, { ownerKey, kind, after, limit: neo4j.int(limit + 1) });
+      const entities = result.records.slice(0, limit).map(record => entityFrom(record.get('entity') as Record<string, unknown>));
+      return { entities, nextCursor: result.records.length > limit ? pageCursor(scope, entities[entities.length - 1]!.id) : null };
+    });
+  }
+
+  async linksPage(principal: OverlayPrincipal | null, id: unknown, filter: { after?: unknown; limit?: unknown } = {}): Promise<{ links: Link[]; nextCursor: string | null }> {
+    const ownerKey = this.owner(principal);
+    if (!isId(id)) return fail(404, 'not_found');
+    const scope = pageScope([ownerKey, 'links', id]);
+    const { after, limit } = pageInput(filter, scope);
+    return this.read(async tx => {
+      await entity(tx, ownerKey, id);
+      const result = await tx.run(`MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey})-[l:OVERLAY_LINK]-(other:OverlayEntity {ownerKey: $ownerKey})
+        WHERE l.ownerKey = $ownerKey AND l.id > $after
+        RETURN ${EDGE} AS edge, CASE WHEN startNode(l) = e THEN 'out' ELSE 'in' END AS direction, ${end('other')} AS other
+        ORDER BY l.id LIMIT $limit`, { ownerKey, id, after, limit: neo4j.int(limit + 1) });
+      const links = result.records.slice(0, limit).map(record => linkFrom(edgeFrom(record.get('edge') as Record<string, unknown>), record.get('direction') as 'out' | 'in', endFrom(record.get('other') as Record<string, unknown>)));
+      return { links, nextCursor: result.records.length > limit ? pageCursor(scope, links[links.length - 1]!.id) : null };
+    });
+  }
+
   /**
    * Search the owner's overlay: entities by name, description or note text,
    * and links by relation text, context, relation type or either end's name.
@@ -462,6 +496,8 @@ export class OverlayStore {
 /** For callers that must erase inside their own transaction (account deletion). */
 export async function deleteOwnerIn(tx: Pick<ManagedTransaction, 'run'>, ownerKey: string): Promise<void> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
+  // Serialize erasure with publication writes on every existing canonical ask.
+  await tx.run("MATCH (a:OverlayEntity {ownerKey:$ownerKey,kind:'ask'}) SET a._lock=true REMOVE a._lock", { ownerKey });
   for (const label of ['OverlayAskPublication', 'OverlayAskPublicationOperation', 'OverlayAskSource', 'OverlayNote', 'OverlayRef', 'OverlayEntity']) await tx.run(`MATCH (n:${label} {ownerKey: $ownerKey}) DETACH DELETE n`, { ownerKey });
 }
 
@@ -1044,3 +1080,21 @@ async function writeCard(tx: Runner, ownerKey: string, id: string, current: Card
 }
 
 export { OverlayError };
+
+const pageScope = (parts: unknown[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
+const pageCursor = (scope: string, after: string) => Buffer.from(JSON.stringify({ scope, after })).toString('base64url');
+function pageInput(input: { after?: unknown; limit?: unknown }, scope: string): { after: string; limit: number } {
+  let after = '';
+  if (input.after !== undefined) {
+    if (typeof input.after !== 'string' || input.after.length > 512 || !/^[A-Za-z0-9_-]+$/.test(input.after)) return fail(400, 'invalid_cursor');
+    try {
+      const decoded = JSON.parse(Buffer.from(input.after, 'base64url').toString('utf8'));
+      if (decoded.scope !== scope || !isId(decoded.after)) return fail(400, 'invalid_cursor');
+      after = decoded.after;
+    } catch { return fail(400, 'invalid_cursor'); }
+  }
+  if (input.limit !== undefined && typeof input.limit !== 'number' && (typeof input.limit !== 'string' || !/^[0-9]+$/.test(input.limit))) return fail(400, 'invalid_limit');
+  const limit = input.limit === undefined ? 100 : Number(input.limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) return fail(400, 'invalid_limit');
+  return { after, limit };
+}

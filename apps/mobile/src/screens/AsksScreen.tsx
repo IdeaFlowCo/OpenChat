@@ -143,6 +143,7 @@ function AsksInventory() {
         </TouchableOpacity>
       </View>
       <View style={styles.toolbar}>
+        <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('SharedAsks')} style={[styles.secondaryButton, { borderColor: c.border, backgroundColor: c.surface }]}><Text style={{ color: c.primary, fontWeight: '700' }}>Shared with me</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('StoryComposer')} style={[styles.secondaryButton, { borderColor: c.border, backgroundColor: c.surface }]}>
           <AppIcon name="plus" color={c.primary} size={17} />
           <Text style={{ color: c.primary, fontWeight: '700' }}>Share a Story</Text>

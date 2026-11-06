@@ -4,9 +4,9 @@ import neo4j, { type ManagedTransaction } from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { normalizePublicDisplayName } from '../privacy/profilePrivacy.js';
 import { privateReviewPrincipal, PrivateGraphError } from './privateGraph.js';
-import { ownerKeyFor, OverlayError } from './overlay/contract.js';
+import { cleanAskText, ownerKeyFor, OverlayError } from './overlay/contract.js';
 import { askIn } from './overlay/store.js';
-import { checkPublicationIn, cleanPublicationInput, commitPublicationIn, publicationFrom, publicationIn, publicationReplayIn, revokePublicationIn, type PublicationInput, type Publication } from './overlay/publications.js';
+import { checkPublicationIn, cleanPublicationInput, commitPublicationIn, publicationFrom, publicationIn, publicationReplayIn, publicationRequestReplayIn, revokePublicationIn, type Publication } from './overlay/publications.js';
 import { consumePublicationApproval, issuePublicationApproval } from './publicationApproval.js';
 import { resolveUnlinkedIdentity } from './unlinkedMessaging.js';
 type Runner = Pick<ManagedTransaction, 'run'>;
@@ -63,29 +63,41 @@ async function preparedIn(tx: Runner, ownerId: string, ownerKey: string, raw: Pu
     if (Number(blocked.records[0]?.get('count')?.toString() ?? 0)) return fail(404, 'Recipient unavailable');
     recipients.push(recipient);
   }
-  const input = cleanPublicationInput({ requestId: raw.requestId, expectedAskRevision: raw.expectedAskRevision, expectedPublicationRevision: raw.expectedPublicationRevision, text: raw.text, audienceKind: raw.audience.kind, recipientKeys: recipients.map(person => person.key), publisherRef: ref(ownerId) });
+  const input = cleanPublicationInput({ requestId: raw.requestId, expectedAskRevision: raw.expectedAskRevision, expectedPublicationRevision: raw.expectedPublicationRevision, text: raw.text, audienceKind: raw.audience.kind, recipientKeys: recipients.map(person => person.key), recipientRefs: recipients.map(person => ref(person.id)), publisherRef: ref(ownerId) });
   return { input, publisher: { userId: ownerId, displayName: publisher.name }, recipients: [...new Map(recipients.map(person => [person.key, { userId: person.id, displayName: person.name }])).values()].sort((a,b) => a.userId.localeCompare(b.userId)), ownerKey };
 }
+const ERRORS: Record<string,string> = { revision_conflict:'This ask or its publication changed. Refresh and review it again.', publication_approval_required:'The publication review expired or changed. Review the exact text and audience again.', unsupported_author:'Only your own asks can be published.', ask_withdrawn:'Reopen the ask before preparing a publication.', publication_operation_conflict:'This publication request was already used with different content. Prepare a new review.', invalid_revision:'Refresh the ask before preparing publication.', invalid_audience:'Choose Public or verified selected people.' };
 async function work<T>(fn: (tx: ManagedTransaction) => Promise<T>, write = false): Promise<T> {
   const db = getDriver().session();
   try { return write ? await db.executeWrite(fn) : await db.executeRead(fn); }
-  catch (error) { if (error instanceof OverlayError) throw new PrivateGraphError(error.status, error.code, error.details); throw error; }
+  catch (error) { if (error instanceof OverlayError) throw new PrivateGraphError(error.status, ERRORS[error.code] ?? error.code, error.details); throw error; }
   finally { await db.close(); }
 }
 export async function getAskPublication(ownerId: string, askId: string) {
   const { ownerKey } = await privateReviewPrincipal(ownerId);
-  return work(async tx => { const ask = await askIn(tx, ownerKey, askId); const publication = await publicationIn(tx, ownerKey, askId); return { publication, askRevision: ask.revision, publishedVersionDiffers: !!publication && publication.sourceRevision !== ask.revision }; });
+  return work(async tx => { const ask = await askIn(tx, ownerKey, askId); const publication = await publicationIn(tx, ownerKey, askId); const recipients = [];
+    for (const recipientRef of publication?.recipientRefs ?? []) {
+      const id = decodeURIComponent(recipientRef.slice('openchat:user:'.length));
+      try { const person = await userIn(tx, id); recipients.push({ userId:id, displayName:person.name }); } catch (error) { if (error instanceof PrivateGraphError && error.status === 404) recipients.push({ userId:id, displayName:'Account unavailable' }); else throw error; }
+    }
+    return { publication, recipients, askRevision: ask.revision, publishedVersionDiffers: !!publication && publication.sourceRevision !== ask.revision }; });
 }
 export async function publishAsk(ownerId: string, actor: string, askId: string, value: unknown) {
-  const raw = request(value), targets = await resolveTargets(raw);
+  const raw = request(value);
   const { ownerKey } = await privateReviewPrincipal(ownerId);
+  const fingerprint = createHash('sha256').update(JSON.stringify({ askId, requestId:raw.requestId, expectedAskRevision:raw.expectedAskRevision, expectedPublicationRevision:raw.expectedPublicationRevision, text:cleanAskText(raw.text), audience:{kind:raw.audience.kind,targets:[...raw.audience.targets].sort((a,b)=>`${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`))} })).digest('hex');
+  if (raw.confirm) {
+    const replay = await work(tx => publicationRequestReplayIn(tx, ownerKey, askId, raw.requestId, fingerprint));
+    if (replay) return { ...replay, notifications:false, quietMatching:false };
+  }
+  const targets = await resolveTargets(raw);
   return work(async tx => {
     const prepared = await preparedIn(tx, ownerId, ownerKey, raw, targets);
     const approvalPayload = { askId, ...prepared.input, publisher: prepared.publisher, recipients: prepared.recipients, expiresAt: null, notifications: false, quietMatching: false };
     if (raw.confirm) {
       const replay = await publicationReplayIn(tx, ownerKey, askId, prepared.input);
       if (replay) return { ...replay, notifications: false, quietMatching: false };
-      return { ...(await commitPublicationIn(tx, ownerKey, askId, prepared.input, () => consumePublicationApproval(raw.approvalGrant, actor, 'publish_ask', approvalPayload))), notifications: false, quietMatching: false };
+      return { ...(await commitPublicationIn(tx, ownerKey, askId, prepared.input, () => consumePublicationApproval(raw.approvalGrant, actor, 'publish_ask', approvalPayload), fingerprint)), notifications: false, quietMatching: false };
     }
     const { ask } = await checkPublicationIn(tx, ownerKey, askId, prepared.input);
     return { approvalRequired: true, preview: { text: prepared.input.text, lifecycle: ask.status, publisher: prepared.publisher, audience: raw.audience.kind, recipients: prepared.recipients, expiresAt: null, notifications: false, quietMatching: false }, approvalGrant: issuePublicationApproval(actor, 'publish_ask', approvalPayload) };

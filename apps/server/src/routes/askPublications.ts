@@ -4,8 +4,8 @@ import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import { listAskPublications, readAskPublication } from '../services/askPublications.js';
 import { PrivateGraphError } from '../services/privateGraph.js';
 const router = Router();
-router.use((_req, res, next) => { res.set('Cache-Control', 'private, no-store'); next(); });
-router.use(async (req: Request, res: Response, next: NextFunction) => {
+router.use(['/ask-publications', '/people/:userId/ask-publications'], (_req, res, next) => { res.set('Cache-Control', 'private, no-store'); next(); });
+router.use(['/ask-publications', '/people/:userId/ask-publications'], async (req: Request, res: Response, next: NextFunction) => {
   if (req.headers.authorization !== undefined || getConnectorPrincipal(req) || req.connectorDelegation) {
     await resolveActor(req, res, () => {
       const needed = getConnectorPrincipal(req) ? 'openchat:read' : 'read';
