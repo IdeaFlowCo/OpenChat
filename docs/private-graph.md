@@ -219,6 +219,26 @@ an add field, with Still open / Fulfilled / Withdrawn actions and a closed-asks
 toggle. Agent tools: `oc_save_ask`, `oc_list_asks`, `oc_update_ask`,
 `oc_delete_ask` (connector and agent-key MCP server).
 
+## Lists
+
+Since 2026-11-05 (Noos #105) a saved thing can be a `list`: an owner-private
+collection of people, such as investors to contact. A list is a named thing
+like any other (one per owner by name; rename, describe, delete), but its kind
+is fixed: a list stays a list and nothing else becomes one (409), because its
+members are its outgoing `contains` links to people. Membership is the owner's
+own bookkeeping. It is not evidence that they know the person, it is never
+shown to the member or anyone else, and nobody is notified. Imports such as
+Unlinked's CSV path write the same links, so a member removed here is gone
+wherever the owner looks.
+
+| Route | Does |
+|---|---|
+| `GET /api/private/lists/:id/members?after=&limit=` | One page of members (oldest link first), each with its `linkId`. The pages come from the overlay's owner-bound link pages: pass `nextCursor` back unchanged as `after`. A page can hold fewer than `limit` members, because other links on the list and people blocked either way are skipped; `nextCursor` is null only at the end. A cursor from another list or owner is 400. |
+| `POST /api/private/lists/:id/members` `{kind: user\|unlinked\|person, id \| name, createNew?, clientRequestId?}` | Add an OpenChat person, an Unlinked person or a saved person (names never merge). Someone already on the list returns the existing membership. |
+| `DELETE /api/private/lists/:id/members/:linkId` | Remove that membership only; the person's card stays. Anything that is not a `contains` link of the owner's list is 404. |
+
+Agent tools: `oc_list_members` (read), `oc_add_list_member` and `oc_remove_list_member` (write), on the connector and the agent-key MCP server. `oc_save_private_thing` and the other thing tools take kind `list`. Note reviews never propose lists. A list's page in the app shows **Members · only you see this list**, one page at a time, with Remove and an add-by-name field; its membership links are left out of the general links section.
+
 ## In the app and for agents
 
 The contact profile shows a collapsed **Private to you** card. Opened, it keeps
