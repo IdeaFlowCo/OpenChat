@@ -249,12 +249,19 @@ notified.
 Removing a member deletes that one `contains` link everywhere the owner looks.
 A membership can be shared by several import receipts, so removal is a graph
 edit, not the withdrawal of one import's contribution. There is no suppression
-tombstone: a later or different import, or later rows of a resumed import that
-name the same person, can add them back. Deleting a list while an import into
-it is still running makes that import's resume fail (`not_found`); a renamed
-list keeps its id, and the import's recorded list name stays historical. Edits
-do not win over an import that is still running. Import receipts live in
-Unlinked's import records, and OpenChat never rewrites them.
+tombstone: a later or different import, later rows of a resumed import that
+name the same person, or a retried write whose receipt was never saved can add
+them back. A row an import already receipted is not replayed, so its removed
+membership stays removed on an exact resume. Once an import has recorded its
+list's id, deleting the list makes the unfinished resume fail (`not_found`)
+without recreating it (a row in flight may leave the person and notes written),
+and renaming it keeps the id (the import's recorded name stays historical).
+Before that id is recorded, a retried import can recreate a deleted list or
+restore its original name. Edits therefore do not win over a pending import;
+making removal win would need a shared Noos suppression or cancellation
+contract that the importer checks, not an OpenChat-only marker. Import receipts
+live in Unlinked's import records and record original outcomes, not live
+membership; OpenChat never rewrites them.
 
 | Route | Does |
 |---|---|
