@@ -1,3 +1,4 @@
+import { pendingAskPublicationContext } from './askPublicationReviews.js';
 import { ASK_TOOLS, executeAskTool } from './assistantAsks.js';
 import { messageOriginMatch, messageBoundaryFilter, messageAtOrBeforeOrigin, messageBoundaryParams, type MessageBoundary } from './messageBoundary.js';
 import { scopeForParticipants, toolAvailableInScope, scopedToolInput, replyAnnotation, SCOPE_DENIED, type AssistantScope } from './assistantScope.js';
@@ -2024,7 +2025,7 @@ If the user's latest message approves it, call send_message with exactly that co
       const response = await client.messages.create({
         model,
         max_tokens: 1024,
-        system: `${system}\n\nORIGINATING MESSAGE DATE: ${turn.sourceCreatedAt ?? 'unavailable; preserve relative dates literally and do not invent dates'}.\n\nAUTHORIZED CONTEXT: ${scope.kind === 'universal' ? 'Universal private assistant DM. Per-owner source grants still apply.' : 'This conversation only. Do not read, infer or write other chats or private sources.'}`,
+        system: `${system}${scope.kind === 'universal' ? pendingAskPublicationContext(userId,conversationId,messageId) : ''}\n\nORIGINATING MESSAGE DATE: ${turn.sourceCreatedAt ?? 'unavailable; preserve relative dates literally and do not invent dates'}.\n\nAUTHORIZED CONTEXT: ${scope.kind === 'universal' ? 'Universal private assistant DM. Per-owner source grants still apply.' : 'This conversation only. Do not read, infer or write other chats or private sources.'}`,
         tools,
         messages,
       });

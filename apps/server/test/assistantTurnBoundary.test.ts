@@ -1,3 +1,4 @@
+import { clearAskPublicationReview, rememberAskPublicationReview } from '../src/services/askPublicationReviews.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Row={id:string;conversationId:string;senderId:string;createdAt:number;content:string;assistantScope?:string;replyToId?:string;deletedAt?:number};
@@ -47,6 +48,19 @@ beforeEach(()=>{
 });
 afterEach(()=>{vi.unstubAllEnvs();vi.unstubAllGlobals();});
 describe('persisted originating message authority and bounded model input',()=>{
+  it('reinjects pending publication payloads only into the universal private model turn',async()=>{
+    rememberAskPublicationReview('owner','dm','earlier-source',{askId:'pending-ask',requestId:'pending-request',expectedAskRevision:0,expectedPublicationRevision:null,text:'Exact approved excerpt',audience:{kind:'public'},confirm:false},'private-review-token',{text:'Exact approved excerpt',audience:'public'});
+    try{
+      h.create.mockResolvedValue({stop_reason:'end_turn',content:[{type:'text',text:'Review reply'}]});
+      await runAssistantTurn({userId:'owner',conversationId:'dm',messageId:'A'});
+      expect(h.create.mock.calls[0][0].system).toContain('private-review-token');
+      expect(h.create.mock.calls[0][0].system).toContain('Exact approved excerpt');
+      h.create.mockClear();h.rows[0].assistantScope='conversation';
+      await runAssistantTurn({userId:'owner',conversationId:'dm',messageId:'A'});
+      expect(h.create.mock.calls[0][0].system).not.toContain('private-review-token');
+    }finally{clearAskPublicationReview('owner','dm','pending-ask');}
+  });
+
   it('delayed universal A cannot consume isolated B that arrives during context loading',async()=>{
     let release!:()=>void;
     let entered!:()=>void;

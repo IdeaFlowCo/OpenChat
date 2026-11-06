@@ -61,6 +61,13 @@ jobs:
           apps/server/test/ideaflowConnector.privateGraph.test.ts
           apps/server/test/privateNoteReview.test.ts
           apps/server/test/overlayVendor.test.ts
+          apps/server/test/askPublications.route.test.ts
+          apps/server/test/askPublications.service.test.ts
+          apps/server/test/assistantAskPublication.test.ts
+          apps/server/test/assistantAsks.test.ts
+          apps/server/test/assistantTurnBoundary.test.ts
+          apps/server/test/askPublication.mobile.test.ts
+          apps/server/test/allAsks.mobile.test.ts
           apps/server/test/unlinkedProvision.test.ts
 
       # The overlay suites create schema on start; one file at a time avoids lock contention.

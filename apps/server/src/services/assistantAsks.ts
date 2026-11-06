@@ -1,3 +1,4 @@
+import { askPublicationReviewMatches, clearAskPublicationReview, completeAskPublicationReview, rememberAskPublicationReview } from './askPublicationReviews.js';
 import { getAskPublication, publishAsk, revokeAskPublication } from './askPublications.js';
 /** Canonical personal asks. All authority and source IDs come from the server turn. */
 import type Anthropic from '@anthropic-ai/sdk';
@@ -26,8 +27,27 @@ const publicationAccess = (ask: Awaited<ReturnType<typeof getAsk>>) => ask.publi
 const by = { author: 'agent:OpenChat', source: 'app', assertion: 'stated' } as const;
 export async function executeAskTool(ownerId: string, name: string, input: Record<string, unknown>, boundary?: MessageBoundary): Promise<unknown> {
   if (name === 'get_ask_publication') return getAskPublication(ownerId, String(input.askId ?? ''));
-  if (name === 'publish_ask') { const { askId, ...payload } = input; return publishAsk(ownerId, `${ownerId}:assistant`, String(askId ?? ''), payload); }
-  if (name === 'revoke_ask_publication') return revokeAskPublication(ownerId, String(input.askId ?? ''), input.expectedPublicationRevision);
+  if (name === 'publish_ask') {
+    if (!boundary) return { error:'An authenticated user turn is required for publication review' };
+    const db=getDriver().session();
+    try {
+      const origin=await db.run(`MATCH (:User {id:$ownerId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
+        MATCH (m:Message {id:$messageId,conversationId:c.id,senderId:$ownerId})
+        WHERE m.deletedAt IS NULL AND (m.assistantScope IS NULL OR m.assistantScope='universal') RETURN m.id AS id`,{ownerId,...boundary});
+      if(!origin.records[0])return {error:'Originating publication request is unavailable'};
+    } finally {await db.close();}
+    if(input.confirm===true&&!askPublicationReviewMatches(ownerId,boundary.conversationId,boundary.messageId,input))return {error:'Publication needs its exact pending review and explicit approval on a later user turn. Prepare a fresh review if it expired or changed.'};
+    const {askId,...payload}=input;
+    const result=await publishAsk(ownerId,`${ownerId}:assistant`,String(askId??''),payload);
+    if('approvalGrant' in result&&typeof result.approvalGrant==='string')rememberAskPublicationReview(ownerId,boundary.conversationId,boundary.messageId,input,result.approvalGrant,result.preview);
+    if('publication' in result)completeAskPublicationReview(ownerId,boundary.conversationId,askId);
+    return result;
+  }
+  if (name === 'revoke_ask_publication') {
+    const result=await revokeAskPublication(ownerId,String(input.askId??''),input.expectedPublicationRevision);
+    if(boundary)clearAskPublicationReview(ownerId,boundary.conversationId,input.askId);
+    return result;
+  }
   if (name === 'list_asks') return listAsks(ownerId, { status: input.status ?? 'all', direction: input.direction, q: input.q, limit: input.limit });
   if (name === 'get_ask') return { ask: await getAsk(ownerId, String(input.askId ?? '')) };
   if (name === 'update_ask') {
