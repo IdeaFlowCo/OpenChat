@@ -17,6 +17,7 @@ import QRCode from 'react-native-qrcode-svg';
 import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
+import * as Device from 'expo-device';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme, ThemePref } from '../contexts/ThemeContext';
@@ -31,6 +32,7 @@ import { registerForPushNotificationsAsync } from '../services/notifications';
 import { ExportSheet } from '../components/ExportSheet';
 import { FeedbackModal } from '../components/FeedbackModal';
 import { openWitFeedback } from '../services/witWidget';
+import { submitNativeFeedback, type FeedbackScreenshot } from '../services/witNativeFeedback';
 import { saveJsonDownload } from '../services/exportDownload';
 import { describeDesktopUpdate, useDesktopShell } from '../services/desktopShell';
 import { AppIcon } from '../components/AppIcon';
@@ -140,13 +142,32 @@ export function SettingsScreen() {
     if (openWitFeedback()) return;
     setFeedbackModalVisible(true);
   }, []);
-  const handleSubmitFeedback = useCallback(async (text: string, anonymous: boolean) => {
+  // Native: files straight to WIT's openchat-feedback board with a verified
+  // `wfb1.` sender token (julr.11); falls back to anonymous if none.
+  const handleSubmitFeedback = useCallback(async (text: string, anonymous: boolean, screenshot: FeedbackScreenshot | null) => {
     setSendingFeedback(true);
     try {
-      const { url, postedAs, displayName } = await api.submitFeedback(text, undefined, anonymous);
+      const build = Platform.OS === 'ios'
+        ? Constants.platform?.ios?.buildNumber ?? Constants.expoConfig?.ios?.buildNumber
+        : Constants.expoConfig?.android?.versionCode;
+      const { issueUrl, verified, attachmentError } = await submitNativeFeedback({
+        message: text,
+        anonymous,
+        screenshot,
+        context: {
+          app: 'OpenChat',
+          version: Constants.expoConfig?.version ?? '?',
+          build: build != null ? String(build) : null,
+          source: 'Settings',
+          device: `${Device.modelName ?? 'Unknown device'}, ${Device.osName ?? Platform.OS} ${Device.osVersion ?? String(Platform.Version)}`,
+          platform: Platform.OS,
+        },
+      });
       setFeedbackModalVisible(false);
-      const as = postedAs === 'anonymous' ? ' anonymously' : displayName ? ` as ${displayName}` : '';
-      Alert.alert('Thanks!', `Your feedback was posted${as}.${url ? `\n\n${url}` : ''}`);
+      const name = currentUser?.name?.trim();
+      const as = verified ? (name ? ` as ${name}` : '') : ' anonymously';
+      const shotNote = attachmentError ? '\n\nThe screenshot couldn’t be attached.' : '';
+      Alert.alert('Sent', `Thanks — your feedback was sent${as}.${shotNote}${issueUrl ? `\n\n${issueUrl}` : ''}`);
     } catch (err) {
       Alert.alert(
         'Couldn’t send feedback',
@@ -155,7 +176,7 @@ export function SettingsScreen() {
     } finally {
       setSendingFeedback(false);
     }
-  }, []);
+  }, [currentUser?.name]);
 
   const handleDeleteAccount = useCallback(() => {
     // First confirmation alert

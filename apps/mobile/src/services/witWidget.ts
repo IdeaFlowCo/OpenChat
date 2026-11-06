@@ -4,11 +4,13 @@
  *
  * The loader renders no launcher (data-trigger="none"); "Send feedback" in the
  * desktop account menu and in Settings opens the panel. Native platforms keep
- * FeedbackModal. Signed-in reports carry a verified sender: the widget's token
+ * FeedbackModal, which files through services/witNativeFeedback.ts.
+ * Signed-in reports carry a verified sender: the widget's token
  * getter asks the server for a 15-minute create-issue-only token
  * (POST /api/feedback/wit-token); null means the report files anonymously.
  */
 import { Platform } from 'react-native';
+import { setNativeFeedbackUser } from './witNativeFeedback';
 
 const WIDGET_SRC = 'https://worldissuetracker.com/widget/wit-feedback.js';
 export const WIT_FEEDBACK_TRACKER = 'openchat-feedback';
@@ -64,7 +66,8 @@ export function openWitFeedback(): boolean {
 export function setWitFeedbackUser(fetchToken: (() => Promise<WitWidgetToken>) | null): void {
   // Queued only: the loader is injected on the first open, so pages that never
   // open feedback (e.g. the chat embedded in Unlinked) load nothing extra.
-  if (!isWeb()) return;
+  // Native: FeedbackModal posts to WIT itself with the same token source.
+  if (!isWeb()) { setNativeFeedbackUser(fetchToken); return; }
   let cached: WitWidgetToken | null = null;
   const getter: TokenGetter | null = fetchToken
     ? async () => {
