@@ -1153,7 +1153,11 @@ export async function deleteAsk(ownerId: string, askId: string): Promise<{ delet
  * Unlinked person or a saved person). Membership is the owner's own
  * bookkeeping: it is not evidence that they know the person, and it is never
  * shown to the member or anyone else. Imports (Unlinked's CSV path) write the
- * same links, so a member removed here is removed everywhere the owner looks.
+ * same links. Removing a member is a graph edit wherever the owner looks, not
+ * a withdrawal of one import's contribution, and there is no suppression
+ * tombstone: a later or still-running import can add the person back (see
+ * docs/private-graph.md, "Lists"). Lists are addressed by id: an imported list
+ * can share its name with another.
  */
 export const LIST_MEMBERSHIP = 'contains';
 export interface ListMember { linkId: string; member: LinkEnd; addedAt: string; author: string | null; source: string | null }

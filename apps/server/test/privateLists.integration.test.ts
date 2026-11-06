@@ -75,7 +75,18 @@ integration('private lists: owner-only editing of list membership', () => {
   });
 
   it('only people can be members, and only of the owner’s own lists', async () => {
-    expect(await status(() => graph.addListMember(alice, listId, { kind: 'company', name: `Acme ${suffix}` }))).toBe(400);
+    // Same-named saved people are never merged: naming one is ambiguous, an id picks it.
+    const twin = `Twin ${suffix}`;
+    await graph.resolvePrivateThing(alice, { kind: 'person', name: twin });
+    const second = await graph.resolvePrivateThing(alice, { kind: 'person', name: twin, createNew: true, clientRequestId: `twin-${suffix}` });
+    expect(await status(() => graph.addListMember(alice, listId, { kind: 'person', name: twin }))).toBe(409);
+    expect((await graph.addListMember(alice, listId, { kind: 'person', id: second.id })).member.id).toBe(second.id);
+    // An imported-style list (separate ref) can share a list's name; both stay addressable by id.
+    const imported = await graph.resolvePrivateThing(alice, { kind: 'list', name: `Seed investors (2026) ${suffix}`, createNew: true, clientRequestId: `investor-list:${suffix}` });
+    expect(imported.id).not.toBe(listId);
+    expect((await graph.listMembers(alice, imported.id)).members).toEqual([]);
+    expect((await graph.updatePrivateThing(alice, imported.id, { name: `Renamed import ${suffix}` })).kind).toBe('list');
+        expect(await status(() => graph.addListMember(alice, listId, { kind: 'company', name: `Acme ${suffix}` }))).toBe(400);
     // Nor through the generic link route: a list's `contains` links are its members.
     expect(await status(() => graph.addLink(alice, { kind: 'thing', id: listId }, 'contains', { kind: 'company', name: `Acme ${suffix}` }))).toBe(400);
     expect((await graph.listMembers(alice, listId)).members.every(entry => entry.member.kind === 'user' || entry.member.kind === 'person')).toBe(true);
