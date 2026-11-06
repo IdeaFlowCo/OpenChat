@@ -15,6 +15,7 @@ import { api, type IntentDraft, type OwnedStory, type ContextIntention } from '.
 import { useTheme } from '../contexts/ThemeContext';
 import type { AsksNavProp } from '../navigation/types';
 import { getColors } from '../theme/colors';
+import { radius, type } from '../theme/tokens';
 import { capsLabel, serif } from '../theme/typography';
 import { AppIcon } from '../components/AppIcon';
 import { PeopleAsks } from '../components/PeopleAsks';
@@ -70,13 +71,13 @@ function AsksInventory() {
         api.listMyStories(),
         api.getContextIntentions(),
       ]);
-      if (nextDrafts.status === 'fulfilled') setDrafts(nextDrafts.value);
-      if (nextStories.status === 'fulfilled') setStories(nextStories.value);
+      setDrafts(nextDrafts.status === 'fulfilled' ? nextDrafts.value : []);
+      setStories(nextStories.status === 'fulfilled' ? nextStories.value : []);
       setIntentions(nextIntentions.status === 'fulfilled' ? nextIntentions.value.intentions : []);
-      const failure = [nextDrafts, nextStories].find(result => result.status === 'rejected');
+      const failure = [nextDrafts, nextStories, nextIntentions].find(result => result.status === 'rejected');
       if (failure?.status === 'rejected') throw failure.reason;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load your intentions.');
+      setError(err instanceof Error ? err.message : 'Some legacy inventory sources are unavailable.');
     } finally {
       setLoading(false);
     }
@@ -85,9 +86,9 @@ function AsksInventory() {
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const items = useMemo<InventoryItem[]>(() => [
-    ...drafts.filter(draft => draft.state === 'pending').map(draft => ({ key: `draft-${draft.id}`, kind: 'draft' as const, draft })),
+    ...drafts.filter(draft => !draft.activatedIntentId || (!intentions.some(item => item.intentId === draft.activatedIntentId) && !stories.some(item => item.intentId === draft.activatedIntentId))).map(draft => ({ key: `draft-${draft.id}`, kind: 'draft' as const, draft })),
     ...intentions.map(intention => ({ key: `intention-${intention.intentId}`, kind: 'intention' as const, intention })),
-    ...stories.filter(story => story.status !== 'withdrawn' && !intentions.some(intention => intention.intentId === story.intentId)).map(story => ({ key: `story-${story.id}`, kind: 'story' as const, story })),
+    ...stories.filter(story => !intentions.some(intention => intention.intentId === story.intentId)).map(story => ({ key: `story-${story.id}`, kind: 'story' as const, story })),
   ], [drafts, stories, intentions]);
 
   const searchQuietly = async (draft: IntentDraft) => {
@@ -133,8 +134,8 @@ function AsksInventory() {
       <View style={[styles.hero, stackHero && styles.heroStacked]}>
         <View style={stackHero ? null : styles.heroCopy}>
           <Text style={[styles.eyebrow, { color: c.primary }]}>YOUR PRIVATE INVENTORY</Text>
-          <Text style={[styles.title, { color: c.textPrimary }]}>Asks, offers & goals</Text>
-          <Text style={[styles.subtitle, { color: c.textSecondary }]}>Most things stay private. You choose what agents may search and what people may see.</Text>
+          <Text style={[styles.title, { color: c.textPrimary }]}>All asks</Text>
+          <Text style={[styles.subtitle, { color: c.textSecondary }]}>Your asks, audiences, sources and history. Intended audience is separate from who can currently see them.</Text>
         </View>
         <TouchableOpacity accessibilityLabel="Tell OpenChat Agent something" onPress={() => navigation.navigate('AgentOverlay')} style={[styles.agentButton, { backgroundColor: c.primary }]}>
           <AppIcon name="sparkle" color={c.onPrimary} size={18} />
@@ -156,7 +157,7 @@ function AsksInventory() {
         <FlatList
           data={items}
           keyExtractor={item => item.key}
-          ListHeaderComponent={<PeopleAsks onOpenAsker={asker => asker.kind === 'user' ? navigation.navigate('ContactProfile', { userId: asker.id }) : navigation.navigate('PrivateThing', { thingId: asker.id })} />}
+          ListHeaderComponent={<PeopleAsks onOpenAsk={askId => navigation.navigate('AskDetail', { askId })} onOpenSource={conversationId => navigation.navigate('Chat', { conversationId })} onOpenPerson={person => person.kind === 'user' ? navigation.navigate('ContactProfile', { userId: person.id }) : navigation.navigate('PrivateThing', { thingId: person.id })} />}
           contentContainerStyle={items.length ? styles.list : styles.emptyList}
           ListEmptyComponent={
             <View style={[styles.empty, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -167,13 +168,13 @@ function AsksInventory() {
           renderItem={({ item }) => item.kind === 'draft' ? (
             <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
               <View style={styles.cardHeading}>
-                <Text style={[styles.state, { color: c.textMetadata }]}>PRIVATE DRAFT</Text>
+                <Text style={[styles.state, { color: c.textMetadata }]}>{item.draft.state.toUpperCase()} DRAFT</Text>
                 <Text style={[styles.date, { color: c.textMetadata }]}>{new Date(item.draft.updatedAt).toLocaleDateString()}</Text>
               </View>
               <Text style={[styles.cardTitle, { color: c.textPrimary }]}>{draftTitle(item.draft)}</Text>
               {item.draft.seeks.length > 0 && <Text style={[styles.detail, { color: c.textSecondary }]}>Looking for · {item.draft.seeks.join(', ')}</Text>}
               {item.draft.brings.length > 0 && <Text style={[styles.detail, { color: c.textSecondary }]}>Can bring · {item.draft.brings.join(', ')}</Text>}
-              <View style={[styles.consentPreview, { borderColor: c.border, backgroundColor: c.background }]}>
+              {item.draft.state === 'pending' && <><View style={[styles.consentPreview, { borderColor: c.border, backgroundColor: c.background }]}>
                 <Text style={[styles.consentTitle, { color: c.textPrimary }]}>Before you approve</Text>
                 <Text style={[styles.detail, { color: c.textSecondary }]}>Audience · all eligible agents in your OpenChat network</Text>
                 <Text style={[styles.detail, { color: c.textSecondary }]}>Duration · 30 days</Text>
@@ -185,7 +186,7 @@ function AsksInventory() {
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => navigation.navigate('StoryComposer', { draftId: item.draft.id })} style={[styles.outlineSmall, { borderColor: c.border }]}><Text style={{ color: c.primary, fontWeight: '700' }}>Share…</Text></TouchableOpacity>
                 <TouchableOpacity disabled={busyId === item.draft.id} onPress={() => void dismiss(item.draft)} style={styles.linkSmall}><Text style={{ color: c.textMetadata, fontWeight: '600' }}>Keep private</Text></TouchableOpacity>
-              </View>
+              </View></>}
             </View>
           ) : item.kind === 'intention' ? (
             <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -229,9 +230,9 @@ function AsksInventory() {
                   </Text>
                 </>
               )}
-              <TouchableOpacity disabled={busyId === item.story.id} onPress={() => void pauseStory(item.story)} style={[styles.outlineSmall, { borderColor: c.border, marginTop: 12, alignSelf: 'flex-start' }]}>
+              {['active', 'paused'].includes(item.story.status) && <TouchableOpacity disabled={busyId === item.story.id} onPress={() => void pauseStory(item.story)} style={[styles.outlineSmall, { borderColor: c.border, marginTop: 12, alignSelf: 'flex-start' }]}>
                 <Text style={{ color: c.primary, fontWeight: '700' }}>{item.story.status === 'paused' ? `Resume ${item.story.humanVisible ? 'Story' : 'search'}` : `Pause ${item.story.humanVisible ? 'Story' : 'search'}`}</Text>
-              </TouchableOpacity>
+              </TouchableOpacity>}
             </View>
           )}
         />
@@ -247,29 +248,29 @@ const styles = StyleSheet.create({
   heroStacked: { flexDirection: 'column' },
   heroCopy: { flex: 1 },
   eyebrow: { ...capsLabel },
-  title: { fontFamily: serif, fontSize: 27, fontWeight: '600', marginTop: 4 },
-  subtitle: { fontSize: 13, lineHeight: 19, marginTop: 5, maxWidth: 560 },
-  agentButton: { minHeight: 46, borderRadius: 14, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  title: { fontFamily: serif, ...type.title, fontWeight: '600', marginTop: 4 },
+  subtitle: { ...type.label, lineHeight: 19, marginTop: 5, maxWidth: 560 },
+  agentButton: { minHeight: 46, borderRadius: radius.md, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 7 },
   agentButtonText: { fontWeight: '800' },
   toolbar: { width: '100%', maxWidth: 820, alignSelf: 'center', paddingHorizontal: 18, paddingBottom: 8, flexDirection: 'row', gap: 8 },
-  secondaryButton: { minHeight: 42, paddingHorizontal: 13, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  secondaryButton: { minHeight: 42, paddingHorizontal: 13, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, flexDirection: 'row', alignItems: 'center', gap: 6 },
   list: { width: '100%', maxWidth: 820, alignSelf: 'center', padding: 18, paddingTop: 4, paddingBottom: 80, gap: 10 },
   emptyList: { flexGrow: 1, width: '100%', maxWidth: 820, alignSelf: 'center', padding: 18 },
-  empty: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, padding: 22, marginTop: 20 },
-  emptyTitle: { fontFamily: serif, fontSize: 21, fontWeight: '600' },
-  emptyText: { fontSize: 14, lineHeight: 21, marginTop: 7 },
-  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 17, padding: 16 },
+  empty: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, padding: 22, marginTop: 20 },
+  emptyTitle: { fontFamily: serif, ...type.heading, fontWeight: '600' },
+  emptyText: { ...type.body, lineHeight: 21, marginTop: 7 },
+  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, padding: 16 },
   cardHeading: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   state: { ...capsLabel },
-  date: { fontSize: 11 },
-  cardTitle: { fontFamily: serif, fontSize: 20, lineHeight: 27, fontWeight: '600', marginTop: 9 },
-  detail: { fontSize: 13, lineHeight: 19, marginTop: 6 },
-  consentPreview: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 11, marginTop: 12 },
-  consentTitle: { fontSize: 12, fontWeight: '800' },
+  date: { ...type.meta },
+  cardTitle: { fontFamily: serif, ...type.heading, lineHeight: 27, fontWeight: '600', marginTop: 9 },
+  detail: { ...type.label, lineHeight: 19, marginTop: 6 },
+  consentPreview: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, padding: 11, marginTop: 12 },
+  consentTitle: { ...type.meta, fontWeight: '800' },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 14 },
-  primarySmall: { minHeight: 42, minWidth: 116, paddingHorizontal: 13, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  primarySmall: { minHeight: 42, minWidth: 116, paddingHorizontal: 13, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
   primarySmallText: { fontWeight: '800' },
-  outlineSmall: { minHeight: 42, paddingHorizontal: 13, borderWidth: StyleSheet.hairlineWidth, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  outlineSmall: { minHeight: 42, paddingHorizontal: 13, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
   linkSmall: { minHeight: 42, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
-  error: { position: 'absolute', left: 18, right: 18, bottom: 12, padding: 10, fontSize: 13 },
+  error: { position: 'absolute', left: 18, right: 18, bottom: 12, padding: 10, ...type.label },
 });

@@ -42,27 +42,29 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
   });
 
   it('saves the owner\'s own asks and people\'s asks once each, with only_me by default', async () => {
-    const own = await graph.saveAsk(alice, { asker: 'self', text: 'Heal my TFCC', horizon: 'evergreen' });
+    const own = await graph.saveAsk(alice, { author: 'self', text: 'Heal my TFCC', horizon: 'evergreen' });
     expect(own.created).toBe(true);
-    expect(own.ask).toMatchObject({ own: true, asker: null, exposure: 'only_me', status: 'open', horizon: 'evergreen', exposureConversationId: null, author: 'owner', source: 'app' });
-    const again = await graph.saveAsk(alice, { asker: { kind: 'self' }, text: 'heal my  TFCC' });
+    expect(own.ask).toMatchObject({ fromMe: true, forMe: false, authorParty: { kind: 'self' }, carrier: null, placements: [], exposure: 'only_me', status: 'open', horizon: 'evergreen', exposureConversationId: null, recordedBy: 'owner', recordedVia: 'app' });
+    const again = await graph.saveAsk(alice, { author: { kind: 'self' }, text: 'heal my  TFCC' });
     expect([again.created, again.ask.id]).toEqual([false, own.ask.id]);
 
-    const bobs = await graph.saveAsk(alice, { asker: { kind: 'user', id: bob }, text: 'Looking for a co-founder', evidence: { label: 'Told me at dinner', seenAt: '2026-11-01' } },
+    const bobs = await graph.saveAsk(alice, { author: { kind: 'user', id: bob }, text: 'Looking for a co-founder', evidence: { label: 'Told me at dinner', seenAt: '2026-11-01' } },
       { author: 'agent:Test', source: 'connector', assertion: 'inferred' });
-    expect(bobs.ask).toMatchObject({ own: false, asker: { kind: 'user', id: bob, name: bob }, author: 'agent:Test', assertion: 'inferred', evidence: { label: 'Told me at dinner', seenAt: '2026-11-01', quote: null, url: null, noteId: null } });
-    // The asker's card shows the ask as a link.
+    expect(bobs.ask).toMatchObject({ fromMe: false, authorParty: { kind: 'user', id: bob, name: bob }, recordedBy: 'agent:Test', assertion: 'inferred', evidence: { label: 'Told me at dinner', seenAt: '2026-11-01', quote: null, url: null, noteId: null } });
+    // The author's card shows the ask as a link.
     expect((await graph.getPersonOverlay(alice, bob)).links.map(link => [link.relation, link.relationType, link.other.kind])).toEqual([['asks', 'asks', 'ask']]);
 
     const maya = await graph.resolvePrivateThing(alice, { kind: 'person', name: `Maya ${suffix}` });
-    const mayas = await graph.saveAsk(alice, { asker: { kind: 'thing', id: maya.id }, text: 'Chiropractor in SF', horizon: 'short' });
-    expect(mayas.ask.asker).toMatchObject({ kind: 'person', id: maya.id });
+    const mayas = await graph.saveAsk(alice, { author: { kind: 'thing', id: maya.id }, text: 'Chiropractor in SF', horizon: 'short' });
+    expect(mayas.ask.authorParty).toMatchObject({ kind: 'person', id: maya.id });
     const topic = await graph.resolvePrivateThing(alice, { kind: 'topic', name: `Neck pain ${suffix}` });
-    expect(await status(() => graph.saveAsk(alice, { asker: { kind: 'thing', id: topic.id }, text: 'x' }))).toBe(400);
-    expect(await status(() => graph.saveAsk(alice, { asker: { kind: 'user', id: alice }, text: 'x' }))).toBe(400);
-    expect(await status(() => graph.saveAsk(alice, { asker: { kind: 'user', id: blocked }, text: 'x' }))).toBe(200);
-    expect(await status(() => graph.saveAsk(alice, { text: 'no asker' }))).toBe(400);
-    expect(await status(() => graph.saveAsk(alice, { asker: 'self', text: 'x', exposureChat: 'openchat:conversation:x' }))).toBe(400);
+    expect(await status(() => graph.saveAsk(alice, { author: { kind: 'thing', id: topic.id }, text: 'x' }))).toBe(400);
+    expect(await status(() => graph.saveAsk(alice, { author: { kind: 'user', id: alice }, text: 'x' }))).toBe(400);
+    expect(await status(() => graph.saveAsk(alice, { author: { kind: 'user', id: blocked }, text: 'x' }))).toBe(200);
+    expect(await status(() => graph.saveAsk(alice, { text: 'no author' }))).toBe(400);
+    // Earlier clients' asker reads as author.
+    expect((await graph.saveAsk(alice, { asker: 'self', text: 'Heal my TFCC' })).created).toBe(false);
+    expect(await status(() => graph.saveAsk(alice, { author: 'self', text: 'x', exposureChat: 'openchat:conversation:x' }))).toBe(400);
     // Saved things never list asks.
     expect((await graph.listThings(alice, '', undefined)).things.some(thing => (thing.kind as string) === 'ask')).toBe(false);
   });
@@ -72,11 +74,12 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
     try { await session.run('MATCH (a:User {id: $alice}), (b:User {id: $blocked}) CREATE (b)-[:BLOCKED]->(a)', { alice, blocked }); } finally { await session.close(); }
     const all = await graph.listAsks(alice, {});
     expect(all.asks.map(ask => ask.text).sort()).toEqual(['Chiropractor in SF', 'Heal my TFCC', 'Looking for a co-founder']);
+    expect((await graph.listAsks(alice, { direction: 'from_me' })).asks.map(ask => ask.text)).toEqual(['Heal my TFCC']);
     expect((await graph.listAsks(alice, { asker: 'self' })).asks.map(ask => ask.text)).toEqual(['Heal my TFCC']);
-    expect((await graph.listAsks(alice, { asker: 'others' })).asks.map(ask => ask.text).sort()).toEqual(['Chiropractor in SF', 'Looking for a co-founder']);
-    expect((await graph.listAsks(alice, { askerKind: 'user', askerId: bob })).asks.map(ask => ask.text)).toEqual(['Looking for a co-founder']);
-    expect((await graph.listAsks(alice, { askerKind: 'user', askerId: carol })).asks).toEqual([]);
-    expect((await graph.listAsks(alice, { asker: 'nobody' }).catch(error => error.status))).toBe(400);
+    expect((await graph.listAsks(alice, { direction: 'from_others' })).asks.map(ask => ask.text).sort()).toEqual(['Chiropractor in SF', 'Looking for a co-founder']);
+    expect((await graph.listAsks(alice, { aboutKind: 'user', aboutId: bob })).asks.map(ask => ask.text)).toEqual(['Looking for a co-founder']);
+    expect((await graph.listAsks(alice, { aboutKind: 'user', aboutId: carol })).asks).toEqual([]);
+    expect((await graph.listAsks(alice, { direction: 'to_me' }).catch(error => error.status))).toBe(400);
     // Bob, the person the ask is about, sees nothing; nor does anyone else.
     expect((await graph.listAsks(bob, {})).asks).toEqual([]);
     const id = all.asks[0]!.id;
@@ -86,7 +89,7 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
   });
 
   it('edits status, recheck and exposure; this_chat needs a conversation the owner is in', async () => {
-    const [ask] = (await graph.listAsks(alice, { asker: 'self' })).asks;
+    const [ask] = (await graph.listAsks(alice, { direction: 'from_me' })).asks;
     expect(await status(() => graph.updateAsk(alice, ask!.id, { exposure: 'this_chat', exposureConversationId: foreign }))).toBe(404);
     expect(await status(() => graph.updateAsk(alice, ask!.id, { exposure: 'this_chat' }))).toBe(400);
     const exposed = await graph.updateAsk(alice, ask!.id, { exposure: 'this_chat', exposureConversationId: shared });
@@ -98,18 +101,44 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
     const rechecked = await graph.updateAsk(alice, ask!.id, { recheckedNow: true });
     expect([rechecked.status, rechecked.needsRecheck, rechecked.revision]).toEqual(['open', false, 3]);
     expect(await status(() => graph.updateAsk(alice, ask!.id, { asker: 'self' }))).toBe(400);
+    expect(await status(() => graph.updateAsk(alice, ask!.id, { author: 'self' }))).toBe(400);
     const done = await graph.updateAsk(alice, ask!.id, { status: 'fulfilled' }, { author: 'agent:Test', source: 'connector', assertion: 'stated' });
-    expect([done.status, done.updatedBy, done.author]).toEqual(['fulfilled', 'agent:Test', 'owner']);
-    expect((await graph.listAsks(alice, { asker: 'self' })).asks).toEqual([]);
-    expect((await graph.listAsks(alice, { asker: 'self', status: 'fulfilled,closed' })).asks.map(value => value.id)).toEqual([ask!.id]);
+    expect([done.status, done.updatedBy, done.recordedBy]).toEqual(['fulfilled', 'agent:Test', 'owner']);
+    expect((await graph.listAsks(alice, { direction: 'from_me' })).asks).toEqual([]);
+    expect((await graph.listAsks(alice, { direction: 'from_me', status: 'fulfilled,closed' })).asks.map(value => value.id)).toEqual([ask!.id]);
+  });
+
+  it('who cares, who carries and where it was placed: from me, for me, about a person', async () => {
+    const dee = await graph.resolvePrivateThing(alice, { kind: 'person', name: `Dee ${suffix}` });
+    // Bob asked me in our chat: Bob cares, it is placed on my stream and in that conversation.
+    const toMe = (await graph.saveAsk(alice, { author: { kind: 'user', id: bob }, placements: ['self', { kind: 'conversation', id: shared }], text: 'Review my pitch deck' })).ask;
+    expect([toMe.fromMe, toMe.forMe, toMe.placements]).toEqual([false, true, [{ kind: 'self' }, { kind: 'conversation', conversationId: shared }]]);
+    // My own, handed to Dee.
+    const handed = (await graph.saveAsk(alice, { author: 'self', carrier: { kind: 'thing', id: dee.id }, text: 'Book the venue' })).ask;
+    expect([handed.fromMe, handed.forMe, handed.carrier]).toEqual([true, false, expect.objectContaining({ kind: 'person', id: dee.id })]);
+    const texts = async (input: Record<string, unknown>) => (await graph.listAsks(alice, input)).asks.map(ask => ask.text).sort();
+    expect(await texts({ direction: 'for_me' })).toEqual(['Review my pitch deck']);
+    expect(await texts({ direction: 'from_me' })).toContain('Book the venue');
+    expect(await texts({ aboutKind: 'thing', aboutId: dee.id })).toEqual(['Book the venue']);
+    expect(await texts({ aboutKind: 'user', aboutId: bob })).toContain('Review my pitch deck');
+    // Placing in a conversation needs one the owner is in; a carrier must be able to act.
+    expect(await status(() => graph.saveAsk(alice, { author: 'self', text: 'x', placements: [{ kind: 'conversation', id: foreign }] }))).toBe(404);
+    const project = await graph.resolvePrivateThing(alice, { kind: 'project', name: `Proj ${suffix}` });
+    expect(await status(() => graph.saveAsk(alice, { author: 'self', text: 'x', carrier: { kind: 'thing', id: project.id } }))).toBe(400);
+    // Handing over to an OpenChat person, then taking it back.
+    expect((await graph.updateAsk(alice, handed.id, { carrier: { kind: 'user', id: bob } })).carrier).toMatchObject({ kind: 'user', id: bob });
+    const back = await graph.updateAsk(alice, handed.id, { carrier: 'self' });
+    expect([back.carrier, back.forMe]).toEqual([{ kind: 'self' }, true]);
+    // Bob still sees none of it.
+    expect((await graph.listAsks(bob, { direction: 'for_me', status: 'all' })).asks).toEqual([]);
   });
 
   it('forgets an ask, and a saved person\'s asks with them', async () => {
-    const mine = await graph.saveAsk(alice, { asker: 'self', text: 'Temporary' });
+    const mine = await graph.saveAsk(alice, { author: 'self', text: 'Temporary' });
     expect(await graph.deleteAsk(alice, mine.ask.id)).toEqual({ deleted: true, id: mine.ask.id });
     expect(await status(() => graph.getAsk(alice, mine.ask.id))).toBe(404);
     const [mayas] = (await graph.listAsks(alice, { q: 'chiropractor' })).asks;
-    await graph.deletePrivateThing(alice, mayas!.asker!.id);
+    await graph.deletePrivateThing(alice, (mayas!.authorParty as { id: string }).id);
     expect(await status(() => graph.getAsk(alice, mayas!.id))).toBe(404);
     // A thing that is not an ask is not deleted through the ask route.
     const topic = await graph.resolvePrivateThing(alice, { kind: 'topic', name: `Keep ${suffix}` });
@@ -139,16 +168,16 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
 
     const dry = await migrateAsksToOverlay(driver, 'neo4j', { apply: false });
     expect(dry.created).toEqual([]);
-    expect((await graph.listAsks(alice, { askerKind: 'thing', askerId: friend.id })).asks).toEqual([]);
+    expect((await graph.listAsks(alice, { aboutKind: 'thing', aboutId: friend.id })).asks).toEqual([]);
     const first = await migrateAsksToOverlay(driver, 'neo4j', { apply: true });
     expect(first.friendAskNotes.skipped.some(skip => skip.reason.includes('topic'))).toBe(true);
     expect(first.legacyAsks.reviewsRepointed).toBe(1);
-    const asks = (await graph.listAsks(alice, { askerKind: 'thing', askerId: friend.id, status: 'all' })).asks;
+    const asks = (await graph.listAsks(alice, { aboutKind: 'thing', aboutId: friend.id, status: 'all' })).asks;
     const byText = new Map(asks.map(ask => [ask.text, ask]));
-    expect(byText.get('A physio in Oakland')).toMatchObject({ horizon: 'short', status: 'open', author: 'agent:Monitor', source: 'connector', evidence: { noteId: multi.id, seenAt: '2026-10-29' } });
+    expect(byText.get('A physio in Oakland')).toMatchObject({ horizon: 'short', status: 'open', recordedBy: 'agent:Monitor', recordedVia: 'connector', evidence: { noteId: multi.id, seenAt: '2026-10-29' } });
     expect(byText.get('Resources for a long-term condition')).toMatchObject({ horizon: 'evergreen', exposure: 'only_me' });
-    expect(byText.get('Meet local founders')).toMatchObject({ status: 'stale', revision: 1, source: 'suggestion' });
-    expect((await graph.listAsks(alice, { askerKind: 'thing', askerId: monitor.id })).asks.map(ask => ask.text)).toEqual(['on a project: migrated as the project asking']);
+    expect(byText.get('Meet local founders')).toMatchObject({ status: 'stale', revision: 1, recordedVia: 'suggestion' });
+    expect((await graph.listAsks(alice, { aboutKind: 'thing', aboutId: monitor.id })).asks.map(ask => ask.text)).toEqual(['on a project: migrated as the project asking']);
     // The ask is linked to the project tracking the friend's asks; the notes stay.
     expect((await graph.getThing(alice, monitor.id)).links.filter(link => link.relation === 'tracked in').length).toBe(2);
     expect((await graph.getThing(alice, friend.id)).notes.filter(note => note.text.startsWith('[friend-ask v1]'))).toHaveLength(2);
@@ -161,14 +190,14 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
     } finally { await check.close(); }
     const second = await migrateAsksToOverlay(driver, 'neo4j', { apply: true });
     expect([second.created, second.legacyAsks.seen, second.friendAskNotes.created]).toEqual([[], 0, 0]);
-    expect((await graph.listAsks(alice, { askerKind: 'thing', askerId: friend.id, status: 'all' })).asks).toHaveLength(3);
+    expect((await graph.listAsks(alice, { aboutKind: 'thing', aboutId: friend.id, status: 'all' })).asks).toHaveLength(3);
   });
 
   it('a migrated ask that already existed leaves its review ledger alone, so undo never deletes it', async () => {
     const { migrateAsksToOverlay } = await import('../src/services/askMigration.js');
     const review = await import('../src/services/privateNoteReview.js');
     const person = await graph.resolvePrivateThing(alice, { kind: 'person', name: `Kim ${suffix}` });
-    const existing = await graph.saveAsk(alice, { asker: { kind: 'thing', id: person.id }, text: 'Find a climbing partner' });
+    const existing = await graph.saveAsk(alice, { author: { kind: 'thing', id: person.id }, text: 'Find a climbing partner' });
     const ownerKey = (await graph.privateReviewPrincipal(alice)).ownerKey;
     const legacyId = `legacy-dup-${suffix}`, reviewId = `review-dup-${suffix}`;
     const session = driver.session();
@@ -197,8 +226,38 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
     expect(onOther.map(ask => ask.id)).toEqual(onTopic.map(ask => ask.id));
     // Linked to two topics: deleting one keeps it; deleting the last takes it.
     await graph.deletePrivateThing(alice, topic.id);
-    expect((await graph.getAsk(alice, onOther[0]!.id)).own).toBe(true);
+    expect((await graph.getAsk(alice, onOther[0]!.id)).fromMe).toBe(true);
     await graph.deletePrivateThing(alice, other.id);
     expect(await status(() => graph.getAsk(alice, onOther[0]!.id))).toBe(404);
+  });
+
+  it('a refused ask leaves no person card; search hides a blocked author’s ask; undo removes a topic link it added', async () => {
+    const review = await import('../src/services/privateNoteReview.js');
+    const ownerKey = (await graph.privateReviewPrincipal(alice)).ownerKey;
+    const refs = async (userId: string) => {
+      const session = driver.session();
+      try { return Number((await session.run('MATCH (r:OverlayRef {ownerKey: $ownerKey, ref: $ref}) RETURN count(r) AS n', { ownerKey, ref: `openchat:user:${userId}` })).records[0]!.get('n')); } finally { await session.close(); }
+    };
+    expect(await refs(carol)).toBe(0);
+    expect(await status(() => graph.saveAsk(alice, { author: { kind: 'user', id: carol }, text: '   ' }))).toBe(400);
+    expect(await status(() => graph.saveAsk(alice, { author: 'self', carrier: { kind: 'user', id: carol }, text: 'x', horizon: 'soon' }))).toBe(400);
+    expect(await status(() => graph.updateAsk(alice, 'no-such-ask-id', { carrier: { kind: 'user', id: carol } }))).toBe(404);
+    expect(await refs(carol)).toBe(0);
+
+    // The blocked person's ask (saved before the block) is out of search as it is out of the lists.
+    const hidden = (await graph.listAsks(alice, { status: 'all', q: 'x' })).asks;
+    expect(hidden.every(ask => !(ask.authorParty.kind === 'user' && ask.authorParty.id === blocked))).toBe(true);
+    expect((await graph.searchPrivate(alice, { kind: 'ask' })).things.some(thing => thing.name === 'x')).toBe(false);
+
+    // A topic card adopting an ask the owner already had: undo removes only that link.
+    const topic = await graph.resolvePrivateThing(alice, { kind: 'topic', name: `Fresh ${suffix}` });
+    await graph.saveAsk(alice, { author: 'self', text: 'Learn to sail' });
+    const batch = await review.captureNoteReview(alice, { kind: 'thing', id: topic.id }, { text: 'Learn to sail', requestId: 'adopt-1', asStandingAsk: true });
+    const applied = await review.applyNoteReview(alice, batch.id, { suggestionIds: [batch.suggestions[0]!.id] });
+    expect(applied.createdRecords?.map(record => record.kind)).toEqual(['connection']);
+    expect((await review.listNoteReviews(alice, { kind: 'thing', id: topic.id })).asks.map(ask => ask.text)).toEqual(['Learn to sail']);
+    await review.undoNoteReview(alice, batch.id);
+    expect((await review.listNoteReviews(alice, { kind: 'thing', id: topic.id })).asks).toEqual([]);
+    expect((await graph.listAsks(alice, { direction: 'from_me', q: 'sail' })).asks).toHaveLength(1);
   });
 });

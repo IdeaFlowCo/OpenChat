@@ -40,7 +40,7 @@ export interface Card {
 }
 /**
  * `description` is a one-line summary (280 characters or fewer), null when none was given.
- * `ask` is present only on entities of kind `ask` (their ask fields, without the asker).
+ * `ask` is present only on entities of kind `ask` (their ask fields, without the parties).
  */
 export interface Entity { id: string; kind: EntityKind; name: string; description: string | null; refs: string[]; card: Card; ask?: AskFields }
 
@@ -102,7 +102,7 @@ export const LIMITS = {
   noteLength: 4000, notesPerEntity: 200, linksPerOwner: 5000, entitiesPerOwner: 5000,
   relationLength: 60, nameLength: 120, cadenceDays: 3650, refsPerEntity: 8,
   descriptionLength: 280, contextLength: 280, dateTextLength: 20,
-  askLength: 1000, asksPerOwner: 2000, quoteLength: 1000, urlLength: 2000, labelLength: 280,
+  askLength: 1000, asksPerOwner: 2000, quoteLength: 1000, urlLength: 2000, labelLength: 280, placementsPerAsk: 8,
 } as const;
 const EXPANDING_FACTOR = 1.6;
 const EXPANDING_CEILING_DAYS = 365;
@@ -365,32 +365,50 @@ export function parseCardPatch(body: unknown): CardPatch {
 }
 
 /**
- * Asks (2026-11-03): a standing need or request, the owner's own or someone
- * else's, as one overlay entity of kind `ask`. The asker is a link from a
- * person (or company, project or idea) entity to the ask (relation `asks`, type `asks`); an
- * ask with no asker is the owner's own (`own: true`).
+ * Asks (2026-11-03): a standing need or request, as one overlay entity of kind
+ * `ask`. Every person is implicitly a gestalt box: an ask someone posts
+ * anywhere is also theirs. Like the Gestalt Box model (caring, carrying,
+ * placing, sharing and mentioning are separate facts), an ask keeps who cares,
+ * who acts and where it was placed as separate facts, never one field:
  *
- * - `horizon` is how fast the ask goes stale: `event` (tied to a date),
- *   `short`, `medium`, `evergreen`. It sets the default `recheckAfter`.
- *   Nothing closes an ask automatically: past `recheckAfter` an open ask
- *   reads `needsRecheck: true` until the owner (or a sweeper acting for them)
- *   rechecks it or changes its status.
- * - `status`: `open`, `fulfilled`, `withdrawn`, or `stale` (no longer known to
- *   be current, not closed).
- * - `exposure` is who the owner means it for: `only_me` (the default),
- *   `this_chat` (with `exposureChat`, the ref of one conversation),
- *   `friends`, `public`. Stored only: in v1 every read is the owner's own,
- *   and no ask is shown to anyone else whatever its exposure. Widening it is
- *   a later, explicit act, like `audience`.
- * - `evidence` is where it came from: a short quote, a URL, a label ("Facebook
- *   post, friends audience"), when it was seen, and the overlay note it was
- *   recorded in, all optional.
+ * - `author`: who cares about it, always set. The owner (`{kind: 'self'}`) or
+ *   one of the owner's person, company, project or idea entities, which is
+ *   linked to the ask (relation `asks`, type `asks`). Fixed for the ask's life.
+ * - `carrier`: who is responsible for acting, optional: the owner (`self`) or
+ *   a person or company. Handing an ask over is setting its carrier.
+ * - `placements`: where it was placed, beyond the author's own box (which is
+ *   implicit): the owner's own stream (`self`, an ask addressed to them), a
+ *   person's stream or a company, project or idea (`{id}`), or an app ref
+ *   such as a conversation (`{ref}`).
+ * - sharing is `exposure`: whom the owner means it for, `only_me` (the
+ *   default), `this_chat` (with `exposureChat`), `friends`, `public`. Stored
+ *   only: in v1 every read is the owner's own, and no ask is shown to anyone
+ *   else whatever its exposure.
  *
- * The same asker (or the owner) and the same text is one ask: a repeated save
- * returns the existing ask, so retries and re-imports never double it.
+ * Direction follows from those facts: `from_me` (the owner is the author),
+ * `for_me` (placed on the owner's stream, or the owner carries it),
+ * `from_others` (someone else cares), `about:<entity id>` (that entity is the
+ * author, the carrier or a placement).
+ *
+ * - `horizon` is how fast it goes stale: `event` (tied to a date), `short`,
+ *   `medium`, `evergreen`; it sets the default `recheckAfter`. Nothing closes
+ *   an ask automatically: past `recheckAfter` an open ask reads
+ *   `needsRecheck: true` until it is rechecked or its status changes.
+ * - `status`: `open`, `fulfilled`, `withdrawn`, or `stale` (not known to be
+ *   current, not closed).
+ * - `evidence` is where it came from: a short quote, a URL, a label, when it
+ *   was seen, and the overlay note it was recorded in, all optional.
+ * - Who recorded it is `recordedBy` / `recordedVia` / `assertion` (the
+ *   provenance notes and links carry as `author` / `source` / `assertion`;
+ *   on an ask, `author` is who cares).
+ *
+ * The same author and the same text is one ask: a repeated save returns the
+ * existing ask unchanged, so retries and re-imports never double it.
  */
-/** Who can ask: a person, or a company, project or idea (an organisation's or a project's need); never a topic or another ask. */
+/** Who can care about (author) an ask or be a placement: a person, company, project or idea; never a topic or another ask. */
 export const ASKER_KINDS: readonly EntityKind[] = ['person', 'company', 'project', 'idea'];
+/** Who can carry (act on) an ask: a person or a company. */
+export const CARRIER_KINDS: readonly EntityKind[] = ['person', 'company'];
 export const ASK_HORIZONS = ['event', 'short', 'medium', 'evergreen'] as const;
 export type AskHorizon = (typeof ASK_HORIZONS)[number];
 /** Default days until an ask is due for a recheck, by horizon. */
@@ -399,26 +417,53 @@ export const ASK_STATUSES = ['open', 'fulfilled', 'withdrawn', 'stale'] as const
 export type AskStatus = (typeof ASK_STATUSES)[number];
 export const ASK_EXPOSURES = ['only_me', 'this_chat', 'friends', 'public'] as const;
 export type AskExposure = (typeof ASK_EXPOSURES)[number];
+export const ASK_DIRECTIONS = ['from_me', 'for_me', 'from_others'] as const;
+export type AskDirection = (typeof ASK_DIRECTIONS)[number];
+/** A source operation is immutable: itemIndex distinguishes separate asks in one message. */
+export interface AskSourceInput { app: string; conversationId: string; messageId: string; itemIndex: number; excerpt: string; assertion: Assertion; audienceIntent: string | null; sourceCreatedAt: string | null; sourceMessageId: string | null }
+export interface AskSourceReceipt extends AskSourceInput { recordedAt: string; recordedBy: string | null }
+export function cleanAskSource(value: unknown): AskSourceInput | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) return fail(400, 'invalid_ask_source');
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some(key => !['app', 'conversationId', 'messageId', 'itemIndex', 'excerpt', 'assertion', 'audienceIntent', 'sourceCreatedAt', 'sourceMessageId'].includes(key))) return fail(400, 'invalid_ask_source');
+  if (!Number.isInteger(input.itemIndex) || Number(input.itemIndex) < 0 || Number(input.itemIndex) > 99) return fail(400, 'invalid_ask_source');
+  return { sourceMessageId: input.sourceMessageId == null ? null : cleanText(input.sourceMessageId, 200, 'invalid_ask_source'), sourceCreatedAt: input.sourceCreatedAt == null ? null : cleanInstant(input.sourceCreatedAt, 'invalid_ask_source'), app: cleanText(input.app, 80, 'invalid_ask_source'), conversationId: cleanText(input.conversationId, 200, 'invalid_ask_source'), messageId: cleanText(input.messageId, 200, 'invalid_ask_source'), itemIndex: Number(input.itemIndex), excerpt: cleanText(input.excerpt, LIMITS.quoteLength, 'invalid_ask_source'), assertion: oneOf(['stated', 'inferred'] as const, input.assertion, 'invalid_ask_source'), audienceIntent: input.audienceIntent == null ? null : cleanText(input.audienceIntent, 300, 'invalid_ask_source') };
+}
 export interface AskEvidence { quote: string | null; url: string | null; label: string | null; seenAt: string | null; noteId: string | null }
-/** The ask's own fields, as an `ask` entity carries them. */
-export interface AskFields extends Provenance {
-  text: string; own: boolean; horizon: AskHorizon; recheckAfter: string; needsRecheck: boolean; status: AskStatus;
+/** A party to an ask: the owner, or one of their entities. */
+export type AskParty = { kind: 'self' } | LinkEnd;
+/** A place an ask was put: the owner's stream, one of their entities, or an app ref (a conversation, a board). */
+export type AskPlacement = { kind: 'self' } | LinkEnd | { kind: 'ref'; ref: string };
+/** Who recorded the ask and how (the provenance of the record, not who cares). */
+export interface AskRecord { recordedBy: string | null; recordedVia: ProvenanceSource | null; assertion: Assertion | null }
+/** The ask's own fields, as an `ask` entity carries them (parties as stored ids; `Ask` resolves them). */
+export interface AskFields extends AskRecord {
+  sources: AskSourceReceipt[];
+  text: string; fromMe: boolean; forMe: boolean; horizon: AskHorizon; recheckAfter: string; needsRecheck: boolean; status: AskStatus;
   exposure: AskExposure; exposureChat: string | null; evidence: AskEvidence | null;
   createdAt: string; updatedAt: string; updatedBy: string | null; closedAt: string | null; checkedAt: string | null; revision: number;
 }
-/** An ask as listed: its fields, its id and its asker (null for the owner's own, or an asker since forgotten). */
-export interface Ask extends AskFields { id: string; asker: LinkEnd | null }
-/** Who asks: the owner themself, or one of the owner's person, company, project or idea entities. */
-export type AskAsker = { own: true } | { id: string };
+/**
+ * An ask as read: its fields and its parties. `author` is null only if the
+ * caring entity is unreadable (it never is for a live ask: forgetting the
+ * author forgets its asks); a forgotten carrier or placement is dropped.
+ */
+export interface Ask extends AskFields { id: string; author: AskParty | null; carrier: AskParty | null; placements: AskPlacement[] }
+/** Who cares about, or carries, an ask: the owner, or one of their entities. */
+export type AskPartyRef = { self: true } | { id: string };
+/** Where an ask is placed: the owner's stream, an entity, or an app ref. Stored as `self`, `entity:<id>` or the ref itself. */
+export type AskPlacementRef = { self: true } | { id: string } | { ref: string };
 export interface AskInput {
-  text: string; asker: AskAsker; horizon: AskHorizon; recheckAfter: string | null; status: AskStatus;
+  sourceReceipt: AskSourceInput | null;
+  text: string; author: AskPartyRef; carrier: AskPartyRef | null; placements: AskPlacementRef[]; horizon: AskHorizon; recheckAfter: string | null; status: AskStatus;
   exposure: AskExposure; exposureChat: string | null; evidence: AskEvidence | null;
 }
 export interface AskPatch {
-  text?: string; horizon?: AskHorizon; recheckAfter?: string | null; status?: AskStatus; exposure?: AskExposure;
+  text?: string; carrier?: AskPartyRef | null; placements?: AskPlacementRef[]; horizon?: AskHorizon; recheckAfter?: string | null; status?: AskStatus; exposure?: AskExposure;
   exposureChat?: string | null; evidence?: AskEvidence | null; recheckedNow?: true;
 }
-export interface AskFilter { status: AskStatus[] | null; own: boolean | null; askerId: string | null; q: string; needsRecheck: boolean; limit: number }
+export interface AskFilter { status: AskStatus[] | null; direction: AskDirection | null; about: string | null; authorId?: string; q: string; needsRecheck: boolean; limit: number }
 
 const oneOf = <T extends string>(values: readonly T[], value: unknown, code: string): T => values.includes(value as T) ? value as T : fail(400, code);
 /** Ask text: up to 1,000 characters, control characters stripped, whitespace collapsed. */
@@ -451,29 +496,57 @@ function cleanExposure(exposure: unknown, chat: unknown): { exposure: AskExposur
   if (value !== 'this_chat') return chat === undefined || chat === null || chat === '' ? { exposure: value, exposureChat: null } : fail(400, 'invalid_exposure');
   return { exposure: value, exposureChat: cleanRef(chat) };
 }
-/** A new ask. `asker` is `'owner'` (or `{own: true}`) for the owner's own ask, or `{id}` of the owner's person, company, project or idea entity. */
+/** A party: `'self'` (or `{self: true}`) for the owner, or `{id}` of one of their entities. */
+export function cleanAskParty(value: unknown, code: string): AskPartyRef {
+  if (value === 'self' || value === 'owner' || (value && typeof value === 'object' && !Array.isArray(value) && ((value as Record<string, unknown>).self === true || (value as Record<string, unknown>).own === true) && Object.keys(value).length === 1)) return { self: true };
+  if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 1 && isId((value as Record<string, unknown>).id)) return { id: (value as { id: string }).id };
+  return fail(400, code);
+}
+/** Placements: `'self'`, `{id}` or `{ref}`, at most 8, duplicates collapsed. */
+export function cleanAskPlacements(value: unknown): AskPlacementRef[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > LIMITS.placementsPerAsk) return fail(400, 'invalid_placement');
+  const seen = new Set<string>(), result: AskPlacementRef[] = [];
+  for (const item of value) {
+    const placement: AskPlacementRef = item && typeof item === 'object' && !Array.isArray(item) && Object.keys(item).length === 1 && 'ref' in item
+      ? { ref: cleanRef((item as { ref: unknown }).ref) } : cleanAskParty(item, 'invalid_placement');
+    const key = placementKey(placement);
+    if (!seen.has(key)) { seen.add(key); result.push(placement); }
+  }
+  return result;
+}
+/** How a placement is stored: `self`, `entity:<id>`, or the ref (refs always contain two colons; `self` and `entity:` never do). */
+export const placementKey = (placement: AskPlacementRef): string => 'self' in placement ? 'self' : 'id' in placement ? `entity:${placement.id}` : placement.ref;
+const ASK_INPUT_KEYS = ['text', 'author', 'asker', 'carrier', 'placements', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureChat', 'evidence', 'sourceReceipt'];
+/** A new ask. `author` (who cares) is required: `'self'` or `{id}`; `carrier` and `placements` are optional. */
 export function parseAskInput(value: unknown): AskInput {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(400, 'invalid_ask');
   const input = value as Record<string, unknown>;
-  if (Object.keys(input).some(key => !['text', 'asker', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureChat', 'evidence'].includes(key))) return fail(400, 'invalid_ask');
-  const raw = input.asker;
-  const asker: AskAsker = raw === 'owner' || (raw && typeof raw === 'object' && (raw as Record<string, unknown>).own === true && Object.keys(raw).length === 1) ? { own: true }
-    : raw && typeof raw === 'object' && !Array.isArray(raw) && Object.keys(raw).length === 1 && isId((raw as Record<string, unknown>).id) ? { id: (raw as { id: string }).id }
-      : fail(400, 'invalid_asker');
+  if (Object.keys(input).some(key => !ASK_INPUT_KEYS.includes(key))) return fail(400, 'invalid_ask');
+  if (input.author !== undefined && input.asker !== undefined) return fail(400, 'invalid_ask');
   return {
-    text: cleanAskText(input.text), asker,
+    sourceReceipt: cleanAskSource(input.sourceReceipt), text: cleanAskText(input.text), author: cleanAskParty(input.author ?? input.asker, 'invalid_author'),
+    carrier: input.carrier === undefined || input.carrier === null ? null : cleanAskParty(input.carrier, 'invalid_carrier'),
+    placements: cleanAskPlacements(input.placements),
     horizon: input.horizon === undefined || input.horizon === null ? 'medium' : oneOf(ASK_HORIZONS, input.horizon, 'invalid_horizon'),
     recheckAfter: input.recheckAfter === undefined || input.recheckAfter === null ? null : cleanInstant(input.recheckAfter, 'invalid_recheck_after'),
     status: input.status === undefined || input.status === null ? 'open' : oneOf(ASK_STATUSES, input.status, 'invalid_status'),
     ...cleanExposure(input.exposure, input.exposureChat), evidence: cleanAskEvidence(input.evidence),
   };
 }
-/** An edit to an ask. Absent leaves a field; `recheckAfter: null` returns to the horizon's default; `evidence: null` clears it. */
+/**
+ * An edit to an ask. Absent leaves a field; `recheckAfter: null` returns to
+ * the horizon's default; `evidence: null` clears it; `carrier: null` takes it
+ * back; `placements` replaces the list. The author never changes.
+ */
 export function parseAskPatch(value: unknown): AskPatch {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(400, 'invalid_ask');
   const input = value as Record<string, unknown>, patch: AskPatch = {};
-  if (Object.keys(input).some(key => !['text', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureChat', 'evidence', 'recheckedNow'].includes(key))) return fail(400, 'invalid_ask');
+  if ('author' in input) return fail(400, 'author_fixed');
+  if (Object.keys(input).some(key => !['text', 'carrier', 'placements', 'horizon', 'recheckAfter', 'status', 'exposure', 'exposureChat', 'evidence', 'recheckedNow'].includes(key))) return fail(400, 'invalid_ask');
   if (input.text !== undefined) patch.text = cleanAskText(input.text);
+  if (input.carrier !== undefined) patch.carrier = input.carrier === null ? null : cleanAskParty(input.carrier, 'invalid_carrier');
+  if (input.placements !== undefined) patch.placements = cleanAskPlacements(input.placements);
   if (input.horizon !== undefined) patch.horizon = oneOf(ASK_HORIZONS, input.horizon, 'invalid_horizon');
   if (input.recheckAfter !== undefined) patch.recheckAfter = input.recheckAfter === null ? null : cleanInstant(input.recheckAfter, 'invalid_recheck_after');
   if (input.status !== undefined) patch.status = oneOf(ASK_STATUSES, input.status, 'invalid_status');
@@ -489,28 +562,58 @@ export function parseAskPatch(value: unknown): AskPatch {
   if (!Object.keys(patch).length) return fail(400, 'nothing_to_change');
   return patch;
 }
-/** A list filter: `status` one value or comma-separated (default open and stale; `all` for every status), `asker` `owner` | `others` | an entity id. */
-export function parseAskFilter(value: { status?: unknown; asker?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown } = {}): AskFilter {
+/**
+ * A list filter: `status` one value or comma-separated (default open and
+ * stale; `all` for every status); `direction` `from_me`, `for_me`,
+ * `from_others` or `about:<entity id>` (that entity is the author, the
+ * carrier or a placement).
+ */
+export function parseAskFilter(value: { status?: unknown; direction?: unknown; asker?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown } = {}): AskFilter {
   let status: AskStatus[] | null = ['open', 'stale'];
   if (value.status === 'all') status = null;
   else if (typeof value.status === 'string' && value.status) status = [...new Set(value.status.split(',').map(part => oneOf(ASK_STATUSES, part.trim(), 'invalid_status')))];
   else if (value.status !== undefined && value.status !== null && value.status !== '') return fail(400, 'invalid_status');
-  let own: boolean | null = null, askerId: string | null = null;
-  if (value.asker === 'owner') own = true;
-  else if (value.asker === 'others') own = false;
-  else if (isId(value.asker)) askerId = value.asker;
-  else if (value.asker !== undefined && value.asker !== null && value.asker !== '') return fail(400, 'invalid_asker');
+  let direction: AskDirection | null = null, about: string | null = null;
+  if (typeof value.direction === 'string' && value.direction.startsWith('about:')) about = isId(value.direction.slice(6)) ? value.direction.slice(6) : fail(400, 'invalid_direction');
+  else if (value.direction !== undefined && value.direction !== null && value.direction !== '') direction = oneOf(ASK_DIRECTIONS, value.direction, 'invalid_direction');
+  let authorId: string | undefined;
+  if (value.asker !== undefined && value.asker !== null && value.asker !== '') {
+    if (value.direction !== undefined && value.direction !== null && value.direction !== '') return fail(400, 'invalid_direction');
+    if (value.asker === 'owner' || value.asker === 'self') direction = 'from_me';
+    else if (value.asker === 'others') direction = 'from_others';
+    else if (isId(value.asker)) authorId = value.asker;
+    else return fail(400, 'invalid_asker');
+  }
   const q = typeof value.q === 'string' ? nameKey(value.q).slice(0, LIMITS.nameLength) : '';
   const needsRecheck = value.needsRecheck === true || value.needsRecheck === 'true';
   const raw = typeof value.limit === 'string' && /^\d{1,3}$/.test(value.limit) ? Number(value.limit) : value.limit;
   const limit = typeof raw === 'number' && Number.isInteger(raw) && raw >= 1 ? Math.min(raw, 200) : 100;
-  return { status, own, askerId, q, needsRecheck, limit };
+  return { status, direction, about, ...(authorId ? { authorId } : {}), q, needsRecheck, limit };
 }
 /** When an ask is next due for a recheck: the given instant, or the horizon's default days from `from`. */
 export const askRecheckAfter = (horizon: AskHorizon, from: string, given: string | null = null): string =>
   given ?? new Date(Date.parse(from) + ASK_RECHECK_DAYS[horizon] * DAY_MS).toISOString();
 /** An ask's display name: its text, cut to a name's length. */
-export const askName = (text: string): string => text.length <= LIMITS.nameLength ? text : `${text.slice(0, LIMITS.nameLength - 1).trimEnd()}\u2026`;
-/** The identity of an ask for one owner: who asks and what, so the same ask saved twice is one. */
-export const askKeyOf = (asker: AskAsker, text: string): string =>
-  createHash('sha256').update(`${'own' in asker ? 'owner' : `entity:${asker.id}`}\n${nameKey(text)}`).digest('hex');
+export const askName = (text: string): string => text.length <= LIMITS.nameLength ? text : `${text.slice(0, LIMITS.nameLength - 1).trimEnd()}…`;
+/** The identity of an ask for one owner: who cares and what, so the same ask saved twice is one. */
+export const askKeyOf = (author: AskPartyRef, text: string): string =>
+  createHash('sha256').update(`${'self' in author ? 'owner' : `entity:${author.id}`}\n${nameKey(text)}`).digest('hex');
+
+/** Unversioned HTTP remains additive for installed clients. Domain author is a party. */
+export function askToWire(ask: Ask) {
+  return { ...ask, authorParty: ask.author, own: ask.fromMe, asker: ask.author?.kind === 'self' ? null : ask.author,
+    author: ask.recordedBy, source: ask.recordedVia };
+}
+
+/** Apply legacy AskFields aliases on generic entities/search/neighbourhood DTOs too. */
+export function overlayToWire(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(overlayToWire);
+  if (!value || typeof value !== 'object') return value;
+  const record = value as Record<string, unknown>;
+  const result = Object.fromEntries(Object.entries(record).map(([key, child]) => [key, overlayToWire(child)]));
+  if (typeof record.fromMe === 'boolean' && typeof record.text === 'string' && 'recordedBy' in record) {
+    Object.assign(result, { own: record.fromMe, author: record.recordedBy, source: record.recordedVia });
+    if (record.author && typeof record.author === 'object') result.authorParty = overlayToWire(record.author);
+  }
+  return result;
+}

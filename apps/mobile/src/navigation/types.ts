@@ -40,6 +40,8 @@ export type RootStackParamList = {
   Search: undefined;
   /** The owner's Profile: card QR, scan a code, Edit profile, OpenChat Agent, Settings. */
   MyCard: undefined;
+  AsksList: undefined;
+  AskDetail: { askId: string };
   ScanQr: undefined;
   /** Blocked users management screen (OpenChat-46p). */
   BlockedUsers: undefined;
@@ -93,6 +95,7 @@ export type ThoughtsStackParamList = {
 };
 
 export type AsksStackParamList = {
+  AskDetail: { askId: string };
   AsksList: undefined;
   Chat: { conversationId: string; lane?: 'chat' | 'context'; entryId?: string };
   AgentOverlay: { prompt?: string; context?: AgentPageContext } | undefined;

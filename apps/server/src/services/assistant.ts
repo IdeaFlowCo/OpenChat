@@ -1,3 +1,4 @@
+import { ASK_TOOLS, executeAskTool } from './assistantAsks.js';
 import { messageOriginMatch, messageBoundaryFilter, messageAtOrBeforeOrigin, messageBoundaryParams, type MessageBoundary } from './messageBoundary.js';
 import { scopeForParticipants, toolAvailableInScope, scopedToolInput, replyAnnotation, SCOPE_DENIED, type AssistantScope } from './assistantScope.js';
 import { appBridgeConfigured, readApp, searchPublicNoos } from './appSources.js';
@@ -1407,6 +1408,7 @@ export function buildTools(scope: AssistantScope): AnthropicType.Tool[] {
       },
     },
   ];
+  tools.push(...ASK_TOOLS);
   return tools.filter((tool) => toolAvailableInScope(scope, tool.name));
 }
 
@@ -1425,6 +1427,7 @@ export async function executeTool(
     const authorizedInput = scopedToolInput(scope, name, input);
     if (!authorizedInput) return SCOPE_DENIED;
     input = authorizedInput;
+    if (ASK_TOOLS.some(tool => tool.name === name)) return await executeAskTool(userId, name, input, boundary);
     switch (name) {
       case 'get_data_sources':
         if (scope.kind === 'conversation') return [{ name: 'OpenChat', access: 'current_conversation_only', conversationId: scope.conversationId }];
@@ -1798,14 +1801,17 @@ export async function deriveAssistantScope(userId: string, conversationId: strin
 export async function loadAssistantTurn(userId: string, conversationId: string, messageId: string) {
   const db = getDriver().session();
   let requested: 'conversation' | 'universal' | undefined;
+  let sourceCreatedAt: string | null = null;
   try {
     const result = await db.run(`MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId})
       MATCH (origin:Message {id:$messageId,conversationId:$conversationId,senderId:$userId})
       WHERE origin.deletedAt IS NULL
-      RETURN origin.id AS id,origin.conversationId AS conversationId,origin.senderId AS senderId,origin.assistantScope AS assistantScope`,
+      RETURN origin.id AS id,origin.conversationId AS conversationId,origin.senderId AS senderId,origin.assistantScope AS assistantScope,origin.createdAt AS createdAt`,
       {userId,conversationId,messageId});
     const origin = result.records[0];
     if (!origin || origin.get('id') !== messageId || origin.get('conversationId') !== conversationId || origin.get('senderId') !== userId) return null;
+    const createdAt = origin.get('createdAt');
+    sourceCreatedAt = createdAt == null ? null : String(createdAt);
     const storedScope = origin.get('assistantScope');
     if (storedScope != null && storedScope !== 'conversation' && storedScope !== 'universal') return null;
     requested = storedScope ?? undefined;
@@ -1813,7 +1819,7 @@ export async function loadAssistantTurn(userId: string, conversationId: string, 
   const scope = await deriveAssistantScope(userId, conversationId, requested);
   if (!scope) return null;
   const messages = await loadConversationContext(conversationId, userId, scope, messageId);
-  return messages.length ? {scope,messages} : null;
+  return messages.length ? {scope,messages,sourceCreatedAt} : null;
 }
 
 export async function loadConversationContext(
@@ -1903,7 +1909,8 @@ Guidelines:
 - To message a PERSON ("text Robert", "tell Sam I'm running late"), use send_message_to_person with their name — it resolves the person and their DM for you. Do NOT hunt for a conversationId in list_conversations and do NOT invent one; conversation ids are opaque and you will get them wrong. Reserve send_message for when you are already working with a specific conversation you just read.
 - Never guess who someone is. If find_person or send_message_to_person reports the name is ambiguous or unreachable, ask the user — for someone new, ask for their complete email address.
 - Quiet matching uses anonymous asks and offers. Publishing an intent is explicit discovery opt-in. Before calling publish_intent, echo the exact anonymous terms back to the user and wait for explicit confirmation. Explain that only kind and terms are shown before mutual approval; private details are never shown to the other person. Never publish silently.
-- When the user mentions a possible ask, offer, resource, or collaboration, save_intent_draft may capture it privately without publication confirmation. Clearly say it remains private. Never activate it silently. Call activate_intent_draft with confirm:false to get the exact payload and approvalGrant, show the agent-search terms, any human Story text, selected audience, and expiries, then wait for an explicit yes and call again with the same payload, confirm:true, and that approvalGrant. Agent-only items never appear in the human Story feed.
+- An explicitly requested personal need belongs in save_ask, the canonical inventory at Profile → All asks. Save immediately without asking permission to save, using a distinct stable zero-based itemIndex for each ask in its original ask-bearing source message (never renumber when a follow-up mentions them in another order) and a short exact excerpt. Preserve requested Public/named-person/private audience in audienceIntent; a named person is not a chat, carrier, DM, or notification. Confirm each ask only after tool success and direct the user to Profile → All asks; retain actual IDs in tool receipts. Currently only the owner can read these asks: say saved privately, intended for Public/Vlad as requested, publication unavailable. Never claim intended audience grants access. Relative dates use the source message date. A duplicate save returns unchanged lifecycle and fields; use update_ask for explicit edits and do not silently reopen closed asks. list_asks/get_ask read the canonical inventory. Do not save the same personal ask again as an intent draft.
+- For offers, resources, collaboration or an explicit matching workflow, save_intent_draft may capture it privately without publication confirmation. Clearly say it remains private. Never activate it silently. Call activate_intent_draft with confirm:false to get the exact payload and approvalGrant, show the agent-search terms, any human Story text, selected audience, and expiries, then wait for an explicit yes and call again with the same payload, confirm:true, and that approvalGrant. Agent-only items never appear in the human Story feed.
 - Matches are double opt-in. A user's plain-language “yes, connect us” can authorize respond_match approval. Before declining, confirm that choice too. Never reveal or speculate about the other side's response. A closed match does not reveal who declined.
 - Mutual approval creates or reuses a normal DM between the two humans with a neutral context card. It never sends an opener on either person's behalf; tell the user they choose whether and what to write.
 - Sending to OTHER people requires confirmation: the first send_message / send_message_to_person call returns { needsConfirmation: true, ... } instead of sending. When you get that, DO NOT retry blindly — tell the user exactly what you'll send and to whom, wait for their explicit yes, then call the SAME tool again with the SAME content and confirm:true. If they decline or change the wording, do not send. Messages to the user's own Assistant DM go through immediately with no confirmation.
@@ -2017,7 +2024,7 @@ If the user's latest message approves it, call send_message with exactly that co
       const response = await client.messages.create({
         model,
         max_tokens: 1024,
-        system: `${system}\n\nAUTHORIZED CONTEXT: ${scope.kind === 'universal' ? 'Universal private assistant DM. Per-owner source grants still apply.' : 'This conversation only. Do not read, infer or write other chats or private sources.'}`,
+        system: `${system}\n\nORIGINATING MESSAGE DATE: ${turn.sourceCreatedAt ?? 'unavailable; preserve relative dates literally and do not invent dates'}.\n\nAUTHORIZED CONTEXT: ${scope.kind === 'universal' ? 'Universal private assistant DM. Per-owner source grants still apply.' : 'This conversation only. Do not read, infer or write other chats or private sources.'}`,
         tools,
         messages,
       });

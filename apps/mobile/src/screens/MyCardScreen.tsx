@@ -303,6 +303,7 @@ export function MyCardScreen() {
       <SectionLabel style={styles.block}>Profile & settings</SectionLabel>
       <Card padding="none" style={styles.block}>
         <ListRow icon="edit" title="Edit profile" subtitle="Name, photo, status and directory settings" onPress={() => navigation.navigate('ProfileEdit')} />
+        <ListRow icon="chat" title="All asks" subtitle="My asks, intended audiences, sources and history" divider onPress={() => navigation.navigate('AsksList')} />
         <ListRow icon="bot" title="OpenChat Agent" subtitle="Private conversation, asks and agent coordination" divider disabled={openingAgent}
           trailing={openingAgent ? <ActivityIndicator size="small" color={r.accent} /> : undefined} chevron={!openingAgent} onPress={() => void handleOpenAgent()} />
         <View style={{ borderTopColor: r.line, borderTopWidth: StyleSheet.hairlineWidth }}><ConnectAgentLink detail /></View>

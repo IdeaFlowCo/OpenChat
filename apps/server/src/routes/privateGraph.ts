@@ -182,8 +182,8 @@ router.post('/note-reviews/:reviewId/undo', async (req: Request, res: Response) 
 // Asks: the overlay's `ask` kind, the owner's own and the people they know (OpenChat-2fsy.1). Owner-only.
 router.get('/asks', async (req: Request, res: Response) => {
   try {
-    const { status, asker, askerKind, askerId, q, needsRecheck, limit } = req.query;
-    res.json(await listAsks(owner(req), { status, asker, askerKind, askerId, q, needsRecheck, limit }));
+    const { status, direction, aboutKind, aboutId, askerKind, askerId, asker, q, needsRecheck, limit } = req.query;
+    res.json(await listAsks(owner(req), { status, direction, aboutKind, aboutId, askerKind, askerId, asker, q, needsRecheck, limit }));
   } catch (error) { fail(error, res); }
 });
 router.post('/asks', async (req: Request, res: Response) => {

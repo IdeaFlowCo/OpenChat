@@ -49,6 +49,8 @@ describe('unified OpenChat connector trust boundary',()=>{
     return fetch(`${base}/api/connector/mcp`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${sign(body,claims)}`},body});
   }
   it('accepts exact signature and bytes once; rejects scope/audience/lifetime/issuer tampering',()=>{
+    const clock=vi.spyOn(Date,'now').mockReturnValue(1_793_926_800_000);
+    try {
     const body='{"jsonrpc":"2.0","method":"tools/list"}',token=sign(body);
     expect(verifyConnectorAssertion(token,Buffer.from(body),secret)?.sub).toBe('subject');
     expect(verifyConnectorAssertion(token,Buffer.from(body),secret)).toBeNull();
@@ -58,6 +60,7 @@ describe('unified OpenChat connector trust boundary',()=>{
     expect(verifyConnectorAssertion(sign(body,{},'wrong'),Buffer.from(body),secret)).toBeNull();
     expect(verifyConnectorAssertion(sign(body),Buffer.from(body+' '),secret)).toBeNull();
     expect(verifyConnectorAssertion(sign(body),Buffer.from(body),'')).toBeNull();
+    } finally { clock.mockRestore(); }
   });
   it('lists only granted tools and checks scope on direct calls',async()=>{
     const listing=await (await call('tools/list',undefined,{scope:'openchat:read'})).json() as any;
