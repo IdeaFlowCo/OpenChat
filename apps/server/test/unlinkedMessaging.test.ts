@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const db = vi.hoisted(() => ({ run: vi.fn(), close: vi.fn() }));
 vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => db }) }));
-import { resolveUnlinkedRecipient, unlinkedProfileId } from '../src/services/unlinkedMessaging.js';
+import { resolveUnlinkedIdentity, resolveUnlinkedRecipient, unlinkedProfileId } from '../src/services/unlinkedMessaging.js';
 import router from '../src/routes/unlinkedMessaging.js';
 const profile = 'https://www.unlinked.ai/people/public-person';
 const fetcher = vi.fn();
@@ -14,6 +14,11 @@ beforeEach(() => { vi.resetAllMocks(); vi.stubGlobal('fetch', fetcher); vi.stubE
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 const answer = (value: unknown) => fetcher.mockResolvedValue(new Response(JSON.stringify(value)));
 describe('Unlinked inbox identity', () => {
+  it('resolves publication identity without creating an account or inbox', async () => {
+    answer({ status: 'member', name: 'Member', identity: { issuer: 'https://id.ideaflow.app/api/auth', subject: 'opaque' } });
+    expect(await resolveUnlinkedIdentity('public-person')).toEqual({ status: 'member', name: 'Member', identity: { issuer: 'https://id.ideaflow.app/api/auth', subject: 'opaque' } });
+    expect(db.run).not.toHaveBeenCalled();
+  });
   it('uses only the trusted issuer and opaque subject, with idempotent shared inbox creation', async () => {
     answer({ status: 'member', name: 'Member', identity: { issuer: 'https://id.ideaflow.app/api/auth', subject: 'opaque' } });
     expect(await resolveUnlinkedRecipient('public-person')).toEqual({ status: 'ready', recipient: { id: 'recipient', name: 'Member' } });

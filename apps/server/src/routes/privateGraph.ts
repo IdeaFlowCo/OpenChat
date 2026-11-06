@@ -1,3 +1,5 @@
+import { OverlayError } from '../services/overlay/contract.js';
+import { getAskPublication, publishAsk, revokeAskPublication } from '../services/askPublications.js';
 /**
  * Private graph API — the signed-in person's own notes, importance, catch-up
  * cadence and links about the people they know. Every route acts for the
@@ -28,6 +30,7 @@ router.use((req: Request, res: Response, next) => {
 });
 
 function fail(error: unknown, res: Response): void {
+  if (error instanceof OverlayError) { res.status(error.status).json({ error: error.code }); return; }
   if (error instanceof PrivateGraphError) { res.status(error.status).json({ ...(error.details ?? {}), error: error.message }); return; }
   console.error('Private graph request failed:', error instanceof Error ? error.message : 'unknown error');
   res.status(500).json({ error: 'Could not save that. Try again.' });
@@ -178,6 +181,19 @@ router.post('/note-reviews/:reviewId/apply', async (req: Request, res: Response)
 });
 router.post('/note-reviews/:reviewId/undo', async (req: Request, res: Response) => {
   try { res.json(await undoNoteReview(owner(req), id(req, 'reviewId'))); } catch (error) { fail(error, res); }
+});
+// Durable publication stays separate from owner-only ask reads and metadata.
+router.get('/asks/:askId/publication', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  try { res.json(await getAskPublication(owner(req), id(req, 'askId'))); } catch (error) { fail(error, res); }
+});
+router.post('/asks/:askId/publication', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  try { res.json(await publishAsk(owner(req), `${owner(req)}:${req.agentKeyId ?? 'human'}`, id(req, 'askId'), req.body)); } catch (error) { fail(error, res); }
+});
+router.delete('/asks/:askId/publication', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  try { res.json(await revokeAskPublication(owner(req), id(req, 'askId'), req.body?.expectedPublicationRevision)); } catch (error) { fail(error, res); }
 });
 // Asks: the overlay's `ask` kind, the owner's own and the people they know (OpenChat-2fsy.1). Owner-only.
 router.get('/asks', async (req: Request, res: Response) => {

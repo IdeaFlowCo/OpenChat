@@ -1,3 +1,4 @@
+import askPublicationsRoutes from './routes/askPublications.js';
 import visionSaveRoutes from './routes/visionSave.js';
 import visionBridgeRoutes, { visionSessionGuard } from './routes/visionBridge.js';
 import { securityRateLimitMonitor, TRUSTED_PROXY_SETTING } from './services/securityEvent.js';
@@ -477,6 +478,7 @@ app.use('/api', agentSocialLayerRoutes);
 app.use('/api/card', addMeCardRoutes);
 app.use('/api/friends', friendsRoutes);
 app.use('/api/private', privateGraphRoutes);
+app.use('/api', askPublicationsRoutes);
 app.use('/api/private-names', privateNamesRoutes);
 app.use('/api/imported-chats', importedChatsRoutes);
 

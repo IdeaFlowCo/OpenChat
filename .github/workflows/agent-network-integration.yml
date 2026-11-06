@@ -61,7 +61,20 @@ jobs:
           apps/server/test/ideaflowConnector.privateGraph.test.ts
           apps/server/test/privateNoteReview.test.ts
           apps/server/test/overlayVendor.test.ts
+          apps/server/test/askPublications.route.test.ts
+          apps/server/test/askPublications.service.test.ts
+          apps/server/test/assistantAskPublication.test.ts
+          apps/server/test/assistantAsks.test.ts
+          apps/server/test/assistantTurnBoundary.test.ts
           apps/server/test/unlinkedProvision.test.ts
+
+      # Native render suites require the server's automatic JSX transform.
+      - name: Run canonical ask native render regressions
+        working-directory: apps/server
+        run: >-
+          ../../node_modules/.bin/vitest run --no-file-parallelism
+          test/askPublication.mobile.test.ts
+          test/allAsks.mobile.test.ts
 
       # The overlay suites create schema on start; one file at a time avoids lock contention.
       - name: Run private-graph overlay suites against Neo4j
@@ -72,6 +85,7 @@ jobs:
           apps/server/test/privateGraph.provenance.integration.test.ts
           apps/server/test/privateNoteReview.integration.test.ts
           apps/server/test/privateAsks.integration.test.ts
+          apps/server/test/askPublications.integration.test.ts
           apps/server/test/privateLists.integration.test.ts
           apps/server/test/importedChats.integration.test.ts
           apps/server/test/importedChatAccount.integration.test.ts

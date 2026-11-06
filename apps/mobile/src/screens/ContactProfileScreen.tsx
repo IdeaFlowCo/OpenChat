@@ -1,3 +1,4 @@
+import { PublishedAsks } from '../components/PublishedAsks';
 /**
  * A cached conversation participant must not keep a person's profile visible
  * after the authenticated official-profile lookup denies access. The lookup
@@ -262,6 +263,7 @@ export function ContactProfileScreen() {
       )}
 
       {/* What they are asking for, limited to what they shared with you. */}
+      <PublishedAsks publisherId={userId} />
       {canSetPrivateName && <ProfileAsks userId={userId} onOpenStory={story => navigation.navigate('StoryViewer', { story })} />}
 
       {/* Your layer: notes, importance, catch-up, links and the private name. Collapsed until opened. */}

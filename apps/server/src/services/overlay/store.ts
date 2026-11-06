@@ -1,3 +1,4 @@
+import { eraseAskPublicationIn, revokeAskPublicationIn } from './publications.js';
 import { createHash } from 'node:crypto';
 import neo4j from 'neo4j-driver';
 import type { Driver, ManagedTransaction } from 'neo4j-driver';
@@ -39,6 +40,9 @@ export class OverlayStore {
         'CREATE CONSTRAINT overlay_note_id IF NOT EXISTS FOR (n:OverlayNote) REQUIRE n.id IS UNIQUE',
         'CREATE CONSTRAINT overlay_link_key IF NOT EXISTS FOR ()-[l:OVERLAY_LINK]-() REQUIRE l.linkKey IS UNIQUE',
         // One ask per owner, author and text; entities that are not asks leave askKey null.
+        'CREATE CONSTRAINT overlay_ask_publication_id IF NOT EXISTS FOR (p:OverlayAskPublication) REQUIRE p.id IS UNIQUE',
+        'CREATE CONSTRAINT overlay_ask_publication_ask IF NOT EXISTS FOR (p:OverlayAskPublication) REQUIRE (p.ownerKey,p.askId) IS UNIQUE',
+        'CREATE CONSTRAINT overlay_ask_publication_operation IF NOT EXISTS FOR (o:OverlayAskPublicationOperation) REQUIRE (o.ownerKey,o.requestId) IS UNIQUE',
         'CREATE CONSTRAINT overlay_ask_source IF NOT EXISTS FOR (s:OverlayAskSource) REQUIRE (s.ownerKey, s.sourceKey) IS UNIQUE',
         'CREATE CONSTRAINT overlay_ask_key IF NOT EXISTS FOR (e:OverlayEntity) REQUIRE (e.ownerKey, e.askKey) IS UNIQUE',
         'CREATE INDEX overlay_entity_owner IF NOT EXISTS FOR (e:OverlayEntity) ON (e.ownerKey, e.kind, e.nameKey)',
@@ -470,7 +474,7 @@ export class OverlayStore {
         OPTIONAL MATCH (b:OverlayEntity {ownerKey: $toKey}) RETURN source, count(b) AS target`, { fromKey, toKey });
       if (!number(counts.records[0]?.get('source'))) return { moved: false };
       if (number(counts.records[0]?.get('target'))) return fail(409, 'owner_conflict');
-      for (const label of ['OverlayAskSource', 'OverlayNote', 'OverlayRef', 'OverlayEntity']) await tx.run(`MATCH (n:${label} {ownerKey: $fromKey}) SET n.ownerKey = $toKey`, { fromKey, toKey });
+      for (const label of ['OverlayAskPublication', 'OverlayAskPublicationOperation', 'OverlayAskSource', 'OverlayNote', 'OverlayRef', 'OverlayEntity']) await tx.run(`MATCH (n:${label} {ownerKey: $fromKey}) SET n.ownerKey = $toKey`, { fromKey, toKey });
       await tx.run('MATCH (:OverlayEntity {ownerKey: $toKey})-[l:OVERLAY_LINK]->() SET l.ownerKey = $toKey', { toKey });
       return { moved: true };
     });
@@ -492,7 +496,9 @@ export class OverlayStore {
 /** For callers that must erase inside their own transaction (account deletion). */
 export async function deleteOwnerIn(tx: Pick<ManagedTransaction, 'run'>, ownerKey: string): Promise<void> {
   if (!isOwnerKey(ownerKey)) return fail(400, 'invalid_owner');
-  for (const label of ['OverlayAskSource', 'OverlayNote', 'OverlayRef', 'OverlayEntity']) await tx.run(`MATCH (n:${label} {ownerKey: $ownerKey}) DETACH DELETE n`, { ownerKey });
+  // Serialize erasure with publication writes on every existing canonical ask.
+  await tx.run("MATCH (a:OverlayEntity {ownerKey:$ownerKey,kind:'ask'}) SET a._lock=true REMOVE a._lock", { ownerKey });
+  for (const label of ['OverlayAskPublication', 'OverlayAskPublicationOperation', 'OverlayAskSource', 'OverlayNote', 'OverlayRef', 'OverlayEntity']) await tx.run(`MATCH (n:${label} {ownerKey: $ownerKey}) DETACH DELETE n`, { ownerKey });
 }
 
 export async function purgeRefIn(tx: Pick<ManagedTransaction, 'run'>, rawRef: unknown): Promise<{ entitiesRemoved: number; refsRemoved: number }> {
@@ -522,6 +528,8 @@ export async function purgeRefIn(tx: Pick<ManagedTransaction, 'run'>, rawRef: un
  * from the placements of the rest. Returns how many asks went.
  */
 async function releaseAskPartyIn(tx: Pick<ManagedTransaction, 'run'>, ownerKey: string, id: string): Promise<number> {
+  const authored = await tx.run("MATCH (a:OverlayEntity {ownerKey:$ownerKey,kind:'ask'}) WHERE coalesce(a.askAuthorId,a.askerId)=$id RETURN a.id AS id", { ownerKey, id });
+  for (const row of authored.records) await eraseAskPublicationIn(tx, ownerKey, String(row.get('id')));
   await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'}) WHERE coalesce(a.askAuthorId, a.askerId) = $id
     MATCH (s:OverlayAskSource {ownerKey: $ownerKey}) WHERE s.askId = a.id DETACH DELETE s`, { ownerKey, id });
   const asks = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'}) WHERE coalesce(a.askAuthorId, a.askerId) = $id
@@ -552,6 +560,7 @@ export async function deleteEntityIn(tx: Runner, ownerKey: string, id: string): 
   const asksRemoved = await releaseAskPartyIn(tx, ownerKey, id);
   const notes = await tx.run('MATCH (n:OverlayNote {ownerKey: $ownerKey, entityId: $id}) DETACH DELETE n RETURN count(*) AS removed', { id, ownerKey });
   const refs = await tx.run('MATCH (r:OverlayRef {ownerKey: $ownerKey, entityId: $id}) DETACH DELETE r RETURN count(*) AS removed', { id, ownerKey });
+  await eraseAskPublicationIn(tx, ownerKey, id);
   await tx.run('MATCH (s:OverlayAskSource {ownerKey: $ownerKey, askId: $id}) DETACH DELETE s', { ownerKey, id });
   await tx.run('MATCH (e:OverlayEntity {id: $id, ownerKey: $ownerKey}) DETACH DELETE e', { id, ownerKey });
   return { notesRemoved: number(notes.records[0]?.get('removed')), linksRemoved: number(found.records[0]?.get('links')), refsRemoved: number(refs.records[0]?.get('removed')), asksRemoved };
@@ -989,6 +998,7 @@ export async function updateAskIn(tx: Runner, ownerKey: string, id: string, patc
     if (current.status === 'stale' && patch.status === undefined) status = 'open';
   }
   if (patch.recheckAfter !== undefined || patch.recheckedNow || patch.horizon !== undefined) values.recheckAfter = askRecheckAfter(horizon, now, patch.recheckAfter ?? null);
+  if (status === 'withdrawn') await revokeAskPublicationIn(tx, ownerKey, id);
   if (status !== current.status) {
     values.askStatus = status;
     values.closedAt = status === 'fulfilled' || status === 'withdrawn' ? (current.closedAt ?? now) : null;

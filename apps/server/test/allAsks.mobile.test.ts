@@ -2,7 +2,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ currentUser: { userId: 'alice' } as { userId: string } | null, navigate: vi.fn(), listAsks: vi.fn(), listIntentDrafts: vi.fn(), listMyStories: vi.fn(), getContextIntentions: vi.fn(), saveAsk: vi.fn(), updateAsk: vi.fn(), getAsk: vi.fn() }));
+const mocks = vi.hoisted(() => ({ currentUser: { userId: 'alice' } as { userId: string } | null, navigate: vi.fn(), listAsks: vi.fn(), listIntentDrafts: vi.fn(), listMyStories: vi.fn(), getContextIntentions: vi.fn(), saveAsk: vi.fn(), updateAsk: vi.fn(), getAskPublication: vi.fn(), getAsk: vi.fn() }));
 vi.mock('react-native', async () => {
   const React = await import('react');
   return { Platform: { OS: 'ios', select: (values: any) => values.ios ?? values.default }, StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 }, useWindowDimensions: () => ({ width: 390 }),
@@ -12,6 +12,7 @@ vi.mock('react-native', async () => {
 vi.mock('@react-navigation/native', () => ({ useFocusEffect: (fn: any) => React.useEffect(fn, [fn]), useNavigation: () => ({ navigate: mocks.navigate }), useRoute: () => ({ params: { askId: 'canonical-1' } }) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ currentUser: mocks.currentUser }) }));
+vi.mock('expo-crypto', () => ({ randomUUID: () => 'synthetic-publication-request' }));
 vi.mock('../../mobile/src/components/ContextIntentionControls', () => ({ IntentionLifecycleControls: () => null }));
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 vi.mock('../../mobile/src/api/client', () => ({ api: mocks }));
@@ -24,7 +25,7 @@ const source = { app: 'openchat', conversationId: 'agent-chat', messageId: 'sour
 const ask = { id: 'canonical-1', text: 'Find party invitees', authorParty: { kind: 'self' }, fromMe: true, forMe: false, carrier: null, placements: [], status: 'open', horizon: 'short', recheckAfter: '2099-01-01', exposure: 'only_me', sources: [source] };
 beforeEach(() => {
   vi.clearAllMocks(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; mocks.currentUser = { userId: 'alice' };
-  mocks.listAsks.mockResolvedValue({ asks: [ask], truncated: false }); mocks.getAsk.mockResolvedValue({ ask });
+  mocks.listAsks.mockResolvedValue({ asks: [ask], truncated: false }); mocks.getAsk.mockResolvedValue({ ask }); mocks.getAskPublication.mockResolvedValue({ publication: null, recipients: [], publishedVersionDiffers: false });
   mocks.listIntentDrafts.mockResolvedValue([]); mocks.listMyStories.mockResolvedValue([]); mocks.getContextIntentions.mockResolvedValue({ intentions: [] });
 });
 afterEach(async () => { await act(async () => root?.unmount()); delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT; });

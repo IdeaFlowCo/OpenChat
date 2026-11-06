@@ -996,11 +996,17 @@ export type OverlayAskPlacement = OverlayAskParty | { kind: 'conversation'; conv
  * carry it) follow. Only the owner ever sees it; `exposure` widens nothing yet.
  */
 export interface OverlayAsk {
+  publication?: { state: 'active' | 'revoked'; audienceKind: 'public' | 'people'; sourceRevision: number } | null;
+  revision: number;
   id: string; text: string; authorParty: OverlayAskParty; author: string | null; own: boolean; asker: OverlayAskParty | null; sources?: { app: string; conversationId: string; messageId: string; itemIndex: number; sourceMessageId?: string | null; excerpt: string; assertion: string; audienceIntent: string | null; recordedAt: string }[]; carrier: OverlayAskParty | null; placements: OverlayAskPlacement[]; fromMe: boolean; forMe: boolean; horizon: OverlayAskHorizon; recheckAfter: string; needsRecheck: boolean; status: OverlayAskStatus;
   exposure: OverlayAskExposure; exposureConversationId: string | null;
   evidence: { quote: string | null; url: string | null; label: string | null; seenAt: string | null; noteId: string | null } | null;
   createdAt: string; updatedAt: string; closedAt: string | null; checkedAt: string | null; recordedBy: string | null; recordedVia: string | null; assertion: string | null;
 }
+export interface AskPublication { id: string; revision: number; sourceRevision: number; text: string; lifecycle: OverlayAskStatus; audienceKind: 'public' | 'people'; state: 'active' | 'revoked' }
+export interface AskPublicationRequest { requestId: string; expectedAskRevision: number; expectedPublicationRevision: number | null; text: string; audience: { kind: 'public' | 'people'; targets: { kind: 'openchat_user'; id: string }[] }; confirm: boolean; approvalGrant?: string }
+export interface AskPublicationPreview { text: string; lifecycle: string; audience: 'public' | 'people'; recipients: { userId: string; displayName: string }[] }
+export interface PublishedAsk { id: string; revision: number; text: string; lifecycle: string; publishedAt: string; updatedAt: string; publisher: { userId: string; displayName: string }; audience: 'public' | 'shared_with_you' }
 export interface PrivateNote { id: string; text: string; createdAt: string; updatedAt: string }
 export interface PrivateLink { id: string; relation: string; direction: 'out' | 'in'; other: { kind: PrivateNodeKind; id: string; name: string }; createdAt: string }
 export interface PrivatePersonOverlay { userId: string; person?: { id: string; name: string; avatarUrl: string | null }; card: PrivatePersonCard; notes: PrivateNote[]; links: PrivateLink[] }
@@ -1708,6 +1714,10 @@ export const api = {
     const query = Object.entries(filter).filter(([, value]) => value !== undefined).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`).join('&');
     return request<{ asks: OverlayAsk[]; truncated: boolean }>(`/api/private/asks${query ? `?${query}` : ''}`);
   },
+  getAskPublication: (id: string) => request<{ publication: AskPublication | null; recipients: { userId: string; displayName: string }[]; publishedVersionDiffers: boolean }>(`/api/private/asks/${encodeURIComponent(id)}/publication`),
+  publishAsk: (id: string, body: AskPublicationRequest) => request<{ approvalRequired?: boolean; approvalGrant?: string; preview?: AskPublicationPreview; publication?: AskPublication }>(`/api/private/asks/${encodeURIComponent(id)}/publication`, { method: 'POST', body: JSON.stringify(body) }),
+  revokeAskPublication: (id: string, expectedPublicationRevision: number) => request<{ publication: AskPublication | null }>(`/api/private/asks/${encodeURIComponent(id)}/publication`, { method: 'DELETE', body: JSON.stringify({ expectedPublicationRevision }) }),
+  listPublishedAsks: (publisherId: string | null, cursor?: string) => request<{ publications: PublishedAsk[]; nextCursor: string | null }>(`${publisherId ? `/api/people/${encodeURIComponent(publisherId)}/ask-publications` : '/api/ask-publications/shared-with-me'}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`),
   getAsk: (id: string) => request<{ ask: OverlayAsk }>(`/api/private/asks/${encodeURIComponent(id)}`),
   saveAsk: (body: { author: 'self' | { kind: 'user' | 'thing' | 'unlinked'; id: string }; text: string; horizon?: OverlayAskHorizon; recheckAfter?: string }) =>
     request<{ ask: OverlayAsk; created: boolean }>('/api/private/asks', { method: 'POST', body: JSON.stringify(body) }),

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Re-vendor the Noos people-overlay core (contract.ts, store.ts) byte-for-byte
+// Re-vendor the Noos people-overlay core (contract.ts, store.ts, publications.ts) byte-for-byte
 // and pin it: node scripts/vendor-noos-overlay.mjs <path-to-noos-checkout> [ref]
 // Without an explicit ref the checkout must be clean. An explicit ref reads immutable Git blobs. CI checks the hashes
 // (apps/server/test/overlayVendor.test.ts), so the vendored files cannot drift
@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-const FILES = ['contract.ts', 'store.ts'];
+const FILES = ['contract.ts', 'store.ts', 'publications.ts'];
 const noos = process.argv[2];
 if (!noos) { console.error('usage: node scripts/vendor-noos-overlay.mjs <path-to-noos-checkout> [ref]'); process.exit(2); }
 const git = (...args) => execFileSync('git', ['-C', noos, ...args], { encoding: 'utf8' }).trim();
