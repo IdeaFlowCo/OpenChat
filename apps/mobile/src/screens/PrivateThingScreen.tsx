@@ -1,6 +1,7 @@
 /**
- * One of your own saved things — a company, idea, project or person who is not
- * on OpenChat — with your notes and everything you have linked to it. This is
+ * One of your own saved things — a company, idea, project, list or person who
+ * is not on OpenChat — with your notes and everything you have linked to it (a
+ * list also shows its members, one page at a time). This is
  * how the private web of people, ideas and projects is browsed: each link
  * opens the next person or thing.
  */
@@ -8,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { api, type PrivateThingDetail } from '../api/client';
+import { ListMembers } from '../components/ListMembers';
 import { PrivateLinks } from '../components/PrivateGraph';
 import { ProfileNoteCapture } from '../components/ProfileNoteCapture';
 import { useTheme } from '../contexts/ThemeContext';
@@ -44,9 +46,12 @@ export function PrivateThingScreen() {
       <Text style={{ color: c.textMetadata, fontSize: 13, textTransform: 'capitalize' }}>{thing.kind}</Text>
       <Text style={[styles.name, { color: c.textPrimary }]}>{thing.name}</Text>
       <Text style={{ color: c.textMetadata, fontSize: 13 }}>Private to you. Only you can see this.</Text>
+      {thing.kind === 'list' && (
+        <ListMembers key={`members-${thing.id}`} listId={thing.id} onOpenThing={id => navigation.push('PrivateThing', { thingId: id })} onOpenPerson={userId => navigation.navigate('ContactProfile', { userId })} />
+      )}
       <ProfileNoteCapture key={thing.id} subject={subject} notes={thing.notes} onChange={() => { void api.getPrivateThing(thingId).then(setThing).catch(() => setError('Could not refresh connections.')); }} onAskAgent={() => navigation.navigate('AgentOverlay', { context: { kind: 'thing', id: thing.id, label: thing.name, includePrivate: true } })} />
       <PrivateLinks
-        subject={subject} links={thing.links} onChange={links => setThing(current => current && { ...current, links })}
+        subject={subject} links={thing.kind === 'list' ? thing.links.filter(link => !(link.direction === 'out' && link.relation === 'contains')) : thing.links} onChange={links => setThing(current => current && { ...current, links })}
         onOpenThing={id => navigation.push('PrivateThing', { thingId: id })}
         onOpenPerson={userId => navigation.navigate('ContactProfile', { userId })}
       />

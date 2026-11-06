@@ -1129,8 +1129,8 @@ export function buildServer(
   const PROVENANCE = "Notes and relations carry author ('owner' or 'agent:<name>'), source ('app', 'connector', 'direct-key' or 'suggestion') and assertion ('stated' or 'inferred'), null on records made before provenance was kept; relations also carry relationType, since, until and context (null when not given) and updatedBy (who last edited them in place).";
   // Noos overlay relation types (2026-10-10). 'related' is the generic fallback; the retired 'other' still reads as 'related'.
   const RELATION_TYPES = ['knows', 'family', 'worked_with', 'works_at', 'works_on', 'attended', 'interested_in', 'part_of', 'about', 'asks', 'related'] as const;
-  const THING_KINDS = ['person', 'company', 'idea', 'project', 'topic'] as const;
-  const KINDS_TEXT = 'person, company, idea, project or topic (a thing in the world people and projects are about, such as ADHD or coherence)';
+  const THING_KINDS = ['person', 'company', 'idea', 'project', 'topic', 'list'] as const;
+  const KINDS_TEXT = 'person, company, idea, project, topic (a thing in the world people and projects are about, such as ADHD or coherence) or list (a private collection of people; manage members with oc_list_members, oc_add_list_member and oc_remove_list_member)';
   const relationTypeSchema = z.enum(RELATION_TYPES).optional().describe("Canonical type for querying; omit to derive it from the relation's words and what it connects (knows/family/worked_with only between two people; 'related' when nothing fits)");
   const linkFacts = {
     since: z.string().max(20).optional().describe("Free date text such as '2019' or '2024-03'"),
@@ -1144,8 +1144,8 @@ export function buildServer(
     subjectKind: z.enum(['user', 'thing', 'unlinked']).describe("'user' for a person on OpenChat (use their user id), 'thing' for one of the owner's saved companies, ideas, projects or people (use its id), 'unlinked' for an Unlinked person (a published profile id, a connection id from unlinked_list_connections for an imported LinkedIn contact, or a linkedin.com/in/ address)"),
     subjectId: z.string().min(1).max(200).describe('The user id, saved-thing id, or Unlinked profile id / connection id / LinkedIn address'),
   };
-  const DESTRUCTIVE_PRIVATE = new Set(['oc_delete_private_note', 'oc_delete_private_link', 'oc_delete_private_thing', 'oc_delete_ask']);
-  const READ_ONLY_PRIVATE = new Set(['oc_search_private', 'oc_get_neighbourhood', 'oc_list_asks']);
+  const DESTRUCTIVE_PRIVATE = new Set(['oc_delete_private_note', 'oc_delete_private_link', 'oc_delete_private_thing', 'oc_remove_list_member', 'oc_delete_ask']);
+  const READ_ONLY_PRIVATE = new Set(['oc_search_private', 'oc_get_neighbourhood', 'oc_list_members', 'oc_list_asks']);
   const ASK_PRIVATE = "Asks are private people knowledge: only the owner ever sees them, in OpenChat's Asks section and on their private cards. exposure records whom the owner means an ask for (only_me by default) but nothing is shown to anyone else yet, whatever its exposure. Never notifies anyone.";
   const ASK_FIELDS = "horizon: event (7 days; give recheckAfter = the event date), short (14), medium (60, default), evergreen (90); it sets recheckAfter unless you give one. status: open, fulfilled, withdrawn or stale. evidence fields are optional.";
   const partyKindSchema = z.enum(['self', 'user', 'thing', 'unlinked']).describe("'self' = the owner; 'user' = an OpenChat person (id = user id); 'thing' = a saved person, company, project or idea (id = its id); 'unlinked' = an Unlinked person (profile id, connection id or linkedin.com/in/ address)");
@@ -1286,6 +1286,20 @@ export function buildServer(
   privateTool('oc_delete_ask', 'Delete an ask',
     `Delete (undo) one of the owner's asks by id with its notes and links; prefer oc_update_ask status fulfilled or withdrawn for one that no longer stands. ${ASK_PRIVATE}`,
     { askId: z.string().min(1).max(64) }, ({ askId }) => api.deleteAsk(askId));
+
+  privateTool('oc_list_members', "Read a page of a private list's members",
+    `Read one page of the people on one of the owner's private lists (kind list). Pass nextCursor back unchanged as after; a page can hold fewer than limit members and nextCursor is null only at the end. Each member has the linkId to remove it with. Being on a list is the owner's own bookkeeping, not a connection. ${PRIVATE_PEOPLE}`,
+    { listId: z.string().min(1).max(64), after: z.string().max(512).optional(), limit: z.number().int().min(1).max(100).optional() },
+    ({ listId, after, limit }) => api.listMembers(listId, { after, limit }));
+
+  privateTool('oc_add_list_member', 'Add a person to a private list',
+    `Add a person to one of the owner's private lists: memberKind user + memberId (OpenChat user id), unlinked + memberId (Unlinked profile id, connection id or linkedin.com/in/ address), or person + memberId (saved person) or memberName (never merges same-named people; createNew with clientRequestId saves a different one). Adding someone already on the list returns the existing membership. Nobody is notified. ${PRIVATE_PEOPLE}`,
+    { listId: z.string().min(1).max(64), memberKind: z.enum(['user', 'unlinked', 'person']), memberId: z.string().min(1).max(512).optional(), memberName: z.string().min(1).max(120).optional(), createNew: z.boolean().optional(), clientRequestId: z.string().min(1).max(200).optional() },
+    ({ listId, memberKind, memberId, memberName, createNew, clientRequestId }) => api.addListMember(listId, { kind: memberKind, ...(memberId ? { id: memberId } : {}), ...(memberName ? { name: memberName } : {}), ...(createNew !== undefined ? { createNew } : {}), ...(clientRequestId ? { clientRequestId } : {}) }));
+
+  privateTool('oc_remove_list_member', 'Remove a person from a private list',
+    `Remove one person from one of the owner's private lists by the linkId oc_list_members returned. Removes only the membership. ${PRIVATE_PEOPLE}`,
+    { listId: z.string().min(1).max(64), linkId: z.string().min(1).max(64) }, ({ listId, linkId }) => api.removeListMember(listId, linkId));
 
   privateTool('oc_list_catch_up', 'List people due for a catch-up',
     "List the people whose catch-up date has passed, soonest first, from the owner's private cadence settings.",
