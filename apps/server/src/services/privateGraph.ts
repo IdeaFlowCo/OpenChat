@@ -566,6 +566,11 @@ export async function addLink(ownerId: string, from: Subject, rawRelation: unkno
     if (existing.kind !== target.kind) fail(400, 'That item is a different kind');
     toId = existing.id;
   } else toId = await namedEntity(principal, target);
+  // A list's `contains` links are its members, and members are people: no other path may add anything else.
+  if (relation === LIST_MEMBERSHIP && from.kind === 'thing') {
+    const [subjectKind, targetKind] = await overlayCall(async overlay => [(await overlay.get(principal, fromId)).kind, (await overlay.get(principal, toId)).kind]);
+    if (subjectKind === 'list' && targetKind !== 'person') fail(400, 'A list contains people: add an OpenChat person, an Unlinked person or a saved person');
+  }
   const { link } = await overlayCall(overlay => overlay.addLink(principal, fromId, relation, toId, by, givenAttributes(attributes)));
   return (await linksFor(ownerId, [link], known))[0]!;
 }
@@ -1070,7 +1075,8 @@ export async function listMembers(ownerId: string, listId: string, input: { afte
   const after = typeof input.after === 'string' && input.after ? input.after : undefined;
   const limit = input.limit === undefined || input.limit === '' ? undefined : input.limit;
   const page = await overlayCall(overlay => overlay.linksPage(principal, listId, { ...(after ? { after } : {}), ...(limit !== undefined ? { limit } : {}) }));
-  const links = page.links.filter(link => link.direction === 'out' && link.relation === LIST_MEMBERSHIP);
+  // People only, however the link was written (the generic link routes cannot add other members, but older data might).
+  const links = page.links.filter(link => link.direction === 'out' && link.relation === LIST_MEMBERSHIP && link.other.kind === 'person');
   const ends = links.map(link => link.other);
   const hidden = await blockedUserIds(ownerId, ends), names = await userNames(ends), connections = await connectionsFor(ownerId, ends);
   const members = links.filter(link => { const userId = userIdOf(link.other.refs); return userId === null || !hidden.has(userId); }).map(link => ({
@@ -1100,7 +1106,7 @@ export async function removeListMember(ownerId: string, listId: string, linkId: 
   await ownList(principal, listId);
   const session = getDriver().session();
   try {
-    const found = await session.run(`MATCH (:OverlayEntity {id: $listId, ownerKey: $ownerKey, kind: 'list'})-[l:OVERLAY_LINK {id: $linkId}]->(:OverlayEntity {ownerKey: $ownerKey})
+    const found = await session.run(`MATCH (:OverlayEntity {id: $listId, ownerKey: $ownerKey, kind: 'list'})-[l:OVERLAY_LINK {id: $linkId}]->(:OverlayEntity {ownerKey: $ownerKey, kind: 'person'})
       WHERE l.ownerKey = $ownerKey AND l.relation = $relation RETURN l.id AS id`, { listId, linkId, ownerKey: principal.ownerKey, relation: LIST_MEMBERSHIP });
     if (!found.records.length) return fail(404, 'Not found');
   } finally { await session.close(); }

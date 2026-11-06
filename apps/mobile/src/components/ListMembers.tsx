@@ -22,6 +22,8 @@ export function ListMembers({ listId, onOpenThing, onOpenPerson }: { listId: str
   const [error, setError] = useState<string | null>(null);
   // Only the latest load for this list may change the list shown.
   const latest = useRef(0);
+  // Memberships removed while a page was loading must not reappear when that page lands.
+  const removed = useRef(new Set<string>());
 
   const load = useCallback(async (after: string | null) => {
     const request = ++latest.current;
@@ -29,7 +31,8 @@ export function ListMembers({ listId, onOpenThing, onOpenPerson }: { listId: str
     try {
       const page = await api.listPrivateListMembers(listId, after ?? undefined);
       if (request !== latest.current) return;
-      setMembers(current => after ? [...current, ...page.members.filter(member => !current.some(known => known.linkId === member.linkId))] : page.members);
+      const fresh = page.members.filter(member => !removed.current.has(member.linkId));
+      setMembers(current => after ? [...current, ...fresh.filter(member => !current.some(known => known.linkId === member.linkId))] : fresh);
       setCursor(page.nextCursor);
       setError(null);
     } catch {
@@ -38,12 +41,13 @@ export function ListMembers({ listId, onOpenThing, onOpenPerson }: { listId: str
       if (request === latest.current) setLoading(false);
     }
   }, [listId]);
-  useEffect(() => { setMembers([]); setCursor(null); void load(null); }, [load]);
+  useEffect(() => { removed.current = new Set(); setMembers([]); setCursor(null); void load(null); }, [load]);
 
   const remove = async (member: PrivateListMember) => {
     setBusy(member.linkId);
     try {
       await api.removePrivateListMember(listId, member.linkId);
+      removed.current.add(member.linkId);
       setMembers(current => current.filter(known => known.linkId !== member.linkId));
     } catch {
       setError(`Could not remove ${member.member.name}.`);
@@ -81,7 +85,7 @@ export function ListMembers({ listId, onOpenThing, onOpenPerson }: { listId: str
           <Button label="Remove" size="sm" variant="ghost" disabled={busy === member.linkId} accessibilityLabel={`Remove ${member.member.name} from this list`} onPress={() => void remove(member)} />
         </View>
       ))}
-      {!loading && !members.length && !error && <Text style={[type.label, { color: c.textSecondary }]}>Nobody on this list yet.</Text>}
+      {!loading && !members.length && !cursor && !error && <Text style={[type.label, { color: c.textSecondary }]}>Nobody on this list yet.</Text>}
       {loading ? <ActivityIndicator color={c.primary} /> : cursor ? <Button label="Show more" size="sm" onPress={() => void load(cursor)} /> : null}
       <View style={[styles.add, { borderColor: c.border, backgroundColor: c.surface }]}>
         <TextInput value={name} onChangeText={setName} placeholder="Add a saved person by name" placeholderTextColor={c.textMetadata} maxLength={120}

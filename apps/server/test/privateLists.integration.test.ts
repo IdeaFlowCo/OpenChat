@@ -76,6 +76,9 @@ integration('private lists: owner-only editing of list membership', () => {
 
   it('only people can be members, and only of the owner’s own lists', async () => {
     expect(await status(() => graph.addListMember(alice, listId, { kind: 'company', name: `Acme ${suffix}` }))).toBe(400);
+    // Nor through the generic link route: a list's `contains` links are its members.
+    expect(await status(() => graph.addLink(alice, { kind: 'thing', id: listId }, 'contains', { kind: 'company', name: `Acme ${suffix}` }))).toBe(400);
+    expect((await graph.listMembers(alice, listId)).members.every(entry => entry.member.kind === 'user' || entry.member.kind === 'person')).toBe(true);
     expect(await status(() => graph.addListMember(alice, listId, { kind: 'user', id: alice }))).toBe(400);
     const idea = (await graph.listThings(alice, `An idea ${suffix}`, 'idea')).things[0]!;
     expect(await status(() => graph.listMembers(alice, idea.id))).toBe(404);
