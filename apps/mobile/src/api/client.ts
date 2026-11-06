@@ -965,8 +965,9 @@ export interface FriendRow extends FriendStatus { user: Pick<User, 'id' | 'name'
 export interface FriendLists { friends: FriendRow[]; incoming: FriendRow[]; outgoing: FriendRow[] }
 
 /** Private graph: the signed-in person's own notes and links about people. Only they ever see it. */
-export type PrivateThingKind = 'person' | 'company' | 'idea' | 'project' | 'topic';
-export type PrivateNodeKind = 'user' | PrivateThingKind | 'list';
+/** `list` (2026-11-05): an owner-private collection of people; members are its `contains` links. */
+export type PrivateThingKind = 'person' | 'company' | 'idea' | 'project' | 'topic' | 'list';
+export type PrivateNodeKind = 'user' | PrivateThingKind;
 export type PrivateSubject = { kind: 'user' | 'thing'; id: string };
 export interface PrivatePersonCard {
   important: boolean;
@@ -1012,6 +1013,8 @@ export interface PrivatePersonOverlay { userId: string; person?: { id: string; n
 /** `description` is the owner's one-line summary (server 2026-10-10; absent from older servers). */
 export interface PrivateThing { id: string; kind: PrivateThingKind; name: string; description?: string | null }
 export interface PrivateThingDetail extends PrivateThing { notes: PrivateNote[]; links: PrivateLink[] }
+/** One person on a private list: `linkId` removes the membership; `member` is an OpenChat person (kind user) or a saved person. */
+export interface PrivateListMember { linkId: string; member: { kind: PrivateNodeKind; id: string; name: string; unlinkedProfileId?: string }; addedAt: string; author: string | null; source: string | null }
 export interface CatchUpPerson { userId: string; name: string; avatarUrl: string | null; important: boolean; nextDueAt: string; lastContactAt: string | null }
 export type PrivateLinkTarget = { kind: 'user'; id: string } | { kind: PrivateThingKind; id?: string; name?: string };
 // Imported chat mirrors (OpenChat-061g): the owner's private, read-only copies of chats from other networks.
@@ -1728,6 +1731,13 @@ export const api = {
   createPrivateThing: (kind: PrivateThingKind, name: string) =>
     request<PrivateThing>('/api/private/things', { method: 'POST', body: JSON.stringify({ kind, name }) }),
   getPrivateThing: (thingId: string) => request<PrivateThingDetail>(`/api/private/things/${encodeURIComponent(thingId)}`),
+  // Private lists: one page of members at a time (pass nextCursor back as after), add by OpenChat user / saved person, remove by link id.
+  listPrivateListMembers: (listId: string, after?: string) =>
+    request<{ members: PrivateListMember[]; nextCursor: string | null }>(`/api/private/lists/${encodeURIComponent(listId)}/members${after ? `?after=${encodeURIComponent(after)}` : ''}`),
+  addPrivateListMember: (listId: string, member: { kind: 'user' | 'person'; id?: string; name?: string }) =>
+    request<PrivateListMember>(`/api/private/lists/${encodeURIComponent(listId)}/members`, { method: 'POST', body: JSON.stringify(member) }),
+  removePrivateListMember: (listId: string, linkId: string) =>
+    request<{ removed: true }>(`/api/private/lists/${encodeURIComponent(listId)}/members/${encodeURIComponent(linkId)}`, { method: 'DELETE' }),
   listCatchUp: () => request<{ due: CatchUpPerson[] }>('/api/private/due'),
 
   // Imported chats — read-only; nothing here sends, invites or notifies anyone.

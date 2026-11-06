@@ -5,10 +5,11 @@
  *
  * Levels follow HOLD_LEVEL_MS in utils/emojiMessage.ts; each crossing gives a
  * light haptic tick so the growth can be felt without looking.
+ *
  */
 
 import { useEffect, useRef } from 'react';
-import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { hapticGrowTick } from '../services/haptics';
 import { type } from '../theme/tokens';
 import { HOLD_LEVEL_MS, MAX_EMOJI_SIZE, holdLevelForDuration, holdScaleForDuration } from '../utils/emojiMessage';
@@ -20,6 +21,9 @@ interface Props {
   onSend: (size: number) => void;
 }
 
+// The long press is the hold itself; claiming it keeps the browser's away.
+const claimLongPress = () => {};
+
 const BASE = 44;
 const HOLD_TOTAL_MS = HOLD_LEVEL_MS[HOLD_LEVEL_MS.length - 1];
 const MAX_SCALE = holdScaleForDuration(HOLD_TOTAL_MS);
@@ -29,12 +33,11 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
   const heldSince = useRef<number | null>(null);
   const level = useRef(1);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
-
   const stopTicker = () => {
     if (ticker.current) clearInterval(ticker.current);
     ticker.current = null;
   };
-  useEffect(() => stopTicker, []);
+  useEffect(() => () => stopTicker(), []);
 
   const begin = () => {
     if (disabled || heldSince.current !== null) return;
@@ -77,21 +80,32 @@ export function EmojiSendButton({ emoji, disabled, onSend }: Props) {
       <Pressable
         onPressIn={begin}
         onPressOut={() => finish(true)}
+        onLongPress={claimLongPress}
+        cancelable={false}
         disabled={disabled}
         accessibilityRole="button"
         accessibilityLabel={`Send ${emoji}`}
         accessibilityHint="Hold to send it bigger"
         hitSlop={6}
-        style={[styles.button, disabled && styles.disabled]}
+        style={[styles.button, Platform.OS === 'web' && webHold, disabled && styles.disabled]}
         testID="emoji-send-button"
       >
         <Animated.View pointerEvents="none" style={{ transform: [{ translateY }, { scale }] }}>
-          <Text style={styles.emoji} allowFontScaling={false}>{emoji}</Text>
+          <Text style={styles.emoji} allowFontScaling={false} selectable={false}>{emoji}</Text>
         </Animated.View>
       </Pressable>
     </View>
   );
 }
+
+// Web only: no panning, text selection or iOS callout may take the touch over.
+// react-native-web passes these straight through as CSS.
+const webHold = {
+  touchAction: 'none',
+  userSelect: 'none',
+  WebkitUserSelect: 'none',
+  WebkitTouchCallout: 'none',
+} as unknown as ViewStyle;
 
 const styles = StyleSheet.create({
   // overflow stays visible so the swelling emoji can rise above the composer.

@@ -10,7 +10,7 @@ const graph = vi.hoisted(() => ({
   addLink: vi.fn(), addNote: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), deletePrivateThing: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
   getUnlinkedPersonOverlay: vi.fn(), listDue: vi.fn(), resolvePrivateThing: vi.fn(), listOwnerLinks: vi.fn(), listThings: vi.fn(), updatePersonCard: vi.fn(),
   updateLink: vi.fn(), searchPrivate: vi.fn(), getNeighbourhood: vi.fn(), updatePrivateThing: vi.fn(),
-  saveAsk: vi.fn(), listAsks: vi.fn(), getAsk: vi.fn(), updateAsk: vi.fn(), deleteAsk: vi.fn(),
+  saveAsk: vi.fn(), listMembers: vi.fn(), addListMember: vi.fn(), removeListMember: vi.fn(), listAsks: vi.fn(), getAsk: vi.fn(), updateAsk: vi.fn(), deleteAsk: vi.fn(),
 }));
 vi.mock('../src/services/privateGraph.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/privateGraph.js')>('../src/services/privateGraph.js');
@@ -73,7 +73,7 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     }
     const search = all.find((value: any) => value.name === 'oc_search_private');
     expect(search.inputSchema.properties.relationType.enum).toEqual(['knows', 'family', 'worked_with', 'works_at', 'works_on', 'attended', 'interested_in', 'part_of', 'about', 'asks', 'related']);
-    expect(search.inputSchema.properties.kind.enum).toEqual(['person', 'company', 'idea', 'project', 'topic']);
+    expect(search.inputSchema.properties.kind.enum).toEqual(['person', 'company', 'idea', 'project', 'topic', 'list']);
     const add = all.find((value: any) => value.name === 'oc_add_private_link');
     expect(Object.keys(add.inputSchema.properties)).toEqual(expect.arrayContaining(['relationType', 'since', 'until', 'context']));
     expect(add.inputSchema.properties.toKind.enum).toContain('topic');
@@ -154,6 +154,28 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     graph.updateAsk.mockRejectedValue(new PrivateGraphError(404, 'Not found'));
     const missing = await tool('oc_update_ask', { askId: 'someone-elses', status: 'withdrawn' });
     expect(missing.result.isError).toBe(true);
+  });
+
+  it('list tools: members read under openchat:read, edits under openchat:write, mapped onto the list routes', async () => {
+    const read = (await (await call('tools/list', {}, 'openchat:read')).json() as any).result.tools.map((value: any) => value.name);
+    expect(read).toContain('oc_list_members');
+    expect(read.some((name: string) => ['oc_add_list_member', 'oc_remove_list_member'].includes(name))).toBe(false);
+    const all = (await (await call('tools/list', {})).json() as any).result.tools;
+    expect(all.find((value: any) => value.name === 'oc_remove_list_member').annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(all.find((value: any) => value.name === 'oc_save_private_thing').inputSchema.properties.kind.enum).toContain('list');
+    graph.listMembers.mockResolvedValue({ list: { id: 'list-1' }, members: [], nextCursor: null });
+    await tool('oc_list_members', { listId: 'list-1', after: 'cursor-1', limit: 50 }, 'openchat:read');
+    expect(graph.listMembers).toHaveBeenCalledWith('owner', 'list-1', { after: 'cursor-1', limit: '50' });
+    graph.addListMember.mockResolvedValue({ linkId: 'l1' });
+    await tool('oc_add_list_member', { listId: 'list-1', memberKind: 'unlinked', memberId: 'https://linkedin.com/in/x' }, undefined, 'Investor import');
+    expect(graph.addListMember).toHaveBeenCalledWith('owner', 'list-1', { kind: 'unlinked', id: 'https://linkedin.com/in/x' }, { author: 'agent:Investor import', source: 'connector', assertion: 'stated' });
+    await tool('oc_add_list_member', { listId: 'list-1', memberKind: 'person', memberName: 'Maya', createNew: true, clientRequestId: 'r1' });
+    expect(graph.addListMember).toHaveBeenLastCalledWith('owner', 'list-1', { kind: 'person', name: 'Maya', createNew: true, clientRequestId: 'r1' }, CONNECTOR);
+    expect((await call('tools/call', { name: 'oc_add_list_member', arguments: { listId: 'list-1', memberKind: 'company', memberId: 'c1' } })).status).toBe(400);
+    expect((await call('tools/call', { name: 'oc_add_list_member', arguments: { listId: 'list-1', memberKind: 'user', memberId: 'u1' } }, 'openchat:read')).status).toBe(403);
+    graph.removeListMember.mockResolvedValue({ removed: true, linkId: 'l1' });
+    await tool('oc_remove_list_member', { listId: 'list-1', linkId: 'l1' });
+    expect(graph.removeListMember).toHaveBeenCalledWith('owner', 'list-1', 'l1');
   });
 
   it('dispatches reads and writes to the private routes as the linked owner', async () => {

@@ -31,12 +31,19 @@ export class PrivateGraphError extends Error {
   constructor(public status: number, message: string, public details?: Record<string, unknown>) { super(message); }
 }
 
-/** `topic` (2026-10-10) is a thing in the world people and projects are about (ADHD, coherence), not something the owner might do. */
-export const THING_KINDS = ['person', 'company', 'idea', 'project', 'topic'] as const;
-const KIND_CHOICE = 'Choose a person, company, idea, project or topic';
+/**
+ * `topic` (2026-10-10) is a thing in the world people and projects are about
+ * (ADHD, coherence), not something the owner might do. `list` (Noos #105,
+ * 2026-11-05) is an owner-private collection: its members are outgoing
+ * `contains` links to people (see "Lists" below).
+ */
+export const THING_KINDS = ['person', 'company', 'idea', 'project', 'topic', 'list'] as const;
+/** What a note review may propose linking to: lists are curated by hand, never inferred from a note. */
+export const REVIEW_KINDS = ['person', 'company', 'idea', 'project', 'topic'] as const;
+const KIND_CHOICE = 'Choose a person, company, idea, project, topic or list';
 export type ThingKind = typeof THING_KINDS[number];
 /** `ask` ends appear on links to an ask (a person `asks` it) and in search; asks are saved through the ask routes, never as things. */
-export type NodeKind = 'user' | Entity['kind'];
+export type NodeKind = 'user' | ThingKind | 'ask';
 export type CadenceMode = 'fixed' | 'expanding';
 
 export interface PersonCard {
@@ -397,7 +404,7 @@ async function userNames(ends: Array<{ refs: string[] }>): Promise<Map<string, s
   } finally { await session.close(); }
   return names;
 }
-function endOf(entity: { id: string; kind: Entity['kind']; name: string; refs: string[]; description?: string | null }, names: Map<string, string> = new Map(), connections: Connections = new Map()): LinkEnd {
+function endOf(entity: { id: string; kind: ThingKind | 'ask'; name: string; refs: string[]; description?: string | null }, names: Map<string, string> = new Map(), connections: Connections = new Map()): LinkEnd {
   const userId = userIdOf(entity.refs), description = entity.description ? { description: entity.description } : {};
   if (userId !== null) return { kind: 'user', id: userId, name: names.get(userId) ?? entity.name, ...description };
   return { kind: entity.kind, id: entity.id, name: entity.name, ...description, ...unlinkedFields(entity.refs, connections) };
@@ -564,6 +571,11 @@ export async function addLink(ownerId: string, from: Subject, rawRelation: unkno
     if (existing.kind !== target.kind) fail(400, 'That item is a different kind');
     toId = existing.id;
   } else toId = await namedEntity(principal, target);
+  // A list's `contains` links are its members, and members are people: no other path may add anything else.
+  if (relation === LIST_MEMBERSHIP && from.kind === 'thing') {
+    const [subjectKind, targetKind] = await overlayCall(async overlay => [(await overlay.get(principal, fromId)).kind, (await overlay.get(principal, toId)).kind]);
+    if (subjectKind === 'list' && targetKind !== 'person') fail(400, 'A list contains people: add an OpenChat person, an Unlinked person or a saved person');
+  }
   const { link } = await overlayCall(overlay => overlay.addLink(principal, fromId, relation, toId, by, givenAttributes(attributes)));
   return (await linksFor(ownerId, [link], known))[0]!;
 }
@@ -634,7 +646,7 @@ export async function listOwnerLinks(ownerId: string, rawQuery: unknown): Promis
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
   return { links: links.slice(0, 200), total: links.length };
 }
-type End = { id: string; kind: Entity['kind']; name: string; refs: string[]; description?: string | null };
+type End = { id: string; kind: ThingKind | 'ask'; name: string; refs: string[]; description?: string | null };
 function ownerLink(link: Edge, from: End, to: End, names: Map<string, string>, connections: Connections = new Map()): OwnerLink {
   return {
     id: link.id, relation: link.relation, relationType: link.relationType, from: endOf(from, names, connections), to: endOf(to, names, connections), createdAt: link.createdAt,
@@ -789,6 +801,8 @@ export async function updatePrivateThing(ownerId: string, thingId: string, raw: 
   const principal = await ownerPrincipal(ownerId);
   const found = await overlayCall(overlay => overlay.get(principal, thingId));
   if (userIdOf(found.refs) !== null) fail(404, 'Not found');
+  // A list's members are its `contains` links: re-kinding either way would leave them meaning something else.
+  if (kind !== undefined && kind !== found.kind && (kind === 'list' || found.kind === 'list')) fail(409, 'A list stays a list, and other saved things cannot become lists');
   return thingOf(await overlayCall(overlay => overlay.update(principal, thingId, patch)));
 }
 
@@ -1129,4 +1143,77 @@ export async function deleteAsk(ownerId: string, askId: string): Promise<{ delet
   const principal = await ownerPrincipal(ownerId);
   await overlayCall(async overlay => { await overlay.getAsk(principal, askId); await overlay.deleteEntity(principal, askId); });
   return { deleted: true, id: askId };
+}
+
+// ---- lists: the Noos overlay's owner-private `list` kind (Noos #105, 2026-11-05) ----
+
+/**
+ * A list is one of the owner's saved things of kind `list`; its members are
+ * the people it has an outgoing `contains` link to (an OpenChat person, an
+ * Unlinked person or a saved person). Membership is the owner's own
+ * bookkeeping: it is not evidence that they know the person, and it is never
+ * shown to the member or anyone else. Imports (Unlinked's CSV path) write the
+ * same links, so a member removed here is removed everywhere the owner looks.
+ */
+export const LIST_MEMBERSHIP = 'contains';
+export interface ListMember { linkId: string; member: LinkEnd; addedAt: string; author: string | null; source: string | null }
+const MEMBER_KINDS = ['user', 'unlinked', 'person'] as const;
+
+/** The owner's list by id: 404 for anything that is not one of their lists. */
+async function ownList(principal: OverlayPrincipal, listId: string): Promise<Entity> {
+  if (typeof listId !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(listId)) return fail(404, 'Not found');
+  const found = await overlayCall(overlay => overlay.get(principal, listId));
+  if (found.kind !== 'list') fail(404, 'Not found');
+  return found;
+}
+
+/**
+ * One page of a list's members, through the overlay's owner-bound link pages:
+ * `after` is the previous page's `nextCursor`, unchanged. A page can hold
+ * fewer than `limit` members (other links on the list are skipped, as are
+ * people blocked either way); `nextCursor` is null only at the end.
+ */
+export async function listMembers(ownerId: string, listId: string, input: { after?: unknown; limit?: unknown } = {}): Promise<{ list: Thing; members: ListMember[]; nextCursor: string | null }> {
+  const principal = await ownerPrincipal(ownerId);
+  const list = await ownList(principal, listId);
+  const after = typeof input.after === 'string' && input.after ? input.after : undefined;
+  const limit = input.limit === undefined || input.limit === '' ? undefined : input.limit;
+  const page = await overlayCall(overlay => overlay.linksPage(principal, listId, { ...(after ? { after } : {}), ...(limit !== undefined ? { limit } : {}) }));
+  // People only, however the link was written (the generic link routes cannot add other members, but older data might).
+  const links = page.links.filter(link => link.direction === 'out' && link.relation === LIST_MEMBERSHIP && link.other.kind === 'person');
+  const ends = links.map(link => link.other);
+  const hidden = await blockedUserIds(ownerId, ends), names = await userNames(ends), connections = await connectionsFor(ownerId, ends);
+  const members = links.filter(link => { const userId = userIdOf(link.other.refs); return userId === null || !hidden.has(userId); }).map(link => ({
+    linkId: link.id, member: endOf(link.other, names, connections), addedAt: link.createdAt, author: link.author ?? null, source: link.source ?? null,
+  }));
+  return { list: thingOf(list), members, nextCursor: page.nextCursor };
+}
+
+/**
+ * Add someone to a list: an OpenChat person (`user` + id), an Unlinked person
+ * (`unlinked` + profile id, connection id or LinkedIn address) or a saved
+ * person (`person` + id, or a name with the usual never-merge rules). Adding
+ * someone already on the list returns the existing membership.
+ */
+export async function addListMember(ownerId: string, listId: string, rawMember: unknown, by: Provenance = OWNER_PROVENANCE): Promise<ListMember> {
+  const principal = await ownerPrincipal(ownerId);
+  await ownList(principal, listId);
+  const kind = (rawMember as { kind?: unknown } | null)?.kind;
+  if (!MEMBER_KINDS.includes(kind as typeof MEMBER_KINDS[number])) fail(400, 'Add a person: kind user (OpenChat), unlinked (Unlinked) or person (saved), with an id or a name');
+  const link = await addLink(ownerId, { kind: 'thing', id: listId }, LIST_MEMBERSHIP, rawMember, by);
+  return { linkId: link.id, member: link.other, addedAt: link.createdAt, author: link.author, source: link.source };
+}
+
+/** Remove one membership by its link id (from listMembers). Anything that is not a `contains` link of the owner's list is 404. */
+export async function removeListMember(ownerId: string, listId: string, linkId: string): Promise<{ removed: true; linkId: string }> {
+  const principal = await ownerPrincipal(ownerId);
+  await ownList(principal, listId);
+  const session = getDriver().session();
+  try {
+    const found = await session.run(`MATCH (:OverlayEntity {id: $listId, ownerKey: $ownerKey, kind: 'list'})-[l:OVERLAY_LINK {id: $linkId}]->(:OverlayEntity {ownerKey: $ownerKey, kind: 'person'})
+      WHERE l.ownerKey = $ownerKey AND l.relation = $relation RETURN l.id AS id`, { listId, linkId, ownerKey: principal.ownerKey, relation: LIST_MEMBERSHIP });
+    if (!found.records.length) return fail(404, 'Not found');
+  } finally { await session.close(); }
+  await overlayCall(overlay => overlay.deleteLink(principal, linkId));
+  return { removed: true, linkId };
 }

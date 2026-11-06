@@ -895,3 +895,37 @@ it('marks a photo message failed with the reason when the server rejects a photo
   expect(mocks.send).toHaveBeenCalledTimes(1);
   expect(outboxEntry()).toBeUndefined();
 });
+
+it('keeps a held emoji size through send, the server row, the saved thread and a reload (OpenChat-o6t5)', async () => {
+  const { emojiFontSize } = await import('../../mobile/src/utils/emojiMessage');
+  vi.stubGlobal('window', {});
+  await openSendingThread();
+  // An emoji sent before sizes existed has no emojiSize and must stay size 1.
+  const older: Message = { id: 'older', conversationId: 'sailing', content: '🍓', senderId: 'alice', createdAt: '2026-11-03T00:00:00Z' };
+  mocks.getMessages.mockResolvedValue({ messages: [older], hasMore: false });
+  await act(async () => chat.retryMessages());
+  // The server stores and echoes the size it accepted (routes/chat.ts, chatHandler.ts).
+  mocks.wsSend.mockImplementation(async (conversationId: string, content: string, _reply: unknown, id: string, emojiSize?: number) => ({
+    id, conversationId, content, senderId: 'me', createdAt: '2026-11-03T00:00:05Z', ...(emojiSize ? { emojiSize } : {}),
+  }));
+  await act(async () => chat.sendMessage('🍓', undefined, undefined, undefined, { emojiSize: 4 }));
+  expect(mocks.wsSend).toHaveBeenCalledExactlyOnceWith('sailing', '🍓', undefined, 'client-message', 4, 'universal');
+  const sent = chat.messages.find(message => message.id === 'client-message');
+  expect(sent).toMatchObject({ content: '🍓', emojiSize: 4 });
+  expect(emojiFontSize(sent!.emojiSize)).toBeGreaterThan(emojiFontSize(chat.messages.find(m => m.id === 'older')!.emojiSize));
+
+  // Reload: the saved thread shows the big emoji before the network answers,
+  // and the server's history page keeps it big afterwards.
+  await act(async () => root.unmount());
+  mocks.handlers.clear();
+  await act(async () => { root = create(React.createElement(ChatProvider, null, React.createElement(Probe))); });
+  await act(async () => { await chat.bootstrapIfAuthed(); });
+  const page = pendingPage();
+  mocks.getMessages.mockReset();
+  mocks.getMessages.mockReturnValue(page.promise);
+  await act(async () => chat.setActiveConversation('sailing'));
+  const sizes = () => Object.fromEntries(chat.messages.map(message => [message.id, emojiFontSize(message.emojiSize)]));
+  expect(sizes()).toEqual({ older: 40, 'client-message': 100 });
+  await act(async () => page.resolve({ messages: [older, { ...sent!, _delivery: undefined, _failed: undefined, emojiSize: 4 }], hasMore: false }));
+  expect(sizes()).toEqual({ older: 40, 'client-message': 100 });
+});
