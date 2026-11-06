@@ -9,7 +9,6 @@
  * (POST /api/feedback/wit-token); null means the report files anonymously.
  */
 import { Platform } from 'react-native';
-import Constants from 'expo-constants';
 
 const WIDGET_SRC = 'https://worldissuetracker.com/widget/wit-feedback.js';
 export const WIT_FEEDBACK_TRACKER = 'openchat-feedback';
@@ -30,18 +29,24 @@ function call(method: string, ...args: unknown[]): void {
 }
 
 /** Injects the loader once (web only). Returns false on native. */
+let injected = false;
 export function ensureWitWidget(): boolean {
   if (!isWeb()) return false;
-  if (!document.querySelector('script[data-tracker-slug][src*="wit-feedback.js"]')) {
-    const script = document.createElement('script');
-    script.defer = true;
-    script.src = WIDGET_SRC;
-    script.dataset.trackerSlug = WIT_FEEDBACK_TRACKER;
-    script.dataset.trigger = 'none';
-    script.dataset.app = 'OpenChat';
-    script.dataset.appVersion = Constants.expoConfig?.version ?? '';
-    document.head.appendChild(script);
-  }
+  if (injected || document.querySelector('script[src*="wit-feedback.js"]')) return true;
+  injected = true;
+  // expo-constants is loaded lazily so importing this module (ChatContext)
+  // never pulls Expo's native runtime into non-web code or unit tests.
+  void import('expo-constants')
+    .then((m) => m.default.expoConfig?.version ?? '', () => '')
+    .then((version) => {
+      const script = document.createElement('script');
+      script.src = WIDGET_SRC;
+      script.dataset.trackerSlug = WIT_FEEDBACK_TRACKER;
+      script.dataset.trigger = 'none';
+      script.dataset.app = 'OpenChat';
+      script.dataset.appVersion = version;
+      document.head.appendChild(script);
+    });
   return true;
 }
 
