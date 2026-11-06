@@ -103,6 +103,48 @@ async function delegatedWitToken(filer: Filer): Promise<string | null> {
   }
 }
 
+export type WitWidgetToken = { token: string; expires_at: number };
+const widgetTokens = new Map<string, WitWidgetToken>();
+
+/**
+ * Feedback token for the in-app WIT widget on web (menu-launched install,
+ * WIT docs/widget-host-integration-guide.md#menu-launched-identity-verified-install).
+ *
+ * OpenChat keeps no Ideaflow ID token: sign-in verifies it and issues an
+ * OpenChat JWT. Instead the server-side first-party delegation above mints a
+ * short-lived WIT-audience token for the person, and WIT's feedback-token
+ * endpoint exchanges that bearer for a `wfb1.` token that can only file
+ * issues (no client-ID allowlist is involved on this path). Neither the
+ * delegated token nor any Ideaflow token reaches the browser. Returns null
+ * when the person has no Ideaflow identity or delegation is unavailable; the
+ * widget then files anonymously.
+ */
+export async function witWidgetToken(userId: string): Promise<WitWidgetToken | null> {
+  const cached = widgetTokens.get(userId);
+  if (cached && cached.expires_at * 1000 - Date.now() > 120_000) return cached;
+  widgetTokens.delete(userId);
+  const bearer = await delegatedWitToken(await loadFiler(userId));
+  if (!bearer) return null;
+  try {
+    const response = await fetch(`${witApiBase()}/feedback-token`, {
+      method: 'POST',
+      redirect: 'error',
+      signal: AbortSignal.timeout(8_000),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bearer}` },
+      body: JSON.stringify({ app: 'openchat' }),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json().catch(() => null)) as { token?: unknown; expires_at?: unknown } | null;
+    if (typeof data?.token !== 'string' || !data.token.startsWith('wfb1.') || !Number.isSafeInteger(data.expires_at)) return null;
+    const result = { token: data.token, expires_at: data.expires_at as number };
+    if (widgetTokens.size > 5000) widgetTokens.clear();
+    widgetTokens.set(userId, result);
+    return result;
+  } catch {
+    return null;
+  }
+}
+
 export async function fileFeedback(params: {
   userId: string;
   message: string;
