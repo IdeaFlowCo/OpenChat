@@ -8,7 +8,8 @@
  *
  * This modal captures the same free-text feedback message uniformly on
  * every platform. The parent (SettingsScreen) owns submission via
- * api.submitFeedback and shows the resulting issue URL.
+ * services/witNativeFeedback.ts (julr.11: openchat-feedback board, verified
+ * `wfb1.` sender) and shows the resulting issue URL.
  *
  * UX:
  *   - Modal slides in from below, matching NVCComposerModal
@@ -16,11 +17,14 @@
  *   - A subtle "Open issue tracker" link stays available as a fallback
  *   - Filed publicly under the person's own account by default; "Post
  *     anonymously" is an explicit opt-in (OpenChat-0xjt)
+ *   - Optional screenshot from the photo library, removable before sending
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -34,13 +38,15 @@ import {
 } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
+import { radius, touchTarget } from '../theme/tokens';
+import type { FeedbackScreenshot } from '../services/witNativeFeedback';
 
 interface Props {
   visible: boolean;
   sending: boolean;
   /** The filer's display name, shown in the attribution line. */
   filerName?: string;
-  onSubmit: (message: string, anonymous: boolean) => void;
+  onSubmit: (message: string, anonymous: boolean, screenshot: FeedbackScreenshot | null) => void;
   onCancel: () => void;
 }
 
@@ -50,18 +56,42 @@ export function FeedbackModal({ visible, sending, filerName, onSubmit, onCancel 
 
   const [message, setMessage] = useState('');
   const [anonymous, setAnonymous] = useState(false);
+  const [screenshot, setScreenshot] = useState<FeedbackScreenshot | null>(null);
+
+  // Start fresh each time the sheet closes (after a send or a cancel); a
+  // failed send keeps the sheet open, so the draft survives for a retry.
+  useEffect(() => {
+    if (visible) return;
+    setMessage('');
+    setAnonymous(false);
+    setScreenshot(null);
+  }, [visible]);
+
+  const pickScreenshot = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset) return;
+    setScreenshot({
+      uri: asset.uri,
+      mimeType: asset.mimeType || 'image/jpeg',
+      fileName: asset.fileName || 'screenshot.jpg',
+    });
+  };
 
   const canSubmit = message.trim().length > 0 && !sending;
 
   const handleSend = () => {
     if (!canSubmit) return;
-    onSubmit(message.trim(), anonymous);
+    onSubmit(message.trim(), anonymous, screenshot);
   };
 
   const handleCancel = () => {
     if (sending) return;
     setMessage('');
     setAnonymous(false);
+    setScreenshot(null);
     onCancel();
   };
 
@@ -108,6 +138,19 @@ export function FeedbackModal({ visible, sending, filerName, onSubmit, onCancel 
               editable={!sending}
               autoFocus
             />
+            {screenshot ? (
+              <View style={styles.shotRow}>
+                <Image source={{ uri: screenshot.uri }} style={[styles.shotThumb, { borderColor: c.border }]} accessibilityLabel="Attached screenshot" />
+                <Text style={[styles.anonLabel, { color: c.textPrimary, flex: 1 }]}>Screenshot attached</Text>
+                <Pressable onPress={() => setScreenshot(null)} hitSlop={8} disabled={sending} accessibilityRole="button" accessibilityLabel="Remove screenshot">
+                  <Text style={[styles.headerCancel, { color: c.textSecondary }]}>Remove</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable onPress={() => void pickScreenshot()} disabled={sending} style={styles.shotRow} accessibilityRole="button">
+                <Text style={[styles.anonLabel, { color: c.primary }]}>Attach a screenshot</Text>
+              </Pressable>
+            )}
             <View style={styles.anonRow}>
               <Text style={[styles.anonLabel, { color: c.textPrimary }]}>Post anonymously</Text>
               <Switch
@@ -119,8 +162,8 @@ export function FeedbackModal({ visible, sending, filerName, onSubmit, onCancel 
             </View>
             <Text style={[styles.attribution, { color: c.textSecondary }]}>
               {anonymous
-                ? 'Shown publicly as Anonymous on World Issue Tracker. Only you can edit it later.'
-                : `Shown publicly as ${filerName?.trim() || 'you'} on World Issue Tracker, under your Ideaflow account.`}
+                ? 'Sending anonymously. Shown publicly as Anonymous on World Issue Tracker.'
+                : `Sending as ${filerName?.trim() || 'you'}. Shown publicly on World Issue Tracker under your Ideaflow account.`}
             </Text>
             <Pressable onPress={() => void Linking.openURL('https://worldissuetracker.com')} hitSlop={8}>
               <Text style={[styles.trackerLink, { color: c.textMetadata }]}>Open issue tracker</Text>
@@ -176,6 +219,14 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   anonLabel: { fontSize: 15 },
+  shotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 14,
+    minHeight: 44,
+  },
+  shotThumb: { width: touchTarget, height: touchTarget, borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth },
   attribution: { fontSize: 13, lineHeight: 18, marginTop: 2 },
   trackerLink: {
     fontSize: 12,

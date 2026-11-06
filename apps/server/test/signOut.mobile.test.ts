@@ -50,6 +50,7 @@ vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn() }));
 vi.mock('expo-notifications', () => ({ getPermissionsAsync: vi.fn() }));
 vi.mock('expo-updates', () => ({ channel: 'production', runtimeVersion: '1', isEnabled: false, isEmbeddedLaunch: true, updateId: null }));
 vi.mock('expo-constants', () => ({ default: { expoConfig: { version: '9.9.9', extra: {} } } }));
+vi.mock('expo-device', () => ({ modelName: 'Test device', osName: 'iOS', osVersion: '18.0' }));
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: { clear: vi.fn(), getItem: vi.fn(async () => null), setItem: vi.fn(async () => {}) } }));
 vi.mock('@react-navigation/native', () => ({
   useNavigation: () => mocks.navigation,
