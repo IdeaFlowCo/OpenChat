@@ -67,7 +67,7 @@ describe('fileFeedback', () => {
     expect(delegate.body).toEqual({ issuer: 'https://id.ideaflow.app/api/auth', subject: 'sub-ada', audience: 'https://worldissuetracker.com', purpose: 'issue_create' });
     expect(create().headers.authorization).toBe('Bearer tok-sub-ada');
     expect(create().headers['x-agent-key']).toBeUndefined();
-    expect(create().body).toMatchObject({ post_anonymously: false, tracker_slug: 'openchat', labels: ['openchat-feedback'] });
+    expect(create().body).toMatchObject({ post_anonymously: false, tracker_slug: 'openchat-feedback', labels: ['openchat-feedback'] });
     expect(create().body.reporter).toBeUndefined();
   });
 
