@@ -30,6 +30,7 @@ import type { NavProp } from '../navigation/types';
 import { registerForPushNotificationsAsync } from '../services/notifications';
 import { ExportSheet } from '../components/ExportSheet';
 import { FeedbackModal } from '../components/FeedbackModal';
+import { openWitFeedback } from '../services/witWidget';
 import { saveJsonDownload } from '../services/exportDownload';
 import { describeDesktopUpdate, useDesktopShell } from '../services/desktopShell';
 import { AppIcon } from '../components/AppIcon';
@@ -135,6 +136,8 @@ export function SettingsScreen() {
   const [sendingFeedback, setSendingFeedback] = useState(false);
   const [feedbackModalVisible, setFeedbackModalVisible] = useState(false);
   const handleSendFeedback = useCallback(() => {
+    // Web (/app): the WIT panel opens in place with a verified sender.
+    if (openWitFeedback()) return;
     setFeedbackModalVisible(true);
   }, []);
   const handleSubmitFeedback = useCallback(async (text: string, anonymous: boolean) => {

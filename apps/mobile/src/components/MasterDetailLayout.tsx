@@ -61,6 +61,7 @@ import { useIdeaflowAccountSwitch } from '../hooks/useIdeaflowAccountSwitch';
 import { ChatScreen } from '../screens/ChatScreen';
 import { AgentOverlayScreen } from '../screens/AgentOverlayScreen';
 import type { NavProp } from '../navigation/types';
+import { openWitFeedback } from '../services/witWidget';
 
 const SIDEBAR_WIDTH_EXPANDED = 320;
 const SIDEBAR_WIDTH_COLLAPSED = 56;
@@ -219,6 +220,8 @@ export function MasterDetailLayout() {
   const menuOpenMyCard = useCallback(() => { setAccountMenuOpen(false); openMyCard(); }, [openMyCard]);
   const menuOpenSettings = useCallback(() => { setAccountMenuOpen(false); openSettings(); }, [openSettings]);
   const menuSignOut = useCallback(() => { setAccountMenuOpen(false); void signOut(); }, [signOut]);
+  // Web only: opens the WIT feedback panel in place (no floating launcher).
+  const menuSendFeedback = useCallback(() => { setAccountMenuOpen(false); if (!openWitFeedback()) openSettings(); }, [openSettings]);
   // Web + Ideaflow enabled only: app-local sign-out, then the Ideaflow
   // account chooser (prompt=select_account). OpenChat-3ag.12.
   const ideaflowSwitch = useIdeaflowAccountSwitch();
@@ -526,6 +529,9 @@ export function MasterDetailLayout() {
             </View>
             <AccountMenuRow icon="qr" label="Profile" hint="Card · QR" onPress={menuOpenMyCard} hoverBg={c.surfaceElevated} color={c.textPrimary} iconColor={c.primary} hintColor={c.textMetadata} />
             <AccountMenuRow icon="settings" label="Settings" hint="⌘," onPress={menuOpenSettings} hoverBg={c.surfaceElevated} color={c.textPrimary} iconColor={c.primary} hintColor={c.textMetadata} />
+            {Platform.OS === 'web' && (
+              <AccountMenuRow icon="flag" label="Send feedback" onPress={menuSendFeedback} hoverBg={c.surfaceElevated} color={c.textPrimary} iconColor={c.primary} hintColor={c.textMetadata} />
+            )}
             {ideaflowSwitch.available && (
               <AccountMenuRow icon="people" label="Switch account" hint="Ideaflow" onPress={menuSwitchAccount} hoverBg={c.surfaceElevated} color={c.textPrimary} iconColor={c.primary} hintColor={c.textMetadata} />
             )}

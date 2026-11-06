@@ -29,6 +29,10 @@ beforeAll(async () => {
       res.end(JSON.stringify(delegation === 200 ? { access_token: `tok-${body.subject}` } : { error: 'nope' }));
       return;
     }
+    if (req.url === '/feedback-token') {
+      res.end(JSON.stringify({ success: true, token: `wfb1.${String(req.headers.authorization).slice(7)}`, expires_at: Math.floor(Date.now() / 1000) + 900, scope: 'create-issue' }));
+      return;
+    }
     res.end(JSON.stringify({ success: true, issue: { id: 'i1', slug: 'openchat-bug' } }));
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -105,5 +109,26 @@ describe('fileFeedback', () => {
   it('defaults to the GCP World Issue Tracker API', () => {
     vi.stubEnv('WIT_API_BASE', '');
     expect(svc.witApiBase()).toBe('https://api.worldissuetracker.com/functions/v1');
+  });
+});
+
+describe('witWidgetToken', () => {
+  // The default-base test above blanks WIT_API_BASE; point it back at the fake.
+  beforeEach(() => { vi.stubEnv('WIT_API_BASE', String(process.env.IDEAFLOW_DELEGATION_URL).replace(/\/delegate$/, '')); });
+  it('exchanges the delegated WIT bearer for a wfb1. token and caches it per person', async () => {
+    const first = await svc.witWidgetToken('linked');
+    expect(first).toEqual({ token: 'wfb1.tok-sub-ada', expires_at: expect.any(Number) });
+    const exchange = requests.find((r) => r.path === '/feedback-token')!;
+    expect(exchange.headers.authorization).toBe('Bearer tok-sub-ada');
+    expect(exchange.body).toEqual({ app: 'openchat' });
+    expect(await svc.witWidgetToken('linked')).toEqual(first);
+    expect(requests.filter((r) => r.path === '/delegate')).toHaveLength(1);
+  });
+
+  it('returns null (anonymous) without an Ideaflow identity or when delegation fails', async () => {
+    expect(await svc.witWidgetToken('legacy')).toBeNull();
+    delegation = 503;
+    expect(await svc.witWidgetToken('nobody')).toBeNull();
+    expect(requests.some((r) => r.path === '/feedback-token')).toBe(false);
   });
 });

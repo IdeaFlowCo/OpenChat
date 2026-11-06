@@ -1345,6 +1345,14 @@ export const api = {
    * user's Ideaflow account (or anonymously when asked) and returns its URL
    * plus how it was posted (OpenChat-0xjt).
    */
+  /** Web feedback widget: 15-minute create-issue-only WIT token, or { token: null } (anonymous). */
+  witFeedbackToken: () =>
+    request<{ token: string | null; expires_at?: number }>('/api/feedback/wit-token', {
+      method: 'POST',
+      body: '{}',
+      expireAuthOnForbidden: false,
+    }),
+
   submitFeedback: (message: string, context?: string, anonymous = false) =>
     request<{
       url: string;
