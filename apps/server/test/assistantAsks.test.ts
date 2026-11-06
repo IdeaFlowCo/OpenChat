@@ -14,6 +14,7 @@ beforeEach(() => {
     expect(params).toMatchObject({ ownerId: 'synthetic-owner', ...boundary });
     return row({ id: 'origin', content: source, transcript: null, attachments: null, createdAt: '2026-11-04T08:22:52.648Z' });
   });
+  mocks.updateAsk.mockResolvedValue({ id:'ask-0',status:'open',publication:null });
   mocks.saveAsk.mockImplementation(async (_owner, input) => ({ ask: { id: `ask-${input.sourceReceipt.itemIndex}`, status: 'open', text: input.text }, created: true }));
 });
 describe('hosted canonical asks under server turn authority', () => {
@@ -44,6 +45,10 @@ describe('hosted canonical asks under server turn authority', () => {
     expect(await executeTool(undefined, 'synthetic-owner', 'save_ask', {}, scope, { ...boundary, conversationId: 'forged' })).toHaveProperty('error');
     expect(await executeTool(undefined, 'synthetic-owner', 'save_ask', { excerpt: 'Invented source' }, scope, boundary)).toHaveProperty('error');
     expect(mocks.saveAsk).not.toHaveBeenCalled();
+  });
+  it('reports an existing publication honestly when a private edit leaves its snapshot unchanged', async () => {
+    mocks.updateAsk.mockResolvedValue({ id:'published-ask',status:'open',publication:{state:'active',audienceKind:'people',sourceRevision:0},revision:1 });
+    expect(await executeTool(undefined,'synthetic-owner','update_ask',{askId:'published-ask',text:'Changed private text'},scope,boundary)).toMatchObject({publication:'selected_people',privateWriteOnly:true,ask:{revision:1}});
   });
   it('binds an add-them-to-my-profile follow-up to the real prior ask-bearing message', async () => {
     mocks.run.mockImplementation(async (query: string, params: Record<string, unknown>) => {

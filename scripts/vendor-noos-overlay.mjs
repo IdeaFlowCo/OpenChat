@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Re-vendor the Noos people-overlay core (contract.ts, store.ts) byte-for-byte
+// Re-vendor the Noos people-overlay core (contract.ts, store.ts, publications.ts) byte-for-byte
 // and pin it: node scripts/vendor-noos-overlay.mjs <path-to-noos-checkout>
 // The checkout must be clean at the commit being pinned. CI checks the hashes
 // (apps/server/test/overlayVendor.test.ts), so the vendored files cannot drift

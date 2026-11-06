@@ -22,6 +22,7 @@ export const ASK_TOOLS: Anthropic.Tool[] = [
   { name: 'get_ask', description: 'Read one of the authenticated owner’s canonical asks with source receipts and current lifecycle.', input_schema: { type: 'object', properties: { askId: { type: 'string' } }, required: ['askId'] } },
   { name: 'update_ask', description: 'Explicitly edit a canonical ask or mark fulfilled/withdrawn/stale/open. Saving a retry never reopens it. Exposure is audience intent only and does not publish. Original source receipts remain intact.', input_schema: { type: 'object', properties: { askId: { type: 'string' }, text: { type: 'string' }, status: { type: 'string', enum: ['open', 'stale', 'fulfilled', 'withdrawn'] }, exposure: { type: 'string', enum: ['only_me', 'friends', 'public'] }, recheckedNow: { type: 'boolean' } }, required: ['askId'] } },
 ];
+const publicationAccess = (ask: Awaited<ReturnType<typeof getAsk>>) => ask.publication?.state === 'active' ? ask.publication.audienceKind === 'public' ? 'public' : 'selected_people' : 'owner_only';
 const by = { author: 'agent:OpenChat', source: 'app', assertion: 'stated' } as const;
 export async function executeAskTool(ownerId: string, name: string, input: Record<string, unknown>, boundary?: MessageBoundary): Promise<unknown> {
   if (name === 'get_ask_publication') return getAskPublication(ownerId, String(input.askId ?? ''));
@@ -32,7 +33,8 @@ export async function executeAskTool(ownerId: string, name: string, input: Recor
   if (name === 'update_ask') {
     const { askId, text, status, exposure, recheckedNow } = input;
     const patch = Object.fromEntries(Object.entries({ text, status, exposure, recheckedNow }).filter(([, value]) => value !== undefined));
-    return { ask: await updateAsk(ownerId, String(askId ?? ''), patch, by), publication: 'owner_only' };
+    const ask = await updateAsk(ownerId, String(askId ?? ''), patch, by);
+    return { ask, publication: publicationAccess(ask), privateWriteOnly: true };
   }
   if (name !== 'save_ask' || !boundary) return { error: 'An authenticated originating message is required to save an ask' };
   if (typeof input.excerpt !== 'string' || !input.excerpt.trim()) return { error: 'An exact source excerpt is required' };
@@ -66,5 +68,5 @@ export async function executeAskTool(ownerId: string, name: string, input: Recor
     ...(input.recheckAfter !== undefined ? { recheckAfter: input.recheckAfter } : {}),
     sourceReceipt: { app: 'openchat', ...boundary, sourceMessageId, sourceCreatedAt, itemIndex: input.itemIndex, excerpt: input.excerpt, assertion: 'stated', audienceIntent: input.audienceIntent },
   }, by);
-  return { ...result, publication: 'owner_only', delivery: 'none', matching: 'inactive', ...(result.created ? {} : { notice: 'Existing ask returned; fields are unchanged. New source evidence is appended. Use update_ask for an explicit edit.' }) };
+  return { ...result, publication: publicationAccess(result.ask), delivery: 'none', matching: 'inactive', ...(result.created ? {} : { notice: 'Existing ask returned; fields are unchanged. New source evidence is appended. Use update_ask for an explicit edit.' }) };
 }

@@ -4,7 +4,7 @@ import neo4j, { type ManagedTransaction } from 'neo4j-driver';
 import { getDriver } from '../db.js';
 import { normalizePublicDisplayName } from '../privacy/profilePrivacy.js';
 import { privateReviewPrincipal, PrivateGraphError } from './privateGraph.js';
-import { cleanAskText, ownerKeyFor, OverlayError } from './overlay/contract.js';
+import { cleanAskText, cleanRequestId, ownerKeyFor, OverlayError } from './overlay/contract.js';
 import { askIn } from './overlay/store.js';
 import { checkPublicationIn, cleanPublicationInput, commitPublicationIn, publicationFrom, publicationIn, publicationReplayIn, publicationRequestReplayIn, revokePublicationIn, type Publication } from './overlay/publications.js';
 import { consumePublicationApproval, issuePublicationApproval } from './publicationApproval.js';
@@ -27,7 +27,14 @@ function request(raw: unknown): PublishRequest {
   if (!Array.isArray(targets) || (audience.kind === 'public' ? targets.length !== 0 : targets.length < 1 || targets.length > 20)) return fail(400, 'Choose one to twenty verified recipients');
   for (const target of targets) if (!target || typeof target !== 'object' || Array.isArray(target) || Object.keys(target).some(key => !['kind','id'].includes(key)) || !['openchat_user','unlinked_profile'].includes(target.kind) || typeof target.id !== 'string' || !target.id || target.id.length > 200 || /\s/.test(target.id)) return fail(400, 'Recipients must be verified account/profile references, not names or email addresses');
   if (value.confirm !== true && value.confirm !== false) return fail(400, 'confirm must be true or false');
-  return { ...value, audience: { kind: audience.kind, targets } } as PublishRequest;
+  if (!Number.isSafeInteger(value.expectedAskRevision) || value.expectedAskRevision < 0 || (value.expectedPublicationRevision !== null && (!Number.isSafeInteger(value.expectedPublicationRevision) || value.expectedPublicationRevision < 0))) return fail(400, 'Refresh the ask before preparing publication');
+  if (value.approvalGrant !== undefined && typeof value.approvalGrant !== 'string') return fail(400, 'Invalid publication review');
+  let requestId: string, text: string;
+  try { requestId = cleanRequestId(value.requestId); text = cleanAskText(value.text); }
+  catch { return fail(400, 'A publication needs a stable request ID and text of 1–1000 characters'); }
+  const uniqueTargets = [...new Map((targets as Target[]).map(target => [`${target.kind}:${target.id}`, target])).values()].sort((a,b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
+  return { requestId, text, expectedAskRevision:value.expectedAskRevision, expectedPublicationRevision:value.expectedPublicationRevision, audience:{kind:audience.kind,targets:uniqueTargets}, confirm:value.confirm, ...(value.approvalGrant === undefined ? {} : {approvalGrant:value.approvalGrant}) };
+
 }
 async function userIn(tx: Runner, id: string) {
   const result = await tx.run(`MATCH (u:User {id:$id}) WHERE ${alive('u')} RETURN u.id AS id,u.name AS name,u.ideaflowIssuer AS issuer,u.ideaflowSub AS subject`, { id });

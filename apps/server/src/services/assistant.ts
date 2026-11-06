@@ -962,7 +962,7 @@ export function buildTools(scope: AssistantScope): AnthropicType.Tool[] {
   const tools: AnthropicType.Tool[] = [
     {
       name: 'get_data_sources',
-      description: 'List the five supported apps and actual source access for this built-in agent.',
+      description: 'List supported apps, owner inventory and actual source access for this built-in agent.',
       input_schema: { type: 'object', properties: {} },
     },
     {
@@ -1432,7 +1432,7 @@ export async function executeTool(
       case 'get_data_sources':
         if (scope.kind === 'conversation') return [{ name: 'OpenChat', access: 'current_conversation_only', conversationId: scope.conversationId }];
         return [
-          { name: 'OpenChat', access: 'signed_in_account', tools: ['search_messages', 'list_conversations', 'read_messages'] },
+          { name: 'OpenChat', access: 'signed_in_account', tools: ['search_messages', 'list_conversations', 'read_messages', 'save_ask', 'list_asks', 'get_ask', 'update_ask', 'get_ask_publication', 'publish_ask', 'revoke_ask_publication'] },
           { name: 'OpenChat Stream', access: 'own_entries_read_only', tools: ['stream_read'] },
           { name: 'Vision', access: appBridgeConfigured() ? 'identity_scoped_reads_on_request' : 'not_configured', tools: ['vision_read'] },
           { name: 'Unlinked', access: unlinkedProvisionConfigured() ? 'identity_scoped_search_on_request' : 'not_configured', tools: ['unlinked_search_network', 'unlinked_search_everyone'] },
