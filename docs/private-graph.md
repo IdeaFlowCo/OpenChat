@@ -235,14 +235,26 @@ Each row shows who carries the ask and where it was placed. The actions are Stil
 ## Lists
 
 Since 2026-11-05 (Noos #105) a saved thing can be a `list`: an owner-private
-collection of people, such as investors to contact. A list is a named thing
-like any other (one per owner by name; rename, describe, delete), but its kind
-is fixed: a list stays a list and nothing else becomes one (409), because its
-members are its outgoing `contains` links to people. Membership is the owner's
-own bookkeeping. It is not evidence that they know the person, it is never
-shown to the member or anyone else, and nobody is notified. Imports such as
-Unlinked's CSV path write the same links, so a member removed here is gone
-wherever the owner looks.
+collection of people, such as investors to contact. A list is a saved thing
+like any other (rename, describe, delete; edits keep its id, refs and kind),
+but its kind is fixed: a list stays a list and nothing else becomes one (409),
+because its members are its outgoing `contains` links to people. Lists are not
+unique by name: an imported list (Unlinked's CSV path names it with an
+app-scoped ref) can share a name with another list, and a name can resolve to
+`ambiguous_name` even when only one list has it, so address lists by id.
+Membership is the owner's own bookkeeping. It is not evidence that they know
+the person, it is never shown to the member or anyone else, and nobody is
+notified.
+
+Removing a member deletes that one `contains` link everywhere the owner looks.
+A membership can be shared by several import receipts, so removal is a graph
+edit, not the withdrawal of one import's contribution. There is no suppression
+tombstone: a later or different import, or later rows of a resumed import that
+name the same person, can add them back. Deleting a list while an import into
+it is still running makes that import's resume fail (`not_found`); a renamed
+list keeps its id, and the import's recorded list name stays historical. Edits
+do not win over an import that is still running. Import receipts live in
+Unlinked's import records, and OpenChat never rewrites them.
 
 | Route | Does |
 |---|---|

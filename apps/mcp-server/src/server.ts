@@ -1298,7 +1298,7 @@ export function buildServer(
     ({ listId, memberKind, memberId, memberName, createNew, clientRequestId }) => api.addListMember(listId, { kind: memberKind, ...(memberId ? { id: memberId } : {}), ...(memberName ? { name: memberName } : {}), ...(createNew !== undefined ? { createNew } : {}), ...(clientRequestId ? { clientRequestId } : {}) }));
 
   privateTool('oc_remove_list_member', 'Remove a person from a private list',
-    `Remove one person from one of the owner's private lists by the linkId oc_list_members returned. Removes only the membership. ${PRIVATE_PEOPLE}`,
+    `Remove one person from one of the owner's private lists by the linkId oc_list_members returned. Removes only the membership. Removing is not permanent against imports: a later or still-running import that names the same person can add them back. ${PRIVATE_PEOPLE}`,
     { listId: z.string().min(1).max(64), linkId: z.string().min(1).max(64) }, ({ listId, linkId }) => api.removeListMember(listId, linkId));
 
   privateTool('oc_list_catch_up', 'List people due for a catch-up',
