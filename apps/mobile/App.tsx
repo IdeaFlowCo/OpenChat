@@ -4,6 +4,7 @@ import { chatBackOptions } from './src/navigation/chatBackOptions';
 import { flushConversationNavigation } from './src/navigation/conversationNavigation';
 import { isUnlinkedEmbed } from './src/services/unlinkedEmbed';
 import { UnlinkedSessionGate } from './src/components/UnlinkedSessionGate';
+import { WebDocumentTitle } from './src/components/WebDocumentTitle';
 /**
  * App entry. Sets up ThemeProvider + ChatProvider and navigation:
  *
@@ -695,7 +696,10 @@ export function Shell() {
 
   return (
     <NavigationContainer ref={navigationRef} theme={navTheme}
+      // WebDocumentTitle owns the tab title (conversation names, unread count).
+      documentTitle={{ enabled: false }}
       onReady={flushConversationNavigation} onStateChange={flushConversationNavigation}>
+      <WebDocumentTitle />
       <StatusBar
         barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'}
         backgroundColor={c.background}

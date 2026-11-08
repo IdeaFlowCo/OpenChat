@@ -57,6 +57,7 @@ import { TickleLine } from '../components/TickleLine';
 import { DEFAULT_QUICK_EMOJI, emojiFontSize, isSingleEmoji } from '../utils/emojiMessage';
 import { usePrivateName } from '../contexts/PrivateNamesContext';
 import { ConversationHeaderContent } from '../components/ConversationHeaderContent';
+import { publishConversationTitle } from '../utils/documentTitle';
 import { isPlaceholderEmail } from '../utils/email';
 import { JumpToBottomButton } from '../components/JumpToBottomButton';
 import { ChatEmptyState } from '../components/ChatEmptyState';
@@ -814,6 +815,13 @@ export function ChatScreen({
       {moreAction}
     </View>
   );
+
+  // Browser tab names this conversation (OpenChat-mrl2), embedded or not.
+  const documentTitle = privateName.name || headerTitle;
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !documentTitle) return undefined;
+    return publishConversationTitle(conversationId, documentTitle, !!embedded);
+  }, [conversationId, documentTitle, embedded]);
 
   useLayoutEffect(() => {
     // Embedded in MasterDetailLayout — the parent owns the chrome.
