@@ -87,7 +87,7 @@ describe('unified OpenChat connector trust boundary',()=>{
     expect(response.status).toBe(200);
     const result=await response.json() as any;
     expect(JSON.parse(result.result.content[0].text)).toEqual({...args,owner:'owner'});
-    const {operationId,...withoutID}=args;
+    const {operationId:_operationId,...withoutID}=args;
     expect((await call('tools/call',{name:'oc_save_people_state',arguments:withoutID},{scope:'openchat:write'})).status).toBe(400);
     expect((await call('tools/call',{name:'oc_save_people_state',arguments:{...args,provenance:{author:'owner'}}},{scope:'openchat:write'})).status).toBe(400);
     expect((await call('tools/call',{name:'oc_save_people_state',arguments:args},{scope:'openchat:read'})).status).toBe(403);
