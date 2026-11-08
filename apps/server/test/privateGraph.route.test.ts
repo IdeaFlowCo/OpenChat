@@ -13,7 +13,7 @@ vi.mock('../src/services/privateGraph.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/privateGraph.js')>('../src/services/privateGraph.js');
   return { ...actual, ...mocks };
 });
-import privateGraphRoutes from '../src/routes/privateGraph.js';
+import privateGraphRoutes, { privateGraphBody } from '../src/routes/privateGraph.js';
 import { PrivateGraphError } from '../src/services/privateGraph.js';
 
 describe('private graph routes', () => {
@@ -25,6 +25,7 @@ describe('private graph routes', () => {
   beforeAll(async () => {
     process.env.JWT_SECRET = 'private-graph-route-test-secret';
     const app = express();
+    app.use(privateGraphBody);
     app.use(express.json());
     app.use('/api/private', privateGraphRoutes);
     await new Promise<void>(resolve => { server = app.listen(0, '127.0.0.1', resolve); });
@@ -52,6 +53,33 @@ describe('private graph routes', () => {
     const state={expectedRevision:0,payload:{schemaVersion:1}};
     expect((await call('/things/t1/people-state',{method:'PUT',body:JSON.stringify(state)})).status).toBe(200);
     expect(mocks.savePeopleState).toHaveBeenCalledWith('alice','t1',state,{author:'owner',source:'app',assertion:'stated'});
+  });
+
+  it('accepts supported large source cards, full batches and People state', async () => {
+    const card = {source:'synthetic:book',sourceId:'one',name:'Synthetic',data:{schemaVersion:1,note:'x'.repeat(260000)}};
+    mocks.importContactSource.mockResolvedValue({created:true});
+    expect((await call('/contact-sources', {method:'POST',body:JSON.stringify(card)})).status).toBe(200);
+    expect(mocks.importContactSource).toHaveBeenCalledWith('alice',card,{author:'owner',source:'app',assertion:'stated'});
+    const cards = Array.from({length:25}, (_, index) => ({...card,sourceId:String(index)}));
+    mocks.importContactSources.mockResolvedValue({results:[]});
+    expect((await call('/contact-source-batches', {method:'POST',body:JSON.stringify({cards})})).status).toBe(200);
+    expect(mocks.importContactSources).toHaveBeenCalledWith('alice',cards,{author:'owner',source:'app',assertion:'stated'});
+    const state = {operationId:'large-state',expectedRevision:0,payload:card.data};
+    mocks.savePeopleState.mockResolvedValue({revision:1});
+    expect((await call('/things/t1/people-state', {method:'PUT',body:JSON.stringify(state)})).status).toBe(200);
+    expect(mocks.savePeopleState).toHaveBeenCalledWith('alice','t1',state,{author:'owner',source:'app',assertion:'stated'});
+  });
+
+  it('bounds large bodies without increasing limits on other routes', async () => {
+    const largeBody = JSON.stringify({note:'x'.repeat(1024 * 1024)});
+    expect((await call('/contact-sources', {method:'POST',body:largeBody})).status).toBe(413);
+    expect((await call('/things/t1/people-state', {method:'PUT',body:largeBody})).status).toBe(413);
+    expect((await call('/contact-source-batches', {method:'POST',body:JSON.stringify({note:'x'.repeat(7 * 1024 * 1024)})})).status).toBe(413);
+    expect((await call('/things', {method:'POST',body:JSON.stringify({note:'x'.repeat(120000)})})).status).toBe(413);
+    expect(mocks.importContactSource).not.toHaveBeenCalled();
+    expect(mocks.importContactSources).not.toHaveBeenCalled();
+    expect(mocks.savePeopleState).not.toHaveBeenCalled();
+    expect(mocks.createPrivateThing).not.toHaveBeenCalled();
   });
   it('always acts for the signed-in owner, whatever the request body claims', async () => {
     mocks.getPersonOverlay.mockResolvedValue({ userId: 'bob', card: {}, notes: [], links: [] });

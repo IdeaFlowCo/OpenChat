@@ -6,7 +6,7 @@ import { getAskPublication, publishAsk, revokeAskPublication } from '../services
  * authenticated owner only; no id in a request can select another owner.
  * Scope refusals answer 404, never 403: the app signs a person out on 403.
  */
-import { Router, type Request, type Response } from 'express';
+import { json, Router, type Request, type RequestHandler, type Response } from 'express';
 import { resolveActor } from '../middleware/resolveActor.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import {
@@ -16,6 +16,17 @@ import {
 import type { Provenance } from '../services/privateGraph.js';
 
 import { captureNoteReview, listNoteReviews, suggestNoteReview, applyNoteReview, undoNoteReview } from '../services/privateNoteReview.js';
+
+const contactBody = json({ limit: '1mb' });
+const contactBatchBody = json({ limit: '7mb' });
+export const privateGraphBody: RequestHandler = (req, res, next) => {
+  if (req.method === 'POST' && /^\/api\/private\/contact-source-batches\/?$/i.test(req.path)) {
+    contactBatchBody(req, res, next);
+  } else if ((req.method === 'POST' && /^\/api\/private\/contact-sources\/?$/i.test(req.path)) ||
+      (req.method === 'PUT' && /^\/api\/private\/things\/[^/]+\/people-state\/?$/i.test(req.path))) {
+    contactBody(req, res, next);
+  } else next();
+};
 
 const router = Router();
 // The owner's session, or an agent key the owner issued. A key needs `read` to
