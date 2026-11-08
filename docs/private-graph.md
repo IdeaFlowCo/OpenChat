@@ -24,14 +24,16 @@ overlay is theirs across Ideaflow apps; an account without one is keyed by its
 OpenChat id, and what it wrote moves to the Ideaflow key when the sign-in is
 linked.
 
-**One owner of the rules.** `services/overlay/contract.ts` and
-`services/overlay/store.ts` are byte-for-byte copies of Noos `src/overlay/`,
-which alone implements the overlay's semantics: names never merging, retries,
-note dedupe, provenance, relation types, relation edits, search and
-neighbourhood. `services/overlay/NOOS_SOURCE.json` pins the Noos commit and each
-file's SHA-256, and `apps/server/test/overlayVendor.test.ts` fails CI if a copy
-differs. Change the files in Noos first, then run
-`node scripts/vendor-noos-overlay.mjs <path-to-clean-noos-checkout>`.
+**One owner of the rules.** The vendored files listed in
+[`NOOS_SOURCE.json`](../apps/server/src/services/overlay/NOOS_SOURCE.json)
+are byte-for-byte copies of Noos `src/overlay/`, which alone implements the
+overlay's semantics, including contact sources, People state, publications and
+blurbs. That manifest owns the source commit and each file's SHA-256;
+`apps/server/test/overlayVendor.test.ts` checks for local drift. Change the files
+in Noos first, then run
+`node scripts/vendor-noos-overlay.mjs <path-to-noos-checkout> [ref]`.
+Without `ref` the source overlay must be clean; an explicit ref reads immutable
+Git blobs. Do not patch the vendored files locally.
 `services/privateGraph.ts` is OpenChat's side: who may be written about (no
 bots, no blocks, not yourself), confirming Unlinked profile refs through the
 owner's grant, who is writing (provenance), and the response shapes below.
@@ -61,7 +63,10 @@ these routes never return it.
 | `DELETE /links/:linkId` | Remove a link |
 | `GET /search?q=&relationType=&kind=&limit=` | Search saved things, OpenChat people and Unlinked people the owner wrote about (by name, description or note text; `matched` says which), and links by relation text, context, either end's name or `relationType`. At least one filter; at most 50 of each; `truncated` when more matched. Blocked people are left out |
 | `GET /neighbourhood?subjectKind=user\|thing\|unlinked&subjectId=&depth=1\|2` | A subject and everything one or two links away, with those links (`from`, `to`). Never creates anything; at most 100 nodes and 200 links. Blocked people are left out |
-| `GET /things?q=&kind=`, `GET /things/:thingId` | Saved things (with `description`), and one with its notes and links |
+| `GET /things?q=&kind=&after=&limit=&details=` | A page of saved things, matching `total` and `nextCursor`; see [Pagination](#pagination) |
+| `GET /things/:thingId` | One saved thing with its card, optional People state, contact sources, notes and links |
+| `POST /contact-sources`, `POST /contact-source-batches` | Import one source card or `{cards: [...]}`; see [Contact sources and People state](#contact-sources-and-people-state) |
+| `PUT /things/:thingId/people-state` | Versioned state replacement with an operation receipt; see [Contact sources and People state](#contact-sources-and-people-state) |
 | `PATCH /things/:thingId` | `{ name?, description?, kind? }`: rename, describe (`null` or `''` clears) or change the kind of a saved thing (an idea that became a project). Someone on Unlinked keeps their kind (409); an OpenChat person's card answers 404 |
 | `DELETE /things/:thingId` | Delete (undo) a saved thing: the entity, its notes, its links in both directions and its refs, plus OpenChat's note reviews and asks about it, in one transaction. Answers `{deleted: true, id, notesRemoved, linksRemoved}`; a missing, already-deleted or foreign id, or an OpenChat person's card, answers 404 |
 | `POST /things`, `POST /things/resolve` | `{kind, name, description?}` / `{kind, name, description?, createNew?, clientRequestId?}`: find or save by name under the no-merge rules below. A description is stored on a new thing and fills an existing thing's blank one; it never replaces one |
@@ -69,6 +74,67 @@ these routes never return it.
 | `GET /links?q=` | Every link the owner recorded, newest first, filtered by a name or relation |
 | `GET /unlinked-people/:profileId` | Card, notes and links for an Unlinked profile (never creates, never calls Unlinked) |
 | `POST /unlinked-people/:profileId/notes`, `POST /unlinked-people/:profileId/links` | Note or link about an Unlinked profile |
+
+### Pagination
+
+`GET /things` and `oc_list_private_things` return
+`{things, total, nextCursor}`. Pass `nextCursor` unchanged as `after` until it
+is `null`; omitting `after` starts a new traversal. `limit` is 1–100, default
+100. Pages use immutable entity-id order, not name order. Cursors are bound to
+the owner and normalized name/kind filters; changing that scope returns 400.
+`total` counts all matching saved things, excluding OpenChat account entities,
+asks and blurbs, rather than just this page. Traversal continues beyond 5,000
+results. Concurrent graph edits can change membership and totals between pages;
+this is not a frozen snapshot.
+
+Every result includes its canonical `card` and `peopleState` when present.
+`details: true` (REST `details=true`) also returns `notes`, `links` and
+`contactSources`, fetched in batches for the page. `GET /things/:thingId`
+returns those details for one entity. The same paging arguments and response
+are available through the shared connector and agent-key MCP server.
+
+### Contact sources and People state
+
+`POST /contact-sources` (`oc_import_contact_source`) takes
+`{source, sourceId, name, data, entityId?}`. `data` is a JSON object with
+`schemaVersion: 1`; supported and future fields survive without alias or
+provenance rewriting. The exact `source` and `sourceId` strings identify the
+owner's source card, including significant whitespace. A retry reuses its
+entity; changed source data updates the source card, never the entity's
+canonical name. A new source creates a separate person even when names match.
+To attach it to an existing entity, supply an explicitly verified,
+owner-scoped `entityId`; rebinding an existing source to another entity returns
+409 `contact_identity_conflict`. The response is `{entity, created, unchanged}`.
+
+`POST /contact-source-batches` (`oc_import_contact_sources`) takes 1–25 cards.
+Each card has its own transaction; the response's `results` contains one
+indexed receipt per input, either `{index, id, created, unchanged}` or
+`{index, error}`. Inspect every receipt: HTTP success does not mean every card
+was imported. Retry failed cards with their original source identifiers.
+
+`PUT /things/:thingId/people-state` (`oc_save_people_state`, with `thingId` as
+a tool argument) takes `{operationId, expectedRevision, payload}`. The payload
+is a complete replacement JSON object with `schemaVersion: 1`, not a patch.
+Use `expectedRevision: 0` when no state exists. A successful write returns
+`{schemaVersion, revision, payload, updatedAt, author, source, assertion}`.
+An optional `payload.card` also updates canonical importance and cadence;
+its exact validation contract is owned by
+[`stateCard`](../apps/server/src/services/overlay/contacts.ts).
+
+An exact replay for the same owner, entity, operation, authenticated app and
+actor, revision and payload returns the original receipt. Reusing that
+operation id with different content or attribution returns 409
+`operation_id_reused`; a stale revision returns 409 `state_conflict`. Preserve
+the local payload for reconciliation, then use a new operation id for the
+revised write. Existing `PATCH /people/:userId` card writes also advance People
+state, preserving other payload fields and recording the authenticated writer,
+so an older People-state revision cannot overwrite them silently.
+
+Source/state provenance comes from authentication, never opaque JSON fields.
+Neither route changes owner access or Unlinked grants. Each source `data` or
+state `payload` is limited to 262,144 serialized UTF-8 bytes. HTTP bodies allow
+1 MiB for single imports/state writes and 7 MiB for batches; the connector MCP
+envelope allows 7 MiB. These do not raise limits on unrelated REST routes.
 
 ## People from Unlinked
 
@@ -283,7 +349,8 @@ opens its own page, where more links and notes can be added. **Catch up**, on
 the People screen, lists who is due. Agent tools: `oc_get_person` (name, shared asks and the private card in one read), `oc_get_person_private`, `oc_get_unlinked_person_private`, `oc_list_private_links`, `oc_search_private`, `oc_get_neighbourhood`, `oc_save_private_thing`,
 `oc_set_person_private`, `oc_add_private_note`, `oc_delete_private_note`,
 `oc_add_private_link`, `oc_update_private_link`, `oc_delete_private_link`, `oc_update_private_thing`, `oc_delete_private_thing`, `oc_list_private_things`,
-`oc_get_private_thing`, `oc_list_catch_up`. Read results include provenance,
+`oc_get_private_thing`, `oc_list_catch_up`, and the
+[contact-source and People-state tools](#contact-sources-and-people-state). Read results include provenance,
 `relationType`, `since`, `until`, `context` and `updatedBy` on relations and
 `description` on things. `oc_save_private_thing` takes `description` and the
 `topic` kind; `oc_add_private_link` takes `relationType`, `since`, `until` and
@@ -291,11 +358,15 @@ the People screen, lists who is due. Agent tools: `oc_get_person` (name, shared 
 `relationType`, `since`, `until` and `context`; `oc_update_private_thing`
 renames, describes or re-kinds a saved thing. The same tools exist on the
 shared Ideaflow connector (which lists OpenChat's catalog live) and on the
-OpenChat MCP server for agent keys. Unlinked does not show this knowledge yet; tool descriptions say
-so. Unlinked people, including imported LinkedIn contacts, are reached with
+OpenChat MCP server for agent keys. Unlinked's read-only view is described
+under [What it holds](#what-it-holds). Unlinked people, including imported LinkedIn contacts, are reached with
 `toKind`/`subjectKind` `unlinked` (see [People from Unlinked](#people-from-unlinked)).
 
 ## Tests
+
+`contacts.adapters.test.ts` exercises the MCP SDK, connector dispatch and
+authenticated route attribution with a mocked graph service; it does not
+establish database persistence or native-device behavior.
 
 `privateGraph.test.ts` (rules), `privateGraph.route.test.ts` and
 `privateGraph.scope.test.ts` (routes, provenance), `privateGraph.mobile.test.ts` (card),

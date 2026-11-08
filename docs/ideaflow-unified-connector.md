@@ -58,20 +58,13 @@ separate source; their stored exposure does not publish them (see
 
 ### Private people knowledge
 
-The owner's [private graph](private-graph.md) (the shared Noos people overlay,
-shown in OpenChat and, read-only, on Unlinked person and contact pages) is exposed with the same scope
-split. Read scope adds `oc_get_person_private`, `oc_get_unlinked_person_private`,
-`oc_list_private_links`, `oc_search_private` (people, things and relations by
-text, `relationType` or kind), `oc_get_neighbourhood` (a subject and what is one
-or two relations away), `oc_list_private_things`, `oc_get_private_thing` and
-`oc_list_catch_up`. Write scope adds `oc_set_person_private`, `oc_add_private_note`,
-`oc_delete_private_note`, `oc_add_private_link` (optionally with
-`relationType`, `since`, `until`, `context`), `oc_update_private_link`
-(correct a relation's text, or change its assertion, type or facts in place),
-`oc_delete_private_link`, `oc_save_private_thing` (with an optional one-line
-`description`; kinds include `topic`), `oc_update_private_thing` (rename,
-describe or re-kind a saved thing) and `oc_delete_private_thing` (the undo for
-saving a thing; removes it with its notes and relations). Lists (the overlay's `list` kind, see [private graph](private-graph.md#lists)): read scope adds `oc_list_members`; write scope adds `oc_add_list_member` and `oc_remove_list_member`; the thing tools take kind `list`. Asks (the overlay's `ask` kind, see [private graph](private-graph.md#asks)): read scope adds `oc_list_asks`; write scope adds `oc_save_ask`, `oc_update_ask` and `oc_delete_ask`. Who cares (`authorKind`/`authorId`), who carries (`carrierKind`/`carrierId`) and where it was placed (`placements`) are separate arguments; `oc_list_asks` filters by `direction` (`from_me`, `for_me`, `from_others`) or `aboutKind`/`aboutId`. Only the owner sees asks, whatever their `exposure`. Notes and relations written
+The owner's shared Noos people overlay is exposed through the connector.
+The [private graph reference](private-graph.md) owns its routes and tool
+contracts, including [paginated reads](private-graph.md#pagination),
+[contact-source imports and People state](private-graph.md#contact-sources-and-people-state),
+[lists](private-graph.md#lists) and [asks](private-graph.md#asks).
+
+Notes and relations written
 through the connector are recorded with `author` `agent:<client name>` (the
 `client` claim the hub adds from the grant; `agent:Ideaflow connector` when an
 older hub omits it), `source` `connector`, and `assertion` `stated` unless the
