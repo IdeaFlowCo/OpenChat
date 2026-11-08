@@ -31,6 +31,9 @@ describe('unified OpenChat connector trust boundary',()=>{
     app.post('/api/chat/people-suggestions',resolveActor,peopleSuggestions);
     app.get('/api/chat/conversations',resolveActor,(req,res)=>res.json([{id:'room',userId:req.user!.userId}]));
     app.post('/api/chat/conversations/:id/messages',resolveActor,(req,res)=>{state.mutations++;res.json({conversationId:req.params.id,...req.body,userId:req.user!.userId});});
+    app.get('/api/private/things',resolveActor,(req,res)=>res.json({things:[],nextCursor:null,total:0,query:req.query,owner:req.user!.userId}));
+    app.post('/api/private/contact-source-batches',resolveActor,(req,res)=>res.json({cards:req.body.cards,owner:req.user!.userId}));
+    app.put('/api/private/things/:thingId/people-state',resolveActor,(req,res)=>res.json({thingId:req.params.thingId,...req.body,owner:req.user!.userId}));
     app.get('/api/probe',resolveActor,(req,res)=>res.json({userId:req.user?.userId,trusted:!!getConnectorPrincipal(req)}));
     await new Promise<void>(r=>{server=app.listen(0,'127.0.0.1',r);});base=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });
@@ -61,6 +64,33 @@ describe('unified OpenChat connector trust boundary',()=>{
     expect(verifyConnectorAssertion(sign(body),Buffer.from(body+' '),secret)).toBeNull();
     expect(verifyConnectorAssertion(sign(body),Buffer.from(body),'')).toBeNull();
     } finally { clock.mockRestore(); }
+  });
+  it('pages private people and accepts bounded structured source cards without owner spoofing',async()=>{
+    const read=await call('tools/call',{name:'oc_list_private_things',arguments:{kind:'person',limit:73,details:true,after:'synthetic-cursor'}},{scope:'openchat:read'});
+    expect(read.status).toBe(200);
+    const page=await read.json() as any;
+    const content=JSON.parse(page.result.content[0].text);
+    expect(content).toMatchObject({owner:'owner',query:{kind:'person',limit:'73',details:'true',after:'synthetic-cursor'},total:0,nextCursor:null});
+    const card={source:'synthetic:book',sourceId:'one',name:'Synthetic',data:{schemaVersion:1,details:[{kind:'phone',value:'+15555550100'}]}};
+    const written=await call('tools/call',{name:'oc_import_contact_sources',arguments:{cards:[card]}},{scope:'openchat:write'});
+    expect(written.status).toBe(200);
+    const body=await written.json() as any;
+    expect(JSON.parse(body.result.content[0].text)).toEqual({cards:[card],owner:'owner'});
+    expect((await call('tools/call',{name:'oc_import_contact_sources',arguments:{cards:[{...card,ownerKey:'other'}]}},{scope:'openchat:write'})).status).toBe(400);
+    expect((await call('tools/call',{name:'oc_import_contact_sources',arguments:{cards:Array(26).fill(card)}},{scope:'openchat:write'})).status).toBe(400);
+    expect((await call('tools/call',{name:'oc_import_contact_sources',arguments:{cards:[card]}},{scope:'openchat:read'})).status).toBe(403);
+  });
+  it('requires a durable People operation ID and forwards opaque fields without allowing actor spoofing',async()=>{
+    const payload={schemaVersion:1,card:{important:true},future:{fromMe:true,text:'Synthetic opaque',recordedBy:'kept',author:'original',source:'original'}};
+    const args={thingId:'synthetic-person',operationId:'synthetic-op-1',expectedRevision:2,payload};
+    const response=await call('tools/call',{name:'oc_save_people_state',arguments:args},{scope:'openchat:write'});
+    expect(response.status).toBe(200);
+    const result=await response.json() as any;
+    expect(JSON.parse(result.result.content[0].text)).toEqual({...args,owner:'owner'});
+    const {operationId,...withoutID}=args;
+    expect((await call('tools/call',{name:'oc_save_people_state',arguments:withoutID},{scope:'openchat:write'})).status).toBe(400);
+    expect((await call('tools/call',{name:'oc_save_people_state',arguments:{...args,provenance:{author:'owner'}}},{scope:'openchat:write'})).status).toBe(400);
+    expect((await call('tools/call',{name:'oc_save_people_state',arguments:args},{scope:'openchat:read'})).status).toBe(403);
   });
   it('lists only granted tools and checks scope on direct calls',async()=>{
     const listing=await (await call('tools/list',undefined,{scope:'openchat:read'})).json() as any;

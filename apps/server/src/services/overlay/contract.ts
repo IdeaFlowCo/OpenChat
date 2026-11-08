@@ -23,9 +23,9 @@ import { createHash } from 'node:crypto';
  * else's ("Laurence wants a chiropractor in SF"); asks are saved and edited
  * only through the ask operations (`saveAsk`, `updateAsk`), never by name.
  */
-export const ENTITY_KINDS = ['person', 'company', 'idea', 'project', 'topic', 'list', 'ask'] as const;
+export const ENTITY_KINDS = ['person', 'company', 'idea', 'project', 'topic', 'list', 'ask', 'blurb'] as const;
 export type EntityKind = (typeof ENTITY_KINDS)[number];
-/** The kinds saved, resolved and re-kinded by name: everything but `ask`. */
+/** The kinds saved, resolved and re-kinded by name; asks and blurbs use operations. */
 export const NAMED_KINDS = ['person', 'company', 'idea', 'project', 'topic', 'list'] as const;
 export type NamedKind = (typeof NAMED_KINDS)[number];
 export type CadenceMode = 'fixed' | 'expanding';
@@ -42,7 +42,7 @@ export interface Card {
  * `description` is a one-line summary (280 characters or fewer), null when none was given.
  * `ask` is present only on entities of kind `ask` (their ask fields, without the parties).
  */
-export interface Entity { id: string; kind: EntityKind; name: string; description: string | null; refs: string[]; card: Card; ask?: AskFields }
+export interface Entity { id: string; kind: EntityKind; name: string; description: string | null; refs: string[]; card: Card; ask?: AskFields; peopleState?: import('./contacts.js').PeopleState }
 
 /**
  * Who wrote a note or link and how. All optional on storage: records written
@@ -80,7 +80,7 @@ export interface LinkAttributes { since: string | null; until: string | null; co
 export interface Link extends Provenance, LinkAttributes { id: string; relation: string; relationType: RelationType; direction: 'out' | 'in'; other: LinkEnd; createdAt: string; updatedAt: string | null; updatedBy: string | null }
 /** A link as an edge between two ends, for search and neighbourhood reads. */
 export interface Edge extends Provenance, LinkAttributes { id: string; relation: string; relationType: RelationType; fromId: string; toId: string; createdAt: string; updatedAt: string | null; updatedBy: string | null }
-export interface EntityDetail extends Entity { notes: Note[]; links: Link[] }
+export interface EntityDetail extends Entity { notes: Note[]; links: Link[]; contactSources?: import('./contacts.js').ContactSource[] }
 export interface SearchHit extends Entity { matched: Array<'name' | 'description' | 'note' | 'link'> }
 export interface SearchResult { entities: SearchHit[]; links: Array<Edge & { from: LinkEnd; to: LinkEnd }>; truncated: boolean }
 export interface Neighbourhood { center: Entity; depth: 1 | 2; entities: Entity[]; links: Edge[]; truncated: boolean }
@@ -90,7 +90,7 @@ export interface DueEntity { id: string; name: string; refs: string[]; important
 export interface CardPatch { important?: boolean; cadenceDays?: number | null; cadenceMode?: CadenceMode; contactedNow?: boolean }
 
 /** A verified caller: which app is asking, and on behalf of which owner. */
-export interface OverlayPrincipal { app: string; ownerKey: string }
+export interface OverlayPrincipal { app: string; ownerKey: string; actor?: string }
 
 export class OverlayError extends Error {
   /** `details` carries structured, owner-only extras such as `candidates` for `ambiguous_name`. */
@@ -99,7 +99,7 @@ export class OverlayError extends Error {
 export const fail = (status: number, code: string, details?: Record<string, unknown>): never => { throw new OverlayError(status, code, details); };
 
 export const LIMITS = {
-  noteLength: 4000, notesPerEntity: 200, linksPerOwner: 5000, entitiesPerOwner: 5000,
+  noteLength: 4000, notesPerEntity: 200, linksPerOwner: 5000, entitiesPerOwner: 100000,
   relationLength: 60, nameLength: 120, cadenceDays: 3650, refsPerEntity: 8,
   descriptionLength: 280, contextLength: 280, dateTextLength: 20,
   askLength: 1000, asksPerOwner: 2000, quoteLength: 1000, urlLength: 2000, labelLength: 280, placementsPerAsk: 8,
@@ -167,7 +167,7 @@ export const cleanRelation = (value: unknown): string => cleanText(value, LIMITS
 export function cleanKind(value: unknown): EntityKind {
   return ENTITY_KINDS.includes(value as EntityKind) ? value as EntityKind : fail(400, 'invalid_kind');
 }
-/** A kind saved by name (ensure, resolve, re-kind): an ask is saved only through `saveAsk`. */
+/** A kind saved by name (ensure, resolve, re-kind); asks and blurbs use operations. */
 export function cleanNamedKind(value: unknown): NamedKind {
   return NAMED_KINDS.includes(value as NamedKind) ? value as NamedKind : fail(400, 'invalid_kind');
 }
@@ -260,7 +260,7 @@ const RELATION_PATTERNS: Array<[RelationType, Ends | null, RegExp]> = [
   ['part_of', [[['project', 'idea', 'company'], ['project', 'company']]], /\b(part of|idea for|belongs? to|subsidiary of|division of|component of|feature of|module of|spin-?off of|sub-?project of|within|under)\b/],
   ['asks', [[['person', 'company', 'project', 'idea'], ['ask']]], /\b(asks?|asked|asking|needs?|needed|wants?|wanted|looking for|seeks?|seeking|requests?|requested)\b/],
   ['interested_in', [[['person'], ['topic', 'idea', 'project', 'company']]], /\b(interest(s|ed)?|likes?|loves?|into|cares? about|passionate|fan of|curious about|excited about|follows|wants|cares)\b/],
-  ['about', [[['person', 'company', 'idea', 'project', 'topic', 'list', 'ask'], ['topic']]], /\b(about|has|had|have|tagged|topic|concerns?|regarding|re|diagnosed with|lives with|deals with|struggles with|focus(es|ed)? on|on)\b/],
+  ['about', [[['person', 'company', 'idea', 'project', 'topic', 'list', 'ask'], ['topic']],[['blurb'], ['company', 'project']]], /\b(about|has|had|have|tagged|topic|concerns?|regarding|re|diagnosed with|lives with|deals with|struggles with|focus(es|ed)? on|on)\b/],
   ['knows', PEOPLE, /\b(knows?|knew|friends?|met|acquaint\w*|introduc\w*|mentor(s|ed|ing|ee)?|neighbou?r|roommate|room ?mate|housemate|connected|contact|close to|dated|dating|ex)\b/],
 ];
 /** Types added with end kinds (`part_of`, `about`, `asks`) need the kinds; without them only the original word patterns apply. */
@@ -605,15 +605,21 @@ export function askToWire(ask: Ask) {
     author: ask.recordedBy, source: ask.recordedVia };
 }
 
-/** Apply legacy AskFields aliases on generic entities/search/neighbourhood DTOs too. */
+/** Apply legacy AskFields aliases only in known entity DTO slots.
+ * Never recurse into opaque contact/People JSON: its own keys may resemble AskFields. */
 export function overlayToWire(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(overlayToWire);
-  if (!value || typeof value !== 'object') return value;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
-  const result = Object.fromEntries(Object.entries(record).map(([key, child]) => [key, overlayToWire(child)]));
-  if (typeof record.fromMe === 'boolean' && typeof record.text === 'string' && 'recordedBy' in record) {
-    Object.assign(result, { own: record.fromMe, author: record.recordedBy, source: record.recordedVia });
-    if (record.author && typeof record.author === 'object') result.authorParty = overlayToWire(record.author);
-  }
-  return result;
+  const entityWire = (item: unknown): unknown => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    const entity = item as Record<string, unknown>;
+    if (entity.kind !== 'ask' || !entity.ask || typeof entity.ask !== 'object' || Array.isArray(entity.ask)) return item;
+    const ask = entity.ask as Record<string, unknown>;
+    return {...entity, ask:{...ask, own:ask.fromMe, author:ask.recordedBy, source:ask.recordedVia,
+      ...(ask.author && typeof ask.author === 'object' ? {authorParty:ask.author} : {})}};
+  };
+  return {...record,
+    ...('entity' in record ? {entity:entityWire(record.entity)} : {}),
+    ...('center' in record ? {center:entityWire(record.center)} : {}),
+    ...(Array.isArray(record.entities) ? {entities:record.entities.map(entityWire)} : {})};
 }

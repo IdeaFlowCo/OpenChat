@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  addLink: vi.fn(), addNote: vi.fn(), createPrivateThing: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), deletePrivateThing: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
+  importContactSource: vi.fn(), importContactSources: vi.fn(), savePeopleState: vi.fn(), addLink: vi.fn(), addNote: vi.fn(), createPrivateThing: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), deletePrivateThing: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
   listDue: vi.fn(), listThings: vi.fn(), updateNote: vi.fn(), updatePersonCard: vi.fn(), updateLink: vi.fn(), searchPrivate: vi.fn(), getNeighbourhood: vi.fn(),
   updatePrivateThing: vi.fn(),
 }));
@@ -37,12 +37,22 @@ describe('private graph routes', () => {
   });
 
   it('requires sign-in on every route', async () => {
-    for (const [method, path] of [['GET', '/due'], ['GET', '/people/bob'], ['PATCH', '/people/bob'], ['POST', '/people/bob/notes'], ['POST', '/people/bob/links'], ['GET', '/things'], ['POST', '/things'], ['GET', '/things/t1'], ['POST', '/things/t1/notes'], ['POST', '/things/t1/links'], ['PATCH', '/notes/n1'], ['DELETE', '/notes/n1'], ['DELETE', '/links/l1'], ['DELETE', '/things/t1'], ['PATCH', '/things/t1']]) {
+    for (const [method, path] of [['POST','/contact-sources'],['POST','/contact-source-batches'],['PUT','/things/t1/people-state'],['GET', '/due'], ['GET', '/people/bob'], ['PATCH', '/people/bob'], ['POST', '/people/bob/notes'], ['POST', '/people/bob/links'], ['GET', '/things'], ['POST', '/things'], ['GET', '/things/t1'], ['POST', '/things/t1/notes'], ['POST', '/things/t1/links'], ['PATCH', '/notes/n1'], ['DELETE', '/notes/n1'], ['DELETE', '/links/l1'], ['DELETE', '/things/t1'], ['PATCH', '/things/t1']]) {
       expect((await fetch(`${baseUrl}/api/private${path}`, { method })).status, `${method} ${path}`).toBe(401);
     }
     expect(Object.values(mocks).every(mock => mock.mock.calls.length === 0)).toBe(true);
   });
 
+  it('source and state writes use authenticated owner and actor attribution',async()=>{
+    mocks.importContactSources.mockResolvedValue({results:[{index:0,id:'private-person'}]});
+    const cards=[{source:'synthetic:book',sourceId:'one',name:'Synthetic',data:{schemaVersion:1}}];
+    expect((await call('/contact-source-batches',{method:'POST',body:JSON.stringify({cards,ownerId:'mallory'})})).status).toBe(200);
+    expect(mocks.importContactSources).toHaveBeenCalledWith('alice',cards,{author:'owner',source:'app',assertion:'stated'});
+    mocks.savePeopleState.mockResolvedValue({revision:1});
+    const state={expectedRevision:0,payload:{schemaVersion:1}};
+    expect((await call('/things/t1/people-state',{method:'PUT',body:JSON.stringify(state)})).status).toBe(200);
+    expect(mocks.savePeopleState).toHaveBeenCalledWith('alice','t1',state,{author:'owner',source:'app',assertion:'stated'});
+  });
   it('always acts for the signed-in owner, whatever the request body claims', async () => {
     mocks.getPersonOverlay.mockResolvedValue({ userId: 'bob', card: {}, notes: [], links: [] });
     mocks.addNote.mockResolvedValue({ id: 'n1', text: 'hi' });
@@ -53,7 +63,7 @@ describe('private graph routes', () => {
     expect((await call('/people/bob/notes', { method: 'POST', body: JSON.stringify({ text: 'hi', ownerId: 'mallory' }) })).status).toBe(201);
     expect(mocks.addNote).toHaveBeenCalledWith('alice', { kind: 'user', id: 'bob' }, 'hi', { author: 'owner', source: 'app', assertion: 'stated' });
     expect((await call('/people/bob', { method: 'PATCH', body: JSON.stringify({ important: true, ownerId: 'mallory' }) })).status).toBe(200);
-    expect(mocks.updatePersonCard).toHaveBeenCalledWith('alice', 'bob', { important: true });
+    expect(mocks.updatePersonCard).toHaveBeenCalledWith('alice', 'bob', { important: true }, { author: 'owner', source: 'app', assertion: 'stated' });
     expect((await call('/people/bob', { method: 'PATCH', body: JSON.stringify({ ownerId: 'mallory' }) })).status).toBe(400);
     expect(mocks.updatePersonCard).toHaveBeenCalledTimes(1);
     expect((await call('/things/t1/links', { method: 'POST', body: JSON.stringify({ relation: 'part of', to: { kind: 'project', name: 'Atlas' } }) })).status).toBe(201);

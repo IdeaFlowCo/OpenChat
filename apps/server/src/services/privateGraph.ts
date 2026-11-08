@@ -43,7 +43,7 @@ export const REVIEW_KINDS = ['person', 'company', 'idea', 'project', 'topic'] as
 const KIND_CHOICE = 'Choose a person, company, idea, project, topic or list';
 export type ThingKind = typeof THING_KINDS[number];
 /** `ask` ends appear on links to an ask (a person `asks` it) and in search; asks are saved through the ask routes, never as things. */
-export type NodeKind = 'user' | ThingKind | 'ask';
+export type NodeKind = 'user' | Entity['kind'];
 export type CadenceMode = 'fixed' | 'expanding';
 
 export interface PersonCard {
@@ -76,7 +76,7 @@ export interface PersonBasics { id: string; name: string; avatarUrl: string | nu
 export interface PersonOverlay { userId: string; person: PersonBasics; card: PersonCard; notes: PrivateNote[]; links: PrivateLink[] }
 /** `description` is the owner's one-line summary, null when none was given. */
 export interface Thing { id: string; kind: ThingKind; name: string; description: string | null }
-export interface ThingDetail extends Thing { notes: PrivateNote[]; links: PrivateLink[]; unlinkedProfileId?: string; linkedinRefHash?: string; unlinkedConnectionId?: string }
+export interface ThingDetail extends Thing { card?: PersonCard; peopleState?: unknown; contactSources?: unknown[]; notes: PrivateNote[]; links: PrivateLink[]; unlinkedProfileId?: string; linkedinRefHash?: string; unlinkedConnectionId?: string }
 /** An Unlinked person: a published profile (`profileId`) and/or one of the owner's imported contacts (`connectionId`, `linkedinRefHash`). */
 export interface UnlinkedPersonOverlay { profileId: string | null; connectionId: string | null; linkedinRefHash: string | null; thingId: string | null; name: string | null; card: PersonCard; notes: PrivateNote[]; links: PrivateLink[] }
 export interface OwnerLink extends Provenance, LinkFacts { id: string; relation: string; relationType: RelationType; from: LinkEnd; to: LinkEnd; createdAt: string; updatedAt: string | null }
@@ -86,7 +86,7 @@ export interface PrivateNeighbourhood { center: LinkEnd; depth: 1 | 2; nodes: Li
 export type Subject = { kind: 'user' | 'thing' | 'unlinked'; id: string };
 export interface DuePerson { userId: string; name: string; avatarUrl: string | null; important: boolean; nextDueAt: string; lastContactAt: string | null }
 
-export const LIMITS = { noteLength: 4000, notesPerSubject: 200, linksPerOwner: 5000, thingsPerOwner: 5000, relationLength: 60, nameLength: 120, cadenceDays: 3650 } as const;
+export const LIMITS = { noteLength: 4000, notesPerSubject: 200, linksPerOwner: 5000, thingsPerOwner: 100000, relationLength: 60, nameLength: 120, cadenceDays: 3650 } as const;
 const EXPANDING_FACTOR = 1.6;
 const EXPANDING_CEILING_DAYS = 365;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -404,7 +404,7 @@ async function userNames(ends: Array<{ refs: string[] }>): Promise<Map<string, s
   } finally { await session.close(); }
   return names;
 }
-function endOf(entity: { id: string; kind: ThingKind | 'ask'; name: string; refs: string[]; description?: string | null }, names: Map<string, string> = new Map(), connections: Connections = new Map()): LinkEnd {
+function endOf(entity: { id: string; kind: Entity['kind']; name: string; refs: string[]; description?: string | null }, names: Map<string, string> = new Map(), connections: Connections = new Map()): LinkEnd {
   const userId = userIdOf(entity.refs), description = entity.description ? { description: entity.description } : {};
   if (userId !== null) return { kind: 'user', id: userId, name: names.get(userId) ?? entity.name, ...description };
   return { kind: entity.kind, id: entity.id, name: entity.name, ...description, ...unlinkedFields(entity.refs, connections) };
@@ -504,9 +504,9 @@ export async function getPersonOverlay(ownerId: string, userId: string): Promise
   return { userId, person, card: found?.card ?? { ...EMPTY_CARD }, notes: (found?.notes ?? []).map(noteOf), links: await linksFor(ownerId, found?.links ?? []) };
 }
 
-export async function updatePersonCard(ownerId: string, userId: string, patch: CardPatch): Promise<PersonCard> {
+export async function updatePersonCard(ownerId: string, userId: string, patch: CardPatch, by: Provenance = OWNER_PROVENANCE): Promise<PersonCard> {
   const { principal, entityId } = await personEntity(ownerId, userId);
-  return (await overlayCall(overlay => overlay.update(principal, entityId, { card: patch }))).card;
+  return (await overlayCall(overlay => overlay.update(principal, entityId, { card: patch }, by))).card;
 }
 
 /** The same text already on this card is the same note (the overlay dedupes): a retried request never doubles it. */
@@ -646,7 +646,7 @@ export async function listOwnerLinks(ownerId: string, rawQuery: unknown): Promis
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
   return { links: links.slice(0, 200), total: links.length };
 }
-type End = { id: string; kind: ThingKind | 'ask'; name: string; refs: string[]; description?: string | null };
+type End = { id: string; kind: Entity['kind']; name: string; refs: string[]; description?: string | null };
 function ownerLink(link: Edge, from: End, to: End, names: Map<string, string>, connections: Connections = new Map()): OwnerLink {
   return {
     id: link.id, relation: link.relation, relationType: link.relationType, from: endOf(from, names, connections), to: endOf(to, names, connections), createdAt: link.createdAt,
@@ -821,11 +821,31 @@ export async function resolvePrivateThing(ownerId: string, raw: unknown): Promis
 }
 
 /** Saved companies, ideas, projects and people-by-name. People on OpenChat are reached through their profile instead. */
-export async function listThings(ownerId: string, query: unknown, kind: unknown): Promise<{ things: Thing[] }> {
+export async function listThings(ownerId: string, query: unknown, kind: unknown, options: { after?: unknown; limit?: unknown; details?: unknown } = {}) {
   if (kind !== undefined && !THING_KINDS.includes(kind as ThingKind)) fail(400, 'Unknown kind');
   const principal = await ownerPrincipal(ownerId);
-  const entities = await overlayCall(overlay => overlay.list(principal, { q: typeof query === 'string' ? query : '', kind }));
-  return { things: entities.filter(entity => userIdOf(entity.refs) === null && entity.kind !== 'ask').map(thingOf) };
+  const page = await overlayCall(overlay => overlay.listPage(principal, {q:query, kind, after:options.after, limit:options.limit,
+    excludeRefPrefix:'openchat:user:', namedOnly:true, details:options.details === true || options.details === 'true'}));
+  const details = page.entities as EntityDetail[];
+  const connections = options.details === true || options.details === 'true'
+    ? await connectionsFor(ownerId, details.flatMap(e => [e, ...(e.links ?? []).map(l => l.other)])) : new Map();
+  const things = await Promise.all(details.map(async e => ({...thingOf(e), card:e.card, ...((e as any).peopleState ? {peopleState:(e as any).peopleState} : {}),
+    ...(e.notes ? {notes:e.notes.map(noteOf), links:await linksFor(ownerId,e.links,connections), contactSources:e.contactSources ?? []} : {})})));
+  return {things, nextCursor:page.nextCursor, total:page.total};
+}
+
+export async function importContactSource(ownerId:string, input:unknown, by:Provenance) {
+  const principal=await ownerPrincipal(ownerId);
+  const result=await overlayCall(overlay=>overlay.importContact(principal,input,by));
+  return {...result, entity:thingOf(result.entity)};
+}
+export async function importContactSources(ownerId:string, cards:unknown, by:Provenance) {
+  const principal=await ownerPrincipal(ownerId);
+  return overlayCall(overlay=>overlay.importContacts(principal,cards,by));
+}
+export async function savePeopleState(ownerId:string, thingId:string, input:unknown, by:Provenance) {
+  const principal=await ownerPrincipal(ownerId);
+  return overlayCall(overlay=>overlay.savePeopleState(principal,thingId,input,by));
 }
 
 export async function getThing(ownerId: string, thingId: string): Promise<ThingDetail> {
@@ -833,7 +853,7 @@ export async function getThing(ownerId: string, thingId: string): Promise<ThingD
   const found: EntityDetail = await overlayCall(overlay => overlay.get(principal, thingId));
   if (userIdOf(found.refs) !== null) fail(404, 'Not found');
   const connections = await connectionsFor(ownerId, [found, ...found.links.map(link => link.other)]);
-  return { ...thingOf(found), ...unlinkedFields(found.refs, connections), notes: found.notes.map(noteOf), links: await linksFor(ownerId, found.links, connections) };
+  return { ...thingOf(found), card:found.card, peopleState:(found as any).peopleState, contactSources:found.contactSources ?? [], ...unlinkedFields(found.refs, connections), notes: found.notes.map(noteOf), links: await linksFor(ownerId, found.links, connections) };
 }
 
 /** People whose catch-up date has passed, soonest first; starred people lead ties. */

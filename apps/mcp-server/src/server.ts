@@ -1261,8 +1261,15 @@ export function buildServer(
 
   privateTool('oc_list_private_things', "List the owner's saved companies, ideas, projects, topics and people",
     "List the owner's saved things with their one-line descriptions, optionally filtered by name and kind. Use an id with oc_get_private_thing to see who and what is linked to it.",
-    { query: z.string().max(120).optional(), kind: z.enum(THING_KINDS).optional() },
-    ({ query, kind }) => api.listPrivateThings(query, kind));
+    { query: z.string().max(120).optional(), kind: z.enum(THING_KINDS).optional(), after:z.string().max(512).optional(),limit:z.number().int().min(1).max(100).optional(),details:z.boolean().optional() },
+    ({ query, kind, after, limit, details }) => api.listPrivateThings(query, kind, after, limit, details));
+
+  privateTool('oc_import_contact_source','Import an address-book source card', 'Owner-private, exact source identifiers; never matches names. Repeat safely using the same source and sourceId.',
+    {source:z.string().min(1).max(200),sourceId:z.string().min(1).max(512),name:z.string().min(1).max(120),data:z.record(z.string(),z.unknown()),entityId:z.string().max(64).optional()}, args=>api.importContactSource(args));
+  privateTool('oc_import_contact_sources','Import address-book source cards','Up to 25 owner-private cards, one indexed receipt per source. Exact source IDs make retries idempotent; never matches names.',
+    {cards:z.array(z.object({source:z.string().min(1).max(200),sourceId:z.string().min(1).max(512),name:z.string().min(1).max(120),data:z.record(z.string(),z.unknown()),entityId:z.string().max(64).optional()})).min(1).max(25)},({cards})=>api.importContactSources(cards));
+  privateTool('oc_save_people_state','Save durable People state','Versioned owner-private fields with optimistic revision checking.',
+    {thingId:z.string().max(64),operationId:z.string().min(1).max(200),expectedRevision:z.number().int().min(0),payload:z.record(z.string(),z.unknown())}, ({thingId,...body})=>api.savePeopleState(thingId,body));
 
   privateTool('oc_get_private_thing', 'Read a saved company, idea, project or person',
     "Read one of the owner's saved things with its private notes and everything linked to it.",

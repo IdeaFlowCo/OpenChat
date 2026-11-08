@@ -433,8 +433,11 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<unknown>('GET', '/api/private/links', { query: { q: query } }),
     deletePrivateLink: (linkId: string) =>
       request<unknown>('DELETE', `/api/private/links/${encodeURIComponent(linkId)}`),
-    listPrivateThings: (query?: string, kind?: string) =>
-      request<unknown>('GET', '/api/private/things', { query: { q: query, kind } }),
+    listPrivateThings: (query?: string, kind?: string, after?: string, limit?: number, details?: boolean) =>
+      request<unknown>('GET', '/api/private/things', { query: { q: query, kind, after, limit, details } }),
+    importContactSources: (cards:Record<string,unknown>[]) => request<unknown>('POST','/api/private/contact-source-batches',{body:{cards}}),
+    importContactSource: (body: Record<string,unknown>) => request<unknown>('POST','/api/private/contact-sources',{body}),
+    savePeopleState: (id:string, body:Record<string,unknown>) => request<unknown>('PUT',`/api/private/things/${encodeURIComponent(id)}/people-state`,{body}),
     getPrivateThing: (thingId: string) =>
       request<unknown>('GET', `/api/private/things/${encodeURIComponent(thingId)}`),
     /** Rename, describe ('' clears) or re-kind a saved thing. */
