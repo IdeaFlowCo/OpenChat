@@ -1,5 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import neo4j, { type Driver } from 'neo4j-driver';
+const extraction = vi.hoisted(() => vi.fn());
+vi.mock('@anthropic-ai/sdk', () => ({ default: class { messages = { create: extraction }; } }));
 const uri = process.env.NEO4J_TEST_URI, user = process.env.NEO4J_TEST_USER, password = process.env.NEO4J_TEST_PASSWORD;
 const integration = uri && user && password ? describe.sequential : describe.skip;
 integration('private note review transaction integration', () => {
@@ -18,6 +20,7 @@ integration('private note review transaction integration', () => {
     const db=driver.session(); try { for (const id of ids) await db.executeWrite(tx=>graph.deletePrivateGraphForUser(tx,id)); await db.run('MATCH (u:User) WHERE u.id IN $ids DETACH DELETE u',{ids}); } finally {await db.close();}
     await driver.close(); await (await import('../src/db.js')).getDriver().close();
   });
+  afterEach(() => { vi.unstubAllEnvs(); extraction.mockReset(); });
   async function seedReady(text: string, key: string) {
     const batch=await review.captureNoteReview(owner,{kind:'user',id:person},{text,requestId:key});
     batch.status='ready'; batch.suggestions=[{id:'ask-one',kind:'ask',text:'Meet local founders',evidence:text},{id:'link-one',kind:'connection',text:'Works at Acme',relation:'works at',target:{kind:'company',name:`Acme-${suffix}`},evidence:text}];
@@ -101,15 +104,21 @@ integration('private note review transaction integration', () => {
     const stored=(await review.listNoteReviews(owner,{kind:'user',id:person})).reviews.find(r=>r.id===batch.id)!;
     expect(stored.sourceNoteAvailable).toBe(false); expect(stored.note.text).toBe('');
   });
-  it.each(['source', 'other-ref', 'erased'])('coordinates %s card adjuncts with actual canonical account purge', async mode => {
-    const departing = `departing-${mode}-${suffix}`;
+  it.each(['source', 'other-ref', 'erased'].flatMap(mode => ['saved', 'ready', 'applied'].map(stage => ({ mode, stage }))))('coordinates $stage reviews and $mode card adjuncts with actual canonical account purge', async ({ mode, stage }) => {
+    const departing = `departing-${mode}-${stage}-${suffix}`;
     ids.push(departing);
-    const marker = `Synthetic erasure ${mode} ${suffix}`;
+    const marker = `Synthetic erasure ${mode} ${stage} ${suffix}`;
     const db = driver.session();
     try {
       await db.run('CREATE (:User {id:$id,name:$name})', { id:departing, name:marker });
-      const batch = await review.captureNoteReview(owner, {kind:'user',id:departing}, {text:marker,requestId:`purge-${mode}`,asStandingAsk:true});
-      const applied = await review.applyNoteReview(owner,batch.id,{suggestionIds:[batch.suggestions[0]!.id]});
+      let batch = await review.captureNoteReview(owner, {kind:'user',id:departing}, {text:marker,requestId:`purge-${mode}-${stage}`,asStandingAsk:stage !== 'saved'});
+      expect(batch.status).toBe(stage === 'saved' ? 'saved' : 'ready');
+      batch = Object.assign(batch, {extension:{future:[mode,stage,{retained:true}]}});
+      const principalBefore = await graph.privateReviewPrincipal(owner);
+      await db.run('MATCH (r:OpenChatNoteReview {id:$id,ownerKey:$ownerKey}) SET r.payload=$payload',
+        {id:batch.id,ownerKey:principalBefore.ownerKey,payload:JSON.stringify(batch)});
+      const captured = batch;
+      if (stage === 'applied') batch = await review.applyNoteReview(owner,batch.id,{suggestionIds:[batch.suggestions[0]!.id]});
       const {principal,entityId} = await graph.privateReviewSubject(owner,{kind:'user',id:departing},false);
       const by = {author:'owner',source:'app',assertion:'stated'} as const;
       await graph.savePeopleState(owner,entityId,{operationId:`old-${mode}`,expectedRevision:0,payload:{schemaVersion:1,historical:marker}},by);
@@ -122,25 +131,76 @@ integration('private note review transaction integration', () => {
       const before = await graph.readContactState(owner,entityId);
       await db.executeWrite(tx => graph.deletePrivateGraphForUser(tx,departing));
       await db.run('MATCH (u:User {id:$id}) DETACH DELETE u',{id:departing});
+      await expect(review.suggestNoteReview(other,batch.id)).rejects.toMatchObject({status:404});
+      await expect(review.applyNoteReview(other,batch.id,{suggestionIds:['foreign']})).rejects.toMatchObject({status:404});
       if (mode !== 'erased') {
         expect(await graph.readContactState(owner,entityId)).toEqual(before);
         const exported = await graph.exportPrivateGraph(owner);
-        expect(exported.noteReviews).toContainEqual(applied);
+        const subject = {kind:'thing',id:entityId} as const;
+        expect(exported.noteReviews).toContainEqual({...batch,subject});
         expect(exported.privateAsks).toContainEqual(expect.objectContaining({id:`legacy-${departing}`,text:marker}));
         const history = await review.listNoteReviews(owner,{kind:'thing',id:entityId});
-        expect(history.reviews).toContainEqual(expect.objectContaining({id:batch.id,status:'applied'}));
-        expect(history.asks).toContainEqual(expect.objectContaining({id:applied.createdRecords![0]!.id,text:marker}));
+        expect(history.reviews).toContainEqual({...batch,subject,sourceNoteAvailable:true});
+        expect(await review.captureNoteReview(owner,subject,{text:marker,requestId:`purge-${mode}-${stage}`,asStandingAsk:stage !== 'saved'})).toEqual({...batch,subject});
+        vi.stubEnv('ANTHROPIC_API_KEY','synthetic-test-only');
+        extraction.mockResolvedValue({content:[{type:'tool_use',name:'propose',input:{suggestions:[{kind:'ask',text:marker,evidenceIndex:0}]}}]});
+        const suggested = await review.suggestNoteReview(owner,batch.id);
+        expect(suggested).toMatchObject({subject,status:stage === 'applied' ? 'applied' : 'ready',note:captured.note});
+        batch = await review.applyNoteReview(owner,batch.id,{suggestionIds:[suggested.suggestions[0]!.id]});
+        expect(batch).toMatchObject({subject,status:'applied'});
+        expect((await review.listNoteReviews(owner,subject)).asks).toContainEqual(expect.objectContaining({id:batch.createdRecords![0]!.id,text:marker}));
         expect((await review.undoNoteReview(owner,batch.id)).status).toBe('undone');
         await graph.deletePrivateThing(owner,entityId);
       } else {
+        await expect(review.suggestNoteReview(owner,batch.id)).rejects.toMatchObject({status:404});
+        await expect(review.applyNoteReview(owner,batch.id,{suggestionIds:['erased']})).rejects.toMatchObject({status:404});
         await expect(review.undoNoteReview(owner,batch.id)).rejects.toMatchObject({status:404});
       }
       await expect(graph.readContactState(owner,entityId)).rejects.toMatchObject({status:404});
       expect(JSON.stringify(await graph.exportPrivateGraph(owner))).not.toContain(marker);
       const remnants = await db.run(`MATCH (n {ownerKey:$ownerKey}) WHERE n.entityId=$entityId OR n.id=$entityId
-        OR n.id IN $askIds RETURN count(n) AS total`, {ownerKey:principal.ownerKey,entityId,askIds:applied.createdRecords!.map(r=>r.id)});
+        OR n.id IN $askIds RETURN count(n) AS total`, {ownerKey:principal.ownerKey,entityId,askIds:(batch.createdRecords ?? []).map(r=>r.id)});
       expect(remnants.records[0]!.get('total').toNumber()).toBe(0);
     } finally { await db.close(); }
+  });
+
+  it('keeps the rebound subject when extraction started before account deletion finishes later', async () => {
+    const departing = `departing-extracting-${suffix}`;
+    ids.push(departing);
+    const marker = `Synthetic in-flight extraction ${suffix}`;
+    const db = driver.session();
+    let finish!: () => void;
+    let pending: Promise<import('../src/services/privateNoteReview.js').NoteReview> | undefined;
+    try {
+      await db.run('CREATE (:User {id:$id,name:$id})',{id:departing});
+      const batch = await review.captureNoteReview(owner,{kind:'user',id:departing},{text:marker,requestId:'purge-extracting'});
+      const {entityId} = await graph.privateReviewSubject(owner,{kind:'user',id:departing},false);
+      await graph.importContactSource(owner,{entityId,source:'synthetic:erasure',sourceId:departing,name:'Independent source name',data:{schemaVersion:1}},
+        {author:'owner',source:'app',assertion:'stated'});
+      vi.stubEnv('ANTHROPIC_API_KEY','synthetic-test-only');
+      let started!: () => void;
+      const extracting = new Promise<void>(resolve => { started = resolve; });
+      extraction.mockImplementationOnce(() => {
+        started();
+        return new Promise(resolve => { finish = () => resolve({content:[{type:'tool_use',name:'propose',input:{suggestions:[{kind:'ask',text:marker,evidenceIndex:0}]}}]}); });
+      });
+      pending = review.suggestNoteReview(owner,batch.id);
+      await Promise.race([extracting,pending.then(() => { throw new Error('Extraction did not start'); })]);
+      await db.executeWrite(tx => graph.deletePrivateGraphForUser(tx,departing));
+      await db.run('MATCH (u:User {id:$id}) DETACH DELETE u',{id:departing});
+      finish();
+      const suggested = await pending;
+      expect(suggested).toMatchObject({subject:{kind:'thing',id:entityId},status:'ready',note:batch.note});
+      expect((await graph.exportPrivateGraph(owner)).noteReviews).toContainEqual(suggested);
+      const applied = await review.applyNoteReview(owner,batch.id,{suggestionIds:[suggested.suggestions[0]!.id]});
+      expect(applied).toMatchObject({subject:{kind:'thing',id:entityId},status:'applied'});
+      await review.undoNoteReview(owner,batch.id);
+      await graph.deletePrivateThing(owner,entityId);
+    } finally {
+      finish?.();
+      await pending?.catch(() => {});
+      await db.close();
+    }
   });
 
   it('erases source-backed owner data, adjuncts and historical People operation payloads together', async () => {

@@ -197,6 +197,7 @@ export async function suggestNoteReview(ownerId: string, reviewId: string): Prom
       const current = row.records[0] && decode(row.records[0].get('payload'));
       if (!current) return fail(404, 'Not found');
       if (current.sourceNoteAvailable === false || ['applied','undone','ready'].includes(current.status)) { Object.assign(review, current); return; }
+      review.subject = current.subject;
       await tx.run('MATCH (r:OpenChatNoteReview {id:$id,ownerKey:$ownerKey}) SET r.payload=$payload', { id: reviewId, ownerKey: principal.ownerKey, payload: JSON.stringify(review) });
     });
     return review;

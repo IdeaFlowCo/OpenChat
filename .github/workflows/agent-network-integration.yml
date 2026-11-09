@@ -60,6 +60,10 @@ jobs:
           apps/server/test/ideaflowConnector.test.ts
           apps/server/test/ideaflowConnector.privateGraph.test.ts
           apps/server/test/privateNoteReview.test.ts
+          apps/server/test/contacts.adapters.test.ts
+          apps/server/test/contacts.errors.test.ts
+          apps/server/test/contacts.http.test.ts
+          apps/server/test/contacts.summary.test.ts
           apps/server/test/overlayVendor.test.ts
           apps/server/test/askPublications.route.test.ts
           apps/server/test/askPublications.service.test.ts
@@ -77,7 +81,7 @@ jobs:
           test/allAsks.mobile.test.ts
 
       # The overlay suites create schema on start; one file at a time avoids lock contention.
-      - name: Run private-graph overlay suites against Neo4j
+      - name: Run private-graph overlay and contact erasure suites against Neo4j
         run: >-
           ./node_modules/.bin/vitest run --no-file-parallelism
           apps/server/test/privateGraph.integration.test.ts

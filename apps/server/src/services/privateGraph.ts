@@ -919,7 +919,7 @@ export async function deletePrivateGraphForUser(tx: Runner, userId: string): Pro
   const identity = await tx.run('MATCH (user:User {id: $userId}) RETURN user.ideaflowIssuer AS issuer, user.ideaflowSub AS subject', { userId });
   const issuer = identity.records[0]?.get('issuer'), subject = identity.records[0]?.get('subject');
   const affected = await tx.run(`MATCH (:OverlayRef {ref:$ref})-[:REF_OF]->(e:OverlayEntity)
-    RETURN DISTINCT e.ownerKey AS ownerKey`, { ref:userRef(userId) });
+    RETURN DISTINCT e.ownerKey AS ownerKey,e.id AS entityId`, { ref:userRef(userId) });
   const runner = tx as unknown as Parameters<typeof deleteOwnerIn>[0];
   await deleteOwnerIn(runner, fallbackKey(userId));
   if (typeof issuer === 'string' && issuer && typeof subject === 'string' && subject) await deleteOwnerIn(runner, ownerKeyFor(issuer, subject));
@@ -927,6 +927,21 @@ export async function deletePrivateGraphForUser(tx: Runner, userId: string): Pro
   if (typeof issuer === 'string' && issuer && typeof subject === 'string' && subject) ownerKeys.push(ownerKeyFor(issuer, subject));
   await purgeRefIn(runner, userRef(userId));
   await eraseOrphanedAdjunctsIn(tx, [...new Set(ownerKeys)]);
+  const surviving = await tx.run(`UNWIND $entities AS entity
+    MATCH (e:OverlayEntity {id:entity.id,ownerKey:entity.ownerKey}),
+      (r:OpenChatNoteReview {entityId:entity.id,ownerKey:entity.ownerKey})
+    WITH r ORDER BY r.id SET r._lock=true REMOVE r._lock
+    RETURN r.id AS id,r.ownerKey AS ownerKey,r.entityId AS entityId,r.payload AS payload`, {
+    entities: affected.records.map(row => ({ id: String(row.get('entityId')), ownerKey: String(row.get('ownerKey')) })),
+  });
+  for (const row of surviving.records) {
+    const review = JSON.parse(String(row.get('payload')));
+    if (review.subject?.kind !== 'user' || review.subject.id !== userId) continue;
+    review.subject = { kind: 'thing', id: String(row.get('entityId')) };
+    await tx.run('MATCH (r:OpenChatNoteReview {id:$id,ownerKey:$ownerKey}) SET r.payload=$payload', {
+      id: row.get('id'), ownerKey: row.get('ownerKey'), payload: JSON.stringify(review),
+    });
+  }
 }
 
 /** Account export: the owner's whole private graph, as plain rows. */
