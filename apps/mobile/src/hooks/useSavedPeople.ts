@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type PrivateThing } from '../api/client';
 
 type Snapshot = { ownerId: string; people: PrivateThing[]; loaded: number; total: number | null; complete: boolean; loading: boolean; error: string };
-type Checkpoint = { rows: Map<string, PrivateThing>; after?: string; cursors: Set<string> };
+type Checkpoint = { rows: Map<string, PrivateThing>; after?: string; cursors: Set<string>; total?: number; changed?: boolean };
 const empty = (ownerId: string): Snapshot => ({ ownerId, people: [], loaded: 0, total: null, complete: false, loading: false, error: '' });
 
 export function useSavedPeople(ownerId: string) {
@@ -22,17 +22,21 @@ export function useSavedPeople(ownerId: string) {
     ownerScope.loading = true;
     const run = ++ownerScope.run;
     const current = () => scope.current === ownerScope && ownerScope.run === run;
-    const checkpoint: Checkpoint = ownerScope.checkpoint ?? { rows: new Map<string, PrivateThing>(), cursors: new Set<string>() };
+    let checkpoint: Checkpoint = ownerScope.checkpoint ?? { rows: new Map<string, PrivateThing>(), cursors: new Set<string>() };
     ownerScope.checkpoint = checkpoint;
     setSnapshot(previous => ({ ...(previous.ownerId === ownerId ? previous : empty(ownerId)), loading: true, complete: false, error: '' }));
+    let reconciliations = 0;
     try {
       for (;;) {
         const page = await api.listPrivateThings('', 'person', { after: checkpoint.after, limit: 100 });
         if (!current()) return;
         if ((page.nextCursor !== null && (typeof page.nextCursor !== 'string' || !page.nextCursor)) || !Number.isSafeInteger(page.total) || page.total < 0) throw new Error('Invalid people page');
         if (page.nextCursor && checkpoint.cursors.has(page.nextCursor)) throw new Error('Repeated people cursor');
+        if (checkpoint.total !== undefined && checkpoint.total !== page.total) checkpoint.changed = true;
+        checkpoint.total = page.total;
         for (const person of page.things) checkpoint.rows.set(person.id, person);
-        const complete = page.nextCursor === null;
+        const ended = page.nextCursor === null;
+        const complete = ended && checkpoint.rows.size === page.total && !checkpoint.changed;
         if (page.nextCursor) checkpoint.cursors.add(page.nextCursor);
         checkpoint.after = page.nextCursor ?? undefined;
         const received = new Map(checkpoint.rows);
@@ -42,6 +46,14 @@ export function useSavedPeople(ownerId: string) {
           return { ownerId, people: [...rows.values()], loaded: received.size, total: page.total, complete, loading: !complete, error: '' };
         });
         if (complete) { ownerScope.checkpoint = null; break; }
+        if (ended) {
+          // A cursor can miss inserts behind it or retain deleted rows. Never
+          // acknowledge that traversal; reconcile once from the beginning.
+          ownerScope.checkpoint = null;
+          if (reconciliations++ >= 1) throw new Error('People changed during reconciliation');
+          checkpoint = { rows: new Map(), cursors: new Set() };
+          ownerScope.checkpoint = checkpoint;
+        }
       }
     } catch {
       if (current()) setSnapshot(previous => ({ ...previous, loading: false, complete: false, error: 'Could not load all saved people. Retry to continue.' }));

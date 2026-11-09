@@ -4,10 +4,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({ listPrivateThings: vi.fn(), listFriends: vi.fn() }));
 vi.mock('../../mobile/src/api/client', () => ({ api }));
-vi.mock('react-native', () => ({
+vi.mock('react-native', async () => {
+  const { FlatList } = await import('react-native-web');
+  return ({
+  FlatList,
   StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
   ActivityIndicator: 'ActivityIndicator', ScrollView: 'ScrollView', Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View',
-}));
+}); });
 vi.mock('@react-navigation/native', async () => {
   const React = await import('react');
   return { useNavigation: () => ({ navigate: vi.fn() }), useRoute: () => ({ params: {} }), useFocusEffect: (effect: () => void) => React.useEffect(effect, [effect]) };
@@ -100,14 +103,59 @@ it('cancels a blurred load and resumes without accepting its late response', asy
   expect(state.complete).toBe(true);
 });
 
-it('renders the complete saved-person count and the final page on the People screen', async () => {
+it('renders the complete count with a bounded window of 5007 saved people and reachable final rows', async () => {
   api.listFriends.mockResolvedValue({ friends: [], incoming: [], outgoing: [] });
-  api.listPrivateThings.mockImplementation(async (_query, _kind, { after }) => after
-    ? { things: [person(101)], total: 101, nextCursor: null }
-    : { things: Array.from({ length: 100 }, (_, index) => person(index + 1)), total: 101, nextCursor: 'last' });
+  api.listPrivateThings.mockImplementation(async (_query, _kind, { after, limit }) => {
+    const start = Number(after ?? 0), end = Math.min(start + limit, 5007);
+    return { things: Array.from({ length: end - start }, (_, i) => person(start + i)), total: 5007, nextCursor: end < 5007 ? String(end) : null };
+  });
   await act(async () => { root = create(React.createElement(FriendsScreen)); });
   const texts = root.root.findAllByType('Text').map(node => node.props.children).flat().join('\n');
-  expect(texts).toContain('101 saved people');
-  expect(texts).toContain('Synthetic 101');
-  expect(api.listPrivateThings).toHaveBeenCalledTimes(2);
+  expect(texts).toContain('5007 saved people');
+  expect(texts).toContain('Synthetic 0');
+  const mountedRows = root.root.findAllByType('TouchableOpacity').filter(node => String(node.props.accessibilityLabel).startsWith('Saved profile for'));
+  expect(mountedRows.length).toBeGreaterThan(0);
+  expect(mountedRows.length).toBeLessThan(100);
+  // Execute the real virtualized list's public row renderer for the final
+  // item, rather than eagerly mounting thousands of profiles in this test.
+  const { FlatList } = await import('react-native-web');
+  const list = root.root.findByType(FlatList);
+  const last = list.props.data.at(-1);
+  expect(last.id).toBe('5006');
+  const rendered = list.props.renderItem({ item: last, index: 5006, separators: {} });
+  expect(rendered.props.accessibilityLabel).toBe('Saved profile for Synthetic 5006');
+  expect(api.listPrivateThings).toHaveBeenCalledTimes(51);
+});
+
+
+it('restarts from the beginning when an insert before the cursor changes total', async () => {
+  const first = Array.from({ length: 100 }, (_, i) => person(i + 1));
+  api.listPrivateThings.mockResolvedValueOnce({ things: first, total: 101, nextCursor: 'last' })
+    .mockResolvedValueOnce({ things: [person(101)], total: 102, nextCursor: null });
+  let finish!: (page: unknown) => void;
+  api.listPrivateThings.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await mount();
+  let pending!: Promise<void>;
+  await act(async () => { pending = state.refresh(); });
+  expect(state).toMatchObject({ complete: false, loaded: 101, total: 102 });
+  expect(api.listPrivateThings).toHaveBeenLastCalledWith('', 'person', { after: undefined, limit: 100 });
+  await act(async () => { finish({ things: [person(0), ...first, person(101)], total: 102, nextCursor: null }); await pending; });
+  expect(state).toMatchObject({ complete: true, loaded: 102, total: 102, error: '' });
+  expect(state.people.map(row => row.id)).toContain('0');
+});
+
+it('retains known people and retries from start if reconciliation stays inconsistent', async () => {
+  api.listPrivateThings.mockResolvedValueOnce({ things: [person(9)], total: 1, nextCursor: null });
+  await mount();
+  await act(async () => { await state.refresh(); });
+  api.listPrivateThings.mockResolvedValue({ things: [person(1)], total: 2, nextCursor: null });
+  await act(async () => { await state.refresh(); });
+  expect(state).toMatchObject({ complete: false, loading: false, loaded: 1, total: 2 });
+  expect(state.error).toBeTruthy();
+  expect(state.people.map(row => row.id).sort()).toEqual(['1', '9']);
+  api.listPrivateThings.mockResolvedValueOnce({ things: [person(1), person(2)], total: 2, nextCursor: null });
+  await act(async () => { await state.refresh(); });
+  expect(api.listPrivateThings).toHaveBeenLastCalledWith('', 'person', { after: undefined, limit: 100 });
+  expect(state).toMatchObject({ complete: true, loaded: 2 });
+  expect(state.people.map(row => row.id)).toEqual(['1', '2']);
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { api, type FriendLists, type FriendRow } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
@@ -92,8 +92,19 @@ export function FriendsScreen() {
     </View>
   );
 
+  // Keep the collection virtualized; controls and friend-account actions stay
+  // in the same scroll surface without mounting every saved profile at once.
   return (
-    <ScrollView style={{ backgroundColor: c.background }} contentContainerStyle={styles.content}>
+    <FlatList
+      style={{ backgroundColor: c.background }} contentContainerStyle={styles.content}
+      data={section === 'friends' ? people.people : []}
+      keyExtractor={person => person.id}
+      initialNumToRender={12}
+      maxToRenderPerBatch={12}
+      windowSize={7}
+      keyboardShouldPersistTaps="handled"
+      renderItem={({ item: person }) => <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Saved profile for ${person.name}`} onPress={() => navigation.navigate('PrivateThing', { thingId: person.id })} style={[styles.row, { borderColor: c.border }]}><View style={styles.rowContent}><Text style={{ color: c.textPrimary, ...type.bubble, fontWeight: '600' }}>{person.name}</Text><Text style={{ color: c.primary, ...type.label }}>Private profile</Text></View></TouchableOpacity>}
+      ListHeaderComponent={<View style={{ gap: space[4] }}>
       <View style={styles.tabs}>
         {(['friends', 'requests'] as const).map(tab => <TouchableOpacity key={tab} onPress={() => setSection(tab)} style={[styles.tab, { borderColor: c.border, backgroundColor: section === tab ? c.primary : c.surface }]}><Text style={{ color: section === tab ? c.onPrimary : c.textPrimary, fontWeight: '700' }}>{tab === 'friends' ? 'Friends' : `Requests${lists?.incoming.length ? ` (${lists.incoming.length})` : ''}`}</Text></TouchableOpacity>)}
       </View>
@@ -111,8 +122,10 @@ export function FriendsScreen() {
         <Text accessibilityLiveRegion="polite" style={[type.label, { color: c.textMetadata }]}>{people.complete ? `${people.people.length} saved people` : `${people.loaded}${people.total === null ? '' : ` of ${people.total}`} loaded · ${people.loading ? 'Loading saved people…' : 'Incomplete'}`}</Text>
         {!!people.error && <><Text accessibilityRole="alert" style={{ color: c.danger }}>{people.error}</Text><Button label="Retry loading people" variant="secondary" onPress={() => void refreshPeople()} loading={people.loading} /></>}
         {!people.people.length && people.complete && <Text style={[type.label, { color: c.textMetadata }]}>No saved people yet.</Text>}
-        {people.people.map(person => <TouchableOpacity key={person.id} accessibilityRole="button" accessibilityLabel={`Saved profile for ${person.name}`} onPress={() => navigation.navigate('PrivateThing', { thingId: person.id })} style={[styles.row, { borderColor: c.border }]}><View style={styles.rowContent}><Text style={{ color: c.textPrimary, ...type.bubble, fontWeight: '600' }}>{person.name}</Text><Text style={{ color: c.primary, ...type.label }}>Private profile</Text></View></TouchableOpacity>)}
+
       </View>}
+      </View>}
+      ListFooterComponent={<View style={{ gap: space[4] }}>
       {error && <TouchableOpacity onPress={() => void refresh()}><Text style={{ color: c.danger }}>{error}</Text></TouchableOpacity>}
       {!lists && !error && <ActivityIndicator color={c.primary} />}
       {lists && section === 'friends' && (lists.friends.length ? lists.friends.map(renderRow) : <Text style={{ color: c.textMetadata }}>No friends yet. Scan a code or find someone to send a request.</Text>)}
@@ -122,7 +135,8 @@ export function FriendsScreen() {
         <Text style={[styles.heading, { color: c.textPrimary }]}>Sent</Text>
         {lists.outgoing.length ? lists.outgoing.map(renderRow) : <Text style={{ color: c.textMetadata }}>No pending requests.</Text>}
       </>}
-    </ScrollView>
+      </View>}
+    />
   );
 }
 
