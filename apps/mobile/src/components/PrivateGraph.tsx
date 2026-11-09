@@ -127,7 +127,7 @@ export function PrivateLinks({ subject, links, onChange, onOpenThing, onOpenPers
     if (!query) { setSuggestions([]); return; }
     let active = true;
     const timer = setTimeout(() => {
-      api.listPrivateThings(query, kind).then(result => { if (active) setSuggestions(result.things.slice(0, 5)); }).catch(() => { if (active) setSuggestions([]); });
+      api.listPrivateThings(query, kind, { summary: true, limit: 5 }).then(result => { if (active) setSuggestions(result.things.slice(0, 5)); }).catch(() => { if (active) setSuggestions([]); });
     }, 250);
     return () => { active = false; clearTimeout(timer); };
   }, [name, kind]);
