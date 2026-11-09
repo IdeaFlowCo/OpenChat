@@ -46,6 +46,7 @@ jobs:
         run: >-
           npx vitest run --no-file-parallelism
           test/contacts.pagination.api.test.ts test/contacts.pagination.mobile.test.ts
+          test/contacts.evidence.mobile.test.ts
           test/privateGraph.mobile.test.ts
       - name: Unlinked confidential exchanges (session, recipient, identities) and compose entry
         working-directory: apps/server

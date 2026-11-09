@@ -161,3 +161,21 @@ it('retains known people and retries from start if reconciliation stays inconsis
   expect(state).toMatchObject({ complete: true, loaded: 2 });
   expect(state.people.map(row => row.id)).toEqual(['1', '2']);
 });
+
+it('reconciles a deletion from the beginning before detaching a previously saved row', async () => {
+  api.listPrivateThings.mockResolvedValueOnce({ things: [person(1), person(2), person(3)], total: 3, nextCursor: null });
+  await mount();
+  await act(async () => { await state.refresh(); });
+  let finish!: (page: unknown) => void;
+  api.listPrivateThings.mockResolvedValueOnce({ things: [person(1), person(2)], total: 3, nextCursor: 'last' })
+    .mockResolvedValueOnce({ things: [], total: 2, nextCursor: null })
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  let pending!: Promise<void>;
+  await act(async () => { pending = state.refresh(); });
+  expect(state).toMatchObject({ complete: false, total: 2 });
+  expect(state.people.map(row => row.id)).toEqual(['1', '2', '3']);
+  expect(api.listPrivateThings).toHaveBeenLastCalledWith('', 'person', { after: undefined, limit: 100, summary: true });
+  await act(async () => { finish({ things: [person(1), person(2)], total: 2, nextCursor: null }); await pending; });
+  expect(state).toMatchObject({ complete: true, total: 2, loaded: 2, error: '' });
+  expect(state.people.map(row => row.id)).toEqual(['1', '2']);
+});

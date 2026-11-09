@@ -39,3 +39,6 @@ apps/mobile/dist-web-shell/
 
 # Local offline-chat browser verification artifacts
 .offline-evidence/
+
+# Synthetic rendered contact QA evidence collected separately by the gate.
+/qa/evidence/contacts/
