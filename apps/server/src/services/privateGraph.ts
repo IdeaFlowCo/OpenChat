@@ -239,13 +239,21 @@ const MESSAGES: Record<string, string> = {
   invalid_evidence: 'evidence takes quote, url (http or https), label, seenAt and noteId (one of your private notes)', duplicate_ask: 'That person already has an ask with this text',
   ask_limit: 'You have reached the limit for asks', ask_fields: 'Edit or delete an ask (and who asks it) through the ask tools',
   has_asks: 'This one has asks; a topic cannot ask, so its kind stays as it is',
+  state_conflict: 'People state has changed. Read the current revision and try again.',
+  operation_id_reused: 'This operation id was already used for a different request.',
+  legacy_operation_requires_reconciliation: 'This earlier operation needs reconciliation before retrying.',
 };
 /** Overlay refusals become the app's own wording; anything else stays an unexpected error. */
 async function overlayCall<T>(work: (overlay: OverlayStore) => Promise<T>): Promise<T> {
   try { return await work(await store()); }
   catch (error) {
     if (error instanceof OverlayError && error.code === 'ambiguous_name') fail(409, String(error.details?.message ?? 'More than one saved item has that name. Choose one by id, or set createNew with a clientRequestId for a different one.'), { code: 'ambiguous_name', candidates: candidatesFor(error.details?.candidates) });
-    if (error instanceof OverlayError && error.status < 500) fail(error.status, MESSAGES[error.code] ?? 'Check what you entered and try again');
+    if (error instanceof OverlayError && error.status < 500) {
+      const details: Record<string, unknown> = { code: error.code };
+      if (Number.isSafeInteger(error.details?.revision) && Number(error.details?.revision) >= 0) details.revision = error.details!.revision;
+      if (typeof error.details?.askId === 'string') details.askId = error.details.askId;
+      fail(error.status, MESSAGES[error.code] ?? 'Check what you entered and try again', details);
+    }
     throw error;
   }
 }

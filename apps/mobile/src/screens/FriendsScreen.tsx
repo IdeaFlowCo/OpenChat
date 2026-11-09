@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
-import { api, type FriendLists, type FriendRow, type PrivateThing } from '../api/client';
+import { api, type FriendLists, type FriendRow } from '../api/client';
 import { useChat } from '../contexts/ChatContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
+import { useSavedPeople } from '../hooks/useSavedPeople';
+import { Button } from '../components/ui/Button';
+import { SectionLabel } from '../components/ui/SectionLabel';
+import { radius, space, touchTarget, type } from '../theme/tokens';
 import { Avatar } from '../components/Avatar';
 import type { NavProp, RouteProps } from '../navigation/types';
 
@@ -24,24 +28,20 @@ export function FriendsScreen() {
   if (ownerScope.current.id !== ownerId) ownerScope.current = { id: ownerId, generation: ownerScope.current.generation + 1 };
   const generation = ownerScope.current.generation;
   const isCurrentOwner = () => ownerScope.current.id === ownerId && ownerScope.current.generation === generation;
-  const [savedPeople, setSavedPeople] = useState<PrivateThing[]>([]);
-  const [savedOwner, setSavedOwner] = useState(ownerId);
+  const people = useSavedPeople(ownerId);
+  const { refresh: refreshPeople, cancel: cancelPeople } = people;
   const [addingPerson, setAddingPerson] = useState(false);
   const [personName, setPersonName] = useState('');
   const [personBusy, setPersonBusy] = useState(false);
   const [personError, setPersonError] = useState('');
-  useEffect(() => { setSavedOwner(ownerId); setSavedPeople([]); setAddingPerson(false); setPersonName(''); setPersonBusy(false); setPersonError(''); }, [ownerId]);
+  useEffect(() => { setAddingPerson(false); setPersonName(''); setPersonBusy(false); setPersonError(''); }, [ownerId]);
   useEffect(() => () => { ownerScope.current.generation += 1; }, []);
-  const refreshPeople = useCallback(async () => {
-    try { const result = await api.listPrivateThings('', 'person'); if (isCurrentOwner()) { setSavedPeople(result.things); setPersonError(''); } }
-    catch { if (isCurrentOwner()) setPersonError('Could not load saved people. Try again.'); }
-  }, [ownerId, generation]);
-  useFocusEffect(useCallback(() => { void refreshPeople(); }, [refreshPeople]));
+  useFocusEffect(useCallback(() => { void refreshPeople(); return cancelPeople; }, [refreshPeople, cancelPeople]));
   const savePerson = async () => {
     if (!personName.trim() || personBusy) return; setPersonBusy(true); setPersonError('');
     try {
       const person = await api.createPrivateThing('person', personName.trim()); if (!isCurrentOwner()) return;
-      setSavedPeople(rows => [person, ...rows.filter(row => row.id !== person.id)]); setPersonName(''); setAddingPerson(false);
+      people.addPerson(person); setPersonName(''); setAddingPerson(false);
       navigation.navigate('PrivateThing', { thingId: person.id });
     } catch { if (isCurrentOwner()) setPersonError('Could not save this person. Your name draft is preserved.'); }
     finally { if (isCurrentOwner()) setPersonBusy(false); }
@@ -78,9 +78,9 @@ export function FriendsScreen() {
     <View key={row.userId} style={[styles.row, { borderColor: c.border }]}>
       <Avatar name={row.user.name || 'Person'} avatarUrl={row.user.avatarUrl ?? undefined} size={42} />
       <TouchableOpacity style={styles.rowContent} accessibilityRole="button" accessibilityLabel={`Profile for ${row.user.name || 'person'}`} onPress={() => navigation.navigate('ContactProfile', { userId: row.userId })}>
-        <Text style={{ color: c.textPrimary, fontSize: 16, fontWeight: '600' }}>{row.user.name || 'Person'}</Text>
-        <Text style={{ color: c.primary, fontSize: 13 }}>Profile</Text>
-        <Text style={{ color: c.textMetadata, fontSize: 13 }}>{row.state === 'incoming' ? 'Wants to be friends' : row.state === 'outgoing' ? 'Request sent' : 'Friend'}</Text>
+        <Text style={{ color: c.textPrimary, ...type.bubble, fontWeight: '600' }}>{row.user.name || 'Person'}</Text>
+        <Text style={{ color: c.primary, ...type.label }}>Profile</Text>
+        <Text style={{ color: c.textMetadata, ...type.label }}>{row.state === 'incoming' ? 'Wants to be friends' : row.state === 'outgoing' ? 'Request sent' : 'Friend'}</Text>
       </TouchableOpacity>
       {busyId === row.userId ? <ActivityIndicator color={c.primary} /> : (
         <View style={styles.actions}>
@@ -103,13 +103,15 @@ export function FriendsScreen() {
         <TouchableOpacity onPress={() => navigation.navigate('InvitePerson')}><Text style={{ color: c.primary, fontWeight: '700' }}>Invite a person</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('CatchUp')}><Text style={{ color: c.primary, fontWeight: '700' }}>Catch up</Text></TouchableOpacity>
       </View>
-      {section === 'friends' && savedOwner === ownerId && <View style={{ gap: 12 }}>
-        <View style={styles.findRow}><Text style={[styles.heading, { color: c.textPrimary }]}>Saved people</Text><TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: addingPerson }} style={styles.personButton} onPress={() => setAddingPerson(value => !value)}><Text style={{ color: c.primary, fontWeight: '600' }}>+ Add person</Text></TouchableOpacity></View>
-        <Text style={{ color: c.textMetadata, fontSize: 13 }}>Private records, only for you. They are not linked to OpenChat accounts.</Text>
-        {addingPerson && <View style={{ gap: 8 }}><TextInput accessibilityLabel="Saved person name" value={personName} onChangeText={setPersonName} editable={!personBusy} maxLength={120} placeholder="Person's name" placeholderTextColor={c.textMuted} style={[styles.personInput, { color: c.textPrimary, borderColor: c.border, backgroundColor: c.surface }]} /><View style={styles.tabs}><TouchableOpacity accessibilityRole="button" disabled={personBusy || !personName.trim()} onPress={() => void savePerson()} style={[styles.personButton, { backgroundColor: c.primary, opacity: personBusy || !personName.trim() ? 0.5 : 1 }]}><Text style={{ color: c.onPrimary, fontWeight: '600' }}>{personBusy ? 'Saving…' : 'Save privately'}</Text></TouchableOpacity><TouchableOpacity accessibilityRole="button" disabled={personBusy} onPress={() => setAddingPerson(false)} style={styles.personButton}><Text style={{ color: c.textPrimary }}>Cancel</Text></TouchableOpacity></View></View>}
+      {section === 'friends' && <View style={{ gap: space[3] }}>
+        <SectionLabel first trailing={<Button label="+ Add person" variant="ghost" onPress={() => setAddingPerson(value => !value)} />}>Saved people</SectionLabel>
+        <Text style={{ color: c.textMetadata, ...type.label }}>Private records, only for you. They are not linked to OpenChat accounts.</Text>
+        {addingPerson && <View style={{ gap: space[2] }}><TextInput accessibilityLabel="Saved person name" value={personName} onChangeText={setPersonName} editable={!personBusy} maxLength={120} placeholder="Person's name" placeholderTextColor={c.textMuted} style={[styles.personInput, { color: c.textPrimary, borderColor: c.border, backgroundColor: c.surface }]} /><View style={styles.tabs}><TouchableOpacity accessibilityRole="button" disabled={personBusy || !personName.trim()} onPress={() => void savePerson()} style={[styles.personButton, { backgroundColor: c.primary, opacity: personBusy || !personName.trim() ? 0.5 : 1 }]}><Text style={{ color: c.onPrimary, fontWeight: '600' }}>{personBusy ? 'Saving…' : 'Save privately'}</Text></TouchableOpacity><TouchableOpacity accessibilityRole="button" disabled={personBusy} onPress={() => setAddingPerson(false)} style={styles.personButton}><Text style={{ color: c.textPrimary }}>Cancel</Text></TouchableOpacity></View></View>}
         {!!personError && <TouchableOpacity accessibilityRole="button" style={styles.personButton} onPress={() => void refreshPeople()}><Text accessibilityRole="alert" style={{ color: c.danger }}>{personError}</Text></TouchableOpacity>}
-        {!savedPeople.length && !personError && <Text style={{ color: c.textMetadata, fontSize: 13 }}>No saved people yet.</Text>}
-        {savedPeople.map(person => <TouchableOpacity key={person.id} accessibilityRole="button" accessibilityLabel={`Saved profile for ${person.name}`} onPress={() => navigation.navigate('PrivateThing', { thingId: person.id })} style={[styles.row, { borderColor: c.border }]}><View style={styles.rowContent}><Text style={{ color: c.textPrimary, fontSize: 16, fontWeight: '600' }}>{person.name}</Text><Text style={{ color: c.primary, fontSize: 13 }}>Private profile</Text></View></TouchableOpacity>)}
+        <Text accessibilityLiveRegion="polite" style={[type.label, { color: c.textMetadata }]}>{people.complete ? `${people.people.length} saved people` : `${people.loaded}${people.total === null ? '' : ` of ${people.total}`} loaded · ${people.loading ? 'Loading saved people…' : 'Incomplete'}`}</Text>
+        {!!people.error && <><Text accessibilityRole="alert" style={{ color: c.danger }}>{people.error}</Text><Button label="Retry loading people" variant="secondary" onPress={() => void refreshPeople()} loading={people.loading} /></>}
+        {!people.people.length && people.complete && <Text style={[type.label, { color: c.textMetadata }]}>No saved people yet.</Text>}
+        {people.people.map(person => <TouchableOpacity key={person.id} accessibilityRole="button" accessibilityLabel={`Saved profile for ${person.name}`} onPress={() => navigation.navigate('PrivateThing', { thingId: person.id })} style={[styles.row, { borderColor: c.border }]}><View style={styles.rowContent}><Text style={{ color: c.textPrimary, ...type.bubble, fontWeight: '600' }}>{person.name}</Text><Text style={{ color: c.primary, ...type.label }}>Private profile</Text></View></TouchableOpacity>)}
       </View>}
       {error && <TouchableOpacity onPress={() => void refresh()}><Text style={{ color: c.danger }}>{error}</Text></TouchableOpacity>}
       {!lists && !error && <ActivityIndicator color={c.primary} />}
@@ -125,14 +127,14 @@ export function FriendsScreen() {
 }
 
 const styles = StyleSheet.create({
-  personButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 8 },
-  personInput: { minHeight: 44, borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, padding: 12, fontSize: 15 },
-  content: { padding: 16, gap: 16, width: '100%', maxWidth: 960, alignSelf: 'center' },
-  tabs: { flexDirection: 'row', gap: 8 },
-  tab: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 18 },
-  findRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 24, paddingVertical: 8 },
-  heading: { fontSize: 17, fontWeight: '700', marginTop: 8 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  rowContent: { flex: 1, minWidth: 0, minHeight: 44, justifyContent: 'center' },
-  actions: { alignItems: 'flex-end', gap: 8 },
+  personButton: { minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: space[3], borderRadius: radius.md },
+  personInput: { minHeight: touchTarget, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, padding: space[3], ...type.body },
+  content: { padding: space[4], gap: space[4], width: '100%', maxWidth: 960, alignSelf: 'center' },
+  tabs: { flexDirection: 'row', gap: space[2] },
+  tab: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingVertical: space[2], paddingHorizontal: space[4] },
+  findRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space[6], paddingVertical: space[2] },
+  heading: { ...type.title, fontWeight: '700', marginTop: space[2] },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space[3], paddingVertical: space[3], borderBottomWidth: StyleSheet.hairlineWidth },
+  rowContent: { flex: 1, minWidth: 0, minHeight: touchTarget, justifyContent: 'center' },
+  actions: { alignItems: 'flex-end', gap: space[2] },
 });
