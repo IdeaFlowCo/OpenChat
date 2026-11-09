@@ -172,17 +172,27 @@ describe('contacts executable adapter contracts', () => {
     if (process.env.CONTACTS_ADAPTER_EVIDENCE === '-') console.log(evidence);
     else if (process.env.CONTACTS_ADAPTER_EVIDENCE) writeFileSync(process.env.CONTACTS_ADAPTER_EVIDENCE, evidence);
   });
-  it('retains verified immutable actors across labels and rejects missing identity before contact writes', async()=>{
-    vi.stubEnv('IDEAFLOW_CONNECTOR_SECRET',secret);vi.stubGlobal('fetch',routeFetch);
-    graph.importContactSource.mockResolvedValue({entity:{id:'one'},created:false});
-    await hub('oc_import_contact_source',card,undefined,'grant:one','Shared');
-    await hub('oc_import_contact_source',card,undefined,'grant:two','Shared');
-    await hub('oc_import_contact_source',card,undefined,'grant:one','Renamed');
-    expect(graph.importContactSource.mock.calls.map(call=>call[3])).toEqual(['grant:one','grant:two','grant:one']);
-    expect(graph.importContactSource.mock.calls.map(call=>call[2].author)).toEqual(['agent:Shared','agent:Shared','agent:Renamed']);
-    const rejected=await hub('oc_import_contact_source',card,undefined,null);
-    expect(rejected.value.result.isError).toBe(true);expect(graph.importContactSource).toHaveBeenCalledTimes(3);
-  });
+  for (const scenario of [
+    { tool: 'oc_import_contact_source', args: card, method: graph.importContactSource, actorIndex: 3, provenanceIndex: 2 },
+    { tool: 'oc_import_contact_sources', args: { cards: [card] }, method: graph.importContactSources, actorIndex: 3, provenanceIndex: 2 },
+    { tool: 'oc_save_people_state', args: { thingId: 'synthetic-person', operationId: 'actor-test', expectedRevision: 0, payload: opaque }, method: graph.savePeopleState, actorIndex: 4, provenanceIndex: 3 },
+    { tool: 'oc_set_person_private', args: { userId: 'synthetic-target', important: true }, method: graph.updatePersonCard, actorIndex: 4, provenanceIndex: 3 },
+  ]) {
+    it(`${scenario.tool} retains immutable actors across labels and rejects missing identity before writing`, async () => {
+      vi.stubEnv('IDEAFLOW_CONNECTOR_SECRET', secret);
+      vi.stubGlobal('fetch', routeFetch);
+      scenario.method.mockResolvedValue({ accepted: true });
+      for (const [actorId, label] of [['grant:one', 'Shared'], ['grant:two', 'Shared'], ['grant:one', 'Renamed']]) {
+        const result = await hub(scenario.tool, scenario.args, undefined, actorId, label);
+        expect(result.value.result.isError).toBeUndefined();
+      }
+      expect(scenario.method.mock.calls.map(call => call[scenario.actorIndex])).toEqual(['grant:one', 'grant:two', 'grant:one']);
+      expect(scenario.method.mock.calls.map(call => call[scenario.provenanceIndex].author)).toEqual(['agent:Shared', 'agent:Shared', 'agent:Renamed']);
+      const rejected = await hub(scenario.tool, scenario.args, undefined, null);
+      expect(rejected.value.result.isError).toBe(true);
+      expect(scenario.method).toHaveBeenCalledTimes(3);
+    });
+  }
 
   it('reads owner-private contact state through both hub and MCP without account profile fields', async()=>{
     const state={thingId:'openchat-backed',card:{important:true},contactSources:[card],peopleState:{revision:4,payload:opaque}};
