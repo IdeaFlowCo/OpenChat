@@ -15,6 +15,20 @@ A monorepo for the OpenChat application.
 
 > **Note:** `apps/mobile` is the singular product client for both native mobile and responsive web. `apps/web` is entirely legacy and retained only for history and migration reference.
 
+## Saved people
+
+From **Chats**, open **People**, then **Friends** to see **Saved people**.
+The list loads all pages automatically and shows how many records have loaded.
+**Incomplete** means loading has stopped before the end; **Retry loading people**
+continues after a failure. Previously displayed people stay visible during an
+incomplete refresh. A final **N saved people** count covers your saved private
+person records, not OpenChat accounts or a verified total of your device contacts.
+
+Choose **+ Add person**, enter a name, and **Save privately**; **Private profile**
+opens the record's notes and asks. Saving a person does not invite or notify them.
+Agent import, pagination and durable-state contracts are in the
+[private graph reference](docs/private-graph.md).
+
 ## Messages and Stream
 
 On web, **Enter** sends a chat message and **Shift+Enter** inserts a newline.

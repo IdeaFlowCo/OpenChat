@@ -23,6 +23,13 @@ and an HS256 assertion in `Authorization: Bearer …`. Claims:
 - `iat`, `exp`: integer seconds, lifetime at most 60 seconds
 - `jti`: unique identifier for each assertion, including retries
 - `body_sha256`: lowercase SHA-256 hex digest of the exact UTF-8 HTTP request body
+- `client` (optional): readable registered client name, used only for provenance
+- `actor_id` (optional): stable verified grant identity, 1–256 printable ASCII
+  characters without spaces; forwarded through the one-use REST delegation
+
+The contact/state writes listed under
+[verified contact actors](private-graph.md#verified-contact-actors-and-profile-independent-readback)
+require `actor_id`; older assertions without it can still use other tools.
 
 Raw bytes are verified before JSON parsing. The assertion is accepted once, only
 by the adapter; it is never a normal OpenChat bearer token. Replay tracking is

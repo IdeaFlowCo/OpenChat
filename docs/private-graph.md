@@ -65,10 +65,11 @@ these routes never return it.
 | `GET /neighbourhood?subjectKind=user\|thing\|unlinked&subjectId=&depth=1\|2` | A subject and everything one or two links away, with those links (`from`, `to`). Never creates anything; at most 100 nodes and 200 links. Blocked people are left out |
 | `GET /things?q=&kind=&after=&limit=&details=` | A page of saved things, matching `total` and `nextCursor`; see [Pagination](#pagination) |
 | `GET /things/:thingId` | One saved thing with its card, optional People state, contact sources, notes and links |
+| `GET /things/:thingId/contact-state` | Owner-only card, sources and People state, including OpenChat-backed entities; see [readback](#verified-contact-actors-and-profile-independent-readback) |
 | `POST /contact-sources`, `POST /contact-source-batches` | Import one source card or `{cards: [...]}`; see [Contact sources and People state](#contact-sources-and-people-state) |
 | `PUT /things/:thingId/people-state` | Versioned state replacement with an operation receipt; see [Contact sources and People state](#contact-sources-and-people-state) |
 | `PATCH /things/:thingId` | `{ name?, description?, kind? }`: rename, describe (`null` or `''` clears) or change the kind of a saved thing (an idea that became a project). Someone on Unlinked keeps their kind (409); an OpenChat person's card answers 404 |
-| `DELETE /things/:thingId` | Delete (undo) a saved thing: the entity, its notes, its links in both directions and its refs, plus OpenChat's note reviews and asks about it, in one transaction. Answers `{deleted: true, id, notesRemoved, linksRemoved}`; a missing, already-deleted or foreign id, or an OpenChat person's card, answers 404 |
+| `DELETE /things/:thingId` | Delete (undo) a saved thing: the entity, its notes, its links in both directions, refs, contact sources and People-state operation receipts, plus OpenChat's note reviews and asks about it, in one transaction. Answers `{deleted: true, id, notesRemoved, linksRemoved}`; a missing, already-deleted or foreign id, or an OpenChat person's card, answers 404 |
 | `POST /things`, `POST /things/resolve` | `{kind, name, description?}` / `{kind, name, description?, createNew?, clientRequestId?}`: find or save by name under the no-merge rules below. A description is stored on a new thing and fills an existing thing's blank one; it never replaces one |
 | `GET /due` | People whose catch-up date has passed |
 | `GET /links?q=` | Every link the owner recorded, newest first, filtered by a name or relation |
@@ -85,7 +86,11 @@ the owner and normalized name/kind filters; changing that scope returns 400.
 `total` counts all matching saved things, excluding OpenChat account entities,
 asks and blurbs, rather than just this page. Traversal continues beyond 5,000
 results. Concurrent graph edits can change membership and totals between pages;
-this is not a frozen snapshot.
+this is not a frozen snapshot. Reconcile missing records only after reaching
+`nextCursor: null`; an interrupted traversal is incomplete. Creation capacity
+is governed by the canonical
+[`LIMITS`](../apps/server/src/services/overlay/contract.ts), independently of
+the page size.
 
 Every result includes its canonical `card` and `peopleState` when present.
 `details: true` (REST `details=true`) also returns `notes`, `links` and
@@ -116,7 +121,7 @@ was imported. Retry failed cards with their original source identifiers.
 a tool argument) takes `{operationId, expectedRevision, payload}`. The payload
 is a complete replacement JSON object with `schemaVersion: 1`, not a patch.
 Use `expectedRevision: 0` when no state exists. A successful write returns
-`{schemaVersion, revision, payload, updatedAt, author, source, assertion}`.
+`{schemaVersion, revision, payload, updatedAt, author, source, assertion, actorId}`.
 An optional `payload.card` also updates canonical importance and cadence;
 its exact validation contract is owned by
 [`stateCard`](../apps/server/src/services/overlay/contacts.ts).
@@ -125,16 +130,40 @@ An exact replay for the same owner, entity, operation, authenticated app and
 actor, revision and payload returns the original receipt. Reusing that
 operation id with different content or attribution returns 409
 `operation_id_reused`; a stale revision returns 409 `state_conflict`. Preserve
-the local payload for reconciliation, then use a new operation id for the
-revised write. Existing `PATCH /people/:userId` card writes also advance People
-state, preserving other payload fields and recording the authenticated writer,
-so an older People-state revision cannot overwrite them silently.
+the local payload for reconciliation, read the current state through
+[`oc_get_contact_state`](#verified-contact-actors-and-profile-independent-readback),
+then use a new operation id for the revised write. A legacy agent receipt that
+cannot establish stable actor identity returns 409
+`legacy_operation_requires_reconciliation`; read back and reconcile before
+attempting a new write. A verified label rename does not change the actor or
+invalidate an otherwise exact replay. Existing `PATCH /people/:userId` card
+writes also advance People state, preserving other payload fields and recording
+the authenticated writer, so an older People-state revision cannot overwrite
+them silently.
 
 Source/state provenance comes from authentication, never opaque JSON fields.
 Neither route changes owner access or Unlinked grants. Each source `data` or
 state `payload` is limited to 262,144 serialized UTF-8 bytes. HTTP bodies allow
 1 MiB for single imports/state writes and 7 MiB for batches; the connector MCP
 envelope allows 7 MiB. These do not raise limits on unrelated REST routes.
+
+### Verified contact actors and profile-independent readback
+
+Source-card imports, People-state saves and legacy person-card PATCHes carry a
+stable verified actor ID separately from the readable `author` label. Connector
+requests use the hub's signed
+[`actor_id` claim](ideaflow-unified-connector.md#service-configuration); direct
+OpenChat keys use their verified key ID. Missing connector identity rejects
+these writes before the store. Labels and request bodies cannot establish
+actor identity. The canonical source pin is owned by
+[`NOOS_SOURCE.json`](../apps/server/src/services/overlay/NOOS_SOURCE.json).
+
+`GET /api/private/things/:thingId/contact-state` and `oc_get_contact_state` return
+only the owner's `thingId`, canonical `card`, `contactSources` and optional
+`peopleState`, including on OpenChat-backed entities. They do not expose the
+associated account profile or widen its visibility. The existing saved-thing
+list and detail exclusions remain. Link browsing uses the canonical lightweight
+projection so it does not load unrelated source JSON or People payloads.
 
 ## People from Unlinked
 
@@ -247,10 +276,13 @@ projects are about, such as ADHD or coherence). Each may carry a one-line
 is; search matches it. A saved thing's kind can change (an idea becomes a
 project) unless it names someone on Unlinked.
 
-Account export includes the owner's private graph under `privateGraph`
-(entities, notes and links). Account deletion removes everything the person
-kept, under either identity that can name them, and removes other owners'
-entities that knew them only as an OpenChat account.
+Account export includes the owner's private graph under `privateGraph`:
+entities with People state, notes and links, plus contact sources and blurb state
+when present. Account deletion removes everything the person kept, under either
+identity that can name them, and removes other owners' entities that knew them
+only as an OpenChat account. An entity with an imported
+contact source survives removal of that account ref; its owner-private source
+record is independent of the deleted account.
 
 ## Asks
 
@@ -377,19 +409,3 @@ relation edits, search, neighbourhood), `privateNoteReview.integration.test.ts` 
 `privateAsks.integration.test.ts` (asks, owner isolation, the migration),
 which run against a real Neo4j when
 `NEO4J_TEST_URI`, `NEO4J_TEST_USER` and `NEO4J_TEST_PASSWORD` are set.
-
-### Verified contact actors and profile-independent readback
-
-Source-card imports, People-state saves and legacy person-card PATCHes carry a
-stable verified actor ID separately from the readable `author` label. Connector
-requests use the signed grant identity forwarded by the hub; direct OpenChat keys
-use their verified key ID. Missing connector identity rejects these writes before
-the store. Labels and request bodies cannot establish actor identity. The pinned
-canonical implementation is the merged Noos PR115 source at `49201d15056913315abd32169ad6ce9ad8d57f66`.
-
-`GET /api/private/things/:thingId/contact-state` and `oc_get_contact_state` return
-only the owner's `thingId`, canonical `card`, `contactSources` and optional
-`peopleState`, including on OpenChat-backed entities. They do not expose the
-associated account profile or widen its visibility. The existing saved-thing
-list and detail exclusions remain. Link browsing uses the canonical lightweight
-projection so it does not load unrelated source JSON or People payloads.

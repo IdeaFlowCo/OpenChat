@@ -118,12 +118,15 @@ OPENCHAT_API_KEY=oc_... npm start --workspace=openchat-mcp-server
 OPENCHAT_API_KEY=oc_... npm run start:http --workspace=openchat-mcp-server
 ```
 
-## Existing Ideaflow connector preparation
+## Shared Ideaflow connector
 
-The separate delegated adapter is preparation for the existing Ideaflow
-connector, which has no OpenChat tools yet. It does not use the setup or
-credential fallback below. See the [integration packet](../../docs/connector-delegation-integration-packet.md)
-for its contract and activation gates.
+The shared connector exposes OpenChat tools through a separate signed adapter;
+it does not use the agent-key setup or credential fallback below. See the
+[adapter contract](../../docs/ideaflow-unified-connector.md) for its identity,
+scope and delegation rules.
+
+The older `ocd_` delegated-token harness remains separate preparation, with its
+own [contract and activation gates](../../docs/connector-delegation-integration-packet.md).
 
 ## Authentication
 
@@ -149,6 +152,9 @@ Set the API key one of three ways (checked in this order):
 
 For the additive shared Context/Stream read tool, see
 [conversation content](../../docs/conversation-content.md).
+For private people tools, including paginated saved things, contact-source
+imports and versioned People state, see the
+[private graph reference](../../docs/private-graph.md#api).
 
 | Tool | Description |
 |---|---|
