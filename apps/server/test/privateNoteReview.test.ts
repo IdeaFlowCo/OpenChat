@@ -7,8 +7,9 @@ vi.mock('../src/services/privateGraph.js', async () => {
 });
 import { captureNoteReview, parseSuggestions, similarAsk, undoNoteReview, applyNoteReview } from '../src/services/privateNoteReview.js';
 import { lockPrivateReviewSubjectIn } from '../src/services/privateGraph.js';
+import { ownerKeyFor } from '../src/services/overlay/contract.js';
 
-const OWNER_KEY = 'a'.repeat(64);
+const OWNER_KEY = ownerKeyFor('https://chat.ideaflow.app/openchat-user','alice');
 const review = { id: 'review-id', subject: {kind:'user',id:'bob'}, note:{id:'raw-note',text:'Chet works at Acme',createdAt:'now',updatedAt:'now'},status:'applied',suggestions:[],appliedIds:['s1'],createdAt:'now',createdRecords:[{id:'new-link',kind:'connection',suggestionId:'s1'},{id:'new-ask',kind:'ask',suggestionId:'s2'}] };
 const rows = (data: Record<string, unknown>) => ({ records: [{get: (key: string) => data[key]}] });
 beforeEach(() => {
@@ -59,9 +60,17 @@ describe('review subject validation under the entity lock', () => {
       parameters?.userId === 'alice' ? {records:[]} : rows({refs:[]}));
     await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'thing',id:'entity-id'},'alice')).rejects.toMatchObject({status:404});
   });
-  it('refuses a card now associated with a different account', async () => {
+  it('uses the surviving associated account after its original ref is purged', async () => {
     const run = vi.fn().mockResolvedValue(rows({refs:['openchat:user:carol']}));
+    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).toEqual({kind:'user',id:'carol'});
+  });
+  it.each([{blocked:true},{isBot:true}])('refuses an inaccessible surviving account: %j', async access => {
+    const run = vi.fn().mockResolvedValue(rows({refs:['openchat:user:carol'],...access}));
     await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).rejects.toMatchObject({status:404});
+  });
+  it('refuses a changed owner binding before saving a review', async () => {
+    const run = vi.fn().mockResolvedValue(rows({refs:[],issuer:'https://different-owner.test',subject:'new-owner'}));
+    await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).rejects.toMatchObject({status:409,details:{code:'contact_owner_changed'}});
   });
 });
 describe('durable batch operations', () => {
