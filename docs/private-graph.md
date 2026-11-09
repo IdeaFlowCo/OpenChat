@@ -48,9 +48,11 @@ last catch-up, or from when the cadence was set.
 
 All routes are under `/api/private` and act for the authenticated owner; no id
 in a request can select another owner. A session has full access. An agent key
-needs `read` to look and `write` to change. A missing, blocked, bot or
-foreign-owned target answers 404; the client signs a person out on 403, so
-these routes never return it.
+needs `read` to look and `write` to change. Profile-dependent routes hide
+missing, blocked and bot accounts with 404; missing or foreign-owned saved
+entities also answer 404. Owner-private contact-state readback is independent
+of the associated account's visibility (see [readback](#verified-contact-actors-and-profile-independent-readback)).
+The client signs a person out on 403, so these routes never return it.
 
 | Route | Purpose |
 |---|---|
@@ -86,8 +88,11 @@ the owner and normalized name/kind filters; changing that scope returns 400.
 `total` counts all matching saved things, excluding OpenChat account entities,
 asks and blurbs, rather than just this page. Traversal continues beyond 5,000
 results. Concurrent graph edits can change membership and totals between pages;
-this is not a frozen snapshot. Reconcile missing records only after reaching
-`nextCursor: null`; an interrupted traversal is incomplete. Creation capacity
+this is not a frozen snapshot. Before reconciling missing records, require
+`nextCursor: null`, the same `total` on every page, and a unique entity count
+equal to that total. If totals drift or the final count differs, restart from
+the beginning; an interrupted or inconsistent traversal is incomplete. Even
+matching counts cannot detect every concurrent replacement. Creation capacity
 is governed by the canonical
 [`LIMITS`](../apps/server/src/services/overlay/contract.ts), independently of
 the page size.
@@ -103,6 +108,17 @@ The mobile People list requests REST `summary=true`: each row contains only
 out of the list's retained data. Summary mode takes precedence over `details`.
 Default list responses, synchronization, detail and contact-state reads retain
 their complete payloads.
+
+The Saved people client retains previously displayed rows until a traversal
+passes those completion checks. On count drift it retries once from the
+beginning, then leaves the list incomplete with a retry action if reconciliation
+still fails. Network failures retain an in-memory page checkpoint; retries
+resume it. An inconsistent second traversal discards its checkpoint so the next
+retry starts over. While the screen remains mounted, losing focus cancels
+in-flight updates without discarding its checkpoint; reloading or remounting
+starts over. Account changes clear both the rows and checkpoint, and late
+responses from the old account are ignored. The list virtualizes saved-person
+rows rather than mounting them all.
 
 ### Contact sources and People state
 
@@ -122,10 +138,16 @@ Each card has its own transaction; the response's `results` contains one
 indexed receipt per input, either `{index, id, created, unchanged}` or
 `{index, error}`. Inspect every receipt: HTTP success does not mean every card
 was imported. Retry failed cards with their original source identifiers.
+Each transaction rechecks the owner's account and identity. Account deletion
+or identity changes can abort the batch with `contact_owner_unavailable` (404)
+or `contact_owner_changed` (409); the error includes the failing `index` and
+prior `results`. Later cards have not been attempted.
 
 `PUT /things/:thingId/people-state` (`oc_save_people_state`, with `thingId` as
 a tool argument) takes `{operationId, expectedRevision, payload}`. The payload
 is a complete replacement JSON object with `schemaVersion: 1`, not a patch.
+Read the current payload first and preserve native and unknown fields that the
+writer does not own.
 Use `expectedRevision: 0` when no state exists. A successful write returns
 `{schemaVersion, revision, payload, updatedAt, author, source, assertion, actorId}`.
 An optional `payload.card` also updates canonical importance and cadence;
@@ -406,12 +428,21 @@ under [What it holds](#what-it-holds). Unlinked people, including imported Linke
 authenticated route attribution with a mocked graph service; it does not
 establish database persistence or native-device behavior.
 
+`contacts.pagination.api.test.ts` covers the authenticated mobile paging
+arguments. `contacts.pagination.mobile.test.ts` exercises the real hook and
+RN-web list with synthetic pages beyond 5,000 people, retry checkpoints,
+count-drift reconciliation and account isolation. `contacts.evidence.mobile.test.ts`
+renders the screen with RN-web primitives and synthetic API responses; its
+optional `CONTACTS_UI_EVIDENCE` output is a static capture, not an authenticated
+browser or native-device check.
+
 `privateGraph.test.ts` (rules), `privateGraph.route.test.ts` and
 `privateGraph.scope.test.ts` (routes, provenance), `privateGraph.mobile.test.ts` (card),
 `overlayVendor.test.ts` (vendored files match the pinned Noos commit),
 and `privateGraph.integration.test.ts`, `privateGraph.people.integration.test.ts`,
 `privateGraph.provenance.integration.test.ts` (provenance, legacy records,
-relation edits, search, neighbourhood), `privateNoteReview.integration.test.ts` and
+relation edits, search, neighbourhood), `contacts.owner.integration.test.ts`
+(per-card commits and owner deletion/identity changes), `privateNoteReview.integration.test.ts` and
 `privateAsks.integration.test.ts` (asks, owner isolation, the migration),
 which run against a real Neo4j when
 `NEO4J_TEST_URI`, `NEO4J_TEST_USER` and `NEO4J_TEST_PASSWORD` are set.

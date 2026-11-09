@@ -261,11 +261,13 @@ webhooks only to registered service endpoints. OpenChat cannot and does not call
 into a consumer ChatGPT or Claude chat session; there is no reverse-invocation
 path into those conversations.
 
-The live agent integration has no OpenChat-hosted `/mcp` HTTP endpoint, no OAuth
-or Dynamic Client Registration, and no npm package publication. The separate
-[Ideaflow connector preparation](https://github.com/IdeaFlowCo/OpenChat/blob/main/docs/connector-delegation-integration-packet.md)
-is a disabled authorization-code harness, not a live connector. The MCP adapter
-runs locally over stdio (or on infrastructure you host). Context enforces read/write key scopes and current conversation membership.
+The agent-key MCP adapter runs locally over stdio (or on infrastructure you
+host); it has no OpenChat-hosted `/mcp` endpoint, OAuth, Dynamic Client
+Registration or npm package publication. The
+[shared Ideaflow connector adapter](https://github.com/IdeaFlowCo/OpenChat/blob/main/docs/ideaflow-unified-connector.md) is a separate
+signed integration. The older
+[delegated-token harness](https://github.com/IdeaFlowCo/OpenChat/blob/main/docs/connector-delegation-integration-packet.md) remains
+disabled in production. Context enforces read/write key scopes and current conversation membership.
 Some older chat endpoints still act with the owning user's permissions rather
 than enforcing scope labels; do not treat a read-only label as a global guarantee.
 

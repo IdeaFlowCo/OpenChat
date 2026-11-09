@@ -1,6 +1,11 @@
-# OpenChat tools in the existing Ideaflow connector: integration packet
+# Disabled OpenChat delegated-token harness: integration packet
 
-Date: 2026-09-30. Owner: OpenChat source lane. State: preparation only; existing-install integration unfinished. This packet is outside Thoughtstream Web and does not authorize any protected-endpoint change, live login, deployment, or production message.
+Date: 2026-09-30. Owner: OpenChat source lane. State: delegated-token harness preparation only; production activation unfinished. This packet is outside Thoughtstream Web and does not authorize any protected-endpoint change, live login, deployment, or production message.
+
+This packet covers only the older `ocd_` authorization-code harness. The
+[shared Ideaflow connector adapter](ideaflow-unified-connector.md) owns the
+current signed-assertion integration and its independent scopes; the harness's
+activation gates below do not describe that adapter.
 
 ## Exact exception requested later
 
@@ -38,7 +43,7 @@ Production persistence addition before enabling: atomically consume transaction/
 
 OpenChat issue `openchat-3l2` tracks this source slice. The local fake relying-party/upstream tests cover authorization-code/PKCE exchange, exact callback/state, one-use code, account switch denial, concurrent user separation, route and scope denial, send retry and grant-specific revoke. Build, typecheck, lint, and PR CI results must be supplied by the outer executor; this packet does not claim those gates have passed. The fixture sends no production message.
 
-Remaining gates: production-persistent atomic delegation storage, central-login owner review, protected Thoughtstream Web endpoint exception and implementation, current platform review/reconnect verification, separately approved test message/browser test, live-login approval, deployment/activation. Until those gates clear, the existing Ideaflow install has no OpenChat tools.
+Remaining harness gates: production-persistent atomic delegation storage, central-login owner review, protected Thoughtstream Web endpoint exception and implementation, current platform review/reconnect verification, separately approved test message/browser test, live-login approval, deployment/activation. Until those gates clear, this delegated-token harness remains disabled in production.
 
 Private source retained unchanged at
 `/Volumes/External_SSD/macmini-relocated/treehouse/firstmate-7bab20/1/firstmate/data/openchat-connector-delegation/integration-packet.md`.
