@@ -125,7 +125,7 @@ export async function captureNoteReview(ownerId: string, subject: ReviewSubject,
   const db = session();
   try {
     return await db.executeWrite(async tx => {
-      const currentSubject = await lockPrivateReviewSubjectIn(tx, principal.ownerKey, entityId, subject);
+      const currentSubject = await lockPrivateReviewSubjectIn(tx, principal.ownerKey, entityId, subject, ownerId);
       const prior = await tx.run('MATCH (r:OpenChatNoteReview {ownerKey:$ownerKey,entityId:$entityId,requestId:$requestId}) RETURN r.payload AS payload', { ownerKey: principal.ownerKey, entityId, requestId });
       if (prior.records.length) {
         const existing = decode(prior.records[0]!.get('payload'));

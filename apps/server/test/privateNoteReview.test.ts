@@ -33,20 +33,35 @@ describe('review subject validation under the entity lock', () => {
   it('retains the exact attached account subject', async () => {
     const run = vi.fn().mockResolvedValue(rows({refs:['openchat:user:bob%3Aexternal']}));
     const subject = {kind:'user',id:'bob:external'} as const;
-    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',subject)).toEqual(subject);
-    expect(run.mock.calls[0]![1]).toEqual({ownerKey:OWNER_KEY,entityId:'entity-id'});
+    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',subject,'alice')).toEqual(subject);
   });
   it.each([{refs:[]},{refs:['other:person:bob']}])('normalizes a surviving card with refs $refs to its canonical identity', async ({refs}) => {
     const run = vi.fn().mockResolvedValue(rows({refs}));
-    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'})).toEqual({kind:'thing',id:'entity-id'});
+    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).toEqual({kind:'thing',id:'entity-id'});
   });
   it('refuses erased or foreign entities instead of saving an orphan', async () => {
-    const run = vi.fn().mockResolvedValue({records:[]});
-    await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'missing',{kind:'user',id:'bob'})).rejects.toMatchObject({status:404});
+    const run = vi.fn(async (_query: string, parameters?: Record<string, unknown>) =>
+      parameters?.entityId ? {records:[]} : rows({id:parameters?.userId}));
+    await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'missing',{kind:'user',id:'bob'},'alice')).rejects.toMatchObject({status:404});
+  });
+  it('uses a surviving card after the original account disappears', async () => {
+    const run = vi.fn(async (_query: string, parameters?: Record<string, unknown>) =>
+      parameters?.userId === 'bob' ? {records:[]} : rows({refs:['other:person:bob']}));
+    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).toEqual({kind:'thing',id:'entity-id'});
+  });
+  it('refuses a stale attached account that no longer exists', async () => {
+    const run = vi.fn(async (_query: string, parameters?: Record<string, unknown>) =>
+      parameters?.userId === 'bob' ? {records:[]} : rows({refs:['openchat:user:bob']}));
+    await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).rejects.toMatchObject({status:404});
+  });
+  it('refuses capture after the owning account disappears', async () => {
+    const run = vi.fn(async (_query: string, parameters?: Record<string, unknown>) =>
+      parameters?.userId === 'alice' ? {records:[]} : rows({refs:[]}));
+    await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'thing',id:'entity-id'},'alice')).rejects.toMatchObject({status:404});
   });
   it('refuses a card now associated with a different account', async () => {
     const run = vi.fn().mockResolvedValue(rows({refs:['openchat:user:carol']}));
-    await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'})).rejects.toMatchObject({status:404});
+    await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).rejects.toMatchObject({status:404});
   });
 });
 describe('durable batch operations', () => {

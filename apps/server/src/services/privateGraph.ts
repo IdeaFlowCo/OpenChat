@@ -20,9 +20,9 @@
 
 import { getDriver } from '../db.js';
 import { DEFAULT_PUBLIC_DISPLAY_NAME } from '../privacy/profilePrivacy.js';
-import { ASK_EXPOSURES, ASK_HORIZONS, ASK_STATUSES, linkedinHashOf, parseAskInput, parseAskPatch, linkedinRef, OverlayError, OWNER_PROVENANCE, ownerKeyFor, RELATION_TYPES } from './overlay/contract.js';
+import { ASK_EXPOSURES, ASK_HORIZONS, ASK_STATUSES, cleanName, cleanRef, linkedinHashOf, parseAskInput, parseAskPatch, linkedinRef, OverlayError, OWNER_PROVENANCE, ownerKeyFor, RELATION_TYPES } from './overlay/contract.js';
 import type { Ask, AskEvidence, AskExposure, AskHorizon, AskStatus, Candidate, Edge, Entity, EntityDetail, Link as OverlayLink, LinkEnd as OverlayLinkEnd, OverlayPrincipal, Provenance, RelationType } from './overlay/contract.js';
-import { deleteEntityIn, deleteNoteIn, deleteOwnerIn, OverlayStore, purgeRefIn } from './overlay/store.js';
+import { deleteEntityIn, deleteNoteIn, deleteOwnerIn, ensureIn, OverlayStore, purgeRefIn } from './overlay/store.js';
 import { lookupUnlinkedContactForIdentity, lookupUnlinkedContactsByHash } from './unlinkedProvision.js';
 import type { UnlinkedContact } from './unlinkedProvision.js';
 
@@ -365,15 +365,7 @@ async function assertPerson(ownerId: string, userId: string): Promise<{ person: 
   if (typeof userId !== 'string' || !userId || userId.length > 200) fail(404, 'Person unavailable');
   const session = getDriver().session();
   try {
-    const result = await session.run(`
-      MATCH (owner:User {id: $ownerId}), (subject:User {id: $userId})
-      RETURN coalesce(subject.isBot, false) AS isBot,
-        ((owner)-[:BLOCKED]->(subject) OR (subject)-[:BLOCKED]->(owner)) AS blocked,
-        coalesce(subject.name, 'Unknown') AS name, subject.avatarUrl AS avatarUrl, ${displayName} AS shownName,
-        owner.ideaflowIssuer AS issuer, owner.ideaflowSub AS subjectId
-    `, { ownerId, userId, fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME });
-    const record = result.records[0];
-    if (!record || record.get('isBot') === true || record.get('blocked') === true) return fail(404, 'Person unavailable');
+    const record = await personRecordIn(session, ownerId, userId);
     return {
       person: { id: userId, name: String(record.get('name')), avatarUrl: (record.get('avatarUrl') as string | null) ?? null },
       principal: await principalFor(ownerId, record.get('issuer'), record.get('subjectId')),
@@ -382,11 +374,44 @@ async function assertPerson(ownerId: string, userId: string): Promise<{ person: 
   } finally { await session.close(); }
 }
 
+async function personRecordIn(tx: Runner, ownerId: string, userId: string) {
+  const result = await tx.run(`
+    MATCH (owner:User {id: $ownerId}), (subject:User {id: $userId})
+    RETURN coalesce(subject.isBot, false) AS isBot,
+      ((owner)-[:BLOCKED]->(subject) OR (subject)-[:BLOCKED]->(owner)) AS blocked,
+      coalesce(subject.name, 'Unknown') AS name, subject.avatarUrl AS avatarUrl, ${displayName} AS shownName,
+      owner.ideaflowIssuer AS issuer, owner.ideaflowSub AS subjectId
+  `, { ownerId, userId, fallbackName: DEFAULT_PUBLIC_DISPLAY_NAME });
+  const record = result.records[0];
+  if (!record || record.get('isBot') === true || record.get('blocked') === true) return fail(404, 'Person unavailable');
+  return record;
+}
+
+async function lockPrivateGraphAccountsIn(tx: Runner, userIds: string[]): Promise<Set<string>> {
+  const present = new Set<string>();
+  for (const userId of [...new Set(userIds)].sort()) {
+    await tx.run('MATCH (u:User {id:$userId}) SET u._privateGraphLock=true REMOVE u._privateGraphLock', { userId });
+    const live = await tx.run('MATCH (u:User {id:$userId}) RETURN u.id AS id', { userId });
+    if (live.records.length) present.add(userId);
+  }
+  return present;
+}
+
 /** The overlay entity for an OpenChat person, created on first write. */
 async function personEntity(ownerId: string, userId: string): Promise<{ principal: OverlayPrincipal; entityId: string; person: PersonBasics }> {
-  const { person, principal, name } = await assertPerson(ownerId, userId);
-  const { entity } = await overlayCall(overlay => overlay.ensure(principal, { kind: 'person', name, ref: userRef(userId) }));
-  return { principal, entityId: entity.id, person };
+  const { principal } = await assertPerson(ownerId, userId);
+  return overlayCall(async () => {
+    const db = getDriver().session({ database: process.env.NEO4J_DATABASE || 'neo4j' });
+    try {
+      return await db.executeWrite(async tx => {
+        const present = await lockPrivateGraphAccountsIn(tx, [ownerId, userId]);
+        if (!present.has(ownerId) || !present.has(userId)) return fail(404, 'Person unavailable');
+        const record = await personRecordIn(tx, ownerId, userId);
+        const { entity } = await ensureIn(tx, principal.ownerKey, { kind: 'person', name: cleanName(record.get('shownName')), ref: cleanRef(userRef(userId)) });
+        return { principal, entityId: entity.id, person: { id: userId, name: String(record.get('name')), avatarUrl: (record.get('avatarUrl') as string | null) ?? null } };
+      });
+    } finally { await db.close(); }
+  });
 }
 
 /** Link ends as the app knows them: an OpenChat person by user id and current name, anything else by entity id. */
@@ -940,6 +965,7 @@ async function eraseCanonicalEntitiesIn<T>(tx: Runner, erase: (runner: Parameter
  * entity that knew this person only as an OpenChat account.
  */
 export async function deletePrivateGraphForUser(tx: Runner, userId: string): Promise<void> {
+  await lockPrivateGraphAccountsIn(tx, [userId]);
   const identity = await tx.run('MATCH (user:User {id: $userId}) RETURN user.ideaflowIssuer AS issuer, user.ideaflowSub AS subject', { userId });
   const issuer = identity.records[0]?.get('issuer'), subject = identity.records[0]?.get('subject');
   const runner = tx as unknown as Parameters<typeof deleteOwnerIn>[0];
@@ -991,12 +1017,18 @@ export async function ensurePrivateGraphIndexes(): Promise<void> {
 }
 
 /** Verified adapter for OpenChat-only review records; the shared overlay contract stays unchanged. */
-export async function lockPrivateReviewSubjectIn(tx: Runner, ownerKey: string, entityId: string, subject: { kind: 'user' | 'thing'; id: string }): Promise<{ kind: 'user' | 'thing'; id: string }> {
+export async function lockPrivateReviewSubjectIn(tx: Runner, ownerKey: string, entityId: string, subject: { kind: 'user' | 'thing'; id: string }, ownerId: string): Promise<{ kind: 'user' | 'thing'; id: string }> {
+  const present = await lockPrivateGraphAccountsIn(tx, subject.kind === 'user' ? [ownerId, subject.id] : [ownerId]);
+  if (!present.has(ownerId)) return fail(404, 'Not found');
   const locked = await tx.run(`MATCH (e:OverlayEntity {id:$entityId,ownerKey:$ownerKey}) SET e._lock=true REMOVE e._lock
     RETURN [(r:OverlayRef {ownerKey:$ownerKey})-[:REF_OF]->(e) | r.ref] AS refs`, { entityId, ownerKey });
   if (!locked.records.length) return fail(404, 'Not found');
   const refs = locked.records[0]!.get('refs') as string[];
-  if (subject.kind === 'user' && refs.includes(userRef(subject.id))) return subject;
+  if (subject.kind === 'user' && refs.includes(userRef(subject.id))) {
+    if (!present.has(subject.id)) return fail(404, 'Person unavailable');
+    await personRecordIn(tx, ownerId, subject.id);
+    return subject;
+  }
   if (userIdOf(refs) !== null) return fail(404, 'Not found');
   return { kind: 'thing', id: entityId };
 }
