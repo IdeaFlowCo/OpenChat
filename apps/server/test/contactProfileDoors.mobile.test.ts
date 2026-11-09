@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ platform: { OS: 'ios', select: (v: any) => v.i
 vi.mock('react-native', () => ({
   Platform: mocks.platform, StyleSheet: { create: (s: unknown) => s, hairlineWidth: 1 },
   ActivityIndicator: 'ActivityIndicator', Alert: { alert: vi.fn() }, Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View', ScrollView: 'ScrollView', KeyboardAvoidingView: 'KeyboardAvoidingView',
-  FlatList: ({ data, renderItem, ListEmptyComponent, ListHeaderComponent, onEndReached }: any) => React.createElement('FlatList', { onEndReached }, ListHeaderComponent, data?.length ? data.map((item: any, index: number) => React.createElement(React.Fragment, { key: index }, renderItem({ item, index }))) : ListEmptyComponent),
+  FlatList: ({ data, renderItem, ListEmptyComponent, ListHeaderComponent, ListFooterComponent, onEndReached }: any) => React.createElement('FlatList', { onEndReached }, ListHeaderComponent, data?.length ? data.map((item: any, index: number) => React.createElement(React.Fragment, { key: index }, renderItem({ item, index }))) : ListEmptyComponent, ListFooterComponent),
 }));
 vi.mock('@react-navigation/native', () => ({ useNavigation: () => mocks.navigation, useRoute: () => ({ params: {} }), useFocusEffect: (callback: () => void) => React.useEffect(callback, [callback]) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
