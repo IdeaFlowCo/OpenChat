@@ -6,6 +6,7 @@ vi.mock('../src/services/privateGraph.js', async () => {
   return { ...actual, privateReviewSubject: mocks.subject, privateReviewPrincipal: mocks.principal, addNote: mocks.addNote };
 });
 import { captureNoteReview, parseSuggestions, similarAsk, undoNoteReview, applyNoteReview } from '../src/services/privateNoteReview.js';
+import { lockPrivateReviewSubjectIn } from '../src/services/privateGraph.js';
 
 const OWNER_KEY = 'a'.repeat(64);
 const review = { id: 'review-id', subject: {kind:'user',id:'bob'}, note:{id:'raw-note',text:'Chet works at Acme',createdAt:'now',updatedAt:'now'},status:'applied',suggestions:[],appliedIds:['s1'],createdAt:'now',createdRecords:[{id:'new-link',kind:'connection',suggestionId:'s1'},{id:'new-ask',kind:'ask',suggestionId:'s2'}] };
@@ -28,15 +29,35 @@ describe('private note review source validation', () => {
     expect(similarAsk('Find investors in Paris','Find cool people Sacramento')).toBe(false);
   });
 });
+describe('review subject validation under the entity lock', () => {
+  it('retains the exact attached account subject', async () => {
+    const run = vi.fn().mockResolvedValue(rows({refs:['openchat:user:bob%3Aexternal']}));
+    const subject = {kind:'user',id:'bob:external'} as const;
+    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',subject)).toEqual(subject);
+    expect(run.mock.calls[0]![1]).toEqual({ownerKey:OWNER_KEY,entityId:'entity-id'});
+  });
+  it.each([{refs:[]},{refs:['other:person:bob']}])('normalizes a surviving card with refs $refs to its canonical identity', async ({refs}) => {
+    const run = vi.fn().mockResolvedValue(rows({refs}));
+    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'})).toEqual({kind:'thing',id:'entity-id'});
+  });
+  it('refuses erased or foreign entities instead of saving an orphan', async () => {
+    const run = vi.fn().mockResolvedValue({records:[]});
+    await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'missing',{kind:'user',id:'bob'})).rejects.toMatchObject({status:404});
+  });
+  it('refuses a card now associated with a different account', async () => {
+    const run = vi.fn().mockResolvedValue(rows({refs:['openchat:user:carol']}));
+    await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'})).rejects.toMatchObject({status:404});
+  });
+});
 describe('durable batch operations', () => {
   it('returns prior capture on retry without writing a second raw note', async () => {
     const saved = {...review,status:'saved',createdRecords:[]};
-    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}) RETURN') ? rows({payload:JSON.stringify(saved)}) : {records:[]});
+    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}) RETURN') ? rows({payload:JSON.stringify(saved)}) : rows({refs:['openchat:user:bob']}));
     expect(await captureNoteReview('alice',{kind:'user',id:'bob'},{text:saved.note.text,requestId:'retry-key'})).toEqual(saved);
     expect(mocks.addNote).not.toHaveBeenCalled();
   });
   it('rejects reuse of a capture request ID for a different note', async () => {
-    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}) RETURN') ? rows({payload:JSON.stringify(review)}) : {records:[]});
+    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}) RETURN') ? rows({payload:JSON.stringify(review)}) : rows({refs:['openchat:user:bob']}));
     await expect(captureNoteReview('alice',{kind:'user',id:'bob'},{text:'Different note',requestId:'retry-key'})).rejects.toMatchObject({status:409});
     expect(mocks.addNote).not.toHaveBeenCalled();
   });

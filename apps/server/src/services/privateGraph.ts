@@ -775,9 +775,10 @@ export async function deletePrivateThing(ownerId: string, thingId: string): Prom
       const cardAsks = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})-[:OVERLAY_LINK {relation: 'is about'}]->(:OverlayEntity {id: $thingId, ownerKey: $ownerKey})
         WHERE coalesce(a.askAuthorSelf, a.askOwn, false) = true AND a.evidenceLabel IN $labels AND NOT EXISTS { MATCH (a)-[:OVERLAY_LINK {relation: 'is about'}]->(other:OverlayEntity) WHERE other.id <> $thingId }
         RETURN a.id AS id`, { ownerKey, thingId, labels: ['Private note review', 'Standing ask on a private card'] });
-      for (const record of cardAsks.records) await deleteEntityIn(tx, ownerKey, String(record.get('id')));
-      const result = await deleteEntityIn(tx, ownerKey, thingId);
-      await eraseOrphanedAdjunctsIn(tx, [ownerKey]);
+      const { result } = await eraseCanonicalEntitiesIn(tx, async runner => {
+        for (const record of cardAsks.records) await deleteEntityIn(runner, ownerKey, String(record.get('id')));
+        return deleteEntityIn(runner, ownerKey, thingId);
+      });
       return result;
     });
     return { deleted: true, id: thingId, notesRemoved: removed.notesRemoved, linksRemoved: removed.linksRemoved };
@@ -909,6 +910,29 @@ async function eraseOrphanedAdjunctsIn(tx: Runner, ownerKeys: string[]): Promise
   }
 }
 
+async function eraseCanonicalEntitiesIn<T>(tx: Runner, erase: (runner: Parameters<typeof purgeRefIn>[0]) => Promise<T>) {
+  const touched = new Map<string, { id: string; ownerKey: string }>();
+  const runner: Runner = {
+    run: async (query, parameters) => {
+      const result = await tx.run(query, parameters);
+      if (typeof parameters?.ownerKey === 'string' && typeof parameters.id === 'string') {
+        const entity = { id: parameters.id, ownerKey: parameters.ownerKey };
+        touched.set(JSON.stringify([entity.ownerKey, entity.id]), entity);
+      }
+      return result;
+    },
+  };
+  const result = await erase(runner as Parameters<typeof purgeRefIn>[0]);
+  const entities = [...touched.values()];
+  for (const label of ['OpenChatNoteReview', 'OpenChatPrivateAsk']) {
+    await tx.run(`UNWIND $entities AS entity
+      MATCH (n:${label} {ownerKey:entity.ownerKey,entityId:entity.id})
+      WHERE NOT EXISTS { MATCH (:OverlayEntity {id:entity.id,ownerKey:entity.ownerKey}) }
+      DETACH DELETE n`, { entities });
+  }
+  return { result, entities };
+}
+
 
 /**
  * Account deletion, inside the caller's transaction: everything this person
@@ -918,21 +942,19 @@ async function eraseOrphanedAdjunctsIn(tx: Runner, ownerKeys: string[]): Promise
 export async function deletePrivateGraphForUser(tx: Runner, userId: string): Promise<void> {
   const identity = await tx.run('MATCH (user:User {id: $userId}) RETURN user.ideaflowIssuer AS issuer, user.ideaflowSub AS subject', { userId });
   const issuer = identity.records[0]?.get('issuer'), subject = identity.records[0]?.get('subject');
-  const affected = await tx.run(`MATCH (:OverlayRef {ref:$ref})-[:REF_OF]->(e:OverlayEntity)
-    RETURN DISTINCT e.ownerKey AS ownerKey,e.id AS entityId`, { ref:userRef(userId) });
   const runner = tx as unknown as Parameters<typeof deleteOwnerIn>[0];
   await deleteOwnerIn(runner, fallbackKey(userId));
   if (typeof issuer === 'string' && issuer && typeof subject === 'string' && subject) await deleteOwnerIn(runner, ownerKeyFor(issuer, subject));
-  const ownerKeys = [fallbackKey(userId), ...affected.records.map(row => String(row.get('ownerKey')))];
+  const ownerKeys = [fallbackKey(userId)];
   if (typeof issuer === 'string' && issuer && typeof subject === 'string' && subject) ownerKeys.push(ownerKeyFor(issuer, subject));
-  await purgeRefIn(runner, userRef(userId));
+  const { entities } = await eraseCanonicalEntitiesIn(tx, canonical => purgeRefIn(canonical, userRef(userId)));
   await eraseOrphanedAdjunctsIn(tx, [...new Set(ownerKeys)]);
   const surviving = await tx.run(`UNWIND $entities AS entity
     MATCH (e:OverlayEntity {id:entity.id,ownerKey:entity.ownerKey}),
       (r:OpenChatNoteReview {entityId:entity.id,ownerKey:entity.ownerKey})
     WITH r ORDER BY r.id SET r._lock=true REMOVE r._lock
     RETURN r.id AS id,r.ownerKey AS ownerKey,r.entityId AS entityId,r.payload AS payload`, {
-    entities: affected.records.map(row => ({ id: String(row.get('entityId')), ownerKey: String(row.get('ownerKey')) })),
+    entities,
   });
   for (const row of surviving.records) {
     const review = JSON.parse(String(row.get('payload')));
@@ -969,6 +991,16 @@ export async function ensurePrivateGraphIndexes(): Promise<void> {
 }
 
 /** Verified adapter for OpenChat-only review records; the shared overlay contract stays unchanged. */
+export async function lockPrivateReviewSubjectIn(tx: Runner, ownerKey: string, entityId: string, subject: { kind: 'user' | 'thing'; id: string }): Promise<{ kind: 'user' | 'thing'; id: string }> {
+  const locked = await tx.run(`MATCH (e:OverlayEntity {id:$entityId,ownerKey:$ownerKey}) SET e._lock=true REMOVE e._lock
+    RETURN [(r:OverlayRef {ownerKey:$ownerKey})-[:REF_OF]->(e) | r.ref] AS refs`, { entityId, ownerKey });
+  if (!locked.records.length) return fail(404, 'Not found');
+  const refs = locked.records[0]!.get('refs') as string[];
+  if (subject.kind === 'user' && refs.includes(userRef(subject.id))) return subject;
+  if (userIdOf(refs) !== null) return fail(404, 'Not found');
+  return { kind: 'thing', id: entityId };
+}
+
 export async function privateReviewSubject(ownerId: string, subject: { kind: 'user' | 'thing'; id: string }, create = true): Promise<{ principal: OverlayPrincipal; entityId: string; name: string }> {
   if (subject.kind === 'user') {
     if (!create) {
