@@ -24,3 +24,16 @@ it('passes opaque page cursors and returns pagination metadata from the authenti
   finally { release(); }
   expect(fetch).toHaveBeenCalledOnce();
 });
+
+
+it('requests lightweight People summaries through the authenticated API', async () => {
+  await setSession('synthetic-token', { userId: 'synthetic-owner', email: 'owner@example.invalid' });
+  const release = setAuthenticatedRequestGuard(async token => token === 'synthetic-token');
+  vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+    expect(new URL(url).searchParams.get('summary')).toBe('true');
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer synthetic-token');
+    return new Response(JSON.stringify({ things: [], total: 0, nextCursor: null }));
+  }));
+  try { await api.listPrivateThings('', 'person', { limit: 100, summary: true }); }
+  finally { release(); }
+});

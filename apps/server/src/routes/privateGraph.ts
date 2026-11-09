@@ -157,7 +157,7 @@ router.put('/things/:thingId/people-state', async (req:Request,res:Response) => 
 });
 
 router.get('/things', async (req: Request, res: Response) => {
-  try { res.json(await listThings(owner(req), req.query.q, req.query.kind, {after:req.query.after,limit:req.query.limit,details:req.query.details})); } catch (error) { fail(error, res); }
+  try { res.json(await listThings(owner(req), req.query.q, req.query.kind, {after:req.query.after,limit:req.query.limit,details:req.query.details,summary:req.query.summary})); } catch (error) { fail(error, res); }
 });
 
 router.get('/things/:thingId', async (req: Request, res: Response) => {

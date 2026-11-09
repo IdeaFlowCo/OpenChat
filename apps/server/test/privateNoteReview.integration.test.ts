@@ -101,4 +101,71 @@ integration('private note review transaction integration', () => {
     const stored=(await review.listNoteReviews(owner,{kind:'user',id:person})).reviews.find(r=>r.id===batch.id)!;
     expect(stored.sourceNoteAvailable).toBe(false); expect(stored.note.text).toBe('');
   });
+  it.each(['source', 'other-ref', 'erased'])('coordinates %s card adjuncts with actual canonical account purge', async mode => {
+    const departing = `departing-${mode}-${suffix}`;
+    ids.push(departing);
+    const marker = `Synthetic erasure ${mode} ${suffix}`;
+    const db = driver.session();
+    try {
+      await db.run('CREATE (:User {id:$id,name:$name})', { id:departing, name:marker });
+      const batch = await review.captureNoteReview(owner, {kind:'user',id:departing}, {text:marker,requestId:`purge-${mode}`,asStandingAsk:true});
+      const applied = await review.applyNoteReview(owner,batch.id,{suggestionIds:[batch.suggestions[0]!.id]});
+      const {principal,entityId} = await graph.privateReviewSubject(owner,{kind:'user',id:departing},false);
+      const by = {author:'owner',source:'app',assertion:'stated'} as const;
+      await graph.savePeopleState(owner,entityId,{operationId:`old-${mode}`,expectedRevision:0,payload:{schemaVersion:1,historical:marker}},by);
+      await graph.savePeopleState(owner,entityId,{operationId:`new-${mode}`,expectedRevision:1,payload:{schemaVersion:1,native:{unknown:marker}}},by);
+      if (mode === 'source') await graph.importContactSource(owner,{entityId,source:'synthetic:erasure',sourceId:departing,name:'Independent source name',data:{schemaVersion:1,unknown:marker}},by);
+      if (mode === 'other-ref') await db.run(`MATCH (e:OverlayEntity {ownerKey:$ownerKey,id:$entityId})
+        CREATE (:OverlayRef {ownerKey:$ownerKey,entityId:$entityId,ref:$ref})-[:REF_OF]->(e)`, {ownerKey:principal.ownerKey,entityId,ref:`other:person:${departing}`});
+      await db.run(`CREATE (:OpenChatPrivateAsk {id:$id,ownerKey:$ownerKey,entityId:$entityId,reviewId:$reviewId,text:$text,revision:0})`,
+        {id:`legacy-${departing}`,ownerKey:principal.ownerKey,entityId,reviewId:batch.id,text:marker});
+      const before = await graph.readContactState(owner,entityId);
+      await db.executeWrite(tx => graph.deletePrivateGraphForUser(tx,departing));
+      await db.run('MATCH (u:User {id:$id}) DETACH DELETE u',{id:departing});
+      if (mode !== 'erased') {
+        expect(await graph.readContactState(owner,entityId)).toEqual(before);
+        const exported = await graph.exportPrivateGraph(owner);
+        expect(exported.noteReviews).toContainEqual(applied);
+        expect(exported.privateAsks).toContainEqual(expect.objectContaining({id:`legacy-${departing}`,text:marker}));
+        const history = await review.listNoteReviews(owner,{kind:'thing',id:entityId});
+        expect(history.reviews).toContainEqual(expect.objectContaining({id:batch.id,status:'applied'}));
+        expect(history.asks).toContainEqual(expect.objectContaining({id:applied.createdRecords![0]!.id,text:marker}));
+        expect((await review.undoNoteReview(owner,batch.id)).status).toBe('undone');
+        await graph.deletePrivateThing(owner,entityId);
+      } else {
+        await expect(review.undoNoteReview(owner,batch.id)).rejects.toMatchObject({status:404});
+      }
+      await expect(graph.readContactState(owner,entityId)).rejects.toMatchObject({status:404});
+      expect(JSON.stringify(await graph.exportPrivateGraph(owner))).not.toContain(marker);
+      const remnants = await db.run(`MATCH (n {ownerKey:$ownerKey}) WHERE n.entityId=$entityId OR n.id=$entityId
+        OR n.id IN $askIds RETURN count(n) AS total`, {ownerKey:principal.ownerKey,entityId,askIds:applied.createdRecords!.map(r=>r.id)});
+      expect(remnants.records[0]!.get('total').toNumber()).toBe(0);
+    } finally { await db.close(); }
+  });
+
+  it('erases source-backed owner data, adjuncts and historical People operation payloads together', async () => {
+    const sourceOwner = `source-owner-${suffix}`;
+    ids.push(sourceOwner);
+    const marker = `Synthetic owner erasure ${suffix}`;
+    const db = driver.session();
+    try {
+      await db.run('CREATE (:User {id:$id,name:$id})',{id:sourceOwner});
+      const by = {author:'owner',source:'app',assertion:'stated'} as const;
+      const imported = await graph.importContactSource(sourceOwner,{source:'synthetic:owner-erasure',sourceId:sourceOwner,name:'Saved source',data:{schemaVersion:1,unknown:marker}},by);
+      const entityId = imported.entity.id;
+      const batch = await review.captureNoteReview(sourceOwner,{kind:'thing',id:entityId},{text:marker,requestId:'owner-erasure',asStandingAsk:true});
+      await review.applyNoteReview(sourceOwner,batch.id,{suggestionIds:[batch.suggestions[0]!.id]});
+      await graph.savePeopleState(sourceOwner,entityId,{operationId:'owner-old',expectedRevision:0,payload:{schemaVersion:1,historical:marker}},by);
+      await graph.savePeopleState(sourceOwner,entityId,{operationId:'owner-new',expectedRevision:1,payload:{schemaVersion:1,native:{unknown:marker}}},by);
+      const principal = await graph.privateReviewPrincipal(sourceOwner);
+      await db.run(`CREATE (:OpenChatPrivateAsk {id:$id,ownerKey:$ownerKey,entityId:$entityId,text:$text})`,
+        {id:`legacy-${sourceOwner}`,ownerKey:principal.ownerKey,entityId,text:marker});
+      await db.executeWrite(tx => graph.deletePrivateGraphForUser(tx,sourceOwner));
+      expect(await graph.exportPrivateGraph(sourceOwner)).toEqual({entities:[],notes:[],links:[],noteReviews:[],privateAsks:[]});
+      const remnants = await db.run('MATCH (n {ownerKey:$ownerKey}) RETURN count(n) AS total',{ownerKey:principal.ownerKey});
+      expect(remnants.records[0]!.get('total').toNumber()).toBe(0);
+      await expect(review.undoNoteReview(sourceOwner,batch.id)).rejects.toMatchObject({status:404});
+    } finally { await db.close(); }
+  });
+
 });

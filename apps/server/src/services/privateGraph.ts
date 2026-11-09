@@ -771,13 +771,14 @@ export async function deletePrivateThing(ownerId: string, thingId: string): Prom
       const found = await tx.run('MATCH (e:OverlayEntity {id: $thingId, ownerKey: $ownerKey}) RETURN [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] AS refs', { thingId, ownerKey });
       const refs = found.records[0]?.get('refs') as string[] | undefined;
       if (!refs || userIdOf(refs) !== null) return fail(404, 'Not found');
-      for (const label of ['OpenChatNoteReview', 'OpenChatPrivateAsk']) await tx.run(`MATCH (n:${label} {ownerKey: $ownerKey, entityId: $thingId}) DETACH DELETE n`, { ownerKey, thingId });
       // A topic's card asks (the owner's own, captured on that card and linked to no other subject) go with it, as they did before asks moved into the overlay.
       const cardAsks = await tx.run(`MATCH (a:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})-[:OVERLAY_LINK {relation: 'is about'}]->(:OverlayEntity {id: $thingId, ownerKey: $ownerKey})
         WHERE coalesce(a.askAuthorSelf, a.askOwn, false) = true AND a.evidenceLabel IN $labels AND NOT EXISTS { MATCH (a)-[:OVERLAY_LINK {relation: 'is about'}]->(other:OverlayEntity) WHERE other.id <> $thingId }
         RETURN a.id AS id`, { ownerKey, thingId, labels: ['Private note review', 'Standing ask on a private card'] });
       for (const record of cardAsks.records) await deleteEntityIn(tx, ownerKey, String(record.get('id')));
-      return deleteEntityIn(tx, ownerKey, thingId);
+      const result = await deleteEntityIn(tx, ownerKey, thingId);
+      await eraseOrphanedAdjunctsIn(tx, [ownerKey]);
+      return result;
     });
     return { deleted: true, id: thingId, notesRemoved: removed.notesRemoved, linksRemoved: removed.linksRemoved };
   } catch (error) {
@@ -833,13 +834,16 @@ export async function resolvePrivateThing(ownerId: string, raw: unknown): Promis
 }
 
 /** Saved companies, ideas, projects and people-by-name. People on OpenChat are reached through their profile instead. */
-export async function listThings(ownerId: string, query: unknown, kind: unknown, options: { after?: unknown; limit?: unknown; details?: unknown } = {}) {
+export async function listThings(ownerId: string, query: unknown, kind: unknown, options: { after?: unknown; limit?: unknown; details?: unknown; summary?: unknown } = {}) {
   if (kind !== undefined && !THING_KINDS.includes(kind as ThingKind)) fail(400, 'Unknown kind');
   const principal = await ownerPrincipal(ownerId);
+  const summary = options.summary === true || options.summary === 'true';
+  const includeDetails = !summary && (options.details === true || options.details === 'true');
   const page = await overlayCall(overlay => overlay.listPage(principal, {q:query, kind, after:options.after, limit:options.limit,
-    excludeRefPrefix:'openchat:user:', namedOnly:true, details:options.details === true || options.details === 'true'}));
+    excludeRefPrefix:'openchat:user:', namedOnly:true, details:includeDetails}));
+  if (summary) return {things:page.entities.map(e => ({...thingOf(e), card:e.card})), nextCursor:page.nextCursor, total:page.total};
   const details = page.entities as EntityDetail[];
-  const connections = options.details === true || options.details === 'true'
+  const connections = includeDetails
     ? await connectionsFor(ownerId, details.flatMap(e => [e, ...(e.links ?? []).map(l => l.other)])) : new Map();
   const things = await Promise.all(details.map(async e => ({...thingOf(e), card:e.card, ...((e as any).peopleState ? {peopleState:(e as any).peopleState} : {}),
     ...(e.notes ? {notes:e.notes.map(noteOf), links:await linksFor(ownerId,e.links,connections), contactSources:e.contactSources ?? []} : {})})));
@@ -898,6 +902,14 @@ export async function listDue(ownerId: string, now = new Date()): Promise<{ due:
   } finally { await session.close(); }
 }
 
+async function eraseOrphanedAdjunctsIn(tx: Runner, ownerKeys: string[]): Promise<void> {
+  for (const label of ['OpenChatNoteReview', 'OpenChatPrivateAsk']) {
+    await tx.run(`MATCH (n:${label}) WHERE n.ownerKey IN $ownerKeys
+      AND NOT EXISTS { MATCH (e:OverlayEntity {id:n.entityId,ownerKey:n.ownerKey}) } DETACH DELETE n`, { ownerKeys });
+  }
+}
+
+
 /**
  * Account deletion, inside the caller's transaction: everything this person
  * kept, under either identity that can name them, and every other owner's
@@ -906,17 +918,15 @@ export async function listDue(ownerId: string, now = new Date()): Promise<{ due:
 export async function deletePrivateGraphForUser(tx: Runner, userId: string): Promise<void> {
   const identity = await tx.run('MATCH (user:User {id: $userId}) RETURN user.ideaflowIssuer AS issuer, user.ideaflowSub AS subject', { userId });
   const issuer = identity.records[0]?.get('issuer'), subject = identity.records[0]?.get('subject');
+  const affected = await tx.run(`MATCH (:OverlayRef {ref:$ref})-[:REF_OF]->(e:OverlayEntity)
+    RETURN DISTINCT e.ownerKey AS ownerKey`, { ref:userRef(userId) });
   const runner = tx as unknown as Parameters<typeof deleteOwnerIn>[0];
   await deleteOwnerIn(runner, fallbackKey(userId));
   if (typeof issuer === 'string' && issuer && typeof subject === 'string' && subject) await deleteOwnerIn(runner, ownerKeyFor(issuer, subject));
-  const ownerKeys = [fallbackKey(userId)];
+  const ownerKeys = [fallbackKey(userId), ...affected.records.map(row => String(row.get('ownerKey')))];
   if (typeof issuer === 'string' && issuer && typeof subject === 'string' && subject) ownerKeys.push(ownerKeyFor(issuer, subject));
-  for (const label of ['OpenChatNoteReview', 'OpenChatPrivateAsk']) {
-    await tx.run(`MATCH (n:${label}) WHERE n.ownerKey IN $ownerKeys DETACH DELETE n`, { ownerKeys });
-    await tx.run(`MATCH (n:${label}), (r:OverlayRef {ref:$ref})-[:REF_OF]->(e:OverlayEntity {id:n.entityId,ownerKey:n.ownerKey})
-      WHERE NOT EXISTS { MATCH (other:OverlayRef)-[:REF_OF]->(e) WHERE other.ref <> $ref } DETACH DELETE n`, { ref: userRef(userId) });
-  }
   await purgeRefIn(runner, userRef(userId));
+  await eraseOrphanedAdjunctsIn(tx, [...new Set(ownerKeys)]);
 }
 
 /** Account export: the owner's whole private graph, as plain rows. */

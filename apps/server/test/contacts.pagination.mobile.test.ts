@@ -36,6 +36,7 @@ afterEach(async () => { await act(async () => { root?.unmount(); }); delete (glo
 it('enumerates 5007 saved people in bounded pages with no duplicates', async () => {
   api.listPrivateThings.mockImplementation(async (_query, _kind, { after, limit }) => {
     expect(limit).toBe(100);
+    expect(api.listPrivateThings.mock.lastCall?.[2].summary).toBe(true);
     const offset = Number(after ?? 0), end = Math.min(offset + limit, 5007);
     return { things: Array.from({ length: end - offset }, (_, index) => person(offset + index)), total: 5007, nextCursor: end < 5007 ? String(end) : null };
   });
@@ -59,7 +60,7 @@ it('keeps prior people on an incomplete refresh and resumes the failed cursor be
   expect(state.people.map(row => row.id).sort()).toEqual(['1', '2', '3']);
   api.listPrivateThings.mockResolvedValueOnce({ things: [person(3), person(4)], total: 3, nextCursor: null });
   await act(async () => { await state.refresh(); });
-  expect(api.listPrivateThings).toHaveBeenLastCalledWith('', 'person', { after: 'page-2', limit: 100 });
+  expect(api.listPrivateThings).toHaveBeenLastCalledWith('', 'person', { after: 'page-2', limit: 100, summary: true });
   expect(state.people.map(row => row.id).sort()).toEqual(['1', '3', '4']);
   expect(state).toMatchObject({ complete: true, loaded: 3, error: '' });
 });
@@ -75,6 +76,7 @@ it('hides the previous owner immediately and rejects their in-flight response', 
   api.listPrivateThings.mockResolvedValueOnce({ things: [person(2)], total: 1, nextCursor: null });
   await act(async () => { await state.refresh(); finish({ things: [person(1)], total: 1, nextCursor: null }); await pending; });
   expect(state.people.map(row => row.id)).toEqual(['2']);
+  expect(api.listPrivateThings).toHaveBeenLastCalledWith('', 'person', { after: undefined, limit: 100, summary: true });
 });
 
 it('stops a repeated cursor without declaring the partial list complete', async () => {
@@ -98,7 +100,7 @@ it('cancels a blurred load and resumes without accepting its late response', asy
   expect(state.people.map(row => row.id)).toEqual(['1']);
   api.listPrivateThings.mockResolvedValueOnce({ things: [person(2)], total: 2, nextCursor: null });
   await act(async () => { await state.refresh(); });
-  expect(api.listPrivateThings).toHaveBeenLastCalledWith('', 'person', { after: 'last', limit: 100 });
+  expect(api.listPrivateThings).toHaveBeenLastCalledWith('', 'person', { after: 'last', limit: 100, summary: true });
   expect(state.people.map(row => row.id)).toEqual(['1', '2']);
   expect(state.complete).toBe(true);
 });
@@ -138,7 +140,7 @@ it('restarts from the beginning when an insert before the cursor changes total',
   let pending!: Promise<void>;
   await act(async () => { pending = state.refresh(); });
   expect(state).toMatchObject({ complete: false, loaded: 101, total: 102 });
-  expect(api.listPrivateThings).toHaveBeenLastCalledWith('', 'person', { after: undefined, limit: 100 });
+  expect(api.listPrivateThings).toHaveBeenLastCalledWith('', 'person', { after: undefined, limit: 100, summary: true });
   await act(async () => { finish({ things: [person(0), ...first, person(101)], total: 102, nextCursor: null }); await pending; });
   expect(state).toMatchObject({ complete: true, loaded: 102, total: 102, error: '' });
   expect(state.people.map(row => row.id)).toContain('0');
@@ -155,7 +157,7 @@ it('retains known people and retries from start if reconciliation stays inconsis
   expect(state.people.map(row => row.id).sort()).toEqual(['1', '9']);
   api.listPrivateThings.mockResolvedValueOnce({ things: [person(1), person(2)], total: 2, nextCursor: null });
   await act(async () => { await state.refresh(); });
-  expect(api.listPrivateThings).toHaveBeenLastCalledWith('', 'person', { after: undefined, limit: 100 });
+  expect(api.listPrivateThings).toHaveBeenLastCalledWith('', 'person', { after: undefined, limit: 100, summary: true });
   expect(state).toMatchObject({ complete: true, loaded: 2 });
   expect(state.people.map(row => row.id)).toEqual(['1', '2']);
 });

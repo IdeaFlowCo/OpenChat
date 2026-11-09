@@ -81,6 +81,14 @@ describe('private graph routes', () => {
     expect(mocks.savePeopleState).not.toHaveBeenCalled();
     expect(mocks.createPrivateThing).not.toHaveBeenCalled();
   });
+  it('forwards the lightweight summary projection with all pagination arguments', async () => {
+    const page = {things:[],total:0,nextCursor:null};
+    mocks.listThings.mockResolvedValue(page);
+    const response = await call('/things?kind=person&summary=true&limit=100&after=next');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(page);
+    expect(mocks.listThings).toHaveBeenCalledWith('alice',undefined,'person',{summary:'true',limit:'100',after:'next',details:undefined});
+  });
   it('always acts for the signed-in owner, whatever the request body claims', async () => {
     mocks.getPersonOverlay.mockResolvedValue({ userId: 'bob', card: {}, notes: [], links: [] });
     mocks.addNote.mockResolvedValue({ id: 'n1', text: 'hi' });

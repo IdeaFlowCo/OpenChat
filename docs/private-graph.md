@@ -63,7 +63,7 @@ these routes never return it.
 | `DELETE /links/:linkId` | Remove a link |
 | `GET /search?q=&relationType=&kind=&limit=` | Search saved things, OpenChat people and Unlinked people the owner wrote about (by name, description or note text; `matched` says which), and links by relation text, context, either end's name or `relationType`. At least one filter; at most 50 of each; `truncated` when more matched. Blocked people are left out |
 | `GET /neighbourhood?subjectKind=user\|thing\|unlinked&subjectId=&depth=1\|2` | A subject and everything one or two links away, with those links (`from`, `to`). Never creates anything; at most 100 nodes and 200 links. Blocked people are left out |
-| `GET /things?q=&kind=&after=&limit=&details=` | A page of saved things, matching `total` and `nextCursor`; see [Pagination](#pagination) |
+| `GET /things?q=&kind=&after=&limit=&details=&summary=` | A page of saved things, matching `total` and `nextCursor`; see [Pagination](#pagination) |
 | `GET /things/:thingId` | One saved thing with its card, optional People state, contact sources, notes and links |
 | `GET /things/:thingId/contact-state` | Owner-only card, sources and People state, including OpenChat-backed entities; see [readback](#verified-contact-actors-and-profile-independent-readback) |
 | `POST /contact-sources`, `POST /contact-source-batches` | Import one source card or `{cards: [...]}`; see [Contact sources and People state](#contact-sources-and-people-state) |
@@ -97,6 +97,12 @@ Every result includes its canonical `card` and `peopleState` when present.
 `contactSources`, fetched in batches for the page. `GET /things/:thingId`
 returns those details for one entity. The same paging arguments and response
 are available through the shared connector and agent-key MCP server.
+
+The mobile People list requests REST `summary=true`: each row contains only
+`id`, `kind`, `name`, `description` and `card`, keeping state and source payloads
+out of the list's retained data. Summary mode takes precedence over `details`.
+Default list responses, synchronization, detail and contact-state reads retain
+their complete payloads.
 
 ### Contact sources and People state
 

@@ -28,7 +28,7 @@ export function useSavedPeople(ownerId: string) {
     let reconciliations = 0;
     try {
       for (;;) {
-        const page = await api.listPrivateThings('', 'person', { after: checkpoint.after, limit: 100 });
+        const page = await api.listPrivateThings('', 'person', { after: checkpoint.after, limit: 100, summary: true });
         if (!current()) return;
         if ((page.nextCursor !== null && (typeof page.nextCursor !== 'string' || !page.nextCursor)) || !Number.isSafeInteger(page.total) || page.total < 0) throw new Error('Invalid people page');
         if (page.nextCursor && checkpoint.cursors.has(page.nextCursor)) throw new Error('Repeated people cursor');
