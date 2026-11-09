@@ -377,3 +377,19 @@ relation edits, search, neighbourhood), `privateNoteReview.integration.test.ts` 
 `privateAsks.integration.test.ts` (asks, owner isolation, the migration),
 which run against a real Neo4j when
 `NEO4J_TEST_URI`, `NEO4J_TEST_USER` and `NEO4J_TEST_PASSWORD` are set.
+
+### Verified contact actors and profile-independent readback
+
+Source-card imports, People-state saves and legacy person-card PATCHes carry a
+stable verified actor ID separately from the readable `author` label. Connector
+requests use the signed grant identity forwarded by the hub; direct OpenChat keys
+use their verified key ID. Missing connector identity rejects these writes before
+the store. Labels and request bodies cannot establish actor identity. The pinned
+canonical implementation is the merged Noos PR115 source at `49201d15056913315abd32169ad6ce9ad8d57f66`.
+
+`GET /api/private/things/:thingId/contact-state` and `oc_get_contact_state` return
+only the owner's `thingId`, canonical `card`, `contactSources` and optional
+`peopleState`, including on OpenChat-backed entities. They do not expose the
+associated account profile or widen its visibility. The existing saved-thing
+list and detail exclusions remain. Link browsing uses the canonical lightweight
+projection so it does not load unrelated source JSON or People payloads.
