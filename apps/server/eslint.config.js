@@ -30,6 +30,22 @@ export default tseslint.config(
     },
   },
   {
+    // This pinned Noos validator deliberately rejects control characters.
+    // Keep the vendored source byte-identical to NOOS_SOURCE.json.
+    files: ['src/services/overlay/contacts.ts'],
+    rules: { 'no-control-regex': 'off' },
+  },
+  {
+    // The pinned Noos export omits deletedAt using object-rest destructuring.
+    files: ['src/services/overlay/store.ts'],
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none', ignoreRestSiblings: true },
+      ],
+    },
+  },
+  {
     // Node-based integration tests live alongside the server package.
     files: ['**/*.mjs'],
     languageOptions: {

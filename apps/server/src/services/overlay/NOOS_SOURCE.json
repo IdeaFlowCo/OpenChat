@@ -1,10 +1,12 @@
 {
   "repository": "IdeaFlowCo/noos",
   "path": "src/overlay",
-  "commit": "775d43878554866809f40ca5d8ab1986164a281a",
+  "commit": "49201d15056913315abd32169ad6ce9ad8d57f66",
   "files": {
-    "contract.ts": "2961e928e580475f0808006155e95dd7bfb0f9d6542f10665d5aae4dcb56aea8",
-    "store.ts": "f70d610aa2d0eb41d80c8b9b8bc414121b5ac66cd34f3c6e17a73eaedc51e71c",
-    "publications.ts": "1257dbcb6aa9f5075b68b0ec3fcf027530548d9a0882b8f366e81552a9dece43"
+    "contract.ts": "d874fb4287be18f7d49a2447569dceceaa2aa8587667e6116b0f4cce0868fa73",
+    "store.ts": "a1aa91961ed2de8eb626aead50254b7b47f6eec7bccc39ff5c07b34ab9db8e07",
+    "publications.ts": "1257dbcb6aa9f5075b68b0ec3fcf027530548d9a0882b8f366e81552a9dece43",
+    "blurbs.ts": "707e8e77995c764b1f9e2d7152a08d5d8b7f046d539eef055828fe7a14cc3413",
+    "contacts.ts": "a4491c832c9d47b12ae503b60beb243dc8dda7568945538694eca5c2bb94cdbc"
   }
 }

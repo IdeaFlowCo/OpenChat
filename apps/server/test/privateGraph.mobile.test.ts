@@ -49,6 +49,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(async () => { root?.unmount(); });
+  vi.useRealTimers();
   root = undefined;
   delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
 });
@@ -121,6 +122,37 @@ describe('the private card on a contact profile', () => {
     expect(mocks.openThing).toHaveBeenCalledWith('t1');
     await act(async () => { button('Carol').props.onPress(); });
     expect(mocks.openPerson).toHaveBeenCalledWith('carol');
+  });
+
+  it.each([
+    { relation: 'works at', kind: 'company' },
+    { relation: 'knows', kind: 'person' },
+  ])('requests five summaries for $kind autocomplete and links the selected saved choice', async ({ relation, kind }) => {
+    vi.useFakeTimers();
+    const things = Array.from({ length: 5 }, (_, index) => ({ id: `saved-${index}`, kind, name: `Acme ${index}` }));
+    const selected = things[2]!;
+    const link = { id: 'selected-link', relation, direction: 'out', other: selected, createdAt: '2026-10-02T00:00:00Z' };
+    mocks.listPrivateThings.mockResolvedValue({ things, total: 100, nextCursor: 'more' });
+    mocks.addPrivateLink.mockResolvedValue(link);
+    await mount();
+    await act(async () => { button('Private to you').props.onPress(); });
+    await act(async () => { button('+ Add connection').props.onPress(); });
+    await act(async () => { button(relation).props.onPress(); });
+    await act(async () => { input('Name').props.onChangeText('  Acme  '); });
+    expect(mocks.listPrivateThings).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(mocks.listPrivateThings).toHaveBeenCalledExactlyOnceWith('Acme', kind, { summary: true, limit: 5 });
+    expect(root!.root.findAllByType('TouchableOpacity').filter(node => node.findAllByType('Text').some(text => String(text.props.children).startsWith('Use “')))).toHaveLength(5);
+    for (const thing of things) expect(texts()).toContain(`Use “${thing.name}”`);
+    expect(button('Save connection').props.disabled).toBe(false);
+    await act(async () => { button(`Use “${selected.name}”`).props.onPress(); });
+    expect(mocks.addPrivateLink).toHaveBeenCalledExactlyOnceWith({ kind: 'user', id: 'bob' }, relation, { kind, id: selected.id });
+    expect(input('Name')).toBeUndefined();
+    expect(texts()).not.toContain('Use “');
+    expect(texts()).toContain(selected.name);
+    await act(async () => { button(selected.name).props.onPress(); });
+    expect(mocks.openThing).toHaveBeenCalledWith(selected.id);
+    expect(mocks.openPerson).not.toHaveBeenCalled();
   });
 
   it('says so plainly when the private card cannot be loaded or saved', async () => {

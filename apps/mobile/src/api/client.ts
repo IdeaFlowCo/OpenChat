@@ -1734,8 +1734,8 @@ export const api = {
   addPrivateLink: (subject: PrivateSubject, relation: string, to: PrivateLinkTarget) =>
     request<PrivateLink>(`${privateSubjectPath(subject)}/links`, { method: 'POST', body: JSON.stringify({ relation, to }) }),
   deletePrivateLink: (linkId: string) => request<{ deleted: true }>(`/api/private/links/${encodeURIComponent(linkId)}`, { method: 'DELETE' }),
-  listPrivateThings: (query: string, kind?: PrivateThingKind) =>
-    request<{ things: PrivateThing[] }>(`/api/private/things?q=${encodeURIComponent(query)}${kind ? `&kind=${kind}` : ''}`),
+  listPrivateThings: (query: string, kind?: PrivateThingKind, options: { after?: string; limit?: number; summary?: boolean } = {}) =>
+    request<{ things: PrivateThing[]; nextCursor: string | null; total: number }>(`/api/private/things?q=${encodeURIComponent(query)}${kind ? `&kind=${kind}` : ''}${options.after ? `&after=${encodeURIComponent(options.after)}` : ''}${options.limit !== undefined ? `&limit=${options.limit}` : ''}${options.summary ? '&summary=true' : ''}`),
   createPrivateThing: (kind: PrivateThingKind, name: string) =>
     request<PrivateThing>('/api/private/things', { method: 'POST', body: JSON.stringify({ kind, name }) }),
   getPrivateThing: (thingId: string) => request<PrivateThingDetail>(`/api/private/things/${encodeURIComponent(thingId)}`),

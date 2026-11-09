@@ -9,7 +9,7 @@
 import { nanoid } from 'nanoid';
 import type Anthropic from '@anthropic-ai/sdk';
 import { getDriver } from '../db.js';
-import { cleanText, cleanRelation, nameKey, LIMITS, REVIEW_KINDS, OWNER_PROVENANCE, privateReviewSubject, privateReviewPrincipal, PrivateGraphError } from './privateGraph.js';
+import { cleanText, cleanRelation, nameKey, LIMITS, REVIEW_KINDS, OWNER_PROVENANCE, privateReviewSubject, privateReviewPrincipal, lockPrivateReviewSubjectIn, PrivateGraphError } from './privateGraph.js';
 import type { PrivateNote, Provenance, ThingKind } from './privateGraph.js';
 import { ASKER_KINDS, OverlayError, parseAskInput } from './overlay/contract.js';
 import type { AskStatus, Provenance as OverlayProvenance } from './overlay/contract.js';
@@ -125,7 +125,7 @@ export async function captureNoteReview(ownerId: string, subject: ReviewSubject,
   const db = session();
   try {
     return await db.executeWrite(async tx => {
-      await tx.run('MATCH (e:OverlayEntity {id:$entityId,ownerKey:$ownerKey}) SET e._lock=true REMOVE e._lock', { entityId, ownerKey: principal.ownerKey });
+      const currentSubject = await lockPrivateReviewSubjectIn(tx, principal.ownerKey, entityId, subject, ownerId);
       const prior = await tx.run('MATCH (r:OpenChatNoteReview {ownerKey:$ownerKey,entityId:$entityId,requestId:$requestId}) RETURN r.payload AS payload', { ownerKey: principal.ownerKey, entityId, requestId });
       if (prior.records.length) {
         const existing = decode(prior.records[0]!.get('payload'));
@@ -135,7 +135,7 @@ export async function captureNoteReview(ownerId: string, subject: ReviewSubject,
       // The note goes through the overlay (limit, dedupe, provenance); its ledger commits with it.
       const { note } = await addNoteIn(tx, principal.ownerKey, entityId, text, by).catch(overlayRefusal) as { note: PrivateNote };
       const now = new Date().toISOString();
-      const review: NoteReview = { id: nanoid(), subject, note, status: asStandingAsk ? 'ready' : 'saved', suggestions: asStandingAsk ? [{ id: nanoid(), kind: 'ask', text, evidence: text }] : [], appliedIds: [], createdAt: now, asStandingAsk };
+      const review: NoteReview = { id: nanoid(), subject: currentSubject, note, status: asStandingAsk ? 'ready' : 'saved', suggestions: asStandingAsk ? [{ id: nanoid(), kind: 'ask', text, evidence: text }] : [], appliedIds: [], createdAt: now, asStandingAsk };
       if (asStandingAsk) {
         const existing = await subjectAskTexts(tx, principal.ownerKey, entityId);
         review.suggestions[0]!.duplicate = existing.some(t => nameKey(t) === nameKey(text));
@@ -197,6 +197,7 @@ export async function suggestNoteReview(ownerId: string, reviewId: string): Prom
       const current = row.records[0] && decode(row.records[0].get('payload'));
       if (!current) return fail(404, 'Not found');
       if (current.sourceNoteAvailable === false || ['applied','undone','ready'].includes(current.status)) { Object.assign(review, current); return; }
+      review.subject = current.subject;
       await tx.run('MATCH (r:OpenChatNoteReview {id:$id,ownerKey:$ownerKey}) SET r.payload=$payload', { id: reviewId, ownerKey: principal.ownerKey, payload: JSON.stringify(review) });
     });
     return review;

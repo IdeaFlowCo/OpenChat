@@ -32,6 +32,7 @@
 
 import express, { type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
@@ -40,7 +41,7 @@ import { buildServer, VERSION } from './server.js';
 
 const DEFAULT_PORT = 8484;
 const DEFAULT_HOST = '0.0.0.0';
-const MAX_BODY_BYTES = '1mb';
+const MAX_BODY_BYTES = '7mb';
 
 function pickApiKey(req: Request): string | undefined {
   // 1. Authorization: Bearer <key>
@@ -97,11 +98,7 @@ async function handleMcpRequest(req: Request, res: Response): Promise<void> {
   }
 }
 
-function main(): void {
-  const port = Number(process.env.PORT) || DEFAULT_PORT;
-  const host = process.env.HOST || DEFAULT_HOST;
-  const { baseUrl, apiKey: envKey } = getConfig();
-
+export function createHttpApp() {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: MAX_BODY_BYTES }));
@@ -124,6 +121,15 @@ function main(): void {
   app.get('/mcp', handleMcpRequest);
   app.delete('/mcp', handleMcpRequest);
 
+  return app;
+}
+
+function main(): void {
+  const port = Number(process.env.PORT) || DEFAULT_PORT;
+  const host = process.env.HOST || DEFAULT_HOST;
+  const { baseUrl, apiKey: envKey } = getConfig();
+  const app = createHttpApp();
+
   app.listen(port, host, () => {
     console.error(
       `[openchat-mcp-http] v${VERSION} listening on http://${host}:${port}/mcp → ${baseUrl}` +
@@ -132,4 +138,4 @@ function main(): void {
   });
 }
 
-main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

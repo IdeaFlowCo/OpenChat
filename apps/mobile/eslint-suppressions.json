@@ -319,11 +319,6 @@
       "count": 5
     }
   },
-  "src/screens/FriendsScreen.tsx": {
-    "no-restricted-syntax": {
-      "count": 12
-    }
-  },
   "src/screens/GroupInvitePreviewScreen.tsx": {
     "no-restricted-syntax": {
       "count": 13

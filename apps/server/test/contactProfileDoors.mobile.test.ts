@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ platform: { OS: 'ios', select: (v: any) => v.i
 vi.mock('react-native', () => ({
   Platform: mocks.platform, StyleSheet: { create: (s: unknown) => s, hairlineWidth: 1 },
   ActivityIndicator: 'ActivityIndicator', Alert: { alert: vi.fn() }, Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View', ScrollView: 'ScrollView', KeyboardAvoidingView: 'KeyboardAvoidingView',
-  FlatList: ({ data, renderItem, ListEmptyComponent, ListHeaderComponent, onEndReached }: any) => React.createElement('FlatList', { onEndReached }, ListHeaderComponent, data?.length ? data.map((item: any, index: number) => React.createElement(React.Fragment, { key: index }, renderItem({ item, index }))) : ListEmptyComponent),
+  FlatList: ({ data, renderItem, ListEmptyComponent, ListHeaderComponent, ListFooterComponent, onEndReached }: any) => React.createElement('FlatList', { onEndReached }, ListHeaderComponent, data?.length ? data.map((item: any, index: number) => React.createElement(React.Fragment, { key: index }, renderItem({ item, index }))) : ListEmptyComponent, ListFooterComponent),
 }));
 vi.mock('@react-navigation/native', () => ({ useNavigation: () => mocks.navigation, useRoute: () => ({ params: {} }), useFocusEffect: (callback: () => void) => React.useEffect(callback, [callback]) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
@@ -22,7 +22,7 @@ let root: ReturnType<typeof create> | undefined;
 const person = { id: 'bob', name: 'Official Bob' };
 beforeEach(() => {
   vi.clearAllMocks(); mocks.platform.OS = 'ios'; vi.useFakeTimers(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
-  mocks.listPrivateThings.mockResolvedValue({ things: [] });
+  mocks.listPrivateThings.mockResolvedValue({ things: [], nextCursor: null, total: 0 });
   mocks.getContacts.mockResolvedValue([person]);
   mocks.listFriends.mockResolvedValue({ friends: [{ userId: 'bob', user: person, state: 'friends' }], incoming: [], outgoing: [] });
   mocks.search.mockResolvedValue({ contacts: [person], conversations: [], messages: [] });
@@ -127,9 +127,10 @@ it('creates a private saved person from People and opens their profile without m
   expect(mocks.createConversation).not.toHaveBeenCalled();
 });
 it('opens an existing saved person profile from People', async () => {
-  mocks.listPrivateThings.mockResolvedValue({ things: [{ id: 'saved', kind: 'person', name: 'Chet' }] });
+  mocks.listPrivateThings.mockResolvedValue({ things: [{ id: 'saved', kind: 'person', name: 'Chet' }], nextCursor: null, total: 1 });
   await act(async () => { root = create(React.createElement(FriendsScreen)); });
   const door = root!.root.findAllByType('TouchableOpacity').find(n => n.props.accessibilityLabel === 'Saved profile for Chet')!;
+  expect(door).toBeDefined();
   expect(door.findAllByType('Text').some(n => n.props.children === 'Private profile')).toBe(true);
   await act(async () => door.props.onPress());
   expect(mocks.navigation.navigate).toHaveBeenCalledWith('PrivateThing', { thingId: 'saved' });

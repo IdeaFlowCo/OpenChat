@@ -43,7 +43,7 @@ import agentNetworkRoutes from './routes/agentNetwork.js';
 import agentSocialLayerRoutes from './routes/agentSocialLayer.js';
 import addMeCardRoutes from './routes/addMeCard.js';
 import friendsRoutes from './routes/friends.js';
-import privateGraphRoutes from './routes/privateGraph.js';
+import privateGraphRoutes, { privateGraphBody } from './routes/privateGraph.js';
 import { ensurePrivateGraphIndexes } from './services/privateGraph.js';
 import privateNamesRoutes from './routes/privateNames.js';
 import importedChatsRoutes, { exceptImportBody } from './routes/importedChats.js';
@@ -115,7 +115,8 @@ app.use(cors({
   },
   credentials: true
 }));
-app.post('/api/connector/mcp', express.raw({ type:'application/json', limit:'1mb' }), handleIdeaflowConnector);
+app.post('/api/connector/mcp', express.raw({ type:'application/json', limit:'7mb' }), handleIdeaflowConnector);
+app.use(privateGraphBody);
 // Imported chat payloads are parsed by their own route, after authentication, with a larger limit.
 app.use(exceptImportBody(express.json()));
 app.use('/api', connectorOperationGuard);

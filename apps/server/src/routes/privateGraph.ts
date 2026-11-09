@@ -6,16 +6,27 @@ import { getAskPublication, publishAsk, revokeAskPublication } from '../services
  * authenticated owner only; no id in a request can select another owner.
  * Scope refusals answer 404, never 403: the app signs a person out on 403.
  */
-import { Router, type Request, type Response } from 'express';
+import { json, Router, type Request, type RequestHandler, type Response } from 'express';
 import { resolveActor } from '../middleware/resolveActor.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import {
-  addLink, addListMember, addNote, createPrivateThing, listMembers, removeListMember, deleteAsk, deleteLink, deleteNote, deletePrivateThing, getAsk, listAsks, saveAsk, updateAsk, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
+  readContactState, importContactSources, importContactSource, savePeopleState, addLink, addListMember, addNote, createPrivateThing, listMembers, removeListMember, deleteAsk, deleteLink, deleteNote, deletePrivateThing, getAsk, listAsks, saveAsk, updateAsk, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
   parseCardPatch, PrivateGraphError, searchPrivate, updateLink, updateNote, updatePersonCard, updatePrivateThing,
 } from '../services/privateGraph.js';
 import type { Provenance } from '../services/privateGraph.js';
 
 import { captureNoteReview, listNoteReviews, suggestNoteReview, applyNoteReview, undoNoteReview } from '../services/privateNoteReview.js';
+
+const contactBody = json({ limit: '1mb' });
+const contactBatchBody = json({ limit: '7mb' });
+export const privateGraphBody: RequestHandler = (req, res, next) => {
+  if (req.method === 'POST' && /^\/api\/private\/contact-source-batches\/?$/i.test(req.path)) {
+    contactBatchBody(req, res, next);
+  } else if ((req.method === 'POST' && /^\/api\/private\/contact-sources\/?$/i.test(req.path)) ||
+      (req.method === 'PUT' && /^\/api\/private\/things\/[^/]+\/people-state\/?$/i.test(req.path))) {
+    contactBody(req, res, next);
+  } else next();
+};
 
 const router = Router();
 // The owner's session, or an agent key the owner issued. A key needs `read` to
@@ -59,6 +70,22 @@ export function provenanceFor(req: Request): Provenance {
   return { author: 'owner', source: 'app', assertion: 'stated' };
 }
 
+/** Immutable identity from verified middleware; labels cannot establish it. */
+export function contactActorId(req: Request): string {
+  const connector = getConnectorPrincipal(req);
+  if (connector) {
+    if (!connector.actorId) throw new PrivateGraphError(400, 'Stable agent identity could not be verified');
+    return connector.actorId;
+  }
+  if (req.connectorDelegation) throw new PrivateGraphError(400, 'Stable agent identity could not be verified');
+  if (req.agentKeyId) return `openchat-key:${req.agentKeyId}`;
+  return 'openchat:owner';
+}
+
+router.get('/things/:thingId/contact-state', async (req: Request, res: Response) => {
+  try { res.json(await readContactState(owner(req),id(req,'thingId'))); } catch(error) {fail(error,res);}
+});
+
 router.get('/due', async (req: Request, res: Response) => {
   try { res.json(await listDue(owner(req))); } catch (error) { fail(error, res); }
 });
@@ -68,7 +95,7 @@ router.get('/people/:userId', async (req: Request, res: Response) => {
 });
 
 router.patch('/people/:userId', async (req: Request, res: Response) => {
-  try { res.json({ card: await updatePersonCard(owner(req), id(req, 'userId'), parseCardPatch(req.body)) }); } catch (error) { fail(error, res); }
+  try { res.json({ card: await updatePersonCard(owner(req), id(req, 'userId'), parseCardPatch(req.body), provenanceFor(req), contactActorId(req)) }); } catch (error) { fail(error, res); }
 });
 
 router.post('/people/:userId/notes', async (req: Request, res: Response) => {
@@ -119,8 +146,18 @@ router.post('/things/resolve', async (req: Request, res: Response) => {
   try { res.json(await resolvePrivateThing(owner(req), req.body)); } catch (error) { fail(error, res); }
 });
 
+router.post('/contact-source-batches', async(req:Request,res:Response)=>{
+  try {res.json(await importContactSources(owner(req),req.body?.cards,provenanceFor(req),contactActorId(req)));} catch(error) {fail(error,res);}
+});
+router.post('/contact-sources', async (req:Request,res:Response) => {
+  try {res.json(await importContactSource(owner(req), req.body, provenanceFor(req),contactActorId(req)));} catch(error) {fail(error,res);}
+});
+router.put('/things/:thingId/people-state', async (req:Request,res:Response) => {
+  try {res.json(await savePeopleState(owner(req),id(req,'thingId'),req.body,provenanceFor(req),contactActorId(req)));} catch(error) {fail(error,res);}
+});
+
 router.get('/things', async (req: Request, res: Response) => {
-  try { res.json(await listThings(owner(req), req.query.q, req.query.kind)); } catch (error) { fail(error, res); }
+  try { res.json(await listThings(owner(req), req.query.q, req.query.kind, {after:req.query.after,limit:req.query.limit,details:req.query.details,summary:req.query.summary})); } catch (error) { fail(error, res); }
 });
 
 router.get('/things/:thingId', async (req: Request, res: Response) => {

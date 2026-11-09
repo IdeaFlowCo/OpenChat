@@ -94,7 +94,10 @@ integration('private graph: one owner, never anyone else', () => {
     await graph.addNote(alice, { kind: 'thing', id: idea.other.id }, 'Worth a longer write-up');
 
     const things = await graph.listThings(alice, 'acme', undefined);
-    expect(things.things).toEqual([{ id: works.other.id, kind: 'company', name: 'Acme Robotics', description: null }]);
+    expect(things.things).toEqual([{
+      id: works.other.id, kind: 'company', name: 'Acme Robotics', description: null,
+      card: { important: false, cadenceDays: null, cadenceMode: 'fixed', intervalDays: null, lastContactAt: null, nextDueAt: null },
+    }]);
     expect((await graph.listThings(alice, '', 'idea')).things.map(value => value.name)).toEqual(['Open social graph']);
     expect((await graph.listThings(carol, '', undefined)).things).toEqual([]);
 
@@ -183,4 +186,26 @@ integration('private graph: one owner, never anyone else', () => {
       expect((await graph.exportPrivateGraph(carol) as { entities: unknown[] }).entities).toHaveLength(0);
     } finally { await session.close(); }
   });
+  it('retains profile-attached contact state and immutable actors without exposing account profiles',async()=>{
+    await graph.updatePersonCard(alice,bob,{important:true});
+    const exported=await graph.exportPrivateGraph(alice) as {entities:Array<{id:string;refs:string[]}>};
+    const id=exported.entities.find(e=>e.refs.includes(refOf(bob)))!.id;
+    const by={author:'agent:Shared label',source:'connector',assertion:'stated'} as const;
+    const data={schemaVersion:1,fromMe:true,author:{native:true},source:'address-book',future:{retained:true}};
+    await graph.importContactSource(alice,{entityId:id,source:'synthetic:book',sourceId:'profile-attached',name:'Owner source name',data},by,'grant:one');
+    const before=await graph.readContactState(alice,id);
+    const operation={operationId:'profile-native',expectedRevision:before.peopleState?.revision??0,payload:{schemaVersion:1,future:{retained:true}}};
+    const committed=await graph.savePeopleState(alice,id,operation,by,'grant:one');
+    expect(await graph.savePeopleState(alice,id,operation,{...by,author:'agent:Renamed'},'grant:one')).toEqual(committed);
+    await expect(graph.savePeopleState(alice,id,operation,by,'grant:two')).rejects.toMatchObject({status:409});
+    const state=await graph.readContactState(alice,id);
+    expect(Object.keys(state).sort()).toEqual(['card','contactSources','peopleState','thingId']);
+    expect(state.contactSources[0]).toMatchObject({data,provenance:{actorId:'grant:one',author:'agent:Shared label'}});
+    expect(state.peopleState).toMatchObject({payload:operation.payload,actorId:'grant:one'});
+    expect(await status(()=>graph.getThing(alice,id))).toBe(404);
+    expect(await status(()=>graph.readContactState(carol,id))).toBe(404);
+    await graph.updatePersonCard(alice,bob,{important:false},by,'grant:two');
+    expect((await graph.readContactState(alice,id)).peopleState).toMatchObject({revision:committed.revision+1,actorId:'grant:two'});
+  });
+
 });
