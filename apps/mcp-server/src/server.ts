@@ -1268,6 +1268,8 @@ export function buildServer(
     {source:z.string().min(1).max(200),sourceId:z.string().min(1).max(512),name:z.string().min(1).max(120),data:z.record(z.string(),z.unknown()),entityId:z.string().max(64).optional()}, args=>api.importContactSource(args));
   privateTool('oc_import_contact_sources','Import address-book source cards','Up to 25 owner-private cards, one indexed receipt per source. Exact source IDs make retries idempotent; never matches names.',
     {cards:z.array(z.object({source:z.string().min(1).max(200),sourceId:z.string().min(1).max(512),name:z.string().min(1).max(120),data:z.record(z.string(),z.unknown()),entityId:z.string().max(64).optional()})).min(1).max(25)},({cards})=>api.importContactSources(cards));
+  privateTool('oc_get_contact_state','Read private contact and People state','Read only the owner-private source cards, canonical card and versioned People state by canonical entity ID, including OpenChat-backed people. Does not expose an account profile.',
+    {thingId:z.string().min(1).max(64)},({thingId})=>api.getContactState(thingId));
   privateTool('oc_save_people_state','Save durable People state','Versioned owner-private fields with optimistic revision checking.',
     {thingId:z.string().max(64),operationId:z.string().min(1).max(200),expectedRevision:z.number().int().min(0),payload:z.record(z.string(),z.unknown())}, ({thingId,...body})=>api.savePeopleState(thingId,body));
 

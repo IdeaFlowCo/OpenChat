@@ -1,19 +1,50 @@
 import { createHash } from 'node:crypto';
 import type { ManagedTransaction } from 'neo4j-driver';
-import { cleanName, cleanProvenance, cleanRequestId, fail, isId } from './contract.js';
-import type { Provenance } from './contract.js';
+import { cleanAuthor, cleanName, cleanProvenance, cleanRequestId, fail, isId } from './contract.js';
+import type { OverlayPrincipal, Provenance } from './contract.js';
 
 /** Private source cards and People state live in the canonical overlay, never public profiles.
  * A source card is an assertion, not a shared identity. Exact source keys are idempotent;
  * attaching it to an existing entity requires an explicit, owner-scoped entity id.
  */
 export interface ContactSource {
-  source: string; sourceId: string; name: string | null; data: Record<string, unknown>; updatedAt: string; provenance: Provenance;
+  source: string; sourceId: string; name: string | null; data: Record<string, unknown>; updatedAt: string; provenance: Provenance & {actorId?: string};
 }
 export interface PeopleState extends Provenance {
   schemaVersion: 1; revision: number; payload: Record<string, unknown>; updatedAt: string;
 }
 export const CONTACT_SOURCE_CONSTRAINT = 'CREATE CONSTRAINT overlay_contact_source IF NOT EXISTS FOR (s:OverlayContactSource) REQUIRE (s.ownerKey, s.sourceKey) IS UNIQUE';
+
+/** Stable identity is supplied by the authenticated application boundary,
+ * independently of the human-readable label. Agent writes fail closed if it
+ * is unavailable; an app's owner session has a stable owner identity. */
+export function actorProvenance(principal: OverlayPrincipal, raw: unknown): Provenance & {actorId: string} {
+  const by = cleanProvenance(raw);
+  const author = cleanAuthor(principal.actor ?? 'owner');
+  if (!principal.actorId && author !== 'owner') return fail(400, 'verified_actor_required');
+  const actorId = principal.actorId ?? `${principal.app}:owner`;
+  if (typeof actorId !== 'string' || !/^[\x21-\x7e]{1,256}$/.test(actorId)) return fail(400, 'invalid_actor');
+  return {...by, author, actorId};
+}
+
+type PeopleOperationRequest = { id: string; expectedRevision: number; payload: Record<string, unknown>; app: string };
+type ActorProvenance = Provenance & { actorId: string };
+export function peopleOperationFingerprint(request: PeopleOperationRequest, by: ActorProvenance): string {
+  return createHash('sha256').update(stableJSON({...request, actorId:by.actorId, source:by.source, assertion:by.assertion})).digest('hex');
+}
+
+export function replayPeopleOperation(request: PeopleOperationRequest, by: ActorProvenance, receipt: { fingerprint: string; fingerprintVersion: number | null; state: string }) {
+  const fingerprint = peopleOperationFingerprint(request, by);
+  if ((receipt.fingerprintVersion === null || receipt.fingerprintVersion === 2) && receipt.fingerprint === fingerprint) return {state:stateFrom(receipt.state)!, upgrade:receipt.fingerprintVersion === null};
+  if (receipt.fingerprintVersion !== null) return fail(409, 'operation_id_reused');
+  const state = stateFrom(receipt.state)!;
+  const provenance = {author:state.author, source:state.source, assertion:state.assertion};
+  const legacyFingerprint = createHash('sha256').update(stableJSON({...request, provenance})).digest('hex');
+  if (receipt.fingerprint !== legacyFingerprint || by.source !== state.source || by.assertion !== state.assertion) return fail(409, 'operation_id_reused');
+  if (state.author !== 'owner') return fail(409, 'legacy_operation_requires_reconciliation', {revision:state.revision});
+  if (by.author !== 'owner') return fail(409, 'operation_id_reused');
+  return {state, upgrade:true};
+}
 
 export function contactInput(raw: unknown) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail(400, 'invalid_contact');
@@ -36,12 +67,12 @@ export function contactJSON(raw: unknown): Record<string, unknown> {
 }
 
 export async function sourcesIn(tx: ManagedTransaction, ownerKey: string, ids: string[]): Promise<Map<string, ContactSource[]>> {
-  const rows = await tx.run('MATCH (s:OverlayContactSource {ownerKey:$ownerKey}) WHERE s.entityId IN $ids RETURN s.entityId AS id, s { .source, .sourceId, .name, .data, .updatedAt, .author, .sourceVia, .assertion } AS value ORDER BY s.sourceKey', { ownerKey, ids });
+  const rows = await tx.run('MATCH (s:OverlayContactSource {ownerKey:$ownerKey}) WHERE s.entityId IN $ids RETURN s.entityId AS id, s { .source, .sourceId, .name, .data, .updatedAt, .author, .sourceVia, .assertion, .actorId } AS value ORDER BY s.sourceKey', { ownerKey, ids });
   const result = new Map<string, ContactSource[]>();
   for (const row of rows.records) {
     const value = row.get('value') as any, id = String(row.get('id'));
     const source: ContactSource = { source: value.source, sourceId: value.sourceId, name: value.name ?? null, data: JSON.parse(value.data), updatedAt: value.updatedAt,
-      provenance: { author: value.author ?? null, source: value.sourceVia ?? null, assertion: value.assertion ?? null } };
+      provenance: { author: value.author ?? null, source: value.sourceVia ?? null, assertion: value.assertion ?? null, ...(value.actorId ? {actorId:value.actorId} : {}) } };
     result.set(id, [...(result.get(id) ?? []), source]);
   }
   return result;

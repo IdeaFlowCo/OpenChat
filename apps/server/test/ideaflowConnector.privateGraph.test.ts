@@ -25,7 +25,7 @@ const secret = 'test-only-connector-secret-32-bytes-minimum';
 function sign(body: string, scope: string, client?: unknown) {
   const now = Math.floor(Date.now() / 1000);
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
-  const payload = Buffer.from(JSON.stringify({ iss: 'https://id.ideaflow.app/connector', aud: 'https://chat.ideaflow.app/mcp', identity_issuer: 'https://id.ideaflow.app/api/auth', sub: 'subject', scope, iat: now, exp: now + 60, jti: randomUUID(), body_sha256: createHash('sha256').update(body).digest('hex'), ...(client !== undefined ? { client } : {}) })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ iss: 'https://id.ideaflow.app/connector', aud: 'https://chat.ideaflow.app/mcp', identity_issuer: 'https://id.ideaflow.app/api/auth', sub: 'subject', actor_id:'ideaflow-grant:synthetic', scope, iat: now, exp: now + 60, jti: randomUUID(), body_sha256: createHash('sha256').update(body).digest('hex'), ...(client !== undefined ? { client } : {}) })).toString('base64url');
   return `${header}.${payload}.${createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url')}`;
 }
 const PRIVATE_READS = ['oc_get_person_private', 'oc_get_unlinked_person_private', 'oc_list_private_links', 'oc_search_private', 'oc_get_neighbourhood', 'oc_list_private_things', 'oc_get_private_thing', 'oc_list_catch_up'];
@@ -60,12 +60,12 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     graph.importContactSources.mockResolvedValue({results:[{index:0,id:'saved'}]});
     const imported = await tool('oc_import_contact_sources',{cards});
     expect(imported.result.isError).toBeUndefined();
-    expect(graph.importContactSources).toHaveBeenCalledWith('owner',cards,CONNECTOR);
+    expect(graph.importContactSources).toHaveBeenCalledWith('owner',cards,CONNECTOR,'ideaflow-grant:synthetic');
     graph.savePeopleState.mockResolvedValue({revision:1});
     const state = {operationId:'large-state',expectedRevision:0,payload:cards[0].data};
     const saved = await tool('oc_save_people_state',{thingId:'saved',...state});
     expect(saved.result.isError).toBeUndefined();
-    expect(graph.savePeopleState).toHaveBeenCalledWith('owner','saved',state,CONNECTOR);
+    expect(graph.savePeopleState).toHaveBeenCalledWith('owner','saved',state,CONNECTOR,'ideaflow-grant:synthetic');
   });
 
   it('lists private reads under openchat:read and writes under openchat:write, described as owner-private', async () => {
@@ -214,7 +214,7 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
 
     graph.updatePersonCard.mockResolvedValue({ important: true });
     await tool('oc_set_person_private', { userId: 'bob', important: true, cadenceDays: null });
-    expect(graph.updatePersonCard).toHaveBeenCalledWith('owner', 'bob', { important: true, cadenceDays: null }, CONNECTOR);
+    expect(graph.updatePersonCard).toHaveBeenCalledWith('owner', 'bob', { important: true, cadenceDays: null }, CONNECTOR,'ideaflow-grant:synthetic');
 
     graph.resolvePrivateThing.mockResolvedValue({ id: 'thing-1', kind: 'person', name: 'Maya' });
     const saved = await tool('oc_save_private_thing', { kind: 'person', name: 'Maya', createNew: true, clientRequestId: 'req-2' });

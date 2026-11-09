@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildServer } from '../../mcp-server/src/server.js';
 import { contactInput, stateInput } from '../src/services/overlay/contacts.js';
 
-const graph = vi.hoisted(() => ({ importContactSource: vi.fn(), importContactSources: vi.fn(), savePeopleState: vi.fn(), listThings: vi.fn(), updatePersonCard: vi.fn() }));
+const graph = vi.hoisted(() => ({ readContactState:vi.fn(), importContactSource: vi.fn(), importContactSources: vi.fn(), savePeopleState: vi.fn(), listThings: vi.fn(), updatePersonCard: vi.fn() }));
 vi.mock('../src/services/privateGraph.js', async () => ({ ...await vi.importActual('../src/services/privateGraph.js'), ...graph }));
 vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({ run: async () => ({ records: [{ get: () => 'synthetic-owner' }] }), close: async () => {} }) }) }));
 import privateRoutes from '../src/routes/privateGraph.js';
@@ -42,12 +42,12 @@ function routeFetch(input: string | URL | globalThis.Request, init: RequestInit 
   });
 }
 
-async function hub(name: string, args: Record<string, unknown>, scope = 'openchat:read openchat:write') {
+async function hub(name: string, args: Record<string, unknown>, scope = 'openchat:read openchat:write', actorId: string | null = 'ideaflow-grant:synthetic', client = 'Synthetic client') {
   const body = Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }));
   const now = Math.floor(Date.now() / 1000);
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const claims = Buffer.from(JSON.stringify({ iss: 'https://id.ideaflow.app/connector', aud: 'https://chat.ideaflow.app/mcp',
-    identity_issuer: 'https://id.ideaflow.app/api/auth', sub: 'synthetic-subject', scope, client: 'Synthetic client',
+    identity_issuer: 'https://id.ideaflow.app/api/auth', sub: 'synthetic-subject', scope, client, ...(actorId === null ? {} : {actor_id:actorId}),
     iat: now, exp: now + 60, jti: randomUUID(), body_sha256: createHash('sha256').update(body).digest('hex') })).toString('base64url');
   const token = `${header}.${claims}.${createHmac('sha256', secret).update(`${header}.${claims}`).digest('base64url')}`;
   let status = 200, value: any;
@@ -146,17 +146,17 @@ describe('contacts executable adapter contracts', () => {
     graph.listThings.mockResolvedValue({ things: [], total: 5007, nextCursor: 'scoped_cursor' });
     const imported = await hub('oc_import_contact_source', card);
     expect(imported.status).toBe(200); expect(imported.value.result.isError).toBeUndefined();
-    expect(graph.importContactSource).toHaveBeenCalledWith('synthetic-owner', card, by);
+    expect(graph.importContactSource).toHaveBeenCalledWith('synthetic-owner', card, by,'ideaflow-grant:synthetic');
     const batch = await hub('oc_import_contact_sources', { cards: [card] });
     expect(payload(batch.value.result).results[0].unchanged).toBe(true);
-    expect(graph.importContactSources).toHaveBeenCalledWith('synthetic-owner', [card], by);
+    expect(graph.importContactSources).toHaveBeenCalledWith('synthetic-owner', [card], by,'ideaflow-grant:synthetic');
     const state = { operationId: 'synthetic-operation', expectedRevision: 0, payload: opaque };
     const saved = await hub('oc_save_people_state', { thingId: 'synthetic-person', ...state });
     expect(payload(saved.value.result)).toEqual({ revision: 1, payload: opaque, ...by });
-    expect(graph.savePeopleState).toHaveBeenCalledWith('synthetic-owner', 'synthetic-person', state, by);
+    expect(graph.savePeopleState).toHaveBeenCalledWith('synthetic-owner', 'synthetic-person', state, by,'ideaflow-grant:synthetic');
     const legacy = await hub('oc_set_person_private', { userId: 'synthetic-target', important: true });
     expect(legacy.value.result.isError).toBeUndefined();
-    expect(graph.updatePersonCard).toHaveBeenCalledWith('synthetic-owner', 'synthetic-target', { important: true }, by);
+    expect(graph.updatePersonCard).toHaveBeenCalledWith('synthetic-owner', 'synthetic-target', { important: true }, by,'ideaflow-grant:synthetic');
     const page = await hub('oc_list_private_things', { kind: 'person', query: 'Alex', after: 'scoped_cursor', details: true, limit: 73 });
     expect(payload(page.value.result).total).toBe(5007);
     expect(graph.listThings).toHaveBeenCalledWith('synthetic-owner', 'Alex', 'person', { after: 'scoped_cursor', details: 'true', limit: '73' });
@@ -172,4 +172,28 @@ describe('contacts executable adapter contracts', () => {
     if (process.env.CONTACTS_ADAPTER_EVIDENCE === '-') console.log(evidence);
     else if (process.env.CONTACTS_ADAPTER_EVIDENCE) writeFileSync(process.env.CONTACTS_ADAPTER_EVIDENCE, evidence);
   });
+  it('retains verified immutable actors across labels and rejects missing identity before contact writes', async()=>{
+    vi.stubEnv('IDEAFLOW_CONNECTOR_SECRET',secret);vi.stubGlobal('fetch',routeFetch);
+    graph.importContactSource.mockResolvedValue({entity:{id:'one'},created:false});
+    await hub('oc_import_contact_source',card,undefined,'grant:one','Shared');
+    await hub('oc_import_contact_source',card,undefined,'grant:two','Shared');
+    await hub('oc_import_contact_source',card,undefined,'grant:one','Renamed');
+    expect(graph.importContactSource.mock.calls.map(call=>call[3])).toEqual(['grant:one','grant:two','grant:one']);
+    expect(graph.importContactSource.mock.calls.map(call=>call[2].author)).toEqual(['agent:Shared','agent:Shared','agent:Renamed']);
+    const rejected=await hub('oc_import_contact_source',card,undefined,null);
+    expect(rejected.value.result.isError).toBe(true);expect(graph.importContactSource).toHaveBeenCalledTimes(3);
+  });
+
+  it('reads owner-private contact state through both hub and MCP without account profile fields', async()=>{
+    const state={thingId:'openchat-backed',card:{important:true},contactSources:[card],peopleState:{revision:4,payload:opaque}};
+    vi.stubEnv('IDEAFLOW_CONNECTOR_SECRET',secret);vi.stubGlobal('fetch',routeFetch);
+    graph.readContactState.mockResolvedValue(state);
+    expect(payload((await hub('oc_get_contact_state',{thingId:'openchat-backed'},'openchat:read')).value.result)).toEqual(state);
+    expect(graph.readContactState).toHaveBeenCalledWith('synthetic-owner','openchat-backed');
+    vi.stubGlobal('fetch',vi.fn(async(url:string,options:RequestInit)=>{
+      expect(new URL(url).pathname).toBe('/api/private/things/openchat-backed/contact-state');expect(options.method).toBe('GET');return new Response(JSON.stringify(state));
+    }));
+    await mcp(async client=>expect(payload(await client.callTool({name:'oc_get_contact_state',arguments:{thingId:'openchat-backed'}}))).toEqual(state));
+  });
+
 });

@@ -1,4 +1,4 @@
-import { CONTACT_SOURCE_CONSTRAINT, contactInput, sourcesIn, stateFrom, stateInput, stateCard, stableJSON } from './contacts.js';
+import { CONTACT_SOURCE_CONSTRAINT, actorProvenance, contactInput, sourcesIn, stateFrom, stateInput, stateCard, stableJSON, peopleOperationFingerprint, replayPeopleOperation } from './contacts.js';
 import { BLURB_CONSTRAINTS, mutateBlurbIn, loadBlurbs, changesIn, shelf, pageLimit, digest, blurbFeedIn } from './blurbs.js';
 import { eraseAskPublicationIn, revokeAskPublicationIn } from './publications.js';
 import { createHash } from 'node:crypto';
@@ -175,6 +175,7 @@ export class OverlayStore {
     const addRef = patch.addRef === undefined ? undefined : cleanRef(patch.addRef);
     const description = patch.description === undefined ? undefined : cleanDescription(patch.description);
     const kind = patch.kind === undefined ? undefined : cleanNamedKind(patch.kind);
+    const by = patch.card ? actorProvenance(principal!, provenance) : undefined;
     if (name === undefined && addRef === undefined && !patch.card && description === undefined && kind === undefined) return fail(400, 'nothing_to_change');
     return this.write(async tx => {
       if (patch.card) await tx.run('MATCH (e:OverlayEntity {ownerKey:$ownerKey,id:$id}) SET e._lock=true REMOVE e._lock', {ownerKey,id});
@@ -218,7 +219,7 @@ export class OverlayStore {
         const updated = await entity(tx, ownerKey, id);
         const previous = current.peopleState;
         const state = {schemaVersion:1, revision:(previous?.revision ?? 0)+1,
-          payload:{...(previous?.payload ?? {schemaVersion:1}), card:{...(previous?.payload.card && typeof previous.payload.card === 'object' && !Array.isArray(previous.payload.card) ? previous.payload.card : {}), ...updated.card, nextDueAt:explicitNextDueAt}}, updatedAt:now, ...cleanProvenance(provenance)};
+          payload:{...(previous?.payload ?? {schemaVersion:1}), card:{...(previous?.payload.card && typeof previous.payload.card === 'object' && !Array.isArray(previous.payload.card) ? previous.payload.card : {}), ...updated.card, nextDueAt:explicitNextDueAt}}, updatedAt:now, ...by};
         await tx.run('MATCH (e:OverlayEntity {ownerKey:$ownerKey,id:$id}) SET e.peopleState=$state', {ownerKey,id,state:JSON.stringify(state)});
       }
       return entity(tx, ownerKey, id);
@@ -345,7 +346,7 @@ export class OverlayStore {
   }
 
   async importContact(principal: OverlayPrincipal | null, raw: unknown, provenance?: unknown) {
-    const ownerKey = this.owner(principal), input = contactInput(raw), by = cleanProvenance(provenance);
+    const ownerKey = this.owner(principal), input = contactInput(raw), by = actorProvenance(principal!, provenance);
     return retryOnce(() => this.write(async tx => {
       await lockBlurbClock(tx, ownerKey);
       // The unique source node serializes retry/concurrent uploads before creating an entity.
@@ -364,8 +365,8 @@ export class OverlayStore {
       }
       const data = stableJSON(input.data), unchanged = existing !== null && locked.records[0]?.get('data') === data && locked.records[0]?.get('name') === input.name;
       if (!unchanged) await tx.run(`MATCH (s:OverlayContactSource {ownerKey:$ownerKey, sourceKey:$sourceKey})
-        SET s.entityId=$id, s.source=$source, s.sourceId=$sourceId, s.name=$name, s.data=$data, s.updatedAt=$now, s.author=$author, s.sourceVia=$via, s.assertion=$assertion`,
-        {ownerKey, sourceKey:input.sourceKey, id, source:input.source, sourceId:input.sourceId, name:input.name, data, now:new Date().toISOString(), author:by.author, via:by.source, assertion:by.assertion});
+        SET s.entityId=$id, s.source=$source, s.sourceId=$sourceId, s.name=$name, s.data=$data, s.updatedAt=$now, s.author=$author, s.sourceVia=$via, s.assertion=$assertion, s.actorId=$actorId`,
+        {ownerKey, sourceKey:input.sourceKey, id, source:input.source, sourceId:input.sourceId, name:input.name, data, now:new Date().toISOString(), author:by.author, via:by.source, assertion:by.assertion, actorId:by.actorId});
       return {entity:await entity(tx, ownerKey, id), created, unchanged};
     }));
   }
@@ -382,27 +383,30 @@ export class OverlayStore {
   }
 
   async savePeopleState(principal: OverlayPrincipal | null, id: unknown, raw: unknown, provenance?: unknown) {
-    const ownerKey = this.owner(principal), input = stateInput(raw, provenance), card = stateCard(input.payload.card);
+    const ownerKey = this.owner(principal), input = stateInput(raw, provenance), card = stateCard(input.payload.card), by = actorProvenance(principal!, input.provenance);
     if (!isId(id)) return fail(404, 'not_found');
     return this.write(async tx => {
       await lockBlurbClock(tx, ownerKey);
       const found = await tx.run('MATCH (e:OverlayEntity {ownerKey:$ownerKey, id:$id}) SET e._lock=true REMOVE e._lock RETURN e.peopleState AS state', {ownerKey,id});
       if (!found.records.length) return fail(404,'not_found');
       const previous = stateFrom(found.records[0]!.get('state'));
-      const fingerprint = createHash('sha256').update(stableJSON({id, expectedRevision:input.expectedRevision, payload:input.payload, app:principal!.app, provenance:input.provenance})).digest('hex');
-      const receipt = await tx.run('MATCH (r:OverlayPeopleOperation {ownerKey:$ownerKey,entityId:$id,operationId:$operationId}) RETURN r.fingerprint AS fingerprint,r.state AS state', {ownerKey,id,operationId:input.operationId});
+      const request = {id, expectedRevision:input.expectedRevision, payload:input.payload, app:principal!.app};
+      const fingerprint = peopleOperationFingerprint(request, by);
+      const receipt = await tx.run('MATCH (r:OverlayPeopleOperation {ownerKey:$ownerKey,entityId:$id,operationId:$operationId}) RETURN r.fingerprint AS fingerprint,r.fingerprintVersion AS fingerprintVersion,r.state AS state', {ownerKey,id,operationId:input.operationId});
       if (receipt.records.length) {
-        if (receipt.records[0]!.get('fingerprint') !== fingerprint) return fail(409,'operation_id_reused');
-        return stateFrom(receipt.records[0]!.get('state'))!;
+        const row = receipt.records[0]!;
+        const replay = replayPeopleOperation(request, by, {fingerprint:row.get('fingerprint'), fingerprintVersion:row.get('fingerprintVersion') === null ? null : number(row.get('fingerprintVersion')), state:row.get('state')});
+        if (replay.upgrade) await tx.run('MATCH (r:OverlayPeopleOperation {ownerKey:$ownerKey,entityId:$id,operationId:$operationId}) SET r.fingerprint=$fingerprint,r.fingerprintVersion=2', {ownerKey,id,operationId:input.operationId,fingerprint});
+        return replay.state;
       }
       if ((previous?.revision ?? 0) !== input.expectedRevision) return fail(409,'state_conflict');
-      const state = {schemaVersion:1 as const, revision:input.expectedRevision+1, payload:input.payload, updatedAt:new Date().toISOString(), ...input.provenance};
+      const state = {schemaVersion:1 as const, revision:input.expectedRevision+1, payload:input.payload, updatedAt:new Date().toISOString(), ...by};
       await tx.run('MATCH (e:OverlayEntity {ownerKey:$ownerKey,id:$id}) SET e.peopleState=$state', {ownerKey,id,state:JSON.stringify(state)});
       if (card) await tx.run(`MATCH (e:OverlayEntity {ownerKey:$ownerKey,id:$id})
         WITH e, coalesce(e.cadenceDays, 0) <> coalesce($card.cadenceDays, 0)
           OR coalesce(e.cadenceMode, 'fixed') <> $card.cadenceMode AS cadenceChanged
         SET e += $card, e.cadenceSetAt = CASE WHEN cadenceChanged THEN $now ELSE e.cadenceSetAt END`, {ownerKey,id,card,now:state.updatedAt});
-      await tx.run('CREATE (:OverlayPeopleOperation {ownerKey:$ownerKey,entityId:$id,operationId:$operationId,fingerprint:$fingerprint,state:$state})', {ownerKey,id,operationId:input.operationId,fingerprint,state:JSON.stringify(state)});
+      await tx.run('CREATE (:OverlayPeopleOperation {ownerKey:$ownerKey,entityId:$id,operationId:$operationId,fingerprint:$fingerprint,fingerprintVersion:2,state:$state})', {ownerKey,id,operationId:input.operationId,fingerprint,state:JSON.stringify(state)});
       return state;
     });
   }
@@ -563,6 +567,21 @@ export class OverlayStore {
   async listAsks(principal: OverlayPrincipal | null, filter: { status?: unknown; direction?: unknown; asker?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown } = {}): Promise<{ asks: Ask[]; truncated: boolean }> {
     const ownerKey = this.owner(principal), parsed = parseAskFilter(filter);
     return this.read(tx => listAsksIn(tx, ownerKey, parsed));
+  }
+
+  /** Link browser projection: never loads source JSON, People state, notes or blurbs. */
+  async exportOwnerLinks(principal: OverlayPrincipal | null) {
+    const ownerKey = this.owner(principal);
+    return this.read(async tx => {
+      const links = await tx.run(`MATCH (a:OverlayEntity {ownerKey:$ownerKey})-[l:OVERLAY_LINK]->(b:OverlayEntity {ownerKey:$ownerKey})
+        WHERE l.ownerKey=$ownerKey AND (a.kind <> 'blurb' OR a.deletedAt IS NULL) AND (b.kind <> 'blurb' OR b.deletedAt IS NULL)
+        RETURN ${EDGE} AS edge, a.id AS fromId, b.id AS toId ORDER BY l.createdAt`, {ownerKey});
+      const edges = links.records.map(row => ({...edgeFrom(row.get('edge') as Record<string,unknown>), fromId:String(row.get('fromId')), toId:String(row.get('toId'))}));
+      const ids = [...new Set(edges.flatMap(edge => [edge.fromId, edge.toId]))];
+      const entities = await tx.run(`MATCH (e:OverlayEntity {ownerKey:$ownerKey}) WHERE e.id IN $ids
+        RETURN e { .id, .kind, .name, .description, refs:[(r:OverlayRef {ownerKey:$ownerKey})-[:REF_OF]->(e)|r.ref] } AS entity ORDER BY e.id`, {ownerKey,ids});
+      return {entities:entities.records.map(row => row.get('entity')), links:edges};
+    });
   }
 
   /** The owner's whole overlay as plain rows. */

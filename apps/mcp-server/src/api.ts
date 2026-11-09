@@ -437,6 +437,7 @@ function buildApiMethods(request: ReturnType<typeof makeRequest>) {
       request<unknown>('GET', '/api/private/things', { query: { q: query, kind, after, limit, details } }),
     importContactSources: (cards:Record<string,unknown>[]) => request<unknown>('POST','/api/private/contact-source-batches',{body:{cards}}),
     importContactSource: (body: Record<string,unknown>) => request<unknown>('POST','/api/private/contact-sources',{body}),
+    getContactState: (id:string) => request<unknown>('GET',`/api/private/things/${encodeURIComponent(id)}/contact-state`),
     savePeopleState: (id:string, body:Record<string,unknown>) => request<unknown>('PUT',`/api/private/things/${encodeURIComponent(id)}/people-state`,{body}),
     getPrivateThing: (thingId: string) =>
       request<unknown>('GET', `/api/private/things/${encodeURIComponent(thingId)}`),

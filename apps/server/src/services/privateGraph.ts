@@ -504,9 +504,13 @@ export async function getPersonOverlay(ownerId: string, userId: string): Promise
   return { userId, person, card: found?.card ?? { ...EMPTY_CARD }, notes: (found?.notes ?? []).map(noteOf), links: await linksFor(ownerId, found?.links ?? []) };
 }
 
-export async function updatePersonCard(ownerId: string, userId: string, patch: CardPatch, by: Provenance = OWNER_PROVENANCE): Promise<PersonCard> {
+function contactPrincipal(principal: OverlayPrincipal, by: Provenance, actorId?: string): OverlayPrincipal {
+  return {...principal, actor:by.author ?? 'owner', ...(actorId === undefined ? {} : {actorId})};
+}
+
+export async function updatePersonCard(ownerId: string, userId: string, patch: CardPatch, by: Provenance = OWNER_PROVENANCE, actorId?: string): Promise<PersonCard> {
   const { principal, entityId } = await personEntity(ownerId, userId);
-  return (await overlayCall(overlay => overlay.update(principal, entityId, { card: patch }, by))).card;
+  return (await overlayCall(overlay => overlay.update(contactPrincipal(principal,by,actorId), entityId, { card: patch }, by))).card;
 }
 
 /** The same text already on this card is the same note (the overlay dedupes): a retried request never doubles it. */
@@ -634,7 +638,7 @@ export async function getUnlinkedPersonOverlay(ownerId: string, raw: string): Pr
 export async function listOwnerLinks(ownerId: string, rawQuery: unknown): Promise<{ links: OwnerLink[]; total: number }> {
   const query = typeof rawQuery === 'string' ? nameKey(rawQuery).slice(0, LIMITS.nameLength) : '';
   const principal = await ownerPrincipal(ownerId);
-  const exported = await overlayCall(overlay => overlay.exportOwner(principal)) as { entities: Array<{ id: string; kind: ThingKind; name: string; description: string | null; refs: string[] }>; links: Array<Edge & { fromId: string; toId: string }> };
+  const exported = await overlayCall(overlay => overlay.exportOwnerLinks(principal)) as { entities: Array<{ id: string; kind: ThingKind; name: string; description: string | null; refs: string[] }>; links: Array<Edge & { fromId: string; toId: string }> };
   const entities = new Map(exported.entities.map(entity => [entity.id, entity]));
   const names = await userNames(exported.entities);
   const linked = new Set(exported.links.flatMap(link => [link.fromId, link.toId]));
@@ -834,18 +838,25 @@ export async function listThings(ownerId: string, query: unknown, kind: unknown,
   return {things, nextCursor:page.nextCursor, total:page.total};
 }
 
-export async function importContactSource(ownerId:string, input:unknown, by:Provenance) {
+export async function importContactSource(ownerId:string, input:unknown, by:Provenance, actorId?:string) {
   const principal=await ownerPrincipal(ownerId);
-  const result=await overlayCall(overlay=>overlay.importContact(principal,input,by));
+  const result=await overlayCall(overlay=>overlay.importContact(contactPrincipal(principal,by,actorId),input,by));
   return {...result, entity:thingOf(result.entity)};
 }
-export async function importContactSources(ownerId:string, cards:unknown, by:Provenance) {
+export async function importContactSources(ownerId:string, cards:unknown, by:Provenance, actorId?:string) {
   const principal=await ownerPrincipal(ownerId);
-  return overlayCall(overlay=>overlay.importContacts(principal,cards,by));
+  return overlayCall(overlay=>overlay.importContacts(contactPrincipal(principal,by,actorId),cards,by));
 }
-export async function savePeopleState(ownerId:string, thingId:string, input:unknown, by:Provenance) {
+export async function savePeopleState(ownerId:string, thingId:string, input:unknown, by:Provenance, actorId?:string) {
   const principal=await ownerPrincipal(ownerId);
-  return overlayCall(overlay=>overlay.savePeopleState(principal,thingId,input,by));
+  return overlayCall(overlay=>overlay.savePeopleState(contactPrincipal(principal,by,actorId),thingId,input,by));
+}
+
+/** Owner-authored private data remains readable independently of an account profile. */
+export async function readContactState(ownerId:string, thingId:string) {
+  const principal=await ownerPrincipal(ownerId);
+  const found=await overlayCall(overlay=>overlay.get(principal,thingId));
+  return {thingId:found.id, card:found.card, contactSources:found.contactSources ?? [], ...(found.peopleState ? {peopleState:found.peopleState} : {})};
 }
 
 export async function getThing(ownerId: string, thingId: string): Promise<ThingDetail> {

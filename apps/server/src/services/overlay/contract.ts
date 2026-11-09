@@ -90,7 +90,7 @@ export interface DueEntity { id: string; name: string; refs: string[]; important
 export interface CardPatch { important?: boolean; cadenceDays?: number | null; cadenceMode?: CadenceMode; contactedNow?: boolean }
 
 /** A verified caller: which app is asking, and on behalf of which owner. */
-export interface OverlayPrincipal { app: string; ownerKey: string; actor?: string }
+export interface OverlayPrincipal { app: string; ownerKey: string; actor?: string; actorId?: string }
 
 export class OverlayError extends Error {
   /** `details` carries structured, owner-only extras such as `candidates` for `ambiguous_name`. */
