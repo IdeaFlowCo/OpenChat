@@ -137,3 +137,10 @@ it is still in front a moment later.
 Private Stream entries, private notes, asks and to-dos scoped to a conversation are never collected into link resources. Only conversation messages and actively shared mirror messages supply links.
 
 A link disappears from Links when every message carrying it is deleted or edited to remove it. Previously collected links remain when a mirror is unshared.
+
+## Validation status
+
+At `df88f70a`, 47 focused tests passed against an isolated real Neo4j. At
+`5cd093d048334d8389bf134aa5f871b89671bd67`, the server build and both server
+and mobile lint checks passed. UI integration and participant, history, and
+privacy gates remain outstanding.
