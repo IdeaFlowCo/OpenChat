@@ -72,7 +72,7 @@ export function StoryViewerScreen() {
             </View>
             <Text style={[styles.eyebrow, { color: c.primary }]}>STORY</Text>
           </View>
-          <Text style={[styles.storyText, { color: c.textPrimary }]}>{story.text}</Text>
+          <Text selectable style={[styles.storyText, { color: c.textPrimary }]}>{story.text}</Text>
         </View>
 
         <View style={[styles.replyCard, { backgroundColor: c.surface, borderColor: c.border }]}>

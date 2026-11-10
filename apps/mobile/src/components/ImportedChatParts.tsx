@@ -50,7 +50,7 @@ export function SourceQuote({ source, onOpenPerson }: { source: ImportedSourceEx
           : <Text style={[type.label, { color: r.text }]}>{who ? participantName(who) : 'Source message'}</Text>}
         {source.sentAt ? <Text style={[type.meta, { color: r.textMeta }]}>{shortDate(source.sentAt)}</Text> : null}
       </View>
-      <Text style={[type.body, { color: source.text ? r.textSecondary : r.textMeta }]} numberOfLines={4}>
+      <Text selectable style={[type.body, { color: source.text ? r.textSecondary : r.textMeta }]} numberOfLines={4}>
         {source.available ? (source.text ?? 'No text (deleted or media)') : 'Source message not in this copy'}
       </Text>
     </View>
@@ -73,7 +73,7 @@ export function AskCard({ ask, onOpenPerson, onSetStatus, busy }: {
         <Text style={[type.eyebrow, { color: ask.status === 'open' ? r.ask : r.textMeta }]}>{ASK_STATUS_LABEL[ask.status]}</Text>
         {ask.stale ? <Chip label="Not in latest import" /> : null}
       </View>
-      <Text style={[type.bodyStrong, { color: r.text }]}>{ask.text}</Text>
+      <Text selectable style={[type.bodyStrong, { color: r.text }]}>{ask.text}</Text>
       <View style={styles.attribution}>
         <Text style={[type.meta, { color: r.textMeta }]}>For </Text>
         {subject

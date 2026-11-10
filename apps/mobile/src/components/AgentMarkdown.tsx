@@ -39,12 +39,12 @@ export function AgentMarkdown({ content, color, linkColor, codeBackground, rende
       {blocks.map((block, index) => {
         const key = `b${index}`;
         switch (block.t) {
-          case 'p': return <Text key={key} style={[styles.body, { color }]}>{inline(block.c, key)}</Text>;
-          case 'heading': return <Text key={key} style={[styles.body, styles.bold, { color }]} accessibilityRole="header">{inline(block.c, key)}</Text>;
-          case 'quote': return <Text key={key} style={[styles.body, styles.quote, { color, borderLeftColor: codeBackground }]}>{inline(block.c, key)}</Text>;
+          case 'p': return <Text selectable key={key} style={[styles.body, { color }]}>{inline(block.c, key)}</Text>;
+          case 'heading': return <Text selectable key={key} style={[styles.body, styles.bold, { color }]} accessibilityRole="header">{inline(block.c, key)}</Text>;
+          case 'quote': return <Text selectable key={key} style={[styles.body, styles.quote, { color, borderLeftColor: codeBackground }]}>{inline(block.c, key)}</Text>;
           case 'code': return (
             <View key={key} style={[styles.codeBlock, { backgroundColor: codeBackground }]}>
-              <Text style={[styles.codeText, { color }]}>{block.v}</Text>
+              <Text selectable style={[styles.codeText, { color }]}>{block.v}</Text>
             </View>
           );
           case 'list': return (
@@ -52,7 +52,7 @@ export function AgentMarkdown({ content, color, linkColor, codeBackground, rende
               {block.items.map((item, i) => (
                 <View key={`${key}.${i}`} style={styles.item}>
                   <Text style={[styles.body, styles.marker, { color }]}>{block.ordered ? `${block.start + i}.` : '•'}</Text>
-                  <Text style={[styles.body, styles.itemText, { color }]}>{inline(item, `${key}.${i}`)}</Text>
+                  <Text selectable style={[styles.body, styles.itemText, { color }]}>{inline(item, `${key}.${i}`)}</Text>
                 </View>
               ))}
             </View>

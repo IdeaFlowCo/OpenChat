@@ -60,7 +60,7 @@ export function ImportedPersonScreen() {
         ? <Text style={[type.body, { color: r.textSecondary }]}>Nothing in this chat describes them yet.</Text>
         : profile.facts.map(fact => (
           <Card key={fact.id} style={styles.fact}>
-            <Text style={[type.bodyStrong, { color: r.text }]}>{fact.text}</Text>
+            <Text selectable style={[type.bodyStrong, { color: r.text }]}>{fact.text}</Text>
             {fact.stale ? <Text style={[type.meta, { color: r.textMeta }]}>Not in latest import</Text> : null}
             {fact.sources.map(source => <SourceQuote key={source.sourceMessageId} source={source} onOpenPerson={openPerson} />)}
           </Card>
@@ -76,7 +76,7 @@ export function ImportedPersonScreen() {
       {profile.recentMessages.map(message => (
         <View key={message.id} style={[styles.message, { borderBottomColor: r.line }]}>
           <Text style={[type.meta, { color: r.textMeta }]}>{messageTime(message.sentAt)}</Text>
-          <Text style={[type.body, { color: message.text ? r.text : r.textMeta }]} numberOfLines={6}>
+          <Text selectable style={[type.body, { color: message.text ? r.text : r.textMeta }]} numberOfLines={6}>
             {message.kind === 'deleted' ? 'Deleted by the sender' : message.text ?? (message.mediaType ? `${message.mediaType} · not imported` : 'No text')}
           </Text>
         </View>
