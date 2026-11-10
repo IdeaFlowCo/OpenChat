@@ -1,8 +1,8 @@
 # Shared chat mirrors and link resources
 
 An [imported chat](imported-chat-mirrors.md) is its owner's private, read-only
-copy of a chat from another network. The owner can share **one** such mirror
-into **one group conversation they own**. The members of that group then see
+copy of a chat from another network. The owner can share a mirror
+into a group conversation they own. The members of that group then see
 the mirrored messages next to the group's own messages, and the group keeps
 every shared link as a lasting resource.
 
@@ -117,14 +117,18 @@ its [README](../scripts/imessage-thread-mirror/README.md). In short:
 - never uploads phone numbers or email addresses (each person is a keyed hash;
   names come from the local config), attachments, tapbacks, group events, or
   any other thread;
-- logs counts only.
+- logs sync counts only; the explicit extract and payload commands output chat
+  data for transfer or review.
 
 It is not a general capture tool. The separate tag-driven iMessage capture in
 PR #157 remains unmerged and under its own review hold.
 
 ## Invite previews
 
-An invite link's preview (`/i/:token`) names the chat in its title when available. The description identifies it only as an OpenChat invitation; it includes no member count or message content. Untitled chats use neutral wording. The page is `noindex`, `private, no-store` and sends no referrer.
+An invite link's static preview (`/i/:token`) uses a neutral title and description,
+without the group name or member count. The group name appears in the page body
+and in the tab title set by script. The page is `noindex`, `private, no-store`
+and sends no referrer.
 
 **Open in OpenChat** uses the app's link scheme. For a visitor without the app
 that tap used to do nothing; the page now continues to **Join on the web** when

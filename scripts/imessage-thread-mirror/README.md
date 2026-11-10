@@ -21,7 +21,8 @@ in its config and nothing else.
   "deleted by the sender".
 - The upload uses the mirror's own write-only sync token, which can touch only
   that mirror. The token and config files must be `chmod 600`.
-- Output is counts only. Message text and names are never logged.
+- Sync logs counts only. The explicit `extract` and `payload` commands output
+  chat data for transfer or review; handle that output privately.
 - Message text is data. Nothing in it is executed or interpreted.
 
 ## Config
