@@ -31,6 +31,7 @@ vi.mock('react-native', async () => {
       ),
   };
 });
+vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn(async () => true) }));
 vi.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: vi.fn() }),
   useFocusEffect: (cb: any) => { React.useEffect(() => { cb(); }, [cb]); },

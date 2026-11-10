@@ -45,7 +45,7 @@ export function ProfileAsks({ userId, onOpenStory }: { userId: string; onOpenSto
       <Card padding="none">
         {stories.map((story, index) => (
           <View key={story.id} style={[styles.ask, index > 0 && { borderTopColor: r.line, borderTopWidth: StyleSheet.hairlineWidth }]}>
-            <Text style={[type.body, { color: r.text }]} numberOfLines={5}>{story.text}</Text>
+            <Text selectable style={[type.body, { color: r.text }]} numberOfLines={5}>{story.text}</Text>
             <View style={styles.askFooter}>
               <Text style={[type.meta, { color: r.textMeta }]}>{askTimeLeft(story.storyExpiresAt)}</Text>
               <Button size="sm" label="Respond" onPress={() => onOpenStory(story)} />

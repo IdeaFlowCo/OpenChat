@@ -260,9 +260,9 @@ export function AgentNetworkCard({ message, onOpenConversation, onShareDraft }: 
       <View style={styles.centered}>
         <View style={shellStyle} accessibilityLabel="Private intention draft from OpenChat Agent">
           <Text style={[styles.eyebrow, { color: c.primary }]}>PRIVATE DRAFT</Text>
-          <Text style={[styles.title, { color: c.textPrimary }]}>{title}</Text>
-          {payload.draft.seeks.length > 0 && <Text style={[styles.terms, { color: c.textSecondary }]}>Looking for · {payload.draft.seeks.join(', ')}</Text>}
-          {payload.draft.brings.length > 0 && <Text style={[styles.terms, { color: c.textSecondary }]}>Can bring · {payload.draft.brings.join(', ')}</Text>}
+          <Text selectable style={[styles.title, { color: c.textPrimary }]}>{title}</Text>
+          {payload.draft.seeks.length > 0 && <Text selectable style={[styles.terms, { color: c.textSecondary }]}>Looking for · {payload.draft.seeks.join(', ')}</Text>}
+          {payload.draft.brings.length > 0 && <Text selectable style={[styles.terms, { color: c.textSecondary }]}>Can bring · {payload.draft.brings.join(', ')}</Text>}
           <View style={[styles.privacyBlock, { backgroundColor: c.surface, borderColor: c.border }]}>
             <Text style={[styles.privacyTitle, { color: c.textPrimary }]}>Still private</Text>
             <Text style={[styles.privacyText, { color: c.textSecondary }]}>No person or outside agent can see this yet. Choose a next step.</Text>
@@ -313,13 +313,13 @@ export function AgentNetworkCard({ message, onOpenConversation, onShareDraft }: 
           <Text style={[styles.title, { color: c.textPrimary }]}>{sharedGoal ? 'Your agents found a shared goal' : reciprocal ? 'Your agents found a reciprocal match' : 'Your agents matched an ask and an offer'}</Text>
           <View style={styles.termBlock}>
             <Text style={[styles.label, { color: c.textMetadata }]}>{sharedGoal ? 'ONE SIDE' : reciprocal ? 'ONE SIDE' : 'ASK'}</Text>
-            <Text style={[styles.terms, { color: c.textPrimary }]}>{payload.askTerms}</Text>
+            <Text selectable style={[styles.terms, { color: c.textPrimary }]}>{payload.askTerms}</Text>
           </View>
           <View
             style={[styles.dividedTermBlock, { borderTopColor: c.border }]}
           >
             <Text style={[styles.label, { color: c.textMetadata }]}>{sharedGoal ? 'SHARED DIRECTION' : reciprocal ? 'COMPLEMENTARY SIDE' : 'OFFER'}</Text>
-            <Text style={[styles.terms, { color: c.textPrimary }]}>{payload.offerTerms}</Text>
+            <Text selectable style={[styles.terms, { color: c.textPrimary }]}>{payload.offerTerms}</Text>
           </View>
         </View>
       </View>
@@ -341,12 +341,12 @@ export function AgentNetworkCard({ message, onOpenConversation, onShareDraft }: 
 
         <View style={[styles.anonymousTerms, { backgroundColor: c.surface, borderColor: c.border }]}>
           <Text style={[styles.label, { color: c.textMetadata }]}>{sharedGoal ? 'ANONYMOUS SHARED DIRECTION' : reciprocal ? 'ANONYMOUS COMPLEMENT' : `ANONYMOUS ${payload.otherKind.toUpperCase()}`}</Text>
-          <Text style={[styles.terms, { color: c.textPrimary }]}>{payload.otherTerms}</Text>
+          <Text selectable style={[styles.terms, { color: c.textPrimary }]}>{payload.otherTerms}</Text>
         </View>
 
         <View style={styles.ownTerms}>
           <Text style={[styles.ownLabel, { color: c.textSecondary }]}>{sharedGoal ? 'Your goal' : reciprocal ? 'Your side' : `Your ${payload.ownIntent.kind}`}</Text>
-          <Text style={[styles.terms, { color: c.textSecondary }]}>{payload.ownIntent.terms}</Text>
+          <Text selectable style={[styles.terms, { color: c.textSecondary }]}>{payload.ownIntent.terms}</Text>
         </View>
 
         {status === 'pending' && !liveMatch?.alreadyResolved && (

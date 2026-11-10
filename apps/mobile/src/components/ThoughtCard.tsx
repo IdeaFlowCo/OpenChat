@@ -21,6 +21,8 @@ import { AppIcon } from './AppIcon';
 import { space, type } from '../theme/tokens';
 import * as Clipboard from 'expo-clipboard';
 import { originalMessageUrl } from '../utils/parseOpenChatUrl';
+import { copyText, hasActiveTextSelection } from '../utils/copyText';
+import { SelectableTextPanel } from './SelectableTextSheet';
 import { COMPACT_VISIBLE_LINES, isLongStreamText, useStreamCompact, useThoughtCollapsed } from '../services/streamDisplay';
 
 // Ink & Paper: warm, muted kind colors (was stock Tailwind indigo/amber/etc).
@@ -72,6 +74,8 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
   const tags = item.tags ?? [];
   const [actions, setActions] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [selecting, setSelecting] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const [collapsed, toggleCollapsedSaved] = useThoughtCollapsed(item.id, item.collapsed);
   const [compact] = useStreamCompact();
   const [revealed, setRevealed] = useState(false);
@@ -82,16 +86,24 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
     setCollapseError(false);
     toggleCollapsedSaved().catch(() => setCollapseError(true));
   };
-  const openActions = () => { setConfirmDelete(false); setActions(true); };
+  const openActions = () => { setConfirmDelete(false); setSelecting(false); setActions(true); };
+  const closeActions = () => { setActions(false); setSelecting(false); };
+  // A finished drag-selection on web must select text, not edit or collapse the card.
+  const pressCard = () => {
+    if (hasActiveTextSelection()) return;
+    (collapsed ? toggleCollapsed : onPress)?.();
+  };
+  const copyEntry = async () => { setCopyFailed(!(await copyText(item.text))); };
   const action = (label: string, run: () => void) => <TouchableOpacity onPress={() => { setActions(false); run(); }} accessibilityRole="button" style={{ padding: 14 }}><Text style={{ color: c.primary }}>{label}</Text></TouchableOpacity>;
 
   return (
     // RN-web's touch responder replaces onContextMenu on TouchableOpacity.
     // Keep right-click on its View parent and long-press on the touchable.
-    <View {...(Platform.OS === 'web' ? { onContextMenu: (event: { preventDefault: () => void; stopPropagation: () => void }) => { event.preventDefault(); event.stopPropagation(); openActions(); } } : {})}>
+    // Right-click over selected text keeps the browser's own Copy menu.
+    <View {...(Platform.OS === 'web' ? { onContextMenu: (event: { preventDefault: () => void; stopPropagation: () => void }) => { if (hasActiveTextSelection()) return; event.preventDefault(); event.stopPropagation(); openActions(); } } : {})}>
     <TouchableOpacity
       // A collapsed card's tap reveals it; editing starts from the expanded card.
-      onPress={collapsed ? toggleCollapsed : onPress}
+      onPress={pressCard}
       accessibilityState={{ expanded: !collapsed }}
       onLongPress={openActions}
       activeOpacity={0.7}
@@ -167,15 +179,19 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
         </TouchableOpacity>
       </View>
 
-      <Modal visible={actions} transparent animationType="fade" onRequestClose={() => setActions(false)}>
+      <Modal visible={actions} transparent animationType="fade" onRequestClose={closeActions}>
+        {/* "Select text…" swaps this Modal's content rather than opening a second Modal. */}
+        {selecting ? <SelectableTextPanel text={item.text} title="Select Stream entry text" onClose={closeActions} /> :
         <Pressable onPress={() => setActions(false)} style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0006' }}>
           <Pressable onPress={event => event.stopPropagation()} style={{ backgroundColor: c.surface, padding: 12, borderRadius: 12, width: 300 }}>
             <Text style={{ color: c.textPrimary, padding: 14, fontWeight: '600' }}>{confirmDelete ? 'Delete Stream entry?' : 'Stream entry actions'}</Text>
             {confirmDelete ? <>
               {onDelete && action('Delete entry', onDelete)}
             </> : <>
-              {action(collapsed ? 'Expand entry' : 'Collapse entry', toggleCollapsed)}
+              {action('Copy text', () => void copyEntry())}
+              <TouchableOpacity onPress={() => setSelecting(true)} accessibilityRole="button" style={{ padding: 14 }}><Text style={{ color: c.primary }}>Select text…</Text></TouchableOpacity>
               {onPress && action('Edit entry', onPress)}
+              {action(collapsed ? 'Expand entry' : 'Collapse entry', toggleCollapsed)}
               {onOpenContext && action('Original message', onOpenContext)}
               {onOpenContext && action('Copy link to original', () => void Clipboard.setStringAsync(originalMessageUrl(item.id)).catch(() => undefined))}
               {onTogglePin && action(item.pinned ? 'Unpin from chat' : 'Pin to chat', onTogglePin)}
@@ -183,16 +199,21 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
             </>}
             {action('Cancel', () => undefined)}
           </Pressable>
-        </Pressable>
+        </Pressable>}
       </Modal>
       {!collapsed && onOpenContext && <TouchableOpacity onPress={onOpenContext} accessibilityRole="button" style={{ paddingVertical: 8 }}><Text style={{ color: c.primary }}>Original message</Text></TouchableOpacity>}
       {/* Body text */}
+      {/* Web: selectable in place (the card's touchable otherwise sets user-select: none).
+          Native: the card's tap/long-press own the gesture, so selection is
+          "Select text…" and copying is "Copy text" in the actions menu. */}
       <Text
+        selectable={Platform.OS === 'web'}
         style={[styles.bodyText, { color: collapsed ? c.textMetadata : c.textPrimary }]}
         numberOfLines={collapsed ? 1 : condensed ? COMPACT_VISIBLE_LINES : undefined}
       >
         {item.text}
       </Text>
+      {copyFailed && <Text accessibilityRole="alert" style={[styles.subtitle, { color: c.danger }]}>Could not copy. Try Select text… instead.</Text>}
       {collapseError && <Text accessibilityRole="alert" style={[styles.subtitle, { color: c.danger }]}>Could not save. Try again.</Text>}
       {!collapsed && compact && long && (
         <TouchableOpacity onPress={() => setRevealed((r) => !r)} accessibilityRole="button" style={{ paddingVertical: 6 }}>

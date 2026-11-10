@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -38,6 +39,8 @@ import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp } from '../navigation/types';
+import { SelectableTextSheet } from '../components/SelectableTextSheet';
+import { hasActiveTextSelection } from '../utils/copyText';
 import {
   getDirectConversationParticipant,
   getDirectConversationTitle,
@@ -75,6 +78,7 @@ export function SearchScreen() {
   const [searchResult, setSearchResult] = useState<{ results: SearchResults; query: string } | null>(null);
   const results = searchResult?.results ?? null;
   const [opening, setOpening] = useState<string | null>(null);
+  const [selectingText, setSelectingText] = useState<string | null>(null);
 
   // Focus the input on mount.
   useLayoutEffect(() => {
@@ -209,7 +213,11 @@ export function SearchScreen() {
       return (
         <TouchableOpacity
           style={[styles.row, { borderColor: c.divider }]}
-          onPress={() => openConversation(h.conversationId)}
+          // Web: finishing a drag-selection of the snippet must not open the chat.
+          onPress={() => { if (!hasActiveTextSelection()) openConversation(h.conversationId); }}
+          // Long-press: the whole message, selectable, with Copy all.
+          onLongPress={() => setSelectingText(h.content)}
+          accessibilityHint="Opens the chat. Press and hold to select or copy the message."
           activeOpacity={0.7}
         >
           <Avatar
@@ -227,7 +235,7 @@ export function SearchScreen() {
               <BotBadge isBot={h.sender?.isBot} compact />
               <Text style={[styles.rowTime, { color: c.textMetadata }]}>{relativeTime(h.createdAt)}</Text>
             </View>
-            <Text style={[styles.rowPreview, { color: c.textPrimary }]} numberOfLines={2}>
+            <Text selectable={Platform.OS === 'web'} style={[styles.rowPreview, { color: c.textPrimary }]} numberOfLines={2}>
               {h.content}
             </Text>
             <Text style={[styles.msgIn, { color: c.textMetadata }]} numberOfLines={1}>
@@ -273,6 +281,7 @@ export function SearchScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
+      {selectingText !== null && <SelectableTextSheet visible text={selectingText} title="Select message text" onClose={() => setSelectingText(null)} />}
       <View style={[styles.searchWrap, { backgroundColor: c.surface, borderColor: c.border }]}>
         <TextInput
           ref={inputRef}

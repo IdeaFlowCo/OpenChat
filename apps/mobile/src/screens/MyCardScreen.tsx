@@ -248,7 +248,7 @@ export function MyCardScreen() {
       <View style={styles.identity}>
         <Avatar name={name} email={safeEmail} avatarUrl={currentUser?.avatarUrl ?? undefined} size={88} />
         <Text style={[type.heading, styles.centered, { color: r.text }]} numberOfLines={1}>{name}</Text>
-        {!!headerHeadline && <Text style={[type.body, styles.centered, { color: r.textSecondary }]} numberOfLines={2}>{headerHeadline}</Text>}
+        {!!headerHeadline && <Text selectable style={[type.body, styles.centered, { color: r.textSecondary }]} numberOfLines={2}>{headerHeadline}</Text>}
         {myLinks.length > 0 && (
           <View style={styles.linkChips}>
             {myLinks.map(item => <Chip key={item.label} icon="link" label={item.label} onPress={() => void Linking.openURL(item.url)} accessibilityLabel={`${item.label}: ${item.url}`} />)}

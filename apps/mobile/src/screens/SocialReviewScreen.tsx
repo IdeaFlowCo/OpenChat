@@ -111,10 +111,10 @@ export function SocialReviewScreen() {
             return (
               <View style={[styles.card, { borderColor: item.priority === 'action' ? c.primary : c.border, backgroundColor: c.surface }]}>
                 <Text style={[styles.label, { color: item.priority === 'action' ? c.primary : c.textMetadata }]}>{itemLabel(item)}</Text>
-                <Text style={[styles.cardTitle, { color: c.textPrimary }]}>{itemTitle(item)}</Text>
-                {item.kind === 'match' && <Text style={[styles.detail, { color: c.textSecondary }]}>Matched with your {item.match.ownIntent.kind}: {item.match.ownIntent.terms}</Text>}
-                {item.kind === 'draft' && item.draft.seeks.length > 0 && <Text style={[styles.detail, { color: c.textSecondary }]}>Looking for · {item.draft.seeks.join(', ')}</Text>}
-                {item.kind === 'draft' && item.draft.brings.length > 0 && <Text style={[styles.detail, { color: c.textSecondary }]}>You can bring · {item.draft.brings.join(', ')}</Text>}
+                <Text selectable style={[styles.cardTitle, { color: c.textPrimary }]}>{itemTitle(item)}</Text>
+                {item.kind === 'match' && <Text selectable style={[styles.detail, { color: c.textSecondary }]}>Matched with your {item.match.ownIntent.kind}: {item.match.ownIntent.terms}</Text>}
+                {item.kind === 'draft' && item.draft.seeks.length > 0 && <Text selectable style={[styles.detail, { color: c.textSecondary }]}>Looking for · {item.draft.seeks.join(', ')}</Text>}
+                {item.kind === 'draft' && item.draft.brings.length > 0 && <Text selectable style={[styles.detail, { color: c.textSecondary }]}>You can bring · {item.draft.brings.join(', ')}</Text>}
                 {item.kind === 'draft' && (
                   <View style={[styles.consentPreview, { borderColor: c.border, backgroundColor: c.background }]}>
                     <Text style={[styles.consentTitle, { color: c.textPrimary }]}>Before you approve</Text>
