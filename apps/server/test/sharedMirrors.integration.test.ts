@@ -108,7 +108,7 @@ integration('shared chat mirrors and link resources — real Neo4j + HTTP', { ti
     const sources = await as(bearer(member)).get(`${conv(group)}/sources`);
     expect(sources.status).toBe(200);
     expect(sources.body).toEqual({ sources: [], resourcesEnabled: false });
-    expect((await as(bearer(member)).get(`${conv(group)}/resources`)).body).toEqual({ enabled: false, resources: [], pending: 0 });
+    expect((await as(bearer(member)).get(`${conv(group)}/resources`)).body).toEqual({ enabled: false, resources: [], pending: 0, nextCursor: null });
     expect((await as(bearer(outsider)).get(`${conv(group)}/sources`)).status).toBe(404);
     expect((await request(app).get(`${conv(group)}/sources`)).status).toBe(401);
   });
@@ -146,6 +146,7 @@ integration('shared chat mirrors and link resources — real Neo4j + HTTP', { ti
     expect(messages.body.messages.map((m: { text: string }) => m.text)).toEqual(['Great, no link in this one', expect.stringContaining('example.org/garden')]);
     expect(messages.body.messages[1].sender).toMatchObject({ label: 'Owner Example', isSharer: true });
     expect(messages.body.nextCursor).toEqual(expect.any(String));
+    expect(Buffer.from(messages.body.nextCursor, 'base64url').toString()).not.toContain('g-2');
     const older = await as(bearer(member)).get(`${conv(group)}/sources/${shareId}/messages?limit=2&before=${encodeURIComponent(messages.body.nextCursor)}`);
     expect(older.body.messages).toHaveLength(1);
     const raw = JSON.stringify([sources.body, messages.body]);
@@ -251,11 +252,33 @@ integration('shared chat mirrors and link resources — real Neo4j + HTTP', { ti
     expect((await sync(syncToken, payload(next, '2026-11-02T09:00:00.000Z'))).status).toBe(404);
   });
 
+  it('pages resources and scans messages sharing a timestamp without skipping any', async () => {
+    await run(`MATCH (c:Conversation {id: $otherGroup}) SET c.resourcesEnabled = true
+      WITH c UNWIND range(0, 1000) AS n
+      CREATE (:Message {id: 'scan-' + toString(n), conversationId: c.id, content: 'https://scan.example.test/' + toString(n), createdAt: datetime('2026-01-01T00:00:00Z'), senderId: $member})`, { otherGroup, member });
+    await as(bearer(member)).get(`${conv(otherGroup)}/resources`);
+    const first = await as(bearer(member)).get(`${conv(otherGroup)}/resources`);
+    expect(first.status).toBe(200);
+    expect(first.body.resources).toHaveLength(500);
+    expect(first.body.nextCursor).toBeTruthy();
+    const second = await as(bearer(member)).get(`${conv(otherGroup)}/resources?before=${encodeURIComponent(first.body.nextCursor)}`);
+    expect(second.body.resources).toHaveLength(500);
+    const third = await as(bearer(member)).get(`${conv(otherGroup)}/resources?before=${encodeURIComponent(second.body.nextCursor)}`);
+    expect(third.body.resources).toHaveLength(1);
+    expect(third.body.nextCursor).toBeNull();
+    expect(new Set([...first.body.resources, ...second.body.resources, ...third.body.resources].map((r: { id: string }) => r.id)).size).toBe(1001);
+    await run('MATCH (m:Message {conversationId: $otherGroup}) DETACH DELETE m', { otherGroup });
+    await run('MATCH (r:ConversationResource {conversationId: $otherGroup}) DETACH DELETE r', { otherGroup });
+  });
+
   it('ends member access when the owner unshares, leaves, or deletes the mirror', async () => {
     // Sharer no longer in the conversation: the mirror is not readable even though the share exists.
     await run('MATCH (:User {id: $owner})-[rel:PARTICIPATES_IN]->(:Conversation {id: $group}) DELETE rel', { owner, group });
     expect((await as(bearer(member)).get(`${conv(group)}/sources`)).body.sources).toEqual([]);
     expect((await as(bearer(member)).get(`${conv(group)}/sources/${shareId}/messages`)).status).toBe(404);
+    await run("MATCH (chat:OpenChatImportedChat {id: $chatId}) SET chat.importCount = coalesce(chat.importCount, 0) + 1 CREATE (:OpenChatImportedMessage {id: $id, chatId: $chatId, ownerUserId: $owner, text: 'https://private.example.test/', sentAt: '2026-11-03T00:00:00.000Z'})", { chatId, owner, id: `private-${suffix}` });
+    expect((await as(bearer(member)).get(`${conv(group)}/resources`)).body.resources.some((r: { host: string }) => r.host === 'private.example.test')).toBe(false);
+    await run("MATCH (m:OpenChatImportedMessage {id: $id}) DELETE m", { id: `private-${suffix}` });
     await run("MATCH (u:User {id: $owner}), (c:Conversation {id: $group}) CREATE (u)-[:PARTICIPATES_IN {role: 'owner'}]->(c)", { owner, group });
     expect((await as(bearer(member)).get(`${conv(group)}/sources`)).body.sources).toHaveLength(1);
 

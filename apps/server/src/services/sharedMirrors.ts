@@ -181,9 +181,19 @@ export type SharedMessage = Pick<ImportedMessageView, 'id' | 'sentAt' | 'kind' |
 
 export async function listSourceMessages(userId: string, conversationId: string, shareId: string, query: { before?: unknown; limit?: unknown }): Promise<{ messages: SharedMessage[]; nextCursor: string | null }> {
   const { chatId, ownerUserId } = await resolveShare(userId, conversationId, shareId);
-  const page = await listImportedMessages(ownerUserId, chatId, { before: query.before, limit: query.limit });
+  let before: string | undefined;
+  if (query.before !== undefined && query.before !== '') {
+    let id: unknown;
+    try { id = JSON.parse(Buffer.from(String(query.before), 'base64url').toString('utf8')); } catch { fail(400, 'Invalid cursor'); }
+    if (typeof id !== 'string' || !id || id.length > 200) fail(400, 'Invalid cursor');
+    const row = await read(tx => tx.run('MATCH (m:OpenChatImportedMessage {id: $id, chatId: $chatId, ownerUserId: $ownerUserId}) RETURN m.sentAt AS sentAt, m.sourceMessageId AS sourceMessageId', { id, chatId, ownerUserId }));
+    if (!row.records.length) fail(400, 'Invalid cursor');
+    before = Buffer.from(JSON.stringify([row.records[0]!.get('sentAt'), row.records[0]!.get('sourceMessageId')])).toString('base64url');
+  }
+  const page = await listImportedMessages(ownerUserId, chatId, { before, limit: query.limit });
+  const last = page.messages[page.messages.length - 1];
   return {
-    nextCursor: page.nextCursor,
+    nextCursor: page.nextCursor && last ? Buffer.from(JSON.stringify(last.id)).toString('base64url') : null,
     messages: page.messages.map(m => ({
       id: m.id, sentAt: m.sentAt, kind: m.kind, text: m.text, mediaType: m.mediaType, edited: m.edited, editedAt: m.editedAt, deletedAtSource: m.deletedAtSource,
       sender: m.sender ? { participantId: m.sender.participantId, label: m.sender.label, isSharer: m.sender.isOwner } : null,

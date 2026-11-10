@@ -48,11 +48,10 @@ async function fetchDoiMetadata(doi: string): Promise<Awaited<ReturnType<Preview
 }
 
 /** The page's own title and description; for a DOI whose page cannot be read, the paper's registered title. */
-async function fetchResourcePreview(url: string): Promise<Awaited<ReturnType<PreviewFetcher>>> {
-  const preview = await fetchPreview(url);
-  if (preview) return preview;
+export async function fetchResourcePreview(url: string, pageFetcher: PreviewFetcher = fetchPreview, doiFetcher: PreviewFetcher = fetchDoiMetadata): Promise<Awaited<ReturnType<PreviewFetcher>>> {
   const doi = doiFromUrl(url);
-  return doi ? fetchDoiMetadata(doi) : null;
+  const metadata = doi ? await doiFetcher(doi) : null;
+  return metadata ?? await pageFetcher(url);
 }
 
 let previewFetcher: PreviewFetcher = fetchResourcePreview;
@@ -80,7 +79,7 @@ export interface ResourceView {
   saved: boolean;
   savedCount: number;
 }
-export interface ResourceList { enabled: boolean; resources: ResourceView[]; pending: number }
+export interface ResourceList { enabled: boolean; resources: ResourceView[]; pending: number; nextCursor: string | null }
 
 async function read<T>(work: (tx: ManagedTransaction) => Promise<T>): Promise<T> {
   const session = getDriver().session();
@@ -122,19 +121,20 @@ async function indexConversation(conversationId: string): Promise<void> {
     const conversation = await tx.run(
       `MATCH (c:Conversation {id: $conversationId}) WHERE c.resourcesEnabled = true
        SET c.resourcesLockedAt = $now
-       RETURN c.resourcesIndexedThrough AS through`, { conversationId, now: now.toISOString() });
+       RETURN c.resourcesIndexedThrough AS through, c.resourcesIndexedThroughId AS throughId`, { conversationId, now: now.toISOString() });
     if (!conversation.records.length) return;
     const through = conversation.records[0]!.get('through') as string | null;
+    const throughId = conversation.records[0]!.get('throughId') as string | null;
     const pending = new Map<string, Pending>();
 
     const messages = await tx.run(
       `MATCH (m:Message {conversationId: $conversationId})
        WHERE m.content CONTAINS 'http' AND m.deletedAt IS NULL AND coalesce(m.messageType, 'text') = 'text'
-         AND ($through IS NULL OR m.createdAt > datetime($through))
-       WITH m ORDER BY m.createdAt LIMIT $limit
+         AND ($through IS NULL OR m.createdAt > datetime($through) OR (m.createdAt = datetime($through) AND $throughId IS NOT NULL AND m.id > $throughId))
+       WITH m ORDER BY m.createdAt, m.id LIMIT $limit
        OPTIONAL MATCH (u:User {id: m.senderId})
        RETURN m.id AS id, m.content AS content, toString(m.createdAt) AS at, m.senderId AS senderId, u.name AS senderName`,
-      { conversationId, through, limit: neo4j.int(LIMITS.scanMessages) });
+      { conversationId, through, throughId, limit: neo4j.int(LIMITS.scanMessages) });
     for (const record of messages.records) {
       collect(pending, conversationId, record.get('content') as string, {
         at: new Date(record.get('at') as string).toISOString(), byLabel: (record.get('senderName') as string | null) ?? null, byUserId: record.get('senderId') as string, source: 'openchat', occurrenceKey: `m:${record.get('id') as string}`,
@@ -142,12 +142,14 @@ async function indexConversation(conversationId: string): Promise<void> {
     }
     // A full page means there may be more: stop the watermark at the last message scanned.
     const lastAt = messages.records.length ? new Date(messages.records[messages.records.length - 1]!.get('at') as string).toISOString() : null;
-    const nextThrough = messages.records.length >= LIMITS.scanMessages && lastAt ? lastAt : new Date(now.getTime() - WATERMARK_OVERLAP_MS).toISOString();
+    const fullPage = messages.records.length >= LIMITS.scanMessages && !!lastAt;
+    const nextThrough = fullPage ? lastAt : new Date(now.getTime() - WATERMARK_OVERLAP_MS).toISOString();
+    const nextThroughId = fullPage ? messages.records[messages.records.length - 1]!.get('id') as string : null;
 
     const mirrored = await tx.run(
       `MATCH (chat:OpenChatImportedChat)-[s:SHARED_INTO]->(c:Conversation {id: $conversationId})
        WHERE chat.ownerUserId = s.sharedBy AND coalesce(s.indexedImportCount, -1) <> coalesce(chat.importCount, 0)
-       MATCH (sharer:User {id: s.sharedBy})
+       MATCH (sharer:User {id: s.sharedBy})-[:PARTICIPATES_IN]->(c)
        SET s.indexedImportCount = coalesce(chat.importCount, 0)
        WITH chat, sharer
        MATCH (m:OpenChatImportedMessage {chatId: chat.id, ownerUserId: chat.ownerUserId})
@@ -190,7 +192,7 @@ async function indexConversation(conversationId: string): Promise<void> {
           sources: [...new Set(entry.occurrences.map(o => o.source))],
         });
     }
-    await tx.run('MATCH (c:Conversation {id: $conversationId}) SET c.resourcesIndexedThrough = $through REMOVE c.resourcesLockedAt', { conversationId, through: nextThrough });
+    await tx.run('MATCH (c:Conversation {id: $conversationId}) SET c.resourcesIndexedThrough = $through, c.resourcesIndexedThroughId = $throughId REMOVE c.resourcesLockedAt', { conversationId, through: nextThrough, throughId: nextThroughId });
   });
 }
 
@@ -250,30 +252,37 @@ function view(r: Record<string, unknown>, saved: boolean, savedCount: number): R
   };
 }
 
-async function readResources(userId: string, conversationId: string, resourceId?: string): Promise<{ resources: ResourceView[]; pending: number }> {
+async function readResources(userId: string, conversationId: string, resourceId?: string, cursor?: [string, string] | null): Promise<{ resources: ResourceView[]; pending: number; nextCursor: string | null }> {
   return read(async tx => {
     const result = await tx.run(
-      `MATCH (r:ConversationResource {conversationId: $conversationId}) WHERE $resourceId IS NULL OR r.id = $resourceId
+      `MATCH (r:ConversationResource {conversationId: $conversationId}) WHERE ($resourceId IS NULL OR r.id = $resourceId) AND ($cursorAt IS NULL OR r.lastSharedAt < $cursorAt OR (r.lastSharedAt = $cursorAt AND r.id > $cursorId))
        WITH r ORDER BY r.lastSharedAt DESC, r.id LIMIT $limit
        OPTIONAL MATCH (:User {id: $userId})-[mine:SAVED_RESOURCE]->(r)
        CALL { WITH r MATCH (:User)-[s:SAVED_RESOURCE]->(r) RETURN count(s) AS savedCount }
        RETURN ${RESOURCE}, mine IS NOT NULL AS saved, savedCount ORDER BY r.lastSharedAt DESC, r.id`,
-      { conversationId, userId, resourceId: resourceId ?? null, limit: neo4j.int(LIMITS.list) });
+      { conversationId, userId, resourceId: resourceId ?? null, cursorAt: cursor?.[0] ?? null, cursorId: cursor?.[1] ?? null, limit: neo4j.int(LIMITS.list + 1) });
     const rows = result.records.map(record => ({ raw: record.get('r') as Record<string, unknown>, saved: record.get('saved') === true, savedCount: Number(record.get('savedCount') ?? 0) }));
-    return { resources: rows.map(row => view(row.raw, row.saved, row.savedCount)), pending: rows.filter(row => !row.raw.previewFetchedAt).length };
+    const page = rows.slice(0, LIMITS.list);
+    const last = page[page.length - 1]?.raw;
+    return { resources: page.map(row => view(row.raw, row.saved, row.savedCount)), pending: page.filter(row => !row.raw.previewFetchedAt).length, nextCursor: rows.length > LIMITS.list && last ? Buffer.from(JSON.stringify([last.lastSharedAt, last.id])).toString('base64url') : null };
   });
 }
 
 /** The conversation's link resources for a member, newest share first. */
-export async function listConversationResources(userId: string, conversationId: string): Promise<ResourceList> {
+export async function listConversationResources(userId: string, conversationId: string, before?: unknown): Promise<ResourceList> {
+  let cursor: [string, string] | null = null;
+  if (before !== undefined && before !== '') {
+    try { const value = JSON.parse(Buffer.from(String(before), 'base64url').toString('utf8')); if (Array.isArray(value) && value.length === 2 && value.every(v => typeof v === 'string' && v.length > 0 && v.length <= 200)) cursor = value; } catch { /* invalid */ }
+    if (!cursor) fail(400, 'Invalid cursor');
+  }
   const member = await read(tx => requireMember(tx, userId, conversationId));
-  if (!member.resourcesEnabled) return { enabled: false, resources: [], pending: 0 };
+  if (!member.resourcesEnabled) return { enabled: false, resources: [], pending: 0, nextCursor: null };
   await indexConversation(conversationId);
   // Wait briefly for page titles, then answer with what is known; the rest finishes in the background.
   let timer: NodeJS.Timeout | undefined;
   await Promise.race([enrich(conversationId), new Promise<void>(resolve => { timer = setTimeout(resolve, LIMITS.enrichBudgetMs); })]);
   if (timer) clearTimeout(timer);
-  return { enabled: true, ...(await readResources(userId, conversationId)) };
+  return { enabled: true, ...(await readResources(userId, conversationId, undefined, cursor)) };
 }
 
 async function requireEnabledMember(tx: ManagedTransaction, userId: string, conversationId: string): Promise<void> {

@@ -71,3 +71,11 @@ describe('link resources: tags a member types', () => {
     }
   });
 });
+
+
+it('prefers Crossref metadata for a DOI and falls back to its page', async () => {
+  const { fetchResourcePreview } = await import('../src/services/conversationResources.js');
+  const page = async () => ({ title: 'Generic page' });
+  expect(await fetchResourcePreview('https://doi.org/10.1145/1111111', page, async () => ({ title: 'Paper title' }))).toEqual({ title: 'Paper title' });
+  expect(await fetchResourcePreview('https://doi.org/10.1145/1111111', page, async () => null)).toEqual({ title: 'Generic page' });
+});

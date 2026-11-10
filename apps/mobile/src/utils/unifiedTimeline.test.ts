@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ConversationSource, Message, SourceMessage } from '../api/client';
-import { mergeTimeline, mirroredEntries, mirrorModeLabel } from './unifiedTimeline';
+import { mergeTimeline, mirroredEntries, mirrorModeLabel, showLoadEarlierMirror } from './unifiedTimeline';
 
 const source = (overrides: Partial<ConversationSource> = {}): ConversationSource => ({
   id: 's1', network: 'imessage', title: 'Synthetic group', sharedAt: '2026-11-01T00:00:00.000Z', sharedBy: { userId: 'owner', name: 'Owner Account' },
@@ -57,4 +57,12 @@ describe('switch wording', () => {
     expect(mirrorModeLabel([{ network: 'imessage' }, { network: 'whatsapp' }])).toBe('Mirrored');
     expect(mirrorModeLabel([{ network: 'matrix' }])).toBe('Matrix');
   });
+});
+
+it('offers earlier mirror pages only when the selected timeline can show them', () => {
+  expect(showLoadEarlierMirror('mirror', true, true)).toBe(true);
+  expect(showLoadEarlierMirror('unified', true, true)).toBe(false);
+  expect(showLoadEarlierMirror('unified', true, false)).toBe(true);
+  expect(showLoadEarlierMirror('openchat', true, false)).toBe(false);
+  expect(showLoadEarlierMirror('mirror', false, false)).toBe(false);
 });

@@ -24,6 +24,8 @@ export function ResourcesLane({ conversationId }: { conversationId: string }) {
   const [resources, setResources] = useState<ConversationResource[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [filter, setFilter] = useState<ResourceFilter>(NO_FILTER);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
@@ -36,7 +38,9 @@ export function ResourcesLane({ conversationId }: { conversationId: string }) {
     try {
       const result = await api.listConversationResources(conversationId);
       if (!alive.current) return;
-      setResources(result.resources); setError(null);
+      setResources(current => quiet && current ? [...result.resources, ...current.filter(item => !result.resources.some(fresh => fresh.id === item.id))] : result.resources);
+      if (!quiet) setNextCursor(result.nextCursor ?? null);
+      setError(null);
       // Page titles arrive a moment after a link is first collected.
       if (result.pending > 0 && refreshes.current < PENDING_REFRESHES) {
         refreshes.current += 1;
@@ -54,6 +58,18 @@ export function ResourcesLane({ conversationId }: { conversationId: string }) {
     void load();
     return () => { alive.current = false; if (timer.current) clearTimeout(timer.current); };
   }, [load]);
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const result = await api.listConversationResources(conversationId, nextCursor);
+      if (!alive.current) return;
+      setResources(current => [...(current ?? []), ...result.resources.filter(item => !current?.some(existing => existing.id === item.id))]);
+      setNextCursor(result.nextCursor ?? null); setError(null);
+    } catch { if (alive.current) setNotice({ text: 'Could not load more links. Try again.', error: true }); }
+    finally { if (alive.current) setLoadingMore(false); }
+  }, [conversationId, nextCursor, loadingMore]);
 
   const replace = useCallback((next: ConversationResource) => setResources(current => current ? current.map(item => item.id === next.id ? next : item) : current), []);
   const toggleSaved = useCallback(async (resource: ConversationResource) => {
@@ -121,6 +137,7 @@ export function ResourcesLane({ conversationId }: { conversationId: string }) {
             conversationId={conversationId}
           />
         )}
+        ListFooterComponent={nextCursor ? <Button label="Load more links" size="sm" loading={loadingMore} onPress={() => void loadMore()} /> : null}
         ListEmptyComponent={
           <Text style={[type.body, styles.empty, { color: r.textMeta }]}>
             {filtering ? 'No links match.' : 'Links shared in this chat are kept here, with tags you can edit and a Save mark of your own.'}
