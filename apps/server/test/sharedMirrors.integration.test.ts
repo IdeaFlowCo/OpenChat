@@ -93,6 +93,10 @@ integration('shared chat mirrors and link resources — real Neo4j + HTTP', { ti
     const res = await as(bearer(owner)).put('/api/imported-chats/import', { ...initial, asks: [{ askKey: 'private-ask', subjectKey: 'p-ada', reporterKey: 'p-ada', text: 'PRIVATE ASK moonflower', sourceMessageIds: ['g-1'], sourceStatus: 'open' }] });
     expect(res.status).toBe(201);
     chatId = res.body.chatId;
+    // Historical messages must exist before the first resource scan advances its watermark.
+    await run(`CREATE (:Message {id: $id1, conversationId: $group, senderId: $member, content: 'Same paper again: https://dl.acm.org/doi/10.1145/1111111#abstract and https://github.com/acme/widget', messageType: 'text', createdAt: datetime('2026-10-31T09:00:00Z')})
+      CREATE (:Message {id: $id2, conversationId: $group, senderId: $member, content: 'gone https://example.org/deleted', messageType: 'text', createdAt: datetime('2026-10-31T09:01:00Z'), deletedAt: datetime()})`,
+      { group, member, id1: `msg-1-${suffix}`, id2: `msg-2-${suffix}` });
   });
 
   afterAll(async () => {
@@ -185,10 +189,6 @@ integration('shared chat mirrors and link resources — real Neo4j + HTTP', { ti
   });
 
   it('collects each shared address once, guesses a kind, suggests tags and reads page titles', async () => {
-    await run(`MATCH (c:Conversation {id: $group}), (m:User {id: $member})
-      CREATE (:Message {id: $id1, conversationId: $group, senderId: $member, content: 'Same paper again: https://dl.acm.org/doi/10.1145/1111111#abstract and https://github.com/acme/widget', messageType: 'text', createdAt: datetime('2026-10-31T09:00:00Z')})
-      CREATE (:Message {id: $id2, conversationId: $group, senderId: $member, content: 'gone https://example.org/deleted', messageType: 'text', createdAt: datetime('2026-10-31T09:01:00Z'), deletedAt: datetime()})`,
-      { group, member, id1: `msg-1-${suffix}`, id2: `msg-2-${suffix}` });
     const first = await as(bearer(member)).get(`${conv(group)}/resources`);
     expect(first.status).toBe(200);
     expect(first.body.enabled).toBe(true);
@@ -320,8 +320,9 @@ integration('shared chat mirrors and link resources — real Neo4j + HTTP', { ti
       CREATE (:Message {id: $msgId, conversationId: $isolated, senderId: $owner, messageType: 'text', content: 'HTTPS://shared-reconcile.example.test/ HTTPS://open-only.example.test/', createdAt: datetime('2026-01-01T00:00:00Z')})`, { isolated, owner, member, msgId });
     expect((await as(bearer(owner)).put(`/api/imported-chats/${chatId}/shares`, { conversationId: isolated })).status).toBe(201);
     const extra = text('reconcile-source', 'p-ada', '2026-10-30T10:07:00.000Z', 'HTTPS://shared-reconcile.example.test/ HTTPS://mirror-only.example.test/');
-    const imported = [...first, extra];
-    expect((await as(bearer(owner)).put('/api/imported-chats/import', payload(imported))).status).toBe(200);
+    const synced = [...first, text('g-4', 'p-ada', '2026-11-02T08:00:00.000Z', 'New one: https://lu.ma/synthetic-event')];
+    const imported = [...synced, extra];
+    expect((await as(bearer(owner)).put('/api/imported-chats/import', payload(imported, '2026-11-03T09:00:00.000Z'))).status).toBe(200);
     const revision = (await as(bearer(member)).get(`${conv(isolated)}/sources`)).body.sources[0].revision;
     const firstList = (await as(bearer(member)).get(`${conv(isolated)}/resources`)).body.resources;
     const find = (list: Array<{ host: string; shareCount: number }>, host: string) => list.find(r => r.host === host);
@@ -329,7 +330,7 @@ integration('shared chat mirrors and link resources — real Neo4j + HTTP', { ti
     expect(find(firstList, 'mirror-only.example.test')).toBeTruthy();
     expect(find(firstList, 'open-only.example.test')).toBeTruthy();
     const edited = { ...extra, text: 'No links remain', editedAt: '2026-11-03T00:00:00.000Z' };
-    expect((await as(bearer(owner)).put('/api/imported-chats/import', payload([...first, edited]))).status).toBe(200);
+    expect((await as(bearer(owner)).put('/api/imported-chats/import', payload([...synced, edited], '2026-11-03T09:00:00.000Z'))).status).toBe(200);
     expect((await as(bearer(member)).get(`${conv(isolated)}/sources`)).body.sources[0].revision).not.toBe(revision);
     const afterMirror = (await as(bearer(member)).get(`${conv(isolated)}/resources`)).body.resources;
     expect(find(afterMirror, 'mirror-only.example.test')).toBeUndefined();
