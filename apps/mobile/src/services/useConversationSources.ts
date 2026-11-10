@@ -56,7 +56,7 @@ export function useConversationSources(conversationId: string | undefined, userI
       if (previous) {
         const unchanged = new Set(next.sources.filter(source => {
           const old = previous.sources.find(item => item.id === source.id);
-          return old && old.coverage.asOf === source.coverage.asOf && old.coverage.latestMessageAt === source.coverage.latestMessageAt && old.messageCount === source.messageCount;
+          return old && old.revision === source.revision && old.coverage.asOf === source.coverage.asOf && old.coverage.latestMessageAt === source.coverage.latestMessageAt && old.messageCount === source.messageCount;
         }).map(source => source.id));
         const seen = new Set(next.mirrored.map(entry => entry.key));
         const older = previous.mirrored.filter(entry => unchanged.has(entry.sourceId) && !seen.has(entry.key));

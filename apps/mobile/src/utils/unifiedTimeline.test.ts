@@ -4,7 +4,7 @@ import { mergeTimeline, mirroredEntries, mirrorModeLabel, showLoadEarlierMirror 
 
 const source = (overrides: Partial<ConversationSource> = {}): ConversationSource => ({
   id: 's1', network: 'imessage', title: 'Synthetic group', sharedAt: '2026-11-01T00:00:00.000Z', sharedBy: { userId: 'owner', name: 'Owner Account' },
-  coverage: { asOf: null, earliestMessageAt: null, latestMessageAt: null, complete: false }, messageCount: 0, participants: [], ...overrides,
+  coverage: { asOf: null, earliestMessageAt: null, latestMessageAt: null, complete: false }, messageCount: 0, revision: '1', participants: [], ...overrides,
 });
 const mirrored = (id: string, sentAt: string, sender: SourceMessage['sender'] = { participantId: 'p-ada', label: 'Ada Example', isSharer: false }): SourceMessage =>
   ({ id, sentAt, kind: 'text', text: id, mediaType: null, edited: false, editedAt: null, deletedAtSource: null, sender });

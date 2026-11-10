@@ -127,45 +127,65 @@ async function indexConversation(conversationId: string): Promise<boolean> {
     const through = conversation.records[0]!.get('through') as string | null;
     const throughId = conversation.records[0]!.get('throughId') as string | null;
     const pending = new Map<string, Pending>();
+    const affected = new Set<string>();
 
     const messages = await tx.run(
       `MATCH (m:Message {conversationId: $conversationId})
-       WHERE m.content CONTAINS 'http' AND m.deletedAt IS NULL AND coalesce(m.messageType, 'text') = 'text'
-         AND ($through IS NULL OR m.createdAt > datetime($through) OR (m.createdAt = datetime($through) AND $throughId IS NOT NULL AND m.id > $throughId))
-       WITH m ORDER BY m.createdAt, m.id LIMIT $limit
+       WITH m, coalesce(m.deletedAt, m.editedAt, m.createdAt) AS changedAt
+       WHERE ($through IS NULL OR changedAt > datetime($through) OR (changedAt = datetime($through) AND $throughId IS NOT NULL AND m.id > $throughId))
+       WITH m, changedAt ORDER BY changedAt, m.id LIMIT $limit
        OPTIONAL MATCH (u:User {id: m.senderId})
-       RETURN m.id AS id, m.content AS content, toString(m.createdAt) AS at, m.senderId AS senderId, u.name AS senderName`,
+       RETURN m.id AS id, CASE WHEN m.deletedAt IS NULL AND coalesce(m.messageType, 'text') = 'text' AND toLower(m.content) CONTAINS 'http' THEN m.content ELSE null END AS content,
+              toString(m.createdAt) AS at, toString(changedAt) AS changedAt, m.senderId AS senderId, u.name AS senderName`,
       { conversationId, through, throughId, limit: neo4j.int(LIMITS.scanMessages) });
     for (const record of messages.records) {
-      collect(pending, conversationId, record.get('content') as string, {
-        at: new Date(record.get('at') as string).toISOString(), byLabel: (record.get('senderName') as string | null) ?? null, byUserId: record.get('senderId') as string, source: 'openchat', occurrenceKey: `m:${record.get('id') as string}`,
+      const occurrenceKey = `m:${record.get('id') as string}`;
+      affected.add(occurrenceKey);
+      collect(pending, conversationId, record.get('content') as string | null, {
+        at: new Date(record.get('at') as string).toISOString(), byLabel: (record.get('senderName') as string | null) ?? null, byUserId: record.get('senderId') as string, source: 'openchat', occurrenceKey,
       });
     }
-    // A full page means there may be more: stop the watermark at the last message scanned.
-    const lastAt = messages.records.length ? messages.records[messages.records.length - 1]!.get('at') as string : null;
+    const lastAt = messages.records.length ? messages.records[messages.records.length - 1]!.get('changedAt') as string : null;
     const fullPage = messages.records.length >= LIMITS.scanMessages && !!lastAt;
     const nextThrough = fullPage ? lastAt : new Date(now.getTime() - WATERMARK_OVERLAP_MS).toISOString();
     const nextThroughId = fullPage ? messages.records[messages.records.length - 1]!.get('id') as string : null;
 
-    const mirrored = await tx.run(
+    const shares = await tx.run(
       `MATCH (chat:OpenChatImportedChat)-[s:SHARED_INTO]->(c:Conversation {id: $conversationId})
        WHERE chat.ownerUserId = s.sharedBy AND coalesce(s.indexedImportCount, -1) <> coalesce(chat.importCount, 0)
        MATCH (sharer:User {id: s.sharedBy})-[:PARTICIPATES_IN]->(c)
-       SET s.indexedImportCount = coalesce(chat.importCount, 0)
-       WITH chat, sharer
-       MATCH (m:OpenChatImportedMessage {chatId: chat.id, ownerUserId: chat.ownerUserId})
-       WHERE m.text CONTAINS 'http' AND m.deletedAtSource IS NULL
+       OPTIONAL MATCH (m:OpenChatImportedMessage {chatId: chat.id, ownerUserId: chat.ownerUserId})
        OPTIONAL MATCH (p:OpenChatImportedParticipant {chatId: chat.id, ownerUserId: chat.ownerUserId, id: m.senderParticipantId})
-       RETURN m.id AS id, m.text AS text, m.sentAt AS at, chat.network AS network, sharer.id AS sharerId, sharer.name AS sharerName, p { .id, .displayName, .ordinal, .isOwner } AS p`,
+       RETURN s.id AS shareId, s.resourceOccurrenceKeys AS previousKeys, chat.network AS network, sharer.id AS sharerId, sharer.name AS sharerName,
+              collect({id: m.id, text: m.text, at: m.sentAt, deleted: m.deletedAtSource, participant: p { .id, .displayName, .ordinal, .isOwner }}) AS messages`,
       { conversationId });
-    for (const record of mirrored.records) {
-      const p = record.get('p') as Record<string, unknown> | null;
-      const isSharer = p?.isOwner === true;
-      collect(pending, conversationId, record.get('text') as string, {
-        at: record.get('at') as string, source: record.get('network') as string, occurrenceKey: `i:${record.get('id') as string}`,
-        byUserId: isSharer ? record.get('sharerId') as string : null,
-        byLabel: isSharer ? (record.get('sharerName') as string | null) ?? null : p ? participantLabel(p as { id: string; displayName?: string | null; ordinal?: unknown }) : null,
-      });
+    for (const share of shares.records) {
+      for (const key of (share.get('previousKeys') as string[] | null) ?? []) affected.add(key);
+      const keys: string[] = [];
+      for (const message of share.get('messages') as Array<Record<string, unknown>>) {
+        if (!message.id) continue;
+        const occurrenceKey = `i:${message.id as string}`;
+        keys.push(occurrenceKey); affected.add(occurrenceKey);
+        const p = message.participant as Record<string, unknown> | null;
+        const isSharer = p?.isOwner === true;
+        collect(pending, conversationId, message.deleted ? null : message.text as string | null, {
+          at: message.at as string, source: share.get('network') as string, occurrenceKey,
+          byUserId: isSharer ? share.get('sharerId') as string : null,
+          byLabel: isSharer ? (share.get('sharerName') as string | null) ?? null : p ? participantLabel(p as { id: string; displayName?: string | null; ordinal?: unknown }) : null,
+        });
+      }
+      await tx.run('MATCH (chat:OpenChatImportedChat)-[s:SHARED_INTO]->(:Conversation {id: $conversationId}) WHERE s.id = $shareId SET s.indexedImportCount = coalesce(chat.importCount, 0), s.resourceOccurrenceKeys = $keys', { conversationId, shareId: share.get('shareId'), keys });
+    }
+
+    if (affected.size) {
+      const live = [...pending.values()].flatMap(entry => entry.occurrences.map(o => ({ resourceKey: entry.resourceKey, occurrenceKey: o.occurrenceKey })));
+      await tx.run(
+        `MATCH (r:ConversationResource {conversationId: $conversationId})
+         WHERE any(key IN r.occurrenceKeys WHERE key IN $affected)
+         SET r.occurrenceKeys = [key IN r.occurrenceKeys WHERE NOT key IN $affected OR any(item IN $live WHERE item.resourceKey = r.resourceKey AND item.occurrenceKey = key)]
+         SET r.shareCount = size(r.occurrenceKeys)
+         WITH r WHERE size(r.occurrenceKeys) = 0 DETACH DELETE r`,
+        { conversationId, affected: [...affected], live });
     }
 
     for (const entry of pending.values()) {

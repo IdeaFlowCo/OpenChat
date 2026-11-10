@@ -111,6 +111,7 @@ export interface ConversationSource {
   sharedBy: { userId: string; name: string | null };
   coverage: { asOf: string | null; earliestMessageAt: string | null; latestMessageAt: string | null; complete: boolean };
   messageCount: number;
+  revision: string;
   participants: SourceParticipant[];
 }
 export interface ConversationSources { sources: ConversationSource[]; resourcesEnabled: boolean }
@@ -142,7 +143,7 @@ export async function listConversationSources(userId: string, conversationId: st
        CALL { WITH chat MATCH (m:OpenChatImportedMessage {chatId: chat.id, ownerUserId: chat.ownerUserId}) RETURN count(m) AS messageCount }
        CALL { WITH chat MATCH (p:OpenChatImportedParticipant {chatId: chat.id, ownerUserId: chat.ownerUserId}) WITH p ORDER BY p.ordinal RETURN collect(p { .id, .displayName, .ordinal, .isOwner }) AS participants }
        RETURN s.id AS id, s.sharedAt AS sharedAt, sharer.id AS sharerId, sharer.name AS sharerName, messageCount, participants,
-              chat { .network, .title, .asOf, .earliestMessageAt, .latestMessageAt, .complete } AS chat
+              chat { .network, .title, .asOf, .earliestMessageAt, .latestMessageAt, .complete, .importCount } AS chat
        ORDER BY s.sharedAt`,
       { conversationId });
     return {
@@ -158,6 +159,7 @@ export async function listConversationSources(userId: string, conversationId: st
           sharedBy: { userId: record.get('sharerId') as string, name: (record.get('sharerName') as string | null) ?? null },
           coverage: { asOf: (chat.asOf as string) ?? null, earliestMessageAt: (chat.earliestMessageAt as string) ?? null, latestMessageAt: (chat.latestMessageAt as string) ?? null, complete: chat.complete === true },
           messageCount: Number(record.get('messageCount') ?? 0),
+          revision: String(chat.importCount ?? 0),
           participants: participants.map(p => ({ participantId: p.id as string, label: participantLabel({ id: p.id as string, displayName: p.displayName as string | null, ordinal: p.ordinal }), isSharer: p.isOwner === true })),
         };
       }),

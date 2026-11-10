@@ -32,15 +32,16 @@ export function ResourcesLane({ conversationId }: { conversationId: string }) {
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const alive = useRef(true);
   const refreshes = useRef(0);
+  const loadedMore = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async (quiet = false) => {
-    if (!quiet) { setLoading(true); refreshes.current = 0; }
+    if (!quiet) { setLoading(true); refreshes.current = 0; loadedMore.current = false; }
     try {
       const result = await api.listConversationResources(conversationId);
       if (!alive.current) return;
       setResources(current => quiet && current ? [...result.resources, ...current.filter(item => !result.resources.some(fresh => fresh.id === item.id))] : result.resources);
-      if (!quiet) setNextCursor(result.nextCursor ?? null);
+      setNextCursor(current => !quiet || !loadedMore.current ? result.nextCursor ?? null : current ?? result.nextCursor ?? null);
       setError(null); setIndexingPending(result.indexingPending === true);
       // Page titles arrive a moment after a link is first collected.
       if (result.indexingPending || (result.pending > 0 && refreshes.current < PENDING_REFRESHES)) {
@@ -67,6 +68,7 @@ export function ResourcesLane({ conversationId }: { conversationId: string }) {
       const result = await api.listConversationResources(conversationId, nextCursor);
       if (!alive.current) return;
       setResources(current => [...(current ?? []), ...result.resources.filter(item => !current?.some(existing => existing.id === item.id))]);
+      loadedMore.current = true;
       setNextCursor(result.nextCursor ?? null); setError(null);
     } catch { if (alive.current) setNotice({ text: 'Could not load more links. Try again.', error: true }); }
     finally { if (alive.current) setLoadingMore(false); }

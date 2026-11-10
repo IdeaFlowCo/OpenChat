@@ -311,6 +311,41 @@ integration('shared chat mirrors and link resources — real Neo4j + HTTP', { ti
     await run('MATCH (r:ConversationResource {conversationId: $otherGroup}) DETACH DELETE r', { otherGroup });
   });
 
+  it('reconciles edited and deleted links and advances the mirror revision', async () => {
+    const isolated = `reconcile-${suffix}`;
+    const msgId = `reconcile-message-${suffix}`;
+    await run(`MATCH (o:User {id: $owner}), (m:User {id: $member})
+      CREATE (c:Conversation {id: $isolated, type: 'group'})
+      CREATE (o)-[:PARTICIPATES_IN {role: 'owner'}]->(c), (m)-[:PARTICIPATES_IN {role: 'member'}]->(c)
+      CREATE (:Message {id: $msgId, conversationId: $isolated, senderId: $owner, messageType: 'text', content: 'HTTPS://shared-reconcile.example.test/ HTTPS://open-only.example.test/', createdAt: datetime('2026-01-01T00:00:00Z')})`, { isolated, owner, member, msgId });
+    expect((await as(bearer(owner)).put(`/api/imported-chats/${chatId}/shares`, { conversationId: isolated })).status).toBe(201);
+    const extra = text('reconcile-source', 'p-ada', '2026-10-30T10:07:00.000Z', 'HTTPS://shared-reconcile.example.test/ HTTPS://mirror-only.example.test/');
+    const imported = [...first, extra];
+    expect((await as(bearer(owner)).put('/api/imported-chats/import', payload(imported))).status).toBe(200);
+    const revision = (await as(bearer(member)).get(`${conv(isolated)}/sources`)).body.sources[0].revision;
+    const firstList = (await as(bearer(member)).get(`${conv(isolated)}/resources`)).body.resources;
+    const find = (list: Array<{ host: string; shareCount: number }>, host: string) => list.find(r => r.host === host);
+    expect(find(firstList, 'shared-reconcile.example.test')?.shareCount).toBe(2);
+    expect(find(firstList, 'mirror-only.example.test')).toBeTruthy();
+    expect(find(firstList, 'open-only.example.test')).toBeTruthy();
+    const edited = { ...extra, text: 'No links remain', editedAt: '2026-11-03T00:00:00.000Z' };
+    expect((await as(bearer(owner)).put('/api/imported-chats/import', payload([...first, edited]))).status).toBe(200);
+    expect((await as(bearer(member)).get(`${conv(isolated)}/sources`)).body.sources[0].revision).not.toBe(revision);
+    const afterMirror = (await as(bearer(member)).get(`${conv(isolated)}/resources`)).body.resources;
+    expect(find(afterMirror, 'mirror-only.example.test')).toBeUndefined();
+    expect(find(afterMirror, 'shared-reconcile.example.test')?.shareCount).toBe(1);
+    await run("MATCH (m:Message {id: $msgId}) SET m.content = 'HTTPS://added-after-edit.example.test/', m.editedAt = datetime()", { msgId });
+    const afterEdit = (await as(bearer(member)).get(`${conv(isolated)}/resources`)).body.resources;
+    expect(find(afterEdit, 'shared-reconcile.example.test')).toBeUndefined();
+    expect(find(afterEdit, 'open-only.example.test')).toBeUndefined();
+    expect(find(afterEdit, 'added-after-edit.example.test')).toBeTruthy();
+    await run('MATCH (m:Message {id: $msgId}) SET m.deletedAt = datetime()', { msgId });
+    expect(find((await as(bearer(member)).get(`${conv(isolated)}/resources`)).body.resources, 'added-after-edit.example.test')).toBeUndefined();
+    await run('MATCH (r:ConversationResource {conversationId: $isolated}) DETACH DELETE r', { isolated });
+    await run('MATCH (m:Message {conversationId: $isolated}) DETACH DELETE m', { isolated });
+    await run('MATCH (c:Conversation {id: $isolated}) DETACH DELETE c', { isolated });
+  });
+
   it('ends member access when the owner unshares, leaves, or deletes the mirror', async () => {
     // Sharer no longer in the conversation: the mirror is not readable even though the share exists.
     await run('MATCH (:User {id: $owner})-[rel:PARTICIPATES_IN]->(:Conversation {id: $group}) DELETE rel', { owner, group });

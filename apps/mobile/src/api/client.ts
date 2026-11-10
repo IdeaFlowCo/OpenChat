@@ -1036,7 +1036,7 @@ export interface ConversationSourceParticipant { participantId: string; label: s
 export interface ConversationSource {
   id: string; network: string; title: string; sharedAt: string; sharedBy: { userId: string; name: string | null };
   coverage: { asOf: string | null; earliestMessageAt: string | null; latestMessageAt: string | null; complete: boolean };
-  messageCount: number; participants: ConversationSourceParticipant[];
+  messageCount: number; revision: string; participants: ConversationSourceParticipant[];
 }
 export interface SourceMessage { id: string; sentAt: string; kind: 'text' | 'media' | 'system' | 'deleted'; text: string | null; mediaType: string | null; edited: boolean; editedAt: string | null; deletedAtSource: string | null; sender: ConversationSourceParticipant | null }
 export type ResourceKind = 'paper' | 'article' | 'reference' | 'person' | 'tool' | 'organization' | 'community' | 'code' | 'video' | 'document' | 'post' | 'event' | 'link';
