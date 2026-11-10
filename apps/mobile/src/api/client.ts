@@ -1029,6 +1029,23 @@ export interface ImportedAsk { id: string; text: string; subject: ImportedPartic
 export interface ImportedFact { id: string; text: string; stale: boolean; sources: ImportedSourceExcerpt[] }
 export interface ImportedPersonProfile { chat: { id: string; title: string; network: string; coverage: ImportedCoverage }; person: ImportedPerson; facts: ImportedFact[]; asksAbout: ImportedAsk[]; asksReported: ImportedAsk[]; recentMessages: ImportedMessage[]; nameSources?: ImportedSourceExcerpt[] }
 const importedChatPath = (chatId: string) => `/api/imported-chats/${encodeURIComponent(chatId)}`;
+
+// Chats shared into a conversation, and its link resources (OpenChat-c8to). A source is another network's
+// chat that a member chose to show this conversation; its messages are read-only and never OpenChat messages.
+export interface ConversationSourceParticipant { participantId: string; label: string; isSharer: boolean }
+export interface ConversationSource {
+  id: string; network: string; title: string; sharedAt: string; sharedBy: { userId: string; name: string | null };
+  coverage: { asOf: string | null; earliestMessageAt: string | null; latestMessageAt: string | null; complete: boolean };
+  messageCount: number; participants: ConversationSourceParticipant[];
+}
+export interface SourceMessage { id: string; sentAt: string; kind: 'text' | 'media' | 'system' | 'deleted'; text: string | null; mediaType: string | null; edited: boolean; editedAt: string | null; deletedAtSource: string | null; sender: ConversationSourceParticipant | null }
+export type ResourceKind = 'paper' | 'article' | 'reference' | 'person' | 'tool' | 'organization' | 'community' | 'code' | 'video' | 'document' | 'post' | 'event' | 'link';
+export interface ConversationResource {
+  id: string; url: string; host: string; kind: ResourceKind; kindEdited: boolean; title: string | null; description: string | null; siteName: string | null;
+  tags: string[]; suggestedTags: string[]; tagsEdited: boolean; firstSharedAt: string | null; lastSharedAt: string | null;
+  firstSharedBy: { label: string | null; userId: string | null }; shareCount: number; sources: string[]; saved: boolean; savedCount: number;
+}
+const conversationPath = (conversationId: string) => `/api/chat/conversations/${encodeURIComponent(conversationId)}`;
 const privateSubjectPath = (subject: PrivateSubject) => `/api/private/${subject.kind === 'user' ? 'people' : 'things'}/${encodeURIComponent(subject.id)}`;
 
 export interface AddMeCardSettings {
@@ -1747,6 +1764,18 @@ export const api = {
   removePrivateListMember: (listId: string, linkId: string) =>
     request<{ removed: true }>(`/api/private/lists/${encodeURIComponent(listId)}/members/${encodeURIComponent(linkId)}`, { method: 'DELETE' }),
   listCatchUp: () => request<{ due: CatchUpPerson[] }>('/api/private/due'),
+
+  // Shared sources and link resources of a conversation. A refusal must never sign the person out.
+  listConversationSources: (conversationId: string) =>
+    request<{ sources: ConversationSource[]; resourcesEnabled: boolean }>(`${conversationPath(conversationId)}/sources`, { expireAuthOnForbidden: false }),
+  listSourceMessages: (conversationId: string, sourceId: string, before?: string | null, limit = 200) =>
+    request<{ messages: SourceMessage[]; nextCursor: string | null }>(`${conversationPath(conversationId)}/sources/${encodeURIComponent(sourceId)}/messages?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`, { expireAuthOnForbidden: false }),
+  listConversationResources: (conversationId: string) =>
+    request<{ enabled: boolean; resources: ConversationResource[]; pending: number }>(`${conversationPath(conversationId)}/resources`, { expireAuthOnForbidden: false }),
+  updateConversationResource: (conversationId: string, resourceId: string, change: { tags?: string[]; kind?: ResourceKind }) =>
+    request<{ resource: ConversationResource }>(`${conversationPath(conversationId)}/resources/${encodeURIComponent(resourceId)}`, { method: 'PATCH', body: JSON.stringify(change), expireAuthOnForbidden: false }),
+  setConversationResourceSaved: (conversationId: string, resourceId: string, saved: boolean) =>
+    request<{ resource: ConversationResource }>(`${conversationPath(conversationId)}/resources/${encodeURIComponent(resourceId)}/saved`, { method: 'PUT', body: JSON.stringify({ saved }), expireAuthOnForbidden: false }),
 
   // Imported chats — read-only; nothing here sends, invites or notifies anyone.
   listImportedChats: () => request<{ chats: ImportedChatSummary[] }>('/api/imported-chats'),
