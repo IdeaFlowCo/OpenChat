@@ -124,10 +124,7 @@ PR #157 remains unmerged and under its own review hold.
 
 ## Invite previews
 
-An invite link's preview (`/i/:token`) no longer names the group or its size:
-the static `<title>`, description and Open Graph tags are neutral, the page is
-`noindex`, `no-store` and sends no referrer. The group's name is shown in the
-page body and the tab title to the person who opened the link.
+An invite link's preview (`/i/:token`) names the chat in its title when available. The description identifies it only as an OpenChat invitation; it includes no member count or message content. Untitled chats use neutral wording. The page is `noindex`, `private, no-store` and sends no referrer.
 
 **Open in OpenChat** uses the app's link scheme. For a visitor without the app
 that tap used to do nothing; the page now continues to **Join on the web** when

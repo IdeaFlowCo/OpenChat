@@ -204,7 +204,7 @@ it('invalidates old mirror pages on changes and clears them on 404', async () =>
   await act(async () => { await state!.loadEarlier(); });
   expect(state!.mirrored.some(m => m.message.text === 'old private text')).toBe(true);
   expect(state!.hasMore).toBe(false);
-  currentSource = { ...source, revision: '2' };
+  mocks.api.listConversationSources.mockImplementationOnce(async () => ({ sources: [source], resourcesEnabled: true })).mockImplementationOnce(async () => { currentSource = { ...source, revision: '2' }; return { sources: [currentSource], resourcesEnabled: true }; });
   await act(async () => { await state!.refresh(); });
   expect(state!.mirrored.some(m => m.message.text === 'old private text')).toBe(false);
   expect(state!.hasMore).toBe(true);
@@ -232,5 +232,19 @@ it('offers new resource pages after quiet indexing without losing loaded links',
     expect(mocks.api.listConversationResources).toHaveBeenLastCalledWith('c1', 'later');
     expect(texts()).toContain('Shared Knowledge Graphs');
     expect(texts()).toContain('Title older');
+  } finally { vi.useRealTimers(); }
+});
+
+
+it('removes links that disappear during a quiet refresh', async () => {
+  vi.useFakeTimers();
+  mocks.api.listConversationResources.mockResolvedValueOnce({ resources: [paper, person], pending: 1, indexingPending: false, nextCursor: null })
+    .mockResolvedValueOnce({ resources: [person], pending: 0, indexingPending: false, nextCursor: null });
+  try {
+    await render(React.createElement(ResourcesLane, { conversationId: 'c1' }));
+    expect(texts()).toContain('Shared Knowledge Graphs');
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(texts()).not.toContain('Shared Knowledge Graphs');
+    expect(texts()).toContain('Ada Example');
   } finally { vi.useRealTimers(); }
 });

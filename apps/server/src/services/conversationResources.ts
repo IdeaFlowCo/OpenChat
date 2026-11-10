@@ -178,14 +178,56 @@ async function indexConversation(conversationId: string): Promise<boolean> {
     }
 
     if (affected.size) {
-      const live = [...pending.values()].flatMap(entry => entry.occurrences.map(o => ({ resourceKey: entry.resourceKey, occurrenceKey: o.occurrenceKey })));
-      await tx.run(
+      const rows = await tx.run(
         `MATCH (r:ConversationResource {conversationId: $conversationId})
          WHERE any(key IN r.occurrenceKeys WHERE key IN $affected)
-         SET r.occurrenceKeys = [key IN r.occurrenceKeys WHERE NOT key IN $affected OR any(item IN $live WHERE item.resourceKey = r.resourceKey AND item.occurrenceKey = key)]
-         SET r.shareCount = size(r.occurrenceKeys)
-         WITH r WHERE size(r.occurrenceKeys) = 0 DETACH DELETE r`,
-        { conversationId, affected: [...affected], live });
+         RETURN r { .resourceKey, .occurrenceKeys, .occurrenceData, .firstSharedAt, .lastSharedAt, .firstSharedByLabel, .firstSharedByUserId, .sources } AS r`,
+        { conversationId, affected: [...affected] });
+      for (const row of rows.records) {
+        const resource = row.get('r') as Record<string, unknown>;
+        const entry = pending.get(resource.resourceKey as string);
+        const current = new Map<string, Omit<Occurrence, 'url'>>();
+        for (const encoded of (resource.occurrenceData as string[] | null) ?? []) {
+          try { const occurrence = JSON.parse(encoded) as Omit<Occurrence, 'url'>; current.set(occurrence.occurrenceKey, occurrence); } catch { /* legacy data */ }
+        }
+        for (const occurrence of entry?.occurrences ?? []) current.set(occurrence.occurrenceKey, occurrence);
+        const liveKeys = new Set((entry?.occurrences ?? []).map(occurrence => occurrence.occurrenceKey));
+        const keys = (resource.occurrenceKeys as string[]).filter(key => !affected.has(key) || liveKeys.has(key));
+        if (!keys.length) {
+          await tx.run('MATCH (r:ConversationResource {resourceKey: $key}) DETACH DELETE r', { key: resource.resourceKey });
+          continue;
+        }
+        const missing = keys.filter(key => !current.has(key));
+        if (missing.length) {
+          const records = await tx.run(
+            `UNWIND $keys AS key
+             OPTIONAL MATCH (m:Message {id: substring(key, 2), conversationId: $conversationId}) WHERE key STARTS WITH 'm:'
+             OPTIONAL MATCH (u:User {id: m.senderId})
+             OPTIONAL MATCH (im:OpenChatImportedMessage {id: substring(key, 2)}) WHERE key STARTS WITH 'i:'
+             OPTIONAL MATCH (chat:OpenChatImportedChat {id: im.chatId, ownerUserId: im.ownerUserId})
+             OPTIONAL MATCH (p:OpenChatImportedParticipant {id: im.senderParticipantId, chatId: im.chatId, ownerUserId: im.ownerUserId})
+             OPTIONAL MATCH (owner:User {id: chat.ownerUserId})
+             RETURN key, toString(m.createdAt) AS messageAt, m.senderId AS senderId, u.name AS senderName, im.sentAt AS importedAt,
+                    chat.network AS network, chat.ownerUserId AS ownerId, owner.name AS ownerName, p { .id, .displayName, .ordinal, .isOwner } AS participant`,
+            { keys: missing, conversationId });
+          for (const record of records.records) {
+            const key = record.get('key') as string;
+            const p = record.get('participant') as Record<string, unknown> | null;
+            const importedAt = record.get('importedAt') as string | null;
+            const messageAt = record.get('messageAt') as string | null;
+            if (importedAt) current.set(key, { occurrenceKey: key, at: importedAt, source: record.get('network') as string, byUserId: p?.isOwner ? record.get('ownerId') as string : null, byLabel: p?.isOwner ? record.get('ownerName') as string | null : p ? participantLabel(p as { id: string; displayName?: string | null; ordinal?: unknown }) : null });
+            else if (messageAt) current.set(key, { occurrenceKey: key, at: new Date(messageAt).toISOString(), source: 'openchat', byUserId: record.get('senderId') as string | null, byLabel: record.get('senderName') as string | null });
+            else current.set(key, { occurrenceKey: key, at: resource.firstSharedAt as string, source: ((resource.sources as string[]) ?? [])[0] ?? 'openchat', byUserId: resource.firstSharedByUserId as string | null, byLabel: resource.firstSharedByLabel as string | null });
+          }
+        }
+        const occurrences = keys.map(key => current.get(key)!).sort((a, b) => a.at.localeCompare(b.at) || a.occurrenceKey.localeCompare(b.occurrenceKey));
+        const first = occurrences[0]!;
+        await tx.run(
+          `MATCH (r:ConversationResource {resourceKey: $key})
+           SET r.occurrenceKeys = $keys, r.occurrenceData = $data, r.shareCount = size($keys), r.firstSharedAt = $firstAt,
+               r.firstSharedByLabel = $label, r.firstSharedByUserId = $userId, r.lastSharedAt = $lastAt, r.sources = $sources`,
+          { key: resource.resourceKey, keys, data: occurrences.map(o => JSON.stringify(o)), firstAt: first.at, label: first.byLabel, userId: first.byUserId, lastAt: occurrences[occurrences.length - 1]!.at, sources: [...new Set(occurrences.map(o => o.source))] });
+      }
     }
 
     for (const entry of pending.values()) {
@@ -193,12 +235,13 @@ async function indexConversation(conversationId: string): Promise<boolean> {
       await tx.run(
         `MERGE (r:ConversationResource {resourceKey: $resourceKey})
          ON CREATE SET r.id = $id, r.conversationId = $conversationId, r.url = $url, r.urlKey = $urlKey, r.host = $host, r.kind = $kind,
-           r.tags = $tags, r.suggestedTags = $tags, r.createdAt = $now, r.occurrenceKeys = [], r.sources = [], r.shareCount = 0
+           r.tags = $tags, r.suggestedTags = $tags, r.createdAt = $now, r.occurrenceKeys = [], r.occurrenceData = [], r.sources = [], r.shareCount = 0
          WITH r, [o IN $occurrences WHERE NOT o.occurrenceKey IN r.occurrenceKeys] AS fresh
          WHERE size(fresh) > 0
          WITH r, fresh, head(fresh) AS first, last(fresh).at AS last
          WITH r, fresh, first, last, (r.firstSharedAt IS NULL OR first.at < r.firstSharedAt) AS earlier
          SET r.occurrenceKeys = r.occurrenceKeys + [o IN fresh | o.occurrenceKey],
+             r.occurrenceData = coalesce(r.occurrenceData, []) + [o IN fresh | o.data],
              r.shareCount = r.shareCount + size(fresh),
              r.sources = r.sources + [source IN $sources WHERE NOT source IN r.sources],
              r.firstSharedAt = CASE WHEN earlier THEN first.at ELSE r.firstSharedAt END,
@@ -209,7 +252,7 @@ async function indexConversation(conversationId: string): Promise<boolean> {
         {
           resourceKey: entry.resourceKey, id: nanoid(), conversationId, url: entry.url, urlKey: entry.urlKey, host: entry.host, kind: guess.kind, tags: guess.suggestedTags,
           now: now.toISOString(),
-          occurrences: [...entry.occurrences].sort((x, y) => x.at.localeCompare(y.at)).map(o => ({ occurrenceKey: o.occurrenceKey, at: o.at, byLabel: o.byLabel, byUserId: o.byUserId })),
+          occurrences: [...entry.occurrences].sort((x, y) => x.at.localeCompare(y.at)).map(o => ({ occurrenceKey: o.occurrenceKey, at: o.at, byLabel: o.byLabel, byUserId: o.byUserId, data: JSON.stringify({ occurrenceKey: o.occurrenceKey, at: o.at, byLabel: o.byLabel, byUserId: o.byUserId, source: o.source }) })),
           sources: [...new Set(entry.occurrences.map(o => o.source))],
         });
     }

@@ -538,7 +538,7 @@ app.get('/i/:token', async (req, res, next) => {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#5664e2">
-${renderInvitePreviewHead()}
+${renderInvitePreviewHead(preview.conversationTitle)}
 <meta name="apple-itunes-app" content="app-id=6774991932, app-argument=${requestOrigin}/i/${encodedToken}">
 <style>
   :root { --bg:#0a0c18; --surface:rgba(255,255,255,0.05); --border:rgba(255,255,255,0.10);

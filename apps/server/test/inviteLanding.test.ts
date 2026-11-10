@@ -38,6 +38,18 @@ describe('invite page link preview', () => {
     expect($('meta[name="referrer"]').attr('content')).toBe('no-referrer');
   });
 
+  it('names only the chat in a safely escaped preview', async () => {
+    const { renderInvitePreviewHead } = await import('../src/services/inviteLanding.js');
+    const hostile = 'Garden & "friends" </title><script>alert(1)</script>';
+    const head = renderInvitePreviewHead(hostile);
+    const $ = load(`<html><head>${head}</head></html>`);
+    expect($('title').text()).toBe(`Join ${hostile} on OpenChat`);
+    expect($('meta[property="og:title"]').attr('content')).toBe(`Join ${hostile} on OpenChat`);
+    expect($('script')).toHaveLength(0);
+    expect($('meta[name="description"]').attr('content')).toBe('An invitation to a chat on OpenChat.');
+    expect($('meta[property="og:description"]').attr('content')).toBe('An invitation to a chat on OpenChat.');
+  });
+
   it('names the group in the visitor’s tab without letting a title break out of the script', async () => {
     const { inviteTabTitleScript } = await import('../src/services/inviteLanding.js');
     const run = (title: string) => { const document = { title: '' }; new Function('document', inviteTabTitleScript(title))(document); return document.title; };

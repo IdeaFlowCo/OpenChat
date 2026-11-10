@@ -7,19 +7,14 @@ export function renderInviteActions(token: string): string {
   <p class="cta-tiny">Installing first? <button type="button" onclick="copyInvite()">Copy Invite Link</button>, then paste it at sign-in.</p>`;
 }
 
-/**
- * The static head of the public invite page. Link previews (iMessage, Slack,
- * search crawlers) read only this, and it never names the group, its members
- * or its size: an invite link is forwarded and unfurled by machines that are
- * not the invited person. The group's name appears in the page body and, via
- * `inviteTabTitleScript`, in the tab title of the person who opened the link.
- */
-export function renderInvitePreviewHead(): string {
-  const title = 'You\u2019re invited to a group chat on OpenChat';
-  const description = 'Open the invite to see the group and join.';
-  return `<title>Group invite \u00b7 OpenChat</title>
+export function renderInvitePreviewHead(groupTitle?: string | null): string {
+  const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const title = groupTitle?.trim() ? `Join ${groupTitle} on OpenChat` : 'Group invite · OpenChat';
+  const ogTitle = groupTitle?.trim() ? title : 'You’re invited to a group chat on OpenChat';
+  const description = 'An invitation to a chat on OpenChat.';
+  return `<title>${escape(title)}</title>
 <meta name="description" content="${description}">
-<meta property="og:title" content="${title}">
+<meta property="og:title" content="${escape(ogTitle)}">
 <meta property="og:description" content="${description}">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary">
