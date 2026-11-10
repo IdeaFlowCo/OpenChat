@@ -41,7 +41,12 @@ import { MessageActionSheet, ReplyToData } from '../components/MessageActionShee
 import { ReactionsBar } from '../components/ReactionsBar';
 import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
-import { ConversationLaneSwitch } from '../components/ConversationLaneSwitch';
+import { ConversationLaneSwitch, type ConversationLaneTab } from '../components/ConversationLaneSwitch';
+import { ConversationSourceBar } from '../components/ConversationSourceBar';
+import { MirroredMessageRow } from '../components/MirroredMessageRow';
+import { ResourcesLane } from '../components/ResourcesLane';
+import { useConversationSources } from '../services/useConversationSources';
+import { mergeTimeline, mirrorModeLabel, type MirroredEntry, type TimelineEntry } from '../utils/unifiedTimeline';
 import { HeaderBarButton } from '../components/HeaderBarButton';
 import { ContextLane } from '../components/ContextLane';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
@@ -214,9 +219,11 @@ function renderContentWithMentions(
 }
 
 interface RenderRow {
-  type: 'message' | 'day';
+  type: 'message' | 'day' | 'mirror';
   key: string;
   message?: Message & { _failed?: boolean };
+  /** A read-only message from a chat shared into this conversation (OpenChat-c8to.4). */
+  mirror?: MirroredEntry;
   label?: string;
   isOwn?: boolean;
   /** First message of a run from this author (after a different author / day break). */
@@ -258,6 +265,39 @@ function buildRows(messages: Message[], myId: string | undefined, isGroup: boole
       isOwn,
       showSender,
       isLastInRun,
+    });
+  }
+  return out;
+}
+
+/**
+ * Rows for a timeline that mixes OpenChat messages with mirrored ones
+ * (OpenChat-c8to.4). Same day breaks and sender runs as `buildRows`; a
+ * mirrored message always ends an OpenChat run and the other way round.
+ */
+function buildTimelineRows(entries: TimelineEntry[], myId: string | undefined, isGroup: boolean): RenderRow[] {
+  const out: RenderRow[] = [];
+  const author = (entry: TimelineEntry | undefined) => !entry ? undefined : entry.kind === 'message' ? `m:${entry.message.senderId}` : `x:${entry.mirror.senderKey}`;
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i]!;
+    const prev = entries[i - 1];
+    const next = entries[i + 1];
+    const newDay = !prev || !sameDay(prev.at, entry.at);
+    if (newDay) out.push({ type: 'day', key: `day-${entry.at}`, label: dayLabel(entry.at) });
+    if (entry.kind === 'mirror') {
+      out.push({ type: 'mirror', key: entry.mirror.key, mirror: entry.mirror, showSender: newDay || author(prev) !== author(entry) });
+      continue;
+    }
+    const m = entry.message;
+    const isOwn = m.senderId === myId;
+    const previousSenderId = !newDay && prev?.kind === 'message' ? prev.message.senderId : undefined;
+    out.push({
+      type: 'message',
+      key: m.id,
+      message: m as Message & { _failed?: boolean },
+      isOwn,
+      showSender: shouldShowGroupSenderLabel(isGroup, isOwn, m.senderId, previousSenderId),
+      isLastInRun: !next || author(next) !== author(entry) || !sameDay(entry.at, next.at),
     });
   }
   return out;
@@ -356,6 +396,25 @@ export function ChatScreen({
     () => activeMessages.filter(message => message.conversationId === conversationId),
     [activeMessages, conversationId]
   );
+
+  // Chats shared into this conversation and its Links lane (OpenChat-c8to). Most conversations have
+  // neither: then `hasSources` and `resourcesEnabled` are false and nothing below changes.
+  const {
+    sources: conversationSources, mirrored: mirroredMessages, resourcesEnabled, mode: sourceMode, setMode: setSourceMode,
+  } = useConversationSources(conversationId, currentUser?.userId);
+  const hasSources = conversationSources.length > 0;
+  const mirrorLabel = mirrorModeLabel(conversationSources);
+  const firstSharer = conversationSources[0]?.sharedBy;
+  const sharedByLabel = !firstSharer ? 'a member' : firstSharer.userId === currentUser?.userId ? 'you' : firstSharer.name || 'a member';
+  // Links is a third tab beside Chat and Context. While it is open the shared lane state says
+  // "context", so the chat is not treated as on screen (no read receipts for unseen messages).
+  const [linksOpen, setLinksOpen] = useState(false);
+  useEffect(() => { setLinksOpen(false); }, [conversationId]);
+  const laneTab: ConversationLaneTab = linksOpen && resourcesEnabled && activeConversationLane === 'context' ? 'links' : activeConversationLane;
+  const chooseLaneTab = useCallback((tab: ConversationLaneTab) => {
+    setLinksOpen(tab === 'links');
+    setActiveConversationLane(tab === 'chat' ? 'chat' : 'context');
+  }, [setActiveConversationLane]);
 
   const { preference: translationPreference } = useChatTranslation(conversationId);
   const [translationFocused, setTranslationFocused] = useState(false);
@@ -859,7 +918,10 @@ export function ChatScreen({
   }, [c.bubbleOwnText]);
 
   const rows = useMemo(() => {
-    const built = buildRows(messages, currentUser?.userId, isGroup);
+    // Conversations without a shared source take the original path untouched.
+    const built = sourceMode === 'openchat' || !mirroredMessages.length
+      ? buildRows(sourceMode === 'mirror' ? [] : messages, currentUser?.userId, isGroup)
+      : buildTimelineRows(mergeTimeline(messages, mirroredMessages, sourceMode, hasMoreMessages), currentUser?.userId, isGroup);
     // Rebuild messageId → row index map for scroll-to-quoted.
     const map = new Map<string, number>();
     built.forEach((r, i) => {
@@ -867,7 +929,28 @@ export function ChatScreen({
     });
     messageIndexRef.current = map;
     return built;
-  }, [messages, currentUser?.userId, isGroup]);
+  }, [messages, currentUser?.userId, isGroup, sourceMode, mirroredMessages, hasMoreMessages]);
+
+  // Mirrored history arrives after the chat's own messages, and the switch changes what is listed.
+  // The first arrival and every switch show the newest message; a later refresh that adds mirrored
+  // messages moves the view only when the person is already at the bottom.
+  const mirrorView = useRef<{ conversationId: string; mode: string; settled: boolean } | null>(null);
+  useEffect(() => {
+    if (!hasSources) return;
+    const previous = mirrorView.current;
+    const fresh = !previous || previous.conversationId !== conversationId || previous.mode !== sourceMode || !previous.settled;
+    mirrorView.current = { conversationId, mode: sourceMode, settled: mirroredMessages.length > 0 };
+    if (!fresh && !isAtBottomRef.current) return;
+    // Twice: the list's height is not final until the merged rows have been laid out.
+    const timers = [50, 300].map(delay => setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), delay));
+    return () => timers.forEach(clearTimeout);
+  }, [hasSources, conversationId, sourceMode, mirroredMessages.length]);
+
+  // Writing while only the mirror is shown: what was sent is an OpenChat message, so show it.
+  const latestMessage = messages[messages.length - 1];
+  useEffect(() => {
+    if (sourceMode === 'mirror' && latestMessage?.senderId === currentUser?.userId && latestMessage?.id.startsWith('local-')) setSourceMode('unified');
+  }, [sourceMode, latestMessage?.id, latestMessage?.senderId, currentUser?.userId, setSourceMode]);
 
   // At-bottom-aware scroll. Rules:
   //   R7. Initial mount / conversation switch → jump to bottom, no animation.
@@ -1679,6 +1762,7 @@ export function ChatScreen({
         </View>
       );
     }
+    if (item.type === 'mirror') return <MirroredMessageRow entry={item.mirror!} showSender={!!item.showSender} />;
     const m = item.message!;
     if (m.messageType === 'card' && m.cardKind === 'tickle') {
       return <TickleLine message={m} myUserId={currentUser?.userId} />;
@@ -1979,7 +2063,15 @@ export function ChatScreen({
           </View>
         );
       })()}
-      <ConversationLaneSwitch activeLane={activeConversationLane} onChange={setActiveConversationLane} />
+      <ConversationLaneSwitch activeLane={laneTab} onChange={chooseLaneTab} showLinks={resourcesEnabled} />
+      {laneTab === 'chat' && hasSources && (
+        <ConversationSourceBar
+          mode={sourceMode}
+          onChange={setSourceMode}
+          mirrorLabel={mirrorLabel}
+          note={sourceMode === 'openchat' ? null : `${mirrorLabel} messages are a read-only mirror shared by ${sharedByLabel}. Replies here are sent on OpenChat.`}
+        />
+      )}
       {showAiDisclosure && <AiDisclosureBanner />}
       {activeConversationLane === 'chat' && <ChatTranslationBar key={conversationId} conversationId={conversationId} suggest={offerTranslation} />}
 
@@ -2052,7 +2144,11 @@ export function ChatScreen({
         </View>
       </Modal>
 
-      {activeConversationLane === 'context' ? (
+      {laneTab === 'links' ? (
+        <View style={{ flex: 1 }}>
+          <ResourcesLane key={`${currentUser?.userId}:${conversationId}`} conversationId={conversationId} />
+        </View>
+      ) : activeConversationLane === 'context' ? (
         <View style={{ flex: 1 }}>
           <ContextLane key={`${currentUser?.userId}:${conversationId}`} conversationId={conversationId} />
         </View>

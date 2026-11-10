@@ -1,5 +1,6 @@
 import neo4j, { Driver } from 'neo4j-driver';
 import { ensureImportedChatSchema } from './services/importedChats.js';
+import { ensureConversationResourceSchema } from './services/conversationResources.js';
 
 let driver: Driver | null = null;
 
@@ -157,6 +158,7 @@ export async function initDatabase(): Promise<void> {
 
     // Imported chat mirrors (OpenChat-061g) keep their own labels and keys.
     await ensureImportedChatSchema(session);
+    await ensureConversationResourceSchema(session);
 
     console.log('Database constraints and indexes initialized');
   } finally {

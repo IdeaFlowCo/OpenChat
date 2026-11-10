@@ -5,6 +5,7 @@ import { securityRateLimitMonitor, TRUSTED_PROXY_SETTING } from './services/secu
 import { startVisionReplyWorker } from './services/visionBridge.js';
 import contextIntentionsRoutes from './routes/contextIntentions.js';
 import conversationContentRoutes from './routes/conversationContent.js';
+import conversationSourcesRoutes from './routes/conversationSources.js';
 import contextWebhooksRoutes from './routes/contextWebhooks.js';
 import { ensureContextWebhookIndexes,startContextWebhookWorker } from './services/contextWebhooks.js';
 import unlinkedConnectionRoutes from './routes/unlinkedConnections.js';
@@ -64,7 +65,7 @@ import {
   sanitizeLegacyPublicDisplayNames,
 } from './privacy/profilePrivacy.js';
 import { resolveInvitePreview, InviteError } from './services/inviteEntry.js';
-import { renderInviteActions } from './services/inviteLanding.js';
+import { inviteAppFallbackScript, inviteTabTitleScript, renderInviteActions, renderInvitePreviewHead } from './services/inviteLanding.js';
 import { resolvePublicPersonProjection } from './services/publicEntryProjection.js';
 import { resolveCardToken } from './services/addMeCard.js';
 import { renderCardPage, renderCardUnavailablePage } from './services/addMeCardPage.js';
@@ -456,6 +457,7 @@ app.use('/api/chat/context-hosted', contextHostedRoutes);
 app.use('/api/chat/context-webhooks', contextWebhooksRoutes);
 app.use('/api/chat', contextIntentionsRoutes);
 app.use('/api/chat', conversationContentRoutes);
+app.use('/api/chat', conversationSourcesRoutes);
 app.use('/api/chat', contextRoutes);
 app.use('/api', entryIntentsRoutes);
 app.use('/api', unlinkedMessagingRoutes);
@@ -536,10 +538,7 @@ app.get('/i/:token', async (req, res, next) => {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#5664e2">
-<title>Join ${safe(groupTitle)}</title>
-<meta name="description" content="${safe(desc)}">
-<meta property="og:title" content="Join ${safe(groupTitle)} on OpenChat">
-<meta property="og:description" content="${safe(desc)}">
+${renderInvitePreviewHead()}
 <meta name="apple-itunes-app" content="app-id=6774991932, app-argument=${requestOrigin}/i/${encodedToken}">
 <style>
   :root { --bg:#0a0c18; --surface:rgba(255,255,255,0.05); --border:rgba(255,255,255,0.10);
@@ -578,6 +577,8 @@ app.get('/i/:token', async (req, res, next) => {
   </div>
 </div>
 <script>
+  ${inviteTabTitleScript(groupTitle)}
+  ${inviteAppFallbackScript(token)}
   function copyInvite() {
     if (!navigator.clipboard?.writeText) {
       alert('Copy unavailable here. Return to this page after installing OpenChat.');
@@ -592,7 +593,10 @@ app.get('/i/:token', async (req, res, next) => {
 </script>
 </body></html>`;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Cache-Control', 'public, max-age=300');
+    // The page names a private group to whoever holds the link: keep it out of shared caches and referrers.
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     res.send(html);
   } catch (error: any) {
     if (error instanceof InviteError) {

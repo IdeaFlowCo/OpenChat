@@ -25,6 +25,8 @@ jobs:
         run: npm run lint --workspace=apps/mobile
       - name: Mobile permission and share utilities
         run: npm run test --workspace=apps/mobile
+      - name: iMessage thread mirror companion (one thread only, no handles uploaded)
+        run: python3 -I scripts/imessage-thread-mirror/mirror.py selftest
       - name: Group opening, message loading, and contact card privacy
         working-directory: apps/server
         run: >-
@@ -40,7 +42,7 @@ jobs:
           test/contextHostedReview.mobile.test.ts test/contextHostedApi.mobile.test.ts test/contextHosted.route.test.ts
           test/contextWebhookSetup.mobile.test.ts test/contextWebhooks.route.test.ts test/contextWebhookTransport.test.ts
           test/conversationContent.route.test.ts test/contextIntentions.mobile.test.ts
-          test/importedChats.mobile.test.ts test/importedChats.test.ts
+          test/importedChats.mobile.test.ts test/importedChats.test.ts test/sharedSources.mobile.test.ts test/resourceInference.test.ts test/conversationSources.route.test.ts
       - name: Saved People pagination, virtualization, account isolation, and private cards
         working-directory: apps/server
         run: >-
