@@ -13,21 +13,20 @@ export const RESOURCE_KINDS = [
 ] as const;
 export type ResourceKind = typeof RESOURCE_KINDS[number];
 
-export const RESOURCE_LIMITS = { tags: 12, tag: 40, urlsPerMessage: 10, url: 2000 } as const;
+export const RESOURCE_LIMITS = { tags: 12, tag: 40, url: 2000 } as const;
 
 export class ResourceInputError extends Error {}
 
 const URL_RE = /https?:\/\/[^\s)\]'"<>]+/g;
 const TRACKING = /^(utm_[a-z]+|fbclid|gclid|mc_cid|mc_eid|igshid|si|ref_src|ref_url)$/i;
 
-/** Every distinct http(s) address in a message, in order, up to a small cap. */
+/** Every distinct http(s) address in a message, in order. */
 export function extractResourceUrls(text: string | null | undefined): string[] {
   if (!text) return [];
   const found: string[] = [];
   for (const match of text.matchAll(URL_RE)) {
     const url = match[0].replace(/[.,!?:;]+$/, '');
     if (url.length <= RESOURCE_LIMITS.url && !found.includes(url)) found.push(url);
-    if (found.length >= RESOURCE_LIMITS.urlsPerMessage) break;
   }
   return found;
 }

@@ -42,25 +42,34 @@ export function useConversationSources(conversationId: string | undefined, userI
   const cacheKey = conversationId && userId ? `${userId}:${conversationId}` : null;
   const [state, setState] = useState<ConversationSourcesState>(() => (cacheKey && cache.get(cacheKey)) || EMPTY);
   const [mode, setModeState] = useState<SourceMode>(() => (cacheKey && modes.get(cacheKey)) || 'unified');
+  const generation = useRef(0);
   const current = useRef(cacheKey);
   current.current = cacheKey;
 
   const refresh = useCallback(async () => {
     if (!cacheKey || !conversationId || !userId) return;
+    const run = ++generation.current;
     try {
       const next = await loadSources(conversationId, userId);
+      if (run !== generation.current || current.current !== cacheKey) return;
       const previous = cache.get(cacheKey);
       if (previous) {
-        const valid = new Set(next.sources.map(source => source.id));
+        const unchanged = new Set(next.sources.filter(source => {
+          const old = previous.sources.find(item => item.id === source.id);
+          return old && old.coverage.asOf === source.coverage.asOf && old.coverage.latestMessageAt === source.coverage.latestMessageAt && old.messageCount === source.messageCount;
+        }).map(source => source.id));
         const seen = new Set(next.mirrored.map(entry => entry.key));
-        next.mirrored.push(...previous.mirrored.filter(entry => valid.has(entry.sourceId) && !seen.has(entry.key)));
-        for (const source of next.sources) if (source.id in previous.cursors) next.cursors[source.id] = previous.cursors[source.id]!;
+        const older = previous.mirrored.filter(entry => unchanged.has(entry.sourceId) && !seen.has(entry.key));
+        next.mirrored.push(...older);
+        for (const source of next.sources) if (older.some(entry => entry.sourceId === source.id)) next.cursors[source.id] = previous.cursors[source.id]!;
       }
       cache.set(cacheKey, next);
       if (current.current === cacheKey) setState(next);
-    } catch {
-      // Leave what is shown; a conversation without sources must never look broken because this failed.
-      if (current.current === cacheKey && !cache.has(cacheKey)) setState({ ...EMPTY, loaded: true });
+    } catch (error) {
+      if ((error as { status?: unknown })?.status === 404) {
+        generation.current += 1; cache.delete(cacheKey); modes.delete(cacheKey);
+        if (current.current === cacheKey) { setState({ ...EMPTY, loaded: true }); setModeState('unified'); }
+      } else if (run === generation.current && current.current === cacheKey && !cache.has(cacheKey)) setState({ ...EMPTY, loaded: true });
     }
   }, [cacheKey, conversationId, userId]);
 
@@ -86,10 +95,13 @@ export function useConversationSources(conversationId: string | undefined, userI
     if (!cacheKey || !conversationId || !userId || busy.current) return;
     const currentState = cache.get(cacheKey);
     if (!currentState) return;
+    const run = generation.current;
     busy.current = true; setLoadingEarlier(true);
     try {
       const pages = await Promise.all(currentState.sources.filter(source => currentState.cursors[source.id]).map(async source => ({ source, page: await api.listSourceMessages(conversationId, source.id, currentState.cursors[source.id], PAGE) })));
-      const latest = cache.get(cacheKey) ?? currentState;
+      if (run !== generation.current || current.current !== cacheKey) return;
+      const latest = cache.get(cacheKey);
+      if (!latest) return;
       const seen = new Set(latest.mirrored.map(entry => entry.key));
       const additions = pages.flatMap(({ source, page }) => mirroredEntries(source, page.messages, userId)).filter(entry => !seen.has(entry.key));
       const cursors = { ...latest.cursors };
@@ -97,7 +109,12 @@ export function useConversationSources(conversationId: string | undefined, userI
       const next = { ...latest, mirrored: [...latest.mirrored, ...additions], cursors };
       cache.set(cacheKey, next);
       if (current.current === cacheKey) setState(next);
-    } catch { /* Keep the cursor so the member can retry. */ }
+    } catch (error) {
+      if ((error as { status?: unknown })?.status === 404) {
+        generation.current += 1; cache.delete(cacheKey); modes.delete(cacheKey);
+        if (current.current === cacheKey) { setState({ ...EMPTY, loaded: true }); setModeState('unified'); }
+      }
+    }
     finally { busy.current = false; if (current.current === cacheKey) setLoadingEarlier(false); }
   }, [cacheKey, conversationId, userId]);
 

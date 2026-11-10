@@ -7,7 +7,8 @@
  * chat into a group sets it). Entries are collected when a member opens the
  * list, from the conversation's own messages and from any mirror shared into
  * it, so the message send path is untouched. Tags and kind are shared by the
- * conversation; "saved" belongs to the member who set it.
+ * conversation; "saved" belongs to the member who set it. Private Stream entries,
+ * private notes, asks and to-dos scoped to a conversation are never collected.
  */
 
 import { nanoid } from 'nanoid';
@@ -20,7 +21,7 @@ import { doiFromUrl, extractResourceUrls, inferResource, isResourceKind, normali
 import { requireMember } from './sharedMirrors.js';
 
 const fail = (status: number, message: string): never => { throw new ImportedChatError(status, message); };
-const LIMITS = { scanMessages: 1000, list: 500, occurrences: 500, enrichBatch: 12, enrichConcurrency: 4, enrichBudgetMs: 2500, description: 500, title: 300 } as const;
+const LIMITS = { scanMessages: 1000, scanBatches: 20, list: 500, enrichBatch: 12, enrichConcurrency: 4, enrichBudgetMs: 2500, description: 500, title: 300 } as const;
 const RETRY_FAILED_AFTER_MS = 24 * 60 * 60 * 1000;
 /** Rescan this far behind the last scan, so a message committed late is still collected. */
 const WATERMARK_OVERLAP_MS = 60_000;
@@ -79,7 +80,7 @@ export interface ResourceView {
   saved: boolean;
   savedCount: number;
 }
-export interface ResourceList { enabled: boolean; resources: ResourceView[]; pending: number; nextCursor: string | null }
+export interface ResourceList { enabled: boolean; resources: ResourceView[]; pending: number; nextCursor: string | null; indexingPending: boolean }
 
 async function read<T>(work: (tx: ManagedTransaction) => Promise<T>): Promise<T> {
   const session = getDriver().session();
@@ -115,14 +116,14 @@ function collect(into: Map<string, Pending>, conversationId: string, text: strin
 }
 
 /** Collect addresses from messages not yet scanned. Idempotent: an occurrence is counted once. */
-async function indexConversation(conversationId: string): Promise<void> {
+async function indexConversation(conversationId: string): Promise<boolean> {
   const now = new Date();
-  await write(async tx => {
+  return write(async tx => {
     const conversation = await tx.run(
       `MATCH (c:Conversation {id: $conversationId}) WHERE c.resourcesEnabled = true
        SET c.resourcesLockedAt = $now
        RETURN c.resourcesIndexedThrough AS through, c.resourcesIndexedThroughId AS throughId`, { conversationId, now: now.toISOString() });
-    if (!conversation.records.length) return;
+    if (!conversation.records.length) return false;
     const through = conversation.records[0]!.get('through') as string | null;
     const throughId = conversation.records[0]!.get('throughId') as string | null;
     const pending = new Map<string, Pending>();
@@ -141,7 +142,7 @@ async function indexConversation(conversationId: string): Promise<void> {
       });
     }
     // A full page means there may be more: stop the watermark at the last message scanned.
-    const lastAt = messages.records.length ? new Date(messages.records[messages.records.length - 1]!.get('at') as string).toISOString() : null;
+    const lastAt = messages.records.length ? messages.records[messages.records.length - 1]!.get('at') as string : null;
     const fullPage = messages.records.length >= LIMITS.scanMessages && !!lastAt;
     const nextThrough = fullPage ? lastAt : new Date(now.getTime() - WATERMARK_OVERLAP_MS).toISOString();
     const nextThroughId = fullPage ? messages.records[messages.records.length - 1]!.get('id') as string : null;
@@ -177,7 +178,7 @@ async function indexConversation(conversationId: string): Promise<void> {
          WHERE size(fresh) > 0
          WITH r, fresh, head(fresh) AS first, last(fresh).at AS last
          WITH r, fresh, first, last, (r.firstSharedAt IS NULL OR first.at < r.firstSharedAt) AS earlier
-         SET r.occurrenceKeys = (r.occurrenceKeys + [o IN fresh | o.occurrenceKey])[..$maxOccurrences],
+         SET r.occurrenceKeys = r.occurrenceKeys + [o IN fresh | o.occurrenceKey],
              r.shareCount = r.shareCount + size(fresh),
              r.sources = r.sources + [source IN $sources WHERE NOT source IN r.sources],
              r.firstSharedAt = CASE WHEN earlier THEN first.at ELSE r.firstSharedAt END,
@@ -187,12 +188,13 @@ async function indexConversation(conversationId: string): Promise<void> {
              r.updatedAt = $now`,
         {
           resourceKey: entry.resourceKey, id: nanoid(), conversationId, url: entry.url, urlKey: entry.urlKey, host: entry.host, kind: guess.kind, tags: guess.suggestedTags,
-          now: now.toISOString(), maxOccurrences: neo4j.int(LIMITS.occurrences), // Oldest first: the query reads the first and last of the ones not yet counted.
+          now: now.toISOString(),
           occurrences: [...entry.occurrences].sort((x, y) => x.at.localeCompare(y.at)).map(o => ({ occurrenceKey: o.occurrenceKey, at: o.at, byLabel: o.byLabel, byUserId: o.byUserId })),
           sources: [...new Set(entry.occurrences.map(o => o.source))],
         });
     }
     await tx.run('MATCH (c:Conversation {id: $conversationId}) SET c.resourcesIndexedThrough = $through, c.resourcesIndexedThroughId = $throughId REMOVE c.resourcesLockedAt', { conversationId, through: nextThrough, throughId: nextThroughId });
+    return fullPage;
   });
 }
 
@@ -276,13 +278,17 @@ export async function listConversationResources(userId: string, conversationId: 
     if (!cursor) fail(400, 'Invalid cursor');
   }
   const member = await read(tx => requireMember(tx, userId, conversationId));
-  if (!member.resourcesEnabled) return { enabled: false, resources: [], pending: 0, nextCursor: null };
-  await indexConversation(conversationId);
+  if (!member.resourcesEnabled) return { enabled: false, resources: [], pending: 0, nextCursor: null, indexingPending: false };
+  let indexingPending = false;
+  for (let batch = 0; batch < LIMITS.scanBatches; batch++) {
+    indexingPending = await indexConversation(conversationId);
+    if (!indexingPending) break;
+  }
   // Wait briefly for page titles, then answer with what is known; the rest finishes in the background.
   let timer: NodeJS.Timeout | undefined;
   await Promise.race([enrich(conversationId), new Promise<void>(resolve => { timer = setTimeout(resolve, LIMITS.enrichBudgetMs); })]);
   if (timer) clearTimeout(timer);
-  return { enabled: true, ...(await readResources(userId, conversationId, undefined, cursor)) };
+  return { enabled: true, indexingPending, ...(await readResources(userId, conversationId, undefined, cursor)) };
 }
 
 async function requireEnabledMember(tx: ManagedTransaction, userId: string, conversationId: string): Promise<void> {

@@ -1771,7 +1771,7 @@ export const api = {
   listSourceMessages: (conversationId: string, sourceId: string, before?: string | null, limit = 200) =>
     request<{ messages: SourceMessage[]; nextCursor: string | null }>(`${conversationPath(conversationId)}/sources/${encodeURIComponent(sourceId)}/messages?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`, { expireAuthOnForbidden: false }),
   listConversationResources: (conversationId: string, before?: string | null) =>
-    request<{ enabled: boolean; resources: ConversationResource[]; pending: number; nextCursor: string | null }>(`${conversationPath(conversationId)}/resources${before ? `?before=${encodeURIComponent(before)}` : ''}`, { expireAuthOnForbidden: false }),
+    request<{ enabled: boolean; resources: ConversationResource[]; pending: number; nextCursor: string | null; indexingPending: boolean }>(`${conversationPath(conversationId)}/resources${before ? `?before=${encodeURIComponent(before)}` : ''}`, { expireAuthOnForbidden: false }),
   updateConversationResource: (conversationId: string, resourceId: string, change: { tags?: string[]; kind?: ResourceKind }) =>
     request<{ resource: ConversationResource }>(`${conversationPath(conversationId)}/resources/${encodeURIComponent(resourceId)}`, { method: 'PATCH', body: JSON.stringify(change), expireAuthOnForbidden: false }),
   setConversationResourceSaved: (conversationId: string, resourceId: string, saved: boolean) =>

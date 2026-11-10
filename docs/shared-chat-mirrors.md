@@ -132,3 +132,5 @@ page body and the tab title to the person who opened the link.
 **Open in OpenChat** uses the app's link scheme. For a visitor without the app
 that tap used to do nothing; the page now continues to **Join on the web** when
 it is still in front a moment later.
+
+Private Stream entries, private notes, asks and to-dos scoped to a conversation are never collected into link resources. Only conversation messages and actively shared mirror messages supply links.
