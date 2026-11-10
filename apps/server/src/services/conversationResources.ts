@@ -337,7 +337,7 @@ async function readResources(userId: string, conversationId: string, resourceId?
 export async function listConversationResources(userId: string, conversationId: string, before?: unknown): Promise<ResourceList> {
   let cursor: [string, string] | null = null;
   if (before !== undefined && before !== '') {
-    try { const value = JSON.parse(Buffer.from(String(before), 'base64url').toString('utf8')); if (Array.isArray(value) && value.length === 2 && value.every(v => typeof v === 'string' && v.length > 0 && v.length <= 200)) cursor = value; } catch { /* invalid */ }
+    try { const value = JSON.parse(Buffer.from(String(before), 'base64url').toString('utf8')); if (Array.isArray(value) && value.length === 2 && value.every(v => typeof v === 'string' && v.length > 0 && v.length <= 200)) cursor = [value[0], value[1]]; } catch { /* invalid */ }
     if (!cursor) fail(400, 'Invalid cursor');
   }
   const member = await read(tx => requireMember(tx, userId, conversationId));
