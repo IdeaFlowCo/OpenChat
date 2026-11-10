@@ -26,6 +26,7 @@ export function ResourcesLane({ conversationId }: { conversationId: string }) {
   const [loading, setLoading] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [indexingPending, setIndexingPending] = useState(false);
   const [filter, setFilter] = useState<ResourceFilter>(NO_FILTER);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
@@ -40,9 +41,9 @@ export function ResourcesLane({ conversationId }: { conversationId: string }) {
       if (!alive.current) return;
       setResources(current => quiet && current ? [...result.resources, ...current.filter(item => !result.resources.some(fresh => fresh.id === item.id))] : result.resources);
       if (!quiet) setNextCursor(result.nextCursor ?? null);
-      setError(null);
+      setError(null); setIndexingPending(result.indexingPending === true);
       // Page titles arrive a moment after a link is first collected.
-      if (result.pending > 0 && refreshes.current < PENDING_REFRESHES) {
+      if (result.indexingPending || (result.pending > 0 && refreshes.current < PENDING_REFRESHES)) {
         refreshes.current += 1;
         if (timer.current) clearTimeout(timer.current);
         timer.current = setTimeout(() => void load(true), PENDING_REFRESH_MS);
@@ -118,6 +119,7 @@ export function ResourcesLane({ conversationId }: { conversationId: string }) {
         ))}
         {filter.tag ? <Chip label={`#${filter.tag} ×`} selected accessibilityLabel={`Clear tag filter ${filter.tag}`} onPress={() => setFilter(current => ({ ...current, tag: null }))} /> : null}
       </ScrollView>
+      {indexingPending ? <Text accessibilityLiveRegion="polite" style={[type.meta, styles.notice, { color: r.textMeta }]}>Older links are still being collected.</Text> : null}
       {notice ? <Text accessibilityRole={notice.error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={[type.meta, styles.notice, { color: notice.error ? r.danger : r.textMeta }]}>{notice.text}</Text> : null}
       <FlatList
         data={visible}

@@ -4,6 +4,8 @@ import { doiFromUrl, extractResourceUrls, inferResource, normalizeResourceUrl, n
 describe('link resources: addresses', () => {
   it('finds every distinct address and trims sentence punctuation', () => {
     expect(extractResourceUrls('see https://example.org/a, then (https://example.org/b). Again https://example.org/a!')).toEqual(['https://example.org/a', 'https://example.org/b']);
+    const many = Array.from({ length: 15 }, (_, i) => `https://example.org/${i}`);
+    expect(extractResourceUrls(many.join(' '))).toEqual(many);
     expect(extractResourceUrls(null)).toEqual([]);
     expect(extractResourceUrls('no links here')).toEqual([]);
   });

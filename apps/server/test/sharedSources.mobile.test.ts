@@ -3,10 +3,11 @@ import { act, create, type ReactTestInstance } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  api: { listConversationResources: vi.fn(), updateConversationResource: vi.fn(), setConversationResourceSaved: vi.fn() },
+  api: { listConversationSources: vi.fn(), listSourceMessages: vi.fn(), listConversationResources: vi.fn(), updateConversationResource: vi.fn(), setConversationResourceSaved: vi.fn() },
   openLink: vi.fn(),
 }));
 vi.mock('react-native', () => ({
+  AppState: { currentState: 'active', addEventListener: () => ({ remove: () => {} }) },
   Platform: { OS: 'ios', select: (v: any) => v.ios ?? v.default }, StyleSheet: { create: (s: unknown) => s, hairlineWidth: 1 },
   ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View', ScrollView: 'ScrollView',
   Alert: { alert: vi.fn() }, Linking: { openURL: vi.fn() },
@@ -21,6 +22,7 @@ import { ConversationLaneSwitch } from '../../mobile/src/components/Conversation
 import { ConversationSourceBar } from '../../mobile/src/components/ConversationSourceBar.js';
 import { MirroredMessageRow } from '../../mobile/src/components/MirroredMessageRow.js';
 import { ResourcesLane } from '../../mobile/src/components/ResourcesLane.js';
+import { clearConversationSourcesCache, useConversationSources } from '../../mobile/src/services/useConversationSources.js';
 
 const resource = (id: string, extra: Record<string, unknown> = {}) => ({
   id, url: `https://example.org/${id}`, host: 'example.org', kind: 'link', kindEdited: false, title: `Title ${id}`, description: null, siteName: null, tags: [], suggestedTags: [], tagsEdited: false,
@@ -171,4 +173,48 @@ it('loads another page of links on request', async () => {
   expect(mocks.api.listConversationResources).toHaveBeenLastCalledWith('c1', 'next');
   expect(texts()).toContain('Shared Knowledge Graphs');
   expect(texts()).toContain('Ada Example');
+});
+
+
+it('continues collection while older links are being indexed', async () => {
+  vi.useFakeTimers();
+  mocks.api.listConversationResources.mockResolvedValueOnce({ enabled: true, resources: [paper], pending: 0, indexingPending: true }).mockResolvedValueOnce({ enabled: true, resources: [paper, person], pending: 0, indexingPending: false });
+  try {
+    await render(React.createElement(ResourcesLane, { conversationId: 'c1' }));
+    expect(texts()).toContain('Older links are still being collected.');
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(texts()).toContain('Ada Example');
+    expect(texts()).not.toContain('Older links are still being collected.');
+  } finally { vi.useRealTimers(); }
+});
+
+it('invalidates old mirror pages on changes and clears them on 404', async () => {
+  clearConversationSourcesCache();
+  const source = { id: 's', network: 'imessage', sharedBy: { userId: 'owner', name: 'Owner' }, coverage: { asOf: 'old', latestMessageAt: 'latest' }, messageCount: 1200 };
+  let currentSource = source;
+  mocks.api.listConversationSources.mockImplementation(async () => ({ sources: [currentSource], resourcesEnabled: true }));
+  mocks.api.listSourceMessages.mockImplementation(async (_c: string, _s: string, before: string | null) => {
+    const n = before ? Number(before) : 0;
+    return { messages: [{ id: `m${n}`, sentAt: '2026-01-01', text: n === 5 ? 'old private text' : 'new', sender: null }], nextCursor: n < 5 ? String(n + 1) : null };
+  });
+  let state: ReturnType<typeof useConversationSources>;
+  function Harness() { state = useConversationSources('c', 'me'); return null; }
+  await render(React.createElement(Harness));
+  expect(state!.hasMore).toBe(true);
+  await act(async () => { await state!.loadEarlier(); });
+  expect(state!.mirrored.some(m => m.message.text === 'old private text')).toBe(true);
+  expect(state!.hasMore).toBe(false);
+  currentSource = { ...source, coverage: { ...source.coverage, asOf: 'new' }, messageCount: 1201 };
+  await act(async () => { await state!.refresh(); });
+  expect(state!.mirrored.some(m => m.message.text === 'old private text')).toBe(false);
+  expect(state!.hasMore).toBe(true);
+  mocks.api.listSourceMessages.mockRejectedValueOnce({ status: 404 });
+  await act(async () => { await state!.loadEarlier(); });
+  expect(state!.sources).toEqual([]);
+  expect(state!.mirrored).toEqual([]);
+  await act(async () => { root!.unmount(); root = create(React.createElement(Harness)); });
+  mocks.api.listConversationSources.mockRejectedValueOnce({ status: 404 });
+  await act(async () => { await state!.refresh(); });
+  expect(state!.mirrored).toEqual([]);
+  clearConversationSourcesCache();
 });

@@ -88,7 +88,9 @@ integration('shared chat mirrors and link resources — real Neo4j + HTTP', { ti
       CREATE (m)-[:PARTICIPATES_IN {role: 'owner'}]->(og), (o)-[:PARTICIPATES_IN {role: 'member'}]->(og)
       CREATE (o)-[:PARTICIPATES_IN {role: 'owner'}]->(d), (x)-[:PARTICIPATES_IN {role: 'member'}]->(d)`,
       { owner, member, outsider, group, otherGroup, direct });
-    const res = await as(bearer(owner)).put('/api/imported-chats/import', payload(first));
+    const initial = payload(first);
+    (initial.participants[1] as Record<string, unknown>).profileFacts = [{ factKey: 'private-fact', text: 'PRIVATE FACT orchid', sourceMessageIds: ['g-1'] }];
+    const res = await as(bearer(owner)).put('/api/imported-chats/import', { ...initial, asks: [{ askKey: 'private-ask', subjectKey: 'p-ada', reporterKey: 'p-ada', text: 'PRIVATE ASK moonflower', sourceMessageIds: ['g-1'], sourceStatus: 'open' }] });
     expect(res.status).toBe(201);
     chatId = res.body.chatId;
   });
@@ -108,7 +110,7 @@ integration('shared chat mirrors and link resources — real Neo4j + HTTP', { ti
     const sources = await as(bearer(member)).get(`${conv(group)}/sources`);
     expect(sources.status).toBe(200);
     expect(sources.body).toEqual({ sources: [], resourcesEnabled: false });
-    expect((await as(bearer(member)).get(`${conv(group)}/resources`)).body).toEqual({ enabled: false, resources: [], pending: 0, nextCursor: null });
+    expect((await as(bearer(member)).get(`${conv(group)}/resources`)).body).toEqual({ enabled: false, resources: [], pending: 0, nextCursor: null, indexingPending: false });
     expect((await as(bearer(outsider)).get(`${conv(group)}/sources`)).status).toBe(404);
     expect((await request(app).get(`${conv(group)}/sources`)).status).toBe(401);
   });
@@ -154,6 +156,24 @@ integration('shared chat mirrors and link resources — real Neo4j + HTTP', { ti
     // The owner's private routes stay the owner's alone.
     expect((await as(bearer(member)).get(`/api/imported-chats/${chatId}/messages`)).status).toBe(404);
     expect((await as(bearer(member)).get(`/api/imported-chats/${chatId}/shares`)).status).toBe(404);
+  });
+
+  it('keeps private asks, facts, statuses and conversation-scoped Stream links out of shared views', async () => {
+    const asks = await as(bearer(owner)).get(`/api/imported-chats/${chatId}/asks`);
+    expect(asks.body.asks).toHaveLength(1);
+    expect((await as(bearer(owner)).patch(`/api/imported-chats/${chatId}/asks/${asks.body.asks[0].id}`, { ownerStatus: 'withdrawn' })).body.ask.ownerStatus).toBe('withdrawn');
+    await run("CREATE (:Thought {id: $id, ownerUserId: $owner, scopeConversationId: $group, text: 'PRIVATE TODO https://private-stream.example.test/secret'})", { id: `thought-${suffix}`, owner, group });
+    const responses = await Promise.all([
+      as(bearer(member)).get(`${conv(group)}/sources`),
+      as(bearer(member)).get(`${conv(group)}/sources/${shareId}/messages`),
+      as(bearer(member)).get(`${conv(group)}/resources`),
+      as(bearer(owner)).get(`${conv(group)}/resources`),
+    ]);
+    for (const response of responses) {
+      expect(response.status).toBe(200);
+      for (const secret of ['PRIVATE ASK moonflower', 'PRIVATE FACT orchid', 'withdrawn', 'PRIVATE TODO', 'private-stream.example.test']) expect(JSON.stringify(response.body)).not.toContain(secret);
+    }
+    await run('MATCH (t:Thought {id: $id}) DETACH DELETE t', { id: `thought-${suffix}` });
   });
 
   it('refuses people outside the conversation and shares addressed through the wrong conversation', async () => {
@@ -267,6 +287,26 @@ integration('shared chat mirrors and link resources — real Neo4j + HTTP', { ti
     expect(third.body.resources).toHaveLength(1);
     expect(third.body.nextCursor).toBeNull();
     expect(new Set([...first.body.resources, ...second.body.resources, ...third.body.resources].map((r: { id: string }) => r.id)).size).toBe(1001);
+    await run('MATCH (m:Message {conversationId: $otherGroup}) DETACH DELETE m', { otherGroup });
+    await run('MATCH (r:ConversationResource {conversationId: $otherGroup}) DETACH DELETE r', { otherGroup });
+  });
+
+  it('indexes all message batches and counts repeated mirror occurrences only once', async () => {
+    await run(`MATCH (c:Conversation {id: $otherGroup}) SET c.resourcesEnabled = true REMOVE c.resourcesIndexedThrough, c.resourcesIndexedThroughId
+      WITH c UNWIND range(0, 1000) AS n
+      CREATE (:Message {id: 'batch-' + toString(n), conversationId: c.id, content: CASE WHEN n = 999 THEN 'https://last-batch.example.test/' ELSE 'https://repeat-batch.example.test/' END, createdAt: datetime('2026-01-01T00:00:00Z'), senderId: $member})`, { otherGroup, member });
+    const indexed = await as(bearer(member)).get(`${conv(otherGroup)}/resources`);
+    expect(indexed.body.indexingPending).toBe(false);
+    expect(indexed.body.resources.some((r: { host: string }) => r.host === 'last-batch.example.test')).toBe(true);
+    await run(`MATCH (chat:OpenChatImportedChat {id: $chatId}) SET chat.importCount = coalesce(chat.importCount, 0) + 1
+      WITH chat UNWIND range(0, 500) AS n CREATE (:OpenChatImportedMessage {id: $prefix + toString(n), chatId: $chatId, ownerUserId: $owner, text: 'https://many-mirror.example.test/', sentAt: '2026-01-01T00:00:00.000Z'})`, { chatId, owner, prefix: `many-${suffix}-` });
+    const firstRead = await as(bearer(member)).get(`${conv(group)}/resources`);
+    expect(firstRead.body.resources.find((r: { host: string }) => r.host === 'many-mirror.example.test').shareCount).toBe(501);
+    await run('MATCH (chat:OpenChatImportedChat {id: $chatId}) SET chat.importCount = chat.importCount + 1', { chatId });
+    const secondRead = await as(bearer(member)).get(`${conv(group)}/resources`);
+    expect(secondRead.body.resources.find((r: { host: string }) => r.host === 'many-mirror.example.test').shareCount).toBe(501);
+    await run('MATCH (m:OpenChatImportedMessage {chatId: $chatId}) WHERE m.id STARTS WITH $prefix DETACH DELETE m', { chatId, prefix: `many-${suffix}-` });
+    await run('MATCH (r:ConversationResource {conversationId: $group, host: $host}) DETACH DELETE r', { group, host: 'many-mirror.example.test' });
     await run('MATCH (m:Message {conversationId: $otherGroup}) DETACH DELETE m', { otherGroup });
     await run('MATCH (r:ConversationResource {conversationId: $otherGroup}) DETACH DELETE r', { otherGroup });
   });
