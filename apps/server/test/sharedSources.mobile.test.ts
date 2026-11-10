@@ -190,7 +190,7 @@ it('continues collection while older links are being indexed', async () => {
 
 it('invalidates old mirror pages on changes and clears them on 404', async () => {
   clearConversationSourcesCache();
-  const source = { id: 's', network: 'imessage', sharedBy: { userId: 'owner', name: 'Owner' }, coverage: { asOf: 'old', latestMessageAt: 'latest' }, messageCount: 1200 };
+  const source = { id: 's', network: 'imessage', sharedBy: { userId: 'owner', name: 'Owner' }, coverage: { asOf: 'old', latestMessageAt: 'latest' }, messageCount: 1200, revision: '1' };
   let currentSource = source;
   mocks.api.listConversationSources.mockImplementation(async () => ({ sources: [currentSource], resourcesEnabled: true }));
   mocks.api.listSourceMessages.mockImplementation(async (_c: string, _s: string, before: string | null) => {
@@ -204,7 +204,7 @@ it('invalidates old mirror pages on changes and clears them on 404', async () =>
   await act(async () => { await state!.loadEarlier(); });
   expect(state!.mirrored.some(m => m.message.text === 'old private text')).toBe(true);
   expect(state!.hasMore).toBe(false);
-  currentSource = { ...source, coverage: { ...source.coverage, asOf: 'new' }, messageCount: 1201 };
+  currentSource = { ...source, revision: '2' };
   await act(async () => { await state!.refresh(); });
   expect(state!.mirrored.some(m => m.message.text === 'old private text')).toBe(false);
   expect(state!.hasMore).toBe(true);
@@ -217,4 +217,20 @@ it('invalidates old mirror pages on changes and clears them on 404', async () =>
   await act(async () => { await state!.refresh(); });
   expect(state!.mirrored).toEqual([]);
   clearConversationSourcesCache();
+});
+
+
+it('offers new resource pages after quiet indexing without losing loaded links', async () => {
+  vi.useFakeTimers();
+  mocks.api.listConversationResources.mockResolvedValueOnce({ resources: [paper], pending: 0, indexingPending: true, nextCursor: null })
+    .mockResolvedValueOnce({ resources: [paper, person], pending: 0, indexingPending: false, nextCursor: 'later' })
+    .mockResolvedValueOnce({ resources: [resource('older')], pending: 0, indexingPending: false, nextCursor: null });
+  try {
+    await render(React.createElement(ResourcesLane, { conversationId: 'c1' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    await press(byLabel('Load more links'));
+    expect(mocks.api.listConversationResources).toHaveBeenLastCalledWith('c1', 'later');
+    expect(texts()).toContain('Shared Knowledge Graphs');
+    expect(texts()).toContain('Title older');
+  } finally { vi.useRealTimers(); }
 });

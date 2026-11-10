@@ -17,7 +17,7 @@ export const RESOURCE_LIMITS = { tags: 12, tag: 40, url: 2000 } as const;
 
 export class ResourceInputError extends Error {}
 
-const URL_RE = /https?:\/\/[^\s)\]'"<>]+/g;
+const URL_RE = /https?:\/\/[^\s)\]'"<>]+/gi;
 const TRACKING = /^(utm_[a-z]+|fbclid|gclid|mc_cid|mc_eid|igshid|si|ref_src|ref_url)$/i;
 
 /** Every distinct http(s) address in a message, in order. */
