@@ -38,13 +38,13 @@ describe('invite page link preview', () => {
     expect($('meta[name="referrer"]').attr('content')).toBe('no-referrer');
   });
 
-  it('names only the chat in a safely escaped preview', async () => {
+  it('keeps the static preview neutral even when the group has a name', async () => {
     const { renderInvitePreviewHead } = await import('../src/services/inviteLanding.js');
     const hostile = 'Garden & "friends" </title><script>alert(1)</script>';
     const head = renderInvitePreviewHead(hostile);
     const $ = load(`<html><head>${head}</head></html>`);
-    expect($('title').text()).toBe(`Join ${hostile} on OpenChat`);
-    expect($('meta[property="og:title"]').attr('content')).toBe(`Join ${hostile} on OpenChat`);
+    expect($('title').text()).toBe('Group invite · OpenChat');
+    expect($('meta[property="og:title"]').attr('content')).toBe('You’re invited to a group chat on OpenChat');
     expect($('script')).toHaveLength(0);
     expect($('meta[name="description"]').attr('content')).toBe('An invitation to a chat on OpenChat.');
     expect($('meta[property="og:description"]').attr('content')).toBe('An invitation to a chat on OpenChat.');

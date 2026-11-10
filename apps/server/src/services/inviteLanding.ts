@@ -7,14 +7,11 @@ export function renderInviteActions(token: string): string {
   <p class="cta-tiny">Installing first? <button type="button" onclick="copyInvite()">Copy Invite Link</button>, then paste it at sign-in.</p>`;
 }
 
-export function renderInvitePreviewHead(groupTitle?: string | null): string {
-  const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  const title = groupTitle?.trim() ? `Join ${groupTitle} on OpenChat` : 'Group invite · OpenChat';
-  const ogTitle = groupTitle?.trim() ? title : 'You’re invited to a group chat on OpenChat';
+export function renderInvitePreviewHead(_groupTitle?: string | null): string {
   const description = 'An invitation to a chat on OpenChat.';
-  return `<title>${escape(title)}</title>
+  return `<title>Group invite · OpenChat</title>
 <meta name="description" content="${description}">
-<meta property="og:title" content="${escape(ogTitle)}">
+<meta property="og:title" content="You’re invited to a group chat on OpenChat">
 <meta property="og:description" content="${description}">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary">
