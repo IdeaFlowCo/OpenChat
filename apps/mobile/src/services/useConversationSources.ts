@@ -10,12 +10,12 @@ import { AppState } from 'react-native';
 import { api, type ConversationSource } from '../api/client';
 import { mirroredEntries, type MirroredEntry, type SourceMode } from '../utils/unifiedTimeline';
 
-export interface ConversationSourcesState { sources: ConversationSource[]; resourcesEnabled: boolean; mirrored: MirroredEntry[]; loaded: boolean }
-const EMPTY: ConversationSourcesState = { sources: [], resourcesEnabled: false, mirrored: [], loaded: false };
+export interface ConversationSourcesState { sources: ConversationSource[]; resourcesEnabled: boolean; mirrored: MirroredEntry[]; cursors: Record<string, string | null>; loaded: boolean }
+const EMPTY: ConversationSourcesState = { sources: [], resourcesEnabled: false, mirrored: [], cursors: {}, loaded: false };
 const cache = new Map<string, ConversationSourcesState>();
 const modes = new Map<string, SourceMode>();
 const PAGE = 200;
-/** Newest 1,000 mirrored messages per source; older history stays in the owner's Imported chats. */
+/** Automatically load the newest five pages per source. */
 const MAX_PAGES = 5;
 const REFRESH_MS = 60_000;
 
@@ -24,6 +24,7 @@ export function clearConversationSourcesCache(): void { cache.clear(); modes.cle
 async function loadSources(conversationId: string, userId: string): Promise<ConversationSourcesState> {
   const { sources, resourcesEnabled } = await api.listConversationSources(conversationId);
   const mirrored: MirroredEntry[] = [];
+  const cursors: Record<string, string | null> = {};
   for (const source of sources) {
     let cursor: string | null = null;
     for (let page = 0; page < MAX_PAGES; page++) {
@@ -32,8 +33,9 @@ async function loadSources(conversationId: string, userId: string): Promise<Conv
       cursor = result.nextCursor;
       if (!cursor) break;
     }
+    cursors[source.id] = cursor;
   }
-  return { sources, resourcesEnabled, mirrored, loaded: true };
+  return { sources, resourcesEnabled, mirrored, cursors, loaded: true };
 }
 
 export function useConversationSources(conversationId: string | undefined, userId: string | undefined) {
@@ -47,6 +49,13 @@ export function useConversationSources(conversationId: string | undefined, userI
     if (!cacheKey || !conversationId || !userId) return;
     try {
       const next = await loadSources(conversationId, userId);
+      const previous = cache.get(cacheKey);
+      if (previous) {
+        const valid = new Set(next.sources.map(source => source.id));
+        const seen = new Set(next.mirrored.map(entry => entry.key));
+        next.mirrored.push(...previous.mirrored.filter(entry => valid.has(entry.sourceId) && !seen.has(entry.key)));
+        for (const source of next.sources) if (source.id in previous.cursors) next.cursors[source.id] = previous.cursors[source.id]!;
+      }
       cache.set(cacheKey, next);
       if (current.current === cacheKey) setState(next);
     } catch {
@@ -71,6 +80,27 @@ export function useConversationSources(conversationId: string | undefined, userI
     return () => { clearInterval(timer); subscription.remove(); };
   }, [hasSources, refresh]);
 
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const busy = useRef(false);
+  const loadEarlier = useCallback(async () => {
+    if (!cacheKey || !conversationId || !userId || busy.current) return;
+    const currentState = cache.get(cacheKey);
+    if (!currentState) return;
+    busy.current = true; setLoadingEarlier(true);
+    try {
+      const pages = await Promise.all(currentState.sources.filter(source => currentState.cursors[source.id]).map(async source => ({ source, page: await api.listSourceMessages(conversationId, source.id, currentState.cursors[source.id], PAGE) })));
+      const latest = cache.get(cacheKey) ?? currentState;
+      const seen = new Set(latest.mirrored.map(entry => entry.key));
+      const additions = pages.flatMap(({ source, page }) => mirroredEntries(source, page.messages, userId)).filter(entry => !seen.has(entry.key));
+      const cursors = { ...latest.cursors };
+      for (const { source, page } of pages) cursors[source.id] = page.nextCursor;
+      const next = { ...latest, mirrored: [...latest.mirrored, ...additions], cursors };
+      cache.set(cacheKey, next);
+      if (current.current === cacheKey) setState(next);
+    } catch { /* Keep the cursor so the member can retry. */ }
+    finally { busy.current = false; if (current.current === cacheKey) setLoadingEarlier(false); }
+  }, [cacheKey, conversationId, userId]);
+
   const setMode = useCallback((next: SourceMode) => { if (cacheKey) modes.set(cacheKey, next); setModeState(next); }, [cacheKey]);
-  return { ...state, mode: hasSources ? mode : 'openchat' as SourceMode, setMode, refresh };
+  return { ...state, mode: hasSources ? mode : 'openchat' as SourceMode, setMode, refresh, hasMore: Object.values(state.cursors).some(Boolean), loadEarlier, loadingEarlier };
 }

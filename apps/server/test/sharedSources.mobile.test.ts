@@ -10,8 +10,8 @@ vi.mock('react-native', () => ({
   Platform: { OS: 'ios', select: (v: any) => v.ios ?? v.default }, StyleSheet: { create: (s: unknown) => s, hairlineWidth: 1 },
   ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View', ScrollView: 'ScrollView',
   Alert: { alert: vi.fn() }, Linking: { openURL: vi.fn() },
-  FlatList: ({ data, renderItem, ListEmptyComponent }: any) => React.createElement('FlatList', null,
-    data?.length ? data.map((item: any, index: number) => React.createElement(React.Fragment, { key: item.id ?? index }, renderItem({ item, index }))) : ListEmptyComponent),
+  FlatList: ({ data, renderItem, ListEmptyComponent, ListFooterComponent }: any) => React.createElement('FlatList', null,
+    data?.length ? data.map((item: any, index: number) => React.createElement(React.Fragment, { key: item.id ?? index }, renderItem({ item, index }))) : ListEmptyComponent, ListFooterComponent),
 }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ currentUser: { userId: 'me' } }) }));
@@ -162,4 +162,13 @@ describe('source switch and mirrored rows', () => {
     expect(texts()).toContain('You');
     expect(texts()).toContain('Deleted by the sender on iMessage');
   });
+});
+
+it('loads another page of links on request', async () => {
+  mocks.api.listConversationResources.mockResolvedValueOnce({ enabled: true, resources: [paper], pending: 0, nextCursor: 'next' }).mockResolvedValueOnce({ enabled: true, resources: [person], pending: 0, nextCursor: null });
+  await render(React.createElement(ResourcesLane, { conversationId: 'c1' }));
+  await press(byLabel('Load more links'));
+  expect(mocks.api.listConversationResources).toHaveBeenLastCalledWith('c1', 'next');
+  expect(texts()).toContain('Shared Knowledge Graphs');
+  expect(texts()).toContain('Ada Example');
 });

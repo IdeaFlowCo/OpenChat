@@ -46,7 +46,7 @@ router.get('/conversations/:conversationId/sources/:shareId/messages', member, a
 });
 
 router.get('/conversations/:conversationId/resources', member, async (req: Request, res: Response) => {
-  try { res.json(await listConversationResources(me(req), param(req, 'conversationId'))); } catch (error) { fail(error, res); }
+  try { res.json(await listConversationResources(me(req), param(req, 'conversationId'), req.query.before)); } catch (error) { fail(error, res); }
 });
 
 router.patch('/conversations/:conversationId/resources/:resourceId', member, async (req: Request, res: Response) => {

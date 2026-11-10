@@ -80,3 +80,7 @@ export function mirrorModeLabel(sources: Pick<ConversationSource, 'network'>[]):
   const networks = [...new Set(sources.map(source => source.network))];
   return networks.length === 1 ? sourceNetworkName(networks[0]!) : 'Mirrored';
 }
+
+export function showLoadEarlierMirror(mode: SourceMode, hasMoreMirror: boolean, hasMoreMessages: boolean): boolean {
+  return hasMoreMirror && (mode === 'mirror' || (mode === 'unified' && !hasMoreMessages));
+}

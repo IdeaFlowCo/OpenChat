@@ -1,3 +1,5 @@
+import { Button } from '../components/ui';
+import { showLoadEarlierMirror } from '../utils/unifiedTimeline';
 import { offerVisionSaveRecovery } from '../utils/visionSaveRecovery';
 import type { VisionSaveRequest } from '../api/client';
 import { uncertainVisionAlert, presentVisionSaveFailure } from '../utils/visionSaveFeedback';
@@ -400,7 +402,7 @@ export function ChatScreen({
   // Chats shared into this conversation and its Links lane (OpenChat-c8to). Most conversations have
   // neither: then `hasSources` and `resourcesEnabled` are false and nothing below changes.
   const {
-    sources: conversationSources, mirrored: mirroredMessages, resourcesEnabled, mode: sourceMode, setMode: setSourceMode,
+    sources: conversationSources, mirrored: mirroredMessages, resourcesEnabled, mode: sourceMode, setMode: setSourceMode, hasMore: hasMoreMirrored, loadEarlier: loadEarlierMirrored, loadingEarlier: loadingEarlierMirrored,
   } = useConversationSources(conversationId, currentUser?.userId);
   const hasSources = conversationSources.length > 0;
   const mirrorLabel = mirrorModeLabel(conversationSources);
@@ -2184,11 +2186,12 @@ export function ChatScreen({
           onScrollToIndexFailed={() => { /* target not in window — ignore */ }}
           // Spinner at the top while loading older messages (OpenChat-vjc).
           ListHeaderComponent={
-            loadingOlderMessages ? (
-              <View style={{ paddingVertical: 12, alignItems: 'center' }}>
-                <ActivityIndicator size="small" color={c.primary} />
-              </View>
-            ) : null
+            <View>
+              {loadingOlderMessages ? <View style={{ paddingVertical: 12, alignItems: 'center' }}><ActivityIndicator size="small" color={c.primary} /></View> : null}
+              {hasSources && showLoadEarlierMirror(sourceMode, hasMoreMirrored, hasMoreMessages) ? (
+                <Button label={`Load earlier ${mirrorLabel} messages`} size="sm" loading={loadingEarlierMirrored} onPress={() => void loadEarlierMirrored()} />
+              ) : null}
+            </View>
           }
           // Preserve scroll position when older messages are prepended (OpenChat-vjc).
           // maintainVisibleContentPosition keeps the first visible item in place on iOS.
