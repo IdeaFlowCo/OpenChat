@@ -21,7 +21,7 @@ const REFRESH_MS = 60_000;
 
 export function clearConversationSourcesCache(): void { cache.clear(); modes.clear(); }
 
-async function loadSources(conversationId: string, userId: string): Promise<ConversationSourcesState> {
+async function loadSources(conversationId: string, userId: string, attempt = 0): Promise<ConversationSourcesState> {
   const { sources, resourcesEnabled } = await api.listConversationSources(conversationId);
   const mirrored: MirroredEntry[] = [];
   const cursors: Record<string, string | null> = {};
@@ -35,7 +35,10 @@ async function loadSources(conversationId: string, userId: string): Promise<Conv
     }
     cursors[source.id] = cursor;
   }
-  return { sources, resourcesEnabled, mirrored, cursors, loaded: true };
+  const verified = await api.listConversationSources(conversationId);
+  const stable = sources.length === verified.sources.length && sources.every(source => verified.sources.some(item => item.id === source.id && item.revision === source.revision));
+  if (!stable) return attempt < 2 ? loadSources(conversationId, userId, attempt + 1) : { ...EMPTY, loaded: true };
+  return { sources: verified.sources, resourcesEnabled: verified.resourcesEnabled, mirrored, cursors, loaded: true };
 }
 
 export function useConversationSources(conversationId: string | undefined, userId: string | undefined) {
@@ -99,6 +102,11 @@ export function useConversationSources(conversationId: string | undefined, userI
     busy.current = true; setLoadingEarlier(true);
     try {
       const pages = await Promise.all(currentState.sources.filter(source => currentState.cursors[source.id]).map(async source => ({ source, page: await api.listSourceMessages(conversationId, source.id, currentState.cursors[source.id], PAGE) })));
+      const verified = await api.listConversationSources(conversationId);
+      if (currentState.sources.length !== verified.sources.length || currentState.sources.some(source => !verified.sources.some(item => item.id === source.id && item.revision === source.revision))) {
+        if (run === generation.current && current.current === cacheKey) { cache.delete(cacheKey); setState({ ...EMPTY, loaded: true }); void refresh(); }
+        return;
+      }
       if (run !== generation.current || current.current !== cacheKey) return;
       const latest = cache.get(cacheKey);
       if (!latest) return;
@@ -116,7 +124,7 @@ export function useConversationSources(conversationId: string | undefined, userI
       }
     }
     finally { busy.current = false; if (current.current === cacheKey) setLoadingEarlier(false); }
-  }, [cacheKey, conversationId, userId]);
+  }, [cacheKey, conversationId, userId, refresh]);
 
   const setMode = useCallback((next: SourceMode) => { if (cacheKey) modes.set(cacheKey, next); setModeState(next); }, [cacheKey]);
   return { ...state, mode: hasSources ? mode : 'openchat' as SourceMode, setMode, refresh, hasMore: Object.values(state.cursors).some(Boolean), loadEarlier, loadingEarlier };

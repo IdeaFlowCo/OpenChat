@@ -333,7 +333,7 @@ integration('shared chat mirrors and link resources — real Neo4j + HTTP', { ti
     expect((await as(bearer(member)).get(`${conv(isolated)}/sources`)).body.sources[0].revision).not.toBe(revision);
     const afterMirror = (await as(bearer(member)).get(`${conv(isolated)}/resources`)).body.resources;
     expect(find(afterMirror, 'mirror-only.example.test')).toBeUndefined();
-    expect(find(afterMirror, 'shared-reconcile.example.test')?.shareCount).toBe(1);
+    expect(find(afterMirror, 'shared-reconcile.example.test')).toMatchObject({ shareCount: 1, firstSharedAt: '2026-01-01T00:00:00.000Z', lastSharedAt: '2026-01-01T00:00:00.000Z', firstSharedBy: { userId: owner, label: owner }, sources: ['openchat'] });
     await run("MATCH (m:Message {id: $msgId}) SET m.content = 'HTTPS://added-after-edit.example.test/', m.editedAt = datetime()", { msgId });
     const afterEdit = (await as(bearer(member)).get(`${conv(isolated)}/resources`)).body.resources;
     expect(find(afterEdit, 'shared-reconcile.example.test')).toBeUndefined();
