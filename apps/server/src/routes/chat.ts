@@ -318,7 +318,7 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
 // Helper: load full conversation with participants (used by mutating endpoints
 // that need to broadcast a fresh shape to clients). Returns null if the
 // conversation has no participants left (i.e. fully drained group).
-async function loadConversation(
+export async function loadConversation(
   session: ReturnType<ReturnType<typeof getDriver>['session']>,
   conversationId: string
 ): Promise<Record<string, unknown> | null> {
@@ -448,13 +448,14 @@ router.patch('/conversations/:id', requireAuth, async (req: Request, res: Respon
     // Verify participation (and ownership for renames)
     const check = await session.run(`
       MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
-      RETURN c, rel.role AS role
+      RETURN c, rel.role AS role, c.unlinkedGroupId AS managedGroupId
     `, { userId, id });
 
     if (check.records.length === 0) {
       res.status(404).json({ error: 'Conversation not found' });
       return;
     }
+    if (check.records[0].get('managedGroupId')) { res.status(409).json({ error: 'Manage membership in the Unlinked group', groupUrl: `https://www.unlinked.ai/groups/${check.records[0].get('managedGroupId')}` }); return; }
     const role = check.records[0].get('role');
     if (hasTitle && role !== 'owner') {
       res.status(403).json({ error: 'Only the group owner can rename' });
@@ -502,13 +503,14 @@ router.post('/conversations/:id/participants', requireAuth, async (req: Request,
     // Verify caller is owner of a group
     const check = await session.run(`
       MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
-      RETURN c.type AS type, rel.role AS role
+      RETURN c.type AS type, rel.role AS role, c.unlinkedGroupId AS managedGroupId
     `, { userId, id });
 
     if (check.records.length === 0) {
       res.status(404).json({ error: 'Conversation not found' });
       return;
     }
+    if (check.records[0].get('managedGroupId')) { res.status(409).json({ error: 'Manage membership in the Unlinked group', groupUrl: `https://www.unlinked.ai/groups/${check.records[0].get('managedGroupId')}` }); return; }
     const role = check.records[0].get('role');
     const type = check.records[0].get('type');
     if (type !== 'group') {
@@ -537,7 +539,7 @@ router.post('/conversations/:id/participants', requireAuth, async (req: Request,
     await session.executeWrite(async (tx) => {
       await acquireContextAclLocks(tx, { userIds: [targetId], conversationId: id });
       return await tx.run(`
-        MATCH (c:Conversation {id: $id})
+        MATCH (c:Conversation {id: $id}) WHERE c.unlinkedGroupId IS NULL
         MATCH (u:User {id: $targetId})
         MERGE (u)-[rel:PARTICIPATES_IN]->(c)
           ON CREATE SET rel.joinedAt = datetime($now), rel.role = 'member'
@@ -589,7 +591,7 @@ router.delete('/conversations/:id/participants/:userId', requireAuth, async (req
     // Caller must be participant
     const callerCheck = await session.run(`
       MATCH (u:User {id: $callerId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
-      RETURN c.type AS type, rel.role AS role
+      RETURN c.type AS type, rel.role AS role, c.unlinkedGroupId AS managedGroupId
     `, { callerId, id });
 
     if (callerCheck.records.length === 0) {
@@ -597,6 +599,7 @@ router.delete('/conversations/:id/participants/:userId', requireAuth, async (req
       return;
     }
     const type = callerCheck.records[0].get('type');
+    if (callerCheck.records[0].get('managedGroupId')) { res.status(409).json({ error: 'Leave or manage membership in the Unlinked group', groupUrl: `https://www.unlinked.ai/groups/${callerCheck.records[0].get('managedGroupId')}` }); return; }
     const callerRole = callerCheck.records[0].get('role');
     if (type !== 'group') {
       res.status(400).json({ error: 'Cannot remove participants from a direct conversation' });
@@ -631,6 +634,7 @@ router.delete('/conversations/:id/participants/:userId', requireAuth, async (req
       await acquireContextAclLocks(tx, { userIds: [targetId], conversationId: id });
       return await tx.run(`
         MATCH (u:User {id: $targetId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
+        WHERE c.unlinkedGroupId IS NULL
         DELETE rel
         SET c.updatedAt = datetime($now)
       `, { id, targetId, now: new Date().toISOString() });
@@ -2776,13 +2780,14 @@ router.post('/conversations/:id/invites', requireAuth, async (req: Request, res:
     // Verify caller is owner of a group
     const check = await session.run(`
       MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $convId})
-      RETURN c.type AS type, rel.role AS role
+      RETURN c.type AS type, rel.role AS role, c.unlinkedGroupId AS managedGroupId
     `, { userId, convId });
 
     if (check.records.length === 0) {
       res.status(404).json({ error: 'Conversation not found' });
       return;
     }
+    if (check.records[0].get('managedGroupId')) { res.status(409).json({ error: 'Manage membership in the Unlinked group', groupUrl: `https://www.unlinked.ai/groups/${check.records[0].get('managedGroupId')}` }); return; }
     const role = check.records[0].get('role');
     const type = check.records[0].get('type');
     if (type !== 'group') {
@@ -2823,7 +2828,7 @@ router.post('/conversations/:id/invites', requireAuth, async (req: Request, res:
     const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString();
 
     await session.run(`
-      MATCH (c:Conversation {id: $convId})
+      MATCH (c:Conversation {id: $convId}) WHERE c.unlinkedGroupId IS NULL
       CREATE (inv:GroupInvite {
         token: $token,
         conversationId: $convId,
