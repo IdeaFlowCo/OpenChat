@@ -16,7 +16,11 @@ revisions fail with409. A deleted group leaves a tombstone, removes participants
 and cannot be resurrected by a later old roster. History is preserved. No message
 or notification push is generated. Socket membership and inbox events update the
 ordinary clients. Publication takes the conversation lock and checks the accepted
-revision before sending projections. Identical retries replay inbox discovery for
+revision before sending projections. Manual mutations commit before a separate
+locked publication revalidates access; invite responses and inbox effects use
+that same publication boundary. Message events select current per-user recipients
+under the roster lock, including edits, deletions, reactions, forwarding, previews
+and transcripts. A socket awaiting eviction cannot receive revoked content. Identical retries replay inbox discovery for
 all current members and any unacknowledged removals; pending removals survive a
 projection failure or a newer roster. Existing mute/read settings remain on retained memberships.
 
@@ -37,5 +41,7 @@ isolated Neo4j: confidential authentication, concurrency, normal inboxes, remova
 stale updates, deletion, migration, retained messages and invitation denial.
 `test/unlinkedGroups.races.integration.test.ts` covers real socket events, delayed
 publication, projection failures and retries, stale joins, migration races in manual
-mutations, safe persisted names and emoji customization.
+mutations, transaction rollback, invite acceptance during migration, delayed
+eviction, ordered message delivery, direct-chat reactions, safe persisted names
+and emoji customization.
 Never use production credentials or a live graph for those tests.

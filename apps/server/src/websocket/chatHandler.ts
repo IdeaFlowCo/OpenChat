@@ -1,4 +1,5 @@
 import type { ManagedTransaction } from 'neo4j-driver';
+import { publishConversationEvent } from '../services/conversationEvents.js';
 import { withConversationLock } from '../services/conversationLock.js';
 import { Server, Socket } from 'socket.io';
 import { nanoid } from 'nanoid';
@@ -62,24 +63,8 @@ export function isUserOnline(userId: string): boolean {
   return (userSockets.get(userId)?.size ?? 0) > 0;
 }
 
-// Broadcast a message:new to every participant of a conversation via their
-// per-user room (user:<id>), which each socket joins on connect. This reaches
-// recipients who are connected but have NOT opened (joined the room of) the
-// conversation — unlike emitting to conversation:<id>, which only reaches
-// sockets that ran conversation:join. Chained .to() unions the rooms so a
-// socket in several matched rooms still receives exactly one copy.
-// See OpenChat-60y.
-export function broadcastMessageToParticipants(
-  io: Server,
-  participantIds: string[],
-  message: unknown
-): void {
-  if (!participantIds.length) return;
-  let op = io.to(`user:${participantIds[0]}`);
-  for (let i = 1; i < participantIds.length; i++) {
-    op = op.to(`user:${participantIds[i]}`);
-  }
-  op.emit('message:new', message);
+export async function broadcastMessageToParticipants(io: Server, conversationId: string, message: unknown): Promise<void> {
+  await publishConversationEvent(io, conversationId, 'message:new', message);
 }
 
 // Force-join a user's live sockets to a conversation room. Used when a
@@ -321,7 +306,7 @@ export function setupChatSocket(io: Server): void {
 
         // Broadcast to every participant's per-user room (reaches recipients who
         // haven't joined the conversation room). See OpenChat-60y.
-        broadcastMessageToParticipants(io, participantIds, message);
+        await broadcastMessageToParticipants(io, conversationId, message);
 
         // Outbound webhooks (openchat bot-channel): push to external subscribers
         // (e.g. groupbrain). Fire-and-forget, no-ops when no subscription.

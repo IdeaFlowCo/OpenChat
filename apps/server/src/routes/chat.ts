@@ -4,6 +4,7 @@ import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
 import { createHash } from 'node:crypto';
 import neo4j, { type ManagedTransaction } from 'neo4j-driver';
+import { publishConversationEvent } from '../services/conversationEvents.js';
 import { withConversationLock } from '../services/conversationLock.js';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -359,9 +360,6 @@ function emitConversationUpdated(
     seen.add(pid);
     io.to(`user:${pid}`).emit('conversation:updated', { conversationId, conversation });
   }
-  // Also emit to anyone currently in the conversation room (in case they're
-  // in a non-participant viewer state — edge case but cheap)
-  io.to(`conversation:${conversationId}`).emit('conversation:updated', { conversationId, conversation });
 }
 
 // PATCH /api/chat/conversations/:id/participants/me — set mute state for
@@ -471,7 +469,7 @@ router.patch('/conversations/:id', requireAuth, async (req: Request, res: Respon
       return;
     }
 
-    const conversation = await withConversationLock(id, async tx => {
+    await withConversationLock(id, async tx => {
       await assertConversationMutation(tx,id,userId,hasTitle,!hasTitle);
       if (hasTitle) {
         await tx.run(`
@@ -486,13 +484,16 @@ router.patch('/conversations/:id', requireAuth, async (req: Request, res: Respon
         `, { id, quickEmoji: quickEmoji === null ? null : (quickEmoji as string).trim() });
       }
 
+    });
+    await withConversationLock(id, async tx => {
+      await assertConversationMutation(tx,id,userId,false,true);
       const conversation = await loadConversation(tx, id);
       const io = req.app.get('io') as IOServer | undefined;
       emitConversationUpdated(io, conversation);
-      return conversation;
+      if (!res.headersSent) res.json(conversation);
     });
-    res.json(conversation);
   } catch (error) {
+    if (res.headersSent) return;
     if (error instanceof InviteError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error updating conversation:', error);
     res.status(500).json({ error: 'Failed to update conversation' });
@@ -550,7 +551,7 @@ router.post('/conversations/:id/participants', requireAuth, async (req: Request,
 
     // Idempotent add: MERGE relationship; preserve role/joinedAt if already present
     const now = new Date().toISOString();
-    const conversation = await withConversationLock(id, async tx => {
+    await withConversationLock(id, async tx => {
       await assertConversationMutation(tx,id,userId,true);
       const allowed = await tx.run(`MATCH(actor:User {id:$userId}),(target:User {id:$targetId})
         WHERE NOT EXISTS { MATCH(actor)-[:BLOCKED]->(target) } AND NOT EXISTS { MATCH(target)-[:BLOCKED]->(actor) }
@@ -565,7 +566,11 @@ router.post('/conversations/:id/participants', requireAuth, async (req: Request,
         RETURN c.id AS id
       `, { id, targetId, now });
       if (!mutation.records.length) throw new InviteError('Conversation mutation rejected',409);
-
+    });
+    await withConversationLock(id, async tx => {
+      await assertConversationMutation(tx,id,userId,true);
+      const target = await tx.run(`MATCH(:User {id:$targetId})-[:PARTICIPATES_IN]->(:Conversation {id:$id}) RETURN true AS member`, {targetId,id});
+      if (!target.records.length) throw new InviteError('Participant no longer present',409);
       const conversation = await loadConversation(tx, id);
       const io = req.app.get('io') as IOServer | undefined;
       if (io && conversation) {
@@ -590,11 +595,11 @@ router.post('/conversations/:id/participants', requireAuth, async (req: Request,
         }
       }
 
-      return conversation;
+      if (!res.headersSent) res.status(201).json(conversation);
     });
 
-    res.status(201).json(conversation);
   } catch (error) {
+    if (res.headersSent) return;
     if (error instanceof InviteError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error adding participant:', error);
     res.status(500).json({ error: 'Failed to add participant' });
@@ -649,7 +654,6 @@ router.delete('/conversations/:id/participants/:userId', requireAuth, async (req
       }
     }
 
-    // Capture participant ids BEFORE removal so we can notify the removed user too
     await withConversationLock(id, async tx => {
       await assertConversationMutation(tx,id,callerId,!isSelf);
       if (isSelf) {
@@ -657,9 +661,6 @@ router.delete('/conversations/:id/participants/:userId', requireAuth, async (req
           OPTIONAL MATCH(:User)-[other:PARTICIPATES_IN]->(c) RETURN p.role AS role,count(other) AS n`, {id,callerId});
         if (owner.records[0]?.get('role') === 'owner' && Number(owner.records[0].get('n')) > 1) throw new InviteError('Owner cannot leave a group with other members. Remove members first.',400);
       }
-      const before = await loadConversation(tx, id);
-      const beforeParticipants = (before?.participants as Array<{ user?: { id?: string } }>) || [];
-
       const mutation = await tx.run(`
           MATCH (u:User {id: $targetId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
           WHERE c.unlinkedGroupId IS NULL
@@ -668,31 +669,17 @@ router.delete('/conversations/:id/participants/:userId', requireAuth, async (req
           RETURN c.id AS id
         `, { id, targetId, now: new Date().toISOString() });
       if (!mutation.records.length) throw new InviteError('Participant mutation rejected',409);
-
+    });
+    await withConversationLock(id, async tx => {
       const after = await loadConversation(tx, id);
-
+      const participants = (after?.participants ?? []) as Array<{user:{id:string}}>;
+      if (participants.some(p => p.user.id === targetId)) return;
       const io = req.app.get('io') as IOServer | undefined;
       if (io) {
-        // Yank the removed user's sockets out of the conversation room first,
-        // so they don't receive the very participant:removed event for "you".
-        // (We still emit to their per-user room below.)
-        leaveUserSocketsFromConversation(io, targetId, id);
-
-        // Notify everyone who was a participant (this includes the removed
-        // user, via their per-user room).
-        const seen = new Set<string>();
-        for (const p of beforeParticipants) {
-          const pid = p?.user?.id;
-          if (!pid || seen.has(pid)) continue;
-          seen.add(pid);
-          io.to(`user:${pid}`).emit('participant:removed', {
-            conversationId: id,
-            userId: targetId,
-            ...(pid === targetId ? {} : { conversation: after }),
-          });
-        }
+        leaveUserSocketsFromConversation(io,targetId,id);
+        io.to(`user:${targetId}`).emit('participant:removed',{conversationId:id,userId:targetId});
+        for (const {user} of participants) io.to(`user:${user.id}`).emit('participant:removed',{conversationId:id,userId:targetId,conversation:after});
       }
-
     });
 
     res.json({ ok: true });
@@ -1306,7 +1293,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // (mobile users on a China VPN where the WS upgrade is blocked/reset) are
     // persisted but never delivered live. Clients dedupe by message.id, so the
     // sender receiving its own broadcast is harmless. See OpenChat-5q1 / -60y.
-    if (io) broadcastMessageToParticipants(io, participantIds, message);
+    if (io) await broadcastMessageToParticipants(io, conversationId as string, message);
     // Push notifications. The socket send path has always fanned these out; this
     // REST path did not, so a message sent over REST — which is exactly what
     // happens when the sender's socket isn't up yet, e.g. the first message in a
@@ -2050,7 +2037,7 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
     // 6. Emit message:new to target conversation room.
     const io = req.app.get('io') as IOServer | undefined;
     if (io) {
-      io.to(`conversation:${toConversationId}`).emit('message:new', raw);
+      await publishConversationEvent(io, toConversationId, 'message:new', raw);
     }
     dispatchMessageEvent(raw, participantIds);
 
@@ -2217,48 +2204,6 @@ router.post('/ai-disclosure-accept', requireAuth, async (req: Request, res: Resp
 
 // ─── Edit / Delete messages (OpenChat-q9h) ───────────────────────────────────
 
-// Helper: load participant IDs of a conversation for socket fanout.
-async function loadParticipantIds(
-  session: Pick<ManagedTransaction, 'run'>,
-  conversationId: string
-): Promise<string[]> {
-  const result = await session.run(`
-    MATCH (u:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-    RETURN u.id AS uid
-  `, { conversationId });
-  return result.records.map(r => r.get('uid') as string);
-}
-
-// Emit message:updated to all participants of a conversation.
-function emitMessageUpdated(
-  io: IOServer | undefined,
-  conversationId: string,
-  participantIds: string[],
-  message: unknown
-): void {
-  if (!io) return;
-  // Emit to the conversation room (sockets already joined).
-  io.to(`conversation:${conversationId}`).emit('message:updated', message);
-  // Also emit to per-user rooms so participants who aren't in the room get it.
-  for (const uid of participantIds) {
-    io.to(`user:${uid}`).emit('message:updated', message);
-  }
-}
-
-// Emit message:reactions-updated to all participants.
-function emitReactionsUpdated(
-  io: IOServer | undefined,
-  conversationId: string,
-  participantIds: string[],
-  payload: unknown
-): void {
-  if (!io) return;
-  io.to(`conversation:${conversationId}`).emit('message:reactions-updated', payload);
-  for (const uid of participantIds) {
-    io.to(`user:${uid}`).emit('message:reactions-updated', payload);
-  }
-}
-
 // PATCH /api/chat/messages/:id — edit own message (owner-only)
 router.patch('/messages/:id', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
@@ -2298,8 +2243,7 @@ router.patch('/messages/:id', resolveActor, async (req: Request, res: Response) 
 
     // Broadcast to all conversation participants
     const io = req.app.get('io') as IOServer | undefined;
-    const participantIds = await loadParticipantIds(session, conversationId);
-    emitMessageUpdated(io, conversationId, participantIds, message);
+    await publishConversationEvent(io, conversationId, 'message:updated', message);
 
     res.json(message);
   } catch (error) {
@@ -2363,11 +2307,10 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
     }));
 
     const io = req.app.get('io') as IOServer | undefined;
-    const participantIds = await loadParticipantIds(session, conversationId);
-    emitMessageUpdated(io, conversationId, participantIds, message);
+    await publishConversationEvent(io, conversationId, 'message:updated', message);
     if (io) {
       for (const t of removedThoughts) {
-        io.to(`conversation:${conversationId}`).emit('thought:unshared', {
+        await publishConversationEvent(io, conversationId, 'thought:unshared', {
           conversationId,
           thoughtId: t.id,
         });
@@ -2498,9 +2441,8 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
     const reactions = await getReactionSummary(session, messageId, userId);
 
     const io = req.app.get('io') as IOServer | undefined;
-    const participantIds = await loadParticipantIds(session, conversationId);
     const payload = { messageId, conversationId, reactions };
-    emitReactionsUpdated(io, conversationId, participantIds, payload);
+    await publishConversationEvent(io, conversationId, 'message:reactions-updated', payload);
 
     res.status(201).json({ reactions });
   } catch (error) {
@@ -2549,9 +2491,8 @@ router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Reques
     const reactions = await getReactionSummary(session, messageId, userId);
 
     const io = req.app.get('io') as IOServer | undefined;
-    const participantIds = await loadParticipantIds(session, conversationId);
     const payload = { messageId, conversationId, reactions };
-    emitReactionsUpdated(io, conversationId, participantIds, payload);
+    await publishConversationEvent(io, conversationId, 'message:reactions-updated', payload);
 
     res.json({ reactions });
   } catch (error) {
@@ -3003,27 +2944,30 @@ router.post('/invites/:token/accept', requireAuth, async (req: Request, res: Res
   try {
     const { conversationId, newlyJoined } = await acceptInviteTransaction(session, userId, token);
 
-    // Load full conversation and emit participant:added
-    const conversation = await loadConversation(session, conversationId);
-    const io = req.app.get('io') as IOServer | undefined;
-    if (io && conversation && newlyJoined) {
-      await joinUserSocketsToConversation(io, userId, conversationId);
-      const participants = (conversation.participants as Array<{ user?: { id?: string } }>) || [];
-      const seen = new Set<string>();
-      for (const p of participants) {
-        const pid = p?.user?.id;
-        if (!pid || seen.has(pid)) continue;
-        seen.add(pid);
-        io.to(`user:${pid}`).emit('participant:added', {
-          conversationId,
-          conversation,
-          userId,
-        });
+    await withConversationLock(conversationId, async tx => {
+      await assertConversationMutation(tx,conversationId,userId,false,true);
+      const conversation = await loadConversation(tx, conversationId);
+      const io = req.app.get('io') as IOServer | undefined;
+      if (io && conversation && newlyJoined) {
+        if (!await joinUserSocketsToConversation(io, userId, conversationId, tx)) throw new InviteError('Conversation not found',404);
+        const participants = (conversation.participants as Array<{ user?: { id?: string } }>) || [];
+        const seen = new Set<string>();
+        for (const p of participants) {
+          const pid = p?.user?.id;
+          if (!pid || seen.has(pid)) continue;
+          seen.add(pid);
+          io.to(`user:${pid}`).emit('participant:added', {
+            conversationId,
+            conversation,
+            userId,
+          });
+        }
       }
-    }
 
-    res.json({ conversationId, conversation });
+      if (!res.headersSent) res.json({ conversationId, conversation });
+    });
   } catch (error: any) {
+    if (res.headersSent) return;
     if (error instanceof InviteError) {
       res.status(error.status).json({ error: error.message });
       return;

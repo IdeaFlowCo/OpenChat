@@ -13,9 +13,11 @@ import router from '../src/routes/unlinkedGroups.js';
 import chatRouter from '../src/routes/chat.js';
 import * as chat from '../src/routes/chat.js';
 import * as groups from '../src/services/unlinkedGroups.js';
+import * as invites from '../src/services/inviteEntry.js';
+import { publishConversationEvent } from '../src/services/conversationEvents.js';
 import * as locks from '../src/services/conversationLock.js';
 import { ensureSharedInbox } from '../src/services/unlinkedMessaging.js';
-import { setupChatSocket, joinUserSocketsToConversation } from '../src/websocket/chatHandler.js';
+import { setupChatSocket, joinUserSocketsToConversation, broadcastMessageToParticipants } from '../src/websocket/chatHandler.js';
 
 const secret = 'synthetic-race-only-'.repeat(4), prefix = `community-race-${randomUUID()}`;
 const app = express().use(express.json()).use('/api', router).use('/api/chat', chatRouter);
@@ -51,6 +53,7 @@ suite('community membership publication races', () => {
     vi.restoreAllMocks();
     for (const socket of sockets) socket.disconnect();
     await new Promise<void>(resolve => io.close(() => resolve()));
+    await q('MATCH(m:Message) WHERE m.conversationId IN $conversationIds OR EXISTS { MATCH(c:Conversation {id:m.conversationId}) WHERE c.unlinkedGroupId IN $groupIds } DETACH DELETE m', {conversationIds,groupIds});
     await q('MATCH(c:Conversation) WHERE c.unlinkedGroupId IN $groupIds OR c.id IN $conversationIds OPTIONAL MATCH(c)-[:HAS_INVITE]->(i:GroupInvite) DETACH DELETE c,i', { groupIds, conversationIds });
     await q('MATCH(s:UnlinkedGroupSync) WHERE s.groupId IN $groupIds DELETE s', { groupIds });
     await q('MATCH(u:User) WHERE u.ideaflowSub STARTS WITH $prefix DETACH DELETE u', { prefix });
@@ -148,4 +151,141 @@ suite('community membership publication races', () => {
     expect((await patch({ quickEmoji: null })).status).toBe(200);
     expect((await patch({ title: 'Wrong', quickEmoji: '🔥' })).status).toBe(409);
   });
+  it.each(['add', 'remove', 'emoji'])('publishes no %s effects from a rolled-back transaction', async action => {
+    const body = snapshot(); await groups.syncUnlinkedGroup(body);
+    const owner = await userId(body.organizer.subject), member = await userId(body.members[0].subject);
+    const client = await login(member);
+    const created = await request(app).post('/api/chat/conversations').auth(token(owner), {type:'bearer'}).send({type:'group',title:'Rollback',participantIds:action === 'add' ? [] : [member]});
+    expect(created.status,created.text).toBe(201); const id = created.body.id; conversationIds.push(id); await client.flush(); client.events.length = 0;
+    const original = locks.withConversationLock; let rejected = false;
+    const spy = vi.spyOn(locks,'withConversationLock').mockImplementation((conversationId,callback) => original(conversationId,async tx => {
+      const result = await callback(tx);
+      if (conversationId === id && !rejected) { rejected = true; throw new Error('synthetic commit rejection'); }
+      return result;
+    }));
+    try {
+      const route = `/api/chat/conversations/${id}`;
+      const req = action === 'add' ? request(app).post(`${route}/participants`).send({userId:member})
+        : action === 'remove' ? request(app).delete(`${route}/participants/${member}`) : request(app).patch(route).send({quickEmoji:'🔥'});
+      expect((await req.auth(token(owner),{type:'bearer'})).status).toBe(500); expect(rejected).toBe(true); await client.flush();
+      const persisted = await q('MATCH(c:Conversation {id:$id}) RETURN EXISTS { MATCH(:User {id:$member})-[:PARTICIPATES_IN]->(c) } AS member,c.quickEmoji AS emoji',{id,member});
+      expect(persisted.records[0].get('member')).toBe(action !== 'add'); expect(persisted.records[0].get('emoji')).toBeNull();
+      expect(io.sockets.sockets.get(client.socket.id!)!.rooms.has(`conversation:${id}`)).toBe(action !== 'add');
+      expect(client.events.filter(e => ['participant:added','participant:removed','conversation:updated'].includes(e.type))).toEqual([]);
+    } finally { spy.mockRestore(); }
+  });
+  it.each([true,false])('rejects an accepted invite revoked before projection with sockets=%s', async socketsEnabled => {
+    const body = snapshot(); await groups.syncUnlinkedGroup(body);
+    const owner = await userId(body.organizer.subject), outsider = await ensureSharedInbox(person('invite-outsider'),'Invite outsider');
+    const created = await request(app).post('/api/chat/conversations').auth(token(owner),{type:'bearer'}).send({type:'group',title:'Invite fixture',participantIds:[]});
+    expect(created.status,created.text).toBe(201); const id = created.body.id; conversationIds.push(id);
+    const invite = await request(app).post(`/api/chat/conversations/${id}/invites`).auth(token(owner),{type:'bearer'}).send({}); expect(invite.status).toBe(201);
+    const client = await login(outsider.id), entered = deferred(), release = deferred(), original = invites.acceptInviteTransaction;
+    const spy = vi.spyOn(invites,'acceptInviteTransaction').mockImplementation(async (...args) => { const result = await original(...args); entered.resolve(); await release.promise; return result; });
+    if (!socketsEnabled) app.set('io',undefined);
+    const pending = request(app).post(`/api/chat/invites/${invite.body.token}/accept`).auth(token(outsider.id),{type:'bearer'}).send({}).then(r => r);
+    await entered.promise;
+    try {
+      const migration = snapshot(); expect((await post({...migration,existingConversationId:id})).status).toBe(200); await client.flush(); client.events.length = 0;
+      release.resolve(); const response = await pending; expect(response.status,response.text).toBe(404); expect(response.body.conversation).toBeUndefined(); await client.flush();
+      expect(client.events.filter(e => ['participant:added','conversation:created','conversation:updated'].includes(e.type))).toEqual([]);
+      expect(io.sockets.sockets.get(client.socket.id!)!.rooms.has(`conversation:${id}`)).toBe(false);
+    } finally { release.resolve(); spy.mockRestore(); app.set('io',io); }
+  });
+  it('keeps invite response and inbox publication ordered before concurrent migration', async () => {
+    const body = snapshot(); await groups.syncUnlinkedGroup(body);
+    const owner = await userId(body.organizer.subject), outsider = await ensureSharedInbox(person('invite-ordered'),'Invite ordered');
+    const created = await request(app).post('/api/chat/conversations').auth(token(owner),{type:'bearer'}).send({type:'group',title:'Invite ordered',participantIds:[]});
+    const id = created.body.id; conversationIds.push(id);
+    const invite = await request(app).post(`/api/chat/conversations/${id}/invites`).auth(token(owner),{type:'bearer'}).send({});
+    const client = await login(outsider.id), entered = deferred(), release = deferred(), original = locks.withConversationLock;
+    let pause = true;
+    const spy = vi.spyOn(locks,'withConversationLock').mockImplementation((conversationId,callback) => original(conversationId, tx => callback(new Proxy(tx,{
+      get(target,key,receiver) {
+        if(key !== 'run') return Reflect.get(target,key,receiver);
+        return async (...args:any[]) => {
+          const result = await target.run(...args);
+          if(pause && conversationId === id && result.records.some(row => row.keys.includes('conversation'))) {
+            pause = false; entered.resolve(); await release.promise;
+          }
+          return result;
+        };
+      }
+    }))));
+    const pending = request(app).post(`/api/chat/invites/${invite.body.token}/accept`).auth(token(outsider.id),{type:'bearer'}).send({}).then(r => r); await entered.promise;
+    const migration = snapshot(); let finished = false;
+    const migrated = post({...migration,existingConversationId:id}).then(r => { finished = true; return r; });
+    try {
+      await new Promise(resolve => setTimeout(resolve,75)); expect(finished).toBe(false);
+      release.resolve(); const response = await pending; expect(response.status,response.text).toBe(200);
+      expect(response.body.conversation.participants.some((p:any) => p.user.id === outsider.id)).toBe(true);
+      expect((await migrated).status).toBe(200); await client.flush();
+      const added = client.events.findIndex(e => e.type === 'participant:added' && e.data.conversationId === id);
+      const removed = client.events.findIndex(e => e.type === 'participant:removed' && e.data.conversationId === id);
+      expect(added).toBeGreaterThanOrEqual(0); expect(removed).toBeGreaterThan(added);
+      expect(client.events.slice(removed+1).filter(e => ['conversation:created','participant:added'].includes(e.type))).toEqual([]);
+    } finally { release.resolve(); spy.mockRestore(); }
+  });
+  it('never sends message content to a revoked socket during delayed eviction', async () => {
+    const body = snapshot(), initial = await post(body); expect(initial.status,initial.text).toBe(200); const id = initial.body.conversationId;
+    const owner = await userId(body.organizer.subject), member = await userId(body.members[0].subject);
+    const client = await login(member), retained = await login(owner); await post(body); await client.flush(); await retained.flush(); client.events.length = 0; retained.events.length = 0;
+    const messageId = randomUUID();
+    await q(`MATCH(c:Conversation {id:$id}),(u:User {id:$owner}) CREATE(m:Message {id:$messageId,conversationId:$id,senderId:$owner,content:'Synthetic original',messageType:'text',createdAt:datetime()}) CREATE(m)-[:IN_CONVERSATION]->(c) CREATE(u)-[:SENT]->(m)`,{id,owner,messageId});
+    const entered = deferred(), release = deferred(), original = groups.syncUnlinkedGroup;
+    const spy = vi.spyOn(groups,'syncUnlinkedGroup').mockImplementation(async input => { const result = await original(input); if(input.groupId === body.groupId && input.revision === 2) { entered.resolve(); await release.promise; } return result; });
+    const pending = post({...body,revision:2,members:[]}).then(r => r); await entered.promise;
+    try {
+      expect(io.sockets.sockets.get(client.socket.id!)!.rooms.has(`conversation:${id}`)).toBe(true);
+      const edit = await request(app).patch(`/api/chat/messages/${messageId}`).auth(token(owner),{type:'bearer'}).send({content:'Synthetic secret edit'}); expect(edit.status,edit.text).toBe(200);
+      expect((await request(app).post(`/api/chat/messages/${messageId}/reactions`).auth(token(owner),{type:'bearer'}).send({emoji:'👍'})).status).toBe(201);
+      expect((await request(app).delete(`/api/chat/messages/${messageId}/reactions/${encodeURIComponent('👍')}`).auth(token(owner),{type:'bearer'})).status).toBe(200);
+      await broadcastMessageToParticipants(io,id,{id:randomUUID(),conversationId:id,content:'Synthetic new content'});
+      await publishConversationEvent(io,id,'message:transcript',{messageId,transcript:'Synthetic private transcript'});
+      await publishConversationEvent(io,id,'message:preview-ready',{messageId,preview:{title:'Synthetic private preview'}});
+      expect((await request(app).delete(`/api/chat/messages/${messageId}`).auth(token(owner),{type:'bearer'})).status).toBe(200);
+      await client.flush(); await retained.flush();
+      expect(client.events.filter(e => e.type.startsWith('message:'))).toEqual([]);
+      expect(retained.events.filter(e => e.type === 'message:updated')).toHaveLength(2);
+      expect(retained.events.filter(e => e.type === 'message:reactions-updated')).toHaveLength(2);
+      expect(retained.events.filter(e => e.type === 'message:new')).toHaveLength(1);
+      expect(retained.events.filter(e => e.type === 'message:transcript')).toHaveLength(1);
+      expect(retained.events.filter(e => e.type === 'message:preview-ready')).toHaveLength(1);
+    } finally { release.resolve(); await pending; spy.mockRestore(); }
+  });
+  it('holds the roster lock through message recipient selection and emission', async () => {
+    const body = snapshot(), initial = await post(body), id = initial.body.conversationId;
+    const member = await userId(body.members[0].subject), client = await login(member);
+    const original = locks.withConversationLock, entered = deferred(), release = deferred(); let pause = true;
+    const spy = vi.spyOn(locks,'withConversationLock').mockImplementation((conversationId,callback) => original(conversationId,async tx => {
+      if(pause && conversationId === id) { pause = false; entered.resolve(); await release.promise; }
+      return callback(tx);
+    }));
+    const message = {id:randomUUID(),conversationId:id,content:'Synthetic ordered message'};
+    const sent = broadcastMessageToParticipants(io,id,message); await entered.promise;
+    let revoked = false; const removed = post({...body,revision:2,members:[]}).then(r => {revoked = true; return r;});
+    try {
+      await new Promise(resolve => setTimeout(resolve,75)); expect(revoked).toBe(false);
+      release.resolve(); await sent; expect((await removed).status).toBe(200); await client.flush();
+      expect(client.events.findIndex(e => e.type === 'message:new')).toBeLessThan(client.events.findIndex(e => e.type === 'participant:removed'));
+      expect(client.events.filter(e => e.type === 'message:new')).toHaveLength(1);
+    } finally {release.resolve(); spy.mockRestore();}
+  });
+  it('delivers direct messages and reaction updates once without conversation-room joins', async () => {
+    const body = snapshot(); await groups.syncUnlinkedGroup(body);
+    const owner = await userId(body.organizer.subject), member = await userId(body.members[0].subject);
+    const created = await request(app).post('/api/chat/conversations').auth(token(owner),{type:'bearer'}).send({type:'direct',participantIds:[member]});
+    expect(created.status,created.text).toBe(201); const id = created.body.id; conversationIds.push(id);
+    const client = await login(member), sender = await login(owner);
+    const sent = await request(app).post(`/api/chat/conversations/${id}/messages`).auth(token(owner),{type:'bearer'}).send({content:'Synthetic direct message',type:'text'});
+    expect(sent.status,sent.text).toBe(201);
+    expect((await request(app).post(`/api/chat/messages/${sent.body.id}/reactions`).auth(token(member),{type:'bearer'}).send({emoji:'👍'})).status).toBe(201);
+    await client.flush(); await sender.flush();
+    for(const connection of [client,sender]) {
+      expect(io.sockets.sockets.get(connection.socket.id!)!.rooms.has(`conversation:${id}`)).toBe(false);
+      expect(connection.events.filter(e => e.type === 'message:new' && e.data.id === sent.body.id)).toHaveLength(1);
+      expect(connection.events.filter(e => e.type === 'message:reactions-updated' && e.data.messageId === sent.body.id)).toHaveLength(1);
+    }
+  });
+
 });

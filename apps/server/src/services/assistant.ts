@@ -242,7 +242,7 @@ export async function persistMessage(
     const created = result.records[0].get('created') as boolean;
 
     if (io && created) {
-      broadcastMessageToParticipants(io, participantIds, message);
+      await broadcastMessageToParticipants(io, conversationId, message);
       processLinkPreviews(io, message.id as string, conversationId, messageContent);
     }
     if (created) dispatchMessageEvent(message, participantIds);
