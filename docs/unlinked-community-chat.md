@@ -11,7 +11,8 @@ the organizer. At most 500 total members are accepted. `existingConversationId`
 is an optional immutable migration binding: the organizer must already own that
 existing group conversation; a missing migration target is rejected. Otherwise a deterministic ID is derived from the group UUID.
 
-Repeated identical revisions converge. Older revisions and conflicting equal
+Repeated identical revisions converge regardless of JSON member-field order or
+roster order; fingerprints use fixed-order member tuples sorted by subject. Older revisions and conflicting equal
 revisions fail with409. A deleted group leaves a tombstone, removes participants,
 and cannot be resurrected by a later old roster. History is preserved. No message
 or notification push is generated. Socket membership and inbox events update the

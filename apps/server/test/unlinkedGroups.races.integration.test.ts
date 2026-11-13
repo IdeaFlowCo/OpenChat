@@ -104,6 +104,41 @@ suite('community membership publication races', () => {
       expect(inbox.body.some((c: any) => c.id === retry.body.conversationId)).toBe(false);
     } finally { spy.mockRestore(); }
   });
+  it('replays exact revisions with reordered JSON keys after publication failures', async () => {
+    const body = snapshot(); body.members.push(person('é'),person('e\u0301'));
+    const member = await ensureSharedInbox(body.members[0],body.members[0].name), client = await login(member.id);
+    const original = chat.loadConversation; let fail = true;
+    const spy = vi.spyOn(chat,'loadConversation').mockImplementation(async (...args) => {
+      if(fail) throw new Error('synthetic publication failure');
+      return original(...args);
+    });
+    try {
+      expect((await post(body)).status).toBe(503);
+      await client.flush(); expect(client.events.filter(e => e.type === 'conversation:created')).toEqual([]);
+      const committed = await q('MATCH(s:UnlinkedGroupSync {groupId:$groupId}) RETURN s.conversationId AS id,s.revision AS revision',{groupId:body.groupId});
+      const id = committed.records[0].get('id'); expect(Number(committed.records[0].get('revision'))).toBe(1);
+      const reordered = {
+        deleted:body.deleted,
+        members:[...body.members].reverse().map(m => ({name:m.name,subject:m.subject,issuer:m.issuer})),
+        organizer:{subject:body.organizer.subject,name:body.organizer.name,issuer:body.organizer.issuer},
+        name:body.name,revision:body.revision,groupId:body.groupId,
+      };
+      fail = false; const retried = await post(reordered);
+      expect(retried.status,retried.text).toBe(200); expect(retried.body).toEqual({conversationId:id,revision:1}); await client.flush();
+      const discovery = client.events.filter(e => e.type === 'conversation:created' && e.data.conversationId === id);
+      expect(discovery).toHaveLength(1); expect(discovery[0].data.conversation.participants).toHaveLength(body.members.length+1);
+      expect(io.sockets.sockets.get(client.socket.id!)!.rooms.has(`conversation:${id}`)).toBe(true);
+      const changed = await post({...reordered,members:reordered.members.map((m,index) => index === 0 ? {...m,name:'Changed fixture name'} : m)});
+      expect(changed.status).toBe(409); expect(changed.body.error).toBe('group_revision_conflict');
+      const removed = {...body,revision:2,members:body.members.slice(1)};
+      fail = true; expect((await post(removed)).status).toBe(503); await client.flush(); client.events.length = 0;
+      fail = false;
+      const removalRetry = await post({...removed,organizer:reordered.organizer,members:[...removed.members].reverse().map(m => ({subject:m.subject,issuer:m.issuer,name:m.name}))});
+      expect(removalRetry.status,removalRetry.text).toBe(200); expect(removalRetry.body).toEqual({conversationId:id,revision:2}); await client.flush();
+      expect(client.events.filter(e => e.type === 'participant:removed' && e.data.userId === member.id && e.data.conversationId === id)).toHaveLength(1);
+      expect(io.sockets.sockets.get(client.socket.id!)!.rooms.has(`conversation:${id}`)).toBe(false);
+    } finally {spy.mockRestore();}
+  });
   it('serializes projection publication before a newer roster can commit', async () => {
     const body = snapshot(); const original = chat.loadConversation, entered = deferred(), release = deferred();
     const spy = vi.spyOn(chat, 'loadConversation').mockImplementation(async (...args) => { entered.resolve(); await release.promise; return original(...args); });

@@ -32,8 +32,9 @@ export function parseGroupSnapshot(input: unknown): UnlinkedGroupSnapshot {
 /** Authoritative roster projection. No messages, invitations, or notification pushes. */
 export async function syncUnlinkedGroup(input: UnlinkedGroupSnapshot) {
   const v = parseGroupSnapshot(input);
-  const ordered = [v.organizer, ...v.members].sort((a,b)=>a.subject.localeCompare(b.subject));
-  const fingerprint = createHash('sha256').update(JSON.stringify([v.name,v.organizer.subject,ordered,v.deleted,v.existingConversationId ?? null])).digest('hex');
+  const ordered = [v.organizer, ...v.members].sort((a,b)=>a.subject < b.subject ? -1 : a.subject > b.subject ? 1 : 0);
+  const memberTuples = ordered.map(m => [m.issuer,m.subject,m.name]);
+  const fingerprint = createHash('sha256').update(JSON.stringify([v.name,v.organizer.subject,memberTuples,v.deleted,v.existingConversationId ?? null])).digest('hex');
   const id = v.existingConversationId ?? `uc_${createHash('sha256').update(v.groupId).digest('hex').slice(0,32)}`;
   const session = getDriver().session();
   try {
