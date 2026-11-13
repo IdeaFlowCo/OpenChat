@@ -1,3 +1,5 @@
+import type { ManagedTransaction } from 'neo4j-driver';
+import { withConversationLock } from '../services/conversationLock.js';
 import { Server, Socket } from 'socket.io';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
@@ -83,22 +85,25 @@ export function broadcastMessageToParticipants(
 // Force-join a user's live sockets to a conversation room. Used when a
 // member is added to a group: their existing connection should immediately
 // start receiving message:new without waiting for them to click the conv.
-export function joinUserSocketsToConversation(io: Server, userId: string, conversationId: string): void {
-  const sockets = userSockets.get(userId);
-  if (!sockets) return;
-  for (const socketId of sockets) {
-    const s = io.sockets.sockets.get(socketId);
-    if (!s) continue;
-    s.join(`conversation:${conversationId}`);
-    if (!conversationSockets.has(conversationId)) {
-      conversationSockets.set(conversationId, new Set());
+export async function joinUserSocketsToConversation(io: Server, userId: string, conversationId: string, transaction?: ManagedTransaction): Promise<boolean> {
+  const join = async (tx: ManagedTransaction) => {
+    const check = await tx.run(`MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId}) RETURN true AS allowed`, { userId, conversationId });
+    if (!check.records.length) {
+      leaveUserSocketsFromConversation(io, userId, conversationId);
+      return false;
     }
-    conversationSockets.get(conversationId)!.add(socketId);
-    if (!socketConversations.has(socketId)) {
-      socketConversations.set(socketId, new Set());
+    for (const socketId of userSockets.get(userId) ?? []) {
+      const socket = io.sockets.sockets.get(socketId);
+      if (!socket) continue;
+      await socket.join(`conversation:${conversationId}`);
+      if (!conversationSockets.has(conversationId)) conversationSockets.set(conversationId, new Set());
+      conversationSockets.get(conversationId)!.add(socketId);
+      if (!socketConversations.has(socketId)) socketConversations.set(socketId, new Set());
+      socketConversations.get(socketId)!.add(conversationId);
     }
-    socketConversations.get(socketId)!.add(conversationId);
-  }
+    return true;
+  };
+  return transaction ? join(transaction) : withConversationLock(conversationId, join);
 }
 
 // Force-leave a user's live sockets from a conversation room. Used when a
@@ -164,35 +169,11 @@ export function setupChatSocket(io: Server): void {
 
     // Join conversation room
     socket.on('conversation:join', async (conversationId: string) => {
-      // Verify user is participant
-      const session = getDriver().session();
       try {
-        const result = await session.run(`
-          MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-          RETURN c
-        `, { userId, conversationId });
-
-        if (result.records.length === 0) {
-          socket.emit('error', { message: 'Not a participant of this conversation' });
-          return;
-        }
-
-        socket.join(`conversation:${conversationId}`);
-
-        if (!conversationSockets.has(conversationId)) {
-          conversationSockets.set(conversationId, new Set());
-        }
-        conversationSockets.get(conversationId)!.add(socket.id);
-
-        // Ensure socketConversations entry exists (may be missing after reconnect)
-        if (!socketConversations.has(socket.id)) {
-          socketConversations.set(socket.id, new Set());
-        }
-        socketConversations.get(socket.id)!.add(conversationId);
-
-        socket.emit('conversation:joined', { conversationId });
-      } finally {
-        await session.close();
+        const joined = await joinUserSocketsToConversation(io, userId, conversationId);
+        socket.emit(joined ? 'conversation:joined' : 'error', joined ? { conversationId } : { message: 'Not a participant of this conversation' });
+      } catch {
+        socket.emit('error', { message: 'Unable to join conversation' });
       }
     });
 

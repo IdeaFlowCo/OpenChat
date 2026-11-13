@@ -1,4 +1,4 @@
-import { getDriver } from '../db.js';
+import { withConversationLock } from '../services/conversationLock.js';
 import { loadConversation } from './chat.js';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
@@ -17,12 +17,23 @@ router.post('/unlinked/groups/sync',async(req,res)=>{
     const result=await syncUnlinkedGroup(parseGroupSnapshot(req.body));
     const io=req.app.get('io') as Server|undefined;
     if(io) {
-      const session=getDriver().session();
-      let conversation;
-      try {conversation=await loadConversation(session,result.conversationId);} finally {await session.close();}
-      for(const id of result.removed) {leaveUserSocketsFromConversation(io,id,result.conversationId);io.to(`user:${id}`).emit('participant:removed',{conversationId:result.conversationId,userId:id});}
-      for(const id of result.added) joinUserSocketsToConversation(io,id,result.conversationId);
-      for(const id of result.participants) io.to(`user:${id}`).emit(result.added.includes(id)?'conversation:created':'conversation:updated',{conversationId:result.conversationId,conversation});
+      await withConversationLock(result.conversationId, async tx => {
+        const current = await tx.run(`MATCH(s:UnlinkedGroupSync {conversationId:$id}) RETURN s.revision AS revision,s.pendingRemoved AS removed`, { id:result.conversationId });
+        if (!current.records.length || Number(current.records[0].get('revision')) !== result.revision) return;
+        const removed = (current.records[0].get('removed') ?? []) as string[];
+        for (const id of removed) {
+          leaveUserSocketsFromConversation(io,id,result.conversationId);
+          io.to(`user:${id}`).emit('participant:removed',{conversationId:result.conversationId,userId:id});
+        }
+        const conversation = await loadConversation(tx,result.conversationId);
+        const participants = (conversation?.participants ?? []) as Array<{user:{id:string}}>;
+        for (const {user} of participants) {
+          if (await joinUserSocketsToConversation(io,user.id,result.conversationId,tx)) {
+            io.to(`user:${user.id}`).emit('conversation:created',{conversationId:result.conversationId,conversation});
+          }
+        }
+        await tx.run(`MATCH(s:UnlinkedGroupSync {conversationId:$id}) SET s.pendingRemoved=[]`, { id:result.conversationId });
+      });
     }
     res.json({conversationId:result.conversationId,revision:result.revision});
   } catch(error) {

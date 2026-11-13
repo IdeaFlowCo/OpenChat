@@ -935,7 +935,7 @@ export async function createConversationForAssistant(
 
     if (io) {
       const { joinUserSocketsToConversation } = await import('../websocket/chatHandler.js');
-      for (const pid of allParticipants) joinUserSocketsToConversation(io, pid, conversationId);
+      for (const pid of allParticipants) await joinUserSocketsToConversation(io, pid, conversationId);
     }
     return { id: conversationId, type, title: title || null, participantIds: allParticipants };
   } finally {

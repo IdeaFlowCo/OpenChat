@@ -47,7 +47,7 @@ export async function syncUnlinkedGroup(input: UnlinkedGroupSnapshot) {
       const result = await tx.run(`MERGE (s:UnlinkedGroupSync {groupId:$groupId})
         ON CREATE SET s.ownerKey=$ownerKey,s.conversationId=$id,s.revision=0
         SET s.lockVersion=coalesce(s.lockVersion,0)+1
-        RETURN s.ownerKey AS ownerKey,s.conversationId AS id,s.revision AS revision,s.fingerprint AS fingerprint,s.deleted AS deleted`,
+        RETURN s.ownerKey AS ownerKey,s.conversationId AS id,s.revision AS revision,s.fingerprint AS fingerprint,s.deleted AS deleted,s.pendingRemoved AS pendingRemoved`,
       {groupId:v.groupId,ownerKey:JSON.stringify([v.organizer.issuer,v.organizer.subject]),id});
       const row=result.records[0];
       before=(await tx.run('MATCH(u:User)-[:PARTICIPATES_IN]->(:Conversation {id:$id}) RETURN u.id AS id',{id})).records.map(r=>r.get('id') as string);
@@ -56,9 +56,10 @@ export async function syncUnlinkedGroup(input: UnlinkedGroupSnapshot) {
       if(revision>v.revision || (row.get('deleted') && !v.deleted)) throw new UnlinkedGroupError(409,'stale_group_snapshot');
       if(revision===v.revision) {
         if(row.get('fingerprint')!==fingerprint) throw new UnlinkedGroupError(409,'group_revision_conflict');
-        return {conversationId:id,revision:v.revision,added:[] as string[],removed:[] as string[],participants:before};
+        return {conversationId:id,revision:v.revision,added:[] as string[],removed:(row.get('pendingRemoved') ?? []) as string[],participants:before};
       }
       const existing=await tx.run('MATCH(c:Conversation {id:$id}) RETURN c.type AS type,c.unlinkedGroupId AS groupId,EXISTS {MATCH(:User {id:$ownerId})-[:PARTICIPATES_IN {role:"owner"}]->(c)} AS owned',{id,ownerId});
+      if(v.existingConversationId && !existing.records.length) throw new UnlinkedGroupError(409,'conversation_binding_conflict');
       if(existing.records.length && (existing.records[0].get('type')!=='group' || (existing.records[0].get('groupId') ? existing.records[0].get('groupId')!==v.groupId : !v.existingConversationId || !existing.records[0].get('owned')))) throw new UnlinkedGroupError(409,'conversation_binding_conflict');
       await tx.run(`MERGE(c:Conversation {id:$id}) ON CREATE SET c.createdAt=datetime(),c.type='group'
         SET c.title=$name,c.unlinkedGroupId=$groupId,c.updatedAt=datetime()`,{id,name:v.name,groupId:v.groupId});
@@ -69,9 +70,10 @@ export async function syncUnlinkedGroup(input: UnlinkedGroupSnapshot) {
         SET p.role=CASE WHEN userId=$ownerId THEN 'owner' ELSE 'member' END`,{id,ids,ownerId});
       // Old invite URLs cannot add people outside the community roster.
       await tx.run(`MATCH(:Conversation {id:$id})-[:HAS_INVITE]->(i:GroupInvite) SET i.revokedAt=coalesce(i.revokedAt,$now)`,{id,now:new Date().toISOString()});
-      await tx.run(`MATCH(s:UnlinkedGroupSync {groupId:$groupId}) SET s.revision=$revision,s.fingerprint=$fingerprint,s.deleted=$deleted,s.syncedAt=datetime()`,
-        {groupId:v.groupId,revision:neo4j.int(v.revision),fingerprint,deleted:v.deleted});
-      return {conversationId:id,revision:v.revision,added:ids.filter(x=>!before.includes(x)),removed:before.filter(x=>!ids.includes(x)),participants:ids};
+      const removed = [...new Set<string>([...(row.get('pendingRemoved') ?? []), ...before.filter(x=>!ids.includes(x))])].filter(x=>!ids.includes(x));
+      await tx.run(`MATCH(s:UnlinkedGroupSync {groupId:$groupId}) SET s.revision=$revision,s.fingerprint=$fingerprint,s.deleted=$deleted,s.pendingRemoved=$removed,s.syncedAt=datetime()`,
+        {groupId:v.groupId,revision:neo4j.int(v.revision),fingerprint,deleted:v.deleted,removed});
+      return {conversationId:id,revision:v.revision,added:ids.filter(x=>!before.includes(x)),removed,participants:ids};
     });
   } finally { await session.close(); }
 }
