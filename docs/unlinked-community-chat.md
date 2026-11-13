@@ -20,7 +20,8 @@ revision before sending projections. Manual mutations commit before a separate
 locked publication revalidates access; invite responses and inbox effects use
 that same publication boundary. Message events select current per-user recipients
 under the roster lock, including edits, deletions, reactions, forwarding, previews
-and transcripts. A socket awaiting eviction cannot receive revoked content. Identical retries replay inbox discovery for
+and transcripts. Thought pins, shared thought edits, profile text and read
+updates also use current per-user recipients rather than cached conversation rooms. A socket awaiting eviction cannot receive revoked content. Identical retries replay inbox discovery for
 all current members and any unacknowledged removals; pending removals survive a
 projection failure or a newer roster. Existing mute/read settings remain on retained memberships.
 
@@ -43,5 +44,6 @@ stale updates, deletion, migration, retained messages and invitation denial.
 publication, projection failures and retries, stale joins, migration races in manual
 mutations, transaction rollback, invite acceptance during migration, delayed
 eviction, ordered message delivery, direct-chat reactions, safe persisted names
-and emoji customization.
+and emoji customization. Delayed-eviction coverage includes new/existing thought
+pins, edits through canonical and legacy sharing relationships, and profile text.
 Never use production credentials or a live graph for those tests.

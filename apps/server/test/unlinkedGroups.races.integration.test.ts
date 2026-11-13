@@ -11,6 +11,8 @@ const state = vi.hoisted(() => ({ driver: null as any }));
 vi.mock('../src/db.js', () => ({ getDriver: () => state.driver }));
 import router from '../src/routes/unlinkedGroups.js';
 import chatRouter from '../src/routes/chat.js';
+import thoughtsRouter from '../src/routes/thoughts.js';
+import authRouter from '../src/routes/auth.js';
 import * as chat from '../src/routes/chat.js';
 import * as groups from '../src/services/unlinkedGroups.js';
 import * as invites from '../src/services/inviteEntry.js';
@@ -20,7 +22,7 @@ import { ensureSharedInbox } from '../src/services/unlinkedMessaging.js';
 import { setupChatSocket, joinUserSocketsToConversation, broadcastMessageToParticipants } from '../src/websocket/chatHandler.js';
 
 const secret = 'synthetic-race-only-'.repeat(4), prefix = `community-race-${randomUUID()}`;
-const app = express().use(express.json()).use('/api', router).use('/api/chat', chatRouter);
+const app = express().use(express.json()).use('/api', router).use('/api/chat', chatRouter).use('/api/thoughts', thoughtsRouter).use('/api/auth', authRouter);
 const http = createServer(app), io = new Server(http);
 const sockets: Socket[] = [], groupIds: string[] = [], conversationIds: string[] = [];
 const q = async (query: string, params = {}) => { const session = state.driver.session(); try { return await session.run(query, params); } finally { await session.close(); } };
@@ -53,6 +55,7 @@ suite('community membership publication races', () => {
     vi.restoreAllMocks();
     for (const socket of sockets) socket.disconnect();
     await new Promise<void>(resolve => io.close(() => resolve()));
+    await q('MATCH(u:User)-[:HAS_THOUGHT]->(t:Thought) WHERE u.ideaflowSub STARTS WITH $prefix DETACH DELETE t', {prefix});
     await q('MATCH(m:Message) WHERE m.conversationId IN $conversationIds OR EXISTS { MATCH(c:Conversation {id:m.conversationId}) WHERE c.unlinkedGroupId IN $groupIds } DETACH DELETE m', {conversationIds,groupIds});
     await q('MATCH(c:Conversation) WHERE c.unlinkedGroupId IN $groupIds OR c.id IN $conversationIds OPTIONAL MATCH(c)-[:HAS_INVITE]->(i:GroupInvite) DETACH DELETE c,i', { groupIds, conversationIds });
     await q('MATCH(s:UnlinkedGroupSync) WHERE s.groupId IN $groupIds DELETE s', { groupIds });
@@ -286,6 +289,88 @@ suite('community membership publication races', () => {
       expect(connection.events.filter(e => e.type === 'message:new' && e.data.id === sent.body.id)).toHaveLength(1);
       expect(connection.events.filter(e => e.type === 'message:reactions-updated' && e.data.messageId === sent.body.id)).toHaveLength(1);
     }
+  });
+
+  it.each(['pin-existing','create-and-pin','legacy-shared'])('protects %s thought content during delayed eviction', async action => {
+    const body = snapshot(); body.members.push(person('retained-reader'));
+    const initial = await post(body); expect(initial.status,initial.text).toBe(200); const id = initial.body.conversationId;
+    const owner = await userId(body.organizer.subject), member = await userId(body.members[0].subject), reader = await userId(body.members[1].subject);
+    const client = await login(member), retained = await login(reader);
+    await post(body); await client.flush(); retained.socket.emit('conversation:leave',id); await retained.flush();
+    expect(io.sockets.sockets.get(client.socket.id!)!.rooms.has(`conversation:${id}`)).toBe(true);
+    expect(io.sockets.sockets.get(retained.socket.id!)!.rooms.has(`conversation:${id}`)).toBe(false);
+    const text = `Synthetic ${action} private thought`, updatedText = `Synthetic ${action} private revision`;
+    let thoughtId: string;
+    if(action !== 'create-and-pin') {
+      const created = await request(app).post('/api/thoughts').auth(token(owner),{type:'bearer'}).send({text});
+      expect(created.status,created.text).toBe(201); thoughtId = created.body.id;
+      if(action === 'legacy-shared') await q('MATCH(t:Thought {id:$thoughtId}),(c:Conversation {id:$id}) CREATE(t)-[:SHARED_IN]->(c) CREATE(t)-[:PINNED_TO]->(c)',{thoughtId,id});
+    }
+    await client.flush(); await retained.flush(); client.events.length = 0; retained.events.length = 0;
+    const original = groups.syncUnlinkedGroup, entered = deferred(), release = deferred();
+    const spy = vi.spyOn(groups,'syncUnlinkedGroup').mockImplementation(async input => {
+      const result = await original(input);
+      if(input.groupId === body.groupId && input.revision === 2) {entered.resolve(); await release.promise;}
+      return result;
+    });
+    const pending = post({...body,revision:2,members:[body.members[1]]}).then(r => r); await entered.promise;
+    try {
+      if(action === 'create-and-pin') {
+        const created = await request(app).post('/api/thoughts').auth(token(owner),{type:'bearer'}).send({text,pinToConversationId:id});
+        expect(created.status,created.text).toBe(201); thoughtId = created.body.id;
+      } else if(action === 'pin-existing') {
+        const pinned = await request(app).post(`/api/thoughts/${thoughtId!}/pin`).auth(token(owner),{type:'bearer'}).send({conversationId:id,expectedText:text});
+        expect(pinned.status,pinned.text).toBe(200);
+      }
+      const patched = await request(app).patch(`/api/thoughts/${thoughtId!}`).auth(token(owner),{type:'bearer'}).send({text:updatedText});
+      expect(patched.status,patched.text).toBe(200); expect(patched.body.text).toBe(updatedText);
+      if(action !== 'legacy-shared') {
+        const unpinned = await request(app).delete(`/api/thoughts/${thoughtId!}/pin/${id}`).auth(token(owner),{type:'bearer'});
+        expect(unpinned.status,unpinned.text).toBe(204);
+      }
+      await client.flush(); await retained.flush();
+      expect(io.sockets.sockets.get(client.socket.id!)!.rooms.has(`conversation:${id}`)).toBe(true);
+      expect(client.events.filter(e => e.type.startsWith('thought:'))).toEqual([]);
+      const pinned = retained.events.filter(e => e.type === 'thought:pinned');
+      expect(pinned).toHaveLength(action === 'legacy-shared' ? 0 : 1);
+      if(pinned.length) expect(pinned[0].data.thought).toMatchObject({id:thoughtId!,text,pinned:true,pinnedBy:owner,authorId:owner});
+      const updated = retained.events.filter(e => e.type === 'thought:updated');
+      expect(updated).toHaveLength(1); expect(updated[0].data.thought).toMatchObject({id:thoughtId!,text:updatedText});
+      expect(retained.events.filter(e => e.type === 'thought:unpinned')).toHaveLength(action === 'legacy-shared' ? 0 : 1);
+    } finally {release.resolve(); await pending; spy.mockRestore();}
+  });
+  it('protects profile text from revoked room sockets during delayed eviction', async () => {
+    const body = snapshot();
+    body.organizer = person('profile-owner-' + randomUUID());
+    body.members = [person('profile-removed-' + randomUUID()),person('profile-reader-' + randomUUID())];
+    const initial = await post(body); expect(initial.status,initial.text).toBe(200); const id = initial.body.conversationId;
+    const owner = await userId(body.organizer.subject), member = await userId(body.members[0].subject), reader = await userId(body.members[1].subject);
+    const client = await login(member), retained = await login(reader); await post(body); await client.flush(); await retained.flush();
+    client.events.length = 0; retained.events.length = 0;
+    const original = groups.syncUnlinkedGroup, entered = deferred(), release = deferred();
+    const spy = vi.spyOn(groups,'syncUnlinkedGroup').mockImplementation(async input => {
+      const result = await original(input);
+      if(input.groupId === body.groupId && input.revision === 2) {entered.resolve(); await release.promise;}
+      return result;
+    });
+    const pending = post({...body,revision:2,members:[body.members[1]]}).then(r => r); await entered.promise;
+    try {
+      expect(io.sockets.sockets.get(client.socket.id!)!.rooms.has(`conversation:${id}`)).toBe(true);
+      const profile = await request(app).patch('/api/auth/me').auth(token(owner),{type:'bearer'}).send({statusMessage:'Synthetic private profile'});
+      expect(profile.status,profile.text).toBe(200);
+      const status = await request(app).put('/api/auth/me/status').auth(token(owner),{type:'bearer'}).send({text:'Synthetic private status',emoji:'🔥'});
+      expect(status.status,status.text).toBe(200);
+      const read = await request(app).patch(`/api/chat/conversations/${id}/read`).auth(token(owner),{type:'bearer'}).send({});
+      expect(read.status,read.text).toBe(200);
+      await client.flush(); await retained.flush();
+      expect(client.events.filter(e => e.type === 'user:profile-updated')).toEqual([]);
+      const updates = retained.events.filter(e => e.type === 'user:profile-updated');
+      expect(updates).toHaveLength(2);
+      expect(updates[0].data.statusMessage).toBe('Synthetic private profile');
+      expect(updates[1].data.profileStatus).toMatchObject({text:'Synthetic private status',emoji:'🔥'});
+      expect(client.events.filter(e => e.type === 'read:updated')).toEqual([]);
+      expect(retained.events.filter(e => e.type === 'read:updated')).toHaveLength(1);
+    } finally {release.resolve(); await pending; spy.mockRestore();}
   });
 
 });

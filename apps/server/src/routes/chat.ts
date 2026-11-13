@@ -965,7 +965,7 @@ router.patch('/conversations/:id/read', requireAuth, async (req: Request, res: R
     const io = req.app.get('io') as IOServer | undefined;
     if (io) {
       // Emit to all participants in the conversation room.
-      io.to(`conversation:${conversationId}`).emit('read:updated', {
+      await publishConversationEvent(io, conversationId as string, 'read:updated', {
         conversationId,
         userId,
         lastReadAt: now,
