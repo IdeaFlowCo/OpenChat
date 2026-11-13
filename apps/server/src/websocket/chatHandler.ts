@@ -1,3 +1,6 @@
+import type { ManagedTransaction } from 'neo4j-driver';
+import { publishConversationEvent } from '../services/conversationEvents.js';
+import { withConversationLock } from '../services/conversationLock.js';
 import { Server, Socket } from 'socket.io';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
@@ -60,50 +63,33 @@ export function isUserOnline(userId: string): boolean {
   return (userSockets.get(userId)?.size ?? 0) > 0;
 }
 
-// Broadcast a message:new to every participant of a conversation via their
-// per-user room (user:<id>), which each socket joins on connect. This reaches
-// recipients who are connected but have NOT opened (joined the room of) the
-// conversation — unlike emitting to conversation:<id>, which only reaches
-// sockets that ran conversation:join. Chained .to() unions the rooms so a
-// socket in several matched rooms still receives exactly one copy.
-// See OpenChat-60y.
-export function broadcastMessageToParticipants(
-  io: Server,
-  participantIds: string[],
-  message: unknown
-): void {
-  if (!participantIds.length) return;
-  let op = io.to(`user:${participantIds[0]}`);
-  for (let i = 1; i < participantIds.length; i++) {
-    op = op.to(`user:${participantIds[i]}`);
-  }
-  op.emit('message:new', message);
+export async function broadcastMessageToParticipants(io: Server, conversationId: string, message: unknown): Promise<void> {
+  await publishConversationEvent(io, conversationId, 'message:new', message);
 }
 
-// Force-join a user's live sockets to a conversation room. Used when a
-// member is added to a group: their existing connection should immediately
-// start receiving message:new without waiting for them to click the conv.
-export function joinUserSocketsToConversation(io: Server, userId: string, conversationId: string): void {
-  const sockets = userSockets.get(userId);
-  if (!sockets) return;
-  for (const socketId of sockets) {
-    const s = io.sockets.sockets.get(socketId);
-    if (!s) continue;
-    s.join(`conversation:${conversationId}`);
-    if (!conversationSockets.has(conversationId)) {
-      conversationSockets.set(conversationId, new Set());
+// Serialize live room joins with roster changes, including server-initiated joins.
+export async function joinUserSocketsToConversation(io: Server, userId: string, conversationId: string, transaction?: ManagedTransaction): Promise<boolean> {
+  const join = async (tx: ManagedTransaction) => {
+    const check = await tx.run(`MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId}) RETURN true AS allowed`, { userId, conversationId });
+    if (!check.records.length) {
+      leaveUserSocketsFromConversation(io, userId, conversationId);
+      return false;
     }
-    conversationSockets.get(conversationId)!.add(socketId);
-    if (!socketConversations.has(socketId)) {
-      socketConversations.set(socketId, new Set());
+    for (const socketId of userSockets.get(userId) ?? []) {
+      const socket = io.sockets.sockets.get(socketId);
+      if (!socket) continue;
+      await socket.join(`conversation:${conversationId}`);
+      if (!conversationSockets.has(conversationId)) conversationSockets.set(conversationId, new Set());
+      conversationSockets.get(conversationId)!.add(socketId);
+      if (!socketConversations.has(socketId)) socketConversations.set(socketId, new Set());
+      socketConversations.get(socketId)!.add(conversationId);
     }
-    socketConversations.get(socketId)!.add(conversationId);
-  }
+    return true;
+  };
+  return transaction ? join(transaction) : withConversationLock(conversationId, join);
 }
 
-// Force-leave a user's live sockets from a conversation room. Used when a
-// member is removed/leaves so they don't keep getting messages over their
-// existing connection.
+// Reconcile live rooms after removal; content fanout separately checks current membership.
 export function leaveUserSocketsFromConversation(io: Server, userId: string, conversationId: string): void {
   const sockets = userSockets.get(userId);
   if (!sockets) return;
@@ -164,35 +150,11 @@ export function setupChatSocket(io: Server): void {
 
     // Join conversation room
     socket.on('conversation:join', async (conversationId: string) => {
-      // Verify user is participant
-      const session = getDriver().session();
       try {
-        const result = await session.run(`
-          MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-          RETURN c
-        `, { userId, conversationId });
-
-        if (result.records.length === 0) {
-          socket.emit('error', { message: 'Not a participant of this conversation' });
-          return;
-        }
-
-        socket.join(`conversation:${conversationId}`);
-
-        if (!conversationSockets.has(conversationId)) {
-          conversationSockets.set(conversationId, new Set());
-        }
-        conversationSockets.get(conversationId)!.add(socket.id);
-
-        // Ensure socketConversations entry exists (may be missing after reconnect)
-        if (!socketConversations.has(socket.id)) {
-          socketConversations.set(socket.id, new Set());
-        }
-        socketConversations.get(socket.id)!.add(conversationId);
-
-        socket.emit('conversation:joined', { conversationId });
-      } finally {
-        await session.close();
+        const joined = await joinUserSocketsToConversation(io, userId, conversationId);
+        socket.emit(joined ? 'conversation:joined' : 'error', joined ? { conversationId } : { message: 'Not a participant of this conversation' });
+      } catch {
+        socket.emit('error', { message: 'Unable to join conversation' });
       }
     });
 
@@ -340,7 +302,7 @@ export function setupChatSocket(io: Server): void {
 
         // Broadcast to every participant's per-user room (reaches recipients who
         // haven't joined the conversation room). See OpenChat-60y.
-        broadcastMessageToParticipants(io, participantIds, message);
+        await broadcastMessageToParticipants(io, conversationId, message);
 
         // Outbound webhooks (openchat bot-channel): push to external subscribers
         // (e.g. groupbrain). Fire-and-forget, no-ops when no subscription.

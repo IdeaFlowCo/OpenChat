@@ -1,3 +1,4 @@
+import { publishConversationEvent } from '../services/conversationEvents.js';
 import { deleteContextWebhooksForUser } from '../services/contextWebhooks.js';
 import { deleteImportedChatsForUser, exportImportedChatsForUser } from '../services/importedChatAccount.js';
 import { securityEvent } from '../services/securityEvent.js';
@@ -1056,7 +1057,7 @@ router.patch('/me', requireAuth, async (req: Request, res: Response) => {
 
       for (const r of convResult.records) {
         const convId = r.get('conversationId') as string;
-        io.to(`conversation:${convId}`).emit('user:profile-updated', {
+        await publishConversationEvent(io, convId, 'user:profile-updated', {
           userId,
           name: user.name,
           statusMessage: user.statusMessage,
@@ -1138,7 +1139,7 @@ router.put('/me/status', requireAuth, async (req: Request, res: Response) => {
 
       for (const r of convResult.records) {
         const convId = r.get('conversationId') as string;
-        io.to(`conversation:${convId}`).emit('user:profile-updated', {
+        await publishConversationEvent(io, convId, 'user:profile-updated', {
           userId,
           name: user.name,
           statusMessage: user.statusMessage,

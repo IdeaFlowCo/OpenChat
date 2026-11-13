@@ -1,3 +1,4 @@
+import { publishConversationEvent } from '../services/conversationEvents.js';
 import { pinThoughtWithReview } from '../services/pinThoughtWithReview.js';
 import { ContextLaneError } from '../services/contextLane.js';
 /**
@@ -487,13 +488,12 @@ router.post('/:id/pin', requireAuth, async (req: Request, res: Response) => {
 
     const thought = toJS(result.records[0].get('thought')) as Record<string, unknown>;
 
-    // Live-update the conversation room so open chat-scoped views refresh.
     const io = req.app.get('io');
     if (io) {
-      io.to(`conversation:${conversationId}`).emit('thought:pinned', {
+      await publishConversationEvent(io, conversationId, 'thought:pinned', {
         conversationId,
         thought: { ...thought,
-          // A room broadcast cannot assume every peer belongs to the source chat.
+          // Sharing a thought does not grant access to its source conversation.
           sourceMessageId: thought.sourceConversationId === conversationId ? thought.sourceMessageId : null,
           sourceConversationId: thought.sourceConversationId === conversationId ? conversationId : null,
           pinned: true, pinnedBy: userId, pinnedAt: now, authorId: userId },
@@ -538,7 +538,7 @@ router.delete('/:id/pin/:conversationId', requireAuth, async (req: Request, res:
 
     const io = req.app.get('io');
     if (io) {
-      io.to(`conversation:${conversationId}`).emit('thought:unpinned', { conversationId, thoughtId: id });
+      await publishConversationEvent(io, String(conversationId), 'thought:unpinned', { conversationId, thoughtId: id });
     }
 
     res.status(204).send();
@@ -695,13 +695,11 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     const thought = toJS(result.records[0].get('thought')) as Record<string, unknown>;
 
-    // Live updates: the owner's Thoughts tab, and — when pinned — the
-    // conversation room's chat-scoped view.
     const io = req.app.get('io');
     if (io) {
       io.to(`user:${userId}`).emit('thought:created', { thought });
       if (pinToConversationId) {
-        io.to(`conversation:${pinToConversationId}`).emit('thought:pinned', {
+        await publishConversationEvent(io, pinToConversationId, 'thought:pinned', {
           conversationId: pinToConversationId,
           thought: { ...thought, pinned: true, pinnedBy: userId, pinnedAt: now, authorId: userId },
         });
@@ -784,9 +782,9 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       io.to(`user:${userId}`).emit("thought:updated", { thought });
       // also notify conversations where it is pinned or shared
       try {
-        const convs = await session.run(`MATCH (t:Thought {id: $id})-[:PINNED_TO|SHARED_IN]->(c:Conversation) RETURN DISTINCT c.id AS cid`, { id });
+        const convs = await session.run(`MATCH (t:Thought {id: $id})-[:PINNED_IN|PINNED_TO|SHARED_IN]->(c:Conversation) RETURN DISTINCT c.id AS cid`, { id });
         for (const rec of convs.records) {
-          io.to(`conversation:${rec.get("cid")}`).emit("thought:updated", { thought });
+          await publishConversationEvent(io, rec.get("cid") as string, "thought:updated", { thought });
         }
       } catch (e) { /* ignore */ }
     }

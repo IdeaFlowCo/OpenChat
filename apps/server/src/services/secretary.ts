@@ -127,7 +127,7 @@ export function maybeTriggerSecretary(opts: {
 
       const message = toJS(persisted.records[0]!.get('message')) as Record<string, unknown>;
       const participantIds = persisted.records[0]!.get('participantIds') as string[];
-      if (io) broadcastMessageToParticipants(io, participantIds, message);
+      if (io) await broadcastMessageToParticipants(io, conversationId, message);
       dispatchMessageEvent(message, participantIds);
       console.log('[secretary] auto_reply', JSON.stringify({
         ownerId: owner.id,

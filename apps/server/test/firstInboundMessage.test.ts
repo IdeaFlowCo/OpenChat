@@ -48,27 +48,28 @@ describe('first inbound message delivery contract', () => {
     expect(socket.join).toHaveBeenCalledWith('user:recipient-a');
   });
 
-  it('fans message:new out to every participant user room', () => {
+  it('fans message:new out to every current participant user room', async () => {
     const emit = vi.fn();
     const rooms: string[] = [];
     const operator = {
-      to: vi.fn((room: string) => {
-        rooms.push(room);
+      to: vi.fn((room: string | string[]) => {
+        rooms.push(...(Array.isArray(room) ? room : [room]));
         return operator;
       }),
       emit,
     };
     const io = {
-      to: vi.fn((room: string) => {
-        rooms.push(room);
+      to: vi.fn((room: string | string[]) => {
+        rooms.push(...(Array.isArray(room) ? room : [room]));
         return operator;
       }),
     };
     const message = { id: 'message-1', conversationId: 'new-dm' };
 
-    broadcastMessageToParticipants(
+    db.run.mockResolvedValueOnce({ records: ['sender-b', 'recipient-a'].map(id => ({ get: () => id })) });
+    await broadcastMessageToParticipants(
       io as never,
-      ['sender-b', 'recipient-a'],
+      'new-dm',
       message,
     );
 

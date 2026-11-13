@@ -9,6 +9,7 @@
  * are documented in apps/server/README.md; publicFetch.ts enforces them.
  */
 
+import { publishConversationEvent } from './conversationEvents.js';
 import { load as cheerioLoad } from 'cheerio';
 import { getDriver } from '../db.js';
 import { publicGet } from './publicFetch.js';
@@ -214,8 +215,7 @@ export function processLinkPreviews(
           await storePreview(messageId, preview);
         }
 
-        // Emit to the conversation room so all clients update.
-        io.to(`conversation:${conversationId}`).emit('message:preview-ready', {
+        await publishConversationEvent(io, conversationId, 'message:preview-ready', {
           messageId,
           preview,
         });

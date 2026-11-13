@@ -181,6 +181,13 @@ Context access. Existing blocks and local declined/removed connections suppress
 new acceptance synchronization. See the [accepted-connection contract](docs/unlinked-accepted-connections.md)
 for synchronization and privacy rules.
 
+Joining an Unlinked community also puts its group chat in your normal inbox.
+Use Unlinked to rename the community, invite or remove members, or leave;
+OpenChat rejects those standalone changes for a managed chat. Quick-emoji
+customization remains available. Leaving removes chat access; the remaining
+members keep the history. See the [community chat contract](docs/unlinked-community-chat.md)
+for synchronization and rollout requirements.
+
 See the [Unlinked compose contract](docs/unlinked-compose-contract.md) for
 accepted profile context, card recipient resolution, and sign-in return rules.
 
