@@ -1,6 +1,7 @@
 import type { Server } from 'socket.io';
 import { withConversationLock } from './conversationLock.js';
 
+/** Keep recipient selection and emission under the ACL lock: room eviction may lag a roster commit. */
 export async function publishConversationEvent(io: Server | undefined, conversationId: string, event: string, payload: unknown): Promise<void> {
   if (!io) return;
   await withConversationLock(conversationId, async tx => {

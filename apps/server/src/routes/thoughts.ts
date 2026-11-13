@@ -488,13 +488,12 @@ router.post('/:id/pin', requireAuth, async (req: Request, res: Response) => {
 
     const thought = toJS(result.records[0].get('thought')) as Record<string, unknown>;
 
-    // Live-update the conversation room so open chat-scoped views refresh.
     const io = req.app.get('io');
     if (io) {
       await publishConversationEvent(io, conversationId, 'thought:pinned', {
         conversationId,
         thought: { ...thought,
-          // A room broadcast cannot assume every peer belongs to the source chat.
+          // Sharing a thought does not grant access to its source conversation.
           sourceMessageId: thought.sourceConversationId === conversationId ? thought.sourceMessageId : null,
           sourceConversationId: thought.sourceConversationId === conversationId ? conversationId : null,
           pinned: true, pinnedBy: userId, pinnedAt: now, authorId: userId },
@@ -696,8 +695,6 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     const thought = toJS(result.records[0].get('thought')) as Record<string, unknown>;
 
-    // Live updates: the owner's Thoughts tab, and — when pinned — the
-    // conversation room's chat-scoped view.
     const io = req.app.get('io');
     if (io) {
       io.to(`user:${userId}`).emit('thought:created', { thought });

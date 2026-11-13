@@ -14,6 +14,7 @@ export function parseGroupSnapshot(input: unknown): UnlinkedGroupSnapshot {
   const v = input as UnlinkedGroupSnapshot;
   const member = (m: Member) => m && typeof m === 'object' && !Array.isArray(m)
     && Object.keys(m).every(k => ['issuer', 'subject', 'name'].includes(k))
+    // eslint-disable-next-line no-control-regex -- Identity subjects must exclude ASCII controls.
     && m.issuer === ISSUER && typeof m.subject === 'string' && /^[^\s\x00-\x1f\x7f]{1,512}$/.test(m.subject)
     && typeof m.name === 'string' && m.name.length <= 160;
   if (!v || typeof v !== 'object' || Array.isArray(v)

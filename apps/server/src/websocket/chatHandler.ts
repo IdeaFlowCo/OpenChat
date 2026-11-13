@@ -67,9 +67,7 @@ export async function broadcastMessageToParticipants(io: Server, conversationId:
   await publishConversationEvent(io, conversationId, 'message:new', message);
 }
 
-// Force-join a user's live sockets to a conversation room. Used when a
-// member is added to a group: their existing connection should immediately
-// start receiving message:new without waiting for them to click the conv.
+// Serialize live room joins with roster changes, including server-initiated joins.
 export async function joinUserSocketsToConversation(io: Server, userId: string, conversationId: string, transaction?: ManagedTransaction): Promise<boolean> {
   const join = async (tx: ManagedTransaction) => {
     const check = await tx.run(`MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(:Conversation {id:$conversationId}) RETURN true AS allowed`, { userId, conversationId });
@@ -91,9 +89,7 @@ export async function joinUserSocketsToConversation(io: Server, userId: string, 
   return transaction ? join(transaction) : withConversationLock(conversationId, join);
 }
 
-// Force-leave a user's live sockets from a conversation room. Used when a
-// member is removed/leaves so they don't keep getting messages over their
-// existing connection.
+// Reconcile live rooms after removal; content fanout separately checks current membership.
 export function leaveUserSocketsFromConversation(io: Server, userId: string, conversationId: string): void {
   const sockets = userSockets.get(userId);
   if (!sockets) return;

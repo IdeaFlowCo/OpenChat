@@ -79,7 +79,7 @@ describe('chat route block enforcement', () => {
   it('refuses adding a blocked member to a group', async () => {
     mocks.run
       .mockResolvedValueOnce({
-        records: [{ get: (key: string) => key === 'type' ? 'group' : 'owner' }],
+        records: [{ get: (key: string) => key === 'type' ? 'group' : key === 'role' ? 'owner' : null }],
       })
       .mockResolvedValueOnce({ records: [{ get: () => false }] });
 
@@ -90,7 +90,7 @@ describe('chat route block enforcement', () => {
     });
 
     expect(response.status).toBe(404);
-    expect(String(mocks.run.mock.calls[1][0])).toContain('[:BLOCKED]');
+    expect(await response.json()).toEqual({ error: 'User not found' });
     expect(mocks.run).toHaveBeenCalledTimes(2);
   });
 

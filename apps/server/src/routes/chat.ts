@@ -295,13 +295,6 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
     const io = req.app.get('io') as IOServer | undefined;
     emitConversationCreated(io, conversation);
 
-    // Force-join every participant's live sockets to the conversation room
-    // immediately. Without this, the very first message:send from the creator
-    // is broadcast to conversation:${id} *before* the other participants'
-    // clients react to conversation:created → conversation:join, and the
-    // message is dropped for them. (Same race as OpenChat-09h, but for group
-    // creation. POST /participants does this for add-member; creation needs
-    // it too.) See OpenChat-22u.
     if (io) {
       for (const pid of allParticipants) {
         await joinUserSocketsToConversation(io, pid, conversationId);
@@ -574,9 +567,6 @@ router.post('/conversations/:id/participants', requireAuth, async (req: Request,
       const conversation = await loadConversation(tx, id);
       const io = req.app.get('io') as IOServer | undefined;
       if (io && conversation) {
-        // Auto-join the new member's live sockets to the conversation room so
-        // they start receiving message:new immediately, without needing to
-        // click into the conversation first.
         await joinUserSocketsToConversation(io, targetId, id, tx);
 
         // Notify all current participants (incl. newly-added) so their clients
@@ -964,7 +954,6 @@ router.patch('/conversations/:id/read', requireAuth, async (req: Request, res: R
 
     const io = req.app.get('io') as IOServer | undefined;
     if (io) {
-      // Emit to all participants in the conversation room.
       await publishConversationEvent(io, conversationId as string, 'read:updated', {
         conversationId,
         userId,
@@ -2034,7 +2023,7 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
       try { raw.attachments = JSON.parse(raw.attachments as string); } catch { /* leave */ }
     }
 
-    // 6. Emit message:new to target conversation room.
+    // 6. Publish to the target conversation's current participants.
     const io = req.app.get('io') as IOServer | undefined;
     if (io) {
       await publishConversationEvent(io, toConversationId, 'message:new', raw);
