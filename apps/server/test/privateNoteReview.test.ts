@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ run: vi.fn(), close: vi.fn(), subject: vi.fn(), principal: vi.fn(), addNote: vi.fn() }));
-vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({ run: mocks.run, close: mocks.close, executeWrite: (fn: (tx: unknown) => unknown) => fn({ run: mocks.run }) }) }) }));
+vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({ run: mocks.run, close: mocks.close, executeWrite: (fn: (tx: unknown) => unknown) => fn({ run: mocks.run }), executeRead: (fn: (tx: unknown) => unknown) => fn({ run: mocks.run }) }) }) }));
 vi.mock('../src/services/privateGraph.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/privateGraph.js')>('../src/services/privateGraph.js');
   return { ...actual, privateReviewSubject: mocks.subject, privateReviewPrincipal: mocks.principal, addNote: mocks.addNote };
 });
-import { captureNoteReview, parseSuggestions, similarAsk, undoNoteReview, applyNoteReview } from '../src/services/privateNoteReview.js';
+import { captureNoteReview, listNoteReviews, parseSuggestions, similarAsk, undoNoteReview, applyNoteReview } from '../src/services/privateNoteReview.js';
 import { lockPrivateReviewSubjectIn } from '../src/services/privateGraph.js';
 import { ownerKeyFor } from '../src/services/overlay/contract.js';
 
@@ -76,14 +76,37 @@ describe('review subject validation under the entity lock', () => {
 describe('durable batch operations', () => {
   it('returns prior capture on retry without writing a second raw note', async () => {
     const saved = {...review,status:'saved',createdRecords:[]};
-    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}) RETURN') ? rows({payload:JSON.stringify(saved)}) : rows({refs:['openchat:user:bob']}));
+    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}') ? rows({payload:JSON.stringify(saved)}) : rows({refs:['openchat:user:bob']}));
     expect(await captureNoteReview('alice',{kind:'user',id:'bob'},{text:saved.note.text,requestId:'retry-key'})).toEqual(saved);
     expect(mocks.addNote).not.toHaveBeenCalled();
   });
   it('rejects reuse of a capture request ID for a different note', async () => {
-    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}) RETURN') ? rows({payload:JSON.stringify(review)}) : rows({refs:['openchat:user:bob']}));
+    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}') ? rows({payload:JSON.stringify(review)}) : rows({refs:['openchat:user:bob']}));
     await expect(captureNoteReview('alice',{kind:'user',id:'bob'},{text:'Different note',requestId:'retry-key'})).rejects.toMatchObject({status:409});
     expect(mocks.addNote).not.toHaveBeenCalled();
+  });
+  it('retries the matching capture when merged members reused a request ID', async () => {
+    const saved = {...review,status:'saved',createdRecords:[]};
+    const other = {...saved,id:'other-review',note:{...saved.note,text:'Another note'}};
+    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}')
+      ? {records:[rows({payload:JSON.stringify(other)}).records[0],rows({payload:JSON.stringify(saved)}).records[0]]}
+      : rows({refs:['openchat:user:bob']}));
+    expect(await captureNoteReview('alice',{kind:'user',id:'bob'},{text:saved.note.text,requestId:'shared-key'})).toEqual(saved);
+    expect(mocks.addNote).not.toHaveBeenCalled();
+  });
+  it('includes member reviews and retained member source notes in history', async () => {
+    const saved = {...review,status:'saved',createdRecords:[]};
+    mocks.run.mockImplementation(async (query: string, params: Record<string, unknown>) => {
+      if (params.ownerKey !== OWNER_KEY) return {records:[]};
+      if (query.includes('RETURN m.mergedInto AS head')) return rows({head:'entity-id',id:'member-id'});
+      if (!(params.entityIds as string[] | undefined)?.includes('member-id')) return {records:[]};
+      if (query.includes('OpenChatNoteReview')) return rows({payload:JSON.stringify(saved)});
+      if (query.includes('OverlayNote')) return rows({id:saved.note.id});
+      return {records:[]};
+    });
+    expect(await listNoteReviews('alice',{kind:'thing',id:'entity-id'})).toEqual({
+      reviews:[{...saved,sourceNoteAvailable:true}],asks:[],
+    });
   });
   it('undo after reload deletes only ledger-created records and preserves the raw note', async () => {
     // The vendored deleteLinkIn reads the link first (an ask's asker link is refused, Noos 2026-11-03).

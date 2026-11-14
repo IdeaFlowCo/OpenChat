@@ -55,6 +55,45 @@ integration('private note review transaction integration', () => {
     expect(applied.createdRecords).toHaveLength(1);
     await review.undoNoteReview(owner,batch.id);
   });
+  it('preserves merged review history, capture receipts and source availability through split', async () => {
+    const head = await graph.createPrivateThing(owner,'person',`Review head ${suffix}`);
+    const member = await graph.createPrivateThing(owner,'person',`Review member ${suffix}`);
+    const headSubject = {kind:'thing',id:head.id} as const;
+    const memberSubject = {kind:'thing',id:member.id} as const;
+    const headInput = {text:'Find a synthetic editor',requestId:'merge-review-retry',asStandingAsk:true};
+    const memberInput = {...headInput,text:'Find a synthetic guide'};
+    const headReview = await review.captureNoteReview(owner,headSubject,headInput);
+    const memberReview = await review.captureNoteReview(owner,memberSubject,memberInput);
+    const applied = await review.applyNoteReview(owner,memberReview.id,{suggestionIds:[memberReview.suggestions[0]!.id]});
+    const foreign = await graph.createPrivateThing(other,'person',`Foreign review ${suffix}`);
+    const foreignReview = await review.captureNoteReview(other,{kind:'thing',id:foreign.id},memberInput);
+    const by = {author:'owner',source:'app',assertion:'stated'} as const;
+    await graph.mergePeople(owner,[{ids:[head.id,member.id],headId:head.id,rule:'synthetic-review',operationId:'merge-review-history'}],undefined,by);
+    const db = driver.session();
+    try {
+      await db.run('MATCH (e:OverlayEntity {id:$id}) SET e.mergedInto=$head', {id:foreign.id,head:head.id});
+    } finally { await db.close(); }
+    for (const subject of [headSubject,memberSubject]) {
+      const history = await review.listNoteReviews(owner,subject);
+      expect(history.reviews).toHaveLength(2);
+      expect(history.reviews).toContainEqual({...headReview,sourceNoteAvailable:true});
+      expect(history.reviews).toContainEqual({...applied,sourceNoteAvailable:true});
+      expect(history.reviews.some(row => row.id === foreignReview.id)).toBe(false);
+      expect(history.asks).toContainEqual(expect.objectContaining({id:applied.createdRecords![0]!.id,reviewId:memberReview.id}));
+      expect(await review.captureNoteReview(owner,subject,headInput)).toEqual(headReview);
+      expect(await review.captureNoteReview(owner,subject,memberInput)).toEqual(applied);
+      await expect(review.captureNoteReview(owner,subject,{...memberInput,text:'Different synthetic note'})).rejects.toMatchObject({status:409});
+    }
+    expect((await graph.getThing(owner,head.id)).notes).toHaveLength(2);
+    await graph.deleteNote(owner,headReview.note.id);
+    const history = await review.listNoteReviews(owner,headSubject);
+    expect(history.reviews.find(row => row.id === headReview.id)?.sourceNoteAvailable).toBe(false);
+    expect(history.reviews.find(row => row.id === memberReview.id)?.sourceNoteAvailable).toBe(true);
+    expect((await review.undoNoteReview(owner,memberReview.id)).status).toBe('undone');
+    await graph.splitPerson(owner,{id:member.id,operationId:'split-review-history'},by);
+    expect((await review.listNoteReviews(owner,headSubject)).reviews.map(row => row.id)).toEqual([headReview.id]);
+    expect((await review.listNoteReviews(owner,memberSubject)).reviews).toEqual([{...applied,status:'undone',sourceNoteAvailable:true}]);
+  });
   it('invalid selected edit rolls back all new records and preserves the note', async () => {
     const batch=await seedReady('A private note','rollback-one');
     await expect(review.applyNoteReview(owner,batch.id,{suggestionIds:['ask-one','link-one'],edits:[{id:'link-one',target:{kind:'invalid',name:'Acme'}}]})).rejects.toMatchObject({status:400});

@@ -19,9 +19,12 @@ import { captureNoteReview, listNoteReviews, suggestNoteReview, applyNoteReview,
 
 const contactBody = json({ limit: '1mb' });
 const contactBatchBody = json({ limit: '7mb' });
+const mergeBody = json({ limit: '1mb' });
 export const privateGraphBody: RequestHandler = (req, res, next) => {
   if (req.method === 'POST' && /^\/api\/private\/contact-source-batches\/?$/i.test(req.path)) {
     contactBatchBody(req, res, next);
+  } else if (req.method === 'POST' && /^\/api\/private\/merges\/?$/i.test(req.path)) {
+    mergeBody(req, res, next);
   } else if ((req.method === 'POST' && /^\/api\/private\/contact-sources\/?$/i.test(req.path)) ||
       (req.method === 'PUT' && /^\/api\/private\/things\/[^/]+\/people-state\/?$/i.test(req.path))) {
     contactBody(req, res, next);
