@@ -69,7 +69,8 @@ export const OWNER_PROVENANCE: Provenance = { author: 'owner', source: 'app', as
 export const RELATION_TYPES = ['knows', 'family', 'worked_with', 'works_at', 'works_on', 'attended', 'interested_in', 'part_of', 'about', 'asks', 'related'] as const;
 export type RelationType = (typeof RELATION_TYPES)[number];
 
-export interface Note extends Provenance { id: string; text: string; createdAt: string; updatedAt: string }
+/** `revision` starts at 1 and counts edits (`updateNote`); `editedBy` is the author of the latest edit. */
+export interface Note extends Provenance { id: string; text: string; createdAt: string; updatedAt: string; revision?: number; editedBy?: string }
 export interface LinkEnd { id: string; kind: EntityKind; name: string; refs: string[] }
 /**
  * Facts about a link besides its relation, all nullable: `since` and `until`
@@ -82,7 +83,8 @@ export interface Link extends Provenance, LinkAttributes { id: string; relation:
 /** A link as an edge between two ends, for search and neighbourhood reads. */
 export interface Edge extends Provenance, LinkAttributes { id: string; relation: string; relationType: RelationType; fromId: string; toId: string; createdAt: string; updatedAt: string | null; updatedBy: string | null }
 /** `requestedId` is set when the id asked for was a merged-away record: `id` is then its person's head. */
-export interface EntityDetail extends Entity { notes: Note[]; links: Link[]; contactSources?: Array<import('./contacts.js').ContactSource & { memberId?: string }>; requestedId?: string }
+/** `fields` and `fieldSuggestions` are computed from field assertions, source cards and notes (./fields.ts); people only. */
+export interface EntityDetail extends Entity { notes: Note[]; links: Link[]; contactSources?: Array<import('./contacts.js').ContactSource & { memberId?: string }>; requestedId?: string; fields?: import('./fields.js').PersonField[]; fieldSuggestions?: import('./fields.js').FieldSuggestion[] }
 export interface SearchHit extends Entity { matched: Array<'name' | 'description' | 'note' | 'link'> }
 export interface SearchResult { entities: SearchHit[]; links: Array<Edge & { from: LinkEnd; to: LinkEnd }>; truncated: boolean }
 export interface Neighbourhood { center: Entity; depth: 1 | 2; entities: Entity[]; links: Edge[]; truncated: boolean }

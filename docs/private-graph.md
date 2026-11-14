@@ -262,6 +262,12 @@ with different text or capture mode returns 409. New captures use the head
 resolved under the membership lock; existing reviews remain on their physical
 records and separate again on split.
 
+### Editing notes and person fields
+
+- `PATCH /api/private/notes/:noteId {text, ifRevision?}` edits a note in place (same id, date and ask evidence); the replaced text is kept as a revision (`GET /api/private/notes/:noteId/revisions`). A stale `ifRevision` answers 409 `stale_revision` with the current `note`. Tools: `oc_update_private_note`, `oc_list_note_revisions`.
+- Person fields (Noos `docs/PEOPLE_OVERLAY.md`, "Person fields"): `GET /api/private/things/:id` returns `fields[]` and `fieldSuggestions[]` for people. `POST /api/private/things/:id/fields` adds an assertion (`oc_set_person_field`); `POST …/field-marks` records former, wrong, hidden, pin, unpin, restore, dismiss, retract or undo (`oc_mark_person_field`); `GET …/fields/:key/reveal` is the only read of an unmasked value such as a Wi-Fi password (`oc_get_person_field`). Nothing is overwritten or deleted.
+- `fields.ts` is vendored with the rest of the overlay (`scripts/vendor-noos-overlay.mjs`).
+
 ## People from Unlinked
 
 An Unlinked person is one of two things, and both are confirmed with the

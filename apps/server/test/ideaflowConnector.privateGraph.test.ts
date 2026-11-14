@@ -9,6 +9,7 @@ vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({ run: stat
 const graph = vi.hoisted(() => ({
   importContactSources: vi.fn(), savePeopleState: vi.fn(), mergePeople: vi.fn(), splitPerson: vi.fn(), revertMerge: vi.fn(), listMergeEvents: vi.fn(),
   addLink: vi.fn(), addNote: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), deletePrivateThing: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
+  updateNote: vi.fn(), listNoteRevisions: vi.fn(), setPersonField: vi.fn(), markPersonField: vi.fn(), revealPersonField: vi.fn(), personFields: vi.fn(),
   getUnlinkedPersonOverlay: vi.fn(), listDue: vi.fn(), resolvePrivateThing: vi.fn(), listOwnerLinks: vi.fn(), listThings: vi.fn(), updatePersonCard: vi.fn(),
   updateLink: vi.fn(), searchPrivate: vi.fn(), getNeighbourhood: vi.fn(), updatePrivateThing: vi.fn(),
   saveAsk: vi.fn(), listMembers: vi.fn(), addListMember: vi.fn(), removeListMember: vi.fn(), listAsks: vi.fn(), getAsk: vi.fn(), updateAsk: vi.fn(), deleteAsk: vi.fn(),
@@ -28,8 +29,8 @@ function sign(body: string, scope: string, client?: unknown) {
   const payload = Buffer.from(JSON.stringify({ iss: 'https://id.ideaflow.app/connector', aud: 'https://chat.ideaflow.app/mcp', identity_issuer: 'https://id.ideaflow.app/api/auth', sub: 'subject', actor_id:'ideaflow-grant:synthetic', scope, iat: now, exp: now + 60, jti: randomUUID(), body_sha256: createHash('sha256').update(body).digest('hex'), ...(client !== undefined ? { client } : {}) })).toString('base64url');
   return `${header}.${payload}.${createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url')}`;
 }
-const PRIVATE_READS = ['oc_get_person_private', 'oc_get_unlinked_person_private', 'oc_list_private_links', 'oc_search_private', 'oc_get_neighbourhood', 'oc_list_private_things', 'oc_get_private_thing', 'oc_list_catch_up'];
-const PRIVATE_WRITES = ['oc_set_person_private', 'oc_add_private_note', 'oc_delete_private_note', 'oc_add_private_link', 'oc_update_private_link', 'oc_delete_private_link', 'oc_save_private_thing', 'oc_update_private_thing', 'oc_delete_private_thing'];
+const PRIVATE_READS = ['oc_get_person_private', 'oc_get_unlinked_person_private', 'oc_list_private_links', 'oc_search_private', 'oc_get_neighbourhood', 'oc_list_private_things', 'oc_get_private_thing', 'oc_list_catch_up', 'oc_list_note_revisions', 'oc_get_person_field'];
+const PRIVATE_WRITES = ['oc_set_person_private', 'oc_add_private_note', 'oc_delete_private_note', 'oc_add_private_link', 'oc_update_private_link', 'oc_delete_private_link', 'oc_save_private_thing', 'oc_update_private_thing', 'oc_delete_private_thing', 'oc_update_private_note', 'oc_set_person_field', 'oc_mark_person_field'];
 const CONNECTOR = { author: 'agent:Ideaflow connector', source: 'connector', assertion: 'stated' };
 
 describe('private people knowledge through the shared Ideaflow connector', () => {
@@ -331,5 +332,40 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     expect(graph.addNote).not.toHaveBeenCalled();
     expect(graph.updatePersonCard).not.toHaveBeenCalled();
     expect(graph.addLink).not.toHaveBeenCalled();
+  });
+
+  it('edits notes in place with revision guards and lists revisions', async () => {
+    graph.updateNote.mockResolvedValue({ id: 'note-1', text: 'New', revision: 2 });
+    const edited = await tool('oc_update_private_note', { noteId: 'note-1', text: 'New', ifRevision: 1 });
+    expect(edited.result.isError).toBeUndefined();
+    expect(graph.updateNote).toHaveBeenCalledWith('owner', 'note-1', 'New', 1, expect.objectContaining({ author: expect.stringMatching(/^agent:/), source: 'connector' }));
+    graph.updateNote.mockRejectedValue(new PrivateGraphError(409, 'This note was changed elsewhere. Choose which version to keep.', { code: 'stale_revision', note: { id: 'note-1', text: 'Theirs', revision: 3 } }));
+    const stale = await tool('oc_update_private_note', { noteId: 'note-1', text: 'Mine', ifRevision: 2 });
+    expect(stale.result.isError).toBe(true);
+    expect(JSON.parse(stale.result.content[0].text)).toMatchObject({ code: 'stale_revision', note: { text: 'Theirs' } });
+    graph.listNoteRevisions.mockResolvedValue({ note: { id: 'note-1' }, revisions: [{ revision: 1, text: 'Old' }] });
+    expect(JSON.parse((await tool('oc_list_note_revisions', { noteId: 'note-1' }, 'openchat:read')).result.content[0].text).revisions[0].text).toBe('Old');
+  });
+
+  it('records person fields as assertions: Wi-Fi as ssid/password, history with status, marks and undo', async () => {
+    graph.setPersonField.mockResolvedValue({ operationId: 'fop_1', fields: [] });
+    await tool('oc_set_person_field', { thingId: 'thing-1', kind: 'wifi', ssid: 'Net', password: 'pw', label: 'guest', clientRequestId: 'r1' });
+    expect(graph.setPersonField).toHaveBeenLastCalledWith('owner', 'thing-1', { kind: 'wifi', label: 'guest', clientRequestId: 'r1', value: { ssid: 'Net', password: 'pw' } }, expect.objectContaining({ source: 'connector' }), 'ideaflow-grant:synthetic');
+    await tool('oc_set_person_field', { thingId: 'thing-1', kind: 'address', value: '832 Addison St, Berkeley', source: 'imessage', observedAt: '2017-01-30', status: 'former', evidence: { messageDate: '2017-01-30' }, clientRequestId: 'r2' });
+    expect(graph.setPersonField.mock.calls.at(-1)![2]).toEqual({ kind: 'address', value: '832 Addison St, Berkeley', source: 'imessage', observedAt: '2017-01-30', status: 'former', evidence: { messageDate: '2017-01-30' }, clientRequestId: 'r2' });
+    await tool('oc_set_person_field', { thingId: 'thing-1', kind: 'context', value: 'Qigong', contextType: 'interest', assertion: 'inferred', clientRequestId: 'r3' });
+    expect(graph.setPersonField.mock.calls.at(-1)![2]).toEqual({ kind: 'context', value: { text: 'Qigong', type: 'interest' }, assertion: 'inferred', clientRequestId: 'r3' });
+    expect((await tool('oc_set_person_field', { thingId: 'thing-1', kind: 'email', value: 'a@b.co' })).error.code).toBe(-32602);
+    graph.markPersonField.mockResolvedValue({ operationId: 'fop_2', fields: [] });
+    await tool('oc_mark_person_field', { thingId: 'thing-1', action: 'undo', operationId: 'fop_1', clientRequestId: 'u1' });
+    expect(graph.markPersonField).toHaveBeenLastCalledWith('owner', 'thing-1', { action: 'undo', operationId: 'fop_1', clientRequestId: 'u1' }, expect.anything());
+    expect((await tool('oc_mark_person_field', { thingId: 'thing-1', action: 'delete', key: 'k', clientRequestId: 'x' })).error.code).toBe(-32602);
+  });
+
+  it('reveals a masked value only through the explicit field read, with read scope', async () => {
+    graph.revealPersonField.mockResolvedValue({ key: 'wifi:abc', kind: 'wifi', value: { ssid: 'Net', password: 'pw' } });
+    const read = await tool('oc_get_person_field', { thingId: 'thing-1', key: 'wifi:abc' }, 'openchat:read');
+    expect(JSON.parse(read.result.content[0].text).value.password).toBe('pw');
+    expect(graph.revealPersonField).toHaveBeenCalledWith('owner', 'thing-1', 'wifi:abc');
   });
 });
