@@ -3,7 +3,7 @@ import { BLURB_CONSTRAINTS, mutateBlurbIn, loadBlurbs, changesIn, shelf, pageLim
 import { eraseAskPublicationIn, revokeAskPublicationIn } from './publications.js';
 import { FIELD_CONSTRAINTS, FIELD_LABELS, markFieldIn, parseMarkFieldInput, parseSetFieldInput, projectFields, fieldSuggestions, setFieldIn, sourceAssertions, storedAssertionsIn } from './fields.js';
 import type { FieldContext, PersonField } from './fields.js';
-import { MERGE_CONSTRAINTS, MERGE_LABELS, headOf, membersOf, memberSummaries, mergeIn, splitIn, revertIn, listMergeEventsIn, exportMergesIn, parseMergeInput, parseSplitInput, parseRevertInput } from './merge.js';
+import { MERGE_CONSTRAINTS, MERGE_LABELS, MERGE_LIMITS, headOf, membersOf, memberSummaries, mergeIn, splitIn, revertIn, listMergeEventsIn, exportMergesIn, parseMergeInput, parseSplitInput, parseRevertInput, parseDifferentInput, markDifferentIn, revokeDifferentIn, differentAmongIn } from './merge.js';
 import { createHash } from 'node:crypto';
 import neo4j from 'neo4j-driver';
 import type { Driver, ManagedTransaction } from 'neo4j-driver';
@@ -280,9 +280,10 @@ export class OverlayStore {
 
   /** Records one value about a person (an assertion; never overwrites). `supersedes` makes the value it replaces former. */
   async setPersonField(principal: OverlayPrincipal | null, id: unknown, input: unknown, provenance?: unknown) {
-    const ownerKey = this.owner(principal), by = { ...cleanProvenance(provenance), ...(principal?.actorId ? { actorId: principal.actorId } : {}) };
+    const ownerKey = this.owner(principal), by = actorProvenance(principal!, provenance);
     if (!isId(id)) return fail(404, 'not_found');
-    const parsed = parseSetFieldInput(input, by.author === 'owner' ? 'owner' : by.author ?? 'owner');
+    const parsed = parseSetFieldInput(input, by.author ?? 'owner');
+    if ((input as Record<string, unknown>).assertion === undefined) parsed.origin = by.assertion === 'inferred' ? 'inferred' : 'stated';
     return this.write(async tx => {
       await lockBlurbClock(tx, ownerKey);
       const ctx = await fieldContext(tx, ownerKey, id);
@@ -294,7 +295,7 @@ export class OverlayStore {
 
   /** Former, wrong, hidden, pin, unpin or restore a value (by key); retract an assertion; dismiss a suggestion; undo an operation. */
   async markPersonField(principal: OverlayPrincipal | null, id: unknown, input: unknown, provenance?: unknown) {
-    const ownerKey = this.owner(principal), by = cleanProvenance(provenance);
+    const ownerKey = this.owner(principal), by = actorProvenance(principal!, provenance);
     if (!isId(id)) return fail(404, 'not_found');
     const parsed = parseMarkFieldInput(input);
     return this.write(async tx => {
@@ -745,6 +746,25 @@ export class OverlayStore {
     return this.write(tx => revertIn(tx, ownerKey, input, by));
   }
 
+  /** "Different people": pairwise negative decisions that later merges respect (409 cannot_link). */
+  async markDifferentPeople(principal: OverlayPrincipal | null, raw: unknown, provenance?: unknown) {
+    const ownerKey = this.owner(principal), input = parseDifferentInput(raw), by = actorProvenance(principal!, provenance);
+    return this.write(tx => markDifferentIn(tx, ownerKey, input, by));
+  }
+  /** Undo "different people" by its operationId; the decisions are kept, revoked. */
+  async undoDifferentPeople(principal: OverlayPrincipal | null, raw: unknown, provenance?: unknown) {
+    const ownerKey = this.owner(principal), by = actorProvenance(principal!, provenance);
+    const operationId = cleanRequestId((raw as Record<string, unknown> | null)?.operationId);
+    return this.write(tx => revokeDifferentIn(tx, ownerKey, operationId, by));
+  }
+  async differentAmong(principal: OverlayPrincipal | null, rawIds: unknown) {
+    const ownerKey = this.owner(principal);
+    if (Array.isArray(rawIds) && rawIds.length > MERGE_LIMITS.idsPerRequest) return fail(400, 'invalid_decision');
+    const ids = Array.isArray(rawIds) ? rawIds.filter(isId) : [];
+    if (!ids.length) return fail(400, 'invalid_decision');
+    return this.read(async tx => ({ decisions: await differentAmongIn(tx, ownerKey, ids) }));
+  }
+
   async listMergeEvents(principal: OverlayPrincipal | null, filter: { batchId?: unknown; entityId?: unknown; limit?: unknown } = {}) {
     const ownerKey = this.owner(principal);
     return this.read(tx => listMergeEventsIn(tx, ownerKey, filter));
@@ -766,7 +786,7 @@ export class OverlayStore {
   }
 
   /** The owner's whole overlay as plain rows. */
-  async exportOwner(principal: OverlayPrincipal | null): Promise<{ entities: unknown[]; notes: unknown[]; links: unknown[]; blurbs?: unknown; contactSources?: unknown[]; mergeEvents?: unknown[]; identityDecisions?: unknown[] }> {
+  async exportOwner(principal: OverlayPrincipal | null): Promise<{ entities: unknown[]; notes: unknown[]; links: unknown[]; blurbs?: unknown; contactSources?: unknown[]; mergeEvents?: unknown[]; identityDecisions?: unknown[]; noteRevisions?: unknown[]; fieldAssertions?: unknown[]; fieldDecisions?: unknown[]; fieldOperations?: unknown[]; identityDecisionReverts?: unknown[] }> {
     const ownerKey = this.owner(principal);
     return this.read(async tx => {
       const blurbState = await loadBlurbs(tx,ownerKey);
@@ -776,6 +796,7 @@ export class OverlayStore {
       return {
         ...(merges.mergeEvents.length ? {mergeEvents: merges.mergeEvents} : {}),
         ...(merges.identityDecisions.length ? {identityDecisions: merges.identityDecisions} : {}),
+        ...(merges.identityDecisionReverts.length ? {identityDecisionReverts: merges.identityDecisionReverts} : {}),
         ...(blurbState.blurbs.length || blurbState.candidates.length || blurbState.conflicts.length ? {blurbs:blurbState} : {}),
         ...(contactSources.length ? {contactSources} : {}),
         // Note revisions and field history are exported only when there are any (older exports read unchanged).
@@ -783,7 +804,8 @@ export class OverlayStore {
           const noteRevisions = await rows('MATCH (r:OverlayNoteRevision {ownerKey: $ownerKey}) RETURN r { .id, .noteId, .entityId, .revision, .text, .author, .savedAt, .replacedAt, .replacedBy } AS row ORDER BY r.noteId, r.revision');
           const fieldAssertions = await rows('MATCH (a:OverlayFieldAssertion {ownerKey: $ownerKey}) RETURN properties(a) AS row ORDER BY a.recordedAt, a.id');
           const fieldDecisions = await rows('MATCH (d:OverlayFieldDecision {ownerKey: $ownerKey}) RETURN properties(d) AS row ORDER BY d.at, d.seq, d.id');
-          return { ...(noteRevisions.length ? { noteRevisions } : {}), ...(fieldAssertions.length ? { fieldAssertions } : {}), ...(fieldDecisions.length ? { fieldDecisions } : {}) };
+          const fieldOperations = await rows('MATCH (o:OverlayFieldOperation {ownerKey: $ownerKey}) RETURN properties(o) AS row ORDER BY o.at, o.id');
+          return { ...(fieldOperations.length ? { fieldOperations } : {}), ...(noteRevisions.length ? { noteRevisions } : {}), ...(fieldAssertions.length ? { fieldAssertions } : {}), ...(fieldDecisions.length ? { fieldDecisions } : {}) };
         })(),
         entities: (await rows(`MATCH (e:OverlayEntity {ownerKey: $ownerKey}) RETURN e { .id, .kind, .deletedAt, .name, .description, .important, .cadenceDays, .cadenceMode, .intervalDays, .lastContactAt, .explicitNextDueAt, .peopleState, .createdAt, .updatedAt,
           .mergedInto, .mergeEventId, ${ASK_PROPERTIES}, refs: [(r:OverlayRef)-[:REF_OF]->(e) | r.ref] } AS row ORDER BY e.createdAt`)).map(value => { const row=value as Record<string,unknown>; if(row.kind==='blurb') return row; const {deletedAt,mergedInto,mergeEventId,...legacy}=row; return {...legacy, ...(mergedInto ? {mergedInto, mergeEventId} : {})}; }),
@@ -1050,7 +1072,6 @@ export async function deleteNoteIn(tx: Runner, ownerKey: string, noteId: string)
   await lockBlurbClock(tx, ownerKey);
   const result = await tx.run("MATCH (n:OverlayNote {id: $noteId, ownerKey: $ownerKey}) WHERE NOT EXISTS { MATCH (e:OverlayEntity {id: n.entityId, ownerKey: $ownerKey, kind: 'blurb'}) WHERE e.deletedAt IS NOT NULL } DETACH DELETE n RETURN count(*) AS removed", { noteId, ownerKey });
   if (!number(result.records[0]?.get('removed'))) fail(404, 'not_found');
-  await tx.run('MATCH (r:OverlayNoteRevision {ownerKey: $ownerKey, noteId: $noteId}) DELETE r', { noteId, ownerKey });
 }
 
 /** `addLink` inside the caller's transaction. `attributes` as for `addLink` (cleaned again here). */

@@ -1,14 +1,14 @@
 {
   "repository": "IdeaFlowCo/noos",
   "path": "src/overlay",
-  "commit": "beecc0f0ba5a05cc998d9674116e53f1585a8aef",
+  "commit": "d2791bf338726f4f3e309c3ea9af45f2e95b2c96",
   "files": {
-    "contract.ts": "4eebd73029269c781ff6feaff8aa780ce9cb1db82ea6696b72768f5ed6b88f5c",
-    "store.ts": "e8f64843982694c43dd022df88440d4ab5c2c307ca68f2d1fc5204a9966bb188",
+    "contract.ts": "e4e4ce5093818bec074bb7e7a27724cd60eba52f01d4d86469f52ef897c52d49",
+    "store.ts": "25f9b476f1683104eaa1872024b6bda12e1ce1ea15ccac49cd9a97a8a6c784ee",
     "publications.ts": "1257dbcb6aa9f5075b68b0ec3fcf027530548d9a0882b8f366e81552a9dece43",
     "blurbs.ts": "707e8e77995c764b1f9e2d7152a08d5d8b7f046d539eef055828fe7a14cc3413",
     "contacts.ts": "a4491c832c9d47b12ae503b60beb243dc8dda7568945538694eca5c2bb94cdbc",
-    "merge.ts": "d30dcef62c7c116628396822e50ccb6a346a69e470bb9886519217cb70fff4a1",
-    "fields.ts": "9d15acf886189ea203babb94d151597206d3d73364ed16e2c8fdf1aecfbe6dfa"
+    "merge.ts": "da68177fbabb0ef67cdcb2b27a05421f7696c85bf2cb83e33c868273ead62353",
+    "fields.ts": "c7d8bed417c68facf17f3ee37c7b93880adadda6722aa50d549cd605633a865a"
   }
 }

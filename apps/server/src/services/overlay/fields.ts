@@ -20,6 +20,7 @@ import { nanoid } from 'nanoid';
 import type { ManagedTransaction } from 'neo4j-driver';
 import { cleanRequestId, fail, isId } from './contract.js';
 import type { Note, Provenance } from './contract.js';
+import { stableJSON } from './contacts.js';
 import type { ContactSource } from './contacts.js';
 
 type Runner = Pick<ManagedTransaction, 'run'>;
@@ -62,7 +63,7 @@ export interface FieldDecision {
 /** One value of one kind, as shown: its current status and every assertion of it (newest first). */
 export interface PersonField {
   key: string; kind: FieldKind; label: string | null; value: FieldValue; normalized: string; status: FieldStatus;
-  pinned: boolean; primary: boolean; conflict: boolean; review: string | null; observedAt: string | null;
+  pinned: boolean; primary: boolean; conflict: boolean; review: string | null; observedAt: string | null; recordedAt: string;
   assertions: Array<Omit<FieldAssertion, 'status' | 'retracted' | 'value' | 'normalized' | 'kind' | 'label'>>;
 }
 export interface FieldSuggestion {
@@ -90,8 +91,12 @@ export function normalizeField(kind: FieldKind, value: FieldValue, label: string
       return bare;
     }
     case 'address': return text.replace(/[.,#]/g, ' ').split(/\s+/).filter(Boolean).map(w => STREET_WORDS[w] ?? w).join(' ');
-    case 'social': return text.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '').replace(/\?.*$/, '');
-    case 'wifi': return `${squash(value.ssid ?? value.text).toLowerCase()}|${value.password ? secretDigest(value.password) : ''}`;
+    case 'social': {
+      const [profile, ...query] = squash(value.text).split('?');
+      const normalized = profile.replace(/^https?:\/\//i, '').replace(/^[^/#]+/, host => host.toLowerCase().replace(/^www\./, ''));
+      return normalized.replace(/\/+$/, '') + (query.length ? `?${query.join('?')}` : '');
+    }
+    case 'wifi': return `${value.ssid ?? value.text}|${value.password ? secretDigest(value.password) : ''}`;
     case 'birthday': {
       const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
       if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
@@ -111,23 +116,21 @@ export function cleanFieldValue(kind: FieldKind, raw: unknown): FieldValue {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail(400, 'invalid_field_value');
     const input = raw as Record<string, unknown>;
     if (Object.keys(input).some(k => !['ssid', 'password', 'text'].includes(k))) return fail(400, 'invalid_field_value');
-    const ssid = line(input.ssid ?? input.text, 200);
+    const rawSsid = input.ssid ?? input.text;
+    const ssid = typeof rawSsid === 'string' && rawSsid.trim().length > 0 && rawSsid.length <= 200 && !/[\u0000-\u0008\u000b-\u001f\u007f]/.test(rawSsid) ? rawSsid : fail(400, 'invalid_field_value');
     const password = input.password === undefined || input.password === null || input.password === '' ? null
       : typeof input.password === 'string' && input.password.length <= 200 && !/[\u0000-\u001f\u007f]/.test(input.password) ? input.password : fail(400, 'invalid_field_value');
     return { text: ssid, ssid, password };
   }
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    const input = raw as Record<string, unknown>;
-    if (Object.keys(input).some(k => !['text', 'type'].includes(k))) return fail(400, 'invalid_field_value');
-    return { text: line(input.text, 1000), ...(kind === 'context' && input.type !== undefined ? { type: line(input.type, 40).toLowerCase() } : {}) };
-  }
-  const text = line(raw, kind === 'address' || kind === 'custom' || kind === 'context' ? 1000 : 300);
+  const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
+  if (input && Object.keys(input).some(k => !['text', 'type'].includes(k))) return fail(400, 'invalid_field_value');
+  const text = line(input ? input.text : raw, kind === 'address' || kind === 'custom' || kind === 'context' ? 1000 : 300);
   if (kind === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return fail(400, 'invalid_field_value');
   if (kind === 'phone' && (text.replace(/\D/g, '').length < 5 || /[a-z]/i.test(text.replace(/\b(ext|x)\b/gi, '')))) return fail(400, 'invalid_field_value');
-  return { text };
+  return { text, ...(kind === 'context' && input?.type !== undefined ? { type: line(input.type, 40).toLowerCase() } : {}) };
 }
 
-/** Wi-Fi passwords are shown only through an explicit field read (`revealPersonField`). */
+/** Masks ordinary field projections; disclosure exceptions are documented in docs/PEOPLE_OVERLAY.md, "Person fields". */
 export function maskValue(value: FieldValue): FieldValue {
   return value.password ? { ...value, password: null, secret: true } : value;
 }
@@ -249,7 +252,22 @@ export async function storedAssertionsIn(tx: Runner, ownerKey: string, ids: stri
   };
 }
 
-const when = (a: { observedAt: string | null; recordedAt: string }) => a.observedAt ?? a.recordedAt;
+const observationTime = (a: { observedAt: string | null }) => a.observedAt ? Date.parse(a.observedAt) : -Infinity;
+const compareObservation = (a: { observedAt: string | null }, b: { observedAt: string | null }) => {
+  const left = observationTime(a), right = observationTime(b);
+  return left === right ? 0 : left > right ? -1 : 1;
+};
+
+function activeDecisions(decisions: FieldDecision[]): FieldDecision[] {
+  const incoming = new Map<string, FieldDecision[]>();
+  for (const d of decisions) if (d.action === 'revert' && d.reverts) incoming.set(d.reverts, [...(incoming.get(d.reverts) ?? []), d]);
+  const memo = new Map<string, boolean>();
+  const active = (d: FieldDecision): boolean => {
+    if (!memo.has(d.id)) memo.set(d.id, !(incoming.get(d.id) ?? []).some(active));
+    return memo.get(d.id)!;
+  };
+  return decisions.filter(active);
+}
 /** Owner statements outrank agents, which outrank imports and evidence (design addendum §3). */
 const rank = (a: FieldAssertion) => a.source === 'owner' ? 3 : a.origin === 'stated' && a.source.startsWith('agent:') ? 2 : 1;
 
@@ -260,8 +278,8 @@ const rank = (a: FieldAssertion) => a.source === 'owner' ? 3 : a.origin === 'sta
  * makes both `conflict`.
  */
 export function projectFields(assertions: FieldAssertion[], decisions: FieldDecision[], reveal = false): PersonField[] {
-  const reverted = new Set(decisions.filter(d => d.action === 'revert' && d.reverts).map(d => d.reverts!));
-  const live = decisions.filter(d => d.action !== 'revert' && !reverted.has(d.id));
+  const live = activeDecisions(decisions).filter(d => d.action !== 'revert');
+  const passwords = assertions.flatMap(a => a.value.password ? [a.value.password] : []);
   const retracted = new Set(live.filter(d => d.action === 'retract' && d.assertionId).map(d => d.assertionId!));
   const groups = new Map<string, FieldAssertion[]>();
   for (const a of assertions) {
@@ -274,33 +292,33 @@ export function projectFields(assertions: FieldAssertion[], decisions: FieldDeci
     const mine = live.filter(d => d.kind === list[0].kind && d.normalized === list[0].normalized);
     let status: FieldStatus = 'current', pinned = false, review: string | null = null, supersededBy: string | null = null, statusAt = '';
     for (const d of mine) {
-      if (d.action === 'pin') pinned = true;
+      if (d.action === 'pin') { pinned = true; status = 'current'; review = null; supersededBy = null; statusAt = d.at; }
       else if (d.action === 'unpin') pinned = false;
       else if (d.action === 'restore') { status = 'current'; review = null; supersededBy = null; statusAt = d.at; }
       else if (d.action === 'former' || d.action === 'wrong' || d.action === 'hidden') { status = d.action; supersededBy = d.supersededBy; statusAt = d.at; }
       else if (d.action === 'review') { status = 'review'; review = d.reason; statusAt = d.at; }
     }
     // A former value said again later (an owner or agent statement after the decision) is current again; imports never revive it.
-    if (status === 'former' && list.some(a => a.origin === 'stated' && a.recordedAt > statusAt)) { status = 'current'; supersededBy = null; }
-    const sorted = list.slice().sort((a, b) => rank(b) - rank(a) || when(b).localeCompare(when(a)));
+    if (status === 'former' && list.some(a => a.origin === 'stated' && a.recordedAt > statusAt && (a.observedAt ? observationTime(a) > Date.parse(statusAt) : (a.source === 'owner' || a.source.startsWith('agent:'))))) { status = 'current'; supersededBy = null; }
+    const sorted = list.slice().sort((a, b) => rank(b) - rank(a) || compareObservation(a, b) || a.id.localeCompare(b.id));
     const lead = sorted[0];
     fields.push({
       key, kind: lead.kind, label: sorted.find(a => a.label)?.label ?? null, value: reveal ? lead.value : maskValue(lead.value), normalized: lead.normalized,
-      status, pinned, primary: false, conflict: false, review, observedAt: list.map(when).sort().at(-1) ?? null,
-      assertions: sorted.map(({ status: _s, retracted: _r, value: _v, normalized: _n, kind: _k, label: _l, ...rest }) => ({ ...rest, supersededBy: rest.supersededBy ?? supersededBy })),
+      status, pinned, primary: false, conflict: false, review, observedAt: lead.observedAt, recordedAt: lead.recordedAt,
+      assertions: sorted.map(({ status: _s, retracted: _r, value: _v, normalized: _n, kind: _k, label: _l, ...rest }) => ({ ...rest, evidence: redactEvidence(rest.evidence, passwords), supersededBy: rest.supersededBy ?? supersededBy })),
     });
   }
   const order = (f: PersonField) => (f.pinned ? 0 : 2) + (f.status === 'current' ? 0 : f.status === 'review' ? 1 : 4);
   const strongest = (f: PersonField) => Math.max(...f.assertions.map(a => a.source === 'owner' ? 3 : a.origin === 'stated' && a.source.startsWith('agent:') ? 2 : 1));
-  fields.sort((a, b) => FIELD_KINDS.indexOf(a.kind) - FIELD_KINDS.indexOf(b.kind) || order(a) - order(b) || strongest(b) - strongest(a) || (b.observedAt ?? '').localeCompare(a.observedAt ?? ''));
+  fields.sort((a, b) => FIELD_KINDS.indexOf(a.kind) - FIELD_KINDS.indexOf(b.kind) || order(a) - order(b) || strongest(b) - strongest(a) || compareObservation(a, b));
   for (const kind of SINGLE_KINDS) {
     const live = fields.filter(f => f.kind === kind && (f.status === 'current' || f.status === 'review'));
     const shown = live.filter(f => f.status === 'current');
+    if (live.length > 1 && !live.some(f => f.pinned)) for (const f of live) f.conflict = true;
     if (!shown.length) continue;
     shown[0].primary = true;
     // Pinned values are each the owner's choice; otherwise a second current or unreviewed value is a conflict.
     if (shown[0].pinned) { for (const f of shown.filter(f => f.pinned)) f.primary = true; continue; }
-    if (live.length > 1) for (const f of live) f.conflict = true;
   }
   for (const f of fields) if (!SINGLE_KINDS.includes(f.kind) && f.status === 'current') f.primary = true;
   return fields;
@@ -309,7 +327,41 @@ export function projectFields(assertions: FieldAssertion[], decisions: FieldDeci
 // ---------------------------------------------------------------- suggestions from notes
 
 const ADDRESS = /\b\d{1,6}[A-Za-z]?\s+(?:[NSEW]\.?\s+)?(?:[A-Z0-9][\w'.-]*\s+){0,4}(?:Avenue|Ave|Street|St|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct|Place|Pl|Terrace|Ter|Parkway|Pkwy|Circle|Cir|Highway|Hwy)\b\.?(?:,?\s+(?:Apt|Unit|Suite|Ste|#)\.?\s*[\w-]+)?(?:,\s*[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,2})?(?:,?\s+[A-Z]{2}\b)?(?:\s+\d{5}(?:-\d{4})?)?/g;
-const WIFI = /\bwi-?fi\b[^:\n]{0,40}?[:\-–]?\s*(?:network|ssid|name)?\s*[:=]?\s*["“]?([^\s,;"”/]{1,64})["”]?\s*(?:,|\/|;|\band\b)?\s*(?:password|pass(?:word|code)?|pw|pwd|key)\s*[:=]?\s*["“]?([^\s"”]{1,64})/i;
+const QUOTED_CREDENTIAL = String.raw`"[^"\r\n]+"|“[^”\r\n]+”|'[^'\r\n]+'|‘[^’\r\n]+’`;
+const SSID_CREDENTIAL = String.raw`(?:${QUOTED_CREDENTIAL}|(?!["“'‘])[^\s,;"“”/]+)`;
+const PASSWORD_CREDENTIAL = String.raw`(?:${QUOTED_CREDENTIAL}|(?!["“'‘])[^\s"“”]+)`;
+const PASSWORD_LABEL = String.raw`\b(?:password|pass(?:word|code)?|pw|pwd|key)\b[^\S\r\n]*(?:is\b[^\S\r\n]*)?[:=]?[^\S\r\n]*`;
+const WIFI = new RegExp(String.raw`\bwi-?fi\b[^:\n]{0,40}?[:\-–]?[^\S\r\n]*(?:network|ssid|name)?[^\S\r\n]*[:=]?[^\S\r\n]*(?<ssid>${SSID_CREDENTIAL})[^\S\r\n]*(?:,|\/|;|\band\b)?[^\S\r\n]*${PASSWORD_LABEL}(?<password>${PASSWORD_CREDENTIAL})`, 'dgi');
+const PASSWORD = new RegExp(String.raw`${PASSWORD_LABEL}(?<password>${PASSWORD_CREDENTIAL})`, 'dgi');
+const quotedCredential = (token: string) => /^["“'‘]/.test(token);
+function credentialValue(token: string, password = false): string {
+  return quotedCredential(token) ? token.slice(1, -1) : password ? token.replace(/[),.;]+$/, '') : token;
+}
+function credentialSpan(m: RegExpMatchArray, name: string, password = false): { value: string; start: number; end: number } {
+  const token = m.groups![name], value = credentialValue(token, password);
+  const start = m.indices!.groups![name][0] + (quotedCredential(token) ? 1 : 0);
+  return { value, start, end: start + value.length };
+}
+function passwordSpans(text: string): Array<{ value: string; start: number; end: number }> {
+  return [...text.matchAll(PASSWORD)].map(m => credentialSpan(m, 'password', true));
+}
+function wifiCredentials(text: string): Array<{ ssid: string; password: string; start: number; ssidStart: number; ssidEnd: number }> {
+  return [...text.matchAll(WIFI)].map(m => {
+    const ssid = credentialSpan(m, 'ssid'), password = credentialSpan(m, 'password', true);
+    return { ssid: ssid.value, password: password.value, start: m.index!, ssidStart: ssid.start, ssidEnd: ssid.end };
+  });
+}
+function wifiPasswords(text: string): string[] {
+  return passwordSpans(text).map(c => c.value).filter(Boolean);
+}
+function redactQuote(quote: string, passwords: string[] = []): string {
+  const secrets = [...new Set([...passwords, ...wifiPasswords(quote)].flatMap(s => [s, squash(s)]))].filter(Boolean).sort((a, b) => b.length - a.length);
+  for (const password of secrets) quote = quote.split(password).join('••••••');
+  return quote.replace(new RegExp(String.raw`(${PASSWORD_LABEL})${PASSWORD_CREDENTIAL}`, 'gi'), '$1••••••');
+}
+function redactEvidence(evidence: FieldEvidence | null, passwords: string[]): FieldEvidence | null {
+  return evidence?.quote ? { ...evidence, quote: redactQuote(evidence.quote, passwords) } : evidence;
+}
 const BIRTHDAY = /\b(?:birthday|bday|born)\b(?:\s+(?:is|on))?\s*[:,-]?\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:,?\s+\d{4})?|\d{4}-\d{2}-\d{2})/i;
 const EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 const PHONE = /(?:\+\d{1,3}[\s.-]?)?\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g;
@@ -319,30 +371,41 @@ export function extractFields(text: string): Array<{ kind: FieldKind; label: str
   const out: Array<{ kind: FieldKind; label: string | null; value: FieldValue; quote: string }> = [];
   // Machine records (`[contact v1] …`, `[friend-ask v1]`) are evidence already imported elsewhere.
   if (/^\s*\[[a-z-]+ v\d+\]/i.test(text)) return out;
+  const credentials = wifiCredentials(text);
+  const secrets = passwordSpans(text);
+  const spans = [...credentials.map(c => ({ start: c.ssidStart, end: c.ssidEnd })), ...secrets];
+  const overlapsCredential = (m: RegExpMatchArray) => spans.some(c => m.index! < c.end && m.index! + m[0].length > c.start);
   for (const m of text.matchAll(ADDRESS)) {
+    if (overlapsCredential(m)) continue;
     const value = m[0].replace(/[\s,.]+$/, '');
     if (!/[A-Za-z]{3,}/.test(value)) continue;
     const before = text.slice(Math.max(0, m.index! - 40), m.index!);
     const label = /guest/i.test(before) ? 'guest' : /work|office/i.test(before) ? 'work' : /home/i.test(before) ? 'home' : null;
     out.push({ kind: 'address', label, value: { text: value }, quote: sentenceAround(text, m.index!, m[0].length) });
   }
-  const wifi = text.match(WIFI);
-  if (wifi) {
-    const ssid = wifi[1], password = wifi[2].replace(/[),.;]+$/, '');
-    const before = text.slice(Math.max(0, wifi.index! - 20), wifi.index! + 12);
+  for (const { ssid, password, start } of credentials) {
+    if (!ssid.trim() || ssid.length > 200 || !password || password.length > 200) continue;
+    const before = text.slice(Math.max(0, start - 20), start + 12);
     out.push({ kind: 'wifi', label: /guest/i.test(before) ? 'guest' : null, value: { text: ssid, ssid, password }, quote: `Wi-Fi ${ssid}` });
   }
-  const birthday = text.match(BIRTHDAY);
+  const birthday = [...text.matchAll(new RegExp(BIRTHDAY.source, 'gi'))].find(m => !overlapsCredential(m));
   if (birthday) out.push({ kind: 'birthday', label: null, value: { text: birthday[1] }, quote: sentenceAround(text, birthday.index!, birthday[0].length) });
-  for (const m of text.matchAll(EMAIL)) out.push({ kind: 'email', label: null, value: { text: m[0] }, quote: m[0] });
-  for (const m of text.matchAll(PHONE)) out.push({ kind: 'phone', label: null, value: { text: m[0].trim() }, quote: sentenceAround(text, m.index!, m[0].length) });
-  return out;
+  for (const m of text.matchAll(EMAIL)) if (!overlapsCredential(m)) out.push({ kind: 'email', label: null, value: { text: m[0] }, quote: m[0] });
+  for (const m of text.matchAll(PHONE)) if (!overlapsCredential(m)) out.push({ kind: 'phone', label: null, value: { text: m[0].trim() }, quote: sentenceAround(text, m.index!, m[0].length) });
+  const passwords = secrets.map(c => c.value);
+  return out.filter(f => f.kind === 'wifi' || !passwords.includes(f.value.text)).map(f => ({ ...f, quote: squash(redactQuote(f.quote, passwords)).slice(0, 280) }));
 }
 function sentenceAround(text: string, index: number, length: number): string {
   const start = Math.max(text.lastIndexOf('\n', index), text.lastIndexOf('. ', index) + 1, 0);
   const endDot = text.indexOf('. ', index + length), endLine = text.indexOf('\n', index + length);
   const end = [endDot, endLine, text.length].filter(x => x >= 0).reduce((a, b) => Math.min(a, b));
-  return squash(text.slice(start, end + (end === endDot ? 1 : 0))).slice(0, 280);
+  const stop = end + (end === endDot ? 1 : 0);
+  let quote = text.slice(start, stop);
+  for (const credential of passwordSpans(text).reverse()) {
+    const from = Math.max(start, credential.start), to = Math.min(stop, credential.end);
+    if (from < to) quote = quote.slice(0, from - start) + '••••••' + quote.slice(to - start);
+  }
+  return quote;
 }
 export const suggestionId = (noteId: string, kind: string, normalized: string) => `sug_${createHash('sha256').update(JSON.stringify([noteId, kind, normalized])).digest('hex').slice(0, 24)}`;
 
@@ -352,8 +415,7 @@ export const suggestionId = (noteId: string, kind: string, normalized: string) =
  * from elsewhere is offered as corroboration ("Add as source").
  */
 export function fieldSuggestions(notes: Note[], fields: PersonField[], decisions: FieldDecision[], reveal = false): FieldSuggestion[] {
-  const reverted = new Set(decisions.filter(d => d.action === 'revert' && d.reverts).map(d => d.reverts!));
-  const dismissed = new Set(decisions.filter(d => d.action === 'dismiss' && !reverted.has(d.id)).map(d => d.reason));
+  const dismissed = new Set(activeDecisions(decisions).filter(d => d.action === 'dismiss').map(d => d.reason));
   const out: FieldSuggestion[] = [];
   for (const note of notes) {
     for (const found of extractFields(note.text)) {
@@ -364,8 +426,8 @@ export function fieldSuggestions(notes: Note[], fields: PersonField[], decisions
       if (existing?.assertions.some(a => a.evidence?.noteId === note.id)) continue;
       // Imported address-book values need no note to back them; only owner/agent-recorded values do.
       if (existing && (found.kind === 'email' || found.kind === 'phone') && existing.assertions.some(a => a.origin === 'imported')) continue;
-      out.push({ id, noteId: note.id, kind: found.kind, label: found.label, value: reveal ? found.value : maskValue(found.value), normalized, quote: found.kind === 'wifi' ? found.quote : found.quote,
-        observedAt: note.createdAt ?? null, corroborates: !!existing && existing.status !== 'wrong' });
+      out.push({ id, noteId: note.id, kind: found.kind, label: found.label, value: reveal ? found.value : maskValue(found.value), normalized, quote: found.quote,
+        observedAt: (note.revision && note.revision > 1 ? note.updatedAt : note.createdAt) ?? null, corroborates: !!existing && existing.status !== 'wrong' });
     }
   }
   return out;
@@ -373,23 +435,24 @@ export function fieldSuggestions(notes: Note[], fields: PersonField[], decisions
 
 // ---------------------------------------------------------------- writing
 
-async function operationIn(tx: Runner, ownerKey: string, requestId: string, entityId: string, kind: string): Promise<{ id: string; replayed: boolean }> {
-  const found = await tx.run('MATCH (o:OverlayFieldOperation {ownerKey:$ownerKey, requestId:$requestId}) RETURN o.id AS id, o.entityId AS entityId, o.kind AS kind', { ownerKey, requestId });
+async function operationIn(tx: Runner, ownerKey: string, requestId: string, ctx: FieldContext, kind: string, input: SetFieldInput | MarkFieldInput, by: Provenance & { actorId: string }): Promise<{ id: string; replayed: boolean }> {
+  const fingerprint = createHash('sha256').update(stableJSON({ input, writer: { author: by.author, actorId: by.actorId } })).digest('hex');
+  const found = await tx.run('MATCH (o:OverlayFieldOperation {ownerKey:$ownerKey, requestId:$requestId}) RETURN o.id AS id, o.entityId AS entityId, o.kind AS kind, o.fingerprint AS fingerprint', { ownerKey, requestId });
   const row = found.records[0];
   if (row) {
-    if (row.get('entityId') !== entityId || row.get('kind') !== kind) return fail(409, 'operation_id_reused');
+    if (!ctx.ids.includes(String(row.get('entityId'))) || row.get('kind') !== kind || row.get('fingerprint') !== fingerprint) return fail(409, 'operation_id_reused');
     return { id: String(row.get('id')), replayed: true };
   }
   const id = `fop_${nanoid()}`;
-  await tx.run('CREATE (:OverlayFieldOperation {id:$id, ownerKey:$ownerKey, requestId:$requestId, entityId:$entityId, kind:$kind, at:$at})', { id, ownerKey, requestId, entityId, kind, at: new Date().toISOString() });
+  await tx.run('CREATE (:OverlayFieldOperation {id:$id, ownerKey:$ownerKey, requestId:$requestId, entityId:$entityId, kind:$kind, fingerprint:$fingerprint, by:$by, actorId:$actorId, at:$at})', { id, ownerKey, requestId, entityId: ctx.headId, kind, fingerprint, by: by.author, actorId: by.actorId, at: new Date().toISOString() });
   return { id, replayed: false };
 }
 let sequence = 0;
-async function decide(tx: Runner, ownerKey: string, entityId: string, d: Omit<FieldDecision, 'id' | 'at'>, by: Provenance): Promise<string> {
+async function decide(tx: Runner, ownerKey: string, entityId: string, d: Omit<FieldDecision, 'id' | 'at'>, by: Provenance & { actorId: string }): Promise<string> {
   const id = `fdc_${nanoid()}`;
   await tx.run(`CREATE (:OverlayFieldDecision {id:$id, ownerKey:$ownerKey, entityId:$entityId, kind:$kind, normalized:$normalized, assertionId:$assertionId, noteId:$noteId,
-    action:$action, reason:$reason, supersededBy:$supersededBy, reverts:$reverts, at:$at, seq:$seq, by:$by, operationId:$operationId})`,
-    { id, ownerKey, entityId, ...d, at: new Date().toISOString(), seq: ++sequence, by: by.author });
+    action:$action, reason:$reason, supersededBy:$supersededBy, reverts:$reverts, at:$at, seq:$seq, by:$by, actorId:$actorId, operationId:$operationId})`,
+    { id, ownerKey, entityId, ...d, at: new Date().toISOString(), seq: ++sequence, by: by.author, actorId: by.actorId });
   return id;
 }
 
@@ -397,8 +460,8 @@ export interface FieldContext { headId: string; ids: string[]; notes: Note[]; so
 export type FieldsResult = { operationId: string; replayed: boolean; assertionId?: string; key?: string };
 
 /** Records one value; with `supersedes` (a value key) the old value becomes former, superseded by this one. */
-export async function setFieldIn(tx: Runner, ownerKey: string, ctx: FieldContext, input: SetFieldInput, by: Provenance & { actorId?: string }): Promise<FieldsResult> {
-  const op = await operationIn(tx, ownerKey, input.requestId, ctx.headId, 'set');
+export async function setFieldIn(tx: Runner, ownerKey: string, ctx: FieldContext, input: SetFieldInput, by: Provenance & { actorId: string }): Promise<FieldsResult> {
+  const op = await operationIn(tx, ownerKey, input.requestId, ctx, 'set', input, by);
   if (op.replayed) {
     const found = await tx.run('MATCH (a:OverlayFieldAssertion {ownerKey:$ownerKey, operationId:$op}) RETURN a.id AS id, a.kind AS kind, a.normalized AS normalized LIMIT 1', { ownerKey, op: op.id });
     const row = found.records[0];
@@ -420,6 +483,8 @@ export async function setFieldIn(tx: Runner, ownerKey: string, ctx: FieldContext
     const note = await tx.run('MATCH (n:OverlayNote {ownerKey:$ownerKey, id:$id}) WHERE n.entityId IN $ids RETURN n.id AS id', { ownerKey, id: evidence.noteId, ids: ctx.ids });
     if (!note.records.length) return fail(400, 'invalid_field_evidence');
   }
+  const stored = await storedAssertionsIn(tx, ownerKey, ctx.ids);
+  evidence = redactEvidence(evidence, [...ctx.notes.flatMap(n => wifiPasswords(n.text)), ...stored.assertions.flatMap(a => a.value.password ? [a.value.password] : []), ...(value.password ? [value.password] : [])]);
   const normalized = normalizeField(kind, value, label);
   const id = `fas_${nanoid()}`;
   await tx.run(`CREATE (:OverlayFieldAssertion {id:$id, ownerKey:$ownerKey, entityId:$entityId, kind:$kind, label:$label, value:$value, normalized:$normalized,
@@ -439,16 +504,15 @@ export async function setFieldIn(tx: Runner, ownerKey: string, ctx: FieldContext
 }
 
 /** Judges one value (by key), retracts one assertion, dismisses one suggestion, or undoes an earlier operation. */
-export async function markFieldIn(tx: Runner, ownerKey: string, ctx: FieldContext, input: MarkFieldInput, by: Provenance): Promise<FieldsResult> {
-  const op = await operationIn(tx, ownerKey, input.requestId, ctx.headId, `mark:${input.action}`);
+export async function markFieldIn(tx: Runner, ownerKey: string, ctx: FieldContext, input: MarkFieldInput, by: Provenance & { actorId: string }): Promise<FieldsResult> {
+  const op = await operationIn(tx, ownerKey, input.requestId, ctx, `mark:${input.action}`, input, by);
   if (op.replayed) return { operationId: op.id, replayed: true };
   const stored = await storedAssertionsIn(tx, ownerKey, ctx.ids);
   const all = [...stored.assertions, ...sourceAssertions(ctx.sources, ctx.headId)];
   if (input.action === 'revert') {
     const target = await tx.run('MATCH (o:OverlayFieldOperation {ownerKey:$ownerKey, id:$id}) WHERE o.entityId IN $ids RETURN o.id AS id', { ownerKey, id: input.operationId, ids: ctx.ids });
     if (!target.records.length) return fail(404, 'operation_not_found');
-    const reverted = new Set(stored.decisions.filter(d => d.action === 'revert').map(d => d.reverts));
-    for (const d of stored.decisions.filter(d => d.operationId === input.operationId && !reverted.has(d.id)))
+    for (const d of activeDecisions(stored.decisions).filter(d => d.operationId === input.operationId))
       await decide(tx, ownerKey, ctx.headId, { kind: d.kind, normalized: d.normalized, assertionId: null, noteId: null, action: 'revert', reason: input.reason, supersededBy: null, reverts: d.id, by: by.author, operationId: op.id }, by);
     for (const a of stored.assertions.filter(a => a.operationId === input.operationId))
       await decide(tx, ownerKey, ctx.headId, { kind: a.kind, normalized: a.normalized, assertionId: a.id, noteId: null, action: 'retract', reason: 'undo', supersededBy: null, reverts: null, by: by.author, operationId: op.id }, by);

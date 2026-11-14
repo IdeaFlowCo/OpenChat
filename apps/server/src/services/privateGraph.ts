@@ -283,6 +283,7 @@ const MESSAGES: Record<string, string> = {
   invalid_field_evidence: 'evidence takes noteId (one of this person\'s notes), quote, messageDate and sourceId', invalid_field_mark: 'Give an action and a value key (or operationId to undo, suggestionId to dismiss, assertionId to retract) and a clientRequestId',
   field_not_found: 'No such value on this person', suggestion_not_found: 'That suggestion is no longer there', operation_not_found: 'No such field change on this person',
   fields_people_only: 'Only people have contact fields',
+  invalid_decision: 'Give 2 to 50 thing ids and an operationId', already_same_person: 'Some of these are already one person; split them first',
 };
 /** Overlay refusals become the app's own wording; anything else stays an unexpected error. */
 async function overlayCall<T>(work: (overlay: OverlayStore) => Promise<T>): Promise<T> {
@@ -609,11 +610,11 @@ export async function addNote(ownerId: string, subject: Subject, rawText: unknow
 }
 
 /** Edits a note in place; the replaced text is kept as a revision. `ifRevision` refuses an edit based on an older text (409, with the current note). */
-export async function updateNote(ownerId: string, noteId: string, rawText: unknown, ifRevision?: unknown, by: Provenance = OWNER_PROVENANCE): Promise<PrivateNote> {
+export async function updateNote(ownerId: string, noteId: string, rawText: unknown, ifRevision?: unknown, by: Provenance = OWNER_PROVENANCE, actorId?: string): Promise<PrivateNote> {
   const text = cleanText(rawText, LIMITS.noteLength, 'Note');
   const principal = await ownerPrincipal(ownerId);
   try {
-    return noteOf(await ownerWrite(ownerId, principal, overlay => overlay.updateNote(principal, noteId, text, { ifRevision, provenance: by })));
+    return noteOf(await ownerWrite(ownerId, principal, overlay => overlay.updateNote(contactPrincipal(principal, by, actorId), noteId, text, { ifRevision, provenance: by })));
   } catch (error) {
     if (error instanceof PrivateGraphError && error.details?.code === 'stale_revision') {
       const current = await overlayCall(overlay => overlay.listNoteRevisions(principal, noteId)).catch(() => null);
@@ -638,9 +639,9 @@ export async function setPersonField(ownerId: string, thingId: string, input: un
   const principal = await ownerPrincipal(ownerId);
   return ownerWrite(ownerId, principal, overlay => overlay.setPersonField(contactPrincipal(principal, by, actorId), thingId, input, by));
 }
-export async function markPersonField(ownerId: string, thingId: string, input: unknown, by: Provenance) {
+export async function markPersonField(ownerId: string, thingId: string, input: unknown, by: Provenance, actorId?: string) {
   const principal = await ownerPrincipal(ownerId);
-  return ownerWrite(ownerId, principal, overlay => overlay.markPersonField(principal, thingId, input, by));
+  return ownerWrite(ownerId, principal, overlay => overlay.markPersonField(contactPrincipal(principal, by, actorId), thingId, input, by));
 }
 /** The one explicit read of an unmasked value (a Wi-Fi password). */
 export async function revealPersonField(ownerId: string, thingId: string, key: string) {
@@ -1020,6 +1021,19 @@ export async function revertMerge(ownerId:string, input:unknown, by:Provenance, 
       throw error;
     }
   });
+}
+/** Review screens: "different people" decisions (Noos docs/PEOPLE_OVERLAY.md, "Different people" decisions). */
+export async function markDifferentPeople(ownerId:string, input:unknown, by:Provenance, actorId?:string) {
+  const principal=await ownerPrincipal(ownerId);
+  return ownerWrite(ownerId,principal,overlay=>overlay.markDifferentPeople(contactPrincipal(principal,by,actorId),input,by));
+}
+export async function undoDifferentPeople(ownerId:string, input:unknown, by:Provenance, actorId?:string) {
+  const principal=await ownerPrincipal(ownerId);
+  return ownerWrite(ownerId,principal,overlay=>overlay.undoDifferentPeople(contactPrincipal(principal,by,actorId),input,by));
+}
+export async function listIdentityDecisions(ownerId:string, ids:string[]) {
+  const principal=await ownerPrincipal(ownerId);
+  return overlayCall(overlay=>overlay.differentAmong(principal,ids));
 }
 export async function listMergeEvents(ownerId:string, filter:{batchId?:unknown; entityId?:unknown; limit?:unknown}) {
   const principal=await ownerPrincipal(ownerId);

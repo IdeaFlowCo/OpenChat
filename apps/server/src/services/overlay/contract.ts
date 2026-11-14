@@ -82,8 +82,10 @@ export interface LinkAttributes { since: string | null; until: string | null; co
 export interface Link extends Provenance, LinkAttributes { id: string; relation: string; relationType: RelationType; direction: 'out' | 'in'; other: LinkEnd; createdAt: string; updatedAt: string | null; updatedBy: string | null }
 /** A link as an edge between two ends, for search and neighbourhood reads. */
 export interface Edge extends Provenance, LinkAttributes { id: string; relation: string; relationType: RelationType; fromId: string; toId: string; createdAt: string; updatedAt: string | null; updatedBy: string | null }
-/** `requestedId` is set when the id asked for was a merged-away record: `id` is then its person's head. */
-/** `fields` and `fieldSuggestions` are computed from field assertions, source cards and notes (./fields.ts); people only. */
+/**
+ * `requestedId` is set when the id asked for was a merged-away record: `id` is then its person's head.
+ * `fields` and `fieldSuggestions` are computed from field assertions, source cards and notes (./fields.ts); people only.
+ */
 export interface EntityDetail extends Entity { notes: Note[]; links: Link[]; contactSources?: Array<import('./contacts.js').ContactSource & { memberId?: string }>; requestedId?: string; fields?: import('./fields.js').PersonField[]; fieldSuggestions?: import('./fields.js').FieldSuggestion[] }
 export interface SearchHit extends Entity { matched: Array<'name' | 'description' | 'note' | 'link'> }
 export interface SearchResult { entities: SearchHit[]; links: Array<Edge & { from: LinkEnd; to: LinkEnd }>; truncated: boolean }
