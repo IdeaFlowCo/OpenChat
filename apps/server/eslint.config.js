@@ -30,9 +30,9 @@ export default tseslint.config(
     },
   },
   {
-    // This pinned Noos validator deliberately rejects control characters.
+    // These pinned Noos validators deliberately reject control characters.
     // Keep the vendored source byte-identical to NOOS_SOURCE.json.
-    files: ['src/services/overlay/contacts.ts'],
+    files: ['src/services/overlay/contacts.ts', 'src/services/overlay/merge.ts'],
     rules: { 'no-control-regex': 'off' },
   },
   {
