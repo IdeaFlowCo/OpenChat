@@ -10,7 +10,7 @@ import { json, Router, type Request, type RequestHandler, type Response } from '
 import { resolveActor } from '../middleware/resolveActor.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import {
-  readContactState, mergePeople, splitPerson, revertMerge, listMergeEvents, importContactSources, importContactSource, savePeopleState, addLink, addListMember, addNote, createPrivateThing, listMembers, removeListMember, deleteAsk, deleteLink, deleteNote, deletePrivateThing, getAsk, listAsks, saveAsk, updateAsk, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
+  readContactState, markDifferentPeople, undoDifferentPeople, listIdentityDecisions, listNoteRevisions, personFields, setPersonField, markPersonField, revealPersonField, mergePeople, splitPerson, revertMerge, listMergeEvents, importContactSources, importContactSource, savePeopleState, addLink, addListMember, addNote, createPrivateThing, listMembers, removeListMember, deleteAsk, deleteLink, deleteNote, deletePrivateThing, getAsk, listAsks, saveAsk, updateAsk, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
   parseCardPatch, PrivateGraphError, searchPrivate, updateLink, updateNote, updatePersonCard, updatePrivateThing,
 } from '../services/privateGraph.js';
 import type { Provenance } from '../services/privateGraph.js';
@@ -199,8 +199,41 @@ router.post('/things/:thingId/links', async (req: Request, res: Response) => {
   try { res.status(201).json(await addLink(owner(req), { kind: 'thing', id: id(req, 'thingId') }, req.body?.relation, req.body?.to, provenanceFor(req), linkAttributes(req))); } catch (error) { fail(error, res); }
 });
 
+// Edit in place (same id and date); the replaced text is kept as a revision. ifRevision guards against overwriting another client's edit.
 router.patch('/notes/:noteId', async (req: Request, res: Response) => {
-  try { res.json(await updateNote(owner(req), id(req, 'noteId'), req.body?.text)); } catch (error) { fail(error, res); }
+  try { const by = provenanceFor(req); res.json(await updateNote(owner(req), id(req, 'noteId'), req.body?.text, req.body?.ifRevision, by, by.author === 'owner' ? undefined : contactActorId(req))); } catch (error) { fail(error, res); }
+});
+router.get('/notes/:noteId/revisions', async (req: Request, res: Response) => {
+  try { res.json(await listNoteRevisions(owner(req), id(req, 'noteId'))); } catch (error) { fail(error, res); }
+});
+
+// Person fields: values with provenance and history. Writes add assertions or decisions; nothing is overwritten.
+// Review screens: "different people" decisions and their undo (revoked, never deleted).
+router.post('/identity-decisions', async (req: Request, res: Response) => {
+  try { res.json(await markDifferentPeople(owner(req), req.body, provenanceFor(req), contactActorId(req))); } catch (error) { fail(error, res); }
+});
+router.post('/identity-decision-reverts', async (req: Request, res: Response) => {
+  try { res.json(await undoDifferentPeople(owner(req), req.body, provenanceFor(req), contactActorId(req))); } catch (error) { fail(error, res); }
+});
+router.get('/identity-decisions', async (req: Request, res: Response) => {
+  try { res.json(await listIdentityDecisions(owner(req), String(req.query.ids ?? '').split(',').filter(Boolean).slice(0, 50))); } catch (error) { fail(error, res); }
+});
+
+router.get('/things/:thingId/fields', async (req: Request, res: Response) => {
+  try { res.json(await personFields(owner(req), id(req, 'thingId'))); } catch (error) { fail(error, res); }
+});
+router.post('/things/:thingId/fields', async (req: Request, res: Response) => {
+  try {
+    const { assertion: _assertion, ...input } = req.body ?? {};
+    const by = provenanceFor(req);
+    res.json(await setPersonField(owner(req), id(req, 'thingId'), { ...input, ...(by.assertion === 'inferred' ? { assertion: 'inferred' } : {}) }, by, by.author === 'owner' ? undefined : contactActorId(req)));
+  } catch (error) { fail(error, res); }
+});
+router.post('/things/:thingId/field-marks', async (req: Request, res: Response) => {
+  try { const by = provenanceFor(req); res.json(await markPersonField(owner(req), id(req, 'thingId'), req.body, by, by.author === 'owner' ? undefined : contactActorId(req))); } catch (error) { fail(error, res); }
+});
+router.get('/things/:thingId/fields/:key/reveal', async (req: Request, res: Response) => {
+  try { res.json(await revealPersonField(owner(req), id(req, 'thingId'), id(req, 'key'))); } catch (error) { fail(error, res); }
 });
 
 router.delete('/notes/:noteId', async (req: Request, res: Response) => {

@@ -14,10 +14,10 @@ describe('vendored Noos overlay', () => {
   it('is pinned to a Noos commit', () => {
     expect(pin.repository).toBe('IdeaFlowCo/noos');
     expect(pin.commit).toMatch(/^[0-9a-f]{40}$/);
-    expect(Object.keys(pin.files).sort()).toEqual(['blurbs.ts', 'contacts.ts', 'contract.ts', 'merge.ts', 'publications.ts', 'store.ts']);
+    expect(Object.keys(pin.files).sort()).toEqual(['blurbs.ts', 'contacts.ts', 'contract.ts', 'fields.ts', 'merge.ts', 'publications.ts', 'store.ts']);
   });
 
-  it.each(['blurbs.ts', 'contacts.ts', 'contract.ts', 'merge.ts', 'publications.ts', 'store.ts'])('%s is byte-identical to the pinned Noos file', name => {
+  it.each(['blurbs.ts', 'contacts.ts', 'contract.ts', 'fields.ts', 'merge.ts', 'publications.ts', 'store.ts'])('%s is byte-identical to the pinned Noos file', name => {
     expect(createHash('sha256').update(readFileSync(join(dir, name))).digest('hex')).toBe(pin.files[name]);
   });
 });

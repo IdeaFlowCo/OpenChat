@@ -59,7 +59,8 @@ export interface PersonCard {
 export type { Provenance, RelationType };
 export { RELATION_TYPES, OWNER_PROVENANCE };
 /** author, source and assertion are null on notes and links written before provenance existed. */
-export interface PrivateNote extends Provenance { id: string; text: string; createdAt: string; updatedAt: string }
+/** `revision` counts edits (1 when never edited); `editedBy` wrote the latest edit. */
+export interface PrivateNote extends Provenance { id: string; text: string; createdAt: string; updatedAt: string; revision?: number; editedBy?: string }
 /**
  * `unlinkedProfileId` is set when the end is a published Unlinked profile
  * (overlay ref `unlinked:person:<id>`); `linkedinRefHash` when it is one of the
@@ -78,7 +79,7 @@ export interface PersonBasics { id: string; name: string; avatarUrl: string | nu
 export interface PersonOverlay { userId: string; person: PersonBasics; card: PersonCard; notes: PrivateNote[]; links: PrivateLink[] }
 /** `description` is the owner's one-line summary, null when none was given. */
 export interface Thing { id: string; kind: ThingKind; name: string; description: string | null }
-export interface ThingDetail extends Thing { card?: PersonCard; peopleState?: unknown; contactSources?: unknown[]; notes: PrivateNote[]; links: PrivateLink[]; unlinkedProfileId?: string; linkedinRefHash?: string; unlinkedConnectionId?: string }
+export interface ThingDetail extends Thing { card?: PersonCard; peopleState?: unknown; contactSources?: unknown[]; fields?: unknown[]; fieldSuggestions?: unknown[]; notes: PrivateNote[]; links: PrivateLink[]; unlinkedProfileId?: string; linkedinRefHash?: string; unlinkedConnectionId?: string }
 /** An Unlinked person: a published profile (`profileId`) and/or one of the owner's imported contacts (`connectionId`, `linkedinRefHash`). */
 export interface UnlinkedPersonOverlay { profileId: string | null; connectionId: string | null; linkedinRefHash: string | null; thingId: string | null; name: string | null; card: PersonCard; notes: PrivateNote[]; links: PrivateLink[] }
 export interface OwnerLink extends Provenance, LinkFacts { id: string; relation: string; relationType: RelationType; from: LinkEnd; to: LinkEnd; createdAt: string; updatedAt: string | null }
@@ -275,6 +276,14 @@ const MESSAGES: Record<string, string> = {
   revert_kind: 'Only merges can be undone; merge again to undo a split', invalid_merge: 'Give 2 to 50 thing ids, a rule and an operationId',
   invalid_head: 'headId must be one of the ids', invalid_split: 'Give the thing id to split off and an operationId', invalid_revert: 'Give either an eventId or a batchId',
   invalid_merge_batch: 'Give 1 to 25 merges', revert_too_large: 'That batch has more than 1000 merges', invalid_batch: 'Unknown batch id', invalid_entity: 'Unknown thing id',
+  stale_revision: 'This note was changed elsewhere. Choose which version to keep.', invalid_revision: 'ifRevision must be a positive whole number',
+  invalid_field: 'A field needs a kind, a value and a clientRequestId, and only known keys', invalid_field_kind: 'kind must be address, phone, email, wifi, birthday, social, context or custom',
+  invalid_field_value: 'That value does not fit this kind (Wi-Fi takes {ssid, password})', invalid_field_label: 'label must be 60 characters or fewer',
+  invalid_field_source: 'source must be owner, agent:<name>, note, imessage or an import source', invalid_observed_at: 'observedAt must be a date such as 2026-11-13',
+  invalid_field_evidence: 'evidence takes noteId (one of this person\'s notes), quote, messageDate and sourceId', invalid_field_mark: 'Give an action and a value key (or operationId to undo, suggestionId to dismiss, assertionId to retract) and a clientRequestId',
+  field_not_found: 'No such value on this person', suggestion_not_found: 'That suggestion is no longer there', operation_not_found: 'No such field change on this person',
+  fields_people_only: 'Only people have contact fields',
+  invalid_decision: 'Give 2 to 50 thing ids and an operationId', already_same_person: 'Some of these are already one person; split them first',
 };
 /** Overlay refusals become the app's own wording; anything else stays an unexpected error. */
 async function overlayCall<T>(work: (overlay: OverlayStore) => Promise<T>): Promise<T> {
@@ -470,7 +479,7 @@ async function linksFor(ownerId: string, links: OverlayLink[], known?: Connectio
 const provenanceOf = (value: Provenance): Provenance => ({ author: value.author, source: value.source, assertion: value.assertion });
 const factsOf = (value: Partial<LinkFacts>): LinkFacts => ({ since: value.since ?? null, until: value.until ?? null, context: value.context ?? null, updatedBy: value.updatedBy ?? null });
 function noteOf(note: PrivateNote): PrivateNote {
-  return { id: note.id, text: note.text, createdAt: note.createdAt, updatedAt: note.updatedAt, ...provenanceOf(note) };
+  return { id: note.id, text: note.text, createdAt: note.createdAt, updatedAt: note.updatedAt, ...provenanceOf(note), ...(note.revision ? { revision: note.revision } : {}), ...(note.editedBy ? { editedBy: note.editedBy } : {}) };
 }
 /** Current display names for the OpenChat people among these ends. */
 async function userNames(ends: Array<{ refs: string[] }>): Promise<Map<string, string>> {
@@ -600,10 +609,44 @@ export async function addNote(ownerId: string, subject: Subject, rawText: unknow
   return noteOf((await overlayCall(overlay => overlay.addNote(principal, entityId, text, by))).note);
 }
 
-export async function updateNote(ownerId: string, noteId: string, rawText: unknown): Promise<PrivateNote> {
+/** Edits a note in place; the replaced text is kept as a revision. `ifRevision` refuses an edit based on an older text (409, with the current note). */
+export async function updateNote(ownerId: string, noteId: string, rawText: unknown, ifRevision?: unknown, by: Provenance = OWNER_PROVENANCE, actorId?: string): Promise<PrivateNote> {
   const text = cleanText(rawText, LIMITS.noteLength, 'Note');
   const principal = await ownerPrincipal(ownerId);
-  return noteOf(await overlayCall(overlay => overlay.updateNote(principal, noteId, text)));
+  try {
+    return noteOf(await ownerWrite(ownerId, principal, overlay => overlay.updateNote(contactPrincipal(principal, by, actorId), noteId, text, { ifRevision, provenance: by })));
+  } catch (error) {
+    if (error instanceof PrivateGraphError && error.details?.code === 'stale_revision') {
+      const current = await overlayCall(overlay => overlay.listNoteRevisions(principal, noteId)).catch(() => null);
+      fail(409, MESSAGES.stale_revision!, { code: 'stale_revision', ...(current ? { note: noteOf(current.note) } : {}) });
+    }
+    throw error;
+  }
+}
+
+export async function listNoteRevisions(ownerId: string, noteId: string) {
+  const principal = await ownerPrincipal(ownerId);
+  const found = await overlayCall(overlay => overlay.listNoteRevisions(principal, noteId));
+  return { note: noteOf(found.note), revisions: found.revisions };
+}
+
+// Person fields (Noos docs/PEOPLE_OVERLAY.md, "Person fields"): append-only assertions and owner decisions.
+export async function personFields(ownerId: string, thingId: string) {
+  const principal = await ownerPrincipal(ownerId);
+  return overlayCall(overlay => overlay.personFields(principal, thingId));
+}
+export async function setPersonField(ownerId: string, thingId: string, input: unknown, by: Provenance, actorId?: string) {
+  const principal = await ownerPrincipal(ownerId);
+  return ownerWrite(ownerId, principal, overlay => overlay.setPersonField(contactPrincipal(principal, by, actorId), thingId, input, by));
+}
+export async function markPersonField(ownerId: string, thingId: string, input: unknown, by: Provenance, actorId?: string) {
+  const principal = await ownerPrincipal(ownerId);
+  return ownerWrite(ownerId, principal, overlay => overlay.markPersonField(contactPrincipal(principal, by, actorId), thingId, input, by));
+}
+/** Explicitly reveals one structured field; ordinary field projections mask Wi-Fi passwords. */
+export async function revealPersonField(ownerId: string, thingId: string, key: string) {
+  const principal = await ownerPrincipal(ownerId);
+  return overlayCall(overlay => overlay.revealPersonField(principal, thingId, key));
 }
 
 export async function deleteNote(ownerId: string, noteId: string): Promise<{ deleted: true }> {
@@ -979,6 +1022,19 @@ export async function revertMerge(ownerId:string, input:unknown, by:Provenance, 
     }
   });
 }
+/** Review screens: "different people" decisions (Noos docs/PEOPLE_OVERLAY.md, "Different people" decisions). */
+export async function markDifferentPeople(ownerId:string, input:unknown, by:Provenance, actorId?:string) {
+  const principal=await ownerPrincipal(ownerId);
+  return ownerWrite(ownerId,principal,overlay=>overlay.markDifferentPeople(contactPrincipal(principal,by,actorId),input,by));
+}
+export async function undoDifferentPeople(ownerId:string, input:unknown, by:Provenance, actorId?:string) {
+  const principal=await ownerPrincipal(ownerId);
+  return ownerWrite(ownerId,principal,overlay=>overlay.undoDifferentPeople(contactPrincipal(principal,by,actorId),input,by));
+}
+export async function listIdentityDecisions(ownerId:string, ids:string[]) {
+  const principal=await ownerPrincipal(ownerId);
+  return overlayCall(overlay=>overlay.differentAmong(principal,ids));
+}
 export async function listMergeEvents(ownerId:string, filter:{batchId?:unknown; entityId?:unknown; limit?:unknown}) {
   const principal=await ownerPrincipal(ownerId);
   return overlayCall(overlay=>overlay.listMergeEvents(principal,filter));
@@ -989,7 +1045,7 @@ export async function getThing(ownerId: string, thingId: string): Promise<ThingD
   const found: EntityDetail = await overlayCall(overlay => overlay.get(principal, thingId));
   if (userIdOf(found.refs) !== null) fail(404, 'Not found');
   const connections = await connectionsFor(ownerId, [found, ...found.links.map(link => link.other)]);
-  return { ...thingOf(found), card:found.card, peopleState:(found as any).peopleState, contactSources:found.contactSources ?? [], ...(found.members ? {members:found.members} : {}), ...(found.requestedId ? {requestedId:found.requestedId} : {}), ...unlinkedFields(found.refs, connections), notes: found.notes.map(noteOf), links: await linksFor(ownerId, found.links, connections) };
+  return { ...thingOf(found), card:found.card, peopleState:(found as any).peopleState, contactSources:found.contactSources ?? [], ...(found.fields ? {fields:found.fields, fieldSuggestions:found.fieldSuggestions ?? []} : {}), ...(found.members ? {members:found.members} : {}), ...(found.requestedId ? {requestedId:found.requestedId} : {}), ...unlinkedFields(found.refs, connections), notes: found.notes.map(noteOf), links: await linksFor(ownerId, found.links, connections) };
 }
 
 /** People whose catch-up date has passed, soonest first; starred people lead ties. */

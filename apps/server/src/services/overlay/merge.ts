@@ -32,9 +32,10 @@ export const MERGE_CONSTRAINTS = [
   'CREATE INDEX overlay_entity_merged IF NOT EXISTS FOR (e:OverlayEntity) ON (e.ownerKey, e.mergedInto)',
   'CREATE INDEX overlay_merge_event_owner IF NOT EXISTS FOR (m:OverlayMergeEvent) ON (m.ownerKey, m.batchId)',
   'CREATE INDEX overlay_identity_decision_owner IF NOT EXISTS FOR (d:OverlayIdentityDecision) ON (d.ownerKey)',
+  'CREATE CONSTRAINT overlay_identity_decision_revert IF NOT EXISTS FOR (r:OverlayIdentityDecisionRevert) REQUIRE (r.ownerKey, r.operationId) IS UNIQUE',
 ];
 /** Owner-scoped labels that follow owner erasure and rekeying. */
-export const MERGE_LABELS = ['OverlayMergeEvent', 'OverlayIdentityDecision'] as const;
+export const MERGE_LABELS = ['OverlayMergeEvent', 'OverlayIdentityDecision', 'OverlayIdentityDecisionRevert'] as const;
 
 export const MERGE_LIMITS = { idsPerRequest: 50, clusterSize: 50, evidence: 40, evidenceLength: 300, batchRevert: 1000 } as const;
 
@@ -90,6 +91,81 @@ export function parseRevertInput(raw: unknown): RevertInput {
   const batchId = input.batchId === undefined || input.batchId === null ? null : typeof input.batchId === 'string' && BATCH.test(input.batchId) ? input.batchId : fail(400, 'invalid_revert');
   if ((eventId === null) === (batchId === null)) return fail(400, 'invalid_revert');
   return { eventId, batchId, ...(input.operationId === undefined ? {} : { operationId: cleanRequestId(input.operationId) }) };
+}
+
+/** "Different people" from a review screen: 2-50 people the owner says are not the same person. */
+export interface DifferentInput { ids: string[]; operationId: string; reason: string | null }
+export function parseDifferentInput(raw: unknown): DifferentInput {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail(400, 'invalid_decision');
+  const input = raw as Record<string, unknown>;
+  if (Object.keys(input).some(key => !['ids', 'operationId', 'reason'].includes(key))) return fail(400, 'invalid_decision');
+  if (!Array.isArray(input.ids) || input.ids.length < 2 || input.ids.length > MERGE_LIMITS.idsPerRequest || !input.ids.every(isId)) return fail(400, 'invalid_decision');
+  const ids = [...new Set(input.ids as string[])].sort();
+  if (ids.length < 2) return fail(400, 'invalid_decision');
+  const reason = input.reason === undefined || input.reason === null ? null
+    : typeof input.reason === 'string' && input.reason.trim() && input.reason.length <= 280 && !CONTROL.test(input.reason) ? input.reason.trim() : fail(400, 'invalid_decision');
+  return { ids, operationId: cleanRequestId(input.operationId), reason };
+}
+
+/**
+ * Records that these people are pairwise different (one `OverlayIdentityDecision` per pair, verdict `different`,
+ * anchored on each person's current head), so later merges refuse them (409 `cannot_link`). Idempotent on
+ * operationId; undo with `revokeDifferentIn`, which marks the decisions revoked rather than deleting them.
+ */
+export async function markDifferentIn(tx: Runner, ownerKey: string, input: DifferentInput, by: By): Promise<{ replayed: boolean; operationId: string; decisions: number; heads: string[] }> {
+  await lockOwner(tx, ownerKey);
+  const print = createHash('sha256').update(JSON.stringify([input.ids, input.reason])).digest('hex');
+  const prior = await tx.run('MATCH (d:OverlayIdentityDecision {ownerKey:$ownerKey, operationId:$operationId}) RETURN d.fingerprint AS print, count(d) AS n, collect(DISTINCT d.anchorsA[0]) + collect(DISTINCT d.anchorsB[0]) AS heads', { ownerKey, operationId: input.operationId });
+  const n = Number(prior.records[0]?.get('n') ?? 0);
+  if (n > 0) {
+    if (prior.records[0]!.get('print') !== print) return fail(409, 'operation_id_reused');
+    return { replayed: true, operationId: input.operationId, decisions: n, heads: [...new Set(prior.records[0]!.get('heads') as string[])].sort() };
+  }
+  const heads: string[] = [];
+  for (const id of input.ids) {
+    const found = await tx.run("MATCH (e:OverlayEntity {ownerKey:$ownerKey, id:$id}) RETURN coalesce(e.mergedInto, e.id) AS head, e.kind AS kind", { ownerKey, id });
+    const row = found.records[0];
+    if (!row) return fail(404, 'not_found');
+    if (row.get('kind') !== 'person') return fail(409, 'merge_kind');
+    heads.push(String(row.get('head')));
+  }
+  const distinct = [...new Set(heads)].sort();
+  if (distinct.length !== heads.length) return fail(409, 'already_same_person');
+  const now = new Date().toISOString();
+  let decisions = 0;
+  for (let i = 0; i < distinct.length; i++) for (let j = i + 1; j < distinct.length; j++) {
+    await tx.run(`CREATE (d:OverlayIdentityDecision {id:$id, ownerKey:$ownerKey, verdict:'different', anchorsA:$a, anchorsB:$b, eventId:null, operationId:$operationId,
+      fingerprint:$print, reason:$reason, actor:$actor, actorId:$actorId, via:$via, at:$now})`,
+      { id: nanoid(), ownerKey, a: [distinct[i]], b: [distinct[j]], operationId: input.operationId, print, reason: input.reason, actor: by.author, actorId: by.actorId, via: by.source, now });
+    decisions++;
+  }
+  return { replayed: false, operationId: input.operationId, decisions, heads: distinct };
+}
+
+/** Undo of "different people": the decisions stay, marked revoked (they no longer block merges). */
+export async function revokeDifferentIn(tx: Runner, ownerKey: string, operationId: string, by: By): Promise<{ revoked: number }> {
+  await lockOwner(tx, ownerKey);
+  const now = new Date().toISOString(), revokeOperationId = nanoid();
+  const rows = await tx.run(`MATCH (d:OverlayIdentityDecision {ownerKey:$ownerKey, operationId:$operationId}) WHERE d.eventId IS NULL
+    WITH d, d.revokedAt IS NULL AS live
+    FOREACH (_ IN CASE WHEN live THEN [1] ELSE [] END | SET d.revokedAt = $now, d.revokedBy = $by, d.revokedByActorId = $actorId, d.revokeOperationId = $revokeOperationId)
+    RETURN count(d) AS total, sum(CASE WHEN live THEN 1 ELSE 0 END) AS revoked`,
+    { ownerKey, operationId, now, by: by.author, actorId: by.actorId, revokeOperationId });
+  if (!Number(rows.records[0]?.get('total') ?? 0)) return fail(404, 'not_found');
+  const revoked = Number(rows.records[0]!.get('revoked') ?? 0);
+  if (revoked) await tx.run(`CREATE (r:OverlayIdentityDecisionRevert {id:$id, ownerKey:$ownerKey, operationId:$operationId,
+    actor:$actor, actorId:$actorId, via:$via, at:$now, revoked:$revoked})`,
+    { id: revokeOperationId, ownerKey, operationId, actor: by.author, actorId: by.actorId, via: by.source, now, revoked });
+  return { revoked };
+}
+
+/** Live "different" decisions touching any of these people (their heads), for review screens. */
+export async function differentAmongIn(tx: Runner, ownerKey: string, ids: string[]): Promise<Array<{ a: string[]; b: string[]; operationId: string | null; at: string }>> {
+  const heads = [...(await headsOf(tx, ownerKey, ids)).values()];
+  const members = [...new Set([...(await membersOf(tx, ownerKey, [...new Set(heads)])).values()].flat())];
+  const rows = await tx.run(`MATCH (d:OverlayIdentityDecision {ownerKey:$ownerKey, verdict:'different'}) WHERE d.revokedAt IS NULL
+    AND (any(x IN d.anchorsA WHERE x IN $members) OR any(x IN d.anchorsB WHERE x IN $members)) RETURN d.anchorsA AS a, d.anchorsB AS b, d.operationId AS op, d.at AS at ORDER BY d.at`, { ownerKey, members });
+  return rows.records.map(r => ({ a: r.get('a') as string[], b: r.get('b') as string[], operationId: (r.get('op') as string | null) ?? null, at: String(r.get('at')) }));
 }
 
 /** Serializes every membership change of one owner (the same per-owner clock other overlay writes lock). */
@@ -374,9 +450,10 @@ function eventFrom(row: Record<string, unknown>): MergeEvent {
   };
 }
 
-/** Export rows: every merge event and identity decision, as stored. */
-export async function exportMergesIn(tx: Runner, ownerKey: string): Promise<{ mergeEvents: unknown[]; identityDecisions: unknown[] }> {
+/** Export stored merge and identity-decision audit rows, including undo receipts. */
+export async function exportMergesIn(tx: Runner, ownerKey: string): Promise<{ mergeEvents: unknown[]; identityDecisions: unknown[]; identityDecisionReverts: unknown[] }> {
   const events = await tx.run('MATCH (m:OverlayMergeEvent {ownerKey:$ownerKey}) RETURN properties(m) AS row ORDER BY m.at, m.id', { ownerKey });
   const decisions = await tx.run('MATCH (d:OverlayIdentityDecision {ownerKey:$ownerKey}) RETURN properties(d) AS row ORDER BY d.at, d.id', { ownerKey });
-  return { mergeEvents: events.records.map(r => r.get('row')), identityDecisions: decisions.records.map(r => r.get('row')) };
+  const reverts = await tx.run('MATCH (r:OverlayIdentityDecisionRevert {ownerKey:$ownerKey}) RETURN properties(r) AS row ORDER BY r.at, r.id', { ownerKey });
+  return { mergeEvents: events.records.map(r => r.get('row')), identityDecisions: decisions.records.map(r => r.get('row')), identityDecisionReverts: reverts.records.map(r => r.get('row')) };
 }
