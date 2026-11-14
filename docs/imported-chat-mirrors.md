@@ -6,6 +6,11 @@ to that owner only. It is not an OpenChat conversation: nobody in it is
 messaged, invited, notified or matched, and nothing in it is visible to anyone
 but the owner and agents the owner has given a key.
 
+One exception, always by the owner's explicit action: the owner can share a
+mirror into a group conversation they own, which lets that group's members
+read its messages and participant names (never its asks, facts or source
+keys). See [shared chat mirrors](shared-chat-mirrors.md).
+
 Tracked in beads `OpenChat-061g`.
 
 ## What it is not

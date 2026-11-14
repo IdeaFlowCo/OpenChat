@@ -3,12 +3,15 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 
+export type ConversationLaneTab = 'chat' | 'context' | 'links';
 interface Props {
-  activeLane: 'chat' | 'context';
-  onChange: (lane: 'chat' | 'context') => void;
+  activeLane: ConversationLaneTab;
+  onChange: (lane: ConversationLaneTab) => void;
+  /** Links appear only for conversations that keep link resources (OpenChat-c8to.5). */
+  showLinks?: boolean;
 }
 
-export function ConversationLaneSwitch({ activeLane, onChange }: Props) {
+export function ConversationLaneSwitch({ activeLane, onChange, showLinks = false }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
 
@@ -34,6 +37,19 @@ export function ConversationLaneSwitch({ activeLane, onChange }: Props) {
         >
           <Text style={[styles.label, { color: activeLane === 'context' ? c.textPrimary : c.textMuted }]}>Context</Text>
         </TouchableOpacity>
+
+        {showLinks && (
+          <TouchableOpacity
+            style={[styles.segment, activeLane === 'links' && [styles.segmentActive, { backgroundColor: c.background, shadowColor: c.textPrimary }]]}
+            onPress={() => onChange('links')}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeLane === 'links' }}
+            accessibilityLabel="Links"
+            testID="conversation-lane-links"
+          >
+            <Text style={[styles.label, { color: activeLane === 'links' ? c.textPrimary : c.textMuted }]}>Links</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );

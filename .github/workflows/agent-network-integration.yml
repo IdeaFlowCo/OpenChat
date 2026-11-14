@@ -94,3 +94,4 @@ jobs:
           apps/server/test/privateLists.integration.test.ts
           apps/server/test/importedChats.integration.test.ts
           apps/server/test/importedChatAccount.integration.test.ts
+          apps/server/test/sharedMirrors.integration.test.ts
