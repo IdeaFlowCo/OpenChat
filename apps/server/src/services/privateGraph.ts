@@ -266,6 +266,15 @@ const MESSAGES: Record<string, string> = {
   state_conflict: 'People state has changed. Read the current revision and try again.',
   operation_id_reused: 'This operation id was already used for a different request.',
   legacy_operation_requires_reconciliation: 'This earlier operation needs reconciliation before retrying.',
+  merged_record: 'This record is part of a merged person. Split it off first, then delete it.',
+  merged_person: 'This person has merged records. Split them off first, then delete.',
+  merge_kind: 'Only people can be merged', merge_account: 'OpenChat people keep their own card and cannot be merged yet',
+  merge_state_conflict: 'More than one of these has People state or a catch-up setting; merge them by hand',
+  cannot_link: 'These were marked as different people', merge_too_large: 'That would make a person of more than 50 records',
+  merge_superseded: 'A later merge or split depends on this one; undo that first', not_merged: 'This record is not merged with anything',
+  revert_kind: 'Only merges can be undone; merge again to undo a split', invalid_merge: 'Give 2 to 50 thing ids, a rule and an operationId',
+  invalid_head: 'headId must be one of the ids', invalid_split: 'Give the thing id to split off and an operationId', invalid_revert: 'Give either an eventId or a batchId',
+  invalid_merge_batch: 'Give 1 to 25 merges', revert_too_large: 'That batch has more than 1000 merges', invalid_batch: 'Unknown batch id', invalid_entity: 'Unknown thing id',
 };
 /** Overlay refusals become the app's own wording; anything else stays an unexpected error. */
 async function overlayCall<T>(work: (overlay: OverlayStore) => Promise<T>): Promise<T> {
@@ -905,11 +914,11 @@ export async function listThings(ownerId: string, query: unknown, kind: unknown,
   const includeDetails = !summary && (options.details === true || options.details === 'true');
   const page = await overlayCall(overlay => overlay.listPage(principal, {q:query, kind, after:options.after, limit:options.limit,
     excludeRefPrefix:'openchat:user:', namedOnly:true, details:includeDetails}));
-  if (summary) return {things:page.entities.map(e => ({...thingOf(e), card:e.card})), nextCursor:page.nextCursor, total:page.total};
+  if (summary) return {things:page.entities.map(e => ({...thingOf(e), card:e.card, ...(e.members ? {members:e.members} : {})})), nextCursor:page.nextCursor, total:page.total};
   const details = page.entities as EntityDetail[];
   const connections = includeDetails
     ? await connectionsFor(ownerId, details.flatMap(e => [e, ...(e.links ?? []).map(l => l.other)])) : new Map();
-  const things = await Promise.all(details.map(async e => ({...thingOf(e), card:e.card, ...((e as any).peopleState ? {peopleState:(e as any).peopleState} : {}),
+  const things = await Promise.all(details.map(async e => ({...thingOf(e), card:e.card, ...((e as any).peopleState ? {peopleState:(e as any).peopleState} : {}), ...(e.members ? {members:e.members} : {}),
     ...(e.notes ? {notes:e.notes.map(noteOf), links:await linksFor(ownerId,e.links,connections), contactSources:e.contactSources ?? []} : {})})));
   return {things, nextCursor:page.nextCursor, total:page.total};
 }
@@ -941,11 +950,38 @@ export async function savePeopleState(ownerId:string, thingId:string, input:unkn
   return ownerWrite(ownerId,principal,overlay=>overlay.savePeopleState(contactPrincipal(principal,by,actorId),thingId,input,by));
 }
 
-/** Owner-authored private data remains readable independently of an account profile. */
+/** Owner-authored private data remains readable independently of an account profile. A merged record reads as its person. */
 export async function readContactState(ownerId:string, thingId:string) {
   const principal=await ownerPrincipal(ownerId);
   const found=await overlayCall(overlay=>overlay.get(principal,thingId));
-  return {thingId:found.id, card:found.card, contactSources:found.contactSources ?? [], ...(found.peopleState ? {peopleState:found.peopleState} : {})};
+  return {thingId:found.id, card:found.card, contactSources:found.contactSources ?? [], ...(found.peopleState ? {peopleState:found.peopleState} : {}),
+    ...(found.requestedId ? {requestedId:found.requestedId} : {}), ...(found.members ? {members:found.members} : {})};
+}
+
+// People resolution (Noos docs/PEOPLE_OVERLAY.md, "Merging people"): identity-level writes, so they carry the verified actor like contact writes.
+export async function mergePeople(ownerId:string, merges:unknown, batchId:unknown, by:Provenance, actorId?:string) {
+  const principal=await ownerPrincipal(ownerId);
+  if (!Array.isArray(merges)) return fail(400, MESSAGES.invalid_merge_batch!);
+  const items=merges.map(item => item && typeof item === 'object' && !Array.isArray(item) && batchId !== undefined && (item as Record<string,unknown>).batchId === undefined ? {...item as Record<string,unknown>, batchId} : item);
+  return ownerWrite(ownerId,principal,overlay=>overlay.mergePeopleBatch(contactPrincipal(principal,by,actorId),items,by));
+}
+export async function splitPerson(ownerId:string, input:unknown, by:Provenance, actorId?:string) {
+  const principal=await ownerPrincipal(ownerId);
+  return ownerWrite(ownerId,principal,overlay=>overlay.splitPerson(contactPrincipal(principal,by,actorId),input,by));
+}
+export async function revertMerge(ownerId:string, input:unknown, by:Provenance, actorId?:string) {
+  const principal=await ownerPrincipal(ownerId);
+  return ownerWrite(ownerId,principal,async overlay=>{
+    try { return await overlay.revertMerge(contactPrincipal(principal,by,actorId),input,by); }
+    catch (error) {
+      if (error instanceof OverlayError && error.code === 'merge_superseded') fail(409, MESSAGES.merge_superseded!, {code:'merge_superseded', ...(error.details ?? {})});
+      throw error;
+    }
+  });
+}
+export async function listMergeEvents(ownerId:string, filter:{batchId?:unknown; entityId?:unknown; limit?:unknown}) {
+  const principal=await ownerPrincipal(ownerId);
+  return overlayCall(overlay=>overlay.listMergeEvents(principal,filter));
 }
 
 export async function getThing(ownerId: string, thingId: string): Promise<ThingDetail> {
@@ -953,7 +989,7 @@ export async function getThing(ownerId: string, thingId: string): Promise<ThingD
   const found: EntityDetail = await overlayCall(overlay => overlay.get(principal, thingId));
   if (userIdOf(found.refs) !== null) fail(404, 'Not found');
   const connections = await connectionsFor(ownerId, [found, ...found.links.map(link => link.other)]);
-  return { ...thingOf(found), card:found.card, peopleState:(found as any).peopleState, contactSources:found.contactSources ?? [], ...unlinkedFields(found.refs, connections), notes: found.notes.map(noteOf), links: await linksFor(ownerId, found.links, connections) };
+  return { ...thingOf(found), card:found.card, peopleState:(found as any).peopleState, contactSources:found.contactSources ?? [], ...(found.members ? {members:found.members} : {}), ...(found.requestedId ? {requestedId:found.requestedId} : {}), ...unlinkedFields(found.refs, connections), notes: found.notes.map(noteOf), links: await linksFor(ownerId, found.links, connections) };
 }
 
 /** People whose catch-up date has passed, soonest first; starred people lead ties. */
