@@ -246,7 +246,9 @@ export class OverlayStore {
    * Saving the same text again changes nothing.
    */
   async updateNote(principal: OverlayPrincipal | null, noteId: unknown, rawText: unknown, options: { ifRevision?: unknown; provenance?: unknown } = {}): Promise<Note> {
-    const ownerKey = this.owner(principal), text = cleanText(rawText, LIMITS.noteLength, 'invalid_note'), by = cleanProvenance(options.provenance);
+    const ownerKey = this.owner(principal), text = cleanText(rawText, LIMITS.noteLength, 'invalid_note');
+    // The editor is the authenticated writer (actor and verified actor id), never a label from the request.
+    const by = { ...cleanProvenance(options.provenance), ...(principal?.actor ? { author: principal.actor } : {}), actorId: principal?.actorId ?? null };
     if (!isId(noteId)) return fail(404, 'not_found');
     const ifRevision = options.ifRevision === undefined || options.ifRevision === null ? null
       : Number.isSafeInteger(options.ifRevision) && (options.ifRevision as number) >= 1 ? options.ifRevision as number : fail(400, 'invalid_revision');
@@ -1552,7 +1554,7 @@ async function fieldsIn(tx: Runner, ownerKey: string, ctx: FieldContext, reveal 
 export interface NoteRevision { revision: number; text: string; author: string | null; savedAt: string; replacedAt: string; replacedBy: string | null }
 
 /** `updateNote` inside the caller's transaction. */
-export async function updateNoteIn(tx: Runner, ownerKey: string, noteId: string, text: string, ifRevision: number | null, by: Provenance): Promise<Note> {
+export async function updateNoteIn(tx: Runner, ownerKey: string, noteId: string, text: string, ifRevision: number | null, by: Provenance & { actorId?: string | null }): Promise<Note> {
   await lockBlurbClock(tx, ownerKey);
   const found = await tx.run(`MATCH (n:OverlayNote {id: $noteId, ownerKey: $ownerKey}) WHERE NOT EXISTS { MATCH (e:OverlayEntity {id: n.entityId, ownerKey: $ownerKey, kind: 'blurb'}) WHERE e.deletedAt IS NOT NULL }
     RETURN ${NOTE} AS note, n.entityId AS entityId`, { noteId, ownerKey });
@@ -1564,10 +1566,10 @@ export async function updateNoteIn(tx: Runner, ownerKey: string, noteId: string,
   const now = new Date().toISOString(), revision = (current.revision ?? 1) + 1;
   // The replaced text is kept, never overwritten: one immutable revision per edit.
   await tx.run(`CREATE (:OverlayNoteRevision {id: $id, ownerKey: $ownerKey, noteId: $noteId, entityId: $entityId, revision: $old, text: $oldText, author: $oldAuthor,
-    savedAt: $savedAt, replacedAt: $now, replacedBy: $by})`, { id: nanoid(), ownerKey, noteId, entityId: row.get('entityId'), old: current.revision ?? 1, oldText: current.text,
-    oldAuthor: current.editedBy ?? current.author, savedAt: current.updatedAt, now, by: by.author });
-  const updated = await tx.run(`MATCH (n:OverlayNote {id: $noteId, ownerKey: $ownerKey}) SET n.text = $text, n.updatedAt = $now, n.revision = $revision, n.editedBy = $by RETURN ${NOTE} AS note`,
-    { noteId, ownerKey, text, now, revision, by: by.author });
+    savedAt: $savedAt, replacedAt: $now, replacedBy: $by, replacedByActorId: $actorId})`, { id: nanoid(), ownerKey, noteId, entityId: row.get('entityId'), old: current.revision ?? 1, oldText: current.text,
+    oldAuthor: current.editedBy ?? current.author, savedAt: current.updatedAt, now, by: by.author, actorId: by.actorId ?? null });
+  const updated = await tx.run(`MATCH (n:OverlayNote {id: $noteId, ownerKey: $ownerKey}) SET n.text = $text, n.updatedAt = $now, n.revision = $revision, n.editedBy = $by, n.editedByActorId = $actorId RETURN ${NOTE} AS note`,
+    { noteId, ownerKey, text, now, revision, by: by.author, actorId: by.actorId ?? null });
   return noteFrom(updated.records[0]!.get('note') as Record<string, unknown>);
 }
 

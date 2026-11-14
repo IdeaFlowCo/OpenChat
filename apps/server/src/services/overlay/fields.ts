@@ -493,7 +493,10 @@ export async function setFieldIn(tx: Runner, ownerKey: string, ctx: FieldContext
     evidence: evidence ? JSON.stringify(evidence) : null, observedAt, recordedAt: new Date().toISOString(), recordedBy: by.author, actorId: by.actorId ?? null,
     origin: input.origin, operationId: op.id });
   const key = valueKey(kind, normalized);
-  if (input.status === 'former' || input.status === 'review') await decide(tx, ownerKey, ctx.headId, { kind, normalized, assertionId: id, noteId: null, action: input.status, reason: input.review, supersededBy: null, reverts: null, by: by.author, operationId: op.id }, by);
+  // An inferred value (an agent's conclusion) stays a review item until the owner accepts it; it never becomes current on its own.
+  const status = input.status ?? (input.origin === 'inferred' ? 'review' : null);
+  const reason = input.review ?? (status === 'review' && input.origin === 'inferred' ? `Suggested by ${(by.author ?? 'an agent').replace(/^agent:/, '')}` : null);
+  if (status === 'former' || status === 'review') await decide(tx, ownerKey, ctx.headId, { kind, normalized, assertionId: id, noteId: null, action: status, reason, supersededBy: null, reverts: null, by: by.author, operationId: op.id }, by);
   if (input.supersedes && input.supersedes !== key) {
     const stored = await storedAssertionsIn(tx, ownerKey, ctx.ids);
     const old = projectFields([...stored.assertions, ...sourceAssertions(ctx.sources, ctx.headId)], stored.decisions).find(f => f.key === input.supersedes);
