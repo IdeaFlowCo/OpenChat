@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const state = vi.hoisted(() => ({ run: vi.fn() }));
 vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({ run: state.run, close: async () => {} }) }) }));
 const graph = vi.hoisted(() => ({
-  importContactSources: vi.fn(), savePeopleState: vi.fn(),
+  importContactSources: vi.fn(), savePeopleState: vi.fn(), mergePeople: vi.fn(), splitPerson: vi.fn(), revertMerge: vi.fn(), listMergeEvents: vi.fn(),
   addLink: vi.fn(), addNote: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), deletePrivateThing: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
   getUnlinkedPersonOverlay: vi.fn(), listDue: vi.fn(), resolvePrivateThing: vi.fn(), listOwnerLinks: vi.fn(), listThings: vi.fn(), updatePersonCard: vi.fn(),
   updateLink: vi.fn(), searchPrivate: vi.fn(), getNeighbourhood: vi.fn(), updatePrivateThing: vi.fn(),
@@ -66,6 +66,26 @@ describe('private people knowledge through the shared Ideaflow connector', () =>
     const saved = await tool('oc_save_people_state',{thingId:'saved',...state});
     expect(saved.result.isError).toBeUndefined();
     expect(graph.savePeopleState).toHaveBeenCalledWith('owner','saved',state,CONNECTOR,'ideaflow-grant:synthetic');
+  });
+
+  it('routes people merges, splits, undo and history with the verified agent identity', async () => {
+    const merges = [{ids:['entity-aaaa1','entity-bbbb2'],rule:'same-underlying-contact',evidence:['carddav:a:b'],operationId:'op-1'}];
+    graph.mergePeople.mockResolvedValue({results:[{index:0,merged:true,headId:'entity-aaaa1'}]});
+    const merged = await tool('oc_merge_people',{merges,batchId:'resolver-1'});
+    expect(merged.result.isError).toBeUndefined();
+    expect(graph.mergePeople).toHaveBeenCalledWith('owner',merges,'resolver-1',CONNECTOR,'ideaflow-grant:synthetic');
+    graph.splitPerson.mockResolvedValue({id:'entity-bbbb2'});
+    await tool('oc_split_person',{thingId:'entity-bbbb2',operationId:'split-1'});
+    expect(graph.splitPerson).toHaveBeenCalledWith('owner',{id:'entity-bbbb2',operationId:'split-1'},CONNECTOR,'ideaflow-grant:synthetic');
+    graph.revertMerge.mockResolvedValue({reverted:['e1'],skipped:[]});
+    await tool('oc_revert_merge',{batchId:'resolver-1'});
+    expect(graph.revertMerge).toHaveBeenCalledWith('owner',{batchId:'resolver-1'},CONNECTOR,'ideaflow-grant:synthetic');
+    graph.listMergeEvents.mockResolvedValue({events:[],truncated:false});
+    const listed = await tool('oc_list_merge_events',{thingId:'entity-aaaa1'},'openchat:read');
+    expect(listed.result.isError).toBeUndefined();
+    expect(graph.listMergeEvents).toHaveBeenCalledWith('owner',expect.objectContaining({entityId:'entity-aaaa1'}));
+    // Identity changes are writes: a read-only grant cannot merge.
+    expect((await call('tools/call',{name:'oc_merge_people',arguments:{merges}},'openchat:read')).status).toBe(403);
   });
 
   it('lists private reads under openchat:read and writes under openchat:write, described as owner-private', async () => {

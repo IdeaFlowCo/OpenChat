@@ -18,13 +18,14 @@ A monorepo for the OpenChat application.
 ## Saved people
 
 From **Chats**, open **People**, then **Friends** to see **Saved people**.
-The list loads all pages automatically and shows how many records have loaded.
+The list loads all pages automatically and shows how many people have loaded.
 **Incomplete** means the list has not finished a consistent load;
 **Retry loading people** continues after a failure. If the total changes during loading, the list reloads
 before showing a complete count. Previously displayed people stay visible
 during an incomplete refresh. A final **N saved people** count covers your saved
-private person records, not OpenChat accounts or a verified total of your device
-contacts.
+private people, counting [merged records](docs/private-graph.md#merging-people)
+as one person; it excludes OpenChat accounts and is not a verified total of your
+device contacts.
 
 Choose **+ Add person**, enter a name, and **Save privately**; **Private profile**
 opens the record's notes and asks. Saving a person does not invite or notify them.

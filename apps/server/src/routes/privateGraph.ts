@@ -10,7 +10,7 @@ import { json, Router, type Request, type RequestHandler, type Response } from '
 import { resolveActor } from '../middleware/resolveActor.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import {
-  readContactState, importContactSources, importContactSource, savePeopleState, addLink, addListMember, addNote, createPrivateThing, listMembers, removeListMember, deleteAsk, deleteLink, deleteNote, deletePrivateThing, getAsk, listAsks, saveAsk, updateAsk, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
+  readContactState, mergePeople, splitPerson, revertMerge, listMergeEvents, importContactSources, importContactSource, savePeopleState, addLink, addListMember, addNote, createPrivateThing, listMembers, removeListMember, deleteAsk, deleteLink, deleteNote, deletePrivateThing, getAsk, listAsks, saveAsk, updateAsk, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
   parseCardPatch, PrivateGraphError, searchPrivate, updateLink, updateNote, updatePersonCard, updatePrivateThing,
 } from '../services/privateGraph.js';
 import type { Provenance } from '../services/privateGraph.js';
@@ -19,9 +19,12 @@ import { captureNoteReview, listNoteReviews, suggestNoteReview, applyNoteReview,
 
 const contactBody = json({ limit: '1mb' });
 const contactBatchBody = json({ limit: '7mb' });
+const mergeBody = json({ limit: '1mb' });
 export const privateGraphBody: RequestHandler = (req, res, next) => {
   if (req.method === 'POST' && /^\/api\/private\/contact-source-batches\/?$/i.test(req.path)) {
     contactBatchBody(req, res, next);
+  } else if (req.method === 'POST' && /^\/api\/private\/merges\/?$/i.test(req.path)) {
+    mergeBody(req, res, next);
   } else if ((req.method === 'POST' && /^\/api\/private\/contact-sources\/?$/i.test(req.path)) ||
       (req.method === 'PUT' && /^\/api\/private\/things\/[^/]+\/people-state\/?$/i.test(req.path))) {
     contactBody(req, res, next);
@@ -154,6 +157,20 @@ router.post('/contact-sources', async (req:Request,res:Response) => {
 });
 router.put('/things/:thingId/people-state', async (req:Request,res:Response) => {
   try {res.json(await savePeopleState(owner(req),id(req,'thingId'),req.body,provenanceFor(req),contactActorId(req)));} catch(error) {fail(error,res);}
+});
+
+// People resolution: merge records known to be one person, split one off, undo merges (by event or batch).
+router.post('/merges', async (req:Request,res:Response) => {
+  try {res.json(await mergePeople(owner(req),req.body?.merges,req.body?.batchId,provenanceFor(req),contactActorId(req)));} catch(error) {fail(error,res);}
+});
+router.post('/splits', async (req:Request,res:Response) => {
+  try {res.json(await splitPerson(owner(req),picked(req,['id','operationId','reason','decision']),provenanceFor(req),contactActorId(req)));} catch(error) {fail(error,res);}
+});
+router.post('/merge-reverts', async (req:Request,res:Response) => {
+  try {res.json(await revertMerge(owner(req),picked(req,['eventId','batchId','operationId']),provenanceFor(req),contactActorId(req)));} catch(error) {fail(error,res);}
+});
+router.get('/merge-events', async (req:Request,res:Response) => {
+  try {res.json(await listMergeEvents(owner(req),{batchId:req.query.batchId,entityId:req.query.thingId,limit:req.query.limit}));} catch(error) {fail(error,res);}
 });
 
 router.get('/things', async (req: Request, res: Response) => {
