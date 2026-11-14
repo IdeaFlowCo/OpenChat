@@ -80,8 +80,9 @@ integration('private note review transaction integration', () => {
       expect(history.reviews).toContainEqual({...applied,sourceNoteAvailable:true});
       expect(history.reviews.some(row => row.id === foreignReview.id)).toBe(false);
       expect(history.asks).toContainEqual(expect.objectContaining({id:applied.createdRecords![0]!.id,reviewId:memberReview.id}));
-      expect(await review.captureNoteReview(owner,subject,headInput)).toEqual(headReview);
-      expect(await review.captureNoteReview(owner,subject,memberInput)).toEqual(applied);
+      const ownInput = subject.id === head.id ? headInput : memberInput;
+      expect(await review.captureNoteReview(owner,subject,ownInput)).toEqual(subject.id === head.id ? headReview : applied);
+      await expect(review.captureNoteReview(owner,subject,subject.id === head.id ? memberInput : headInput)).rejects.toMatchObject({status:409});
       await expect(review.captureNoteReview(owner,subject,{...memberInput,text:'Different synthetic note'})).rejects.toMatchObject({status:409});
     }
     expect((await graph.getThing(owner,head.id)).notes).toHaveLength(2);
@@ -93,6 +94,42 @@ integration('private note review transaction integration', () => {
     await graph.splitPerson(owner,{id:member.id,operationId:'split-review-history'},by);
     expect((await review.listNoteReviews(owner,headSubject)).reviews.map(row => row.id)).toEqual([headReview.id]);
     expect((await review.listNoteReviews(owner,memberSubject)).reviews).toEqual([{...applied,status:'undone',sourceNoteAvailable:true}]);
+  });
+  it('replays exact merged receipts and otherwise the oldest receipt', async () => {
+    const people = await Promise.all(['head','older','newer'].map(name => graph.createPrivateThing(owner,'person',`Receipt ${name} ${suffix}`)));
+    const [head,older,newer] = people;
+    const input = {text:'Find a synthetic receipt editor',requestId:'identical-merged-receipts',asStandingAsk:true};
+    const olderReview = await review.captureNoteReview(owner,{kind:'thing',id:older!.id},input);
+    const newerReview = await review.captureNoteReview(owner,{kind:'thing',id:newer!.id},input);
+    const applied = await review.applyNoteReview(owner,newerReview.id,{suggestionIds:[newerReview.suggestions[0]!.id]});
+    olderReview.createdAt = '2026-01-01T00:00:00.000Z';
+    applied.createdAt = '2026-02-01T00:00:00.000Z';
+    const db = driver.session();
+    try {
+      for (const receipt of [olderReview,applied]) await db.run('MATCH (r:OpenChatNoteReview {id:$id}) SET r.payload=$payload', {id:receipt.id,payload:JSON.stringify(receipt)});
+    } finally { await db.close(); }
+    await graph.mergePeople(owner,[{ids:people.map(person => person.id),headId:head!.id,rule:'synthetic-receipts',operationId:'identical-merge-receipts'}],undefined,{author:'owner',source:'app',assertion:'stated'});
+    expect(await review.captureNoteReview(owner,{kind:'thing',id:older!.id},input)).toEqual(olderReview);
+    expect(await review.captureNoteReview(owner,{kind:'thing',id:newer!.id},input)).toEqual(applied);
+    expect(await review.captureNoteReview(owner,{kind:'thing',id:head!.id},input)).toEqual(olderReview);
+    await review.undoNoteReview(owner,applied.id);
+  });
+  it('keeps a capture on its current head when a merge follows subject resolution', async () => {
+    const head = await graph.createPrivateThing(owner,'person',`Racing head ${suffix}`);
+    const member = await graph.createPrivateThing(owner,'person',`Racing member ${suffix}`);
+    const by = {author:'owner',source:'app',assertion:'stated'} as const;
+    interleaving.afterSubject = async () => {
+      await graph.mergePeople(owner,[{ids:[head.id,member.id],headId:head.id,rule:'synthetic-race',operationId:'capture-racing-merge'}],undefined,by);
+    };
+    const input = {text:'Synthetic capture after merging',requestId:'capture-racing-merge'};
+    const captured = await review.captureNoteReview(owner,{kind:'thing',id:member.id},input);
+    expect(captured.subject).toEqual({kind:'thing',id:head.id});
+    await graph.splitPerson(owner,{id:member.id,operationId:'split-racing-capture'},by);
+    expect((await graph.getThing(owner,head.id)).notes).toContainEqual(captured.note);
+    expect((await graph.getThing(owner,member.id)).notes).toEqual([]);
+    expect((await review.listNoteReviews(owner,{kind:'thing',id:head.id})).reviews).toEqual([{...captured,sourceNoteAvailable:true}]);
+    expect((await review.listNoteReviews(owner,{kind:'thing',id:member.id})).reviews).toEqual([]);
+    expect(await review.captureNoteReview(owner,{kind:'thing',id:head.id},input)).toEqual(captured);
   });
   it('invalid selected edit rolls back all new records and preserves the note', async () => {
     const batch=await seedReady('A private note','rollback-one');

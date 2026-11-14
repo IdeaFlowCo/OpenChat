@@ -1106,23 +1106,26 @@ export async function ensurePrivateGraphIndexes(): Promise<void> {
 }
 
 /** Verified adapter for OpenChat-only review records; the shared overlay contract stays unchanged. */
-export async function lockPrivateReviewSubjectIn(tx: Runner, ownerKey: string, entityId: string, subject: { kind: 'user' | 'thing'; id: string }, ownerId: string): Promise<{ kind: 'user' | 'thing'; id: string }> {
+export async function lockPrivateReviewSubjectIn(tx: Runner, ownerKey: string, entityId: string, subject: { kind: 'user' | 'thing'; id: string }, ownerId: string): Promise<{ entityId: string; subject: { kind: 'user' | 'thing'; id: string } }> {
   const initial = await tx.run(`MATCH (e:OverlayEntity {id:$entityId,ownerKey:$ownerKey})
     RETURN [(r:OverlayRef {ownerKey:$ownerKey})-[:REF_OF]->(e) | r.ref] AS refs`, { entityId, ownerKey });
   const accountIds = ((initial.records[0]?.get('refs') ?? []) as string[]).filter(ref => ref.startsWith(USER_REF)).map(ref => decodeURIComponent(ref.slice(USER_REF.length)));
   const present = await lockPrivateGraphAccountsIn(tx, [ownerId,...accountIds,...(subject.kind === 'user' ? [subject.id] : [])]);
   await assertPrivateGraphOwnerIn(tx, ownerId, ownerKey);
-  const locked = await tx.run(`MATCH (e:OverlayEntity {id:$entityId,ownerKey:$ownerKey}) SET e._lock=true REMOVE e._lock
-    RETURN [(r:OverlayRef {ownerKey:$ownerKey})-[:REF_OF]->(e) | r.ref] AS refs`, { entityId, ownerKey });
+  await tx.run('MERGE (c:OverlayBlurbClock {ownerKey:$ownerKey}) ON CREATE SET c.sequence=0 SET c._lock=true REMOVE c._lock', { ownerKey });
+  const locked = await tx.run(`MATCH (requested:OverlayEntity {id:$entityId,ownerKey:$ownerKey})
+    MATCH (e:OverlayEntity {id:coalesce(requested.mergedInto,requested.id),ownerKey:$ownerKey}) SET e._lock=true REMOVE e._lock
+    RETURN e.id AS entityId, [(r:OverlayRef {ownerKey:$ownerKey})-[:REF_OF]->(e) | r.ref] AS refs`, { entityId, ownerKey });
   if (!locked.records.length) return fail(404, 'Not found');
+  entityId = String(locked.records[0]!.get('entityId'));
   const refs = locked.records[0]!.get('refs') as string[];
   const currentUserId = subject.kind === 'user' && refs.includes(userRef(subject.id)) ? subject.id : userIdOf(refs);
   if (currentUserId !== null) {
     if (!present.has(currentUserId)) return fail(404, 'Person unavailable');
     await personRecordIn(tx, ownerId, currentUserId);
-    return { kind: 'user', id: currentUserId };
+    return { entityId, subject: { kind: 'user', id: currentUserId } };
   }
-  return { kind: 'thing', id: entityId };
+  return { entityId, subject: { kind: 'thing', id: entityId } };
 }
 
 export async function privateReviewSubject(ownerId: string, subject: { kind: 'user' | 'thing'; id: string }, create = true): Promise<{ principal: OverlayPrincipal; entityId: string; name: string }> {

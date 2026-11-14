@@ -5,6 +5,10 @@ vi.mock('../src/services/privateGraph.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/privateGraph.js')>('../src/services/privateGraph.js');
   return { ...actual, privateReviewSubject: mocks.subject, privateReviewPrincipal: mocks.principal, addNote: mocks.addNote };
 });
+vi.mock('../src/services/overlay/store.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/services/overlay/store.js')>('../src/services/overlay/store.js');
+  return { ...actual, addNoteIn: mocks.addNote };
+});
 import { captureNoteReview, listNoteReviews, parseSuggestions, similarAsk, undoNoteReview, applyNoteReview } from '../src/services/privateNoteReview.js';
 import { lockPrivateReviewSubjectIn } from '../src/services/privateGraph.js';
 import { ownerKeyFor } from '../src/services/overlay/contract.js';
@@ -32,13 +36,13 @@ describe('private note review source validation', () => {
 });
 describe('review subject validation under the entity lock', () => {
   it('retains the exact attached account subject', async () => {
-    const run = vi.fn().mockResolvedValue(rows({refs:['openchat:user:bob%3Aexternal']}));
+    const run = vi.fn().mockResolvedValue(rows({entityId:'entity-id',refs:['openchat:user:bob%3Aexternal']}));
     const subject = {kind:'user',id:'bob:external'} as const;
-    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',subject,'alice')).toEqual(subject);
+    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',subject,'alice')).toEqual({entityId:'entity-id',subject});
   });
   it.each([{refs:[]},{refs:['other:person:bob']}])('normalizes a surviving card with refs $refs to its canonical identity', async ({refs}) => {
-    const run = vi.fn().mockResolvedValue(rows({refs}));
-    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).toEqual({kind:'thing',id:'entity-id'});
+    const run = vi.fn().mockResolvedValue(rows({entityId:'entity-id',refs}));
+    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).toEqual({entityId:'entity-id',subject:{kind:'thing',id:'entity-id'}});
   });
   it('refuses erased or foreign entities instead of saving an orphan', async () => {
     const run = vi.fn(async (_query: string, parameters?: Record<string, unknown>) =>
@@ -47,52 +51,91 @@ describe('review subject validation under the entity lock', () => {
   });
   it('uses a surviving card after the original account disappears', async () => {
     const run = vi.fn(async (_query: string, parameters?: Record<string, unknown>) =>
-      parameters?.userId === 'bob' ? {records:[]} : rows({refs:['other:person:bob']}));
-    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).toEqual({kind:'thing',id:'entity-id'});
+      parameters?.userId === 'bob' ? {records:[]} : rows({entityId:'entity-id',refs:['other:person:bob']}));
+    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).toEqual({entityId:'entity-id',subject:{kind:'thing',id:'entity-id'}});
   });
   it('refuses a stale attached account that no longer exists', async () => {
     const run = vi.fn(async (_query: string, parameters?: Record<string, unknown>) =>
-      parameters?.userId === 'bob' ? {records:[]} : rows({refs:['openchat:user:bob']}));
+      parameters?.userId === 'bob' ? {records:[]} : rows({entityId:'entity-id',refs:['openchat:user:bob']}));
     await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).rejects.toMatchObject({status:404});
   });
   it('refuses capture after the owning account disappears', async () => {
     const run = vi.fn(async (_query: string, parameters?: Record<string, unknown>) =>
-      parameters?.userId === 'alice' ? {records:[]} : rows({refs:[]}));
+      parameters?.userId === 'alice' ? {records:[]} : rows({entityId:'entity-id',refs:[]}));
     await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'thing',id:'entity-id'},'alice')).rejects.toMatchObject({status:404});
   });
   it('uses the surviving associated account after its original ref is purged', async () => {
-    const run = vi.fn().mockResolvedValue(rows({refs:['openchat:user:carol']}));
-    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).toEqual({kind:'user',id:'carol'});
+    const run = vi.fn().mockResolvedValue(rows({entityId:'entity-id',refs:['openchat:user:carol']}));
+    expect(await lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).toEqual({entityId:'entity-id',subject:{kind:'user',id:'carol'}});
   });
   it.each([{blocked:true},{isBot:true}])('refuses an inaccessible surviving account: %j', async access => {
-    const run = vi.fn().mockResolvedValue(rows({refs:['openchat:user:carol'],...access}));
+    const run = vi.fn().mockResolvedValue(rows({entityId:'entity-id',refs:['openchat:user:carol'],...access}));
     await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).rejects.toMatchObject({status:404});
   });
   it('refuses a changed owner binding before saving a review', async () => {
-    const run = vi.fn().mockResolvedValue(rows({refs:[],issuer:'https://different-owner.test',subject:'new-owner'}));
+    const run = vi.fn().mockResolvedValue(rows({entityId:'entity-id',refs:[],issuer:'https://different-owner.test',subject:'new-owner'}));
     await expect(lockPrivateReviewSubjectIn({run},OWNER_KEY,'entity-id',{kind:'user',id:'bob'},'alice')).rejects.toMatchObject({status:409,details:{code:'contact_owner_changed'}});
   });
 });
 describe('durable batch operations', () => {
   it('returns prior capture on retry without writing a second raw note', async () => {
     const saved = {...review,status:'saved',createdRecords:[]};
-    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}') ? rows({payload:JSON.stringify(saved)}) : rows({refs:['openchat:user:bob']}));
+    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}') ? rows({payload:JSON.stringify(saved)}) : rows({entityId:'entity-id',refs:['openchat:user:bob']}));
     expect(await captureNoteReview('alice',{kind:'user',id:'bob'},{text:saved.note.text,requestId:'retry-key'})).toEqual(saved);
     expect(mocks.addNote).not.toHaveBeenCalled();
   });
   it('rejects reuse of a capture request ID for a different note', async () => {
-    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}') ? rows({payload:JSON.stringify(review)}) : rows({refs:['openchat:user:bob']}));
+    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}') ? rows({payload:JSON.stringify(review)}) : rows({entityId:'entity-id',refs:['openchat:user:bob']}));
     await expect(captureNoteReview('alice',{kind:'user',id:'bob'},{text:'Different note',requestId:'retry-key'})).rejects.toMatchObject({status:409});
     expect(mocks.addNote).not.toHaveBeenCalled();
   });
-  it('retries the matching capture when merged members reused a request ID', async () => {
+  it('prefers an exact record receipt when merged members reused a request ID', async () => {
     const saved = {...review,status:'saved',createdRecords:[]};
     const other = {...saved,id:'other-review',note:{...saved.note,text:'Another note'}};
     mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}')
-      ? {records:[rows({payload:JSON.stringify(other)}).records[0],rows({payload:JSON.stringify(saved)}).records[0]]}
-      : rows({refs:['openchat:user:bob']}));
+      ? {records:[rows({entityId:'other-id',payload:JSON.stringify(other)}).records[0],rows({entityId:'entity-id',payload:JSON.stringify(saved)}).records[0]]}
+      : rows({entityId:'entity-id',refs:['openchat:user:bob']}));
     expect(await captureNoteReview('alice',{kind:'user',id:'bob'},{text:saved.note.text,requestId:'shared-key'})).toEqual(saved);
     expect(mocks.addNote).not.toHaveBeenCalled();
+  });
+  it.each(['entity-id','member-id'])('replays the exact %s receipt for identical merged captures', async requestedId => {
+    const applied = {...review,createdAt:'2026-01-01T00:00:00.000Z'};
+    const saved = {...review,id:'saved-review',status:'saved',appliedIds:[],createdRecords:[],createdAt:'2026-02-01T00:00:00.000Z'};
+    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}')
+      ? {records:[rows({entityId:'entity-id',payload:JSON.stringify(applied)}).records[0],rows({entityId:'member-id',payload:JSON.stringify(saved)}).records[0]]}
+      : rows({entityId:'entity-id',refs:[]}));
+    expect(await captureNoteReview('alice',{kind:'thing',id:requestedId},{text:review.note.text,requestId:'same-key'})).toEqual(requestedId === 'entity-id' ? applied : saved);
+  });
+  it('refuses a conflicting exact receipt even when another member matches', async () => {
+    const other = {...review,id:'other-review',note:{...review.note,text:'Another note'}};
+    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}')
+      ? {records:[rows({entityId:'other-id',payload:JSON.stringify(other)}).records[0],rows({entityId:'entity-id',payload:JSON.stringify(review)}).records[0]]}
+      : rows({entityId:'entity-id',refs:[]}));
+    await expect(captureNoteReview('alice',{kind:'thing',id:'entity-id'},{text:other.note.text,requestId:'same-key'})).rejects.toMatchObject({status:409});
+  });
+  it('falls back to the oldest receipt and breaks timestamp ties by review id', async () => {
+    const newer = {...review,id:'newer',createdAt:'2026-02-01T00:00:00.000Z'};
+    const oldest = {...review,id:'a-oldest',createdAt:'2026-01-01T00:00:00.000Z'};
+    const tied = {...oldest,id:'z-oldest'};
+    mocks.run.mockImplementation(async (query: string) => query.includes('requestId:$requestId}')
+      ? {records:[newer,tied,oldest].map((value,index) => rows({entityId:`member-${index}`,payload:JSON.stringify(value)}).records[0])}
+      : rows({entityId:'entity-id',refs:[]}));
+    expect(await captureNoteReview('alice',{kind:'thing',id:'no-receipt'},{text:review.note.text,requestId:'same-key'})).toEqual(oldest);
+  });
+  it('saves the note and ledger on the head resolved under the membership lock', async () => {
+    mocks.subject.mockResolvedValue({principal:{app:'openchat',ownerKey:OWNER_KEY},entityId:'stale-id',name:'Chet'});
+    let stored: Record<string, unknown> | undefined;
+    mocks.run.mockImplementation(async (query: string, params: Record<string, unknown>) => {
+      if (query.includes('CREATE (r:OpenChatNoteReview')) stored = params;
+      if (query.includes('requestId:$requestId}')) return {records:[]};
+      return rows({entityId:'current-head',refs:[]});
+    });
+    mocks.addNote.mockResolvedValue({note:review.note});
+    const saved = await captureNoteReview('alice',{kind:'thing',id:'stale-id'},{text:review.note.text,requestId:'stale-head'});
+    expect(saved.subject).toEqual({kind:'thing',id:'current-head'});
+    expect(mocks.addNote).toHaveBeenCalledWith(expect.anything(),OWNER_KEY,'current-head',review.note.text,expect.anything());
+    expect(stored).toMatchObject({entityId:'current-head',ownerKey:OWNER_KEY});
+    expect(JSON.parse(stored!.payload as string)).toEqual(saved);
   });
   it('includes member reviews and retained member source notes in history', async () => {
     const saved = {...review,status:'saved',createdRecords:[]};
