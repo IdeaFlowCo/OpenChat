@@ -643,7 +643,7 @@ export async function markPersonField(ownerId: string, thingId: string, input: u
   const principal = await ownerPrincipal(ownerId);
   return ownerWrite(ownerId, principal, overlay => overlay.markPersonField(contactPrincipal(principal, by, actorId), thingId, input, by));
 }
-/** The one explicit read of an unmasked value (a Wi-Fi password). */
+/** Explicitly reveals one structured field; ordinary field projections mask Wi-Fi passwords. */
 export async function revealPersonField(ownerId: string, thingId: string, key: string) {
   const principal = await ownerPrincipal(ownerId);
   return overlayCall(overlay => overlay.revealPersonField(principal, thingId, key));
