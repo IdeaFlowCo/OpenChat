@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { View, TextInput, TouchableOpacity, Text, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
@@ -16,8 +16,22 @@ export function ContextComposer({ conversationId, replyTo, editing, onDone }: { 
   const [contentHeight, setContentHeight] = useState(24);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const input = useRef<TextInput>(null);
   const pending = useRef<{ text: string; id: string; kind: string; replyToId?: string } | null>(null);
   const sending = useRef(false);
+
+  useLayoutEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const element = input.current as unknown as HTMLTextAreaElement | null;
+    if (!element) return;
+    // scrollHeight includes the current height. Reset it before measuring so a
+    // shorter draft can shrink too, without replacing or blurring the input.
+    const previousHeight = element.style.height;
+    element.style.height = '0px';
+    const measuredHeight = Math.ceil(element.scrollHeight);
+    element.style.height = previousHeight;
+    setContentHeight(measuredHeight);
+  }, [text, expanded]);
 
   const handleSend = async () => {
     if (!text.trim() || sending.current) return;
@@ -57,6 +71,7 @@ export function ContextComposer({ conversationId, replyTo, editing, onDone }: { 
       {error && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={{ color: c.danger, marginBottom: 8 }}>{error}</Text>}
       <View style={[styles.inputRow, { backgroundColor: c.background, borderColor: c.border }]}>
         <TextInput
+          ref={input}
           style={[styles.input, { color: c.textPrimary, height: expanded ? Math.min(120, Math.max(44, contentHeight)) : 24 }]}
           placeholder="Add to Stream…"
           onFocus={() => setExpanded(true)}
