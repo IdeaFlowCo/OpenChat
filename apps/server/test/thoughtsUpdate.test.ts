@@ -17,6 +17,7 @@ vi.mock('../src/db.js', () => ({
     session: () => ({
       run: mocks.run,
       close: mocks.close,
+      executeWrite: (callback: any) => callback({run:mocks.run}),
     }),
   }),
 }));
@@ -28,6 +29,7 @@ describe('PATCH /api/thoughts/:id', () => {
   let baseUrl: string;
 
   beforeAll(async () => {
+    vi.stubEnv('JWT_SECRET','dev-secret-change-me');
     const app = express();
     app.set('io', { to: mockTo });
     app.use(express.json());
@@ -45,6 +47,7 @@ describe('PATCH /api/thoughts/:id', () => {
   });
 
   afterAll(async () => {
+    vi.unstubAllEnvs();
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });
@@ -78,6 +81,8 @@ describe('PATCH /api/thoughts/:id', () => {
         ]
       });
 
+    mocks.run.mockResolvedValueOnce({records:[]}).mockResolvedValueOnce({records:[{get:() => 'peer-2'}]});
+
     const response = await fetch(`${baseUrl}/api/thoughts/thought-1`, {
       method: 'PATCH',
       headers: { 
@@ -93,7 +98,7 @@ describe('PATCH /api/thoughts/:id', () => {
 
     // Check socket emissions
     expect(mockTo).toHaveBeenCalledWith('user:user-1');
-    expect(mockTo).toHaveBeenCalledWith('conversation:conv-1');
+    expect(mockTo).toHaveBeenCalledWith(['user:peer-2']);
     expect(mockEmit).toHaveBeenCalledWith('thought:updated', expect.objectContaining({
       thought: expect.objectContaining({ text: 'updated text' })
     }));

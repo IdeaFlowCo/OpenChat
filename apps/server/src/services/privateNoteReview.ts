@@ -14,6 +14,7 @@ import type { PrivateNote, Provenance, ThingKind } from './privateGraph.js';
 import { ASKER_KINDS, OverlayError, parseAskInput } from './overlay/contract.js';
 import type { AskStatus, Provenance as OverlayProvenance } from './overlay/contract.js';
 import { addLinkIn, addNoteIn, askIn, deleteEntityIn, deleteLinkIn, listAsksIn, resolveIn, saveAskIn } from './overlay/store.js';
+import { membersOf } from './overlay/merge.js';
 
 export type ReviewSubject = { kind: 'user' | 'thing'; id: string };
 /** `target.id` (set only by an owner's edit) picks one of the owner's existing saved things when a name is shared. */
@@ -121,14 +122,18 @@ export async function captureNoteReview(ownerId: string, subject: ReviewSubject,
   const text = cleanText(input?.text, LIMITS.noteLength, 'Note');
   if (asStandingAsk && text.length > 500) return fail(400, 'Standing ask is too long');
   const requestId = cleanText(input?.requestId, 100, 'Request ID');
-  const { principal, entityId } = await privateReviewSubject(ownerId, subject);
+  const { principal, entityId: resolvedId } = await privateReviewSubject(ownerId, subject);
+  const requestedId = subject.kind === 'thing' ? subject.id : resolvedId;
   const db = session();
   try {
     return await db.executeWrite(async tx => {
-      const currentSubject = await lockPrivateReviewSubjectIn(tx, principal.ownerKey, entityId, subject, ownerId);
-      const prior = await tx.run('MATCH (r:OpenChatNoteReview {ownerKey:$ownerKey,entityId:$entityId,requestId:$requestId}) RETURN r.payload AS payload', { ownerKey: principal.ownerKey, entityId, requestId });
+      const { entityId, subject: currentSubject } = await lockPrivateReviewSubjectIn(tx, principal.ownerKey, requestedId, subject, ownerId);
+      const entityIds = (await membersOf(tx, principal.ownerKey, [entityId])).get(entityId)!;
+      const prior = await tx.run('MATCH (r:OpenChatNoteReview {ownerKey:$ownerKey,requestId:$requestId}) WHERE r.entityId IN $entityIds RETURN r.entityId AS entityId,r.payload AS payload', { ownerKey: principal.ownerKey, entityIds, requestId });
       if (prior.records.length) {
-        const existing = decode(prior.records[0]!.get('payload'));
+        const receipts = prior.records.map(row => ({ entityId: row.get('entityId'), review: decode(row.get('payload')) }))
+          .sort((a, b) => a.review.createdAt.localeCompare(b.review.createdAt) || a.review.id.localeCompare(b.review.id));
+        const existing = (receipts.find(receipt => receipt.entityId === requestedId) ?? receipts[0])!.review;
         if (existing.note.text !== text || (existing.asStandingAsk === true) !== asStandingAsk) return fail(409, 'This request ID was already used for another note or capture mode');
         return existing;
       }
@@ -151,16 +156,19 @@ export async function listNoteReviews(ownerId: string, subject: ReviewSubject): 
   if (!entityId) return { reviews: [], asks: [] };
   const db = session();
   try {
-    const reviews = await db.run('MATCH (r:OpenChatNoteReview {ownerKey:$ownerKey,entityId:$entityId}) RETURN r.payload AS payload ORDER BY r.id', { ownerKey: principal.ownerKey, entityId });
-    const asks = (await db.executeRead(tx => subjectAsks(tx, principal.ownerKey, entityId))).asks.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    const notes = await db.run('MATCH (n:OverlayNote {ownerKey:$ownerKey,entityId:$entityId}) RETURN n.id AS id', { ownerKey: principal.ownerKey, entityId });
-    const noteIds = new Set(notes.records.map(r => String(r.get('id'))));
-    const all = reviews.records.map(r => decode(r.get('payload')));
-    const reviewOf = new Map(all.flatMap(r => (r.createdRecords ?? []).filter(record => record.kind === 'ask').map(record => [record.id, r.id] as const)));
-    return {
-      reviews: all.map(r => ({ ...r, sourceNoteAvailable: noteIds.has(r.note.id) })).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,50),
-      asks: asks.map(ask => ({ id: ask.id, text: ask.text, sourceNoteId: ask.evidence?.noteId ?? null, createdAt: ask.createdAt, reviewId: reviewOf.get(ask.id) ?? null, status: LEGACY_STATUS[ask.status], askStatus: ask.status, needsRecheck: ask.needsRecheck })),
-    };
+    return await db.executeRead(async tx => {
+      const entityIds = (await membersOf(tx, principal.ownerKey, [entityId])).get(entityId)!;
+      const reviews = await tx.run('MATCH (r:OpenChatNoteReview {ownerKey:$ownerKey}) WHERE r.entityId IN $entityIds RETURN r.payload AS payload ORDER BY r.id', { ownerKey: principal.ownerKey, entityIds });
+      const asks = (await subjectAsks(tx, principal.ownerKey, entityId)).asks.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const notes = await tx.run('MATCH (n:OverlayNote {ownerKey:$ownerKey}) WHERE n.entityId IN $entityIds RETURN n.id AS id', { ownerKey: principal.ownerKey, entityIds });
+      const noteIds = new Set(notes.records.map(r => String(r.get('id'))));
+      const all = reviews.records.map(r => decode(r.get('payload')));
+      const reviewOf = new Map(all.flatMap(r => (r.createdRecords ?? []).filter(record => record.kind === 'ask').map(record => [record.id, r.id] as const)));
+      return {
+        reviews: all.map(r => ({ ...r, sourceNoteAvailable: noteIds.has(r.note.id) })).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,50),
+        asks: asks.map(ask => ({ id: ask.id, text: ask.text, sourceNoteId: ask.evidence?.noteId ?? null, createdAt: ask.createdAt, reviewId: reviewOf.get(ask.id) ?? null, status: LEGACY_STATUS[ask.status], askStatus: ask.status, needsRecheck: ask.needsRecheck })),
+      };
+    });
   } finally { await db.close(); }
 }
 

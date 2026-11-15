@@ -11,6 +11,8 @@ sending rules. It must not create a second message store or synchronize copies.
 Member profile actions open the normal conversation inside Unlinked; standalone OpenChat
 continues to expose the same inbox.
 
+Community roster synchronization has its own [contract](unlinked-community-chat.md).
+
 ## Profile entry
 
 `https://chat.ideaflow.app/app/?intent=compose&source=unlinked` accepts an optional

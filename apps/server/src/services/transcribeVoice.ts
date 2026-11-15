@@ -19,6 +19,7 @@
  * text. Anything that reads a message as text for an agent (assistant context,
  * outbound webhooks) must therefore wait for / fall back to `transcript`.
  */
+import { publishConversationEvent } from './conversationEvents.js';
 import type { Server as IOServer } from 'socket.io';
 import { getDriver } from '../db.js';
 import { publicGet } from './publicFetch.js';
@@ -168,7 +169,7 @@ export async function maybeTranscribeMessage(
     ).catch(() => { /* best-effort */ });
 
     if (io) {
-      io.to(`conversation:${conversationId}`).emit('message:transcript', {
+      await publishConversationEvent(io, conversationId, 'message:transcript', {
         messageId,
         conversationId,
         transcript: text,

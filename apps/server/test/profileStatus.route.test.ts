@@ -7,6 +7,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const mocks = vi.hoisted(() => ({
   run: vi.fn(),
   close: vi.fn(async () => {}),
+  emit: vi.fn(),
+  to: vi.fn(),
 }));
 
 vi.mock('../src/db.js', () => ({
@@ -29,15 +31,11 @@ describe('PUT /api/auth/me/status', () => {
   let token: string;
 
   beforeAll(async () => {
-    process.env.JWT_SECRET = 'test-secret';
+    vi.stubEnv('JWT_SECRET','test-secret');
     app = express();
     app.use(express.json());
     // Mock io app setting since we use req.app.get('io') in the route
-    app.set('io', {
-      to: () => ({
-        emit: vi.fn()
-      })
-    });
+    app.set('io', {to: mocks.to.mockReturnValue({emit:mocks.emit})});
     app.use('/api/auth', authRouter);
 
     await new Promise<void>((resolve) => {
@@ -51,6 +49,7 @@ describe('PUT /api/auth/me/status', () => {
   });
 
   afterAll(async () => {
+    vi.unstubAllEnvs();
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
     });
@@ -76,6 +75,8 @@ describe('PUT /api/auth/me/status', () => {
       }]
     });
 
+    mocks.run.mockResolvedValueOnce({records:[]}).mockResolvedValueOnce({records:[{get:() => 'peer-2'}]});
+
     const res = await fetch(`http://localhost:${port}/api/auth/me/status`, {
       method: 'PUT',
       headers: {
@@ -90,7 +91,8 @@ describe('PUT /api/auth/me/status', () => {
     expect(body.profileStatus.text).toBe('Working');
     expect(body.profileStatus.emoji).toBe('💻');
 
-    expect(mocks.run).toHaveBeenCalledTimes(2); // One for update, one for find conversations to emit
+    expect(mocks.to).toHaveBeenCalledWith(['user:peer-2']);
+    expect(mocks.emit).toHaveBeenCalledWith('user:profile-updated',expect.objectContaining({userId:'u1',profileStatus:expect.objectContaining({text:'Working',emoji:'💻'})}));
     const callArgs = mocks.run.mock.calls[0][1];
     expect(callArgs.setProfileStatusText).toBe(true);
     expect(callArgs.profileStatusText).toBe('Working');

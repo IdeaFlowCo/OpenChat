@@ -32,16 +32,16 @@ function toJS(value: unknown): unknown {
   return value;
 }
 
-function notifyParticipants(
+async function notifyParticipants(
   io: IOServer | undefined,
   conversation: Record<string, unknown>,
   participantIds: string[],
   created: boolean,
-): void {
+): Promise<void> {
   if (!io) return;
   const conversationId = conversation.id as string;
   for (const participantId of participantIds) {
-    joinUserSocketsToConversation(io, participantId, conversationId);
+    await joinUserSocketsToConversation(io, participantId, conversationId);
     if (created) {
       io.to(`user:${participantId}`).emit('conversation:created', {
         conversationId,
@@ -66,7 +66,7 @@ export async function ensureDirectConversation(
   const session = getDriver().session();
   try {
     const result = await session.executeWrite(tx => ensureDirectConversationInTransaction(tx, userId, otherId, title));
-    notifyParticipants(io, result.conversation, [...new Set([userId, otherId])].sort(), result.created);
+    await notifyParticipants(io, result.conversation, [...new Set([userId, otherId])].sort(), result.created);
     return result;
   } finally { await session.close(); }
 }

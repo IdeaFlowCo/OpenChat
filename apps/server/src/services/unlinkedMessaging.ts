@@ -64,7 +64,7 @@ export async function ensureSharedInboxInTransaction(tx: Pick<ManagedTransaction
         u.name=$name,u.signupProvider='ideaflow-id',u.sharedInboxPending=true,
         u.createdAt=datetime(),u.presenceStatus='offline'
       WITH u WHERE u.ideaflowIssuer=$issuer AND u.ideaflowSub=$subject
-      RETURN u.id AS id,u.name AS name`, { key: `${ISSUER}\u001f${identity.subject}`, id: nanoid(), issuer: ISSUER, subject: identity.subject, name });
+      RETURN u.id AS id,u.name AS name`, { key: `${ISSUER}\u001f${identity.subject}`, id: nanoid(), issuer: ISSUER, subject: identity.subject, name: normalizePublicDisplayName(name) });
     if (result.records.length !== 1 || typeof result.records[0].get('id') !== 'string') throw new Error('messaging_unavailable');
     return { id: result.records[0].get('id'), name: normalizePublicDisplayName(result.records[0].get('name')) };
 }

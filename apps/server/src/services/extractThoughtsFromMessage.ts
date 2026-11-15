@@ -30,6 +30,7 @@
  *   #fact#fact#fact... would otherwise create 100s of thoughts)
  */
 
+import { publishConversationEvent } from './conversationEvents.js';
 import type { Session } from 'neo4j-driver';
 import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
@@ -217,7 +218,7 @@ export async function createThoughtsFromMessageTags(
           pinned: false,
         };
         params.io.to(`user:${params.senderId}`).emit('thought:created', { thought });
-        params.io.to(`conversation:${params.conversationId}`).emit('thought:shared', {
+        await publishConversationEvent(params.io, params.conversationId, 'thought:shared', {
           conversationId: params.conversationId,
           thought,
         });

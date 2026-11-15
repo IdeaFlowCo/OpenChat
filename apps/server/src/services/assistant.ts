@@ -242,7 +242,7 @@ export async function persistMessage(
     const created = result.records[0].get('created') as boolean;
 
     if (io && created) {
-      broadcastMessageToParticipants(io, participantIds, message);
+      await broadcastMessageToParticipants(io, conversationId, message);
       processLinkPreviews(io, message.id as string, conversationId, messageContent);
     }
     if (created) dispatchMessageEvent(message, participantIds);
@@ -935,7 +935,7 @@ export async function createConversationForAssistant(
 
     if (io) {
       const { joinUserSocketsToConversation } = await import('../websocket/chatHandler.js');
-      for (const pid of allParticipants) joinUserSocketsToConversation(io, pid, conversationId);
+      for (const pid of allParticipants) await joinUserSocketsToConversation(io, pid, conversationId);
     }
     return { id: conversationId, type, title: title || null, participantIds: allParticipants };
   } finally {

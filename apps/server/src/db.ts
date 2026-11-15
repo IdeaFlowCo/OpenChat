@@ -26,6 +26,7 @@ export async function initDatabase(): Promise<void> {
   const session = getDriver().session();
 
   try {
+    await session.run(`CREATE CONSTRAINT unlinked_group_sync_id IF NOT EXISTS FOR (s:UnlinkedGroupSync) REQUIRE s.groupId IS UNIQUE`);
     await session.run(`CREATE CONSTRAINT vision_save_receipt_key IF NOT EXISTS FOR (s:VisionSaveReceipt) REQUIRE s.key IS UNIQUE`);
     await session.run(`CREATE CONSTRAINT vision_save_grant_owner IF NOT EXISTS FOR (g:VisionSaveGrant) REQUIRE g.userId IS UNIQUE`);
     // Vision stream bridge (OpenChat-vwgq.10/.11): provenance beside a message, and one reply delivery per reply.

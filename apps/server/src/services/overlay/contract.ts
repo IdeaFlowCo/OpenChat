@@ -8,10 +8,8 @@
  * as `openchat:user:<id>` or `unlinked:person:<id>`, and the same owner sees
  * the same overlay from either.
  *
- * This file and ./store.ts are the single owner of the overlay's semantics
- * (ambiguity, idempotency, provenance, relation types). OpenChat vendors both
- * byte-for-byte (apps/server/src/services/overlay/, checked by hash in its CI);
- * change them here first, then re-vendor.
+ * Overlay semantics and downstream vendoring are documented in
+ * docs/PEOPLE_OVERLAY.md, "Mounting".
  */
 import { createHash } from 'node:crypto';
 
@@ -38,11 +36,14 @@ export interface Card {
   lastContactAt: string | null;
   nextDueAt: string | null;
 }
+/** A physical person record in a merged person's `members` list. */
+export interface MergedMember { id: string; name: string; mergeEventId: string | null }
 /**
  * `description` is a one-line summary (280 characters or fewer), null when none was given.
  * `ask` is present only on entities of kind `ask` (their ask fields, without the parties).
+ * `members`, when present, lists the head before its merged-away records.
  */
-export interface Entity { id: string; kind: EntityKind; name: string; description: string | null; refs: string[]; card: Card; ask?: AskFields; peopleState?: import('./contacts.js').PeopleState }
+export interface Entity { id: string; kind: EntityKind; name: string; description: string | null; refs: string[]; card: Card; ask?: AskFields; peopleState?: import('./contacts.js').PeopleState; members?: MergedMember[] }
 
 /**
  * Who wrote a note or link and how. All optional on storage: records written
@@ -68,7 +69,8 @@ export const OWNER_PROVENANCE: Provenance = { author: 'owner', source: 'app', as
 export const RELATION_TYPES = ['knows', 'family', 'worked_with', 'works_at', 'works_on', 'attended', 'interested_in', 'part_of', 'about', 'asks', 'related'] as const;
 export type RelationType = (typeof RELATION_TYPES)[number];
 
-export interface Note extends Provenance { id: string; text: string; createdAt: string; updatedAt: string }
+/** `revision` starts at 1 and counts edits (`updateNote`); `editedBy` is the author of the latest edit. */
+export interface Note extends Provenance { id: string; text: string; createdAt: string; updatedAt: string; revision?: number; editedBy?: string }
 export interface LinkEnd { id: string; kind: EntityKind; name: string; refs: string[] }
 /**
  * Facts about a link besides its relation, all nullable: `since` and `until`
@@ -80,7 +82,11 @@ export interface LinkAttributes { since: string | null; until: string | null; co
 export interface Link extends Provenance, LinkAttributes { id: string; relation: string; relationType: RelationType; direction: 'out' | 'in'; other: LinkEnd; createdAt: string; updatedAt: string | null; updatedBy: string | null }
 /** A link as an edge between two ends, for search and neighbourhood reads. */
 export interface Edge extends Provenance, LinkAttributes { id: string; relation: string; relationType: RelationType; fromId: string; toId: string; createdAt: string; updatedAt: string | null; updatedBy: string | null }
-export interface EntityDetail extends Entity { notes: Note[]; links: Link[]; contactSources?: import('./contacts.js').ContactSource[] }
+/**
+ * `requestedId` is set when the id asked for was a merged-away record: `id` is then its person's head.
+ * `fields` and `fieldSuggestions` are computed from field assertions, source cards and notes (./fields.ts); people only.
+ */
+export interface EntityDetail extends Entity { notes: Note[]; links: Link[]; contactSources?: Array<import('./contacts.js').ContactSource & { memberId?: string }>; requestedId?: string; fields?: import('./fields.js').PersonField[]; fieldSuggestions?: import('./fields.js').FieldSuggestion[] }
 export interface SearchHit extends Entity { matched: Array<'name' | 'description' | 'note' | 'link'> }
 export interface SearchResult { entities: SearchHit[]; links: Array<Edge & { from: LinkEnd; to: LinkEnd }>; truncated: boolean }
 export interface Neighbourhood { center: Entity; depth: 1 | 2; entities: Entity[]; links: Edge[]; truncated: boolean }

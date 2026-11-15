@@ -27,8 +27,9 @@ linked.
 **One owner of the rules.** The vendored files listed in
 [`NOOS_SOURCE.json`](../apps/server/src/services/overlay/NOOS_SOURCE.json)
 are byte-for-byte copies of Noos `src/overlay/`, which alone implements the
-overlay's semantics, including contact sources, People state, publications and
-blurbs. That manifest owns the source commit and each file's SHA-256;
+overlay's semantics, including contact sources, People state, publications,
+blurbs and people merges. That manifest owns the source commit and each file's
+SHA-256;
 `apps/server/test/overlayVendor.test.ts` checks for local drift. Change the files
 in Noos first, then run
 `node scripts/vendor-noos-overlay.mjs <path-to-noos-checkout> [ref]`.
@@ -59,19 +60,20 @@ The client signs a person out on 403, so these routes never return it.
 | `GET /people/:userId` | Card, notes and links for a person |
 | `PATCH /people/:userId` | `important`, `cadenceDays` (or `null`), `cadenceMode`, `contactedNow: true` |
 | `POST /people/:userId/notes`, `POST /things/:thingId/notes` | Add a note |
-| `PATCH /notes/:noteId`, `DELETE /notes/:noteId` | Edit or delete a note |
+| `PATCH /notes/:noteId`, `DELETE /notes/:noteId` | Edit or delete a note; see [note revisions](#editing-notes-and-person-fields) |
 | `POST /people/:userId/links`, `POST /things/:thingId/links` | `{ relation, to, relationType?, since?, until?, context? }` where `to` is `{kind:'user', id}` or `{kind:'person'\|'company'\|'idea'\|'project'\|'topic', id \| name}`; a name creates or reuses the saved thing. Repeating an existing link returns it unchanged |
 | `PATCH /links/:linkId` | Any of `{ relation, relationType, assertion, since, until, context }`, see [Editing a relation](#editing-a-relation) |
 | `DELETE /links/:linkId` | Remove a link |
 | `GET /search?q=&relationType=&kind=&limit=` | Search saved things, OpenChat people and Unlinked people the owner wrote about (by name, description or note text; `matched` says which), and links by relation text, context, either end's name or `relationType`. At least one filter; at most 50 of each; `truncated` when more matched. Blocked people are left out |
 | `GET /neighbourhood?subjectKind=user\|thing\|unlinked&subjectId=&depth=1\|2` | A subject and everything one or two links away, with those links (`from`, `to`). Never creates anything; at most 100 nodes and 200 links. Blocked people are left out |
 | `GET /things?q=&kind=&after=&limit=&details=&summary=` | A page of saved things, matching `total` and `nextCursor`; see [Pagination](#pagination) |
-| `GET /things/:thingId` | One saved thing with its card, optional People state, contact sources, notes and links |
+| `GET /things/:thingId` | One saved thing with its card, optional People state, contact sources, notes and links; people also include [structured fields and note suggestions](#editing-notes-and-person-fields) |
 | `GET /things/:thingId/contact-state` | Owner-only card, sources and People state, including OpenChat-backed entities; see [readback](#verified-contact-actors-and-profile-independent-readback) |
 | `POST /contact-sources`, `POST /contact-source-batches` | Import one source card or `{cards: [...]}`; see [Contact sources and People state](#contact-sources-and-people-state) |
 | `PUT /things/:thingId/people-state` | Versioned state replacement with an operation receipt; see [Contact sources and People state](#contact-sources-and-people-state) |
-| `PATCH /things/:thingId` | `{ name?, description?, kind? }`: rename, describe (`null` or `''` clears) or change the kind of a saved thing (an idea that became a project). Someone on Unlinked keeps their kind (409); an OpenChat person's card answers 404 |
-| `DELETE /things/:thingId` | Delete (undo) a saved thing: the entity, its notes, its links in both directions, refs, contact sources and People-state operation receipts, plus OpenChat's note reviews and asks about it, in one transaction. Answers `{deleted: true, id, notesRemoved, linksRemoved}`; a missing, already-deleted or foreign id, or an OpenChat person's card, answers 404 |
+| `POST /merges`, `POST /splits`, `POST /merge-reverts`, `GET /merge-events` | Merge people, split a record, undo merges and inspect history; see [Merging people](#merging-people) |
+| `PATCH /things/:thingId` | `{ name?, description?, kind? }`: rename, describe (`null` or `''` clears) or change the kind of a saved thing (an idea that became a project); see [kind restrictions](#kinds-and-descriptions). An OpenChat person's card answers 404 |
+| `DELETE /things/:thingId` | Delete (undo) a saved thing: the entity, its notes, its links in both directions, refs, contact sources and People-state operation receipts, plus OpenChat's note reviews and asks about it, in one transaction. Answers `{deleted: true, id, notesRemoved, linksRemoved}`; a missing, already-deleted or foreign id, or an OpenChat person's card, answers 404. See [merged-person restrictions](#merging-people) |
 | `POST /things`, `POST /things/resolve` | `{kind, name, description?}` / `{kind, name, description?, createNew?, clientRequestId?}`: find or save by name under the no-merge rules below. A description is stored on a new thing and fills an existing thing's blank one; it never replaces one |
 | `GET /due` | People whose catch-up date has passed |
 | `GET /links?q=` | Every link the owner recorded, newest first, filtered by a name or relation |
@@ -104,7 +106,8 @@ returns those details for one entity. The same paging arguments and response
 are available through the shared connector and agent-key MCP server.
 
 The mobile People list requests REST `summary=true`: each row contains only
-`id`, `kind`, `name`, `description` and `card`, keeping state and source payloads
+`id`, `kind`, `name`, `description`, `card` and optional merged-person
+[`members`](#merging-people), keeping state and source payloads
 out of the list's retained data. Summary mode takes precedence over `details`.
 Default list responses, synchronization, detail and contact-state reads retain
 their complete payloads.
@@ -177,7 +180,10 @@ envelope allows 7 MiB. These do not raise limits on unrelated REST routes.
 
 ### Verified contact actors and profile-independent readback
 
-Source-card imports, People-state saves and legacy person-card PATCHes carry a
+Source-card imports, People-state saves, legacy person-card PATCHes,
+[merge, split and revert writes](#merging-people),
+[different-people decisions and undo](#different-people-decisions),
+[note edits and person-field writes](#editing-notes-and-person-fields) carry a
 stable verified actor ID separately from the readable `author` label. Connector
 requests use the hub's signed
 [`actor_id` claim](ideaflow-unified-connector.md#service-configuration); direct
@@ -187,11 +193,147 @@ actor identity. The canonical source pin is owned by
 [`NOOS_SOURCE.json`](../apps/server/src/services/overlay/NOOS_SOURCE.json).
 
 `GET /api/private/things/:thingId/contact-state` and `oc_get_contact_state` return
-only the owner's `thingId`, canonical `card`, `contactSources` and optional
-`peopleState`, including on OpenChat-backed entities. They do not expose the
+only the owner's `thingId`, canonical `card`, `contactSources`, optional
+`peopleState` and [merged-person fields](#merging-people), including on
+OpenChat-backed entities. They do not expose the
 associated account profile or widen its visibility. The existing saved-thing
 list and detail exclusions remain. Link browsing uses the canonical lightweight
 projection so it does not load unrelated source JSON or People payloads.
+
+### Merging people
+
+These owner-private operations are available through REST and the shared
+Ideaflow connector; the standalone agent-key MCP catalog does not expose them.
+Merge, split and revert require write scope and a
+[verified actor](#verified-contact-actors-and-profile-independent-readback);
+history requires read scope. They do not merge accounts or publish anything.
+Only merge on certain identity evidence: the same underlying contact or profile,
+or a shared email, phone or LinkedIn address with the exact same full name.
+A name alone is insufficient; the caller must establish the evidence.
+Noos `docs/PEOPLE_OVERLAY.md`, "Merging people", owns the underlying pointer
+semantics and head-selection rules.
+
+- `POST /merges` (`oc_merge_people`) takes `{merges, batchId?}` with 1–25
+  items, each `{ids, rule, operationId, headId?, evidence?, batchId?}`.
+  Give 2–50 distinct person IDs; the resulting person can have at most 50
+  records. `headId`, if given, must be one of the input IDs. `rule` names the
+  identity rule; `evidence` records its supporting facts. Exact validation is
+  owned by [`parseMergeInput` and `MERGE_LIMITS`](../apps/server/src/services/overlay/merge.ts).
+  A top-level batch ID fills only items without their own. The HTTP body limit
+  is 1 MiB.
+  Each item commits independently. Inspect every indexed `results` entry:
+  `{index, merged, replayed, headId, memberIds, eventId}` or
+  `{index, error, details?}`. HTTP success does not mean all items merged.
+  Exact retries with the same operation and actor replay the receipt;
+  changed content or actor returns `operation_id_reused`. OpenChat-backed
+  records, records marked different, and groups containing more than one
+  record with People state or catch-up settings are refused. An explicit
+  head must preserve the existing state-bearing head.
+- `POST /splits` takes `{id, operationId, reason?, decision?}`;
+  `oc_split_person` calls the ID `thingId`. It separates one physical record,
+  including the current head, keeping its stored data with it. By default it
+  records a different-person decision that prevents remerging the separated
+  records; `decision: false` skips that decision.
+- `POST /merge-reverts` (`oc_revert_merge`) takes exactly one of `eventId` or
+  `batchId`, plus optional `operationId`. It restores the prior pointers for
+  one merge or a batch's merges, newest first, in one transaction. Already
+  reverted merges are skipped; the result is `{reverted, skipped}`. Later
+  dependent merges or splits cause 409 `merge_superseded` without partial
+  rollback. A batch revert is limited to 1,000 merges. An operation ID makes
+  a retry replay the original result exactly. Split events cannot be reverted
+  through this operation.
+- `GET /merge-events?batchId=&thingId=&limit=` (`oc_list_merge_events`)
+  returns `{events, truncated}`, newest first. Filters can select a batch or
+  a person through any member ID; `limit` defaults to 100, maximum 1,000.
+  Events carry the actor, rule, evidence and before/after pointer changes.
+
+Merging moves or deletes no stored notes, links, refs, source cards or settings.
+Thing lists and totals count each person once. Lists (including summary mode),
+detail and contact-state responses include `members` when merged: the head
+first, then member records, each `{id, name, mergeEventId}`. Reading a member
+returns the head's `id` (`thingId` for contact-state), with `requestedId` naming
+the requested member. Details combine the person's notes, links and source
+cards; source cards carry `memberId` to identify their physical record.
+Writes addressed to a member land on the head. Deleting a merged member or a
+head with members returns 409 (`merged_record` or `merged_person`); split first.
+
+Private note-review history and source-note availability include all members.
+Capture retries prefer the requested record's receipt; otherwise they use the
+oldest receipt, breaking timestamp ties by review ID. Reusing its request ID
+with different text or capture mode returns 409. New captures use the head
+resolved under the membership lock; existing reviews remain on their physical
+records and separate again on split.
+
+### Different-people decisions
+
+Duplicate review can keep saved people apart without merging or splitting them.
+These routes and tools are exposed through REST and the shared Ideaflow
+connector; the standalone agent-key MCP catalog does not expose these tools.
+Writes require write scope and a
+[verified actor](#verified-contact-actors-and-profile-independent-readback);
+reads require read scope.
+
+- `POST /identity-decisions` (`oc_mark_different_people`) takes
+  `{ids, operationId, reason?}` for 2–50 distinct saved people. It records a
+  decision for each pair, preventing later merges between them. People already
+  in one merged person must be split first (`already_same_person`). Retrying the
+  same operation and content replays the result; changed content returns 409
+  `operation_id_reused`.
+- `POST /identity-decision-reverts` (`oc_undo_different_people`) takes
+  `{operationId}` from the review decision. It revokes that operation's
+  decisions without deleting their history; they no longer block merges.
+  Decisions created by a split are not undone by this route.
+- `GET /identity-decisions?ids=<comma-separated IDs>`
+  (`oc_list_identity_decisions`) returns `{decisions}`: live decisions touching
+  any of up to 50 supplied people, including through merged members.
+
+Noos `docs/PEOPLE_OVERLAY.md`, "Different people" decisions, owns the
+underlying identity rules.
+
+### Editing notes and person fields
+
+These routes are available through REST; the named tools below are available
+through the shared Ideaflow connector, rather than the standalone agent-key
+MCP catalog. Reads need read scope; writes need write scope and a
+[verified actor](#verified-contact-actors-and-profile-independent-readback).
+
+`PATCH /notes/:noteId` (`oc_update_private_note`) takes `{text, ifRevision?}`
+and edits a note in place, keeping its ID, creation date and ask evidence
+references. Reads include `revision` (1 before any edits) and, after an edit,
+`editedBy`; the original provenance stays. Pass the revision read as
+`ifRevision` to avoid overwriting another edit: a stale value returns 409
+`stale_revision` with the current `note`. Omitting it permits an unconditional
+edit. An unchanged text does not create a revision.
+
+`GET /notes/:noteId/revisions` (`oc_list_note_revisions`) returns
+`{note, revisions}` with earlier texts newest first, their authors and
+replacement dates. Restore an earlier text by passing it to the edit route.
+
+For people, `GET /things/:thingId` includes `fields[]` and
+`fieldSuggestions[]`; `GET /things/:thingId/fields` returns
+`{id, fields, fieldSuggestions}` separately and also supports OpenChat-backed
+entities. Noos `docs/PEOPLE_OVERLAY.md`, "Person fields", owns the field
+projection, note-suggestion, provenance and history rules.
+
+- `POST /things/:thingId/fields` (`oc_set_person_field`) adds an assertion;
+  `clientRequestId` is required. REST takes Wi-Fi as
+  `value: {ssid, password}`; the connector tool takes separate `ssid` and
+  `password` arguments. Accept a note suggestion with its `suggestionId` and
+  a `clientRequestId`, without restating the value. To replace a value, pass
+  its key as `supersedes`; the old value becomes former.
+- `POST /things/:thingId/field-marks` (`oc_mark_person_field`) records a
+  judgement or undo, with a required `clientRequestId`. Use a field `key` for
+  former, wrong, hidden, pin, unpin or restore; a `suggestionId` for dismiss;
+  an `assertionId` for retract; or an earlier field `operationId` for undo.
+  Assertions and decisions retain history rather than overwriting values.
+- `GET /things/:thingId/fields/:key/reveal` (`oc_get_person_field`) explicitly
+  reads one structured field in full. Ordinary field projections mask Wi-Fi
+  passwords; use this tool only when the owner asks for that value. This is
+  field masking, not redaction of source note text, note revisions, contact
+  sources or the owner's full export, which can still contain credentials.
+
+The [vendoring contract](#what-it-holds) also covers person fields; do not edit
+the vendored implementation locally.
 
 ## People from Unlinked
 
@@ -246,7 +388,8 @@ The same subject, relation and target is always one link, and the same note text
 on a card is one note, so retried calls do not duplicate. Deleting a note or link
 is the undo; deleting a saved thing (`DELETE /things/:thingId`,
 `oc_delete_private_thing`) is the undo for saving one, and takes its notes and
-links with it. Deleting again answers 404.
+links with it, subject to the [merged-person deletion restrictions](#merging-people).
+Deleting again answers 404.
 
 ## Provenance and relation types
 
@@ -302,12 +445,17 @@ Saved things are `person`, `company` (also schools and organisations),
 projects are about, such as ADHD or coherence). Each may carry a one-line
 `description` (280 characters or fewer) instead of a separate node for what it
 is; search matches it. A saved thing's kind can change (an idea becomes a
-project) unless it names someone on Unlinked.
+project) unless it names someone on Unlinked. A merged member or head with
+members must be split before changing its kind (409); names and descriptions
+can still be edited through the head.
 
 Account export includes the owner's private graph under `privateGraph`:
-entities with People state, notes and links, plus contact sources and blurb state
-when present. Account deletion removes everything the person kept, under either
-identity that can name them, and removes other owners' entities that knew them
+entities with People state, notes and links, plus contact sources, blurb state,
+merge events, identity decisions and their revocations, note revisions, and
+field assertions, decisions and operation receipts when present. Merged entity
+exports retain their physical IDs and pointers. Account deletion removes everything the
+person kept, under either identity that can name them, and removes other
+owners' entities that knew them
 only as an OpenChat account. An entity with an imported
 contact source survives removal of that account ref; its owner-private source
 record is independent of the deleted account.

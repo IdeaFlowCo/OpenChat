@@ -27,7 +27,7 @@ and an HS256 assertion in `Authorization: Bearer …`. Claims:
 - `actor_id` (optional): stable verified grant identity, 1–256 printable ASCII
   characters without spaces; forwarded through the one-use REST delegation
 
-The contact/state writes listed under
+The writes listed under
 [verified contact actors](private-graph.md#verified-contact-actors-and-profile-independent-readback)
 require `actor_id`; older assertions without it can still use other tools.
 
@@ -69,6 +69,7 @@ The owner's shared Noos people overlay is exposed through the connector.
 The [private graph reference](private-graph.md) owns its routes and tool
 contracts, including [paginated reads](private-graph.md#pagination),
 [contact-source imports and People state](private-graph.md#contact-sources-and-people-state),
+[people merges, splits and rollback](private-graph.md#merging-people),
 [lists](private-graph.md#lists) and [asks](private-graph.md#asks).
 
 Notes and relations written

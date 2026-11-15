@@ -18,13 +18,14 @@ A monorepo for the OpenChat application.
 ## Saved people
 
 From **Chats**, open **People**, then **Friends** to see **Saved people**.
-The list loads all pages automatically and shows how many records have loaded.
+The list loads all pages automatically and shows how many people have loaded.
 **Incomplete** means the list has not finished a consistent load;
 **Retry loading people** continues after a failure. If the total changes during loading, the list reloads
 before showing a complete count. Previously displayed people stay visible
 during an incomplete refresh. A final **N saved people** count covers your saved
-private person records, not OpenChat accounts or a verified total of your device
-contacts.
+private people, counting [merged records](docs/private-graph.md#merging-people)
+as one person; it excludes OpenChat accounts and is not a verified total of your
+device contacts.
 
 Choose **+ Add person**, enter a name, and **Save privately**; **Private profile**
 opens the record's notes and asks. Saving a person does not invite or notify them.
@@ -180,6 +181,13 @@ no unread notification. It does not grant OpenChat friendship or friends-only
 Context access. Existing blocks and local declined/removed connections suppress
 new acceptance synchronization. See the [accepted-connection contract](docs/unlinked-accepted-connections.md)
 for synchronization and privacy rules.
+
+Joining an Unlinked community also puts its group chat in your normal inbox.
+Use Unlinked to rename the community, invite or remove members, or leave;
+OpenChat rejects those standalone changes for a managed chat. Quick-emoji
+customization remains available. Leaving removes chat access; the remaining
+members keep the history. See the [community chat contract](docs/unlinked-community-chat.md)
+for synchronization and rollout requirements.
 
 See the [Unlinked compose contract](docs/unlinked-compose-contract.md) for
 accepted profile context, card recipient resolution, and sign-in return rules.

@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const mocks = vi.hoisted(() => ({
   readContactState:vi.fn(), importContactSource: vi.fn(), importContactSources: vi.fn(), savePeopleState: vi.fn(), addLink: vi.fn(), addNote: vi.fn(), createPrivateThing: vi.fn(), deleteLink: vi.fn(), deleteNote: vi.fn(), deletePrivateThing: vi.fn(), getPersonOverlay: vi.fn(), getThing: vi.fn(),
   listDue: vi.fn(), listThings: vi.fn(), updateNote: vi.fn(), updatePersonCard: vi.fn(), updateLink: vi.fn(), searchPrivate: vi.fn(), getNeighbourhood: vi.fn(),
-  updatePrivateThing: vi.fn(),
+  updatePrivateThing: vi.fn(), mergePeople: vi.fn(),
 }));
 vi.mock('../src/services/privateGraph.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/privateGraph.js')>('../src/services/privateGraph.js');
@@ -73,6 +73,7 @@ describe('private graph routes', () => {
   it('bounds large bodies without increasing limits on other routes', async () => {
     const largeBody = JSON.stringify({note:'x'.repeat(1024 * 1024)});
     expect((await call('/contact-sources', {method:'POST',body:largeBody})).status).toBe(413);
+    expect((await call('/merges', {method:'POST',body:largeBody})).status).toBe(413);
     expect((await call('/things/t1/people-state', {method:'PUT',body:largeBody})).status).toBe(413);
     expect((await call('/contact-source-batches', {method:'POST',body:JSON.stringify({note:'x'.repeat(7 * 1024 * 1024)})})).status).toBe(413);
     expect((await call('/things', {method:'POST',body:JSON.stringify({note:'x'.repeat(120000)})})).status).toBe(413);
@@ -80,6 +81,20 @@ describe('private graph routes', () => {
     expect(mocks.importContactSources).not.toHaveBeenCalled();
     expect(mocks.savePeopleState).not.toHaveBeenCalled();
     expect(mocks.createPrivateThing).not.toHaveBeenCalled();
+    expect(mocks.mergePeople).not.toHaveBeenCalled();
+  });
+  it('accepts a full merge batch with maximum-length evidence through the bounded parser', async () => {
+    const merges = Array.from({length:25}, (_, index) => ({
+      ids:[`person-head-${index}`,`person-member-${index}`],
+      rule:'exact-email', operationId:`large-merge-${index}`,
+      evidence:Array.from({length:40}, (_, evidenceIndex) => `${evidenceIndex}:`.padEnd(300, 'x')),
+    }));
+    const results = merges.map((_, index) => ({index,headId:`person-head-${index}`}));
+    mocks.mergePeople.mockResolvedValue({results});
+    const response = await call('/merges/', {method:'POST',body:JSON.stringify({merges,batchId:'large-batch'})});
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({results});
+    expect(mocks.mergePeople).toHaveBeenCalledWith('alice',merges,'large-batch',{author:'owner',source:'app',assertion:'stated'},'openchat:owner');
   });
   it('forwards the lightweight summary projection with all pagination arguments', async () => {
     const page = {things:[],total:0,nextCursor:null};

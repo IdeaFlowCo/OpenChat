@@ -3,7 +3,9 @@ import { Router, Request, Response } from 'express';
 import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
 import { createHash } from 'node:crypto';
-import neo4j from 'neo4j-driver';
+import neo4j, { type ManagedTransaction } from 'neo4j-driver';
+import { publishConversationEvent } from '../services/conversationEvents.js';
+import { withConversationLock } from '../services/conversationLock.js';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getDriver } from '../db.js';
@@ -293,16 +295,9 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
     const io = req.app.get('io') as IOServer | undefined;
     emitConversationCreated(io, conversation);
 
-    // Force-join every participant's live sockets to the conversation room
-    // immediately. Without this, the very first message:send from the creator
-    // is broadcast to conversation:${id} *before* the other participants'
-    // clients react to conversation:created → conversation:join, and the
-    // message is dropped for them. (Same race as OpenChat-09h, but for group
-    // creation. POST /participants does this for add-member; creation needs
-    // it too.) See OpenChat-22u.
     if (io) {
       for (const pid of allParticipants) {
-        joinUserSocketsToConversation(io, pid, conversationId);
+        await joinUserSocketsToConversation(io, pid, conversationId);
       }
     }
 
@@ -318,8 +313,8 @@ router.post('/conversations', resolveActor, async (req: Request, res: Response) 
 // Helper: load full conversation with participants (used by mutating endpoints
 // that need to broadcast a fresh shape to clients). Returns null if the
 // conversation has no participants left (i.e. fully drained group).
-async function loadConversation(
-  session: ReturnType<ReturnType<typeof getDriver>['session']>,
+export async function loadConversation(
+  session: Pick<ManagedTransaction, 'run'>,
   conversationId: string
 ): Promise<Record<string, unknown> | null> {
   const result = await session.run(`
@@ -358,9 +353,6 @@ function emitConversationUpdated(
     seen.add(pid);
     io.to(`user:${pid}`).emit('conversation:updated', { conversationId, conversation });
   }
-  // Also emit to anyone currently in the conversation room (in case they're
-  // in a non-participant viewer state — edge case but cheap)
-  io.to(`conversation:${conversationId}`).emit('conversation:updated', { conversationId, conversation });
 }
 
 // PATCH /api/chat/conversations/:id/participants/me — set mute state for
@@ -418,6 +410,14 @@ router.patch('/conversations/:id/participants/me', requireAuth, async (req: Requ
   }
 });
 
+async function assertConversationMutation(tx: ManagedTransaction, id: string, userId: string, ownerOnly: boolean, allowManaged = false): Promise<void> {
+  const result = await tx.run(`MATCH(:User {id:$userId})-[p:PARTICIPATES_IN]->(c:Conversation {id:$id})
+    RETURN c.unlinkedGroupId AS managedGroupId,p.role AS role`, { id,userId });
+  if (!result.records.length) throw new InviteError('Conversation not found',404);
+  if (!allowManaged && result.records[0].get('managedGroupId')) throw new InviteError('Manage membership in the Unlinked group',409);
+  if (ownerOnly && result.records[0].get('role') !== 'owner') throw new InviteError('Only the group owner can make this change',403);
+}
+
 // PATCH /api/chat/conversations/:id - Update title (owner-only for groups)
 router.patch('/conversations/:id', requireAuth, async (req: Request, res: Response) => {
   const session = getDriver().session();
@@ -448,37 +448,46 @@ router.patch('/conversations/:id', requireAuth, async (req: Request, res: Respon
     // Verify participation (and ownership for renames)
     const check = await session.run(`
       MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
-      RETURN c, rel.role AS role
+      RETURN c, rel.role AS role, c.unlinkedGroupId AS managedGroupId
     `, { userId, id });
 
     if (check.records.length === 0) {
       res.status(404).json({ error: 'Conversation not found' });
       return;
     }
+    if (hasTitle && check.records[0].get('managedGroupId')) { res.status(409).json({ error: 'Manage membership in the Unlinked group', groupUrl: `https://www.unlinked.ai/groups/${check.records[0].get('managedGroupId')}` }); return; }
     const role = check.records[0].get('role');
     if (hasTitle && role !== 'owner') {
       res.status(403).json({ error: 'Only the group owner can rename' });
       return;
     }
 
-    if (hasTitle) {
-      await session.run(`
-        MATCH (c:Conversation {id: $id})
-        SET c.title = $title, c.updatedAt = datetime($now)
-      `, { id, title: (title as string).trim(), now: new Date().toISOString() });
-    }
-    if (hasQuickEmoji) {
-      await session.run(`
-        MATCH (c:Conversation {id: $id})
-        SET c.quickEmoji = $quickEmoji
-      `, { id, quickEmoji: quickEmoji === null ? null : (quickEmoji as string).trim() });
-    }
+    await withConversationLock(id, async tx => {
+      await assertConversationMutation(tx,id,userId,hasTitle,!hasTitle);
+      if (hasTitle) {
+        await tx.run(`
+          MATCH (c:Conversation {id: $id})
+          SET c.title = $title, c.updatedAt = datetime($now)
+        `, { id, title: (title as string).trim(), now: new Date().toISOString() });
+      }
+      if (hasQuickEmoji) {
+        await tx.run(`
+          MATCH (c:Conversation {id: $id})
+          SET c.quickEmoji = $quickEmoji
+        `, { id, quickEmoji: quickEmoji === null ? null : (quickEmoji as string).trim() });
+      }
 
-    const conversation = await loadConversation(session, id);
-    const io = req.app.get('io') as IOServer | undefined;
-    emitConversationUpdated(io, conversation);
-    res.json(conversation);
+    });
+    await withConversationLock(id, async tx => {
+      await assertConversationMutation(tx,id,userId,false,true);
+      const conversation = await loadConversation(tx, id);
+      const io = req.app.get('io') as IOServer | undefined;
+      emitConversationUpdated(io, conversation);
+      if (!res.headersSent) res.json(conversation);
+    });
   } catch (error) {
+    if (res.headersSent) return;
+    if (error instanceof InviteError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error updating conversation:', error);
     res.status(500).json({ error: 'Failed to update conversation' });
   } finally {
@@ -502,13 +511,14 @@ router.post('/conversations/:id/participants', requireAuth, async (req: Request,
     // Verify caller is owner of a group
     const check = await session.run(`
       MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
-      RETURN c.type AS type, rel.role AS role
+      RETURN c.type AS type, rel.role AS role, c.unlinkedGroupId AS managedGroupId
     `, { userId, id });
 
     if (check.records.length === 0) {
       res.status(404).json({ error: 'Conversation not found' });
       return;
     }
+    if (check.records[0].get('managedGroupId')) { res.status(409).json({ error: 'Manage membership in the Unlinked group', groupUrl: `https://www.unlinked.ai/groups/${check.records[0].get('managedGroupId')}` }); return; }
     const role = check.records[0].get('role');
     const type = check.records[0].get('type');
     if (type !== 'group') {
@@ -534,43 +544,53 @@ router.post('/conversations/:id/participants', requireAuth, async (req: Request,
 
     // Idempotent add: MERGE relationship; preserve role/joinedAt if already present
     const now = new Date().toISOString();
-    await session.executeWrite(async (tx) => {
-      await acquireContextAclLocks(tx, { userIds: [targetId], conversationId: id });
-      return await tx.run(`
-        MATCH (c:Conversation {id: $id})
+    await withConversationLock(id, async tx => {
+      await assertConversationMutation(tx,id,userId,true);
+      const allowed = await tx.run(`MATCH(actor:User {id:$userId}),(target:User {id:$targetId})
+        WHERE NOT EXISTS { MATCH(actor)-[:BLOCKED]->(target) } AND NOT EXISTS { MATCH(target)-[:BLOCKED]->(actor) }
+        RETURN target.id AS id`, {userId,targetId});
+      if (!allowed.records.length) throw new InviteError('User not found',404);
+      const mutation = await tx.run(`
+        MATCH (c:Conversation {id: $id}) WHERE c.unlinkedGroupId IS NULL
         MATCH (u:User {id: $targetId})
         MERGE (u)-[rel:PARTICIPATES_IN]->(c)
           ON CREATE SET rel.joinedAt = datetime($now), rel.role = 'member'
         SET c.updatedAt = datetime($now)
+        RETURN c.id AS id
       `, { id, targetId, now });
+      if (!mutation.records.length) throw new InviteError('Conversation mutation rejected',409);
+    });
+    await withConversationLock(id, async tx => {
+      await assertConversationMutation(tx,id,userId,true);
+      const target = await tx.run(`MATCH(:User {id:$targetId})-[:PARTICIPATES_IN]->(:Conversation {id:$id}) RETURN true AS member`, {targetId,id});
+      if (!target.records.length) throw new InviteError('Participant no longer present',409);
+      const conversation = await loadConversation(tx, id);
+      const io = req.app.get('io') as IOServer | undefined;
+      if (io && conversation) {
+        await joinUserSocketsToConversation(io, targetId, id, tx);
+
+        // Notify all current participants (incl. newly-added) so their clients
+        // refresh.
+        const participants = (conversation.participants as Array<{ user?: { id?: string } }>) || [];
+        const seen = new Set<string>();
+        for (const p of participants) {
+          const pid = p?.user?.id;
+          if (!pid || seen.has(pid)) continue;
+          seen.add(pid);
+          io.to(`user:${pid}`).emit('participant:added', {
+            conversationId: id,
+            conversation,
+            userId: targetId,
+          });
+        }
+      }
+
+      if (!res.headersSent) res.status(201).json(conversation);
     });
 
-    const conversation = await loadConversation(session, id);
-    const io = req.app.get('io') as IOServer | undefined;
-    if (io && conversation) {
-      // Auto-join the new member's live sockets to the conversation room so
-      // they start receiving message:new immediately, without needing to
-      // click into the conversation first.
-      joinUserSocketsToConversation(io, targetId, id);
-
-      // Notify all current participants (incl. newly-added) so their clients
-      // refresh.
-      const participants = (conversation.participants as Array<{ user?: { id?: string } }>) || [];
-      const seen = new Set<string>();
-      for (const p of participants) {
-        const pid = p?.user?.id;
-        if (!pid || seen.has(pid)) continue;
-        seen.add(pid);
-        io.to(`user:${pid}`).emit('participant:added', {
-          conversationId: id,
-          conversation,
-          userId: targetId,
-        });
-      }
-    }
-
-    res.status(201).json(conversation);
   } catch (error) {
+    if (res.headersSent) return;
+    if (error instanceof InviteError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error adding participant:', error);
     res.status(500).json({ error: 'Failed to add participant' });
   } finally {
@@ -589,7 +609,7 @@ router.delete('/conversations/:id/participants/:userId', requireAuth, async (req
     // Caller must be participant
     const callerCheck = await session.run(`
       MATCH (u:User {id: $callerId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
-      RETURN c.type AS type, rel.role AS role
+      RETURN c.type AS type, rel.role AS role, c.unlinkedGroupId AS managedGroupId
     `, { callerId, id });
 
     if (callerCheck.records.length === 0) {
@@ -597,6 +617,7 @@ router.delete('/conversations/:id/participants/:userId', requireAuth, async (req
       return;
     }
     const type = callerCheck.records[0].get('type');
+    if (callerCheck.records[0].get('managedGroupId')) { res.status(409).json({ error: 'Leave or manage membership in the Unlinked group', groupUrl: `https://www.unlinked.ai/groups/${callerCheck.records[0].get('managedGroupId')}` }); return; }
     const callerRole = callerCheck.records[0].get('role');
     if (type !== 'group') {
       res.status(400).json({ error: 'Cannot remove participants from a direct conversation' });
@@ -623,45 +644,37 @@ router.delete('/conversations/:id/participants/:userId', requireAuth, async (req
       }
     }
 
-    // Capture participant ids BEFORE removal so we can notify the removed user too
-    const before = await loadConversation(session, id);
-    const beforeParticipants = (before?.participants as Array<{ user?: { id?: string } }>) || [];
-
-    await session.executeWrite(async (tx) => {
-      await acquireContextAclLocks(tx, { userIds: [targetId], conversationId: id });
-      return await tx.run(`
-        MATCH (u:User {id: $targetId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
-        DELETE rel
-        SET c.updatedAt = datetime($now)
-      `, { id, targetId, now: new Date().toISOString() });
-    });
-
-    const after = await loadConversation(session, id);
-
-    const io = req.app.get('io') as IOServer | undefined;
-    if (io) {
-      // Yank the removed user's sockets out of the conversation room first,
-      // so they don't receive the very participant:removed event for "you".
-      // (We still emit to their per-user room below.)
-      leaveUserSocketsFromConversation(io, targetId, id);
-
-      // Notify everyone who was a participant (this includes the removed
-      // user, via their per-user room).
-      const seen = new Set<string>();
-      for (const p of beforeParticipants) {
-        const pid = p?.user?.id;
-        if (!pid || seen.has(pid)) continue;
-        seen.add(pid);
-        io.to(`user:${pid}`).emit('participant:removed', {
-          conversationId: id,
-          userId: targetId,
-          conversation: after,
-        });
+    await withConversationLock(id, async tx => {
+      await assertConversationMutation(tx,id,callerId,!isSelf);
+      if (isSelf) {
+        const owner = await tx.run(`MATCH(:User {id:$callerId})-[p:PARTICIPATES_IN]->(c:Conversation {id:$id})
+          OPTIONAL MATCH(:User)-[other:PARTICIPATES_IN]->(c) RETURN p.role AS role,count(other) AS n`, {id,callerId});
+        if (owner.records[0]?.get('role') === 'owner' && Number(owner.records[0].get('n')) > 1) throw new InviteError('Owner cannot leave a group with other members. Remove members first.',400);
       }
-    }
+      const mutation = await tx.run(`
+          MATCH (u:User {id: $targetId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $id})
+          WHERE c.unlinkedGroupId IS NULL
+          DELETE rel
+          SET c.updatedAt = datetime($now)
+          RETURN c.id AS id
+        `, { id, targetId, now: new Date().toISOString() });
+      if (!mutation.records.length) throw new InviteError('Participant mutation rejected',409);
+    });
+    await withConversationLock(id, async tx => {
+      const after = await loadConversation(tx, id);
+      const participants = (after?.participants ?? []) as Array<{user:{id:string}}>;
+      if (participants.some(p => p.user.id === targetId)) return;
+      const io = req.app.get('io') as IOServer | undefined;
+      if (io) {
+        leaveUserSocketsFromConversation(io,targetId,id);
+        io.to(`user:${targetId}`).emit('participant:removed',{conversationId:id,userId:targetId});
+        for (const {user} of participants) io.to(`user:${user.id}`).emit('participant:removed',{conversationId:id,userId:targetId,conversation:after});
+      }
+    });
 
     res.json({ ok: true });
   } catch (error) {
+    if (error instanceof InviteError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error removing participant:', error);
     res.status(500).json({ error: 'Failed to remove participant' });
   } finally {
@@ -941,8 +954,7 @@ router.patch('/conversations/:id/read', requireAuth, async (req: Request, res: R
 
     const io = req.app.get('io') as IOServer | undefined;
     if (io) {
-      // Emit to all participants in the conversation room.
-      io.to(`conversation:${conversationId}`).emit('read:updated', {
+      await publishConversationEvent(io, conversationId as string, 'read:updated', {
         conversationId,
         userId,
         lastReadAt: now,
@@ -1270,7 +1282,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // (mobile users on a China VPN where the WS upgrade is blocked/reset) are
     // persisted but never delivered live. Clients dedupe by message.id, so the
     // sender receiving its own broadcast is harmless. See OpenChat-5q1 / -60y.
-    if (io) broadcastMessageToParticipants(io, participantIds, message);
+    if (io) await broadcastMessageToParticipants(io, conversationId as string, message);
     // Push notifications. The socket send path has always fanned these out; this
     // REST path did not, so a message sent over REST — which is exactly what
     // happens when the sender's socket isn't up yet, e.g. the first message in a
@@ -2011,10 +2023,10 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
       try { raw.attachments = JSON.parse(raw.attachments as string); } catch { /* leave */ }
     }
 
-    // 6. Emit message:new to target conversation room.
+    // 6. Publish to the target conversation's current participants.
     const io = req.app.get('io') as IOServer | undefined;
     if (io) {
-      io.to(`conversation:${toConversationId}`).emit('message:new', raw);
+      await publishConversationEvent(io, toConversationId, 'message:new', raw);
     }
     dispatchMessageEvent(raw, participantIds);
 
@@ -2181,48 +2193,6 @@ router.post('/ai-disclosure-accept', requireAuth, async (req: Request, res: Resp
 
 // ─── Edit / Delete messages (OpenChat-q9h) ───────────────────────────────────
 
-// Helper: load participant IDs of a conversation for socket fanout.
-async function loadParticipantIds(
-  session: ReturnType<ReturnType<typeof getDriver>['session']>,
-  conversationId: string
-): Promise<string[]> {
-  const result = await session.run(`
-    MATCH (u:User)-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-    RETURN u.id AS uid
-  `, { conversationId });
-  return result.records.map(r => r.get('uid') as string);
-}
-
-// Emit message:updated to all participants of a conversation.
-function emitMessageUpdated(
-  io: IOServer | undefined,
-  conversationId: string,
-  participantIds: string[],
-  message: unknown
-): void {
-  if (!io) return;
-  // Emit to the conversation room (sockets already joined).
-  io.to(`conversation:${conversationId}`).emit('message:updated', message);
-  // Also emit to per-user rooms so participants who aren't in the room get it.
-  for (const uid of participantIds) {
-    io.to(`user:${uid}`).emit('message:updated', message);
-  }
-}
-
-// Emit message:reactions-updated to all participants.
-function emitReactionsUpdated(
-  io: IOServer | undefined,
-  conversationId: string,
-  participantIds: string[],
-  payload: unknown
-): void {
-  if (!io) return;
-  io.to(`conversation:${conversationId}`).emit('message:reactions-updated', payload);
-  for (const uid of participantIds) {
-    io.to(`user:${uid}`).emit('message:reactions-updated', payload);
-  }
-}
-
 // PATCH /api/chat/messages/:id — edit own message (owner-only)
 router.patch('/messages/:id', resolveActor, async (req: Request, res: Response) => {
   const session = getDriver().session();
@@ -2262,8 +2232,7 @@ router.patch('/messages/:id', resolveActor, async (req: Request, res: Response) 
 
     // Broadcast to all conversation participants
     const io = req.app.get('io') as IOServer | undefined;
-    const participantIds = await loadParticipantIds(session, conversationId);
-    emitMessageUpdated(io, conversationId, participantIds, message);
+    await publishConversationEvent(io, conversationId, 'message:updated', message);
 
     res.json(message);
   } catch (error) {
@@ -2327,11 +2296,10 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
     }));
 
     const io = req.app.get('io') as IOServer | undefined;
-    const participantIds = await loadParticipantIds(session, conversationId);
-    emitMessageUpdated(io, conversationId, participantIds, message);
+    await publishConversationEvent(io, conversationId, 'message:updated', message);
     if (io) {
       for (const t of removedThoughts) {
-        io.to(`conversation:${conversationId}`).emit('thought:unshared', {
+        await publishConversationEvent(io, conversationId, 'thought:unshared', {
           conversationId,
           thoughtId: t.id,
         });
@@ -2462,9 +2430,8 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
     const reactions = await getReactionSummary(session, messageId, userId);
 
     const io = req.app.get('io') as IOServer | undefined;
-    const participantIds = await loadParticipantIds(session, conversationId);
     const payload = { messageId, conversationId, reactions };
-    emitReactionsUpdated(io, conversationId, participantIds, payload);
+    await publishConversationEvent(io, conversationId, 'message:reactions-updated', payload);
 
     res.status(201).json({ reactions });
   } catch (error) {
@@ -2513,9 +2480,8 @@ router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Reques
     const reactions = await getReactionSummary(session, messageId, userId);
 
     const io = req.app.get('io') as IOServer | undefined;
-    const participantIds = await loadParticipantIds(session, conversationId);
     const payload = { messageId, conversationId, reactions };
-    emitReactionsUpdated(io, conversationId, participantIds, payload);
+    await publishConversationEvent(io, conversationId, 'message:reactions-updated', payload);
 
     res.json({ reactions });
   } catch (error) {
@@ -2776,13 +2742,14 @@ router.post('/conversations/:id/invites', requireAuth, async (req: Request, res:
     // Verify caller is owner of a group
     const check = await session.run(`
       MATCH (u:User {id: $userId})-[rel:PARTICIPATES_IN]->(c:Conversation {id: $convId})
-      RETURN c.type AS type, rel.role AS role
+      RETURN c.type AS type, rel.role AS role, c.unlinkedGroupId AS managedGroupId
     `, { userId, convId });
 
     if (check.records.length === 0) {
       res.status(404).json({ error: 'Conversation not found' });
       return;
     }
+    if (check.records[0].get('managedGroupId')) { res.status(409).json({ error: 'Manage membership in the Unlinked group', groupUrl: `https://www.unlinked.ai/groups/${check.records[0].get('managedGroupId')}` }); return; }
     const role = check.records[0].get('role');
     const type = check.records[0].get('type');
     if (type !== 'group') {
@@ -2795,53 +2762,59 @@ router.post('/conversations/:id/invites', requireAuth, async (req: Request, res:
     }
 
     // Check for an existing active non-expired invite from this owner
-    const existing = await session.run(`
-      MATCH (c:Conversation {id: $convId})-[:HAS_INVITE]->(inv:GroupInvite {createdBy: $userId})
-      WHERE inv.revokedAt IS NULL
-        AND datetime(inv.expiresAt) > datetime()
-        AND inv.usesLeft > 0
-      RETURN inv
-      ORDER BY inv.createdAt DESC
-      LIMIT 1
-    `, { convId, userId });
+    const outcome = await withConversationLock(convId, async tx => {
+      await assertConversationMutation(tx,convId,userId,true);
+      const existing = await tx.run(`
+        MATCH (c:Conversation {id: $convId})-[:HAS_INVITE]->(inv:GroupInvite {createdBy: $userId})
+        WHERE inv.revokedAt IS NULL
+          AND datetime(inv.expiresAt) > datetime()
+          AND inv.usesLeft > 0
+        RETURN inv
+        ORDER BY inv.createdAt DESC
+        LIMIT 1
+      `, { convId, userId });
 
-    if (existing.records.length > 0) {
-      const inv = toJS(existing.records[0].get('inv').properties) as Record<string, unknown>;
-      const token = inv.token as string;
-      res.json({
+      if (existing.records.length > 0) {
+        const inv = toJS(existing.records[0].get('inv').properties) as Record<string, unknown>;
+        const token = inv.token as string;
+        return { status:200, body:{
+          token,
+          url: `${requestOrigin}/i/${token}`,
+          expiresAt: inv.expiresAt,
+          usesLeft: inv.usesLeft,
+        }};
+      }
+
+      // Create new invite
+      const token = nanoid(32);
+      const now = new Date().toISOString();
+      const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString();
+
+      const mutation = await tx.run(`
+        MATCH (c:Conversation {id: $convId}) WHERE c.unlinkedGroupId IS NULL
+        CREATE (inv:GroupInvite {
+          token: $token,
+          conversationId: $convId,
+          createdBy: $userId,
+          createdAt: datetime($now),
+          expiresAt: datetime($expiresAt),
+          usesLeft: $maxUses
+        })
+        CREATE (c)-[:HAS_INVITE]->(inv)
+        RETURN inv.token AS token
+      `, { convId, token, userId, now, expiresAt, maxUses: neo4j.int(maxUses) });
+
+      if (!mutation.records.length) throw new InviteError('Invite creation rejected',409);
+      return { status:201, body:{
         token,
         url: `${requestOrigin}/i/${token}`,
-        expiresAt: inv.expiresAt,
-        usesLeft: inv.usesLeft,
-      });
-      return;
-    }
-
-    // Create new invite
-    const token = nanoid(32);
-    const now = new Date().toISOString();
-    const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString();
-
-    await session.run(`
-      MATCH (c:Conversation {id: $convId})
-      CREATE (inv:GroupInvite {
-        token: $token,
-        conversationId: $convId,
-        createdBy: $userId,
-        createdAt: datetime($now),
-        expiresAt: datetime($expiresAt),
-        usesLeft: $maxUses
-      })
-      CREATE (c)-[:HAS_INVITE]->(inv)
-    `, { convId, token, userId, now, expiresAt, maxUses: neo4j.int(maxUses) });
-
-    res.status(201).json({
-      token,
-      url: `${requestOrigin}/i/${token}`,
-      expiresAt,
-      usesLeft: maxUses,
+        expiresAt,
+        usesLeft: maxUses,
+      }};
     });
+    res.status(outcome.status).json(outcome.body);
   } catch (error) {
+    if (error instanceof InviteError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error creating invite:', error);
     res.status(500).json({ error: 'Failed to create invite' });
   } finally {
@@ -2960,27 +2933,30 @@ router.post('/invites/:token/accept', requireAuth, async (req: Request, res: Res
   try {
     const { conversationId, newlyJoined } = await acceptInviteTransaction(session, userId, token);
 
-    // Load full conversation and emit participant:added
-    const conversation = await loadConversation(session, conversationId);
-    const io = req.app.get('io') as IOServer | undefined;
-    if (io && conversation && newlyJoined) {
-      joinUserSocketsToConversation(io, userId, conversationId);
-      const participants = (conversation.participants as Array<{ user?: { id?: string } }>) || [];
-      const seen = new Set<string>();
-      for (const p of participants) {
-        const pid = p?.user?.id;
-        if (!pid || seen.has(pid)) continue;
-        seen.add(pid);
-        io.to(`user:${pid}`).emit('participant:added', {
-          conversationId,
-          conversation,
-          userId,
-        });
+    await withConversationLock(conversationId, async tx => {
+      await assertConversationMutation(tx,conversationId,userId,false,true);
+      const conversation = await loadConversation(tx, conversationId);
+      const io = req.app.get('io') as IOServer | undefined;
+      if (io && conversation && newlyJoined) {
+        if (!await joinUserSocketsToConversation(io, userId, conversationId, tx)) throw new InviteError('Conversation not found',404);
+        const participants = (conversation.participants as Array<{ user?: { id?: string } }>) || [];
+        const seen = new Set<string>();
+        for (const p of participants) {
+          const pid = p?.user?.id;
+          if (!pid || seen.has(pid)) continue;
+          seen.add(pid);
+          io.to(`user:${pid}`).emit('participant:added', {
+            conversationId,
+            conversation,
+            userId,
+          });
+        }
       }
-    }
 
-    res.json({ conversationId, conversation });
+      if (!res.headersSent) res.json({ conversationId, conversation });
+    });
   } catch (error: any) {
+    if (res.headersSent) return;
     if (error instanceof InviteError) {
       res.status(error.status).json({ error: error.message });
       return;
