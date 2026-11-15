@@ -35,10 +35,16 @@ import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
  *   - Cmd-/ / Ctrl-/ → opens KeyboardShortcuts cheat-sheet
  *   - Esc → if a modal is open it closes; else deselects the active
  *     conversation
+ *   - Cmd-Shift-I / Cmd-. → shows or hides the conversation side panel
+ *
+ * Side panel (OpenChat-v27k.2): with room for it the layout is three columns,
+ *   [ sidebar ][ chat ][ 360px panel: To-dos · Stream · Details ]
+ * and the choice persists. With less room the same panel slides over the
+ * chat and closes again on Esc or a click outside it.
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Animated, Linking, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Linking, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { OPENCHAT_URL } from '../api/client';
@@ -62,6 +68,13 @@ import { ChatScreen } from '../screens/ChatScreen';
 import { AgentOverlayScreen } from '../screens/AgentOverlayScreen';
 import type { NavProp } from '../navigation/types';
 import { openWitFeedback } from '../services/witWidget';
+import { ConversationPanel } from './ConversationPanel';
+import {
+  DEFAULT_PANEL_PREFS, PANEL_WIDTH, loadPanelPrefs, nextPanelPrefs, onPanelRequest, panelPlacement, savePanelPrefs,
+  type ConversationPanelPrefs, type ConversationPanelTab,
+} from '../services/conversationPanel';
+import { sheetShadow } from '../theme/tokens';
+import { DESKTOP_RAIL_WIDTH } from '../theme/breakpoints';
 
 const SIDEBAR_WIDTH_EXPANDED = 320;
 const SIDEBAR_WIDTH_COLLAPSED = 56;
@@ -162,6 +175,66 @@ export function MasterDetailLayout() {
 
   const [collapsed, setCollapsed] = useState(false);
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+
+  // Conversation side panel. Docked, its open state is a saved preference;
+  // as a drawer it is open only while the reader asked for it.
+  const { width: windowWidth } = useWindowDimensions();
+  const placement = panelPlacement(windowWidth - (isUnlinkedEmbed() ? 0 : DESKTOP_RAIL_WIDTH) - (collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED));
+  const [panelPrefs, setPanelPrefs] = useState<ConversationPanelPrefs>(DEFAULT_PANEL_PREFS);
+  const [panelReady, setPanelReady] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [focusTodoId, setFocusTodoId] = useState<string | undefined>();
+  const docked = placement === 'docked';
+  const panelOpen = !!activeConversationId && panelReady && !agentPanelOpen && (docked ? panelPrefs.open : drawerOpen);
+  const placementRef = useRef(placement);
+  placementRef.current = placement;
+  const drawerOpenRef = useRef(drawerOpen);
+  drawerOpenRef.current = drawerOpen;
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadPanelPrefs().then(prefs => { if (!cancelled) { setPanelPrefs(prefs); setPanelReady(true); } });
+    return () => { cancelled = true; };
+  }, []);
+  // A drawer belongs to the chat it was opened over.
+  useEffect(() => { setDrawerOpen(false); setFocusTodoId(undefined); }, [activeConversationId]);
+
+  const panelPrefsRef = useRef(panelPrefs);
+  panelPrefsRef.current = panelPrefs;
+  const agentOpenRef = useRef(agentPanelOpen);
+  agentOpenRef.current = agentPanelOpen;
+  // The agent takes the panel's place while it is open.
+  const isPanelOpen = () => !agentOpenRef.current && (placementRef.current === 'docked' ? panelPrefsRef.current.open : drawerOpenRef.current);
+
+  const showPanelTab = useCallback((tab: ConversationPanelTab, options: { toggle?: boolean; focusTodoId?: string } = {}) => {
+    const current = { ...panelPrefsRef.current, open: isPanelOpen() };
+    const next = options.toggle ? nextPanelPrefs(current, tab) : { open: true, tab };
+    setAgentPanelOpen(false);
+    setFocusTodoId(next.open ? options.focusTodoId : undefined);
+    // Docked, open is the saved preference; a drawer only remembers its tab.
+    const saved = placementRef.current === 'docked' ? next : { open: panelPrefsRef.current.open, tab: next.tab };
+    if (placementRef.current !== 'docked') setDrawerOpen(next.open);
+    panelPrefsRef.current = saved;
+    setPanelPrefs(saved);
+    savePanelPrefs(saved);
+  }, []);
+  const hidePanel = useCallback(() => {
+    setFocusTodoId(undefined);
+    if (placementRef.current !== 'docked') { setDrawerOpen(false); return; }
+    const saved = { ...panelPrefsRef.current, open: false };
+    panelPrefsRef.current = saved;
+    setPanelPrefs(saved);
+    savePanelPrefs(saved);
+  }, []);
+  const togglePanel = useCallback(() => {
+    if (isPanelOpen()) hidePanel(); else showPanelTab(panelPrefsRef.current.tab);
+  }, [hidePanel, showPanelTab]);
+
+  useEffect(() => onPanelRequest(request => {
+    if (request.conversationId !== activeIdRef.current) return;
+    if (request.passive && placementRef.current !== 'docked' && !drawerOpenRef.current) return;
+    showPanelTab(request.tab, { focusTodoId: request.focusTodoId });
+  }), [showPanelTab]);
   // Animated width — initialized to expanded; we'll snap (no animation) to
   // the persisted value on mount once we've read AsyncStorage, then any
   // subsequent toggles animate. Avoids a flash-of-expanded-then-collapsed.
@@ -275,6 +348,12 @@ export function MasterDetailLayout() {
         openShortcuts();
         return;
       }
+      if ((meta && ev.shiftKey && (key === 'i' || key === 'I')) || (meta && key === '.')) {
+        if (!activeIdRef.current) return;
+        ev.preventDefault();
+        togglePanel();
+        return;
+      }
       // Arrow-key conversation navigation (Up/Down move the selection through
       // the sidebar list; wraps at the ends). Skip when focus is inside a
       // text input / textarea / contentEditable so arrows keep their normal
@@ -306,12 +385,18 @@ export function MasterDetailLayout() {
         return;
       }
       if (key === 'Escape') {
+        // An open menu, sheet or dialog owns Escape; it must not also close the chat behind it.
+        if (document.querySelector('[aria-modal="true"]')) return;
         if (accountMenuOpen) {
           setAccountMenuOpen(false);
           return;
         }
         if (agentPanelOpen) {
           setAgentPanelOpen(false);
+          return;
+        }
+        if (placementRef.current === 'drawer' && drawerOpenRef.current) {
+          setDrawerOpen(false);
           return;
         }
         // If a modal is open (NewConv/Settings/Search/GroupSettings/Shortcuts),
@@ -330,7 +415,7 @@ export function MasterDetailLayout() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [openSearch, openNew, openSettings, openShortcuts, navigation, activeConversationId, agentPanelOpen, accountMenuOpen, setActiveConversation]);
+  }, [openSearch, openNew, openSettings, openShortcuts, navigation, activeConversationId, agentPanelOpen, accountMenuOpen, setActiveConversation, togglePanel]);
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
@@ -495,6 +580,8 @@ export function MasterDetailLayout() {
             conversationId={activeConversationId}
             embedded
             onOpenAgent={openAgentOverlay}
+            panelTab={panelOpen ? panelPrefs.tab : null}
+            onPanelTab={tab => showPanelTab(tab, { toggle: true })}
           />
         ) : (
           <View style={styles.emptyDetail}>
@@ -507,6 +594,34 @@ export function MasterDetailLayout() {
           </View>
         )}
       </View>
+      {panelOpen && activeConversationId && (docked ? (
+        <View style={[styles.panelDocked, { borderLeftColor: c.border }]}>
+          <ConversationPanel
+            key={activeConversationId}
+            conversationId={activeConversationId}
+            tab={panelPrefs.tab}
+            onTabChange={tab => showPanelTab(tab)}
+            onClose={hidePanel}
+            focusTodoId={focusTodoId}
+          />
+        </View>
+      ) : (
+        <>
+          {/* Click-away for the drawer. It leaves the sidebar clickable. */}
+          <Pressable onPress={hidePanel} accessibilityLabel="Close panel" style={[styles.panelBackdrop, { left: collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED }]} />
+          <View style={[styles.panelDrawer, sheetShadow, { borderLeftColor: c.border, backgroundColor: c.background }]}>
+            <ConversationPanel
+              key={activeConversationId}
+              conversationId={activeConversationId}
+              tab={panelPrefs.tab}
+              onTabChange={tab => showPanelTab(tab)}
+              onClose={hidePanel}
+              focusTodoId={focusTodoId}
+              onOpenedSource={hidePanel}
+            />
+          </View>
+        </>
+      ))}
       {accountMenuOpen && (
         <>
           {/* Click-away backdrop. Transparent, above the panes, below the menu. */}
@@ -682,7 +797,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  detail: { flex: 1 },
+  detail: { flex: 1, minWidth: 0 },
+  panelDocked: { width: PANEL_WIDTH, borderLeftWidth: StyleSheet.hairlineWidth },
+  panelBackdrop: {
+    position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 10,
+    // @ts-ignore — web-only: the backdrop is not a link.
+    cursor: 'default',
+  },
+  panelDrawer: { position: 'absolute', top: 0, right: 0, bottom: 0, width: PANEL_WIDTH, maxWidth: '92%', zIndex: 11, borderLeftWidth: StyleSheet.hairlineWidth },
   agentPanel: { width: 420, maxWidth: '42%', borderLeftWidth: StyleSheet.hairlineWidth },
   emptyDetail: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });

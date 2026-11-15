@@ -47,7 +47,7 @@ import { ContextLane } from '../components/ContextLane';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
 import { useRecording } from '../contexts/RecordingContext';
 import { getColors } from '../theme/colors';
-import { radius, space, type } from '../theme/tokens';
+import { radius, roles, sheetShadow, space, type } from '../theme/tokens';
 import { Avatar } from '../components/Avatar';
 import { AiDisclosureBanner } from '../components/AiDisclosureBanner';
 import { AppIcon } from '../components/AppIcon';
@@ -105,6 +105,11 @@ import {
 } from '../utils/conversationDisplay';
 import { shouldShowGroupSenderLabel } from '../utils/conversationPresentation';
 import { showsVisionCaption, VISION_CAPTION } from '../utils/messageProvenance';
+import { onMessageJump, requestPanel, type ConversationPanelTab } from '../services/conversationPanel';
+import { MessageColumn, pointerCanHover, type MessageQuickActions } from '../components/MessageHoverActions';
+import { SwipeableMessage } from '../components/SwipeableMessage';
+import { addChatTodo, useChatTodos } from '../services/chatTodos';
+import { parseTodoCommand, todoTitleFromMessage, todosByMessage } from '../utils/chatTodos';
 
 // react-navigation's web header caps a left-aligned title's width assuming a
 // ~52pt headerRight and never lets it shrink, so a long chat name ran under the
@@ -117,6 +122,7 @@ const WEB_HEADER_LAYOUT: Pick<HeaderOptions, 'headerTitleContainerStyle' | 'head
 };
 
 const TYPING_DEBOUNCE_MS = 2000; // auto-clear typing after this much silence
+const CONVERSATION_MENU_WIDTH = 280;
 
 // ── Voice message constants (OpenChat-xxc) ─────────────────────────────────
 const CANCEL_DRAG_PX = 80; // horizontal drag distance to cancel recording
@@ -224,6 +230,8 @@ interface RenderRow {
   /** Last message of a run from this author (next message is different author / day / EOF).
    *  Used to render the avatar only on the bottom of a run in group chats. */
   isLastInRun?: boolean;
+  /** First message of a run from this author: runs sit apart, messages within one sit close. */
+  isFirstInRun?: boolean;
 }
 
 function buildRows(messages: Message[], myId: string | undefined, isGroup: boolean): RenderRow[] {
@@ -258,6 +266,7 @@ function buildRows(messages: Message[], myId: string | undefined, isGroup: boole
       isOwn,
       showSender,
       isLastInRun,
+      isFirstInRun: !prev || prev.senderId !== m.senderId || !sameDay(prev.createdAt, m.createdAt),
     });
   }
   return out;
@@ -285,6 +294,10 @@ interface ChatScreenProps {
   embedded?: boolean;
   /** Wide-layout hook that opens OpenChat Agent without replacing the chat pane. */
   onOpenAgent?: () => void;
+  /** Wide layout: the side-panel tab showing beside this chat, or null when it is hidden. */
+  panelTab?: ConversationPanelTab | null;
+  /** Wide layout: a header tab button was pressed (pressing the open tab hides the panel). */
+  onPanelTab?: (tab: ConversationPanelTab) => void;
 }
 
 /** One line per photo that can't be sent, e.g. "IMG_9.HEIC: HEIC photos aren't supported". */
@@ -298,6 +311,8 @@ export function ChatScreen({
   conversationId: conversationIdProp,
   embedded = false,
   onOpenAgent,
+  panelTab = null,
+  onPanelTab,
 }: ChatScreenProps = {}) {
   // A web pressable claims selection gestures and suppresses native link menus.
   const MessageBubble = Platform.OS === 'web' ? View : TouchableOpacity;
@@ -314,6 +329,7 @@ export function ChatScreen({
   const laneProp = routeRaw.name === 'Chat' ? ((routeRaw.params as any)?.lane as 'chat' | 'context' | undefined) : undefined;
   const { scheme } = useTheme();
   const c = getColors(scheme);
+  const r = roles(c);
   const { enhanced } = useSocialExperience();
   // Dynamic keyboard offset for KeyboardAvoidingView. This is the distance
   // from the top of the screen to the top of the KAV — i.e. the height of
@@ -359,12 +375,25 @@ export function ChatScreen({
 
   const { preference: translationPreference } = useChatTranslation(conversationId);
   const [translationFocused, setTranslationFocused] = useState(false);
+  /** Bumped by More › Translation to open this chat's translation settings. */
+  const [translationSignal, setTranslationSignal] = useState(0);
   useFocusEffect(useCallback(() => { setTranslationFocused(true); return () => setTranslationFocused(false); }, []));
   const [manualTranslations, setManualTranslations] = useState<Record<string, { content: string; version: number }>>({});
   const offerTranslation = messages.slice(-20).some(m => !m.deletedAt && m.senderId !== currentUser?.userId && likelyNeedsTranslation(m.content, translationPreference.language));
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+
+  // ── Private to-dos (OpenChat-v27k.4) ───────────────────────────────────────
+  // Owner-only asks placed in this chat. Nothing in this block sends a message.
+  const todos = useChatTodos(currentUser?.userId, conversationId);
+  const todoByMessage = useMemo(() => todosByMessage(todos.open, conversationId), [todos.open, conversationId]);
+  /** The composer writes a private to-do instead of a message: the lock button, or a line starting with /todo. */
+  const [todoMode, setTodoMode] = useState(false);
+  const todoCommand = parseTodoCommand(text);
+  const composingTodo = todoMode || todoCommand.isCommand;
+  const [savingTodo, setSavingTodo] = useState(false);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
 
   // NVC composer modal (OpenChat-3kr.2) — Observation / Feeling / Need /
   // Request scaffold. Optional mode for difficult conversations.
@@ -422,6 +451,12 @@ export function ChatScreen({
   const [actionSheetMessage, setActionSheetMessage] = useState<Message | null>(null);
   const [actionSheetIsOwn, setActionSheetIsOwn] = useState(false);
   const [actionSheetSenderName, setActionSheetSenderName] = useState('');
+  /** Where a right-click happened, so the menu opens at the pointer (desktop web). */
+  const [actionSheetAnchor, setActionSheetAnchor] = useState<{ x: number; y: number } | null>(null);
+  // A mouse gets a hover bar and a pointer menu; a finger gets swipe, long-press and the in-bubble button.
+  const hoverUi = useMemo(() => pointerCanHover(), []);
+  // The hover bar sits beside a bubble when the pane has a gutter for it, above it otherwise.
+  const [paneWidth, setPaneWidth] = useState(0);
 
   // ── Reply state ────────────────────────────────────────────────────────────
   const [replyTo, setReplyTo] = useState<ReplyToData | null>(null);
@@ -698,15 +733,25 @@ export function ChatScreen({
   }), [conversation?.participants?.length, containsBot, directPresenceText, isGroup, isMuted, isSelfDM]);
 
   const openConversationInfo = useCallback(() => {
-    if (isGroup) navigation.navigate('GroupSettings', { conversationId });
+    // Beside the chat when there is a side panel; the full screens stay one press further in.
+    if (embedded && onPanelTab && !isSelfDM && (isGroup || other?.id)) onPanelTab('details');
+    else if (isGroup) navigation.navigate('GroupSettings', { conversationId });
     else if (isSelfDM) navigation.navigate('ProfileEdit');
     else if (other?.id) navigation.navigate('ContactProfile', { userId: other.id });
-  }, [conversationId, isGroup, isSelfDM, navigation, other?.id]);
+  }, [conversationId, embedded, isGroup, isSelfDM, navigation, onPanelTab, other?.id]);
 
   const openConversationThoughts = useCallback(() => {
     setConversationMenuVisible(false);
+    if (embedded && onPanelTab) { onPanelTab('stream'); return; }
     navigation.navigate('ConversationThoughts', { conversationId, title: headerTitle });
-  }, [conversationId, headerTitle, navigation]);
+  }, [conversationId, embedded, headerTitle, navigation, onPanelTab]);
+
+  /** Show a side-panel tab: beside the chat on wide layouts, as a screen on phones. */
+  const openPanel = useCallback((tab: ConversationPanelTab, focusTodoId?: string) => {
+    setConversationMenuVisible(false);
+    if (embedded && requestPanel({ conversationId, tab, focusTodoId })) return;
+    navigation.navigate('ConversationThoughts', { conversationId, title: headerTitle, tab, ...(focusTodoId ? { focusTodoId } : {}) });
+  }, [conversationId, embedded, headerTitle, navigation]);
 
   const openAgentNetwork = useCallback(() => {
     setConversationMenuVisible(false);
@@ -792,25 +837,53 @@ export function ChatScreen({
     }
   }, [conversationId, runShake, sendTickle, showToast]);
 
+  // Wide layouts open More as a menu right under its button, wherever the panes have put it.
+  const moreButtonRef = useRef<View>(null);
+  const [moreMenuAnchor, setMoreMenuAnchor] = useState<{ top: number; left: number } | null>(null);
+  const openConversationMenu = () => {
+    if (!embedded || !moreButtonRef.current?.measureInWindow) { setMoreMenuAnchor(null); setConversationMenuVisible(true); return; }
+    moreButtonRef.current.measureInWindow((x, y, width, height) => {
+      setMoreMenuAnchor(Number.isFinite(x) && Number.isFinite(y) ? { top: y + height + 4, left: Math.max(8, x + width - CONVERSATION_MENU_WIDTH) } : null);
+      setConversationMenuVisible(true);
+    });
+  };
   const moreAction = (
-    <HeaderBarButton
-      onPress={() => setConversationMenuVisible(true)}
-      accessibilityLabel="More conversation actions"
-      style={styles.headerMoreAction}
-    >
-      <AppIcon name="more" color={c.textSecondary} size={20} />
-    </HeaderBarButton>
+    <View ref={moreButtonRef} collapsable={false}>
+      <HeaderBarButton
+        onPress={openConversationMenu}
+        accessibilityLabel="More conversation actions"
+        style={styles.headerMoreAction}
+      >
+        <AppIcon name="more" color={c.textSecondary} size={20} />
+      </HeaderBarButton>
+    </View>
   );
 
+  const openTodoCount = todos.open.length;
+  const todosLabel = `To-dos, private to you${openTodoCount ? `, ${openTodoCount} open` : ''}`;
   const headerActions = (
     <View style={styles.headerActionsRow}>
+      {/* Wide layouts name both panel tabs. A phone header has no room for a
+          second word, so To-dos appears there only once there is one (it is
+          always in More). */}
+      {(embedded || openTodoCount > 0) && (
+        <HeaderBarButton
+          onPress={() => (embedded && onPanelTab ? onPanelTab('todos') : openPanel('todos'))}
+          accessibilityLabel={todosLabel}
+          style={[styles.headerThoughtsButton, embedded && panelTab === 'todos' && { backgroundColor: c.surfaceElevated }]}
+        >
+          <AppIcon name="todo" color={r.private} size={18} />
+          {embedded && <Text style={[styles.headerThoughtsText, { color: c.textPrimary }]}>To-dos</Text>}
+          {openTodoCount > 0 && <Text style={[styles.headerThoughtsText, { color: r.private }]}>{openTodoCount}</Text>}
+        </HeaderBarButton>
+      )}
       <HeaderBarButton
         onPress={openConversationThoughts}
         accessibilityLabel="Stream for this chat"
-        style={styles.headerThoughtsButton}
+        style={[styles.headerThoughtsButton, embedded && panelTab === 'stream' && { backgroundColor: c.surfaceElevated }]}
       >
-        <AppIcon name="thought" color={c.primary} size={18} />
-        <Text style={[styles.headerThoughtsText, { color: c.primary }]}>Stream</Text>
+        <AppIcon name="thought" color={embedded ? c.textSecondary : c.primary} size={18} />
+        <Text style={[styles.headerThoughtsText, { color: embedded ? c.textPrimary : c.primary }]}>Stream</Text>
       </HeaderBarButton>
       {moreAction}
     </View>
@@ -845,7 +918,7 @@ export function ChatScreen({
       headerRight: () => headerActions,
       ...(Platform.OS === 'web' ? WEB_HEADER_LAYOUT : null),
     });
-  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, headerSubtitle, privateName.name, other, groupAvatarMembers, openConversationInfo, openConversationThoughts, c.primary, c.textSecondary]);
+  }, [embedded, navigation, isGroup, isSelfDM, headerTitle, headerSubtitle, privateName.name, other, groupAvatarMembers, openConversationInfo, openConversationThoughts, openPanel, openTodoCount, r.private, c.primary, c.textSecondary]);
 
   // Ink & Paper: own bubbles are ink-on-paper (light) / paper-on-ink (dark),
   // so translucent overlays inside them derive from the bubble text color
@@ -1023,7 +1096,11 @@ export function ChatScreen({
       setTransformLabel('');
     }
     // Typing throttle: emit typing:start on first keystroke, auto-stop after silence.
-    if (next.length > 0) {
+    // A private to-do is not being written to anyone, so it shows no typing
+    // indicator — including while the /todo command is still being typed.
+    const draft = next.trim().toLowerCase();
+    const privateDraft = todoMode || parseTodoCommand(next).isCommand || (draft.length > 0 && '/todo'.startsWith(draft));
+    if (next.length > 0 && !privateDraft) {
       reportTyping(conversationId, true);
       if (typingTimer.current) clearTimeout(typingTimer.current);
       typingTimer.current = setTimeout(() => reportTyping(conversationId, false), TYPING_DEBOUNCE_MS);
@@ -1214,7 +1291,32 @@ export function ChatScreen({
     if (sent) setReplyTo(null);
   }, [cancelActiveRecording, stopAndSendRecording]);
 
+  // A private to-do from the composer. This path never reaches sendMessage:
+  // a /todo line is not a chat message even when it has no text yet.
+  const submitTodo = async () => {
+    const body = (todoCommand.isCommand ? todoCommand.text : text).trim();
+    if (!body || savingTodo) return;
+    const source = replyTo ? messages.find(m => m.id === replyTo.messageId) ?? null : null;
+    setSavingTodo(true);
+    try {
+      const { todo, created } = await addChatTodo({ conversationId, text: body, message: source });
+      setText('');
+      setTodoMode(false);
+      setReplyTo(null);
+      setActiveHashtag(null);
+      setMentionQuery(null);
+      showToast(created ? 'Private to-do added. Only you can see it.' : 'That to-do was already on your list.');
+      if (embedded) requestPanel({ conversationId, tab: 'todos', focusTodoId: todo.id, passive: true });
+    } catch (err) {
+      logError('[todos] add from composer failed', err);
+      Alert.alert('Could not add the to-do', err instanceof Error ? err.message : 'Your text is still in the box. Please try again.');
+    } finally {
+      setSavingTodo(false);
+    }
+  };
+
   const handleSend = async () => {
+    if (composingTodo && !editingMessage) { await submitTodo(); return; }
     const trimmed = text.trim();
     const hasAttachment = pendingAssets.length > 0 || !!pendingFile;
     if ((!trimmed && !hasAttachment) || composerBusy || sendInFlightRef.current) return;
@@ -1434,8 +1536,9 @@ export function ChatScreen({
   };
 
   // ── Long-press handler ─────────────────────────────────────────────────────
-  const handleLongPress = useCallback((m: Message, isOwn: boolean, senderName: string) => {
+  const handleLongPress = useCallback((m: Message, isOwn: boolean, senderName: string, anchor: { x: number; y: number } | null = null) => {
     if (m.id.startsWith('local-')) return;
+    setActionSheetAnchor(anchor);
     setActionSheetMessage(m);
     setActionSheetIsOwn(isOwn);
     setActionSheetSenderName(senderName);
@@ -1630,6 +1733,36 @@ export function ChatScreen({
     }
   }, []);
 
+  // A to-do's source quote asks for its message; mark it briefly so the eye lands on it.
+  useEffect(() => onMessageJump((targetConversationId, messageId) => {
+    if (targetConversationId !== conversationId) return;
+    if (!messageIndexRef.current.has(messageId)) { showToast('That message is further back. Scroll up to load it.'); return; }
+    scrollToMessage(messageId);
+    setHighlightedMessageId(messageId);
+    setTimeout(() => setHighlightedMessageId(current => (current === messageId ? null : current)), 2200);
+  }), [conversationId, scrollToMessage, showToast]);
+
+  // ── Private to-do from a message (one gesture; nothing is sent) ──────────
+  const handleMakeTodo = useCallback(async (message: Message) => {
+    const existing = todoByMessage.get(message.id);
+    if (existing) { openPanel('todos', existing.id); return; }
+    const title = todoTitleFromMessage(message.content || message.transcript);
+    if (!title) {
+      showToast('That message has no text. Write the to-do yourself.');
+      setTodoMode(true);
+      setTimeout(() => textInputRef.current?.focus(), 80);
+      return;
+    }
+    try {
+      const { todo, created } = await addChatTodo({ conversationId, text: title, message: { ...message, content: message.content || message.transcript || '' } });
+      showToast(created ? 'Private to-do added. Only you can see it.' : 'That to-do was already on your list.');
+      if (embedded) requestPanel({ conversationId, tab: 'todos', focusTodoId: todo.id, passive: true });
+    } catch (err) {
+      logError('[todos] add from message failed', err);
+      Alert.alert('Could not add the to-do', err instanceof Error ? err.message : 'Please try again.');
+    }
+  }, [conversationId, embedded, openPanel, showToast, todoByMessage]);
+
   // Typing indicator (someone else)
   const otherTypers = useMemo(() => {
     const set = typingByConv.get(conversationId);
@@ -1707,8 +1840,28 @@ export function ChatScreen({
     // A lone emoji (OpenChat-3aiu) renders big and without a bubble, as in
     // iMessage; `emojiSize` from a held send makes it bigger still.
     const emojiOnly = !m.deletedAt && !failed && !m.attachments?.length && isSingleEmoji(m.content);
+    const senderName = getUserDisplayName(m.sender);
+    const actionable = !m.deletedAt && !failed && !m.id.startsWith('local-');
+    const hasText = !!(m.content || m.transcript)?.trim();
+    const replyNow = () => handleReply({ messageId: m.id, senderId: m.senderId, senderName, content: m.content });
+    const moreLabel = `Message actions: ${m.deletedAt ? 'Deleted message' : (m.content?.slice(0, 80) || 'Attachment')}`;
+    const quickActions: MessageQuickActions | null = m.id.startsWith('local-') ? null : {
+      moreLabel,
+      myReactions: (m.reactions ?? []).filter(reaction => reaction.byMe).map(reaction => reaction.emoji),
+      hasTodo: todoByMessage.has(m.id),
+      onMore: anchor => handleLongPress(m, isOwn, senderName, anchor ?? null),
+      onReact: emoji => void handleReact(m.id, emoji),
+      ...(actionable ? { onReply: replyNow, onTodo: () => void handleMakeTodo(m) } : {}),
+      ...(actionable && hasText ? { onSave: () => void handleSaveToThoughts(m, false) } : {}),
+    };
     return (
-      <View style={[styles.row, { justifyContent: isOwn ? 'flex-end' : 'flex-start', alignItems: 'flex-end' }]}>
+      <SwipeableMessage
+        enabled={!hoverUi && actionable}
+        onReply={replyNow}
+        onTodo={() => void handleMakeTodo(m)}
+        onSave={hasText ? () => void handleSaveToThoughts(m, false) : undefined}
+      >
+      <View style={[styles.row, { justifyContent: isOwn ? 'flex-end' : 'flex-start', alignItems: 'flex-end', marginTop: item.isFirstInRun ? 8 : 0 }]}>
         {showGroupAvatar && (
           <View style={styles.avatarSlot}>
             {item.isLastInRun && (
@@ -1723,14 +1876,17 @@ export function ChatScreen({
         )}
         {/* RN-web replaces TouchableOpacity's context-menu handler, so the
             column owns right-click as well as placing reactions below. */}
-        <View style={{ flexDirection: 'column', maxWidth: '78%', alignItems: isOwn ? 'flex-end' : 'flex-start' }}
-          {...(Platform.OS === 'web' ? {
-            onContextMenu: (event: React.MouseEvent) => {
-              if (preserveBrowserMenu(event.target, globalThis.getSelection?.()?.toString() ?? '')) return;
-              event.preventDefault();
-              handleLongPress(m, isOwn, getUserDisplayName(m.sender));
-            },
-          } : {})}>
+        <MessageColumn
+          isOwn={isOwn}
+          rowWidth={Math.max(0, paneWidth - 24 - (showGroupAvatar ? 34 : 0))}
+          maxWidth={paneWidth > 0 ? Math.min(Math.round(paneWidth * 0.78), 620) : undefined}
+          actions={quickActions}
+          onContextMenu={(event: React.MouseEvent) => {
+            if (preserveBrowserMenu(event.target, globalThis.getSelection?.()?.toString() ?? '')) return;
+            event.preventDefault();
+            const point = Number.isFinite(event.clientX) && Number.isFinite(event.clientY) ? { x: event.clientX, y: event.clientY } : null;
+            handleLongPress(m, isOwn, senderName, hoverUi ? point : null);
+          }}>
         <MessageBubble
           {...(Platform.OS === 'web' ? {} : {
             activeOpacity: 0.85,
@@ -1756,6 +1912,7 @@ export function ChatScreen({
             m.replyToId && !failed && (isOwn
               ? { borderRightWidth: 3, borderRightColor: ownTint(0.55) }
               : { borderLeftWidth: 3, borderLeftColor: c.primary }),
+            highlightedMessageId === m.id && { borderWidth: 2, borderColor: r.private },
           ]}
         >
           {/* Reply quote header — shown if this message is a reply (OpenChat-uxj) */}
@@ -1884,11 +2041,17 @@ export function ChatScreen({
               ))
           }
           <View style={styles.bubbleFooter}>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Message actions: ${m.deletedAt ? 'Deleted message' : (m.content?.slice(0, 80) || 'Attachment')}`}
-              onPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
-              style={{ minHeight: 44, minWidth: 44, justifyContent: 'center', marginRight: 8 }}>
-              <Text style={{ color: emojiOnly ? c.textMetadata : isOwn ? c.bubbleOwnText : c.bubbleOtherText, ...type.meta }}>Actions</Text>
-            </TouchableOpacity>
+            {/* Touch layouts keep a visible, voice-reachable actions button on every
+                message (a mouse gets the hover bar instead). It is a small glyph with
+                a 44pt reach, not a word that makes every bubble a line taller. */}
+            {!hoverUi && (
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={moreLabel}
+                onPress={() => handleLongPress(m, isOwn, senderName)}
+                hitSlop={{ top: 14, bottom: 14, left: 12, right: 8 }}
+                style={styles.bubbleActions}>
+                <AppIcon name="more" color={emojiOnly ? c.textMetadata : isOwn ? ownTint(0.7) : c.textMetadata} size={16} />
+              </TouchableOpacity>
+            )}
             <Text style={{ color: emojiOnly ? c.textMetadata : isOwn ? ownTint(0.7) : c.textMetadata, fontSize: 10, flexShrink: 1 }}>
               {failed
                 ? (m._deliveryDetail ? `Failed to send — ${m._deliveryDetail}` : 'Failed to send')
@@ -1909,7 +2072,7 @@ export function ChatScreen({
             {isOwn && !isGroup && !failed && !m.id.startsWith('local-') && (() => {
               const tick = getTickState(m);
               if (tick === 'read') {
-                return <Text style={{ color: scheme === 'dark' ? '#b3541e' : '#e08b5c', fontSize: 10, marginLeft: 3 }}>✓✓</Text>;
+                return <Text style={{ color: c.bubbleOwnText, fontSize: 10, marginLeft: 3, fontWeight: '700' }}>✓✓</Text>;
               }
               if (tick === 'delivered') {
                 return <Text style={{ color: ownTint(0.6), fontSize: 10, marginLeft: 3 }}>✓✓</Text>;
@@ -1932,6 +2095,22 @@ export function ChatScreen({
             </TouchableOpacity>
           </View>
         )}
+        {/* Private to-do marker: only this viewer has it, and it says so. */}
+        {(() => {
+          const todo = todoByMessage.get(m.id);
+          return todo && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Your private to-do from this message: ${todo.text}`}
+              onPress={() => openPanel('todos', todo.id)}
+              style={[styles.todoMarker, { backgroundColor: r.privateSoft, alignSelf: isOwn ? 'flex-end' : 'flex-start' }]}
+              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+            >
+              <AppIcon name="lock" color={r.private} size={11} strokeWidth={2.4} />
+              <Text style={[styles.todoMarkerText, { color: r.private }]}>Your to-do</Text>
+            </TouchableOpacity>
+          );
+        })()}
         {/* Reactions bar below bubble (OpenChat-7bd) */}
         {!!(m.reactions && m.reactions.length > 0) && (
           <ReactionsBar reactions={m.reactions!} isOwn={isOwn} onToggle={(emoji) => void handleReact(m.id, emoji)} />
@@ -1945,8 +2124,9 @@ export function ChatScreen({
             scheme={scheme}
           />
         ))}
-        </View>{/* end column wrapper */}
+        </MessageColumn>
       </View>
+      </SwipeableMessage>
     );
   };
 
@@ -1979,9 +2159,12 @@ export function ChatScreen({
           </View>
         );
       })()}
-      <ConversationLaneSwitch activeLane={activeConversationLane} onChange={setActiveConversationLane} />
+      {/* The chat's Stream has one door now (the header). The switch stays
+          only as the way back while a notification or link has put this
+          screen on its Context lane. */}
+      {activeConversationLane === 'context' && <ConversationLaneSwitch activeLane={activeConversationLane} onChange={setActiveConversationLane} />}
       {showAiDisclosure && <AiDisclosureBanner />}
-      {activeConversationLane === 'chat' && <ChatTranslationBar key={conversationId} conversationId={conversationId} suggest={offerTranslation} />}
+      {activeConversationLane === 'chat' && <ChatTranslationBar key={conversationId} conversationId={conversationId} suggest={offerTranslation} openSignal={translationSignal} />}
 
       <ExportSheet
         visible={exportSheetVisible}
@@ -1999,7 +2182,8 @@ export function ChatScreen({
         animationType="fade"
         onRequestClose={() => setConversationMenuVisible(false)}
       >
-        <View style={styles.conversationMenuBackdrop}>
+        {/* A wide window gets a menu under the More button; a phone gets the sheet. */}
+        <View style={[styles.conversationMenuBackdrop, embedded && styles.conversationMenuBackdropWide]}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -2008,13 +2192,18 @@ export function ChatScreen({
             accessibilityLabel="Close conversation actions"
           />
           <View
-            style={[styles.conversationMenuSheet, { backgroundColor: c.surface, borderColor: c.border }]}
+            style={[styles.conversationMenuSheet, embedded && styles.conversationMenuSheetWide, embedded && moreMenuAnchor && { position: 'absolute', top: moreMenuAnchor.top, left: moreMenuAnchor.left, marginTop: 0, marginRight: 0 }, { backgroundColor: c.surface, borderColor: c.border }]}
             accessibilityRole="menu"
             accessibilityLabel="Conversation actions"
           >
             <Text style={[styles.conversationMenuTitle, { color: c.textPrimary }]} numberOfLines={1}>
               {headerTitle || 'Chat'}
             </Text>
+            <TouchableOpacity onPress={() => openPanel('todos')} style={styles.conversationMenuRow} accessibilityRole="menuitem" accessibilityLabel={todosLabel}>
+              <AppIcon name="todo" color={r.private} size={20} />
+              <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>To-dos</Text>
+              <Text style={{ color: c.textMetadata, ...type.meta }}>Only you{openTodoCount ? ` · ${openTodoCount} open` : ''}</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={openConversationThoughts} style={styles.conversationMenuRow} accessibilityRole="menuitem">
               <AppIcon name="thought" color={c.primary} size={20} />
               <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Stream for this chat</Text>
@@ -2033,6 +2222,10 @@ export function ChatScreen({
               <Text style={styles.conversationMenuEmoji}>{quickEmoji}</Text>
               <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Chat emoji</Text>
             </TouchableOpacity>
+            <TouchableOpacity onPress={() => { setConversationMenuVisible(false); setTranslationSignal(value => value + 1); }} style={styles.conversationMenuRow} accessibilityRole="menuitem">
+              <AppIcon name="chat" color={c.textMetadata} size={19} strokeWidth={1.8} />
+              <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Translation</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={showMuteOptions} style={styles.conversationMenuRow} accessibilityRole="menuitem">
               <AppIcon name="mute" color={c.textMetadata} size={19} strokeWidth={1.8} />
               <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>{isMuted ? 'Unmute' : 'Mute'}</Text>
@@ -2041,13 +2234,15 @@ export function ChatScreen({
               <AppIcon name="download" color={c.textMetadata} size={19} />
               <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Export conversation</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setConversationMenuVisible(false)}
-              style={[styles.conversationMenuCancel, { borderTopColor: c.border }]}
-              accessibilityRole="button"
-            >
-              <Text style={[styles.conversationMenuLabel, { color: c.textSecondary }]}>Cancel</Text>
-            </TouchableOpacity>
+            {!embedded && (
+              <TouchableOpacity
+                onPress={() => setConversationMenuVisible(false)}
+                style={[styles.conversationMenuCancel, { borderTopColor: c.border }]}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.conversationMenuLabel, { color: c.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>
@@ -2073,14 +2268,14 @@ export function ChatScreen({
         // Wrap the list + floating pill in a flex:1 relative container so the
         // pill's absolute positioning is anchored to the message-area bottom
         // (i.e. just above the composer), not to the whole KeyboardAvoidingView.
-        <Animated.View style={[styles.listWrap, { transform: [{ translateX: shakeX }] }]}>
+        <Animated.View style={[styles.listWrap, { transform: [{ translateX: shakeX }] }]} onLayout={event => setPaneWidth(event.nativeEvent.layout.width)}>
         <FlatList
           ref={listRef}
           data={rows}
           keyExtractor={r => r.key}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: 12, gap: 8 }}
+          contentContainerStyle={{ padding: 12, gap: 3 }}
           onScroll={handleScroll}
           // Throttle scroll events to ~60fps; high enough to catch the
           // user reaching bottom quickly, low enough not to thrash JS.
@@ -2340,7 +2535,28 @@ export function ChatScreen({
         </View>
       )}
 
-      <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
+      {/* Private to-do mode: the composer is writing to the owner's own list.
+          The bar, the lock and the Add button all change so this can never
+          be mistaken for a message about to be sent. */}
+      {composingTodo && !editingMessage && (
+        <View style={[styles.privateBar, { backgroundColor: r.privateSoft, borderColor: r.private }]} accessibilityRole="alert">
+          <AppIcon name="lock" color={r.private} size={14} strokeWidth={2.2} />
+          <Text style={[styles.privateBarText, { color: c.textPrimary }]}>
+            <Text style={{ color: r.private, fontWeight: '700' }}>Private to-do.</Text> Only you will see it. It is not sent to {isGroup ? 'the group' : 'this chat'}.
+          </Text>
+          <TouchableOpacity
+            onPress={() => { setTodoMode(false); if (todoCommand.isCommand) setText(todoCommand.text); }}
+            accessibilityRole="button"
+            accessibilityLabel="Stop writing a private to-do"
+            style={styles.replyBarClose}
+            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+          >
+            <AppIcon name="x" color={c.textSecondary} size={16} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <View style={[styles.composer, { backgroundColor: c.surface, borderColor: composingTodo && !editingMessage ? r.private : c.border }]}>
         {/* Hide-keyboard button: a visible way out while typing, beyond the
             swipe-down-on-the-list gesture. Native only; web has no
             on-screen keyboard to dismiss. */}
@@ -2392,16 +2608,31 @@ export function ChatScreen({
             <AppIcon name="file" color={c.textSecondary} size={22} />
           </TouchableOpacity>
         )}
+        {/* Private to-do toggle (OpenChat-v27k.4): one press turns the
+            composer into a note to yourself; /todo does the same from the
+            keyboard. Hidden while editing or recording. */}
+        {!editingMessage && !isRecording && (
+          <TouchableOpacity
+            onPress={() => { setTodoMode(value => !value); setTimeout(() => textInputRef.current?.focus(), 60); }}
+            style={[styles.attachBtn, composingTodo && { backgroundColor: r.privateSoft, borderRadius: radius.sm }]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: composingTodo }}
+            accessibilityLabel="Private to-do"
+            {...(Platform.OS === 'web' ? { title: 'Private to-do: only you see it (or type /todo)' } as object : {})}
+          >
+            <AppIcon name="todo" color={composingTodo ? r.private : c.textSecondary} size={22} />
+          </TouchableOpacity>
+        )}
         <TextInput
           ref={textInputRef}
           style={[
             styles.input,
-            { backgroundColor: 'transparent', color: c.textPrimary, borderBottomColor: c.border },
+            { backgroundColor: 'transparent', color: c.textPrimary, borderBottomColor: composingTodo && !editingMessage ? r.private : c.border },
             Platform.OS === 'web' && styles.inputWeb,
           ]}
           value={text}
           onChangeText={handleTextChange}
-          placeholder="Write…"
+          placeholder={composingTodo && !editingMessage ? 'A to-do only you will see…' : 'Write…'}
           placeholderTextColor={c.textMuted}
           multiline
           // Web: a textarea defaults to two rows, which left the placeholder
@@ -2421,7 +2652,7 @@ export function ChatScreen({
             which opens the 4-field Observation/Feeling/Need/Request
             scaffold modal (OpenChat-3kr.2) instead of running an AI
             rewrite. */}
-        {!editingMessage && !isRecording && (
+        {!editingMessage && !isRecording && !composingTodo && (
           <TransformButton
             text={text}
             disabled={!text.trim() || composerBusy}
@@ -2435,7 +2666,7 @@ export function ChatScreen({
           Hold to record; drag left > 80px to cancel.
           On web, always hidden (Platform.OS === 'web').
         */}
-        {!editingMessage && !text.trim() && !pendingAssets.length && !pendingFile && Platform.OS !== 'web'
+        {!editingMessage && !composingTodo && !text.trim() && !pendingAssets.length && !pendingFile && Platform.OS !== 'web'
           && (!isAnyRecording || isRecording) && (
           <View
             onTouchStart={(e) => { void handleMicPressIn(e.nativeEvent.pageX); }}
@@ -2466,11 +2697,26 @@ export function ChatScreen({
         {/* Chat emoji (OpenChat-3aiu): where Send sits while the composer is
             empty. Tap sends it; hold grows it. Hidden while editing, while a
             voice note records, and once anything is typed or attached. */}
-        {!editingMessage && !text.trim() && !pendingAssets.length && !pendingFile && !isRecording && (
+        {!editingMessage && !composingTodo && !text.trim() && !pendingAssets.length && !pendingFile && !isRecording && (
           <EmojiSendButton emoji={quickEmoji} disabled={composerBusy} onSend={size => { void handleSendEmoji(size); }} />
         )}
+        {/* Add button: private to-do mode. It replaces Send, the emoji and the mic. */}
+        {composingTodo && !editingMessage && (() => {
+          const empty = !(todoCommand.isCommand ? todoCommand.text : text).trim();
+          return (
+            <TouchableOpacity
+              style={[styles.send, { backgroundColor: r.private, opacity: empty || savingTodo ? 0.5 : 1 }]}
+              onPress={() => { void submitTodo(); }}
+              disabled={empty || savingTodo}
+              accessibilityRole="button"
+              accessibilityLabel="Add private to-do"
+            >
+              {savingTodo ? <ActivityIndicator size="small" color={c.background} /> : <Text style={{ color: c.background, fontWeight: '600' }}>Add</Text>}
+            </TouchableOpacity>
+          );
+        })()}
         {/* Send button: shown when there is text or a pending asset */}
-        {(!!text.trim() || pendingAssets.length > 0 || !!pendingFile || editingMessage) && (
+        {!(composingTodo && !editingMessage) && (!!text.trim() || pendingAssets.length > 0 || !!pendingFile || editingMessage) && (
           <TouchableOpacity
             style={[styles.send, { backgroundColor: c.primary, opacity: (!text.trim() && !pendingAssets.length && !pendingFile) || composerBusy ? 0.5 : 1 }]}
             onPress={handleSend}
@@ -2509,6 +2755,9 @@ export function ChatScreen({
         message={actionSheetMessage}
         isOwn={actionSheetIsOwn}
         senderName={actionSheetSenderName}
+        anchor={actionSheetAnchor}
+        onMakeTodo={m => { void handleMakeTodo(m); }}
+        hasTodo={!!actionSheetMessage && todoByMessage.has(actionSheetMessage.id)}
         onDismiss={() => setActionSheetVisible(false)}
         onReply={handleReply}
         onTranslate={m => setManualTranslations(previous => ({ ...previous, [m.id]: { content: m.content, version: (previous[m.id]?.version || 0) + 1 } }))}
@@ -2604,6 +2853,8 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     backgroundColor: 'rgba(0,0,0,0.32)',
   },
+  conversationMenuBackdropWide: { justifyContent: 'flex-start', alignItems: 'flex-end', backgroundColor: 'transparent' },
+  conversationMenuSheetWide: { width: CONVERSATION_MENU_WIDTH, margin: 0, marginTop: 58, marginRight: 12, paddingBottom: 8, borderRadius: radius.md, ...sheetShadow },
   conversationMenuSheet: {
     margin: 12,
     paddingTop: 8,
@@ -2633,6 +2884,10 @@ const styles = StyleSheet.create({
   },
   conversationMenuLabel: { fontSize: 16, fontWeight: '500' },
   conversationMenuEmoji: { ...type.heading, fontWeight: '400', letterSpacing: 0, width: 20, textAlign: 'center' },
+  privateBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 14, paddingRight: 6, paddingVertical: 8, borderTopWidth: 1 },
+  privateBarText: { flex: 1, minWidth: 0, ...type.label, fontWeight: '400' },
+  todoMarker: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill },
+  todoMarkerText: { ...type.caption, fontWeight: '600' },
   listWrap: { flex: 1, position: 'relative' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   row: { flexDirection: 'row', gap: 6 },
@@ -2648,7 +2903,8 @@ const styles = StyleSheet.create({
   },
   sender: { fontSize: 12, marginBottom: 2, fontWeight: '500' },
   forwardedLabel: { fontSize: 11, fontStyle: 'italic', marginBottom: 3 },
-  bubbleFooter: { marginTop: 4, flexDirection: 'row', alignItems: 'center' },
+  bubbleFooter: { marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
+  bubbleActions: { height: 16, minWidth: 24, justifyContent: 'center', marginRight: 6 },
   dayWrap: {
     flexDirection: 'row',
     alignItems: 'center',

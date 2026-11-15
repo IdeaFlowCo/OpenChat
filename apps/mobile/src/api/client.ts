@@ -989,6 +989,10 @@ export type OverlayAskExposure = 'only_me' | 'this_chat' | 'friends' | 'public';
 /** A party to an ask: you (`self`), or an end named as private links name them (an OpenChat person by user id, anything else by its saved id). */
 export type OverlayAskParty = { kind: 'self' } | { kind: PrivateNodeKind | 'ask'; id: string; name: string; description?: string; unlinkedProfileId?: string };
 export type OverlayAskPlacement = OverlayAskParty | { kind: 'conversation'; conversationId: string } | { kind: 'ref'; ref: string };
+/** A placement as the server takes it: your own stream, a person or saved thing, or a conversation you are in. */
+export type OverlayAskPlacementInput = 'self' | { kind: 'user' | 'thing' | 'unlinked'; id: string } | { kind: 'conversation'; id: string };
+/** The message an ask was made from. `itemIndex` tells apart several asks from one message. */
+export interface OverlayAskSourceInput { app: 'openchat'; conversationId: string; messageId: string; sourceMessageId: string; itemIndex: number; excerpt: string; assertion: 'stated' | 'inferred'; audienceIntent: null; sourceCreatedAt: string | null }
 /**
  * An ask in the owner's people overlay (OpenChat-2fsy.1). Who cares
  * (`author`), who acts (`carrier`) and where it was placed (`placements`) are
@@ -1719,10 +1723,11 @@ export const api = {
   revokeAskPublication: (id: string, expectedPublicationRevision: number) => request<{ publication: AskPublication | null }>(`/api/private/asks/${encodeURIComponent(id)}/publication`, { method: 'DELETE', body: JSON.stringify({ expectedPublicationRevision }) }),
   listPublishedAsks: (publisherId: string | null, cursor?: string) => request<{ publications: PublishedAsk[]; nextCursor: string | null }>(`${publisherId ? `/api/people/${encodeURIComponent(publisherId)}/ask-publications` : '/api/ask-publications/shared-with-me'}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`),
   getAsk: (id: string) => request<{ ask: OverlayAsk }>(`/api/private/asks/${encodeURIComponent(id)}`),
-  saveAsk: (body: { author: 'self' | { kind: 'user' | 'thing' | 'unlinked'; id: string }; text: string; horizon?: OverlayAskHorizon; recheckAfter?: string }) =>
+  saveAsk: (body: { author: 'self' | { kind: 'user' | 'thing' | 'unlinked'; id: string }; text: string; horizon?: OverlayAskHorizon; recheckAfter?: string; carrier?: 'self' | null; placements?: OverlayAskPlacementInput[]; sourceReceipt?: OverlayAskSourceInput }) =>
     request<{ ask: OverlayAsk; created: boolean }>('/api/private/asks', { method: 'POST', body: JSON.stringify(body) }),
-  updateAsk: (id: string, patch: { status?: OverlayAskStatus; recheckedNow?: true; text?: string; horizon?: OverlayAskHorizon; carrier?: 'self' | null }) =>
+  updateAsk: (id: string, patch: { status?: OverlayAskStatus; recheckedNow?: true; text?: string; horizon?: OverlayAskHorizon; carrier?: 'self' | null; placements?: OverlayAskPlacementInput[] }) =>
     request<{ ask: OverlayAsk }>(`/api/private/asks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteAsk: (id: string) => request<{ deleted: true; id: string }>(`/api/private/asks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // Private graph — notes, importance, catch-up cadence and links that only the owner sees.
   getPrivatePerson: (userId: string) => request<PrivatePersonOverlay>(`/api/private/people/${encodeURIComponent(userId)}`),

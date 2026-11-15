@@ -21,6 +21,8 @@ import { Platform, useWindowDimensions } from 'react-native';
 import { useSocialExperience } from '../contexts/SocialExperienceContext';
 
 export const BREAKPOINT_DESKTOP = 900;
+/** Width of the desktop side rail that replaces the bottom tab bar (App.tsx). */
+export const DESKTOP_RAIL_WIDTH = 72;
 // Separates tablets from landscape phones before enabling native split view.
 export const BREAKPOINT_TABLET_MIN_SHORT_SIDE = 600;
 

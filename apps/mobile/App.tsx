@@ -72,6 +72,7 @@ installClientLogger();
 // with the same pattern — desktop-web swaps activeConversationId instead
 // of pushing a Chat screen.
 import { HomeScreen } from './src/screens/HomeScreen';
+import { DESKTOP_RAIL_WIDTH, useIsDesktop } from './src/theme/breakpoints';
 import { ChatScreenRouter } from './src/screens/ChatScreenRouter';
 import { KeyboardShortcutsScreen } from './src/screens/KeyboardShortcutsScreen';
 import { PermissionsScreen } from './src/screens/PermissionsScreen';
@@ -97,6 +98,7 @@ import { AgentKeyDetailScreen } from './src/screens/AgentKeyDetailScreen';
 import { ThoughtsScreen } from './src/screens/ThoughtsScreen';
 import { AddEditThoughtScreen } from './src/screens/AddEditThoughtScreen';
 import { ConversationThoughtsScreen } from './src/screens/ConversationThoughtsScreen';
+import { conversationPanelTitle } from './src/utils/conversationPanel';
 import { AsksScreen } from './src/screens/AsksScreen';
 import { StoryComposerScreen } from './src/screens/StoryComposerScreen';
 import { StoryViewerScreen } from './src/screens/StoryViewerScreen';
@@ -308,9 +310,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen
         name="ConversationThoughts"
         component={ConversationThoughtsScreen}
-        options={({ route }) => ({
-          title: route.params.title ? `Stream · ${route.params.title}` : 'Chat Stream',
-        })}
+        options={({ route }) => ({ title: conversationPanelTitle(route.params.tab, route.params.title) })}
       />
     </ChatsStack.Navigator>
   );
@@ -437,7 +437,7 @@ function chatCanGoBack(state: NestedNavigationState, depth = 0): boolean {
   return route.name === 'Chat' && depth > 0 && index > 0;
 }
 
-function TabIcon({ label, icon, focused, color, c, stacked }: {
+function TabIcon({ label, icon, focused, color, c, stacked, rail = false }: {
   /** Emoji fallback — used only when `icon` is not provided. */
   label?: string;
   /** Line-icon name; preferred over emoji so tabs render identically across
@@ -448,6 +448,8 @@ function TabIcon({ label, icon, focused, color, c, stacked }: {
   c: ReturnType<typeof getColors>;
   /** Label renders below the icon (phones in portrait). */
   stacked: boolean;
+  /** Desktop side rail: the tinted pill is the whole selected state, with no top accent bar. */
+  rail?: boolean;
 }) {
   return (
     <View
@@ -464,7 +466,7 @@ function TabIcon({ label, icon, focused, color, c, stacked }: {
       {/* Top accent bar — the desktop-web "selected tab" indicator. Pinned to
           the top of the tab item via a negative offset so it reads as a tab
           underline regardless of how wide the item gets on large screens. */}
-      {focused && (
+      {focused && !rail && (
         <View
           pointerEvents="none"
           style={{
@@ -543,6 +545,9 @@ function AuthedTabs({
   // Like Messages/WhatsApp, a phone-width chat thread owns the whole screen:
   // the tab bar shows on the lists, and the thread leaves by back/edge swipe.
   const narrow = width < 768;
+  // A desktop window gets a side rail (OpenChat-v27k.6): a bottom tab bar is a
+  // phone idiom, and it spent the full window width on three links.
+  const rail = useIsDesktop() && !isUnlinkedEmbed();
   return (
     <Tab.Navigator
       tabBar={(props) => {
@@ -561,7 +566,10 @@ function AuthedTabs({
       screenListeners={{ blur: () => Keyboard.dismiss() }}
       screenOptions={{
         headerShown: false,
-        tabBarStyle: [
+        ...(rail ? { tabBarPosition: 'left' as const, tabBarVariant: 'material' as const, tabBarLabelPosition: 'below-icon' as const } : null),
+        tabBarStyle: rail
+          ? { backgroundColor: c.surface, borderRightColor: c.border, borderRightWidth: StyleSheet.hairlineWidth, width: DESKTOP_RAIL_WIDTH, minWidth: DESKTOP_RAIL_WIDTH, paddingTop: 8 }
+          : [
           { backgroundColor: c.surface, borderTopColor: c.border },
           stacked && {
             height: STACKED_TAB_BAR_CONTENT_HEIGHT + stackedBottomPadding,
@@ -591,7 +599,7 @@ function AuthedTabs({
             <TabLabel text="Chats" focused={focused} color={color} />
           ),
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon icon="chat" focused={focused} color={color} c={c} stacked={stacked} />
+            <TabIcon icon="chat" focused={focused} color={color} c={c} stacked={stacked} rail={rail} />
           ),
         }}
       >
@@ -605,7 +613,7 @@ function AuthedTabs({
               <TabLabel text="Asks" focused={focused} color={color} />
             ),
             tabBarIcon: ({ focused, color }) => (
-              <TabIcon icon="sparkle" focused={focused} color={color} c={c} stacked={stacked} />
+              <TabIcon icon="sparkle" focused={focused} color={color} c={c} stacked={stacked} rail={rail} />
             ),
           }}
         >
@@ -621,7 +629,7 @@ function AuthedTabs({
             <TabLabel text="Stream" focused={focused} color={color} />
           ),
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon icon="thought" focused={focused} color={color} c={c} stacked={stacked} />
+            <TabIcon icon="thought" focused={focused} color={color} c={c} stacked={stacked} rail={rail} />
           ),
         }}
       >

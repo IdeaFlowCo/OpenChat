@@ -7,6 +7,7 @@
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
+import { radius, type } from '../theme/tokens';
 
 export const REACTION_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🙏'] as const;
 export type ReactionEmoji = (typeof REACTION_EMOJI)[number];
@@ -15,25 +16,27 @@ interface Props {
   /** Emoji strings that the current user has already reacted with (highlight them). */
   myReactions?: string[];
   onPick: (emoji: string) => void;
+  /** Tighter row for the desktop pointer menu. */
+  compact?: boolean;
 }
 
-export function ReactionPicker({ myReactions = [], onPick }: Props) {
+export function ReactionPicker({ myReactions = [], onPick, compact = false }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
 
   return (
-    <View style={[styles.row, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
+    <View style={[styles.row, compact && styles.rowCompact, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
       {REACTION_EMOJI.map(emoji => {
         const active = myReactions.includes(emoji);
         return (
           <TouchableOpacity
             key={emoji}
-            style={[styles.btn, active && { backgroundColor: c.primaryMuted, borderRadius: 20 }]}
+            style={[styles.btn, compact && styles.btnCompact, active && { backgroundColor: c.primaryMuted, borderRadius: 20 }]}
             onPress={() => onPick(emoji)}
             activeOpacity={0.7}
             accessibilityLabel={`React with ${emoji}`}
           >
-            <Text style={styles.emoji}>{emoji}</Text>
+            <Text style={compact ? styles.emojiCompact : styles.emoji}>{emoji}</Text>
           </TouchableOpacity>
         );
       })}
@@ -52,6 +55,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
   },
+  rowCompact: { paddingHorizontal: 4, paddingVertical: 2, marginHorizontal: 8, marginBottom: 4, marginTop: 4, borderRadius: radius.md },
+  btnCompact: { padding: 5 },
+  emojiCompact: { ...type.heading, fontWeight: '400', letterSpacing: 0 },
   btn: {
     padding: 8,
     alignItems: 'center',

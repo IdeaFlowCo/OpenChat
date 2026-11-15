@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useChatTranslation } from '../contexts/TranslationContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -38,15 +38,22 @@ export function TranslationControls({ conversationId }: { conversationId?: strin
   </View>;
 }
 
-export function ChatTranslationBar({ conversationId, suggest }: { conversationId: string; suggest: boolean }) {
+/**
+ * Translation for one chat. The bar appears only when it has something to
+ * say: an offer to translate a chat in another language, or a reminder that
+ * auto-translate is on. Otherwise the settings open from the chat's More
+ * menu (`openSignal` changes), so an ordinary chat carries no extra strip.
+ */
+export function ChatTranslationBar({ conversationId, suggest, openSignal = 0 }: { conversationId: string; suggest: boolean; openSignal?: number }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => { if (openSignal > 0) setOpen(true); }, [openSignal]);
   const { context, preference } = useChatTranslation(conversationId);
   const { scheme } = useTheme();
   const c = getColors(scheme);
   if (!context) return null;
   const offer = context.ready && suggest && preference.mode === 'ask';
   return <>
-    <View style={[styles.bar, { borderColor: c.border, backgroundColor: c.surface }]}>
+    {(offer || preference.mode === 'auto') && <View style={[styles.bar, { borderColor: c.border, backgroundColor: c.surface }]}>
       <TouchableOpacity accessibilityRole="button" onPress={() => setOpen(true)} style={styles.barButton}>
         <Text style={[type.label, { color: c.textPrimary }]}>{preference.mode === 'auto' ? `Auto-translate · ${preference.language}` : 'Translate'}</Text>
       </TouchableOpacity>
@@ -60,7 +67,7 @@ export function ChatTranslationBar({ conversationId, suggest }: { conversationId
           <Text style={[type.label, { color: c.textMetadata }]}>Not now</Text>
         </TouchableOpacity>
       </>}
-    </View>
+    </View>}
     <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
       <View style={[styles.backdrop, { backgroundColor: c.background }]}>
         <View style={[styles.sheet, { backgroundColor: c.surface, borderColor: c.border }]} accessibilityViewIsModal>

@@ -41,10 +41,33 @@ describe('canonical All asks in the native client', () => {
     await act(async () => { root = create(React.createElement(AsksScreen)); });
     expect(mocks.listAsks).toHaveBeenCalledWith({ direction: 'from_me', status: 'all', q: '', limit: 200 });
     expect(text()).toContain('Only you can currently see this · intended for Only synthetic Vlad');
+    // A row is the ask and one honest line; its actions and sources open under More.
+    expect(text()).not.toContain('Details & sources');
+    await press('More');
     await press('Details & sources'); expect(mocks.navigate).toHaveBeenLastCalledWith('AskDetail', { askId: 'canonical-1' });
     await press('Open source conversation'); expect(mocks.navigate).toHaveBeenLastCalledWith('Chat', { conversationId: 'agent-chat' });
-    await press('Hide closed'); expect(mocks.listAsks).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'open,stale' }));
-    await press('For me'); expect(mocks.listAsks).toHaveBeenLastCalledWith(expect.objectContaining({ direction: 'for_me', status: 'open,stale' }));
+    await press('To do'); expect(mocks.listAsks).toHaveBeenLastCalledWith(expect.objectContaining({ direction: 'for_me', status: 'all' }));
+  });
+  it('keeps closed asks one press away under a count instead of mixing them into the list', async () => {
+    mocks.listAsks.mockResolvedValue({ asks: [ask, { ...ask, id: 'done-1', text: 'Book the hall', status: 'fulfilled', closedAt: '2026-11-01T00:00:00Z' }], truncated: false });
+    await act(async () => { root = create(React.createElement(AsksScreen)); });
+    expect(text()).toContain('Find party invitees'); expect(text()).not.toContain('Book the hall');
+    expect(text()).toContain('Show closed · 1');
+    await press('Show closed');
+    expect(text()).toContain('Book the hall'); expect(text()).toContain('Fulfilled');
+    expect(mocks.listAsks).toHaveBeenCalledTimes(1);
+  });
+  it('keeps your own to-dos out of My asks and adds a to-do as something you carry', async () => {
+    const todo = { ...ask, id: 'todo-1', text: 'Introduce Harper to Sia', carrier: { kind: 'self' }, forMe: true, placements: [{ kind: 'conversation', conversationId: 'weekend' }] };
+    mocks.listAsks.mockResolvedValue({ asks: [ask, todo], truncated: false });
+    mocks.saveAsk.mockResolvedValue({ created: true, ask: todo });
+    await act(async () => { root = create(React.createElement(AsksScreen)); });
+    expect(text()).not.toContain('Introduce Harper to Sia');
+    await press('To do');
+    expect(text()).toContain('Introduce Harper to Sia'); expect(text()).toContain('From a chat');
+    const input = root.root.findAllByType('TextInput').find(node => node.props.accessibilityLabel === 'Add a to-do')!;
+    await act(async () => input.props.onChangeText('Send the deck')); await press('Save');
+    expect(mocks.saveAsk).toHaveBeenLastCalledWith({ author: 'self', text: 'Send the deck', carrier: 'self' });
   });
   it('labels truncation and partial legacy failures; account switch clears previous owner rows immediately', async () => {
     mocks.listAsks.mockResolvedValue({ asks: [ask], truncated: true }); mocks.getContextIntentions.mockRejectedValue(new Error('Context source unavailable'));

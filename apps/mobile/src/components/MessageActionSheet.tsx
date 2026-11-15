@@ -1,20 +1,21 @@
 import { MessageLinkActions } from './MessageLinkActions';
 import { messageLinks } from '../utils/messageLinks';
 /**
- * MessageActionSheet — modal bottom sheet that appears on long-press of a
- * message bubble in ChatScreen.
+ * MessageActionSheet — everything you can do with one message.
  *
- * Actions (OpenChat-uxj, OpenChat-46p, OpenChat-wgl, OpenChat-q9h, OpenChat-7bd, OpenChat-hhc):
- *   Reply         — always shown; sets composer replyTo state
- *   Forward       — always shown (own and others'); opens ForwardPickerScreen
- *   Edit          — own messages only; enters edit mode in composer
- *   Delete        — own messages only; confirms then soft-deletes
- *   React         — always shown; shows inline emoji picker
- *   Block <name>  — others' messages only
- *   Report        — others' messages only; sub-sheet for reason
+ * One list, grouped by intent so it reads at a glance:
+ *   respond   Reply · Copy · Forward
+ *   keep      Private to-do · Save to Stream · Pin to chat · Save to Vision
+ *   more      Links · Translate · photos · OpenChat Agent · Tickle
+ *   yours     Edit · Delete            (own messages)
+ *   safety    Block · Report           (others' messages)
+ *
+ * Presentation follows the device: a bottom sheet under a finger, a menu at
+ * the pointer for a right-click (`anchor`), and a centred dialog when a wide
+ * window opens it without a pointer position (keyboard).
  */
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   Alert,
   Clipboard,
@@ -27,13 +28,14 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
-import { type } from '../theme/tokens';
+import { radius, roles, sheetShadow, space, type } from '../theme/tokens';
 import { Message, ReactionSummary } from '../api/client';
 import { ReactionPicker } from './ReactionPicker';
-import { AppIcon } from './AppIcon';
+import { AppIcon, type AppIconName } from './AppIcon';
 
 export interface ReplyToData {
   messageId: string;
@@ -87,7 +89,25 @@ interface Props {
   translateLanguage?: string;
   /** Tickle the sender (OpenChat-m0xp) — others' messages from people, not bots. */
   onTickle?: (userId: string, displayName: string) => void;
+  /** Make a private to-do from this message, or open the one it already has. Nothing is sent. */
+  onMakeTodo?: (message: Message) => void;
+  hasTodo?: boolean;
+  /** Pointer position of a right-click: the menu opens there instead of as a sheet. */
+  anchor?: { x: number; y: number } | null;
 }
+
+interface ActionRow {
+  key: string;
+  label: string;
+  hint?: string;
+  icon?: AppIconName;
+  emoji?: string;
+  tone?: 'private' | 'danger';
+  disabled?: boolean;
+  onPress: () => void;
+}
+const WIDE_WINDOW = 700;
+const MENU_WIDTH = 300;
 
 const REPORT_REASONS = ['Spam', 'Inappropriate', 'Abuse', 'Other'] as const;
 type ReportReason = (typeof REPORT_REASONS)[number];
@@ -112,14 +132,20 @@ export function MessageActionSheet({
   onSavePhotos,
   onTranslate,
   onTickle,
+  onMakeTodo,
+  hasTodo = false,
+  anchor = null,
   translateLanguage = 'English',
 }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
+  const r = roles(c);
+  const window = useWindowDimensions();
+  const [menuSize, setMenuSize] = useState<{ width: number; height: number } | null>(null);
 
   // Sub-sheet state: null = main, 'report' = report picker, 'other' = freeform,
   // 'react' = emoji picker, 'assistant' = "ask about this" question prompt.
-  const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react' | 'assistant' | 'links'>(null);
+  const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react' | 'assistant' | 'links' | 'vision'>(null);
   const [freeformText, setFreeformText] = useState('');
   const [visionSelection, setVisionSelection] = useState('');
   const [visionBusy, setVisionBusy] = useState(false);
@@ -275,15 +301,20 @@ export function MessageActionSheet({
 
   if (!visible || !message) return null;
 
-  const overlayStyle = { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' as const };
+  // A finger gets a bottom sheet; a wide window gets a centred dialog; a right-click gets a menu at the pointer.
+  const wide = Platform.OS === 'web' && window.width >= WIDE_WINDOW;
+  const overlayStyle = wide
+    ? { flex: 1, backgroundColor: 'rgba(0,0,0,0.32)', justifyContent: 'center' as const, alignItems: 'center' as const }
+    : { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' as const };
 
   const sheetStyle = [
     styles.sheet,
     {
       backgroundColor: c.surface,
       borderColor: c.border,
-      paddingBottom: Platform.OS === 'ios' ? 34 : 16,
+      paddingBottom: wide ? 8 : Platform.OS === 'ios' ? 34 : 16,
     },
+    wide && [styles.dialog, sheetShadow],
   ];
 
   if (subSheet === 'links') {
@@ -431,14 +462,127 @@ export function MessageActionSheet({
     .filter((r: ReactionSummary) => r.byMe)
     .map((r: ReactionSummary) => r.emoji);
 
-  // ── Main action sheet ──────────────────────────────────────────────────────
+  // ── "Save an excerpt to Vision" ────────────────────────────────────────────
+  if (subSheet === 'vision') {
+    return (
+      <Modal transparent animationType="fade" visible={visible} onRequestClose={handleDismiss}>
+        <Pressable style={overlayStyle} onPress={handleDismiss}>
+          <Pressable onPress={() => { /* stop propagation */ }}>
+            <View style={sheetStyle}>
+              {!wide && <View style={styles.handle} />}
+              <Text style={[styles.title, { color: c.textPrimary }]}>Save an excerpt to Vision</Text>
+              <TextInput accessibilityLabel="Selected text for Vision" value={visionSelection} onChangeText={setVisionSelection} multiline autoFocus
+                placeholder="Paste or dictate the exact excerpt" placeholderTextColor={c.textMuted}
+                style={[styles.freeformInput, { backgroundColor: c.surfaceElevated, color: c.textPrimary, borderColor: c.border }]} />
+              <TouchableOpacity accessibilityRole="button" disabled={visionBusy || !visionSelection.trim()} onPress={() => { void saveVision(visionSelection); }}
+                style={[styles.submitBtn, { backgroundColor: c.primary, opacity: visionSelection.trim() && !visionBusy ? 1 : 0.5 }]}>
+                <Text style={{ color: c.onPrimary, ...type.bodyStrong }}>{visionBusy ? 'Saving…' : 'Save selected text to Vision'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" style={[styles.cancelRow, { borderColor: c.border }]} onPress={() => setSubSheet(null)}>
+                <Text style={[styles.cancelLabel, { color: c.textSecondary }]}>Back to message actions</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    );
+  }
+
+  // ── Main list, grouped by intent ───────────────────────────────────────────
+  const live = !message.deletedAt;
+  const hasText = live && !!message.content?.trim();
+  const closeThen = (run: () => void) => () => { const current = message; handleDismiss(); if (current) run(); };
+  const respond: ActionRow[] = live ? [
+    { key: 'reply', label: 'Reply', icon: 'reply', onPress: handleReply },
+    { key: 'copy', label: 'Copy', icon: 'copy', onPress: handleCopy },
+    { key: 'forward', label: 'Forward', icon: 'forward', onPress: handleForwardPress },
+  ] : [];
+  const keep: ActionRow[] = [];
+  if (live && onMakeTodo) keep.push({ key: 'todo', label: hasTodo ? 'Open your to-do' : 'Private to-do', hint: 'Only you see it. Nothing is sent.', icon: 'todo', tone: 'private', onPress: closeThen(() => onMakeTodo(message)) });
+  if (hasText) {
+    keep.push({ key: 'stream', label: 'Save to Stream', icon: 'bookmark', onPress: handleSaveToThoughts });
+    keep.push({ key: 'pin', label: 'Pin to chat', hint: 'Saves it and shows it to everyone here', icon: 'pin', onPress: handleSaveAndPin });
+  }
+  if (hasText && onSaveToVision) {
+    keep.push({ key: 'vision', label: visionBusy ? 'Saving…' : 'Save to Vision', hint: 'Private copy', icon: 'thought', disabled: visionBusy, onPress: () => { void saveVision(); } });
+    keep.push({ key: 'vision-excerpt', label: 'Save an excerpt to Vision…', icon: 'thought', onPress: () => setSubSheet('vision') });
+  }
+  const more: ActionRow[] = [];
+  if (live && messageLinks(message.content).length > 0) more.push({ key: 'links', label: 'Links · Open or copy', icon: 'link', onPress: () => setSubSheet('links') });
+  if (hasText && onTranslate) more.push({ key: 'translate', label: `Translate to ${translateLanguage}`, icon: 'chat', onPress: closeThen(() => onTranslate(message)) });
+  if (live && photoCount > 0 && onSavePhotos) more.push({ key: 'photos', label: photoCount === 1 ? `${saveVerb} photo` : `${saveVerb} all ${photoCount} photos`, icon: 'download', onPress: handleSavePhotos });
+  if (live) {
+    more.push({ key: 'agent', label: 'Forward to OpenChat Agent', icon: 'bot', onPress: handleForwardToAssistantPress });
+    more.push({ key: 'agent-ask', label: 'Ask OpenChat Agent about this…', icon: 'sparkle', onPress: () => setSubSheet('assistant') });
+  }
+  if (!isOwn && onTickle && !message.sender?.isBot) more.push({ key: 'tickle', label: `Tickle ${senderName}`, emoji: '👉', onPress: closeThen(() => onTickle(message.senderId, senderName)) });
+  const yours: ActionRow[] = isOwn && live ? [
+    { key: 'edit', label: 'Edit message', icon: 'edit', onPress: handleEditPress },
+    { key: 'delete', label: 'Delete message', icon: 'trash', tone: 'danger', onPress: handleDeletePress },
+  ] : [];
+  const safety: ActionRow[] = !isOwn ? [
+    { key: 'block', label: `Block ${senderName}`, icon: 'block', tone: 'danger', onPress: handleBlockPress },
+    { key: 'report', label: 'Report message', icon: 'flag', tone: 'danger', onPress: () => setSubSheet('report') },
+  ] : [];
+  const groups = [respond, keep, more, yours, safety].filter(group => group.length > 0);
+
+  const menu = !!anchor && wide;
+  const rowNodes: ReactNode[] = [];
+  groups.forEach((group, index) => {
+    if (index > 0) rowNodes.push(<View key={`divider-${index}`} style={[styles.groupDivider, { backgroundColor: c.divider }]} />);
+    for (const row of group) {
+      const color = row.tone === 'danger' ? c.danger : row.tone === 'private' ? r.private : c.textPrimary;
+      rowNodes.push(
+        <TouchableOpacity
+          key={row.key}
+          accessibilityRole={menu ? 'menuitem' : 'button'}
+          accessibilityLabel={row.hint ? `${row.label}. ${row.hint}` : row.label}
+          disabled={row.disabled}
+          onPress={row.onPress}
+          activeOpacity={0.7}
+          style={[styles.actionRow, wide && styles.actionRowWide]}
+        >
+          <View style={styles.actionIconBox}>
+            {row.emoji ? <Text style={styles.actionEmoji}>{row.emoji}</Text> : row.icon ? <AppIcon name={row.icon} color={color} size={wide ? 17 : 20} /> : null}
+          </View>
+          <View style={styles.actionText}>
+            <Text style={[wide ? styles.actionLabelWide : styles.actionLabel, { color }]} numberOfLines={1}>{row.label}</Text>
+            {!!row.hint && <Text style={[styles.actionHint, { color: c.textMetadata }]} numberOfLines={1}>{row.hint}</Text>}
+          </View>
+        </TouchableOpacity>,
+      );
+    }
+  });
+
+  if (menu && anchor) {
+    // Opens at the pointer, nudged back inside the window once its size is known.
+    const width = menuSize?.width ?? MENU_WIDTH;
+    const height = menuSize?.height ?? 0;
+    const left = Math.max(8, Math.min(anchor.x, window.width - width - 8));
+    const top = Math.max(8, Math.min(anchor.y, window.height - height - 8));
+    return (
+      <Modal transparent animationType="none" visible={visible} onRequestClose={handleDismiss}>
+        <Pressable style={styles.menuBackdrop} onPress={handleDismiss} accessibilityLabel="Close message actions">
+          <Pressable onPress={() => { /* keep clicks inside the menu */ }}
+            onLayout={event => setMenuSize({ width: event.nativeEvent.layout.width, height: event.nativeEvent.layout.height })}
+            style={[styles.menu, sheetShadow, { left, top, maxHeight: window.height - 16, backgroundColor: c.surface, borderColor: c.border, opacity: menuSize ? 1 : 0 }]}>
+            <ScrollView keyboardShouldPersistTaps="handled" accessibilityRole="menu">
+              <ReactionPicker myReactions={myReactions} onPick={handleReactPick} compact />
+              {rowNodes}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    );
+  }
+
   return (
     <Modal transparent animationType="fade" visible={visible} onRequestClose={handleDismiss}>
       <Pressable style={overlayStyle} onPress={handleDismiss}>
         <Pressable style={{ maxHeight: '90%' }} onPress={() => { /* stop propagation */ }}>
           <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled">
           <View style={sheetStyle}>
-            <View style={styles.handle} />
+            {!wide && <View style={styles.handle} />}
 
             {/* Content preview */}
             <View style={[styles.preview, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
@@ -453,209 +597,7 @@ export function MessageActionSheet({
             {/* Inline emoji reaction picker — always shown (OpenChat-7bd) */}
             <ReactionPicker myReactions={myReactions} onPick={handleReactPick} />
 
-            {!message.deletedAt && messageLinks(message.content).length > 0 && (
-              <TouchableOpacity accessibilityRole="button" style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={() => setSubSheet('links')}>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Links · Open or copy</Text>
-              </TouchableOpacity>
-            )}
-
-            {!message.deletedAt && !!message.content?.trim() && onTranslate && (
-              <TouchableOpacity accessibilityRole="button" style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={() => { handleDismiss(); onTranslate(message); }}>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Translate to {translateLanguage}</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Copy — always shown (even for deleted, harmless) (openchat-651) */}
-            {!message.deletedAt && (
-              <TouchableOpacity
-                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={handleCopy}
-                activeOpacity={0.7}
-              >
-                <View style={styles.actionIconBox}><AppIcon name="copy" color={c.textPrimary} size={20} /></View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Copy</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Save photos — photo messages only (OpenChat-zwt4) */}
-            {!message.deletedAt && photoCount > 0 && onSavePhotos && (
-              <TouchableOpacity
-                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={handleSavePhotos}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-              >
-                <View style={styles.actionIconBox}><AppIcon name="download" color={c.textPrimary} size={20} /></View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>
-                  {photoCount === 1 ? `${saveVerb} photo` : `${saveVerb} all ${photoCount} photos`}
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Reply — always shown (skip if message is deleted) */}
-            {!message.deletedAt && (
-              <TouchableOpacity
-                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={handleReply}
-                activeOpacity={0.7}
-              >
-                <View style={styles.actionIconBox}><AppIcon name="reply" color={c.textPrimary} size={20} /></View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Reply</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Forward — always shown (own and others'), skip if deleted (OpenChat-hhc) */}
-            {!message.deletedAt && (
-              <TouchableOpacity
-                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={handleForwardPress}
-                activeOpacity={0.7}
-              >
-                <View style={styles.actionIconBox}><AppIcon name="forward" color={c.textPrimary} size={20} /></View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Forward</Text>
-              </TouchableOpacity>
-            )}
-
-            {!message.deletedAt && !!message.content?.trim() && onSaveToVision && (
-              <>
-                <TouchableOpacity style={[styles.actionRow,styles.actionRowBorder,{borderColor:c.divider}]} accessibilityRole="button" disabled={visionBusy} onPress={()=>{void saveVision();}}>
-                  <View style={styles.actionIconBox}><AppIcon name="thought" color={c.textPrimary} size={20}/></View>
-                  <View style={{flex:1}}><Text style={[styles.actionLabel,{color:c.textPrimary}]}>{visionBusy?'Saving…':'Save to Vision'}</Text><Text style={{color:c.textMetadata,...type.meta}}>Private copy · receipt required</Text></View>
-                </TouchableOpacity>
-                <View style={{padding:16,borderBottomWidth:1,borderColor:c.divider}}>
-                  <Text style={{color:c.textMetadata,...type.meta}}>Or select an excerpt to save</Text>
-                  <TextInput accessibilityLabel="Selected text for Vision" value={visionSelection} onChangeText={setVisionSelection} multiline placeholder="Paste or dictate an exact excerpt" placeholderTextColor={c.textMuted} style={{color:c.textPrimary,minHeight:44,paddingVertical:8}}/>
-                  <TouchableOpacity accessibilityRole="button" disabled={visionBusy||!visionSelection.trim()} onPress={()=>{void saveVision(visionSelection);}} style={{minHeight:44,justifyContent:'center'}}><Text style={{color:visionSelection.trim()?c.primary:c.textMuted}}>Save selected text to Vision</Text></TouchableOpacity>
-                </View>
-              </>
-            )}
-
-            {/* Save to Stream / Save & pin — the unified capture affordance.
-                Saves this message's text into the user's Stream with
-                provenance; the pin variant also shares it to this chat's
-                pinned notes. Skip for messages with no text (e.g. image-only). */}
-            {!message.deletedAt && !!message.content?.trim() && (
-              <TouchableOpacity
-                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={handleSaveToThoughts}
-                activeOpacity={0.7}
-              >
-                <View style={styles.actionIconBox}>
-                  <AppIcon name="thought" color={c.textPrimary} size={20} />
-                </View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Save to Stream</Text>
-              </TouchableOpacity>
-            )}
-            {!message.deletedAt && !!message.content?.trim() && (
-              <TouchableOpacity
-                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={handleSaveAndPin}
-                activeOpacity={0.7}
-              >
-                <View style={styles.actionIconBox}>
-                  <AppIcon name="pin" color={c.textPrimary} size={20} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Pin to chat</Text>
-                  <Text style={{ fontSize: 12, color: c.textMetadata, marginTop: 1 }}>
-                    Saves to your Stream and pins it for everyone here
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            )}
-
-            {/* Forward to Assistant — private "ask my agent" (openchat-ug6).
-                Always shown (own and others'), skip if deleted. Drops the
-                quoted message into the user's PRIVATE Assistant DM — never
-                posts back into this shared conversation. */}
-            {!message.deletedAt && (
-              <TouchableOpacity
-                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={handleForwardToAssistantPress}
-                activeOpacity={0.7}
-              >
-                <View style={styles.actionIconBox}><AppIcon name="bot" color={c.textPrimary} size={20} /></View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Forward to OpenChat Agent</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Ask about this… — prompts for a question, then forwards both the
-                quoted message and the question to the private Assistant DM. */}
-            {!message.deletedAt && (
-              <TouchableOpacity
-                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={() => setSubSheet('assistant')}
-                activeOpacity={0.7}
-              >
-                <View style={styles.actionIconBox}><AppIcon name="chat" color={c.textPrimary} size={20} /></View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Ask OpenChat Agent about this…</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Edit — own non-deleted messages only (OpenChat-q9h) */}
-            {isOwn && !message.deletedAt && (
-              <TouchableOpacity
-                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={handleEditPress}
-                activeOpacity={0.7}
-              >
-                <View style={styles.actionIconBox}><AppIcon name="edit" color={c.textPrimary} size={20} /></View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Edit message</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Delete — own messages only (OpenChat-q9h) */}
-            {isOwn && !message.deletedAt && (
-              <TouchableOpacity
-                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={handleDeletePress}
-                activeOpacity={0.7}
-              >
-                <View style={styles.actionIconBox}><AppIcon name="trash" color={c.danger} size={20} /></View>
-                <Text style={[styles.actionLabel, { color: c.danger }]}>Delete message</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Tickle — others' messages from people (OpenChat-m0xp) */}
-            {!isOwn && onTickle && !message.sender?.isBot && (
-              <TouchableOpacity
-                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={() => { handleDismiss(); onTickle(message.senderId, senderName); }}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-              >
-                <View style={styles.actionIconBox}><Text style={styles.actionEmoji}>👉</Text></View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Tickle {senderName}</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Block — only on others' messages */}
-            {!isOwn && (
-              <TouchableOpacity
-                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={handleBlockPress}
-                activeOpacity={0.7}
-              >
-                <View style={styles.actionIconBox}><AppIcon name="block" color={c.danger} size={20} /></View>
-                <Text style={[styles.actionLabel, { color: c.danger }]}>
-                  Block {senderName}
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Report — only on others' messages */}
-            {!isOwn && (
-              <TouchableOpacity
-                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
-                onPress={() => setSubSheet('report')}
-                activeOpacity={0.7}
-              >
-                <View style={styles.actionIconBox}><AppIcon name="flag" color={c.danger} size={20} /></View>
-                <Text style={[styles.actionLabel, { color: c.danger }]}>Report message</Text>
-              </TouchableOpacity>
-            )}
+            {rowNodes}
 
             <TouchableOpacity
               style={[styles.cancelRow, { borderColor: c.border }]}
@@ -710,13 +652,22 @@ const styles = StyleSheet.create({
   previewContent: {
     fontSize: 14,
   },
+  dialog: { width: 420, maxWidth: '92%', borderRadius: radius.lg, overflow: 'hidden' },
+  menuBackdrop: { flex: 1 },
+  menu: { position: 'absolute', width: MENU_WIDTH, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, paddingVertical: space[1], overflow: 'hidden' },
+  groupDivider: { height: StyleSheet.hairlineWidth, marginVertical: space[1], marginHorizontal: space[3] },
   actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    minHeight: 48,
+    paddingVertical: 8,
     gap: 14,
   },
+  actionRowWide: { minHeight: 34, paddingVertical: 5, paddingHorizontal: space[3], gap: space[2] + 2 },
+  actionText: { flex: 1, minWidth: 0 },
+  actionLabelWide: { ...type.body, lineHeight: 20 },
+  actionHint: { ...type.meta },
   actionRowBorder: {
     borderBottomWidth: StyleSheet.hairlineWidth,
   },

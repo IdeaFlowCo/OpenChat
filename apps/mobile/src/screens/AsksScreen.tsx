@@ -133,23 +133,20 @@ function AsksInventory() {
     <View style={[styles.root, { backgroundColor: c.background }]}>
       <View style={[styles.hero, stackHero && styles.heroStacked]}>
         <View style={stackHero ? null : styles.heroCopy}>
-          <Text style={[styles.eyebrow, { color: c.primary }]}>YOUR PRIVATE INVENTORY</Text>
-          <Text style={[styles.title, { color: c.textPrimary }]}>All asks</Text>
-          <Text style={[styles.subtitle, { color: c.textSecondary }]}>Your asks, audiences, sources and history. Intended audience is separate from who can currently see them.</Text>
+          <Text style={[styles.subtitle, { color: c.textSecondary }]}>What you and the people you know are looking for, and what you mean to do about it. Each one is private until you share it.</Text>
         </View>
-        <TouchableOpacity accessibilityLabel="Tell OpenChat Agent something" onPress={() => navigation.navigate('AgentOverlay')} style={[styles.agentButton, { backgroundColor: c.primary }]}>
-          <AppIcon name="sparkle" color={c.onPrimary} size={18} />
-          <Text style={[styles.agentButtonText, { color: c.onPrimary }]}>Tell OpenChat Agent</Text>
+        <TouchableOpacity accessibilityLabel="Tell OpenChat Agent something" onPress={() => navigation.navigate('AgentOverlay')} style={[styles.agentButton, { borderColor: c.border, backgroundColor: c.surface }]}>
+          <AppIcon name="sparkle" color={c.primary} size={16} />
+          <Text style={[styles.agentButtonText, { color: c.textPrimary }]}>Tell OpenChat Agent</Text>
         </TouchableOpacity>
       </View>
       <View style={styles.toolbar}>
-        <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('SharedAsks')} style={[styles.secondaryButton, { borderColor: c.border, backgroundColor: c.surface }]}><Text style={{ color: c.primary, fontWeight: '700' }}>Shared with me</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('StoryComposer')} style={[styles.secondaryButton, { borderColor: c.border, backgroundColor: c.surface }]}>
-          <AppIcon name="plus" color={c.primary} size={17} />
-          <Text style={{ color: c.primary, fontWeight: '700' }}>Share a Story</Text>
+        <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('SharedAsks')} style={styles.secondaryButton}><Text style={[styles.secondaryText, { color: c.primary }]}>Shared with me</Text></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('StoryComposer')} style={styles.secondaryButton}>
+          <Text style={[styles.secondaryText, { color: c.primary }]}>Share a Story</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('SocialReview')} style={[styles.secondaryButton, { borderColor: c.border, backgroundColor: c.surface }]}>
-          <Text style={{ color: c.primary, fontWeight: '700' }}>Review decisions</Text>
+        <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('SocialReview')} style={styles.secondaryButton}>
+          <Text style={[styles.secondaryText, { color: c.primary }]}>Review decisions</Text>
         </TouchableOpacity>
       </View>
       {loading ? (
@@ -158,13 +155,12 @@ function AsksInventory() {
         <FlatList
           data={items}
           keyExtractor={item => item.key}
-          ListHeaderComponent={<PeopleAsks onOpenAsk={askId => navigation.navigate('AskDetail', { askId })} onOpenSource={conversationId => navigation.navigate('Chat', { conversationId })} onOpenPerson={person => person.kind === 'user' ? navigation.navigate('ContactProfile', { userId: person.id }) : navigation.navigate('PrivateThing', { thingId: person.id })} />}
-          contentContainerStyle={items.length ? styles.list : styles.emptyList}
+          ListHeaderComponent={<><PeopleAsks onOpenAsk={askId => navigation.navigate('AskDetail', { askId })} onOpenSource={conversationId => navigation.navigate('Chat', { conversationId })} onOpenPerson={person => person.kind === 'user' ? navigation.navigate('ContactProfile', { userId: person.id }) : navigation.navigate('PrivateThing', { thingId: person.id })} />
+            {/* The second, older system: asks handed to agents for quiet matching, and Stories. Named so it reads as a separate thing. */}
+            <Text accessibilityRole="header" style={[styles.sectionLabel, { color: c.textMetadata }]}>Agent matching and Stories</Text></>}
+          contentContainerStyle={styles.list}
           ListEmptyComponent={
-            <View style={[styles.empty, { backgroundColor: c.surface, borderColor: c.border }]}>
-              <Text style={[styles.emptyTitle, { color: c.textPrimary }]}>Start with ordinary language</Text>
-              <Text style={[styles.emptyText, { color: c.textSecondary }]}>Tell OpenChat Agent “I’m looking for a technical cofounder” or “I have an extra ticket.” It stays private until you approve a next step.</Text>
-            </View>
+            <Text style={[styles.emptyText, { color: c.textSecondary }]}>Nothing is being matched. Tell OpenChat Agent “I’m looking for a technical cofounder” or “I have an extra ticket” and it can search quietly; it stays private until you approve a next step.</Text>
           }
           renderItem={({ item }) => item.kind === 'draft' ? (
             <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -248,18 +244,15 @@ const styles = StyleSheet.create({
   hero: { width: '100%', maxWidth: 820, alignSelf: 'center', padding: 18, paddingBottom: 10, flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
   heroStacked: { flexDirection: 'column' },
   heroCopy: { flex: 1 },
-  eyebrow: { ...capsLabel },
-  title: { fontFamily: serif, ...type.title, fontWeight: '600', marginTop: 4 },
-  subtitle: { ...type.label, lineHeight: 19, marginTop: 5, maxWidth: 560 },
-  agentButton: { minHeight: 46, borderRadius: radius.md, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 7 },
-  agentButtonText: { fontWeight: '800' },
-  toolbar: { width: '100%', maxWidth: 820, alignSelf: 'center', paddingHorizontal: 18, paddingBottom: 8, flexDirection: 'row', gap: 8 },
-  secondaryButton: { minHeight: 42, paddingHorizontal: 13, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  subtitle: { ...type.label, fontWeight: '400', lineHeight: 19, maxWidth: 560 },
+  agentButton: { minHeight: 40, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  agentButtonText: { ...type.label, fontWeight: '600' },
+  toolbar: { width: '100%', maxWidth: 820, alignSelf: 'center', paddingHorizontal: 18, flexDirection: 'row', flexWrap: 'wrap', columnGap: 16 },
+  secondaryButton: { minHeight: 44, justifyContent: 'center' },
+  secondaryText: { ...type.label, fontWeight: '600' },
+  sectionLabel: { ...capsLabel, marginTop: 20 },
   list: { width: '100%', maxWidth: 820, alignSelf: 'center', padding: 18, paddingTop: 4, paddingBottom: 80, gap: 10 },
-  emptyList: { flexGrow: 1, width: '100%', maxWidth: 820, alignSelf: 'center', padding: 18 },
-  empty: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, padding: 22, marginTop: 20 },
-  emptyTitle: { fontFamily: serif, ...type.heading, fontWeight: '600' },
-  emptyText: { ...type.body, lineHeight: 21, marginTop: 7 },
+  emptyText: { ...type.label, fontWeight: '400' },
   card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, padding: 16 },
   cardHeading: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   state: { ...capsLabel },
