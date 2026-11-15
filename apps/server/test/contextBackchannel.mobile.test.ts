@@ -74,3 +74,11 @@ it('queues agent help only from an explicit Ask agents action', async () => {
   expect(mocks.ask).not.toHaveBeenCalled(); await act(async () => button('More').props.onPress()); await act(async () => button('Ask agents').props.onPress());
   expect(mocks.ask).toHaveBeenCalledWith('room', 'question'); expect(JSON.stringify(tree!.toJSON())).toContain('Requested help from 2 agents');
 });
+it('keeps multiline fixed and preserves the draft when the composer expands', async () => {
+  await act(async () => { tree = create(React.createElement(ContextComposer, { conversationId: 'room' })); });
+  const input = () => tree!.root.findByType('TextInput' as any);
+  expect(input().props.multiline).toBe(true);
+  await act(async () => input().props.onChangeText('Keep this draft'));
+  await act(async () => input().props.onFocus());
+  expect(input().props.multiline).toBe(true); expect(input().props.value).toBe('Keep this draft');
+});
