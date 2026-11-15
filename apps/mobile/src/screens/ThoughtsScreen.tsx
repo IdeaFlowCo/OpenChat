@@ -447,7 +447,7 @@ export function ThoughtsScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { flex: 1, width: '100%', maxWidth: 720, alignSelf: 'center' },
   displayRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 12 },
   chipRow: { flexDirection: 'row', gap: space[2], paddingHorizontal: space[4], paddingTop: space[2] },
   notice: { ...type.meta, paddingHorizontal: space[4], paddingTop: space[2] },

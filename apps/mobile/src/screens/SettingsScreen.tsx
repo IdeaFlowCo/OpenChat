@@ -13,7 +13,7 @@ import { ConnectAgentLink } from '../components/ConnectAgentLink';
  */
 
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Clipboard, Linking, Modal, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Clipboard, Linking, Modal, Platform, ScrollView, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
@@ -99,6 +99,7 @@ export function SettingsScreen() {
   }, [setNetworkPaused, socialPreferences.networkPaused]);
 
   // Account deletion (OpenChat-nhy)
+  const [showMore, setShowMore] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -351,18 +352,6 @@ export function SettingsScreen() {
       style={[styles.root, { backgroundColor: c.background }]}
       contentContainerStyle={styles.content}
     >
-      <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, marginBottom: 20 }]}>
-        <Text style={[type.label, { color: c.textSecondary, padding: 16 }]}>Agent setup</Text>
-        <ConnectAgentLink detail />
-        <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('AgentKeys')} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 }}>
-          <Text style={{ color: c.textPrimary, fontWeight: '500' }}>API keys</Text>
-          <Text style={{ color: c.textMetadata, fontSize: type.label.fontSize, marginTop: 3 }}>View, copy, create, or revoke existing OpenChat keys</Text>
-        </TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" onPress={handleCopyAgentSetup} disabled={mintingSetup} style={{ minHeight: 44, justifyContent: 'center', padding: 16 }}>
-          {mintingSetup ? <ActivityIndicator color={c.primary} /> : <Text style={{ color: c.primary }}>Copy agent setup with a new API key</Text>}
-        </TouchableOpacity>
-      </View>
-
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>ACCOUNT</Text>
         <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -410,6 +399,18 @@ export function SettingsScreen() {
         </View>
       </View>
 
+      <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>AGENTS</Text>
+      <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, marginBottom: 20 }]}>
+        <ConnectAgentLink detail />
+        <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('AgentKeys')} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 }}>
+          <Text style={{ color: c.textPrimary, fontWeight: '500' }}>API keys</Text>
+          <Text style={{ color: c.textMetadata, fontSize: type.label.fontSize, marginTop: 3 }}>View, copy, create, or revoke existing OpenChat keys</Text>
+        </TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" onPress={handleCopyAgentSetup} disabled={mintingSetup} style={{ minHeight: 44, justifyContent: 'center', padding: 16 }}>
+          {mintingSetup ? <ActivityIndicator color={c.primary} /> : <Text style={{ color: c.primary }}>Copy agent setup with a new API key</Text>}
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>EXPERIENCE</Text>
         <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
@@ -418,9 +419,9 @@ export function SettingsScreen() {
             onPress={() => void switchExperience('enhanced')}
             disabled={savingExperience}
             accessibilityRole="radio"
-            accessibilityState={{ selected: socialPreferences.experienceMode === 'enhanced' }}
+            accessibilityState={{ checked: socialPreferences.experienceMode === 'enhanced' }}
           >
-            <AppIcon name={socialPreferences.experienceMode === 'enhanced' ? 'check' : 'chevron-right'} color={c.primary} size={18} />
+            <View style={[styles.radio, { borderColor: socialPreferences.experienceMode === 'enhanced' ? c.primary : c.border }]}>{socialPreferences.experienceMode === 'enhanced' && <View style={[styles.radioDot, { backgroundColor: c.primary }]} />}</View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Chat + coordination</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>Stories, OpenChat Agent review, asks, and quiet matching</Text>
@@ -431,43 +432,34 @@ export function SettingsScreen() {
             onPress={chooseSimpleExperience}
             disabled={savingExperience}
             accessibilityRole="radio"
-            accessibilityState={{ selected: socialPreferences.experienceMode === 'simple' }}
+            accessibilityState={{ checked: socialPreferences.experienceMode === 'simple' }}
           >
-            <AppIcon name={socialPreferences.experienceMode === 'simple' ? 'check' : 'chevron-right'} color={c.primary} size={18} />
+            <View style={[styles.radio, { borderColor: socialPreferences.experienceMode === 'simple' ? c.primary : c.border }]}>{socialPreferences.experienceMode === 'simple' && <View style={[styles.radioDot, { backgroundColor: c.primary }]} />}</View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Simple chat</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>Chats and Stream without the coordination layer</Text>
             </View>
           </TouchableOpacity>
           {socialPreferences.experienceMode === 'enhanced' && (
-            <TouchableOpacity
+            <View
               style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
-              onPress={() => void setStoriesCollapsed(!storiesCollapsed)}
-              accessibilityRole="switch"
-              accessibilityState={{ checked: !storiesCollapsed }}
             >
               <View style={{ flex: 1 }}>
                 <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Show Stories rail</Text>
                 <Text style={[styles.optionHint, { color: c.textSecondary }]}>OpenChat Agent still filters matching opportunities into Review when it is collapsed</Text>
               </View>
-              <Text style={{ color: c.primary, fontWeight: '700' }}>{storiesCollapsed ? 'Off' : 'On'}</Text>
-            </TouchableOpacity>
+              <Switch accessibilityLabel="Show Stories rail" value={!storiesCollapsed} onValueChange={value => void setStoriesCollapsed(!value)} trackColor={{ true: c.primary }} />
+            </View>
           )}
-          <TouchableOpacity
+          <View
             style={styles.optionRow}
-            onPress={() => void toggleNetworkPause()}
-            disabled={savingExperience}
-            accessibilityRole="switch"
-            accessibilityState={{ checked: socialPreferences.networkPaused }}
           >
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Pause quiet searches</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>Paused searches do not reactivate automatically</Text>
             </View>
-            <Text style={{ color: socialPreferences.networkPaused ? c.danger : c.textMetadata, fontWeight: '700' }}>
-              {socialPreferences.networkPaused ? 'Paused' : 'Active'}
-            </Text>
-          </TouchableOpacity>
+            <Switch accessibilityLabel="Pause quiet searches" value={socialPreferences.networkPaused} disabled={savingExperience} onValueChange={() => void toggleNetworkPause()} trackColor={{ true: c.primary }} />
+          </View>
         </View>
 
         <Text style={[styles.subsectionLabel, { color: c.textMetadata }]}>LAYOUT ON THIS DEVICE</Text>
@@ -516,46 +508,9 @@ export function SettingsScreen() {
         </View>
       </View>
 
-      <View style={styles.section}>
-        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>FEEDBACK</Text>
-        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <TouchableOpacity
-            style={[styles.optionRow]}
-            onPress={handleSendFeedback}
-            disabled={sendingFeedback}
-            activeOpacity={0.7}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>
-                {sendingFeedback ? 'Sending…' : 'Send feedback'}
-              </Text>
-              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
-                Report a bug or request a feature
-              </Text>
-            </View>
-            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
-          </TouchableOpacity>
-        </View>
-      </View>
 
-      <View style={styles.section}>
-        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>DATA</Text>
-        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-          <TouchableOpacity
-            style={styles.optionRow}
-            onPress={() => setExportSheetVisible(true)}
-            activeOpacity={0.7}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Export my data</Text>
-              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
-                Download messages, Stream entries, settings, and account metadata
-              </Text>
-            </View>
-            <AppIcon name="download" color={c.primary} size={18} />
-          </TouchableOpacity>
-        </View>
-      </View>
+
+
 
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>APPEARANCE</Text>
@@ -709,7 +664,57 @@ export function SettingsScreen() {
       {/* Invite people (openchat-37z). Shareable QR/link points to the landing
           page (chat.ideaflow.app) which branches to iOS App Store, web, and
           Android — so one QR works for whoever scans it. */}
-      <View style={styles.section}>
+
+
+      {/* About / web version (OpenChat-e4n) */}
+
+
+      {/* Agent keys (OpenChat-7c9) — promoted to the top of Settings as a
+          hero card (OpenChat-i9h). The hero is at the very top of this
+          screen; there is no longer a buried DEVELOPER row. */}
+
+      {/* Legal & Account section (OpenChat-nhy + OpenChat-wfz) */}
+
+
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="More settings" accessibilityState={{ expanded: showMore }} onPress={() => setShowMore(value => !value)} style={styles.optionRow}><Text style={[styles.optionLabel, { color: c.textPrimary }]}>More</Text><AppIcon name={showMore ? 'chevron-down' : 'chevron-right'} color={c.textMetadata} size={18} /></TouchableOpacity>
+      {showMore && <View><View style={styles.section}>
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>FEEDBACK</Text>
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <TouchableOpacity
+            style={[styles.optionRow]}
+            onPress={handleSendFeedback}
+            disabled={sendingFeedback}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>
+                {sendingFeedback ? 'Sending…' : 'Send feedback'}
+              </Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                Report a bug or request a feature
+              </Text>
+            </View>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
+          </TouchableOpacity>
+        </View>
+      </View><View style={styles.section}>
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>DATA</Text>
+        <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => setExportSheetVisible(true)}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Export my data</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>
+                Download messages, Stream entries, settings, and account metadata
+              </Text>
+            </View>
+            <AppIcon name="download" color={c.primary} size={18} />
+          </TouchableOpacity>
+        </View>
+      </View><View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>INVITE PEOPLE</Text>
         <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
           <View style={{ alignItems: 'center', paddingVertical: 18 }}>
@@ -763,10 +768,7 @@ export function SettingsScreen() {
             <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
         </View>
-      </View>
-
-      {/* About / web version (OpenChat-e4n) */}
-      <View style={styles.section}>
+      </View><View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>ABOUT</Text>
         <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
           <TouchableOpacity
@@ -840,14 +842,7 @@ export function SettingsScreen() {
             <AppIcon name="copy" color={c.textMuted} size={16} />
           </TouchableOpacity>
         </View>
-      </View>
-
-      {/* Agent keys (OpenChat-7c9) — promoted to the top of Settings as a
-          hero card (OpenChat-i9h). The hero is at the very top of this
-          screen; there is no longer a buried DEVELOPER row. */}
-
-      {/* Legal & Account section (OpenChat-nhy + OpenChat-wfz) */}
-      <View style={styles.section}>
+      </View><View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>LEGAL & ACCOUNT</Text>
         <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
           {/* Privacy Policy (OpenChat-wfz) */}
@@ -897,8 +892,7 @@ export function SettingsScreen() {
             </Text>
           </TouchableOpacity>
         </View>
-      </View>
-
+      </View></View>}
       <Text style={[styles.versionFooter, { color: c.textMetadata }]}>
         {desktopShell ? `OpenChat for Mac · v${desktopShell.version} · web ` : 'OpenChat mobile · '}v{Constants.expoConfig?.version ?? '?'}
         {Platform.OS !== 'web' && ` (${Constants.expoConfig?.ios?.buildNumber ?? Constants.expoConfig?.android?.versionCode ?? '?'})`}

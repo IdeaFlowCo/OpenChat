@@ -114,3 +114,8 @@ and Original message below the note. Settings, Profile, New message and People
 are bounded to 720px. Agent keys uses an inline New API key action. People uses
 consistent labeled buttons and marks private saved profiles Only you. Shared
 Button, Chip and ListRow controls use instant hover/focus feedback without motion.
+
+Settings keeps Account first, then Agents. Experience and Appearance use one
+radio style; Stories and quiet-search pause use native Switch controls. More
+reveals Feedback, Data, Invite, About and Legal without hiding Sign out. Stream
+and message metadata share the list/bubble/card time-formatting module.

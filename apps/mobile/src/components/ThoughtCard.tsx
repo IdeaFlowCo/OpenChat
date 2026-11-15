@@ -23,15 +23,6 @@ import * as Clipboard from 'expo-clipboard';
 import { originalMessageUrl } from '../utils/parseOpenChatUrl';
 import { COMPACT_VISIBLE_LINES, isLongStreamText, useStreamCompact, useThoughtCollapsed } from '../services/streamDisplay';
 
-// Ink & Paper: warm, muted kind colors (was stock Tailwind indigo/amber/etc).
-const KIND_COLORS: Record<string, string> = {
-  fact:        '#6d5f8f', // muted plum
-  decision:    '#b3541e', // sienna
-  commitment:  '#4a7c59', // moss
-  reminder:    '#c07b28', // ochre
-  observation: '#8a7f6d', // stone
-};
-
 const KIND_LABELS: Record<string, string> = {
   fact:        'Fact',
   decision:    'Decision',
@@ -61,7 +52,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
   const { scheme } = useTheme();
   const c = getColors(scheme);
 
-  const kindColor = KIND_COLORS[item.kind] ?? '#8a7f6d';
+  const kindColor = c.textMetadata;
   const kindLabel = KIND_LABELS[item.kind] ?? item.kind;
   const tags = item.tags ?? [];
   const [actions, setActions] = useState(false);
@@ -94,6 +85,8 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
         {
           backgroundColor: c.surface,
           borderColor: c.border,
+          borderLeftWidth: item.pinned ? 3 : StyleSheet.hairlineWidth,
+          borderLeftColor: item.pinned ? c.primary : c.border,
 
         },
       ]}
@@ -120,13 +113,13 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
           <View
             style={[
               styles.badge,
-              { backgroundColor: item.status === 'open' ? '#4a7c5922' : '#8a7f6d22' },
+              { backgroundColor: c.surfaceElevated },
             ]}
           >
             <Text
               style={[
                 styles.badgeText,
-                { color: item.status === 'open' ? '#4a7c59' : '#8a7f6d' },
+                { color: c.textMetadata },
               ]}
             >
               {item.status === 'open' ? 'Open' : 'Closed'}
@@ -134,7 +127,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
           </View>
         )}
         {item.kind !== 'observation' && (
-          <View style={[styles.badge, { backgroundColor: kindColor + '22' }]}>
+          <View style={[styles.badge, { backgroundColor: c.surfaceElevated }]}>
             <Text style={[styles.badgeText, { color: kindColor }]}>{kindLabel}</Text>
           </View>
         )}
@@ -209,7 +202,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
               activeOpacity={0.7}
               style={[styles.chip, { backgroundColor: c.primaryMuted }]}
             >
-              <Text style={[styles.chipText, { color: c.primary }]}>
+              <Text style={[styles.chipText, { color: c.primaryActive }]}>
                 #{tag.replace(/^#/, '')}
               </Text>
             </TouchableOpacity>

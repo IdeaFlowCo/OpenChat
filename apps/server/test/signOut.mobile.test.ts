@@ -243,6 +243,8 @@ describe('Settings sign out', () => {
     const tree = create(React.createElement(SettingsScreen));
     await flush();
 
+    expect(hasText(tree.root, 'Delete my account')).toBe(false);
+    await act(async () => { tree.root.findByProps({ accessibilityLabel: 'More settings' }).props.onPress(); });
     const order = textOrder(tree.root);
     const account = order.indexOf('ACCOUNT');
     const signOut = order.indexOf('Sign out');
