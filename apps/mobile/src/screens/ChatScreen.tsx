@@ -2632,7 +2632,7 @@ export function ChatScreen({
           ]}
           value={text}
           onChangeText={handleTextChange}
-          placeholder={composingTodo && !editingMessage ? 'A to-do only you will see…' : 'Write…'}
+          placeholder={composingTodo && !editingMessage ? 'A to-do for you and your agents…' : 'Write…'}
           placeholderTextColor={c.textMuted}
           multiline
           // Web: a textarea defaults to two rows, which left the placeholder
