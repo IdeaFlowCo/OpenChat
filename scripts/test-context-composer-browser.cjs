@@ -16,6 +16,7 @@ const mocks = {
 
 async function main() {
   await esbuild.build({
+    absWorkingDir: root,
     stdin: {
       contents: `
         import React from 'react';
