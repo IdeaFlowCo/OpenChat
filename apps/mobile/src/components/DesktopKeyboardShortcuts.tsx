@@ -10,7 +10,7 @@ export function DesktopKeyboardShortcuts({ enabled }: { enabled: boolean }) {
   const desktop = useIsDesktop();
   useEffect(() => {
     if (!enabled || !desktop || Platform.OS !== 'web' || typeof document === 'undefined') return;
-    const onKey = (event: KeyboardEvent) => {
+    const handleKey = (event: KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229 || event.defaultPrevented || !navigationRef.isReady()) return;
       if (dispatchDesktopKeyboardHandler(event)) return;
       const meta = event.metaKey || event.ctrlKey;
@@ -28,6 +28,13 @@ export function DesktopKeyboardShortcuts({ enabled }: { enabled: boolean }) {
         event.preventDefault();
         navigationRef.goBack();
       }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      // Let local capture handlers (e.g. the chat hashtag picker) consume
+      // Escape first. TextInput may stop bubbling, so retain this capture
+      // listener and check defaultPrevented after local handlers have run.
+      if (event.key === 'Escape') queueMicrotask(() => handleKey(event));
+      else handleKey(event);
     };
     // RN-web TextInput stops keydown bubbling. Capture keeps Escape and
     // global shortcuts available while Search or a composer owns focus.

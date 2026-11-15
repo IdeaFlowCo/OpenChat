@@ -33,14 +33,15 @@ async function mount(enabled = true) {
   await act(async () => { tree = create(React.createElement(DesktopKeyboardShortcuts, { enabled })); });
 }
 function key(value: string, meta = false, isComposing = false) {
-  const event = { key: value, metaKey: meta, ctrlKey: false, shiftKey: false, isComposing, defaultPrevented: false, preventDefault: vi.fn() } as unknown as KeyboardEvent;
-  listeners.forEach(handler => handler(event)); return event;
+  const event = { key: value, metaKey: meta, ctrlKey: false, shiftKey: false, isComposing, defaultPrevented: false, preventDefault: vi.fn(() => { event.defaultPrevented = true; }) };
+  listeners.forEach(handler => handler(event as unknown as KeyboardEvent)); return event;
 }
 
 it('keeps one shell listener when Chats blurs to Search, so Escape and global shortcuts still work', async () => {
   await mount();
   expect(captureListener).toBe(true); // RN-web inputs stop bubble-phase keydown.
   key('Escape', false, true);
+  await Promise.resolve();
   expect(mocks.navigation.goBack).not.toHaveBeenCalled();
   key('k', true, true);
   expect(mocks.navigation.dispatch).not.toHaveBeenCalled();
@@ -49,6 +50,7 @@ it('keeps one shell listener when Chats blurs to Search, so Escape and global sh
   expect(mocks.navigation.dispatch).not.toHaveBeenCalled(); expect(listeners.size).toBe(1);
   blur(); // Search and the other unwrapped routes have no layout registration.
   const escape = key('Escape');
+  await Promise.resolve();
   expect(mocks.navigation.goBack).toHaveBeenCalledTimes(1); expect(escape.preventDefault).toHaveBeenCalled();
   key('k', true);
   expect(mocks.navigation.dispatch).toHaveBeenCalledWith({ name: 'Main', params: { screen: 'ChatsTab', params: { screen: 'Search' } } });
@@ -59,11 +61,19 @@ it('uses only the most recently focused layout and removes the listener on sign-
   await mount(); const chats = vi.fn(), settings = vi.fn();
   disposers.push(registerDesktopKeyboardHandler(chats));
   const blurSettings = registerDesktopKeyboardHandler(settings); disposers.push(blurSettings);
-  key('Escape'); expect(settings).toHaveBeenCalledTimes(1); expect(chats).not.toHaveBeenCalled();
-  blurSettings(); key('Escape'); expect(chats).toHaveBeenCalledTimes(1);
+  key('Escape'); await Promise.resolve(); expect(settings).toHaveBeenCalledTimes(1); expect(chats).not.toHaveBeenCalled();
+  blurSettings(); key('Escape'); await Promise.resolve(); expect(chats).toHaveBeenCalledTimes(1);
   expect(listeners.size).toBe(1);
   await act(async () => tree!.update(React.createElement(DesktopKeyboardShortcuts, { enabled: false })));
   expect(listeners.size).toBe(0);
+});
+
+it('lets local Escape handlers dismiss a picker without navigating away', async () => {
+  await mount();
+  const event = key('Escape');
+  event.preventDefault(); // Local input capture runs after document capture.
+  await Promise.resolve();
+  expect(mocks.navigation.goBack).not.toHaveBeenCalled();
 });
 
 it('leaves phone and native keyboard behavior unchanged', async () => {
