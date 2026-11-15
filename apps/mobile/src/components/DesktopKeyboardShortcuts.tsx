@@ -1,0 +1,36 @@
+import { useEffect } from 'react';
+import { Platform } from 'react-native';
+import { CommonActions } from '@react-navigation/native';
+import { navigationRef } from '../navigation/conversationNavigation';
+import { useIsDesktop } from '../theme/breakpoints';
+import { dispatchDesktopKeyboardHandler } from '../services/desktopKeyboard';
+
+/** One desktop listener survives navigation to screens without a split layout. */
+export function DesktopKeyboardShortcuts({ enabled }: { enabled: boolean }) {
+  const desktop = useIsDesktop();
+  useEffect(() => {
+    if (!enabled || !desktop || Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !navigationRef.isReady()) return;
+      if (dispatchDesktopKeyboardHandler(event)) return;
+      const meta = event.metaKey || event.ctrlKey;
+      const key = event.key.toLowerCase();
+      const screen = meta ? key === 'k' ? 'Search'
+        : key === 'n' || (event.shiftKey && key === 'o') ? 'NewConversation'
+        : key === ',' ? 'Settings'
+        : key === '/' ? 'KeyboardShortcuts' : undefined : undefined;
+      if (screen) {
+        event.preventDefault();
+        navigationRef.dispatch(CommonActions.navigate({
+          name: 'Main', params: { screen: 'ChatsTab', params: { screen } },
+        }));
+      } else if (event.key === 'Escape' && navigationRef.canGoBack()) {
+        event.preventDefault();
+        navigationRef.goBack();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [enabled, desktop]);
+  return null;
+}

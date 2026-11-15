@@ -1,0 +1,67 @@
+import React from 'react';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  platform: { OS: 'web' }, desktop: true,
+  navigation: { isReady: () => true, canGoBack: () => true, goBack: vi.fn(), dispatch: vi.fn() },
+}));
+vi.mock('react-native', () => ({ Platform: mocks.platform }));
+vi.mock('@react-navigation/native', () => ({ CommonActions: { navigate: (payload: unknown) => payload } }));
+vi.mock('../../mobile/src/navigation/conversationNavigation', () => ({ navigationRef: mocks.navigation }));
+vi.mock('../../mobile/src/theme/breakpoints', () => ({ useIsDesktop: () => mocks.desktop }));
+import { DesktopKeyboardShortcuts } from '../../mobile/src/components/DesktopKeyboardShortcuts';
+import { registerDesktopKeyboardHandler } from '../../mobile/src/services/desktopKeyboard';
+
+let tree: ReactTestRenderer | undefined;
+let listeners: Set<(event: KeyboardEvent) => void>;
+const disposers: (() => void)[] = [];
+beforeEach(() => {
+  mocks.platform.OS = 'web'; mocks.desktop = true; vi.clearAllMocks();
+  listeners = new Set();
+  vi.stubGlobal('document', {
+    addEventListener: (type: string, handler: (e: KeyboardEvent) => void) => { if (type === 'keydown') listeners.add(handler); },
+    removeEventListener: (type: string, handler: (e: KeyboardEvent) => void) => { if (type === 'keydown') listeners.delete(handler); },
+  });
+});
+afterEach(async () => {
+  if (tree) await act(async () => tree!.unmount()); tree = undefined;
+  disposers.splice(0).forEach(dispose => dispose()); vi.unstubAllGlobals();
+});
+async function mount(enabled = true) {
+  await act(async () => { tree = create(React.createElement(DesktopKeyboardShortcuts, { enabled })); });
+}
+function key(value: string, meta = false) {
+  const event = { key: value, metaKey: meta, ctrlKey: false, shiftKey: false, defaultPrevented: false, preventDefault: vi.fn() } as unknown as KeyboardEvent;
+  listeners.forEach(handler => handler(event)); return event;
+}
+
+it('keeps one shell listener when Chats blurs to Search, so Escape and global shortcuts still work', async () => {
+  await mount();
+  const chatHandler = vi.fn(); const blur = registerDesktopKeyboardHandler(chatHandler); disposers.push(blur);
+  key('k', true); expect(chatHandler).toHaveBeenCalledTimes(1);
+  expect(mocks.navigation.dispatch).not.toHaveBeenCalled(); expect(listeners.size).toBe(1);
+  blur(); // Search and the other unwrapped routes have no layout registration.
+  const escape = key('Escape');
+  expect(mocks.navigation.goBack).toHaveBeenCalledTimes(1); expect(escape.preventDefault).toHaveBeenCalled();
+  key('k', true);
+  expect(mocks.navigation.dispatch).toHaveBeenCalledWith({ name: 'Main', params: { screen: 'ChatsTab', params: { screen: 'Search' } } });
+  expect(listeners.size).toBe(1);
+});
+
+it('uses only the most recently focused layout and removes the listener on sign-out', async () => {
+  await mount(); const chats = vi.fn(), settings = vi.fn();
+  disposers.push(registerDesktopKeyboardHandler(chats));
+  const blurSettings = registerDesktopKeyboardHandler(settings); disposers.push(blurSettings);
+  key('Escape'); expect(settings).toHaveBeenCalledTimes(1); expect(chats).not.toHaveBeenCalled();
+  blurSettings(); key('Escape'); expect(chats).toHaveBeenCalledTimes(1);
+  expect(listeners.size).toBe(1);
+  await act(async () => tree!.update(React.createElement(DesktopKeyboardShortcuts, { enabled: false })));
+  expect(listeners.size).toBe(0);
+});
+
+it('leaves phone and native keyboard behavior unchanged', async () => {
+  mocks.desktop = false; await mount(); expect(listeners.size).toBe(0);
+  await act(async () => tree!.unmount()); tree = undefined;
+  mocks.desktop = true; mocks.platform.OS = 'ios'; await mount(); expect(listeners.size).toBe(0);
+});

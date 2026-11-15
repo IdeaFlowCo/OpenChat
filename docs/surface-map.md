@@ -134,3 +134,16 @@ posts show the author, real agent attribution, kind and relative time. More,
 hover or long-press reveals actions; **Ask agents** requires an explicit press.
 The quiet shared composer starts as one line and expands on focus. Private entry
 remains a separate action labeled Only you; posting does not scan asks automatically.
+
+### Desktop keyboard and Stream follow-up
+
+The authenticated desktop shell owns one document keyboard listener. A focused
+split layout registers its local menu/selection behavior; Search, Shortcuts,
+Group settings and agent screens retain Escape and global navigation when no
+split layout is focused. Phone/native keyboard behavior is unchanged.
+
+Stream exact time appears on timestamp hover or focus and remains available on
+tap. The composer keeps multiline mounted and grows with content up to 120px.
+The card wrapper stays non-accessible so its nested controls remain separate;
+native Button, Chip and ListRow retain pressed opacity. Dates older than a week
+keep the shared short month/day contract, adding the year only when it differs.
