@@ -13,6 +13,8 @@ expected_bytes=${2:-103835096}
 expected_version=${3:-1.0.20}
 expected_code=${4:-4}
 expected_package=com.jacobcole.openchat
+# Trusted release signer; rotation requires a reviewed pin change.
+expected_signer=dc568c4ccbf4dde1ed7c411a01e3e40f519cc93a57a26a6e8b32708b61ce8cea
 aapt_tool=${AAPT:-$(command -v aapt2 || command -v aapt || true)}
 [[ "$tag" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]] || { echo 'Invalid release tag.' >&2; exit 1; }
 [[ "$expected_bytes" =~ ^[1-9][0-9]*$ ]] || { echo 'Expected bytes must be a positive integer.' >&2; exit 1; }
@@ -85,7 +87,28 @@ code=$(sed -n "s/^package: .*versionCode='\\([^']*\\)'.*/\\1/p" "$work_dir/badgi
 [ "$code" = "$expected_code" ] || fail "version code: expected $expected_code, got $code"
 
 if command -v apksigner >/dev/null; then
-  apksigner verify --verbose --print-certs "$apk"
+  apksigner verify --verbose --print-certs "$apk" > "$work_dir/signature"
+  # Digest-like lines must never be hidden by a missing/malformed Signer prefix.
+  # Known non-SHA256 attributes must belong to the same single signer.
+  signer=$(awk '
+    tolower($0) ~ /signer.*certificate/ || index(tolower($0), "certificate sha-256 digest") {
+      is_digest = index(tolower($0), "certificate sha-256 digest")
+      if (!is_digest && $0 ~ /^Signer #[1-9][0-9]* certificate DN: /) { metadata[$2] = 1; next }
+      if (!is_digest && $0 ~ /^Signer #[1-9][0-9]* certificate SHA-1 digest: [0-9A-Fa-f]+$/ && NF == 6 && length($6) == 40) { metadata[$2] = 1; next }
+      if (!is_digest && $0 ~ /^Signer #[1-9][0-9]* certificate MD5 digest: [0-9A-Fa-f]+$/ && NF == 6 && length($6) == 32) { metadata[$2] = 1; next }
+      count++
+      if ($0 !~ /^Signer #[1-9][0-9]* certificate SHA-256 digest: [0-9A-Fa-f]+$/ || NF != 6 || length($6) != 64) bad = 1
+      else { digest = tolower($6); signer_id = $2 }
+    }
+    END {
+      for (id in metadata) if (id != signer_id) bad = 1
+      if (bad || count != 1) exit 1
+      print digest
+    }
+  ' "$work_dir/signature") || fail 'Malformed, missing or multiple APK signer certificate records (pinned signer required)'
+  [ "$signer" = "$expected_signer" ] || fail 'APK signer does not match the pinned release certificate'
+  cat "$work_dir/signature"
+  printf 'Signer certificate pin matched: %s\n' "$expected_signer"
 else
   echo 'Signature not checked here (apksigner unavailable).'
 fi
