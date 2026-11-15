@@ -13,7 +13,7 @@ afterEach(async()=>{if(tree)await act(async()=>tree.unmount());vi.clearAllMocks(
 it('retains sidebar, title and usable Back on desktop secondary screens',async()=>{
  mocks.desktop=true;await act(async()=>{tree=create(React.createElement(DesktopDetailScreen,{title:'Settings',children:React.createElement('Content')}));});
  expect(tree.root.findAllByType('SidebarAndDetail' as any)).toHaveLength(1);expect(mocks.nav.setOptions).toHaveBeenCalledWith({headerShown:false});
- await act(async()=>tree.root.findByProps({accessibilityLabel:'Back to Chats'}).props.onPress());expect(mocks.nav.goBack).toHaveBeenCalled();
+ await act(async()=>tree.root.findByProps({accessibilityLabel:'Back'}).props.onPress());expect(mocks.nav.goBack).toHaveBeenCalled();
 });
 it('keeps the native stack and original screen on phone widths',async()=>{
  mocks.desktop=false;await act(async()=>{tree=create(React.createElement(DesktopDetailScreen,{title:'Profile',children:React.createElement('Content')}));});

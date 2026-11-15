@@ -237,7 +237,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen
         name="ProfileEdit"
         component={ProfileEditDetail}
-        options={{ title: 'Edit Profile', presentation: 'modal' }}
+        options={{ title: 'Edit Profile', presentation: desktop ? 'card' : 'modal' }}
       />
       {/* Group invite flow (OpenChat-240) */}
       <ChatsStack.Screen
