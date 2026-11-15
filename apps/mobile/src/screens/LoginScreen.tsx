@@ -1,3 +1,6 @@
+import Constants from 'expo-constants';
+import * as Updates from 'expo-updates';
+import { AppStamp } from '../components/AppStamp';
 import { AppIcon } from '../components/AppIcon';
 import { radius, type } from '../theme/tokens';
 import { useEffect, useRef, useState } from 'react';
@@ -20,8 +23,6 @@ import QRCode from 'react-native-qrcode-svg';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import Constants from 'expo-constants';
-import * as Updates from 'expo-updates';
 import { useTheme } from '../contexts/ThemeContext';
 import { loginWithPassword, registerWithPassword, googleIdTokenExchange, googleExchange, ideaflowExchange, signInWithApple, GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, OPENCHAT_URL, api } from '../api/client';
 import { getColors } from '../theme/colors';
@@ -76,11 +77,8 @@ export function LoginScreen() {
     : Platform.OS === 'android'
       ? Constants.expoConfig?.android?.versionCode
       : undefined;
-  const buildDate = (Constants.expoConfig?.extra as { buildDate?: string } | undefined)?.buildDate;
   const loginBuildLabel = appVersion
-    ? `v${appVersion}${buildNumber != null ? ` (${buildNumber})` : ''}${
-        Platform.OS === 'web' && buildDate ? ` · ${buildDate}` : ''
-      }${Updates.isEnabled && !Updates.isEmbeddedLaunch && Updates.updateId
+    ? `v${appVersion}${buildNumber != null ? ` (${buildNumber})` : ''}${Updates.isEnabled && !Updates.isEmbeddedLaunch && Updates.updateId
         ? ` · update ${Updates.updateId.slice(0, 8)}` : ''}`
     : null;
   const { bootstrapIfAuthed } = useChat();
@@ -766,25 +764,18 @@ export function LoginScreen() {
           </View>
         </View>
       </ScrollView>
-      {loginBuildLabel && (
-        <Text
-          accessibilityLabel={`OpenChat version ${loginBuildLabel}`}
-          pointerEvents="none"
-          style={[styles.buildLabel, { color: c.textMetadata, bottom: insets.bottom + 6, backgroundColor: c.background }]}
-        >
-          {loginBuildLabel}
-        </Text>
-      )}
+      {Platform.OS !== 'web' && loginBuildLabel && <Text accessibilityLabel={`OpenChat version ${loginBuildLabel}`} style={[styles.buildLabel, { color: c.textMetadata }]}>{loginBuildLabel}</Text>}
+      <AppStamp />
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  buildLabel: { textAlign: 'center', fontSize: type.caption.fontSize },
   autoSignInPending: { alignItems: 'center', justifyContent: 'center' },
   scroll: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingHorizontal: 24, justifyContent: 'center', alignItems: 'stretch' },
-  buildLabel: { position: 'absolute', right: 10, paddingHorizontal: 4, fontSize: type.caption.fontSize, lineHeight: 15 },
   card: {
     width: '100%',
     maxWidth: 520,
