@@ -421,6 +421,11 @@ app.get(['/llms.txt', '/AGENTS.md'], (_req, res) => {
 // compact, tablet, or split-pane layouts based on the available width and the
 // user's saved preference.
 const appDistPath = path.join(__dirname, '..', '..', '..', 'client-app', 'dist');
+// Public provenance belongs to the same immutable client export as /app/.
+app.get('/version.json', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(appDistPath, 'version.json'), err => { if (err) next(err); });
+});
 app.use('/app', (_req, res, next) => {
   res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://www.unlinked.ai");
   next();

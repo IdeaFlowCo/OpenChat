@@ -25,6 +25,9 @@ if [ -d "$MOBILE_REPO" ]; then
   echo ""
   echo "── Building the responsive OpenChat web app for /app/ ──"
   rm -rf "$MOBILE_REPO/dist-web-app"
+  # Freeze one provenance record for Expo config and the public metadata file.
+  export OPENCHAT_STAMP_FILE="$(pwd)/client-app/dist/version.json"
+  env -u OPENCHAT_STAMP_FILE node -e 'const fs = require("node:fs"); const config = require(process.argv[1]); fs.writeFileSync(process.argv[2], JSON.stringify(config.expo.extra.appStamp) + "\n")' "$MOBILE_REPO/app.config.js" "$OPENCHAT_STAMP_FILE"
   (
     cd "$MOBILE_REPO" && \
     IS_WEB_BUILD=1 OPENCHAT_BASE_URL=/app npx expo export \

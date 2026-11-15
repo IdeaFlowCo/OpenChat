@@ -36,6 +36,7 @@ import { openWitFeedback } from '../services/witWidget';
 import { submitNativeFeedback, type FeedbackScreenshot } from '../services/witNativeFeedback';
 import { saveJsonDownload } from '../services/exportDownload';
 import { describeDesktopUpdate, useDesktopShell } from '../services/desktopShell';
+import { AppStamp } from '../components/AppStamp';
 import { AppIcon } from '../components/AppIcon';
 import { isPlaceholderEmail } from '../utils/email';
 
@@ -312,7 +313,6 @@ export function SettingsScreen() {
     : Updates.isEmbeddedLaunch
       ? 'Bundled JS (no OTA applied)'
       : `OTA bundle ${Updates.updateId ? Updates.updateId.slice(0, 8) : 'active'}`;
-  const buildDate = (Constants.expoConfig?.extra as { buildDate?: string } | undefined)?.buildDate;
   // OpenChat for Mac: the native shell's own version + auto-update state.
   const desktopShell = useDesktopShell();
   const desktopSummary = desktopShell
@@ -320,8 +320,8 @@ export function SettingsScreen() {
     : null;
   const provenanceSummary =
     Platform.OS === 'web'
-      ? `${desktopSummary ? `${desktopSummary} · ` : ''}Web · v${appVersion}${buildDate ? ` · ${buildDate}` : ''}`
-      : `v${appVersion} (build ${buildNumber})${buildDate ? ` · ${buildDate}` : ''} · channel ${updateChannel}`;
+      ? `${desktopSummary ? `${desktopSummary} · ` : ''}Web · v${appVersion}`
+      : `v${appVersion} (build ${buildNumber}) · channel ${updateChannel}`;
 
   const handleClearLocalData = () => {
     Alert.alert(
@@ -893,11 +893,7 @@ export function SettingsScreen() {
           </TouchableOpacity>
         </View>
       </View></View>}
-      <Text style={[styles.versionFooter, { color: c.textMetadata }]}>
-        {desktopShell ? `OpenChat for Mac · v${desktopShell.version} · web ` : 'OpenChat mobile · '}v{Constants.expoConfig?.version ?? '?'}
-        {Platform.OS !== 'web' && ` (${Constants.expoConfig?.ios?.buildNumber ?? Constants.expoConfig?.android?.versionCode ?? '?'})`}
-        {buildDate ? ` · Built ${buildDate}` : ''}
-      </Text>
+      <AppStamp />
 
       <ExportSheet
         visible={exportSheetVisible}
@@ -1068,7 +1064,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   radioDot: { width: 10, height: 10, borderRadius: radius.sm },
-  versionFooter: { fontSize: type.caption.fontSize, textAlign: 'center', marginTop: 8 },
   // Android delete-account confirmation modal styles
   modalBackdrop: {
     flex: 1,

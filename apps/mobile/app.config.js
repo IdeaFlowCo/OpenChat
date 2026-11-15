@@ -107,7 +107,7 @@ module.exports = {
       eas: {
         projectId: 'fc828863-4fa4-4b62-97f6-8c00ce1dffe3',
       },
-      buildDate: '2026-10-07',
+
     },
 
     // baseUrl ONLY set during web exports (when IS_WEB_BUILD=1). Native
@@ -144,3 +144,6 @@ module.exports = {
     ],
   },
 };
+
+// JS-only provenance; preserve the native version literal used by bump-version.js.
+module.exports.expo.extra.appStamp = require('./scripts/app-stamp.cjs').readStamp(module.exports.expo.version);
