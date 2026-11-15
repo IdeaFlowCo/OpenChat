@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#5664e2">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f8f7fc" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a0c18" media="(prefers-color-scheme: dark)">
 <title>OpenChat — real-time messaging with agents built in</title>
 <meta name="description" content="OpenChat is a fast, modern messaging app with iMessage-quality UX and AI agents you can invite into any conversation via MCP. iOS, Android, web, and any agent CLI.">
 <meta property="og:title" content="OpenChat">
@@ -12,20 +14,55 @@
 <meta name="twitter:card" content="summary_large_image">
 <style>
   :root {
-    --bg: #0a0c18;
-    --surface: rgba(255,255,255,0.04);
-    --surface-strong: rgba(255,255,255,0.08);
-    --border: rgba(255,255,255,0.10);
-    --text: #f4f6ff;
-    --text-dim: #9aa0c5;
-    --text-faint: #5b6195;
-    --accent: #7c80ff;
-    --accent-2: #ad6cff;
+    color-scheme: light;
+    --bg: #f8f7fc;
+    --surface: rgba(255,255,255,0.75);
+    --surface-strong: rgba(79,87,232,0.08);
+    --border: rgba(45,40,98,0.16);
+    --text: #1b1d33;
+    --text-dim: #4b526b;
+    --text-faint: #5d637b;
+    --accent: #5145bf;
+    --accent-hover: #4036a5;
+    --accent-2: #8345c4;
     --accent-bg: linear-gradient(135deg,#4f57e8 0%,#8a4cd8 100%);
-    --shadow-soft: 0 8px 24px rgba(0,0,0,0.32);
-    --shadow-strong: 0 24px 60px rgba(76,80,200,0.35);
-    --code-bg: #0f1230;
-    --code-border: rgba(255,255,255,0.08);
+    --shadow-soft: 0 8px 24px rgba(36,30,86,0.10);
+    --shadow-strong: 0 24px 60px rgba(76,80,200,0.20);
+    --code-bg: #efedf8;
+    --code-border: rgba(45,40,98,0.14);
+    --inline-code-bg: rgba(79,87,232,0.07);
+    --control-hover: rgba(79,87,232,0.12);
+    --success: #146c43;
+    --heading-gradient: linear-gradient(180deg,#202441 0%,#535aae 130%);
+    --glow-1: #e7e4fc;
+    --glow-2: #efe2fa;
+    --glow-3: #e8e9fc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #0a0c18;
+      --surface: rgba(255,255,255,0.04);
+      --surface-strong: rgba(255,255,255,0.08);
+      --border: rgba(255,255,255,0.10);
+      --text: #f4f6ff;
+      --text-dim: #9aa0c5;
+      --text-faint: #8a91b9;
+      --accent: #7c80ff;
+      --accent-hover: #b9bcff;
+      --accent-2: #ad6cff;
+      --shadow-soft: 0 8px 24px rgba(0,0,0,0.32);
+      --shadow-strong: 0 24px 60px rgba(76,80,200,0.35);
+      --code-bg: #0f1230;
+      --code-border: rgba(255,255,255,0.08);
+      --inline-code-bg: rgba(255,255,255,0.06);
+      --control-hover: rgba(255,255,255,0.12);
+      --success: #43d68b;
+      --heading-gradient: linear-gradient(180deg,#ffffff 0%,#c8cbff 130%);
+      --glow-1: #2a2475;
+      --glow-2: #6230a8;
+      --glow-3: #1c1f5e;
+    }
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
@@ -38,13 +75,14 @@
     content: "";
     position: fixed; inset: 0; z-index: -1;
     background:
-      radial-gradient(900px 600px at 20% -10%, #2a2475 0%, transparent 60%),
-      radial-gradient(800px 500px at 80% 10%, #6230a8 0%, transparent 55%),
-      radial-gradient(700px 600px at 50% 110%, #1c1f5e 0%, transparent 60%),
+      radial-gradient(900px 600px at 20% -10%, var(--glow-1) 0%, transparent 60%),
+      radial-gradient(800px 500px at 80% 10%, var(--glow-2) 0%, transparent 55%),
+      radial-gradient(700px 600px at 50% 110%, var(--glow-3) 0%, transparent 60%),
       var(--bg);
   }
   a { color: var(--accent); text-decoration: none; }
-  a:hover { color: #b9bcff; }
+  a:hover { color: var(--accent-hover); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
   .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
 
@@ -87,7 +125,7 @@
     letter-spacing: -0.025em;
     line-height: 1.05;
     margin: 0 0 16px;
-    background: linear-gradient(180deg, #ffffff 0%, #c8cbff 130%);
+    background: var(--heading-gradient);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -221,7 +259,7 @@
   .step-title { font-size: 14px; font-weight: 600; color: var(--text); margin: 0 0 4px; }
   .step-body { font-size: 13px; color: var(--text-dim); margin: 0; line-height: 1.55; }
   .step-body code {
-    background: rgba(255,255,255,0.06);
+    background: var(--inline-code-bg);
     padding: 1px 5px; border-radius: 4px;
     font-size: 0.85em; color: var(--text);
     font-family: "SF Mono", Menlo, Consolas, monospace;
@@ -267,8 +305,8 @@
     font-size: 11px; font-weight: 600;
     cursor: pointer; transition: all 140ms ease;
   }
-  .copy-btn:hover { color: var(--text); background: rgba(255,255,255,0.12); }
-  .copy-btn.copied { color: #43d68b; border-color: rgba(67,214,139,0.5); }
+  .copy-btn:hover { color: var(--text); background: var(--control-hover); }
+  .copy-btn.copied { color: var(--success); border-color: var(--success); }
 
   .agents-actions {
     display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px;
@@ -284,7 +322,7 @@
     background: var(--surface-strong); color: var(--text);
     border: 1px solid var(--border);
   }
-  .agents-actions a:hover { background: rgba(255,255,255,0.12); color: var(--text); }
+  .agents-actions a:hover { background: var(--control-hover); color: var(--text); }
 
   /* CTA banner */
   .cta-banner {
@@ -297,7 +335,8 @@
     max-width: 880px;
   }
   .cta-banner h2 { font-size: clamp(24px, 3vw, 32px); font-weight: 700; margin: 0 0 8px; color: #fff; letter-spacing: -0.01em; }
-  .cta-banner p { color: rgba(255,255,255,0.85); margin: 0 0 24px; font-size: 15px; }
+  .cta-banner p { color: #fff; margin: 0 0 24px; font-size: 15px; }
+  .cta-banner a:focus-visible { outline-color: #fff; }
   .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
   .cta-btn {
     display: inline-flex; align-items: center; gap: 8px;
@@ -310,7 +349,7 @@
   }
   .cta-btn:hover { transform: translateY(-1px); color: #1a1a2e; }
   .cta-btn.ghost { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.5); box-shadow: none; }
-  .cta-btn.ghost:hover { background: rgba(255,255,255,0.1); color: #fff; }
+  .cta-btn.ghost:hover { background: rgba(255,255,255,0.04); color: #fff; }
 
   /* Footer */
   footer { padding: 56px 0 32px; text-align: center; }
@@ -430,7 +469,7 @@
       <div>
         <div style="font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-faint);margin-bottom:4px;">Share OpenChat IRL</div>
         <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:4px;">Scan to install or sign in</div>
-        <div style="font-size:13px;color:var(--text-dim);line-height:1.5;">Encodes <code style="background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:4px;font-size:12px;color:var(--text);">chat.ideaflow.app</code> — perfect for cards, posters, and physical meetups.</div>
+        <div style="font-size:13px;color:var(--text-dim);line-height:1.5;">Encodes <code style="background:var(--inline-code-bg);padding:1px 5px;border-radius:4px;font-size:12px;color:var(--text);">chat.ideaflow.app</code> — perfect for cards, posters, and physical meetups.</div>
       </div>
     </div>
   </section>
