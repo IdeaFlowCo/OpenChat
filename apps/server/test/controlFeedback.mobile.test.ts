@@ -5,11 +5,22 @@ vi.mock('react-native',()=>({StyleSheet:{create:(x:any)=>x,hairlineWidth:1},View
 vi.mock('../../mobile/src/contexts/ThemeContext',()=>({useTheme:()=>({scheme:'light'})}));
 vi.mock('../../mobile/src/components/AppIcon',()=>({AppIcon:()=>null}));
 import {Button} from '../../mobile/src/components/ui/Button';
+import {Chip} from '../../mobile/src/components/ui/Chip';
+import {ListRow} from '../../mobile/src/components/ui/ListRow';
 let tree:ReactTestRenderer;
 afterEach(async()=>{if(tree)await act(async()=>tree.unmount());vi.unstubAllGlobals();});
 it('retains native pressed feedback when hover and focus are unavailable',async()=>{
  await act(async()=>{tree=create(React.createElement(Button,{label:'Save'}));});
  expect(tree.root.findByType('TouchableOpacity' as any).props.activeOpacity).toBe(0.7);
+});
+it('retains native pressed feedback for tappable chips and list rows too',async()=>{
+ await act(async()=>{tree=create(React.createElement(React.Fragment,null,
+  React.createElement(Chip,{label:'Saved',onPress:()=>{}}),
+  React.createElement(ListRow,{title:'Settings',onPress:()=>{}})));
+ });
+ const controls=tree.root.findAllByType('TouchableOpacity' as any);
+ expect(controls).toHaveLength(2);
+ controls.forEach(control=>expect(control.props.activeOpacity).toBe(0.7));
 });
 it('uses instant mouse feedback on web while preserving the keyboard focus path',async()=>{
  vi.stubGlobal('document',{});await act(async()=>{tree=create(React.createElement(Button,{label:'Save'}));});

@@ -81,4 +81,28 @@ it('keeps multiline fixed and preserves the draft when the composer expands', as
   await act(async () => input().props.onChangeText('Keep this draft'));
   await act(async () => input().props.onFocus());
   expect(input().props.multiline).toBe(true); expect(input().props.value).toBe('Keep this draft');
+  await act(async () => input().props.onContentSizeChange({ nativeEvent: { contentSize: { height: 90 } } }));
+  expect(input().props.style.at(-1).height).toBe(90);
+  await act(async () => input().props.onContentSizeChange({ nativeEvent: { contentSize: { height: 220 } } }));
+  expect(input().props.style.at(-1).height).toBe(120);
+  expect(input().props.multiline).toBe(true); expect(input().props.value).toBe('Keep this draft');
+});
+
+it('keeps nested card actions accessible and reveals exact time on hover, focus and tap', async () => {
+  mocks.list.mockResolvedValue({ posts: [post('root')] });
+  await act(async () => { tree = create(React.createElement(ContextLane, { conversationId: 'room' })); });
+  const card = tree!.root.findAllByType('Pressable' as any).find(n => n.props.onLongPress)!;
+  expect(card.props.accessible).toBe(false); expect(card.props.focusable).toBe(false);
+  const time = () => tree!.root.findAllByType('Pressable' as any).find(n => n.props.accessibilityLabel?.startsWith('Show exact time:'))!;
+  const exact = new Date(post('root').createdAt).toLocaleString();
+  await act(async () => time().props.onHoverIn());
+  expect(tree!.root.findByProps({ role: 'tooltip' }).children.join('')).toBe(exact);
+  await act(async () => time().props.onHoverOut());
+  expect(tree!.root.findAllByProps({ role: 'tooltip' })).toHaveLength(0);
+  await act(async () => time().props.onFocus());
+  expect(tree!.root.findAllByProps({ role: 'tooltip' })).toHaveLength(1);
+  await act(async () => time().props.onBlur());
+  await act(async () => time().props.onPress());
+  expect(JSON.stringify(tree!.toJSON())).toContain(exact);
+  expect(button('More')).toBeDefined();
 });

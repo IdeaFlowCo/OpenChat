@@ -52,6 +52,7 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
   const [actionsFor, setActionsFor] = useState<string>();
   const [busy, setBusy] = useState<string>();
   const [feedback, setFeedback] = useState<{ text: string; error: boolean }>();
+  const [exactTimeFor, setExactTimeFor] = useState<string>();
 
   useEffect(() => { contextLaneManager.setAccount(accountId); }, [accountId]);
   useEffect(() => { if (feed.contextAvailable === false) { setEditing(undefined); setReplyTo(undefined); setConfirmDelete(undefined); setReporting(undefined); } }, [feed.contextAvailable]);
@@ -91,7 +92,18 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
         {item.agent && <Text style={{ color: c.textMetadata, ...type.meta }}>via {item.agent.name} · Agent</Text>}
         <Text style={{ color: c.textMetadata, ...type.meta }}>{item.kind === 'ask' ? 'ASK' : item.kind === 'offer' ? 'OFFER' : 'NOTE'}</Text>
       </View>
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Show exact time: ${new Date(item.createdAt).toLocaleString()}`} onPress={() => setFeedback({ text: new Date(item.createdAt).toLocaleString(), error: false })} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: c.textMetadata, ...type.meta }} {...{ title: new Date(item.createdAt).toLocaleString() }}>Shared with this chat · {formatRelativeTime(item.createdAt)}{item.revision > 1 ? ' · Edited' : ''}</Text></TouchableOpacity>
+      <View style={{ position: 'relative', zIndex: exactTimeFor === item.id ? 1 : 0 }}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Show exact time: ${new Date(item.createdAt).toLocaleString()}`}
+          onPress={() => setFeedback({ text: new Date(item.createdAt).toLocaleString(), error: false })}
+          onHoverIn={() => setExactTimeFor(item.id)} onHoverOut={() => setExactTimeFor(undefined)}
+          onFocus={() => setExactTimeFor(item.id)} onBlur={() => setExactTimeFor(undefined)}
+          style={({ pressed }) => ({ minHeight: 44, justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}>
+          <Text style={{ color: c.textMetadata, ...type.meta }}>Shared with this chat · {formatRelativeTime(item.createdAt)}{item.revision > 1 ? ' · Edited' : ''}</Text>
+        </Pressable>
+        {exactTimeFor === item.id && <View pointerEvents="none" style={{ position: 'absolute', top: 44, left: 0, padding: 8, borderRadius: radius.sm, backgroundColor: c.background, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border }}>
+          <Text role="tooltip" style={{ color: c.textPrimary, ...type.meta }}>{new Date(item.createdAt).toLocaleString()}</Text>
+        </View>}
+      </View>
       {item.replyToId && <View style={[styles.quote, { borderLeftColor: c.border }]}><Text numberOfLines={2} style={{ color: c.textMetadata, ...type.label }}>{parent?.isDeleted ? 'Reply to a deleted post' : parent ? `Reply to ${parent.author?.name || 'a participant'}: ${parent.text}` : 'Reply to an earlier post'}</Text></View>}
       <Text selectable style={{ color: item.isDeleted ? c.textMetadata : c.textPrimary, ...type.body, marginTop: 8 }}>{item.isDeleted ? 'Post deleted' : item.text}</Text>
       {!item.isDeleted && button(actionsFor === item.id ? 'Hide actions' : 'More', () => setActionsFor(actionsFor === item.id ? undefined : item.id))}

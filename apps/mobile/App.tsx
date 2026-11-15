@@ -35,6 +35,7 @@ import { RecordingProvider } from './src/contexts/RecordingContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import { SocialExperienceProvider, useSocialExperience } from './src/contexts/SocialExperienceContext';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { DesktopKeyboardShortcuts } from './src/components/DesktopKeyboardShortcuts';
 import { UpdateBanner } from './src/components/UpdateBanner';
 import {
   configureNotificationHandlers,
@@ -708,6 +709,7 @@ export function Shell() {
       documentTitle={{ enabled: false }}
       onReady={flushConversationNavigation} onStateChange={flushConversationNavigation}>
       <WebDocumentTitle />
+      <DesktopKeyboardShortcuts enabled={isAuthed && onboardingDone === true} />
       <StatusBar
         barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'}
         backgroundColor={c.background}

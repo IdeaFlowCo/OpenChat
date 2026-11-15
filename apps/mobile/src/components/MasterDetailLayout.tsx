@@ -62,6 +62,7 @@ import { ChatScreen } from '../screens/ChatScreen';
 import { AgentOverlayScreen } from '../screens/AgentOverlayScreen';
 import type { NavProp } from '../navigation/types';
 import { openWitFeedback } from '../services/witWidget';
+import { registerDesktopKeyboardHandler } from '../services/desktopKeyboard';
 
 const SIDEBAR_WIDTH_EXPANDED = 320;
 const SIDEBAR_WIDTH_COLLAPSED = 56;
@@ -236,9 +237,8 @@ export function MasterDetailLayout({ detail }: { detail?: ReactNode } = {}) {
     [navigation]
   );
 
-  // Keyboard shortcuts (web only). DOM listeners aren't available on native.
-  // Listening on `document` (vs window) so the handler still fires when focus
-  // is inside an iframe-mounted RN-web composer in some edge cases.
+  // Only the focused layout contributes local menu/selection behavior to
+  // the shell's single document listener. Unwrapped routes use its fallback.
   useFocusEffect(useCallback(() => {
     if (Platform.OS !== 'web') return;
     if (typeof document === 'undefined') return;
@@ -328,8 +328,7 @@ export function MasterDetailLayout({ detail }: { detail?: ReactNode } = {}) {
         }
       }
     };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    return registerDesktopKeyboardHandler(onKey);
   }, [openSearch, openNew, openSettings, openShortcuts, navigation, activeConversationId, agentPanelOpen, accountMenuOpen, setActiveConversation]));
 
   return (

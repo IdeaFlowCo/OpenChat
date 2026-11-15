@@ -13,6 +13,7 @@ export function ContextComposer({ conversationId, replyTo, editing, onDone }: { 
   const [text, setText] = useState(editing?.text ?? '');
   const [kind, setKind] = useState('note');
   const [expanded, setExpanded] = useState(!!editing || !!replyTo);
+  const [contentHeight, setContentHeight] = useState(24);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef<{ text: string; id: string; kind: string; replyToId?: string } | null>(null);
@@ -30,6 +31,7 @@ export function ContextComposer({ conversationId, replyTo, editing, onDone }: { 
       else await contextLaneManager.addPost(conversationId, value, pending.current.id, kind, replyTo?.id);
       pending.current = null;
       setText('');
+      setContentHeight(24);
       setExpanded(false);
       onDone?.();
     } catch (e) {
@@ -55,7 +57,7 @@ export function ContextComposer({ conversationId, replyTo, editing, onDone }: { 
       {error && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={{ color: c.danger, marginBottom: 8 }}>{error}</Text>}
       <View style={[styles.inputRow, { backgroundColor: c.background, borderColor: c.border }]}>
         <TextInput
-          style={[styles.input, { color: c.textPrimary, maxHeight: expanded ? 120 : 24 }]}
+          style={[styles.input, { color: c.textPrimary, height: expanded ? Math.min(120, Math.max(44, contentHeight)) : 24 }]}
           placeholder="Add to Stream…"
           onFocus={() => setExpanded(true)}
           placeholderTextColor={c.textMuted}
@@ -63,6 +65,7 @@ export function ContextComposer({ conversationId, replyTo, editing, onDone }: { 
           editable={!isSending}
           value={text}
           onChangeText={setText}
+          onContentSizeChange={event => setContentHeight(Math.ceil(event.nativeEvent.contentSize.height))}
           multiline
           maxLength={2000}
         />
