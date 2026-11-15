@@ -1,3 +1,5 @@
+import { DesktopDetailScreen } from './src/components/DesktopDetailScreen';
+import { useIsDesktop } from './src/theme/breakpoints';
 import { SharedAsksScreen } from './src/screens/SharedAsksScreen';
 import { AskDetailScreen } from './src/screens/AskDetailScreen';
 import { chatBackOptions } from './src/navigation/chatBackOptions';
@@ -123,7 +125,13 @@ const Tab = createBottomTabNavigator<TabParamList>();
 
 // ── Chats stack — all pre-existing chat screens ──────────────────────────────
 
+function SettingsDetail() { return <DesktopDetailScreen title="Settings"><SettingsScreen /></DesktopDetailScreen>; }
+function NewMessageDetail() { return <DesktopDetailScreen title="New message"><NewConversationScreen /></DesktopDetailScreen>; }
+function ProfileDetail() { return <DesktopDetailScreen title="Profile"><MyCardScreen /></DesktopDetailScreen>; }
+function ProfileEditDetail() { return <DesktopDetailScreen title="Edit profile"><ProfileEditScreen /></DesktopDetailScreen>; }
+
 function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
+  const desktop = useIsDesktop();
   return (
     <ChatsStack.Navigator
       screenOptions={({ navigation, route }) => ({
@@ -156,8 +164,8 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen name="OriginalMessage" component={OriginalMessageScreen} options={{ title: 'Original message' }} />
       <ChatsStack.Screen
         name="NewConversation"
-        component={NewConversationScreen}
-        options={{ title: 'New message', presentation: 'modal' }}
+        component={NewMessageDetail}
+        options={{ title: 'New message', presentation: desktop ? 'card' : 'modal' }}
       />
       <ChatsStack.Screen
         name="InvitePerson"
@@ -192,7 +200,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       />
       <ChatsStack.Screen
         name="Settings"
-        component={SettingsScreen}
+        component={SettingsDetail}
         options={{ title: 'Settings' }}
       />
       <ChatsStack.Screen
@@ -213,8 +221,8 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen name="AskDetail" component={AskDetailScreen} options={{ title: 'Ask details' }} />
       <ChatsStack.Screen
         name="MyCard"
-        component={MyCardScreen}
-        options={{ title: 'Profile', presentation: 'modal' }}
+        component={ProfileDetail}
+        options={{ title: 'Profile', presentation: desktop ? 'card' : 'modal' }}
       />
       <ChatsStack.Screen
         name="ScanQr"
@@ -228,8 +236,8 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       />
       <ChatsStack.Screen
         name="ProfileEdit"
-        component={ProfileEditScreen}
-        options={{ title: 'Edit Profile', presentation: 'modal' }}
+        component={ProfileEditDetail}
+        options={{ title: 'Edit Profile', presentation: desktop ? 'card' : 'modal' }}
       />
       {/* Group invite flow (OpenChat-240) */}
       <ChatsStack.Screen

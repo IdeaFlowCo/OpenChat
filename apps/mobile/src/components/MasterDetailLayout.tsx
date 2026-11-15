@@ -40,7 +40,7 @@ import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Animated, Linking, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { OPENCHAT_URL } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
@@ -133,7 +133,7 @@ function AccountMenuRow({
   );
 }
 
-export function MasterDetailLayout() {
+export function MasterDetailLayout({ detail }: { detail?: ReactNode } = {}) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const navigation = useNavigation<NavProp<'Conversations'>>();
@@ -239,7 +239,7 @@ export function MasterDetailLayout() {
   // Keyboard shortcuts (web only). DOM listeners aren't available on native.
   // Listening on `document` (vs window) so the handler still fires when focus
   // is inside an iframe-mounted RN-web composer in some edge cases.
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (Platform.OS !== 'web') return;
     if (typeof document === 'undefined') return;
     const onKey = (ev: KeyboardEvent) => {
@@ -330,7 +330,7 @@ export function MasterDetailLayout() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [openSearch, openNew, openSettings, openShortcuts, navigation, activeConversationId, agentPanelOpen, accountMenuOpen, setActiveConversation]);
+  }, [openSearch, openNew, openSettings, openShortcuts, navigation, activeConversationId, agentPanelOpen, accountMenuOpen, setActiveConversation]));
 
   return (
     <View style={[styles.root, { backgroundColor: c.background }]}>
@@ -453,7 +453,7 @@ export function MasterDetailLayout() {
         <View style={{ flex: 1 }}>
           <ConversationList
             activeId={activeConversationId}
-            onSelect={setActiveConversation}
+            onSelect={id => { setActiveConversation(id); if (detail) navigation.navigate('Conversations'); }}
             onStartChat={openNew}
             compact={collapsed}
             onCreateStory={() => navigation.navigate('StoryComposer')}
@@ -489,7 +489,7 @@ export function MasterDetailLayout() {
       </Animated.View>
 
       <View style={[styles.detail, { backgroundColor: c.background }]}>
-        {activeConversationId ? (
+        {detail ?? (activeConversationId ? (
           <ChatScreen
             key={activeConversationId}
             conversationId={activeConversationId}
@@ -505,7 +505,7 @@ export function MasterDetailLayout() {
               {isUnlinkedEmbed() ? 'Choose a conversation to pick up where you left off.' : 'Select a conversation from the sidebar, or press ⌘K to search.'}
             </Text>
           </View>
-        )}
+        ))}
       </View>
       {accountMenuOpen && (
         <>

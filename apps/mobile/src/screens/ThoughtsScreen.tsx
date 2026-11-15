@@ -358,7 +358,7 @@ export function ThoughtsScreen() {
         <Text style={[styles.emptyText, { color: c.textMetadata }]}>
           {searching
             ? `No Stream entries match "${query.trim()}".`
-            : 'Your Stream is empty. Tap + to add an entry.'}
+            : 'Your Stream is empty. Choose Create entry to add a note.'}
         </Text>
       </View>
     );
