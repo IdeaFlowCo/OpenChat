@@ -498,7 +498,7 @@ export function MessageActionSheet({
     { key: 'forward', label: 'Forward', icon: 'forward', onPress: handleForwardPress },
   ] : [];
   const keep: ActionRow[] = [];
-  if (live && onMakeTodo) keep.push({ key: 'todo', label: hasTodo ? 'Open your to-do' : 'Private to-do', hint: 'Only you see it. Nothing is sent.', icon: 'todo', tone: 'private', onPress: closeThen(() => onMakeTodo(message)) });
+  if (live && onMakeTodo) keep.push({ key: 'todo', label: hasTodo ? 'Open your to-do' : 'Private to-do', hint: 'Private to you and readable by your agents. Saves a message excerpt; nothing is posted to this chat.', icon: 'todo', tone: 'private', onPress: closeThen(() => onMakeTodo(message)) });
   if (hasText) {
     keep.push({ key: 'stream', label: 'Save to Stream', icon: 'bookmark', onPress: handleSaveToThoughts });
     keep.push({ key: 'pin', label: 'Pin to chat', hint: 'Saves it and shows it to everyone here', icon: 'pin', onPress: handleSaveAndPin });

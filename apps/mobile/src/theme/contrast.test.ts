@@ -54,7 +54,8 @@ describe('contrast helper', () => {
 });
 
 describe('look selection', () => {
-  it('stays on Ink & Paper unless asked, and remembers only an explicit choice', () => {
+  it('defaults to Slate and preserves an explicit Paper choice', () => {
+    expect(resolveLook('', 'paper')).toEqual({ look: 'paper', remember: false });
     expect(resolveLook('', null)).toEqual({ look: 'slate', remember: false });
     expect(resolveLook('?experience=simple', 'slate')).toEqual({ look: 'slate', remember: false });
     expect(resolveLook('?look=slate', null)).toEqual({ look: 'slate', remember: true });

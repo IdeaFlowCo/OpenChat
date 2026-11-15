@@ -1713,7 +1713,7 @@ export const api = {
   updatePrivateAsk: (id: string, status: PrivateAsk['status']) =>
     request<{ ask: OverlayAsk }>(`/api/private/asks/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   // Asks in the owner's people overlay: their own and the people they know (OpenChat-2fsy.1). Owner-only.
-  listAsks: (filter: { direction?: 'from_me' | 'for_me' | 'from_others'; status?: string; q?: string; needsRecheck?: boolean; limit?: number } = {}) => {
+  listAsks: (filter: { direction?: 'from_me' | 'for_me' | 'from_others'; status?: string; q?: string; needsRecheck?: boolean; limit?: number; conversationId?: string } = {}) => {
     // Built by hand: React Native's URLSearchParams lacks size and array-of-pairs input.
     const query = Object.entries(filter).filter(([, value]) => value !== undefined).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`).join('&');
     return request<{ asks: OverlayAsk[]; truncated: boolean }>(`/api/private/asks${query ? `?${query}` : ''}`);

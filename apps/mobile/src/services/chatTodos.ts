@@ -19,11 +19,11 @@ const MAX_ITEMS_PER_MESSAGE = 8;
 export interface ChatTodoList { open: ChatTodo[]; done: ChatTodo[]; truncated: boolean }
 
 export async function listChatTodos(conversationId: string): Promise<ChatTodoList> {
-  const page = await api.listAsks({ direction: 'for_me', status: 'all', limit: PAGE });
+  const page = await api.listAsks({ direction: 'for_me', status: 'all', limit: PAGE, conversationId });
   return { ...todosForConversation(page.asks, conversationId), truncated: page.truncated };
 }
 
-function placementInputs(ask: OverlayAsk, addConversationId: string): OverlayAskPlacementInput[] {
+function placementInputs(ask: OverlayAsk, addConversationId?: string): OverlayAskPlacementInput[] {
   const kept = ask.placements.flatMap((place): OverlayAskPlacementInput[] => {
     if (place.kind === 'self') return ['self'];
     if (place.kind === 'conversation') return [{ kind: 'conversation', id: place.conversationId }];
@@ -31,12 +31,17 @@ function placementInputs(ask: OverlayAsk, addConversationId: string): OverlayAsk
     // Saved people, companies, projects and ideas are all addressed as things; opaque refs cannot be re-sent.
     return place.kind === 'ref' || place.kind === 'ask' ? [] : [{ kind: 'thing', id: place.id }];
   });
-  return [...kept, { kind: 'conversation', id: addConversationId }];
+  return addConversationId ? [...kept, { kind: 'conversation', id: addConversationId }] : kept;
+}
+
+/** Never mutate or forget an ask that has been shared or published. */
+function requirePrivateAsk(ask: OverlayAsk): void {
+  if (!ask.fromMe || ask.exposure !== 'only_me' || ask.publication) throw new Error('This ask is shared or published. Manage it from Asks instead.');
 }
 
 /** Make sure an existing ask reads as an open to-do in this chat. Leaves an ask that is not the owner's own alone. */
 async function adoptAsTodo(ask: OverlayAsk, conversationId: string): Promise<OverlayAsk> {
-  if (!ask.fromMe) return ask;
+  requirePrivateAsk(ask);
   const patch: Parameters<typeof api.updateAsk>[1] = {};
   if (ask.carrier?.kind !== 'self') patch.carrier = 'self';
   if (ask.status !== 'open') patch.status = 'open';
@@ -86,19 +91,24 @@ export async function addChatTodo(input: { conversationId: string; text: string;
 }
 
 export async function setChatTodoDone(conversationId: string, id: string, done: boolean): Promise<ChatTodo> {
+  requirePrivateAsk((await api.getAsk(id)).ask);
   const { ask } = await api.updateAsk(id, { status: done ? 'fulfilled' : 'open' });
   announceTodosChanged(conversationId);
   return toChatTodo(ask);
 }
 
 export async function renameChatTodo(conversationId: string, id: string, text: string): Promise<ChatTodo> {
+  requirePrivateAsk((await api.getAsk(id)).ask);
   const { ask } = await api.updateAsk(id, { text: text.replace(/\s+/g, ' ').trim().slice(0, TODO_TEXT_MAX) });
   announceTodosChanged(conversationId);
   return toChatTodo(ask);
 }
 
 export async function deleteChatTodo(conversationId: string, id: string): Promise<void> {
-  await api.deleteAsk(id);
+  const { ask } = await api.getAsk(id);
+  requirePrivateAsk(ask);
+  if (ask.placements.some(place => place.kind === 'ref' || place.kind === 'ask')) throw new Error('Manage this ask from Asks to preserve its other placements.');
+  await api.updateAsk(id, { placements: placementInputs({ ...ask, placements: ask.placements.filter(place => place.kind !== 'conversation' || place.conversationId !== conversationId) }) });
   announceTodosChanged(conversationId);
 }
 

@@ -156,7 +156,7 @@ export function MessageColumn({ isOwn, rowWidth, actions, maxWidth, onContextMen
                 <BarButton icon="smile" label="React" shortcut="E" color={r.textSecondary} onPress={() => setPicking(true)} />
                 {actions.onReply && <BarButton icon="reply" label="Reply" shortcut="R" color={r.textSecondary} onPress={() => actions.onReply?.()} />}
                 {actions.onSave && <BarButton icon="bookmark" label="Save to Stream" shortcut="S" color={r.textSecondary} onPress={() => actions.onSave?.()} />}
-                {actions.onTodo && <BarButton icon="todo" label={actions.hasTodo ? 'Open your private to-do' : 'Private to-do: only you see it'} shortcut="T" color={r.private} onPress={() => actions.onTodo?.()} />}
+                {actions.onTodo && <BarButton icon="todo" label={actions.hasTodo ? 'Open your private to-do' : 'Private to-do: readable by you and your agents; saves a message excerpt'} shortcut="T" color={r.private} onPress={() => actions.onTodo?.()} />}
                 <BarButton icon="more" label={actions.moreLabel} color={r.textSecondary} onPress={anchor => actions.onMore(anchor)} />
               </>
             )}

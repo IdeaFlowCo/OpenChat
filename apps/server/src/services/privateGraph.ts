@@ -1368,6 +1368,26 @@ async function existingEntity(ownerId: string, principal: OverlayPrincipal, subj
  * unlinked) keeps asks that person or thing cares about, carries or is
  * placed on. `status` is one or a comma list, or `all`.
  */
+/** Chat placement is filtered before LIMIT, without changing the pinned Noos overlay. */
+export async function listConversationTodos(ownerId: string, conversationId: unknown): Promise<{ asks: PrivateAskView[]; truncated: boolean }> {
+  const principal = await ownerPrincipal(ownerId);
+  const ref = await conversationRef(ownerId, conversationId);
+  const session = getDriver().session({ database: process.env.NEO4J_DATABASE || 'neo4j' });
+  let ids: string[];
+  try {
+    const result = await session.run(`MATCH (e:OverlayEntity {ownerKey: $ownerKey, kind: 'ask'})
+      WHERE $ref IN coalesce(e.placements, []) AND coalesce(e.askAuthorSelf, e.askOwn, false) AND coalesce(e.carrierSelf, false)
+        AND coalesce(e.exposure, 'only_me') = 'only_me'
+        AND NOT EXISTS { MATCH (p:OverlayAskPublication {ownerKey: $ownerKey}) WHERE p.askId = e.id }
+      RETURN e.id AS id ORDER BY CASE coalesce(e.askStatus, 'open') WHEN 'open' THEN 0 WHEN 'stale' THEN 1 ELSE 2 END, e.createdAt LIMIT 201`, { ownerKey: principal.ownerKey, ref });
+    ids = result.records.map(row => row.get('id') as string);
+  } finally { await session.close(); }
+  const rows = await Promise.all(ids.slice(0, 200).map(async id => {
+    try { return await getAsk(ownerId, id); } catch (error) { if (error instanceof PrivateGraphError && error.status === 404) return null; throw error; }
+  }));
+  return { asks: rows.filter((ask): ask is PrivateAskView => !!ask && ask.exposure === 'only_me' && !ask.publication), truncated: ids.length > 200 };
+}
+
 export async function listAsks(ownerId: string, input: { status?: unknown; direction?: unknown; aboutKind?: unknown; aboutId?: unknown; askerKind?: unknown; askerId?: unknown; asker?: unknown; q?: unknown; needsRecheck?: unknown; limit?: unknown }): Promise<{ asks: PrivateAskView[]; truncated: boolean }> {
   const principal = await ownerPrincipal(ownerId);
   const hasLegacy = input.asker !== undefined || input.askerKind !== undefined || input.askerId !== undefined;

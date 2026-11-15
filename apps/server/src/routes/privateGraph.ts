@@ -10,7 +10,7 @@ import { json, Router, type Request, type RequestHandler, type Response } from '
 import { resolveActor } from '../middleware/resolveActor.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import {
-  readContactState, markDifferentPeople, undoDifferentPeople, listIdentityDecisions, listNoteRevisions, personFields, setPersonField, markPersonField, revealPersonField, mergePeople, splitPerson, revertMerge, listMergeEvents, importContactSources, importContactSource, savePeopleState, addLink, addListMember, addNote, createPrivateThing, listMembers, removeListMember, deleteAsk, deleteLink, deleteNote, deletePrivateThing, getAsk, listAsks, saveAsk, updateAsk, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
+  readContactState, markDifferentPeople, undoDifferentPeople, listIdentityDecisions, listNoteRevisions, personFields, setPersonField, markPersonField, revealPersonField, mergePeople, splitPerson, revertMerge, listMergeEvents, importContactSources, importContactSource, savePeopleState, addLink, addListMember, addNote, createPrivateThing, listMembers, removeListMember, deleteAsk, deleteLink, deleteNote, deletePrivateThing, getAsk, listAsks, listConversationTodos, saveAsk, updateAsk, getNeighbourhood, getPersonOverlay, getThing, getUnlinkedPersonOverlay, listDue, resolvePrivateThing, listOwnerLinks, listThings,
   parseCardPatch, PrivateGraphError, searchPrivate, updateLink, updateNote, updatePersonCard, updatePrivateThing,
 } from '../services/privateGraph.js';
 import type { Provenance } from '../services/privateGraph.js';
@@ -285,6 +285,7 @@ router.delete('/asks/:askId/publication', async (req, res) => {
 // Asks: the overlay's `ask` kind, the owner's own and the people they know (OpenChat-2fsy.1). Owner-only.
 router.get('/asks', async (req: Request, res: Response) => {
   try {
+    if (req.query.conversationId !== undefined) { res.json(await listConversationTodos(owner(req), req.query.conversationId)); return; }
     const { status, direction, aboutKind, aboutId, askerKind, askerId, asker, q, needsRecheck, limit } = req.query;
     res.json(await listAsks(owner(req), { status, direction, aboutKind, aboutId, askerKind, askerId, asker, q, needsRecheck, limit }));
   } catch (error) { fail(error, res); }

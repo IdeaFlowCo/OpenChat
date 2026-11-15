@@ -30,8 +30,8 @@ export interface ChatTodo {
 }
 
 /** The owner cares and the owner acts: that is a to-do. */
-export function isTodoAsk(ask: Pick<OverlayAsk, 'fromMe' | 'carrier'>): boolean {
-  return ask.fromMe && ask.carrier?.kind === 'self';
+export function isTodoAsk(ask: Pick<OverlayAsk, 'fromMe' | 'carrier' | 'exposure' | 'publication'>): boolean {
+  return ask.fromMe && ask.carrier?.kind === 'self' && ask.exposure === 'only_me' && !ask.publication;
 }
 
 export function askConversationIds(ask: Pick<OverlayAsk, 'placements'>): string[] {

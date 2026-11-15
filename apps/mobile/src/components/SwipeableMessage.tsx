@@ -88,9 +88,9 @@ export function SwipeableMessage({ enabled, onReply, onSave, onTodo, todoLabel =
         importantForAccessibility={open ? 'yes' : 'no-hide-descendants'}
       >
         {onTodo && (
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Private to-do: only you see it" onPress={() => act(onTodo)} style={[styles.action, { backgroundColor: r.privateSoft }]}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Private to-do: readable by you and your agents; saves a message excerpt" onPress={() => act(onTodo)} style={[styles.action, { backgroundColor: r.privateSoft }]}>
             <AppIcon name="todo" color={r.private} size={20} />
-            <Text style={[type.caption, { color: r.private }]}>{todoLabel}</Text>
+            <Text style={[type.caption, { color: r.private }]}>{todoLabel}</Text><Text style={[type.caption, { color: r.private }]}>You + agents</Text>
           </TouchableOpacity>
         )}
         {onSave && (
