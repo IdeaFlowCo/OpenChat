@@ -79,7 +79,10 @@ if case == 'signer-metadata-valid':
     print('Signer #1 certificate DN: CN=Fixture')
     print('Signer #1 certificate SHA-1 digest: ' + '1' * 40)
     print('Signer #1 certificate MD5 digest: ' + '2' * 32)
-print('Signer #1 certificate SHA-256 digest: ' + pin)
+signer_id = '#12' if case == 'signer-alternate-id' else '#1'
+if case == 'signer-alternate-id':
+    print('Signer #12 certificate DN: CN=Fixture')
+print('Signer ' + signer_id + ' certificate SHA-256 digest: ' + pin)
 if case == 'signer-extra':
     print('Signer #2 certificate SHA-256 digest: ' + '0' * 64)
 if case == 'signer-duplicate':
@@ -92,6 +95,12 @@ if case == 'signer-extra-unknown':
     print('Signer #2 certificate SHA256 digest: ' + '0' * 64)
 if case == 'signer-extra-dn':
     print('Signer #2 certificate DN: CN=Other')
+if case == 'signer-extra-no-prefix':
+    print('certificate SHA-256 digest: ' + '0' * 64)
+if case == 'signer-extra-invalid-id':
+    print('Signer #x certificate SHA-256 digest: ' + '0' * 64)
+if case == 'signer-dn-digest-phrase':
+    print('Signer #1 certificate DN: CN=certificate SHA-256 digest: ' + pin)
 '''
 CASES = {
     'valid': None,
@@ -123,8 +132,12 @@ CASES = {
     'signer-extra-unknown': 'certificate records',
     'signer-extra-dn': 'certificate records',
     'signer-metadata-valid': None,
+    'signer-extra-no-prefix': 'certificate records',
+    'signer-extra-invalid-id': 'certificate records',
+    'signer-dn-digest-phrase': 'certificate records',
+    'signer-alternate-id': None,
 }
-POSITIVES = {'valid', 'signer-uppercase', 'signer-unavailable', 'signer-metadata-valid'}
+POSITIVES = {'valid', 'signer-uppercase', 'signer-unavailable', 'signer-metadata-valid', 'signer-alternate-id'}
 
 
 def executable(path, source):

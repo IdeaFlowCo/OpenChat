@@ -88,18 +88,23 @@ code=$(sed -n "s/^package: .*versionCode='\\([^']*\\)'.*/\\1/p" "$work_dir/badgi
 
 if command -v apksigner >/dev/null; then
   apksigner verify --verbose --print-certs "$apk" > "$work_dir/signature"
-  # Classify certificate records broadly, then validate the complete grammar.
-  # Other certificate attributes are allowed only in the known single-signer form.
+  # Digest-like lines must never be hidden by a missing/malformed Signer prefix.
+  # Known non-SHA256 attributes must belong to the same single signer.
   signer=$(awk '
-    tolower($0) ~ /signer.*certificate/ {
-      if ($0 ~ /^Signer #1 certificate DN: /) next
-      if ($0 ~ /^Signer #1 certificate SHA-1 digest: [0-9A-Fa-f]+$/ && NF == 6 && length($6) == 40) next
-      if ($0 ~ /^Signer #1 certificate MD5 digest: [0-9A-Fa-f]+$/ && NF == 6 && length($6) == 32) next
+    tolower($0) ~ /signer.*certificate/ || index(tolower($0), "certificate sha-256 digest") {
+      is_digest = index(tolower($0), "certificate sha-256 digest")
+      if (!is_digest && $0 ~ /^Signer #[1-9][0-9]* certificate DN: /) { metadata[$2] = 1; next }
+      if (!is_digest && $0 ~ /^Signer #[1-9][0-9]* certificate SHA-1 digest: [0-9A-Fa-f]+$/ && NF == 6 && length($6) == 40) { metadata[$2] = 1; next }
+      if (!is_digest && $0 ~ /^Signer #[1-9][0-9]* certificate MD5 digest: [0-9A-Fa-f]+$/ && NF == 6 && length($6) == 32) { metadata[$2] = 1; next }
       count++
-      if ($0 !~ /^Signer #1 certificate SHA-256 digest: [0-9A-Fa-f]+$/ || NF != 6 || length($6) != 64) bad = 1
-      else digest = tolower($6)
+      if ($0 !~ /^Signer #[1-9][0-9]* certificate SHA-256 digest: [0-9A-Fa-f]+$/ || NF != 6 || length($6) != 64) bad = 1
+      else { digest = tolower($6); signer_id = $2 }
     }
-    END { if (bad || count != 1) exit 1; print digest }
+    END {
+      for (id in metadata) if (id != signer_id) bad = 1
+      if (bad || count != 1) exit 1
+      print digest
+    }
   ' "$work_dir/signature") || fail 'Malformed, missing or multiple APK signer certificate records (pinned signer required)'
   [ "$signer" = "$expected_signer" ] || fail 'APK signer does not match the pinned release certificate'
   cat "$work_dir/signature"
