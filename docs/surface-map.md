@@ -106,3 +106,11 @@ The public `/` page verifies the current browser's OpenChat session. Signed-in
 visitors see **Signed in as [name]** and **Open OpenChat**; signed-out visitors
 see **Sign in**. It refreshes on return and cross-tab sign-out. Agent setup links
 to the shared `/agents` guide instead of maintaining separate MCP snippets.
+
+### Oct 9 cleanup
+
+Stream uses a single search/create entry point and note-first cards, with time
+and Original message below the note. Settings, Profile, New message and People
+are bounded to 720px. Agent keys uses an inline New API key action. People uses
+consistent labeled buttons and marks private saved profiles Only you. Shared
+Button, Chip and ListRow controls use instant hover/focus feedback without motion.

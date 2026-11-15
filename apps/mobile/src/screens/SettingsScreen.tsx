@@ -1,3 +1,4 @@
+import { radius, type } from '../theme/tokens';
 import { TranslationControls } from '../components/TranslationControls';
 import { ConnectAgentLink } from '../components/ConnectAgentLink';
 /**
@@ -351,10 +352,11 @@ export function SettingsScreen() {
       contentContainerStyle={styles.content}
     >
       <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, marginBottom: 20 }]}>
+        <Text style={[type.label, { color: c.textSecondary, padding: 16 }]}>Agent setup</Text>
         <ConnectAgentLink detail />
         <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('AgentKeys')} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 }}>
           <Text style={{ color: c.textPrimary, fontWeight: '500' }}>API keys</Text>
-          <Text style={{ color: c.textMetadata, fontSize: 13, marginTop: 3 }}>View, copy, create, or revoke existing OpenChat keys</Text>
+          <Text style={{ color: c.textMetadata, fontSize: type.label.fontSize, marginTop: 3 }}>View, copy, create, or revoke existing OpenChat keys</Text>
         </TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" onPress={handleCopyAgentSetup} disabled={mintingSetup} style={{ minHeight: 44, justifyContent: 'center', padding: 16 }}>
           {mintingSetup ? <ActivityIndicator color={c.primary} /> : <Text style={{ color: c.primary }}>Copy agent setup with a new API key</Text>}
@@ -378,7 +380,7 @@ export function SettingsScreen() {
                     {currentUser.name ? currentUser.name : 'Set your display name'}
                   </Text>
                 </View>
-                <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+                <AppIcon name="chevron-right" color={c.textMuted} size={18} />
               </TouchableOpacity>
               {!isPlaceholderEmail(currentUser.email) && (
                 <View style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}>
@@ -418,7 +420,7 @@ export function SettingsScreen() {
             accessibilityRole="radio"
             accessibilityState={{ selected: socialPreferences.experienceMode === 'enhanced' }}
           >
-            <Text style={[styles.radioMark, { color: c.primary }]}>{socialPreferences.experienceMode === 'enhanced' ? '●' : '○'}</Text>
+            <AppIcon name={socialPreferences.experienceMode === 'enhanced' ? 'check' : 'chevron-right'} color={c.primary} size={18} />
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Chat + coordination</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>Stories, OpenChat Agent review, asks, and quiet matching</Text>
@@ -431,7 +433,7 @@ export function SettingsScreen() {
             accessibilityRole="radio"
             accessibilityState={{ selected: socialPreferences.experienceMode === 'simple' }}
           >
-            <Text style={[styles.radioMark, { color: c.primary }]}>{socialPreferences.experienceMode === 'simple' ? '●' : '○'}</Text>
+            <AppIcon name={socialPreferences.experienceMode === 'simple' ? 'check' : 'chevron-right'} color={c.primary} size={18} />
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Simple chat</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>Chats and Stream without the coordination layer</Text>
@@ -509,7 +511,7 @@ export function SettingsScreen() {
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Secretary</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>Auto-answer repetitive questions using replies you approve</Text>
             </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
         </View>
       </View>
@@ -531,7 +533,7 @@ export function SettingsScreen() {
                 Report a bug or request a feature
               </Text>
             </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
         </View>
       </View>
@@ -550,7 +552,7 @@ export function SettingsScreen() {
                 Download messages, Stream entries, settings, and account metadata
               </Text>
             </View>
-            <Text style={{ color: c.primary, fontSize: 18 }}>↓</Text>
+            <AppIcon name="download" color={c.primary} size={18} />
           </TouchableOpacity>
         </View>
       </View>
@@ -592,7 +594,7 @@ export function SettingsScreen() {
             {notifStatus === 'granted' && (
               <View style={[styles.optionRow, styles.notifRow]}>
                 <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>Notifications are on</Text>
-                <Text style={{ color: c.primary, fontSize: 18 }}>✓</Text>
+                <Text style={{ color: c.primary, fontSize: type.title.fontSize }}>✓</Text>
               </View>
             )}
             {notifStatus === 'undetermined' && (
@@ -619,7 +621,7 @@ export function SettingsScreen() {
                     Tap to open {Platform.OS === 'ios' ? 'iOS' : 'system'} Settings and enable
                   </Text>
                 </View>
-                <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+                <AppIcon name="chevron-right" color={c.textMuted} size={18} />
               </TouchableOpacity>
             )}
             {(notifStatus === 'unknown' || notifStatus === undefined) && (
@@ -641,7 +643,7 @@ export function SettingsScreen() {
                   Camera, microphone, photos, notifications — manage each
                 </Text>
               </View>
-              <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+              <AppIcon name="chevron-right" color={c.textMuted} size={18} />
             </TouchableOpacity>
           </View>
         </View>
@@ -664,7 +666,7 @@ export function SettingsScreen() {
                 Show your QR so people can add you
               </Text>
             </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -680,7 +682,7 @@ export function SettingsScreen() {
                 Add someone by scanning their code
               </Text>
             </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
           {/* Blocked users — OpenChat-46p */}
           <TouchableOpacity
@@ -697,7 +699,7 @@ export function SettingsScreen() {
                 Manage who you've blocked
               </Text>
             </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
         </View>
       </View>
@@ -711,7 +713,7 @@ export function SettingsScreen() {
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>INVITE PEOPLE</Text>
         <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
           <View style={{ alignItems: 'center', paddingVertical: 18 }}>
-            <View style={{ backgroundColor: '#fff', padding: 12, borderRadius: 12 }}>
+            <View style={{ backgroundColor: '#fff', padding: 12, borderRadius: radius.md }}>
               <QRCode value="https://chat.ideaflow.app" size={168} />
             </View>
             <Text style={[styles.optionHint, { color: c.textSecondary, marginTop: 10, textAlign: 'center', paddingHorizontal: 16 }]}>
@@ -736,7 +738,7 @@ export function SettingsScreen() {
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>📤  Share invite link</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>chat.ideaflow.app · works on any device</Text>
             </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
@@ -747,7 +749,7 @@ export function SettingsScreen() {
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Get the iOS app · App Store</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>Install the native app on iPhone or iPad</Text>
             </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.optionRow}
@@ -758,7 +760,7 @@ export function SettingsScreen() {
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>View the download page</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>The landing page with every platform</Text>
             </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
         </View>
       </View>
@@ -776,7 +778,7 @@ export function SettingsScreen() {
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Source code · GitHub</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>github.com/IdeaFlowCo/OpenChat — open source</Text>
             </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
@@ -789,7 +791,7 @@ export function SettingsScreen() {
                 chat.ideaflow.app · platform docs, agent setup, source
               </Text>
             </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.optionRow, { borderBottomColor: c.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}
@@ -802,7 +804,7 @@ export function SettingsScreen() {
                 Use OpenChat in any browser
               </Text>
             </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
 
           {/* App / update provenance (openchat-3jq.3). Tap to copy the full
@@ -835,7 +837,7 @@ export function SettingsScreen() {
                 </>
               )}
             </View>
-            <Text style={{ color: c.textMuted, fontSize: 16 }}>⧉</Text>
+            <AppIcon name="copy" color={c.textMuted} size={16} />
           </TouchableOpacity>
         </View>
       </View>
@@ -855,7 +857,7 @@ export function SettingsScreen() {
             activeOpacity={0.7}
           >
             <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>Privacy Policy</Text>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
 
           {/* Terms of Service (OpenChat-wfz) */}
@@ -865,7 +867,7 @@ export function SettingsScreen() {
             activeOpacity={0.7}
           >
             <Text style={[styles.optionLabel, { color: c.textPrimary, flex: 1 }]}>Terms of Service</Text>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
 
           {/* Clear local data & cache */}
@@ -880,7 +882,7 @@ export function SettingsScreen() {
                 Clears device sandbox storage and cached session without deleting your server account
               </Text>
             </View>
-            <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+            <AppIcon name="chevron-right" color={c.textMuted} size={18} />
           </TouchableOpacity>
 
           {/* Delete account (OpenChat-nhy) */}
@@ -966,11 +968,11 @@ export function SettingsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  content: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32 },
+  content: { width: '100%', maxWidth: 720, alignSelf: 'center', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32 },
 
   // One-click "Copy agent setup" primary action (openchat-bbr)
   copySetupBtn: {
-    borderRadius: 14,
+    borderRadius: radius.lg,
     paddingVertical: 16,
     paddingHorizontal: 18,
     alignItems: 'center',
@@ -983,9 +985,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 3,
   },
-  copySetupTitle: { fontSize: 16, fontWeight: '700' },
+  copySetupTitle: { fontSize: type.bubble.fontSize, fontWeight: '700' },
   copySetupSub: {
-    fontSize: 12,
+    fontSize: type.meta.fontSize,
     marginTop: 3,
     textAlign: 'center',
     lineHeight: 16,
@@ -997,7 +999,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 18,
     paddingVertical: 18,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginBottom: 28,
     gap: 12,
     shadowColor: '#000',
@@ -1007,33 +1009,33 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   agentHeroEyebrow: {
-    fontSize: 10,
+    fontSize: type.caption.fontSize,
     fontWeight: '700',
     letterSpacing: 1.2,
     marginBottom: 4,
   },
   agentHeroTitle: {
-    fontSize: 17,
+    fontSize: type.title.fontSize,
     fontWeight: '700',
     marginBottom: 3,
   },
   agentHeroSubtitle: {
-    fontSize: 12,
+    fontSize: type.meta.fontSize,
     lineHeight: 17,
   },
-  agentHeroArrow: { fontSize: 22, fontWeight: '300' },
+  agentHeroArrow: { fontSize: type.heading.fontSize, fontWeight: '300' },
 
   section: { marginBottom: 24 },
-  sectionLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
+  sectionLabel: { fontSize: type.caption.fontSize, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
   row: {
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderRadius: 10,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  rowText: { fontSize: 15 },
+  rowText: { fontSize: type.body.fontSize },
   card: {
-    borderRadius: 10,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
@@ -1044,11 +1046,11 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   notifRow: { minHeight: 56 },
-  optionLabel: { fontSize: 16, fontWeight: '500' },
-  optionHint: { fontSize: 12, marginTop: 2 },
-  radioMark: { width: 28, fontSize: 20, lineHeight: 24 },
+  optionLabel: { fontSize: type.bubble.fontSize, fontWeight: '500' },
+  optionHint: { fontSize: type.meta.fontSize, marginTop: 2 },
+  radioMark: { width: 28, fontSize: type.heading.fontSize, lineHeight: 24 },
   subsectionLabel: {
-    fontSize: 10,
+    fontSize: type.caption.fontSize,
     fontWeight: '700',
     letterSpacing: 0.9,
     marginTop: 14,
@@ -1058,7 +1060,7 @@ const styles = StyleSheet.create({
   layoutChoice: {
     minHeight: 44,
     paddingHorizontal: 14,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1066,13 +1068,13 @@ const styles = StyleSheet.create({
   radio: {
     width: 22,
     height: 22,
-    borderRadius: 11,
+    borderRadius: radius.md,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  radioDot: { width: 10, height: 10, borderRadius: 5 },
-  versionFooter: { fontSize: 11, textAlign: 'center', marginTop: 8 },
+  radioDot: { width: 10, height: 10, borderRadius: radius.sm },
+  versionFooter: { fontSize: type.caption.fontSize, textAlign: 'center', marginTop: 8 },
   // Android delete-account confirmation modal styles
   modalBackdrop: {
     flex: 1,
@@ -1083,19 +1085,19 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     width: '100%',
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     padding: 20,
     gap: 12,
   },
-  modalTitle: { fontSize: 17, fontWeight: '700' },
-  modalBody: { fontSize: 14, lineHeight: 20 },
+  modalTitle: { fontSize: type.title.fontSize, fontWeight: '700' },
+  modalBody: { fontSize: type.label.fontSize, lineHeight: 20 },
   modalInput: {
     paddingHorizontal: 12,
     paddingVertical: 10,
-    borderRadius: 8,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
-    fontSize: 16,
+    fontSize: type.bubble.fontSize,
   },
   modalButtons: {
     flexDirection: 'row',
@@ -1105,7 +1107,7 @@ const styles = StyleSheet.create({
   modalBtn: {
     flex: 1,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: radius.md,
     alignItems: 'center',
   },
 });

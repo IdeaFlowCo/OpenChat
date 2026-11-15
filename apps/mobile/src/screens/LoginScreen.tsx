@@ -1,3 +1,4 @@
+import { radius, type } from '../theme/tokens';
 import { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -525,7 +526,7 @@ export function LoginScreen() {
             <>
               <Text style={[styles.title, { color: c.textPrimary }]}>OpenChat</Text>
               <Text style={[styles.subtitle, { color: c.textSecondary }]}>
-                Real-time messaging powered by the Global Brain
+                Messaging built for you and your agents.
               </Text>
               {!isWeb && (
                 <TouchableOpacity onPress={handlePasteInvite} style={{ marginBottom: 16, alignSelf: 'center' }}>
@@ -673,7 +674,7 @@ export function LoginScreen() {
               disabled={loading}
               style={{ marginTop: 14, alignSelf: 'center' }}
             >
-              <Text style={{ color: c.primary, fontSize: 14, fontWeight: '600' }}>
+              <Text style={{ color: c.primary, fontSize: type.label.fontSize, fontWeight: '600' }}>
                 {mode === 'register' ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
               </Text>
             </TouchableOpacity>
@@ -726,10 +727,10 @@ export function LoginScreen() {
               activeOpacity={0.7}
             >
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', color: c.textPrimary }}>Get the iOS app · App Store</Text>
-                <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 4 }}>Install the native app on iPhone or iPad</Text>
+                <Text style={{ fontSize: type.bubble.fontSize, fontWeight: '600', color: c.textPrimary }}>Get the iOS app · App Store</Text>
+                <Text style={{ fontSize: type.label.fontSize, color: c.textSecondary, marginTop: 4 }}>Install the native app on iPhone or iPad</Text>
               </View>
-              <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+              <Text style={{ color: c.textMuted, fontSize: type.title.fontSize }}>›</Text>
             </TouchableOpacity>
 
             {Platform.OS !== 'web' ? (
@@ -738,7 +739,7 @@ export function LoginScreen() {
                   <QRCode value="https://chat.ideaflow.app/app/" size={80} backgroundColor="#ffffff" color="#000000" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: c.textPrimary }}>Scan to open on any phone</Text>
+                  <Text style={{ fontSize: type.bubble.fontSize, fontWeight: '600', color: c.textPrimary }}>Scan to open on any phone</Text>
                   <TouchableOpacity
                     onPress={() => Share.share({ message: 'Try OpenChat: https://chat.ideaflow.app/app/' })}
                     activeOpacity={0.7}
@@ -755,10 +756,10 @@ export function LoginScreen() {
                 activeOpacity={0.7}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: c.textPrimary }}>Open in browser</Text>
-                  <Text style={{ fontSize: 13, color: c.textSecondary, marginTop: 4 }}>Continue on the web version</Text>
+                  <Text style={{ fontSize: type.bubble.fontSize, fontWeight: '600', color: c.textPrimary }}>Open in browser</Text>
+                  <Text style={{ fontSize: type.label.fontSize, color: c.textSecondary, marginTop: 4 }}>Continue on the web version</Text>
                 </View>
-                <Text style={{ color: c.textMuted, fontSize: 18 }}>›</Text>
+                <Text style={{ color: c.textMuted, fontSize: type.title.fontSize }}>›</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -782,87 +783,87 @@ const styles = StyleSheet.create({
   autoSignInPending: { alignItems: 'center', justifyContent: 'center' },
   scroll: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingHorizontal: 24, justifyContent: 'center', alignItems: 'stretch' },
-  buildLabel: { position: 'absolute', right: 10, paddingHorizontal: 4, fontSize: 11, lineHeight: 15 },
+  buildLabel: { position: 'absolute', right: 10, paddingHorizontal: 4, fontSize: type.caption.fontSize, lineHeight: 15 },
   card: {
     width: '100%',
     maxWidth: 520,
     alignSelf: 'center',
     padding: 24,
-    borderRadius: 20,
+    borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     gap: 12,
   },
-  title: { fontSize: 28, fontWeight: '700', textAlign: 'center' },
-  subtitle: { fontSize: 14, textAlign: 'center', marginBottom: 12 },
+  title: { fontSize: type.display.fontSize, fontWeight: '700', textAlign: 'center' },
+  subtitle: { fontSize: type.label.fontSize, textAlign: 'center', marginBottom: 12 },
   input: {
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
-    fontSize: 16,
+    fontSize: type.bubble.fontSize,
   },
   button: {
     height: 50,
-    borderRadius: 12,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 4,
   },
-  buttonText: { fontSize: 16, fontWeight: '600' },
+  buttonText: { fontSize: type.bubble.fontSize, fontWeight: '600' },
   ideaflowButton: {
     height: 50,
-    borderRadius: 12,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ideaflowButtonText: { fontSize: 16, fontWeight: '600' },
-  inlineError: { fontSize: 14, textAlign: 'center' },
+  ideaflowButtonText: { fontSize: type.bubble.fontSize, fontWeight: '600' },
+  inlineError: { fontSize: type.label.fontSize, textAlign: 'center' },
   pendingMethods: { height: 50, alignItems: 'center', justifyContent: 'center' },
-  newHereHint: { fontSize: 13, textAlign: 'center' },
-  appleHint: { fontSize: 13, textAlign: 'center', marginTop: 8 },
-  footer: { fontSize: 12, textAlign: 'center', marginTop: 8 },
+  newHereHint: { fontSize: type.label.fontSize, textAlign: 'center' },
+  appleHint: { fontSize: type.label.fontSize, textAlign: 'center', marginTop: 8 },
+  footer: { fontSize: type.meta.fontSize, textAlign: 'center', marginTop: 8 },
   shareSection: { width: '100%', maxWidth: 520, alignSelf: 'center', marginTop: 32, alignItems: 'stretch', opacity: 0.88 },
-  shareLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8, textAlign: 'center' },
+  shareLabel: { fontSize: type.caption.fontSize, fontWeight: '700', letterSpacing: 1, marginBottom: 8, textAlign: 'center' },
   shareCard: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     gap: 16,
   },
   qrWrap: {
     padding: 6,
     backgroundColor: '#ffffff',
-    borderRadius: 8,
+    borderRadius: radius.md,
   },
   shareTextBlock: { flex: 1, gap: 6 },
-  shareTitle: { fontSize: 14, fontWeight: '600' },
-  shareLink: { fontSize: 13 },
+  shareTitle: { fontSize: type.label.fontSize, fontWeight: '600' },
+  shareLink: { fontSize: type.label.fontSize },
   shareButton: {
     marginTop: 6,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    borderRadius: 8,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     alignSelf: 'flex-start',
   },
-  shareButtonText: { fontSize: 13, fontWeight: '500' },
+  shareButtonText: { fontSize: type.label.fontSize, fontWeight: '500' },
   quickLogin: { marginTop: 4 },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 12 },
-  quickLabel: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, textAlign: 'center', marginBottom: 10 },
+  quickLabel: { fontSize: type.caption.fontSize, textTransform: 'uppercase', letterSpacing: 0.6, textAlign: 'center', marginBottom: 10 },
   quickRow: { flexDirection: 'row', gap: 10 },
   quickButton: {
     flex: 1,
     paddingVertical: 10,
     paddingHorizontal: 8,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
   },
-  quickButtonText: { fontSize: 15, fontWeight: '600' },
-  quickButtonSub: { fontSize: 11, marginTop: 2 },
+  quickButtonText: { fontSize: type.body.fontSize, fontWeight: '600' },
+  quickButtonSub: { fontSize: type.caption.fontSize, marginTop: 2 },
   googleButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -870,7 +871,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     gap: 10,
     height: 50,
@@ -878,7 +879,7 @@ const styles = StyleSheet.create({
   googleGlyph: {
     width: 22,
     height: 22,
-    borderRadius: 4,
+    borderRadius: radius.sm,
     backgroundColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
@@ -887,27 +888,27 @@ const styles = StyleSheet.create({
   // Google-blue glyph as a stand-in — visually close enough without pulling in
   // an SVG dependency.
   googleGlyphText: {
-    fontSize: 18,
+    fontSize: type.title.fontSize,
     fontWeight: '700',
     color: '#4285F4',
     lineHeight: 22,
   },
   googleButtonText: {
     color: '#1f1f1f',
-    fontSize: 15,
+    fontSize: type.body.fontSize,
     fontWeight: '600',
   },
   // Apple Sign-In button. AppleAuthenticationButton requires an explicit height.
   appleButton: {
     width: '100%',
     height: 50,
-    borderRadius: 12,
+    borderRadius: radius.md,
   },
   // Loading placeholder so the layout doesn't jump while the native sheet opens.
   appleButtonPlaceholder: {
     width: '100%',
     height: 50,
-    borderRadius: 12,
+    borderRadius: radius.md,
     backgroundColor: '#000',
     alignItems: 'center',
     justifyContent: 'center',
@@ -919,5 +920,5 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   orLine: { flex: 1, height: StyleSheet.hairlineWidth },
-  orLabel: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6 },
+  orLabel: { fontSize: type.caption.fontSize, textTransform: 'uppercase', letterSpacing: 0.6 },
 });

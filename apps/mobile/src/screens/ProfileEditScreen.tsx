@@ -1,3 +1,4 @@
+import { radius, type } from '../theme/tokens';
 /**
  * ProfileEditScreen — lets the user update their display name and status
  * message. Presented as a modal (same pattern as MyCardScreen).
@@ -227,7 +228,7 @@ export function ProfileEditScreen() {
         <Text style={[styles.label, { color: c.textSecondary }]}>STATUS MESSAGE</Text>
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <TextInput
-            style={[styles.input, { backgroundColor: c.surface, borderColor: c.border, color: c.textPrimary, width: 64, textAlign: 'center', fontSize: 24 }]}
+            style={[styles.input, { backgroundColor: c.surface, borderColor: c.border, color: c.textPrimary, width: 64, textAlign: 'center', fontSize: type.heading.fontSize }]}
             value={profileStatusEmoji}
             onChangeText={setProfileStatusEmoji}
             placeholder="😀"
@@ -270,6 +271,7 @@ export function ProfileEditScreen() {
 
 const styles = StyleSheet.create({
   root: {
+    width: '100%', maxWidth: 720, alignSelf: 'center',
     paddingHorizontal: 16,
     paddingTop: 24,
     paddingBottom: 40,
@@ -285,12 +287,12 @@ const styles = StyleSheet.create({
   },
   photoBtn: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
+    borderRadius: radius.md,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   label: {
-    fontSize: 11,
+    fontSize: type.caption.fontSize,
     fontWeight: '700',
     letterSpacing: 1,
     marginBottom: 8,
@@ -298,19 +300,19 @@ const styles = StyleSheet.create({
   input: {
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderRadius: 10,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
-    fontSize: 16,
+    fontSize: type.bubble.fontSize,
   },
   hint: {
-    fontSize: 11,
+    fontSize: type.caption.fontSize,
     marginTop: 6,
   },
   discoveryOption: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
+    borderRadius: radius.md,
     padding: 12,
     marginBottom: 8,
   },
@@ -318,7 +320,7 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderWidth: 2,
-    borderRadius: 10,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 1,
@@ -326,29 +328,29 @@ const styles = StyleSheet.create({
   radioDot: {
     width: 10,
     height: 10,
-    borderRadius: 5,
+    borderRadius: radius.sm,
   },
   discoveryCopy: {
     flex: 1,
     marginLeft: 10,
   },
   discoveryTitle: {
-    fontSize: 14,
+    fontSize: type.label.fontSize,
     fontWeight: '600',
   },
   discoveryDetail: {
-    fontSize: 12,
+    fontSize: type.meta.fontSize,
     lineHeight: 17,
     marginTop: 2,
   },
   saveBtn: {
     paddingVertical: 14,
-    borderRadius: 10,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
   saveBtnText: {
     fontWeight: '700',
-    fontSize: 16,
+    fontSize: type.bubble.fontSize,
   },
 });

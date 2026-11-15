@@ -103,16 +103,16 @@ export function FriendsScreen() {
       maxToRenderPerBatch={12}
       windowSize={7}
       keyboardShouldPersistTaps="handled"
-      renderItem={({ item: person }) => <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Saved profile for ${person.name}`} onPress={() => navigation.navigate('PrivateThing', { thingId: person.id })} style={[styles.row, { borderColor: c.border }]}><View style={styles.rowContent}><Text style={{ color: c.textPrimary, ...type.bubble, fontWeight: '600' }}>{person.name}</Text><Text style={{ color: c.primary, ...type.label }}>Private profile</Text></View></TouchableOpacity>}
+      renderItem={({ item: person }) => <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Saved profile for ${person.name}`} onPress={() => navigation.navigate('PrivateThing', { thingId: person.id })} style={[styles.row, { borderColor: c.border }]}><View style={styles.rowContent}><Text style={{ color: c.textPrimary, ...type.bubble, fontWeight: '600' }}>{person.name}</Text><Text style={{ color: c.textMetadata, ...type.label }}>Only you</Text></View></TouchableOpacity>}
       ListHeaderComponent={<View style={{ gap: space[4] }}>
       <View style={styles.tabs}>
         {(['friends', 'requests'] as const).map(tab => <TouchableOpacity key={tab} onPress={() => setSection(tab)} style={[styles.tab, { borderColor: c.border, backgroundColor: section === tab ? c.primary : c.surface }]}><Text style={{ color: section === tab ? c.onPrimary : c.textPrimary, fontWeight: '700' }}>{tab === 'friends' ? 'Friends' : `Requests${lists?.incoming.length ? ` (${lists.incoming.length})` : ''}`}</Text></TouchableOpacity>)}
       </View>
       <View style={styles.findRow}>
-        <TouchableOpacity onPress={() => navigation.navigate('NewConversation')}><Text style={{ color: c.primary, fontWeight: '700' }}>Find people</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('ScanQr')}><Text style={{ color: c.primary, fontWeight: '700' }}>Scan a code</Text></TouchableOpacity>
+        <Button label="Find people" variant="secondary" size="sm" onPress={() => navigation.navigate('NewConversation')} />
+        <Button label="Scan a code" variant="secondary" size="sm" onPress={() => navigation.navigate('ScanQr')} />
         <TouchableOpacity onPress={() => navigation.navigate('InvitePerson')}><Text style={{ color: c.primary, fontWeight: '700' }}>Invite a person</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('CatchUp')}><Text style={{ color: c.primary, fontWeight: '700' }}>Catch up</Text></TouchableOpacity>
+        <Button label="Catch up" variant="secondary" size="sm" onPress={() => navigation.navigate('CatchUp')} />
       </View>
       {section === 'friends' && <View style={{ gap: space[3] }}>
         <SectionLabel first trailing={<Button label="+ Add person" variant="ghost" onPress={() => setAddingPerson(value => !value)} />}>Saved people</SectionLabel>
@@ -143,7 +143,7 @@ export function FriendsScreen() {
 const styles = StyleSheet.create({
   personButton: { minHeight: touchTarget, justifyContent: 'center', paddingHorizontal: space[3], borderRadius: radius.md },
   personInput: { minHeight: touchTarget, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, padding: space[3], ...type.body },
-  content: { padding: space[4], gap: space[4], width: '100%', maxWidth: 960, alignSelf: 'center' },
+  content: { padding: space[4], gap: space[4], width: '100%', maxWidth: 720, alignSelf: 'center' },
   tabs: { flexDirection: 'row', gap: space[2] },
   tab: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingVertical: space[2], paddingHorizontal: space[4] },
   findRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space[6], paddingVertical: space[2] },

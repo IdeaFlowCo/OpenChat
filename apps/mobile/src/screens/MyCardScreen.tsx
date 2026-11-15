@@ -364,7 +364,7 @@ export function MyCardScreen() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space[6] },
-  content: { alignItems: 'center', paddingHorizontal: space[4], paddingTop: space[6], paddingBottom: space[10] },
+  content: { width: '100%', maxWidth: 720, alignSelf: 'center', alignItems: 'center', paddingHorizontal: space[4], paddingTop: space[6], paddingBottom: space[10] },
   block: { width: '100%', maxWidth: 560 },
   identity: { alignItems: 'center', gap: space[2], width: '100%', maxWidth: 560 },
   centered: { textAlign: 'center', maxWidth: 340 },

@@ -367,7 +367,7 @@ export function NewConversationScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, paddingHorizontal: space[4], paddingTop: space[3] },
+  root: { flex: 1, width: '100%', maxWidth: 720, alignSelf: 'center', paddingHorizontal: space[4], paddingTop: space[3] },
   top: { gap: space[2] },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: space[8] },
   loadingMore: { paddingVertical: space[4], alignItems: 'center' },

@@ -18,7 +18,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import type { Thought } from '../api/client';
 import { AppIcon } from './AppIcon';
-import { space, type } from '../theme/tokens';
+import { radius, space, type } from '../theme/tokens';
 import * as Clipboard from 'expo-clipboard';
 import { originalMessageUrl } from '../utils/parseOpenChatUrl';
 import { COMPACT_VISIBLE_LINES, isLongStreamText, useStreamCompact, useThoughtCollapsed } from '../services/streamDisplay';
@@ -40,14 +40,8 @@ const KIND_LABELS: Record<string, string> = {
   observation: 'Observation',
 };
 
-export function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 60_000) return 'just now';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
+export { formatRelativeTime } from '../utils/relativeTime';
+import { formatRelativeTime } from '../utils/relativeTime';
 
 interface ThoughtCardProps {
   item: Thought;
@@ -100,13 +94,17 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
         {
           backgroundColor: c.surface,
           borderColor: c.border,
-          borderLeftColor: item.pinned ? c.primary : kindColor,
+
         },
       ]}
     >
-      {/* Header: time leads; pin + status + kind pill float right. The kind
-          pill is hidden for 'observation' (the catch-all default) to keep
-          cards quiet — only meaningful types show. */}
+      {/* Body text */}
+      <Text
+        style={[styles.bodyText, { color: collapsed ? c.textMetadata : c.textPrimary }]}
+        numberOfLines={collapsed ? 1 : condensed ? COMPACT_VISIBLE_LINES : undefined}
+      >
+        {item.text}
+      </Text>
       <View style={styles.cardHeader}>
         <Text style={[styles.time, { color: c.textMetadata }]}>
           {formatRelativeTime(item.createdAt)}
@@ -169,7 +167,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
 
       <Modal visible={actions} transparent animationType="fade" onRequestClose={() => setActions(false)}>
         <Pressable onPress={() => setActions(false)} style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0006' }}>
-          <Pressable onPress={event => event.stopPropagation()} style={{ backgroundColor: c.surface, padding: 12, borderRadius: 12, width: 300 }}>
+          <Pressable onPress={event => event.stopPropagation()} style={{ backgroundColor: c.surface, padding: 12, borderRadius: radius.md, width: 300 }}>
             <Text style={{ color: c.textPrimary, padding: 14, fontWeight: '600' }}>{confirmDelete ? 'Delete Stream entry?' : 'Stream entry actions'}</Text>
             {confirmDelete ? <>
               {onDelete && action('Delete entry', onDelete)}
@@ -185,14 +183,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
           </Pressable>
         </Pressable>
       </Modal>
-      {!collapsed && onOpenContext && <TouchableOpacity onPress={onOpenContext} accessibilityRole="button" style={{ paddingVertical: 8 }}><Text style={{ color: c.primary }}>Original message</Text></TouchableOpacity>}
-      {/* Body text */}
-      <Text
-        style={[styles.bodyText, { color: collapsed ? c.textMetadata : c.textPrimary }]}
-        numberOfLines={collapsed ? 1 : condensed ? COMPACT_VISIBLE_LINES : undefined}
-      >
-        {item.text}
-      </Text>
+      {!collapsed && onOpenContext && <TouchableOpacity onPress={onOpenContext} accessibilityRole="button" style={{ paddingVertical: 8 }}><Text style={[type.meta, { color: c.textMetadata }]}>Original message</Text></TouchableOpacity>}
       {collapseError && <Text accessibilityRole="alert" style={[styles.subtitle, { color: c.danger }]}>Could not save. Try again.</Text>}
       {!collapsed && compact && long && (
         <TouchableOpacity onPress={() => setRevealed((r) => !r)} accessibilityRole="button" style={{ paddingVertical: 6 }}>
@@ -233,19 +224,10 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
 const styles = StyleSheet.create({
   // Index card: sharp accent-ruled left edge, soft right corners, faint lift.
   card: {
-    borderTopLeftRadius: 2,
-    borderBottomLeftRadius: 2,
-    borderTopRightRadius: 10,
-    borderBottomRightRadius: 10,
-    borderWidth: 1,
-    borderLeftWidth: 3,
-    padding: 14,
-    marginBottom: 10,
-    shadowColor: '#1c1917',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 2,
-    elevation: 1,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: space[3],
+    marginBottom: space[2],
   },
   cardHeader: {
     flexDirection: 'row',
@@ -258,26 +240,26 @@ const styles = StyleSheet.create({
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 10,
+    borderRadius: radius.md,
   },
   badgeText: {
-    fontSize: 10,
+    fontSize: type.caption.fontSize,
     fontWeight: '700',
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
   time: {
-    fontSize: 11,
+    fontSize: type.caption.fontSize,
   },
   pinBtn: {
     marginLeft: 2,
   },
   bodyText: {
-    fontSize: 15,
+    fontSize: type.body.fontSize,
     lineHeight: 22,
   },
   subtitle: {
-    fontSize: 12,
+    fontSize: type.meta.fontSize,
     marginTop: 6,
   },
   tagRow: {
@@ -289,10 +271,10 @@ const styles = StyleSheet.create({
   chip: {
     paddingHorizontal: 9,
     paddingVertical: 4,
-    borderRadius: 999, // fully rounded pill — distinct from the squared kind badge
+    borderRadius: radius.pill, // fully rounded pill — distinct from the squared kind badge
   },
   chipText: {
-    fontSize: 12,
+    fontSize: type.meta.fontSize,
     fontWeight: '500',
   },
 });

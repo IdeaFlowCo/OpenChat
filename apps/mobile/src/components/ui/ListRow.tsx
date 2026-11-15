@@ -1,3 +1,4 @@
+import { useControlFeedback } from '../../hooks/useControlFeedback';
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -29,6 +30,7 @@ export function ListRow({
   title, subtitle, icon, leading, trailing, onPress, chevron = !!onPress, destructive, divider, disabled,
   accessibilityLabel, testID, style,
 }: ListRowProps) {
+  const feedback = useControlFeedback();
   const { scheme } = useTheme();
   const r = roles(getColors(scheme));
   const fg = destructive ? r.danger : r.text;
@@ -47,13 +49,15 @@ export function ListRow({
   if (!onPress) return <View style={rowStyle} testID={testID} accessibilityLabel={accessibilityLabel}>{content}</View>;
   return (
     <TouchableOpacity
+      {...feedback.events}
+      activeOpacity={feedback.activeOpacity}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? title}
       accessibilityState={{ disabled: !!disabled }}
       onPress={onPress}
       disabled={disabled}
       testID={testID}
-      style={[rowStyle, disabled && styles.disabled]}
+      style={[rowStyle, feedback.active && !disabled && { backgroundColor: r.pressed }, disabled && styles.disabled]}
     >
       {content}
     </TouchableOpacity>
