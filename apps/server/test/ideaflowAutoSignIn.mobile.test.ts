@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
 }));
 
+vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 vi.mock('react-native', () => ({
   Platform: mocks.platform,
   StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },

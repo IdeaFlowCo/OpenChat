@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   updates: { isEnabled: false, isEmbeddedLaunch: true, updateId: null as string | null },
 }));
 
+vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 vi.mock('react-native', async () => {
   const web = await import('react-native-web');
   return { ...web, Platform: { ...web.Platform, OS: process.env.OPENCHAT_LOGIN_EVIDENCE_PLATFORM === 'web' ? 'web' : 'ios' }, Alert: { alert: mocks.alert } };
