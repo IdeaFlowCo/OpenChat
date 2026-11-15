@@ -131,7 +131,7 @@ it('opens an existing saved person profile from People', async () => {
   await act(async () => { root = create(React.createElement(FriendsScreen)); });
   const door = root!.root.findAllByType('TouchableOpacity').find(n => n.props.accessibilityLabel === 'Saved profile for Chet')!;
   expect(door).toBeDefined();
-  expect(door.findAllByType('Text').some(n => n.props.children === 'Private profile')).toBe(true);
+  expect(door.findAllByType('Text').some(n => n.props.children === 'Only you')).toBe(true);
   await act(async () => door.props.onPress());
   expect(mocks.navigation.navigate).toHaveBeenCalledWith('PrivateThing', { thingId: 'saved' });
   expect(mocks.createConversation).not.toHaveBeenCalled();

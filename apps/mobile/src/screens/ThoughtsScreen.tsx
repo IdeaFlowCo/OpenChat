@@ -1,3 +1,4 @@
+import { radius } from '../theme/tokens';
 /**
  * Stream list screen — shows the user's personal notes feed. (OpenChat-zi1)
  *
@@ -441,22 +442,12 @@ export function ThoughtsScreen() {
         }
       />
 
-      {/* FAB */}
-      <TouchableOpacity
-        style={[styles.fab, { backgroundColor: c.primary }]}
-        onPress={() => openAdd()}
-        activeOpacity={0.8}
-        accessibilityRole="button"
-        accessibilityLabel="New Stream entry"
-      >
-        <AppIcon name="plus" color={c.onPrimary} size={22} strokeWidth={2.2} /><Text style={{ color: c.onPrimary, fontSize: 10 }}>Create</Text>
-      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { flex: 1, width: '100%', maxWidth: 720, alignSelf: 'center' },
   displayRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 12 },
   chipRow: { flexDirection: 'row', gap: space[2], paddingHorizontal: space[4], paddingTop: space[2] },
   notice: { ...type.meta, paddingHorizontal: space[4], paddingTop: space[2] },
@@ -468,9 +459,9 @@ const styles = StyleSheet.create({
   searchInput: {
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
-    fontSize: 16,
+    fontSize: type.bubble.fontSize,
   },
   list: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 88 },
   // Same index-card look as ThoughtCard, in edit mode.
@@ -485,7 +476,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   editorInput: {
-    fontSize: 15,
+    fontSize: type.body.fontSize,
     lineHeight: 22,
     minHeight: 44,
     padding: 0,
@@ -497,7 +488,7 @@ const styles = StyleSheet.create({
     paddingTop: 80,
   },
   emptyText: {
-    fontSize: 15,
+    fontSize: type.body.fontSize,
     textAlign: 'center',
   },
   centered: {
@@ -506,7 +497,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   errorText: {
-    fontSize: 14,
+    fontSize: type.label.fontSize,
     marginBottom: 12,
     textAlign: 'center',
     paddingHorizontal: 24,
@@ -518,7 +509,7 @@ const styles = StyleSheet.create({
     right: 20,
     width: 56,
     height: 56,
-    borderRadius: 28,
+    borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 4,

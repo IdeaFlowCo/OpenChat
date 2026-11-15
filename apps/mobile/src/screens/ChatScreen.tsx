@@ -1,3 +1,4 @@
+import { formatTime as formatTimestamp } from '../utils/time';
 import { offerVisionSaveRecovery } from '../utils/visionSaveRecovery';
 import type { VisionSaveRequest } from '../api/client';
 import { uncertainVisionAlert, presentVisionSaveFailure } from '../utils/visionSaveFeedback';
@@ -143,7 +144,7 @@ function dayLabel(iso: string): string {
 }
 
 function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return formatTimestamp(iso, { style: 'bubble' });
 }
 
 /**

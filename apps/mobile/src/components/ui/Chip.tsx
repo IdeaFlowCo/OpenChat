@@ -1,3 +1,4 @@
+import { useControlFeedback } from '../../hooks/useControlFeedback';
 import { StyleSheet, Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getColors } from '../../theme/colors';
@@ -23,6 +24,7 @@ const SLOP = (touchTarget - HEIGHT) / 2;
 /** Filter, tag and choice chip. Pill-shaped; selected chips take the soft
  * accent tint. Without `onPress` it renders as a static tag. */
 export function Chip({ label, selected, onPress, icon, disabled, accessibilityRole = 'button', accessibilityLabel, testID, style }: ChipProps) {
+  const feedback = useControlFeedback();
   const { scheme } = useTheme();
   const r = roles(getColors(scheme));
   const fg = selected ? r.onAccentSoft : r.textSecondary;
@@ -32,10 +34,12 @@ export function Chip({ label, selected, onPress, icon, disabled, accessibilityRo
       <Text style={[styles.label, { color: fg }, selected && styles.selectedLabel]} numberOfLines={1}>{label}</Text>
     </>
   );
-  const chrome = [styles.chip, { backgroundColor: selected ? r.accentSoft : r.card, borderColor: selected ? 'transparent' : r.line }, style];
+  const chrome = [styles.chip, { backgroundColor: selected ? r.accentSoft : feedback.active ? r.pressed : r.card, borderColor: selected ? 'transparent' : r.line }, style];
   if (!onPress) return <View style={chrome} testID={testID}>{body}</View>;
   return (
     <TouchableOpacity
+      {...feedback.events}
+      activeOpacity={feedback.activeOpacity}
       accessibilityRole={accessibilityRole}
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={accessibilityRole === 'radio' ? { checked: !!selected, disabled: !!disabled } : { selected: !!selected, disabled: !!disabled }}

@@ -1,3 +1,4 @@
+import { useControlFeedback } from '../../hooks/useControlFeedback';
 import type { ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -33,6 +34,7 @@ export function Button({
   label, onPress, variant = 'secondary', size = 'md', icon, leading, disabled, loading, block,
   accessibilityLabel, accessibilityHint, testID, style,
 }: ButtonProps) {
+  const feedback = useControlFeedback();
   const { scheme } = useTheme();
   const r = roles(getColors(scheme));
   const tone = {
@@ -47,6 +49,8 @@ export function Button({
   const inactive = disabled || loading;
   return (
     <TouchableOpacity
+      {...feedback.events}
+      activeOpacity={feedback.activeOpacity}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityHint={accessibilityHint}
@@ -55,10 +59,9 @@ export function Button({
       onPress={onPress}
       hitSlop={slop ? { top: slop, bottom: slop, left: 4, right: 4 } : undefined}
       testID={testID}
-      activeOpacity={0.7}
       style={[
         styles.base,
-        { minHeight: height, paddingHorizontal: sm ? space[3] : space[4], backgroundColor: tone.bg, borderColor: tone.border },
+        { minHeight: height, paddingHorizontal: sm ? space[3] : space[4], backgroundColor: feedback.active && !inactive && variant !== 'primary' ? r.pressed : tone.bg, borderColor: feedback.active ? r.accent : tone.border },
         variant === 'ghost' && { paddingHorizontal: sm ? space[2] : space[3] },
         block && styles.block,
         inactive && styles.inactive,

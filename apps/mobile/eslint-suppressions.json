@@ -201,7 +201,7 @@
   },
   "src/components/ThoughtCard.tsx": {
     "no-restricted-syntax": {
-      "count": 20
+      "count": 1
     }
   },
   "src/components/ThoughtsSearchBar.tsx": {
@@ -257,11 +257,6 @@
   "src/screens/AgentKeyDetailScreen.tsx": {
     "no-restricted-syntax": {
       "count": 12
-    }
-  },
-  "src/screens/AgentKeysScreen.tsx": {
-    "no-restricted-syntax": {
-      "count": 16
     }
   },
   "src/screens/AgentOverlayScreen.tsx": {
@@ -336,7 +331,7 @@
   },
   "src/screens/LoginScreen.tsx": {
     "no-restricted-syntax": {
-      "count": 50
+      "count": 10
     }
   },
   "src/screens/MyCardScreen.tsx": {
@@ -369,11 +364,6 @@
       "count": 3
     }
   },
-  "src/screens/ProfileEditScreen.tsx": {
-    "no-restricted-syntax": {
-      "count": 13
-    }
-  },
   "src/screens/ScanQrScreen.tsx": {
     "no-restricted-syntax": {
       "count": 7
@@ -396,7 +386,7 @@
   },
   "src/screens/SettingsScreen.tsx": {
     "no-restricted-syntax": {
-      "count": 52
+      "count": 4
     }
   },
   "src/screens/SocialReviewScreen.tsx": {
@@ -416,7 +406,7 @@
   },
   "src/screens/ThoughtsScreen.tsx": {
     "no-restricted-syntax": {
-      "count": 8
+      "count": 1
     }
   },
   "src/utils/colorForUserId.ts": {
