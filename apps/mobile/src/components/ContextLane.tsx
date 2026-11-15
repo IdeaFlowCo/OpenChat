@@ -131,7 +131,7 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
   </View>;
 }
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, width: '100%', maxWidth: 720, alignSelf: 'center' },
   toolbar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
   search: { flex: 1, minWidth: 0, height: 44, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.sm, paddingHorizontal: 10, marginVertical: 8 },
   card: { padding: space[3], borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, marginBottom: 10 },
