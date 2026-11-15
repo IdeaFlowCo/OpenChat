@@ -1,12 +1,13 @@
 import { useState } from 'react';
 
-/** Instant hover/focus feedback; no animated opacity, including reduced motion. */
+/** Instant web hover/focus feedback; native controls retain pressed opacity. */
 export function useControlFeedback() {
   const [hovered, setHovered] = useState(false), [focused, setFocused] = useState(false);
+  const web = 'document' in globalThis;
   return {
     active: hovered || focused,
-    activeOpacity: 1,
-    events: 'document' in globalThis ? {
+    activeOpacity: web ? 1 : 0.7,
+    events: web ? {
       onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false),
       onFocus: () => setFocused(true), onBlur: () => setFocused(false),
     } : {},
