@@ -116,3 +116,13 @@ to the shared `/agents` guide instead of maintaining separate MCP snippets.
 | Details | Open chat → More → Details | Person or group details; same panel on wide screens |
 
 Message hover, long-press and swipe expose Reply, Save to Stream and Make to-do.
+
+### Member-only Links filter (API prerequisite: #224)
+
+Chat → Stream → Links shows compact member-only resource rows, source labels,
+Save/Saved state and explicit pagination. It reuses the remembered Compact view.
+Search in Links matches loaded resources; All currently searches notes and saved
+entries only and is not described as universal. No link is inserted into the
+agent-readable content feed. No independent Links tab is added. The resources
+API and the removal of #224's separate Links tab must land together; this slice
+is draft and must not deploy until #224's privacy gates are satisfied.

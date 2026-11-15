@@ -1,3 +1,10 @@
+export type ResourceKind = 'paper' | 'article' | 'reference' | 'person' | 'tool' | 'organization' | 'community' | 'code' | 'video' | 'document' | 'post' | 'event' | 'link';
+export interface ConversationResource {
+  id: string; url: string; host: string; kind: ResourceKind; kindEdited: boolean; title: string | null; description: string | null; siteName: string | null;
+  tags: string[]; suggestedTags: string[]; tagsEdited: boolean; firstSharedAt: string | null; lastSharedAt: string | null;
+  firstSharedBy: { label: string | null; userId: string | null }; shareCount: number; sources: string[]; saved: boolean; savedCount: number;
+}
+const conversationPath = (conversationId: string) => `/api/chat/conversations/${encodeURIComponent(conversationId)}`;
 import { ApiError, errorFromResponse } from './errors';
 export { ApiError } from './errors';
 import { authenticatedRequestLease } from './authenticatedRequest';
@@ -1752,6 +1759,13 @@ export const api = {
   removePrivateListMember: (listId: string, linkId: string) =>
     request<{ removed: true }>(`/api/private/lists/${encodeURIComponent(listId)}/members/${encodeURIComponent(linkId)}`, { method: 'DELETE' }),
   listCatchUp: () => request<{ due: CatchUpPerson[] }>('/api/private/due'),
+
+  listConversationResources: (conversationId: string, before?: string | null) =>
+    request<{ enabled: boolean; resources: ConversationResource[]; pending: number; nextCursor: string | null; indexingPending: boolean }>(`${conversationPath(conversationId)}/resources${before ? `?before=${encodeURIComponent(before)}` : ''}`, { expireAuthOnForbidden: false }),
+  updateConversationResource: (conversationId: string, resourceId: string, change: { tags?: string[]; kind?: ResourceKind }) =>
+    request<{ resource: ConversationResource }>(`${conversationPath(conversationId)}/resources/${encodeURIComponent(resourceId)}`, { method: 'PATCH', body: JSON.stringify(change), expireAuthOnForbidden: false }),
+  setConversationResourceSaved: (conversationId: string, resourceId: string, saved: boolean) =>
+    request<{ resource: ConversationResource }>(`${conversationPath(conversationId)}/resources/${encodeURIComponent(resourceId)}/saved`, { method: 'PUT', body: JSON.stringify({ saved }), expireAuthOnForbidden: false }),
 
   // Imported chats — read-only; nothing here sends, invites or notifies anyone.
   listImportedChats: () => request<{ chats: ImportedChatSummary[] }>('/api/imported-chats'),
