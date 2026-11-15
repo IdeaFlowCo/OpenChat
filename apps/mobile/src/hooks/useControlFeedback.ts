@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Platform } from 'react-native';
 
 /** Instant hover/focus feedback; no animated opacity, including reduced motion. */
 export function useControlFeedback() {
@@ -7,7 +6,7 @@ export function useControlFeedback() {
   return {
     active: hovered || focused,
     activeOpacity: 1,
-    events: Platform.OS === 'web' ? {
+    events: 'document' in globalThis ? {
       onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false),
       onFocus: () => setFocused(true), onBlur: () => setFocused(false),
     } : {},
