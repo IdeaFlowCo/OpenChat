@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, TextInput, AppState } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, TextInput, AppState, Pressable } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { contextLaneManager } from '../services/contextLane';
@@ -12,6 +12,9 @@ import { StreamCompactToggle } from './StreamCompactToggle';
 import { applyCollapsed } from '../services/streamDisplay';
 import { useConversationContent } from '../services/useConversationContent';
 import { getSocket } from '../api/socket';
+import { Avatar } from './Avatar';
+import { type, radius, space } from '../theme/tokens';
+import { formatRelativeTime } from './ThoughtCard';
 import { ContextIntentionControls } from './ContextIntentionControls';
 
 /** Group loaded replies below their root, while retaining orphan previews across pages. */
@@ -46,6 +49,7 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
   const [editing, setEditing] = useState<ContextPost>();
   const [confirmDelete, setConfirmDelete] = useState<string>();
   const [reporting, setReporting] = useState<string>();
+  const [actionsFor, setActionsFor] = useState<string>();
   const [busy, setBusy] = useState<string>();
   const [feedback, setFeedback] = useState<{ text: string; error: boolean }>();
 
@@ -80,16 +84,18 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
   const renderItem = ({ item: { post: item, reply } }: { item: { post: ContextPost; reply: boolean } }) => {
     const own = item.authorId === currentUser?.userId;
     const parent = item.replyTo || state.posts.find(p => p.id === item.replyToId);
-    return <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, marginLeft: reply ? 16 : 0 }]}>
+    return <Pressable accessible={false} focusable={false} onHoverIn={() => setActionsFor(item.id)} onLongPress={() => setActionsFor(item.id)} style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, marginLeft: reply ? 16 : 0 }]}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'baseline' }}>
-        <Text style={{ color: c.textPrimary, fontWeight: '600' }}>{item.author?.name || (own ? 'You' : 'Chat participant')}</Text>
-        {item.agent && <Text style={{ color: c.textMetadata, fontSize: 12 }}>via {item.agent.name} · Agent</Text>}
-        <Text style={{ color: c.textMetadata, fontSize: 12 }}>{item.kind === 'ask' ? 'Ask' : item.kind === 'offer' ? 'Offer' : 'Note'}</Text>
+        <Avatar name={item.agent?.name || item.author?.name} avatarUrl={item.agent ? undefined : item.author?.avatarUrl} isBot={!!item.agent} size={28} />
+        <Text style={[type.label, { color: c.textPrimary, fontWeight: '600' }]}>{item.author?.name || (own ? 'You' : 'Chat participant')}</Text>
+        {item.agent && <Text style={{ color: c.textMetadata, ...type.meta }}>via {item.agent.name} · Agent</Text>}
+        <Text style={{ color: c.textMetadata, ...type.meta }}>{item.kind === 'ask' ? 'ASK' : item.kind === 'offer' ? 'OFFER' : 'NOTE'}</Text>
       </View>
-      <Text style={{ color: c.textMetadata, fontSize: 12, marginTop: 3 }}>Shared with this chat · Context · {new Date(item.createdAt).toLocaleString()}{item.revision > 1 ? ' · Edited' : ''}</Text>
-      {item.replyToId && <View style={[styles.quote, { borderLeftColor: c.border }]}><Text numberOfLines={2} style={{ color: c.textMetadata, fontSize: 13 }}>{parent?.isDeleted ? 'Reply to a deleted post' : parent ? `Reply to ${parent.author?.name || 'a participant'}: ${parent.text}` : 'Reply to an earlier post'}</Text></View>}
-      <Text selectable style={{ color: item.isDeleted ? c.textMetadata : c.textPrimary, fontSize: 15, lineHeight: 22, marginTop: 8 }}>{item.isDeleted ? 'Post deleted' : item.text}</Text>
-      {!item.isDeleted && <View style={styles.actions}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Show exact time: ${new Date(item.createdAt).toLocaleString()}`} onPress={() => setFeedback({ text: new Date(item.createdAt).toLocaleString(), error: false })} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: c.textMetadata, ...type.meta }} {...{ title: new Date(item.createdAt).toLocaleString() }}>Shared with this chat · {formatRelativeTime(item.createdAt)}{item.revision > 1 ? ' · Edited' : ''}</Text></TouchableOpacity>
+      {item.replyToId && <View style={[styles.quote, { borderLeftColor: c.border }]}><Text numberOfLines={2} style={{ color: c.textMetadata, ...type.label }}>{parent?.isDeleted ? 'Reply to a deleted post' : parent ? `Reply to ${parent.author?.name || 'a participant'}: ${parent.text}` : 'Reply to an earlier post'}</Text></View>}
+      <Text selectable style={{ color: item.isDeleted ? c.textMetadata : c.textPrimary, ...type.body, marginTop: 8 }}>{item.isDeleted ? 'Post deleted' : item.text}</Text>
+      {!item.isDeleted && button(actionsFor === item.id ? 'Hide actions' : 'More', () => setActionsFor(actionsFor === item.id ? undefined : item.id))}
+      {!item.isDeleted && actionsFor === item.id && <View style={styles.actions}>
         {button('Reply', () => { setReplyTo(item); setEditing(undefined); })}
         {own && button('Edit', () => { setEditing(item); setReplyTo(undefined); })}
         {own && button('Delete', () => setConfirmDelete(item.id), true)}
@@ -99,19 +105,19 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
           setFeedback({ text: result.queued ? `Requested help from ${result.queued} agent${result.queued === 1 ? '' : 's'}. Replies will appear here.` : 'These agents have already received this request. Replies will appear here.', error: false });
         }))}
       </View>}
-      {!item.isDeleted && <ContextIntentionControls post={item} conversationId={conversationId} onChange={() => void load()} />}
+      {!item.isDeleted && actionsFor === item.id && <ContextIntentionControls post={item} conversationId={conversationId} onChange={() => void load()} />}
       {confirmDelete === item.id && <View><Text style={{ color: c.textMetadata }}>Delete this post? Replies will remain.</Text><View style={styles.actions}>{button('Confirm delete', () => void action(item.id, () => contextLaneManager.deletePost(conversationId, item.id)), true)}{button('Cancel', () => setConfirmDelete(undefined))}</View></View>}
       {reporting === item.id && <View><Text style={{ color: c.textMetadata }}>Report this post for review</Text><View style={styles.actions}>{['Spam', 'Harassment', 'Other'].map(reason => <React.Fragment key={reason}>{button(reason, () => void action(item.id, () => api.reportContextPost(conversationId, item.id, reason.toLowerCase()), 'Report submitted.'))}</React.Fragment>)}{button('Cancel', () => setReporting(undefined))}</View></View>}
       {busy === item.id && <ActivityIndicator color={c.primary} accessibilityLabel="Working" />}
-    </View>;
+    </Pressable>;
   };
   return <View style={styles.container}>
     <View style={[styles.toolbar, { borderBottomColor: c.border }]}>
-      <TextInput accessibilityLabel="Search conversation content" placeholder={feed.contextAvailable === false ? 'Search Stream' : 'Search Context and Stream'} placeholderTextColor={c.textMuted} value={search} onChangeText={feed.chooseSearch} style={[styles.search, { color: c.textPrimary, backgroundColor: c.surface, borderColor: c.border }]} />
-      {search ? button('Clear search', () => feed.chooseSearch('')) : null}{button('Refresh', () => void load())}
+      <TextInput accessibilityLabel="Search conversation content" placeholder="Search this chat’s Stream" placeholderTextColor={c.textMuted} value={search} onChangeText={feed.chooseSearch} style={[styles.search, { color: c.textPrimary, backgroundColor: c.surface, borderColor: c.border }]} />
+      {search ? button('Clear search', () => feed.chooseSearch('')) : null}{button('Refresh Stream', () => void load())}
     </View>
-    <View style={[styles.actions, { paddingHorizontal: 12 }]}>{(feed.contextAvailable === false ? ['stream'] as const : ['all', 'context', 'stream'] as const).map(filter => <TouchableOpacity key={filter} accessibilityRole="button" accessibilityLabel={`${filter === 'all' ? 'All content' : filter === 'context' ? 'Context posts' : 'Stream entries'}`} accessibilityState={{ selected: feed.contextAvailable === false || feed.filter === filter }} onPress={() => feed.chooseFilter(filter)} style={[styles.action, { backgroundColor: feed.contextAvailable === false || feed.filter === filter ? c.primaryMuted : undefined, borderRadius: 8 }]}><Text style={{ color: c.primary }}>{filter === 'all' ? 'All' : filter === 'context' ? 'Context' : 'Stream'}</Text></TouchableOpacity>)}{button('Private entry', () => setCreatingPrivate(true))}<StreamCompactToggle /></View>
-    {feed.contextAvailable === false && <Text style={{ color: c.textMetadata, paddingHorizontal: 16 }}>Context is unavailable. This chat’s Stream and your private entries remain available.</Text>}
+    <View style={[styles.actions, { paddingHorizontal: 12 }]}>{(feed.contextAvailable === false ? ['stream'] as const : ['all', 'context', 'stream'] as const).map(filter => <TouchableOpacity key={filter} accessibilityRole="button" accessibilityLabel={`${filter === 'all' ? 'All content' : filter === 'context' ? 'Back channel posts' : 'Stream entries'}`} accessibilityState={{ selected: feed.contextAvailable === false || feed.filter === filter }} onPress={() => feed.chooseFilter(filter)} style={[styles.action, { backgroundColor: feed.contextAvailable === false || feed.filter === filter ? c.primaryMuted : undefined, borderRadius: radius.sm }]}><Text style={{ color: c.primary }}>{filter === 'all' ? 'All' : filter === 'context' ? 'Back channel' : 'Saved'}</Text></TouchableOpacity>)}{button('Private entry', () => setCreatingPrivate(true))}<StreamCompactToggle /></View>
+    {feed.contextAvailable === false && <Text style={{ color: c.textMetadata, paddingHorizontal: 16 }}>Back channel is unavailable. This chat’s Stream and your private entries remain available.</Text>}
     {creatingPrivate && <ConversationEntryEditor conversationId={conversationId} onCancel={() => setCreatingPrivate(false)} onDone={() => { setCreatingPrivate(false); void load(); }} />}
     {feedback && <Text accessibilityRole={feedback.error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={{ color: feedback.error ? c.danger : c.textMetadata, padding: 12 }}>{feedback.text}</Text>}
     {state.isError && <View style={{ paddingHorizontal: 16 }}><Text accessibilityRole="alert" style={{ color: c.danger }}>{feed.error} {feed.items.length ? 'Showing previously loaded content.' : ''}</Text>{button('Retry', () => void load())}</View>}
@@ -120,15 +126,15 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
       refreshing={state.isLoading} onRefresh={() => void load()}
       onEndReached={() => { if (!state.isError) void load(true); }} onEndReachedThreshold={0.5}
       ListFooterComponent={state.hasMore && feed.items.length ? button('Load older content', () => void load(true)) : null}
-      ListEmptyComponent={state.isLoading ? <ActivityIndicator color={c.primary} style={{ margin: 24 }} /> : !state.isError ? <Text style={{ color: c.textMetadata, textAlign: 'center', margin: 24 }}>{search ? 'No matching conversation content.' : feed.contextAvailable === false ? 'This chat’s Stream entries appear here. Private entries are labeled Only you.' : 'Context posts and this chat’s Stream entries appear here. Private entries are labeled Only you.'}</Text> : null} />
+      ListEmptyComponent={state.isLoading ? <ActivityIndicator color={c.primary} style={{ margin: 24 }} /> : !state.isError ? <Text style={{ color: c.textMetadata, textAlign: 'center', margin: 24 }}>{search ? 'No matching conversation content.' : feed.contextAvailable === false ? 'This chat’s Stream entries appear here. Private entries are labeled Only you.' : 'Notes and saved items for this chat appear here. Private entries are labeled Only you.'}</Text> : null} />
     {feed.contextAvailable === true && <ContextComposer key={`${conversationId}:${editing?.id || replyTo?.id || 'new'}`} conversationId={conversationId} editing={editing} replyTo={replyTo} onDone={() => { setEditing(undefined); setReplyTo(undefined); void load(); }} />}
   </View>;
 }
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, width: '100%', maxWidth: 720, alignSelf: 'center' },
   toolbar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
-  search: { flex: 1, minWidth: 0, height: 44, borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, paddingHorizontal: 10, marginVertical: 8 },
-  card: { padding: 12, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, marginBottom: 10 },
+  search: { flex: 1, minWidth: 0, height: 44, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.sm, paddingHorizontal: 10, marginVertical: 8 },
+  card: { padding: space[3], borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, marginBottom: 10 },
   quote: { borderLeftWidth: 2, paddingLeft: 10, marginTop: 10 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   action: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
