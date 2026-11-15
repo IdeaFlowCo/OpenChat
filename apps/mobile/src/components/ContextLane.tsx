@@ -84,14 +84,14 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
   const renderItem = ({ item: { post: item, reply } }: { item: { post: ContextPost; reply: boolean } }) => {
     const own = item.authorId === currentUser?.userId;
     const parent = item.replyTo || state.posts.find(p => p.id === item.replyToId);
-    return <Pressable onHoverIn={() => setActionsFor(item.id)} onLongPress={() => setActionsFor(item.id)} style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, marginLeft: reply ? 16 : 0 }]}>
+    return <Pressable focusable={false} onHoverIn={() => setActionsFor(item.id)} onLongPress={() => setActionsFor(item.id)} style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, marginLeft: reply ? 16 : 0 }]}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'baseline' }}>
         <Avatar name={item.agent?.name || item.author?.name} avatarUrl={item.agent ? undefined : item.author?.avatarUrl} isBot={!!item.agent} size={28} />
         <Text style={[type.label, { color: c.textPrimary, fontWeight: '600' }]}>{item.author?.name || (own ? 'You' : 'Chat participant')}</Text>
         {item.agent && <Text style={{ color: c.textMetadata, ...type.meta }}>via {item.agent.name} · Agent</Text>}
         <Text style={{ color: c.textMetadata, ...type.meta }}>{item.kind === 'ask' ? 'ASK' : item.kind === 'offer' ? 'OFFER' : 'NOTE'}</Text>
       </View>
-      <Text style={{ color: c.textMetadata, ...type.meta, marginTop: 3 }}>Shared with this chat · {formatRelativeTime(item.createdAt)}{item.revision > 1 ? ' · Edited' : ''}</Text>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Show exact time: ${new Date(item.createdAt).toLocaleString()}`} onPress={() => setFeedback({ text: new Date(item.createdAt).toLocaleString(), error: false })} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: c.textMetadata, ...type.meta }} {...{ title: new Date(item.createdAt).toLocaleString() }}>Shared with this chat · {formatRelativeTime(item.createdAt)}{item.revision > 1 ? ' · Edited' : ''}</Text></TouchableOpacity>
       {item.replyToId && <View style={[styles.quote, { borderLeftColor: c.border }]}><Text numberOfLines={2} style={{ color: c.textMetadata, ...type.label }}>{parent?.isDeleted ? 'Reply to a deleted post' : parent ? `Reply to ${parent.author?.name || 'a participant'}: ${parent.text}` : 'Reply to an earlier post'}</Text></View>}
       <Text selectable style={{ color: item.isDeleted ? c.textMetadata : c.textPrimary, ...type.body, marginTop: 8 }}>{item.isDeleted ? 'Post deleted' : item.text}</Text>
       {!item.isDeleted && button(actionsFor === item.id ? 'Hide actions' : 'More', () => setActionsFor(actionsFor === item.id ? undefined : item.id))}
@@ -114,7 +114,7 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
   return <View style={styles.container}>
     <View style={[styles.toolbar, { borderBottomColor: c.border }]}>
       <TextInput accessibilityLabel="Search conversation content" placeholder="Search this chat’s Stream" placeholderTextColor={c.textMuted} value={search} onChangeText={feed.chooseSearch} style={[styles.search, { color: c.textPrimary, backgroundColor: c.surface, borderColor: c.border }]} />
-      {search ? button('Clear search', () => feed.chooseSearch('')) : null}
+      {search ? button('Clear search', () => feed.chooseSearch('')) : null}{button('Refresh Stream', () => void load())}
     </View>
     <View style={[styles.actions, { paddingHorizontal: 12 }]}>{(feed.contextAvailable === false ? ['stream'] as const : ['all', 'context', 'stream'] as const).map(filter => <TouchableOpacity key={filter} accessibilityRole="button" accessibilityLabel={`${filter === 'all' ? 'All content' : filter === 'context' ? 'Back channel posts' : 'Stream entries'}`} accessibilityState={{ selected: feed.contextAvailable === false || feed.filter === filter }} onPress={() => feed.chooseFilter(filter)} style={[styles.action, { backgroundColor: feed.contextAvailable === false || feed.filter === filter ? c.primaryMuted : undefined, borderRadius: radius.sm }]}><Text style={{ color: c.primary }}>{filter === 'all' ? 'All' : filter === 'context' ? 'Back channel' : 'Saved'}</Text></TouchableOpacity>)}{button('Private entry', () => setCreatingPrivate(true))}<StreamCompactToggle /></View>
     {feed.contextAvailable === false && <Text style={{ color: c.textMetadata, paddingHorizontal: 16 }}>Back channel is unavailable. This chat’s Stream and your private entries remain available.</Text>}

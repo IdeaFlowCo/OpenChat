@@ -55,7 +55,7 @@ export function ContextComposer({ conversationId, replyTo, editing, onDone }: { 
       {error && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={{ color: c.danger, marginBottom: 8 }}>{error}</Text>}
       <View style={[styles.inputRow, { backgroundColor: c.background, borderColor: c.border }]}>
         <TextInput
-          style={[styles.input, { color: c.textPrimary }]}
+          style={[styles.input, { color: c.textPrimary, maxHeight: expanded ? 120 : 24 }]}
           placeholder="Add to Stream…"
           onFocus={() => setExpanded(true)}
           placeholderTextColor={c.textMuted}
@@ -63,7 +63,7 @@ export function ContextComposer({ conversationId, replyTo, editing, onDone }: { 
           editable={!isSending}
           value={text}
           onChangeText={setText}
-          multiline={expanded}
+          multiline
           maxLength={2000}
         />
         <TouchableOpacity
