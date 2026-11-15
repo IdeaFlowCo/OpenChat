@@ -13,6 +13,15 @@ export function DesktopKeyboardShortcuts({ enabled }: { enabled: boolean }) {
     const pendingEscapes = new Set<ReturnType<typeof setTimeout>>();
     const handleKey = (event: KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229 || event.defaultPrevented || !navigationRef.isReady()) return;
+      if (event.key === 'Escape') {
+        const target = event.target as (HTMLElement & { value?: unknown }) | null;
+        const editable = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable;
+        const text = typeof target?.value === 'string' ? target.value : target?.textContent ?? '';
+        const route = navigationRef.getCurrentRoute()?.name;
+        // Search/recipient lookup own their input and may close on Escape.
+        // A chat or Stream draft must never be discarded by a global key.
+        if (editable && text.length > 0 && route !== 'Search' && route !== 'NewConversation') return;
+      }
       if (dispatchDesktopKeyboardHandler(event)) return;
       const meta = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();

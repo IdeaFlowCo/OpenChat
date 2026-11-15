@@ -3,8 +3,8 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  platform: { OS: 'web' }, desktop: true,
-  navigation: { isReady: () => true, canGoBack: () => true, goBack: vi.fn(), dispatch: vi.fn() },
+  platform: { OS: 'web' }, desktop: true, route: 'Search',
+  navigation: { isReady: () => true, canGoBack: () => true, getCurrentRoute: () => ({ name: mocks.route }), goBack: vi.fn(), dispatch: vi.fn() },
 }));
 vi.mock('react-native', () => ({ Platform: mocks.platform }));
 vi.mock('@react-navigation/native', () => ({ CommonActions: { navigate: (payload: unknown) => payload } }));
@@ -18,7 +18,7 @@ let listeners: Set<(event: KeyboardEvent) => void>;
 let captureListener = false;
 const disposers: (() => void)[] = [];
 beforeEach(() => {
-  mocks.platform.OS = 'web'; mocks.desktop = true; vi.clearAllMocks();
+  mocks.platform.OS = 'web'; mocks.desktop = true; mocks.route = 'Search'; vi.clearAllMocks();
   listeners = new Set(); captureListener = false;
   vi.stubGlobal('document', {
     addEventListener: (type: string, handler: (e: KeyboardEvent) => void, capture: boolean) => { if (type === 'keydown') { listeners.add(handler); captureListener = capture; } },
@@ -33,8 +33,8 @@ async function mount(enabled = true) {
   await act(async () => { tree = create(React.createElement(DesktopKeyboardShortcuts, { enabled })); });
 }
 const finishKey = () => new Promise(resolve => setTimeout(resolve, 0));
-function key(value: string, meta = false, isComposing = false) {
-  const event = { key: value, metaKey: meta, ctrlKey: false, shiftKey: false, isComposing, defaultPrevented: false, preventDefault: vi.fn(() => { event.defaultPrevented = true; }) };
+function key(value: string, meta = false, isComposing = false, target: unknown = null) {
+  const event = { key: value, metaKey: meta, ctrlKey: false, shiftKey: false, isComposing, target, defaultPrevented: false, preventDefault: vi.fn(() => { event.defaultPrevented = true; }) };
   listeners.forEach(handler => handler(event as unknown as KeyboardEvent)); return event;
 }
 
@@ -82,6 +82,18 @@ it('cancels a pending Escape when the authenticated shell is disabled', async ()
   await act(async () => tree!.update(React.createElement(DesktopKeyboardShortcuts, { enabled: false })));
   await finishKey();
   expect(mocks.navigation.goBack).not.toHaveBeenCalled();
+});
+
+it('preserves non-empty chat and Stream drafts but still closes Search with a query', async () => {
+  await mount();
+  const layout = vi.fn(); const blur = registerDesktopKeyboardHandler(layout); disposers.push(blur);
+  const draft = { tagName: 'TEXTAREA', value: 'Keep this draft' };
+  mocks.route = 'Conversations'; key('Escape', false, false, draft); await finishKey();
+  expect(layout).not.toHaveBeenCalled(); expect(draft.value).toBe('Keep this draft');
+  blur(); mocks.route = 'ConversationThoughts'; key('Escape', false, false, draft); await finishKey();
+  expect(mocks.navigation.goBack).not.toHaveBeenCalled(); expect(draft.value).toBe('Keep this draft');
+  mocks.route = 'Search'; key('Escape', false, false, { tagName: 'INPUT', value: 'Search query' }); await finishKey();
+  expect(mocks.navigation.goBack).toHaveBeenCalledTimes(1);
 });
 
 it('leaves phone and native keyboard behavior unchanged', async () => {
