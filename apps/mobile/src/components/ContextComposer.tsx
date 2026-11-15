@@ -117,7 +117,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sendText: {
-    fontWeight: '600',
     ...type.label,
+    fontWeight: '600',
   },
 });
