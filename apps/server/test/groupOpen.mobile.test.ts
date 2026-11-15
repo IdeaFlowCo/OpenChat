@@ -35,6 +35,9 @@ vi.mock('react-native', async () => {
       timing: () => ({ start: vi.fn() }), spring: () => ({ start: vi.fn() }), sequence: () => ({ start: vi.fn() }),
     },
     Easing: { out: (fn: unknown) => fn, quad: (t: number) => t },
+    // Swipe actions on a message row (SwipeableMessage): inert here, the gesture maths is unit-tested.
+    PanResponder: { create: () => ({ panHandlers: {} }) },
+    AccessibilityInfo: { isReduceMotionEnabled: async () => false },
     Pressable: 'Pressable',
     Keyboard: { addListener: vi.fn(() => ({ remove: vi.fn() })) },
     ActivityIndicator: 'ActivityIndicator', Image: 'Image', ScrollView: 'ScrollView',

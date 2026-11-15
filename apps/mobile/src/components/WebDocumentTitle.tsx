@@ -36,11 +36,12 @@ export function WebDocumentTitle() {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const ready = navigationRef.isReady();
     const route = ready ? navigationRef.getCurrentRoute() : undefined;
-    const options = ready ? navigationRef.getCurrentOptions() as { title?: unknown } | undefined : undefined;
+    // `documentTitle` lets a screen name what is open (a person, a group) for the tab without changing its header.
+    const options = ready ? navigationRef.getCurrentOptions() as { title?: unknown; documentTitle?: unknown } | undefined : undefined;
     const params = route?.params as { conversationId?: unknown } | undefined;
     const title = resolveDocumentTitle({
       routeName: route?.name,
-      optionTitle: options?.title,
+      optionTitle: typeof options?.documentTitle === 'string' && options.documentTitle.trim() ? options.documentTitle : options?.title,
       routeConversationId: typeof params?.conversationId === 'string' ? params.conversationId : undefined,
       activeConversationId,
       unreadTotal,

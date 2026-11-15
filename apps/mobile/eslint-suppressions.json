@@ -131,7 +131,7 @@
   },
   "src/components/LinkPreviewCard.tsx": {
     "no-restricted-syntax": {
-      "count": 5
+      "count": 4
     }
   },
   "src/components/MasterDetailLayout.tsx": {
@@ -151,7 +151,7 @@
   },
   "src/components/MessageActionSheet.tsx": {
     "no-restricted-syntax": {
-      "count": 15
+      "count": 14
     }
   },
   "src/components/NVCComposerModal.tsx": {
@@ -296,7 +296,7 @@
   },
   "src/screens/ChatScreen.tsx": {
     "no-restricted-syntax": {
-      "count": 41
+      "count": 39
     }
   },
   "src/screens/ComposeScreen.tsx": {

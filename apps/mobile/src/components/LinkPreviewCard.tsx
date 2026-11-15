@@ -19,34 +19,20 @@ interface Props {
   scheme: 'light' | 'dark';
 }
 
-export function LinkPreviewCard({ preview, isOwn, scheme }: Props) {
+export function LinkPreviewCard({ preview, scheme }: Props) {
   const c = getColors(scheme);
 
   const url = safeMessageUrl(preview.url);
   if (!url) return null;
   const handlePress = () => { void openMessageLink(url); };
 
-  /**
-   * Own-bubble foreground tint. The own bubble is ink in light mode but PAPER
-   * in dark mode, so hardcoded white was unreadable in dark. Mirrors the
-   * `ownTint` helper in ChatScreen: derive every own-bubble colour from
-   * `c.bubbleOwnText`, the token that already means "text on the own bubble".
-   */
-  const ownTint = (opacity: number) => {
-    const hex = c.bubbleOwnText.replace('#', '');
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-    return `rgba(${r},${g},${b},${opacity})`;
-  };
-
-  const bgColor = isOwn
-    ? ownTint(0.12)
-    : scheme === 'dark' ? c.surfaceElevated : '#F0F0F0';
-  const borderColor = isOwn ? ownTint(0.2) : c.border;
-  const titleColor = isOwn ? c.bubbleOwnText : c.textPrimary;
-  const descColor = isOwn ? ownTint(0.75) : c.textSecondary;
-  const siteColor = isOwn ? ownTint(0.55) : c.textMuted;
+  // Cards sit outside the message bubble. Give them their own opaque surface;
+  // bubble foreground tints become white-on-white on the conversation canvas.
+  const bgColor = c.surface;
+  const borderColor = c.border;
+  const titleColor = c.textPrimary;
+  const descColor = c.textMetadata;
+  const siteColor = c.textMetadata;
 
   return (
     <TouchableOpacity

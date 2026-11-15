@@ -148,6 +148,14 @@ export function ContactProfileScreen() {
     }
   }, [user]);
 
+  const safeEmail = user && !isPlaceholderEmail(user.email) ? user.email : '';
+  const officialName = user?.name || safeEmail || 'Unknown';
+  const displayName = user ? privateName.name || officialName : loadingProfile ? 'Loading contact' : 'Person unavailable';
+  // Keep this hook above the loading/unavailable return, and clear a stale person's title.
+  useEffect(() => {
+    navigation.setOptions({ documentTitle: `${displayName} · Contact info` } as object);
+  }, [displayName, navigation]);
+
   if (!user) {
     return (
       <View style={[styles.root, styles.centered, { backgroundColor: r.canvas }]}>
@@ -156,9 +164,6 @@ export function ContactProfileScreen() {
     );
   }
 
-  const safeEmail = isPlaceholderEmail(user.email) ? '' : user.email;
-  const officialName = user.name || safeEmail || 'Unknown';
-  const displayName = privateName.name || officialName;
   const presenceLine =
     (pres?.statusMessage) ||
     (pres?.status === 'online' ? 'Online' : null) ||

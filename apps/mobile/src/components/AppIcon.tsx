@@ -2,6 +2,11 @@ import Svg, { Circle, Line, Path, Polyline } from 'react-native-svg';
 
 export type AppIconName =
   | 'attach'
+  | 'bookmark'
+  | 'circle'
+  | 'panel'
+  | 'smile'
+  | 'todo'
   | 'block'
   | 'bot'
   | 'camera'
@@ -324,6 +329,35 @@ export function AppIcon({ name, color, size = 20, strokeWidth = 2 }: AppIconProp
           <Path d="M8 9H6v11h12V9h-2" {...common} />
           <Polyline points="8 6 12 2 16 6" {...common} />
           <Line x1="12" y1="2" x2="12" y2="14" {...common} />
+        </>
+      )}
+      {name === 'bookmark' && (
+        /* Keep it: save a message to Stream. */
+        <Path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z" {...common} />
+      )}
+      {name === 'circle' && (
+        <Circle cx="12" cy="12" r="8.5" {...common} />
+      )}
+      {name === 'todo' && (
+        /* A ticked circle: a to-do. */
+        <>
+          <Circle cx="12" cy="12" r="8.5" {...common} />
+          <Polyline points="8.2 12.4 11 15.2 16 9.6" {...common} />
+        </>
+      )}
+      {name === 'panel' && (
+        /* A window with its right-hand side panel marked. */
+        <>
+          <Path d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" {...common} />
+          <Line x1="14.5" y1="5" x2="14.5" y2="19" {...common} />
+        </>
+      )}
+      {name === 'smile' && (
+        <>
+          <Circle cx="12" cy="12" r="8.5" {...common} />
+          <Path d="M8.5 14a4.2 4.2 0 0 0 7 0" {...common} />
+          <Line x1="9.2" y1="9.6" x2="9.2" y2="10.2" {...common} />
+          <Line x1="14.8" y1="9.6" x2="14.8" y2="10.2" {...common} />
         </>
       )}
       {name === 'x' && (

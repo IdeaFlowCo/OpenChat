@@ -2,6 +2,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
+  setOptions: vi.fn(),
   exactEmail: undefined as string | undefined, noConversation: false, userId: 'alice', targetId: 'bob', name: 'Official Bob', isBot: false,
   platform: { OS: 'ios', select: (values: any) => values.ios ?? values.default }, getProfile: vi.fn(), get: vi.fn(), set: vi.fn(), clear: vi.fn(), navigate: vi.fn(),
 }));
@@ -10,7 +11,7 @@ vi.mock('react-native', () => ({
   ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View', ScrollView: 'ScrollView',
   Alert: { alert: vi.fn() },
 }));
-vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mocks.navigate }), useRoute: () => ({ params: { userId: mocks.targetId, exactEmail: mocks.exactEmail } }) }));
+vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mocks.navigate, setOptions: mocks.setOptions }), useRoute: () => ({ params: { userId: mocks.targetId, exactEmail: mocks.exactEmail } }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({
   currentUser: { userId: mocks.userId }, conversations: mocks.noConversation ? [] : [{ participants: [{ user: { id: mocks.targetId, name: mocks.name, isBot: mocks.isBot } }] }],
   presence: new Map(), createConversation: vi.fn(), refreshConversations: vi.fn(),
@@ -104,6 +105,8 @@ describe('native and canonical web private names', () => {
     await render();
     expect(mocks.getProfile).toHaveBeenCalledWith('bob', undefined);
     expect(text()).toContain('Official Bob');
+    // The browser tab names the person, not only the screen.
+    expect(mocks.setOptions).toHaveBeenLastCalledWith({ documentTitle: 'Official Bob · Contact info' });
     await act(async () => button('Set private name').props.onPress());
     await act(async () => root!.root.findByType('TextInput').props.onChangeText('No DM needed'));
     await act(async () => button('Save private name').props.onPress());
@@ -118,6 +121,7 @@ describe('native and canonical web private names', () => {
     await render();
     expect(text()).toContain('Person unavailable');
     expect(button('Set private name')).toBeUndefined();
+    expect(mocks.setOptions).toHaveBeenLastCalledWith({ documentTitle: 'Person unavailable · Contact info' });
   });
   it('offers no alias editor for yourself', async () => { mocks.targetId = 'alice'; await render(); expect(button('Set private name')).toBeUndefined(); });
   it('offers no alias editor for a bot', async () => { mocks.isBot = true; await render(); expect(button('Set private name')).toBeUndefined(); });

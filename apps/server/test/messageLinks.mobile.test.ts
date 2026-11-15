@@ -12,10 +12,12 @@ vi.mock('react-native', () => ({
 vi.mock('expo-clipboard', () => ({ setStringAsync: os.copy }));
 import { MessageText, openMessageLink } from '../../mobile/src/components/MessageText.js';
 import { LinkPreviewCard } from '../../mobile/src/components/LinkPreviewCard.js';
+import * as colors from '../../mobile/src/theme/colors.js';
+import { palettes } from '../../mobile/src/theme/palette.js';
 import { MessageLinkActions } from '../../mobile/src/components/MessageLinkActions.js';
 let screen: ReturnType<typeof create>;
 beforeEach(() => { vi.clearAllMocks(); os.platform = 'ios'; os.open.mockResolvedValue(undefined); os.copy.mockResolvedValue(true); });
-afterEach(async () => { if (screen) await act(async () => screen.unmount()); vi.unstubAllGlobals(); });
+afterEach(async () => { if (screen) await act(async () => screen.unmount()); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('message URL detection', () => {
   it.each([
@@ -101,4 +103,26 @@ it('reports open failures without an unhandled rejection', async () => {
 it('does not expose unsafe preview destinations as an alternate link action', async () => {
   await act(async () => { screen = create(React.createElement(LinkPreviewCard, { preview: { url: 'javascript:alert(1)', title: 'Unsafe' }, isOwn: false, scheme: 'light' })); });
   expect(screen.toJSON()).toBeNull(); expect(os.open).not.toHaveBeenCalled();
+});
+
+it.each(['paper', 'slate'] as const)('keeps detached link-preview text readable in the %s palette', async look => {
+  const luminance = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+    .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+  for (const scheme of ['light', 'dark'] as const) {
+    vi.spyOn(colors, 'getColors').mockReturnValue(palettes[look][scheme]);
+    for (const isOwn of [true, false]) {
+      await act(async () => { screen = create(React.createElement(LinkPreviewCard, {
+        preview: { url: 'https://example.test', title: 'Readable title', description: 'Readable description', siteName: 'Example' }, isOwn, scheme,
+      })); });
+      const ground = Object.assign({}, ...screen.root.findByType('TouchableOpacity').props.style).backgroundColor;
+      expect(ground).toMatch(/^#[0-9a-f]{6}$/i);
+      for (const text of screen.root.findAllByType('Text')) {
+        const foreground = Object.assign({}, ...text.props.style).color;
+        const a = luminance(foreground), b = luminance(ground);
+        expect((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toBeGreaterThanOrEqual(4.5);
+      }
+      await act(async () => screen.unmount());
+    }
+  }
 });

@@ -54,6 +54,10 @@ export function GroupSettingsScreen() {
   const memberIds = new Set((conversation?.participants || []).map(p => p.user.id));
 
   const [draftTitle, setDraftTitle] = useState(conversation?.title || '');
+  // The browser tab names the group, not just "Group Info" (titles name the open thing).
+  useEffect(() => {
+    if (conversation?.title) navigation.setOptions({ documentTitle: `${conversation.title} · Group info` } as object);
+  }, [conversation?.title, navigation]);
   const [savingTitle, setSavingTitle] = useState(false);
 
   const [showAdd, setShowAdd] = useState(false);

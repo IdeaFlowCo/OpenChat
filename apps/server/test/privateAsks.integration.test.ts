@@ -260,4 +260,13 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
     expect((await review.listNoteReviews(alice, { kind: 'thing', id: topic.id })).asks).toEqual([]);
     expect((await graph.listAsks(alice, { direction: 'from_me', q: 'sail' })).asks).toHaveLength(1);
   });
+  it('filters chat placement before the 200-row limit and retains the owner/membership boundary', async () => {
+    const target = await graph.saveAsk(alice, { author: 'self', carrier: 'self', text: 'Target chat task', placements: [{ kind: 'conversation', id: shared }] });
+    for (let i = 0; i < 202; i++) await graph.saveAsk(alice, { author: 'self', carrier: 'self', text: `Unrelated task ${suffix} ${i}` });
+    const page = await graph.listConversationTodos(alice, shared);
+    expect(page.asks.some(ask => ask.id === target.ask.id)).toBe(true);
+    expect(page.truncated).toBe(false);
+    expect(await status(() => graph.listConversationTodos(carol, shared))).toBe(404);
+  }, 120_000);
+
 });

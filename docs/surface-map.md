@@ -106,3 +106,13 @@ The public `/` page verifies the current browser's OpenChat session. Signed-in
 visitors see **Signed in as [name]** and **Open OpenChat**; signed-out visitors
 see **Sign in**. It refreshes on return and cross-tab sign-out. Agent setup links
 to the shared `/agents` guide instead of maintaining separate MCP snippets.
+
+### Conversation panel
+
+| Door | From Chats | Surface |
+|---|---|---|
+| Stream | Open chat → Stream | Chat notes and saved items in a docked panel, drawer or phone screen |
+| To-dos | Open chat → To-dos | Owner-only tasks with source-message links |
+| Details | Open chat → More → Details | Person or group details; same panel on wide screens |
+
+Message hover, long-press and swipe expose Reply, Save to Stream and Make to-do.

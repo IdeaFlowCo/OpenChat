@@ -89,3 +89,10 @@ describe('theme preference defaults and migration', () => {
     expect(theme.scheme).toBe('light');
   });
 });
+
+it('preserves the stored Paper palette while following the system scheme', async () => {
+  mocks.getItem.mockImplementation(async key => key === 'openchat_look' ? 'paper' : 'system');
+  await mount(); expect(theme.look).toBe('paper'); expect(theme.scheme).toBe('dark');
+  expect(mocks.setItem).not.toHaveBeenCalled();
+  await act(async () => tree.unmount()); await mount(); expect(theme.look).toBe('paper');
+});
