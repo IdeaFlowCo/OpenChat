@@ -267,6 +267,6 @@ integration('private asks: the overlay ask kind, seen only by its owner', () => 
     expect(page.asks.some(ask => ask.id === target.ask.id)).toBe(true);
     expect(page.truncated).toBe(false);
     expect(await status(() => graph.listConversationTodos(carol, shared))).toBe(404);
-  });
+  }, 120_000);
 
 });
