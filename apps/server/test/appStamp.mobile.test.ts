@@ -12,6 +12,8 @@ const { createStamp } = require('../../mobile/scripts/app-stamp.cjs');
 const mocks = vi.hoisted(() => ({ stamp: { version: '1.0.20', commit: 'a'.repeat(40), commitTime: '2026-11-15T12:00:00Z', buildTime: '2026-11-15T13:00:00Z', event: 'commit' } }));
 vi.mock('react-native', () => ({ Platform: { OS: 'web' }, AppState: {} }));
 vi.mock('expo-constants', () => ({ default: { expoConfig: { version: '1.0.20', extra: { appStamp: mocks.stamp } } } }));
+vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
+import { AppStamp } from '../../mobile/src/components/AppStamp.web';
 import { useAppStamp } from '../../mobile/src/hooks/useAppStamp';
 
 const now = Date.parse('2026-11-15T12:00:00Z');
@@ -61,6 +63,19 @@ describe('stamp visibility clock', () => {
     vi.stubGlobal('document', doc);
   });
   afterEach(async () => { if (tree!) await act(async () => tree.unmount()); vi.useRealTimers(); vi.unstubAllGlobals(); });
+  it('exposes the displayed exact time, timezone and commit in the focused control name', async () => {
+    await act(async () => { tree = create(React.createElement(AppStamp)); });
+    let button = tree.root.findByType('button');
+    expect(button.props['aria-label']).toContain('Updated just now');
+    await act(async () => button.props.onClick());
+    button = tree.root.findByType('button');
+    const time = tree.root.findByType('time');
+    expect(button.props['aria-label']).toContain(time.props.children);
+    expect(button.props['aria-label']).toContain('commit aaaaaaa');
+    expect(button.props['aria-pressed']).toBe(true);
+    expect(time.props.dateTime).toBe(mocks.stamp.commitTime);
+    expect(time.props.title).toContain('2026');
+  });
   it('ticks once per minute only while visible, refreshes on return, and cleans up', async () => {
     function Probe() { stamp = useAppStamp(); return null; }
     await act(async () => { tree = create(React.createElement(Probe)); });
