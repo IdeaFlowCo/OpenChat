@@ -40,9 +40,10 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
   const c = getColors(scheme);
   const { currentUser } = useChat();
   const feed = useConversationContent(accountId, conversationId);
-  const search = feed.search;
-  const state = { posts: feed.items.flatMap(item => item.origin === 'context' ? [item.context] : []), isLoading: feed.loading, isError: !!feed.error, hasMore: feed.hasMore };
   const [links, setLinks] = useState(false);
+  const [linksSearch, setLinksSearch] = useState('');
+  const search = links ? linksSearch : feed.search;
+  const state = { posts: feed.items.flatMap(item => item.origin === 'context' ? [item.context] : []), isLoading: feed.loading, isError: !!feed.error, hasMore: feed.hasMore };
   const [creatingPrivate, setCreatingPrivate] = useState(false);
   const [replyTo, setReplyTo] = useState<ContextPost>();
   const [editing, setEditing] = useState<ContextPost>();
@@ -109,8 +110,8 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
   };
   return <View style={styles.container}>
     <View style={[styles.toolbar, { borderBottomColor: c.border }]}>
-      <TextInput accessibilityLabel="Search conversation content" placeholder={links ? 'Search loaded links' : feed.contextAvailable === false ? 'Search Stream' : 'Search notes and saved items'} placeholderTextColor={c.textMuted} value={search} onChangeText={feed.chooseSearch} style={[styles.search, { color: c.textPrimary, backgroundColor: c.surface, borderColor: c.border }]} />
-      {search ? button('Clear search', () => feed.chooseSearch('')) : null}{button('Refresh', () => void load())}
+      <TextInput accessibilityLabel="Search conversation content" placeholder={links ? 'Search loaded links' : feed.contextAvailable === false ? 'Search Stream' : 'Search notes and saved items'} placeholderTextColor={c.textMuted} value={search} onChangeText={value => links ? setLinksSearch(value) : feed.chooseSearch(value)} style={[styles.search, { color: c.textPrimary, backgroundColor: c.surface, borderColor: c.border }]} />
+      {search ? button('Clear search', () => links ? setLinksSearch('') : feed.chooseSearch('')) : null}{button('Refresh', () => void load())}
     </View>
     <View style={[styles.actions, { paddingHorizontal: 12 }]}>{(feed.contextAvailable === false ? ['stream'] as const : ['all', 'context', 'stream'] as const).map(filter => <TouchableOpacity key={filter} accessibilityRole="button" accessibilityLabel={`${filter === 'all' ? 'All content' : filter === 'context' ? 'Context posts' : 'Stream entries'}`} accessibilityState={{ selected: !links && (feed.contextAvailable === false || feed.filter === filter) }} onPress={() => { setLinks(false); feed.chooseFilter(filter); }} style={[styles.action, { backgroundColor: !links && (feed.contextAvailable === false || feed.filter === filter) ? c.primaryMuted : undefined, borderRadius: 8 }]}><Text style={{ color: c.primary }}>{filter === 'all' ? 'All' : filter === 'context' ? 'Context' : 'Stream'}</Text></TouchableOpacity>)}{button('Links', () => setLinks(true))}{button('Private entry', () => setCreatingPrivate(true))}<StreamCompactToggle /></View>
     {feed.contextAvailable === false && <Text style={{ color: c.textMetadata, paddingHorizontal: 16 }}>Context is unavailable. This chat’s Stream and your private entries remain available.</Text>}
