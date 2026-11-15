@@ -133,7 +133,7 @@ function AccountMenuRow({
   );
 }
 
-export function MasterDetailLayout() {
+export function MasterDetailLayout({ detail }: { detail?: ReactNode } = {}) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const navigation = useNavigation<NavProp<'Conversations'>>();
@@ -453,7 +453,7 @@ export function MasterDetailLayout() {
         <View style={{ flex: 1 }}>
           <ConversationList
             activeId={activeConversationId}
-            onSelect={setActiveConversation}
+            onSelect={id => { setActiveConversation(id); if (detail) navigation.navigate('Conversations'); }}
             onStartChat={openNew}
             compact={collapsed}
             onCreateStory={() => navigation.navigate('StoryComposer')}
@@ -489,7 +489,7 @@ export function MasterDetailLayout() {
       </Animated.View>
 
       <View style={[styles.detail, { backgroundColor: c.background }]}>
-        {activeConversationId ? (
+        {detail ?? (activeConversationId ? (
           <ChatScreen
             key={activeConversationId}
             conversationId={activeConversationId}
@@ -505,7 +505,7 @@ export function MasterDetailLayout() {
               {isUnlinkedEmbed() ? 'Choose a conversation to pick up where you left off.' : 'Select a conversation from the sidebar, or press ⌘K to search.'}
             </Text>
           </View>
-        )}
+        ))}
       </View>
       {accountMenuOpen && (
         <>

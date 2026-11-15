@@ -114,3 +114,10 @@ and Original message below the note. Settings, Profile, New message and People
 are bounded to 720px. Agent keys uses an inline New API key action. People uses
 consistent labeled buttons and marks private saved profiles Only you. Shared
 Button, Chip and ListRow controls use instant hover/focus feedback without motion.
+
+### Desktop secondary screens
+
+Settings, Profile, Edit profile and New message keep the Chats sidebar at desktop
+widths. Their existing screens occupy the detail pane, with a title and Back.
+Selecting a sidebar chat returns to Chats and preserves the selected conversation.
+Phone widths retain the existing stack headers and modal presentation.
