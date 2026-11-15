@@ -48,6 +48,18 @@ type, checks the expected size, matches the public `SHA256SUMS`, and tests ZIP
 integrity plus the manifest and DEX entries. Android build-tools `aapt2` (or `aapt`)
 must be on PATH, or supplied via `AAPT=/path/to/aapt2`; it checks the package
 `com.jacobcole.openchat`, version name, and version code against the expected values. A draft release fails these checks.
-It runs `apksigner verify` if available; otherwise signature verification still
-needs the Android build-tools step described above. It neither installs the APK
+When `apksigner` is available, it verifies the APK signature and requires exactly
+one signer whose certificate SHA-256 is
+`dc568c4ccbf4dde1ed7c411a01e3e40f519cc93a57a26a6e8b32708b61ce8cea`.
+A different, missing or additional signer fails, even if `SHA256SUMS` matches.
+Signing-key rotation requires a separately reviewed pin update; the public
+checksum file cannot change the expected certificate. Without `apksigner`, the
+script checks download integrity only, not publisher authentication; complete
+the Android build-tools signature step before distribution. It neither installs the APK
 nor verifies sign-in/runtime behavior. Temporary downloads are removed on exit.
+
+Offline regression cases (mock transport/Android-tool output; real ZIP/hash tools):
+
+```sh
+python3 scripts/test-verify-android-release.py
+```
