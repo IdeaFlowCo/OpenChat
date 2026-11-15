@@ -16,6 +16,8 @@ describe('to-dos are asks the owner both cares about and carries', () => {
   it('excludes asks someone else cares about and asks nobody carries', () => {
     expect(isTodoAsk(ask({}))).toBe(true);
     expect(isTodoAsk(ask({ fromMe: false }))).toBe(false);
+    expect(isTodoAsk(ask({ exposure: 'friends' }))).toBe(false);
+    expect(isTodoAsk(ask({ publication: { state: 'active', audienceKind: 'public', sourceRevision: 1 } }))).toBe(false);
     expect(isTodoAsk(ask({ carrier: null }))).toBe(false);
     expect(isTodoAsk(ask({ carrier: { kind: 'user', id: 'u2', name: 'Maya' } }))).toBe(false);
   });

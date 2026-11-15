@@ -48,7 +48,7 @@ type NotifStatus = 'granted' | 'denied' | 'undetermined' | 'unknown';
 
 export function SettingsScreen() {
   const navigation = useNavigation<NavProp<'Settings'>>();
-  const { preference, setPreference, scheme } = useTheme();
+  const { preference, setPreference, scheme, look, setLook } = useTheme();
   const { currentUser, isConnected, signOut } = useChat();
   const {
     preferences: socialPreferences,
@@ -558,6 +558,10 @@ export function SettingsScreen() {
       <View style={styles.section}>
         <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>APPEARANCE</Text>
         <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+      <View style={{ padding: 16 }} accessibilityRole="radiogroup" accessibilityLabel="Palette">
+        <Text style={{ color: c.textPrimary, fontWeight: '600' }}>Palette</Text>
+        {(['slate', 'paper'] as const).map(value => <TouchableOpacity key={value} accessibilityRole="radio" accessibilityState={{ checked: look === value }} onPress={() => void setLook(value)} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: c.textPrimary }}>{value === 'slate' ? 'Slate' : 'Ink & Paper'}{look === value ? ' · Selected' : ''}</Text></TouchableOpacity>)}
+      </View>
           {OPTIONS.map((opt, i) => {
             const selected = preference === opt.value;
             return (

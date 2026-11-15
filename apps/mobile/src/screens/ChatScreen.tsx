@@ -1305,7 +1305,7 @@ export function ChatScreen({
       setReplyTo(null);
       setActiveHashtag(null);
       setMentionQuery(null);
-      showToast(created ? 'Private to-do added. Only you can see it.' : 'That to-do was already on your list.');
+      showToast(created ? 'Private to-do added. Your agents can also read it.' : 'That to-do was already on your list.');
       if (embedded) requestPanel({ conversationId, tab: 'todos', focusTodoId: todo.id, passive: true });
     } catch (err) {
       logError('[todos] add from composer failed', err);
@@ -1755,7 +1755,7 @@ export function ChatScreen({
     }
     try {
       const { todo, created } = await addChatTodo({ conversationId, text: title, message: { ...message, content: message.content || message.transcript || '' } });
-      showToast(created ? 'Private to-do added. Only you can see it.' : 'That to-do was already on your list.');
+      showToast(created ? 'Private to-do added. Your agents can also read it.' : 'That to-do was already on your list.');
       if (embedded) requestPanel({ conversationId, tab: 'todos', focusTodoId: todo.id, passive: true });
     } catch (err) {
       logError('[todos] add from message failed', err);
@@ -2542,7 +2542,7 @@ export function ChatScreen({
         <View style={[styles.privateBar, { backgroundColor: r.privateSoft, borderColor: r.private }]} accessibilityRole="alert">
           <AppIcon name="lock" color={r.private} size={14} strokeWidth={2.2} />
           <Text style={[styles.privateBarText, { color: c.textPrimary }]}>
-            <Text style={{ color: r.private, fontWeight: '700' }}>Private to-do.</Text> Only you will see it. It is not sent to {isGroup ? 'the group' : 'this chat'}.
+            <Text style={{ color: r.private, fontWeight: '700' }}>Private to-do.</Text> You and your agents can read it. It is not sent to {isGroup ? 'the group' : 'this chat'}.
           </Text>
           <TouchableOpacity
             onPress={() => { setTodoMode(false); if (todoCommand.isCommand) setText(todoCommand.text); }}
@@ -2618,7 +2618,7 @@ export function ChatScreen({
             accessibilityRole="button"
             accessibilityState={{ selected: composingTodo }}
             accessibilityLabel="Private to-do"
-            {...(Platform.OS === 'web' ? { title: 'Private to-do: only you see it (or type /todo)' } as object : {})}
+            {...(Platform.OS === 'web' ? { title: 'Private to-do: readable by you and your agents (or type /todo)' } as object : {})}
           >
             <AppIcon name="todo" color={composingTodo ? r.private : c.textSecondary} size={22} />
           </TouchableOpacity>

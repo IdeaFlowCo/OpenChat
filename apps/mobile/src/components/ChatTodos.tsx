@@ -113,8 +113,8 @@ export function ChatTodos({ conversationId, focusTodoId, onOpenSource }: Props) 
               <View style={styles.editActions}>
                 <TouchableOpacity accessibilityRole="button" onPress={() => saveEdit(todo)} style={styles.textAction}><Text style={[type.label, { color: r.private }]}>Save</Text></TouchableOpacity>
                 <TouchableOpacity accessibilityRole="button" onPress={() => setEditingId(null)} style={styles.textAction}><Text style={[type.label, { color: r.textSecondary }]}>Cancel</Text></TouchableOpacity>
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Delete to-do: ${todo.text}`} onPress={() => void run(todo.id, () => deleteChatTodo(conversationId, todo.id))} style={[styles.textAction, styles.deleteAction]}>
-                  <Text style={[type.label, { color: r.danger }]}>Delete</Text>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Remove to-do from this chat: ${todo.text}`} onPress={() => void run(todo.id, () => deleteChatTodo(conversationId, todo.id))} style={[styles.textAction, styles.deleteAction]}>
+                  <Text style={[type.label, { color: r.danger }]}>Remove from chat</Text>
                 </TouchableOpacity>
               </View>
             </>
@@ -145,7 +145,7 @@ export function ChatTodos({ conversationId, focusTodoId, onOpenSource }: Props) 
       <View style={[styles.banner, { backgroundColor: r.privateSoft }]} accessibilityRole="text">
         <AppIcon name="lock" color={r.private} size={14} strokeWidth={2.2} />
         <Text style={[type.label, styles.bannerText, { color: r.text }]}>
-          <Text style={{ color: r.private, fontWeight: '700' }}>Only you</Text> can see these. Nothing here is sent to the chat.
+          <Text style={{ color: r.private, fontWeight: '700' }}>Only you</Text> and your agents can read these, including saved message excerpts. Nothing here is sent to the chat.
         </Text>
       </View>
 

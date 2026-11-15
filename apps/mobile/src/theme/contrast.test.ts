@@ -54,12 +54,13 @@ describe('contrast helper', () => {
 });
 
 describe('look selection', () => {
-  it('stays on Ink & Paper unless asked, and remembers only an explicit choice', () => {
-    expect(resolveLook('', null)).toEqual({ look: 'paper', remember: false });
+  it('defaults to Slate and preserves an explicit Paper choice', () => {
+    expect(resolveLook('', 'paper')).toEqual({ look: 'paper', remember: false });
+    expect(resolveLook('', null)).toEqual({ look: 'slate', remember: false });
     expect(resolveLook('?experience=simple', 'slate')).toEqual({ look: 'slate', remember: false });
     expect(resolveLook('?look=slate', null)).toEqual({ look: 'slate', remember: true });
     expect(resolveLook('?a=1&look=paper', 'slate')).toEqual({ look: 'paper', remember: true });
-    expect(resolveLook('?look=neon', 'bogus')).toEqual({ look: 'paper', remember: false });
+    expect(resolveLook('?look=neon', 'bogus')).toEqual({ look: 'slate', remember: false });
   });
 });
 
