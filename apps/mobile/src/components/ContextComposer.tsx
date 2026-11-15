@@ -4,6 +4,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { contextLaneManager } from '../services/contextLane';
 import type { ContextPost } from '../api/client';
+import { type, radius, space } from '../theme/tokens';
 import { nanoid } from 'nanoid/non-secure';
 
 export function ContextComposer({ conversationId, replyTo, editing, onDone }: { conversationId: string; replyTo?: ContextPost; editing?: ContextPost; onDone?: () => void }) {
@@ -11,6 +12,7 @@ export function ContextComposer({ conversationId, replyTo, editing, onDone }: { 
   const c = getColors(scheme);
   const [text, setText] = useState(editing?.text ?? '');
   const [kind, setKind] = useState('note');
+  const [expanded, setExpanded] = useState(!!editing || !!replyTo);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef<{ text: string; id: string; kind: string; replyToId?: string } | null>(null);
@@ -30,7 +32,7 @@ export function ContextComposer({ conversationId, replyTo, editing, onDone }: { 
       setText('');
       onDone?.();
     } catch (e) {
-      setError((e as { status?: number })?.status === 409 ? 'This post changed. Your draft is saved here; cancel to reload the latest version before editing again.' : e instanceof Error ? e.message : 'Could not post context. Try again.');
+      setError((e as { status?: number })?.status === 409 ? 'This post changed. Your draft is saved here; cancel to reload the latest version before editing again.' : e instanceof Error ? e.message : 'Could not post to Stream. Try again.');
     } finally {
       sending.current = false;
       setIsSending(false);
@@ -39,35 +41,34 @@ export function ContextComposer({ conversationId, replyTo, editing, onDone }: { 
 
   return (
     <View style={[styles.container, { backgroundColor: c.surface, borderTopColor: c.border }]}>
-      <Text style={{ color: c.textMetadata, fontSize: 12, marginBottom: 8 }}>
-        Post quietly — visible to this chat; no notifications.
-      </Text>
       {(replyTo || editing) && <View style={{ marginBottom: 8 }}>
         <Text style={{ color: c.textMetadata, fontWeight: '600' }}>{editing ? 'Editing your post' : `Replying to ${replyTo?.author?.name || 'a participant'}`}</Text>
         {replyTo && <Text numberOfLines={2} style={{ color: c.textMetadata }}>{replyTo.text}</Text>}
         <TouchableOpacity accessibilityRole="button" onPress={onDone} disabled={isSending} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: c.primary }}>Cancel {editing ? 'edit' : 'reply'}</Text></TouchableOpacity>
       </View>}
-      {!editing && <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
-        {['note', 'ask', 'offer'].map(value => <TouchableOpacity key={value} accessibilityRole="button" accessibilityState={{ selected: kind === value }} disabled={isSending} onPress={() => setKind(value)} style={{ minHeight: 44, paddingHorizontal: 14, borderRadius: 8, justifyContent: 'center', backgroundColor: kind === value ? c.primaryMuted : c.background }}><Text style={{ color: kind === value ? c.primary : c.textMetadata, fontWeight: kind === value ? '600' : '400' }}>{value[0].toUpperCase() + value.slice(1)}</Text></TouchableOpacity>)}
+      {expanded && !editing && <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+        {['note', 'ask', 'offer'].map(value => <TouchableOpacity key={value} accessibilityRole="button" accessibilityState={{ selected: kind === value }} disabled={isSending} onPress={() => setKind(value)} style={{ minHeight: 44, paddingHorizontal: 14, borderRadius: radius.sm, justifyContent: 'center', backgroundColor: kind === value ? c.primaryMuted : c.background }}><Text style={{ color: kind === value ? c.primary : c.textMetadata, fontWeight: kind === value ? '600' : '400' }}>{value[0].toUpperCase() + value.slice(1)}</Text></TouchableOpacity>)}
       </View>}
-      {kind === 'ask' && !editing && <Text style={{ color: c.textMetadata, fontSize: 12, marginBottom: 8 }}>A question for this chat. Posting alone does not summon agents.</Text>}
+      {kind === 'ask' && !editing && <Text style={{ color: c.textMetadata, ...type.meta, marginBottom: 8 }}>A question for this chat. Posting alone does not summon agents.</Text>}
+      {expanded && <Text style={[type.meta, { color: c.textMetadata, marginBottom: space[2] }]}>Shared with this chat · Quiet, no notifications</Text>}
       {error && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={{ color: c.danger, marginBottom: 8 }}>{error}</Text>}
       <View style={[styles.inputRow, { backgroundColor: c.background, borderColor: c.border }]}>
         <TextInput
           style={[styles.input, { color: c.textPrimary }]}
-          placeholder="Add to context..."
+          placeholder="Add to Stream…"
+          onFocus={() => setExpanded(true)}
           placeholderTextColor={c.textMuted}
-          accessibilityLabel={editing ? "Edit context post" : replyTo ? "Reply in context" : "Add to context"}
+          accessibilityLabel={editing ? "Edit Stream post" : replyTo ? "Reply in Stream" : "Add to Stream"}
           editable={!isSending}
           value={text}
           onChangeText={setText}
-          multiline
+          multiline={expanded}
           maxLength={2000}
         />
         <TouchableOpacity
           style={[styles.sendButton, { backgroundColor: text.trim() ? c.primary : c.primaryMuted }]}
           accessibilityRole="button"
-          accessibilityLabel="Post to context"
+          accessibilityLabel="Post to Stream"
           onPress={handleSend}
           disabled={!text.trim() || isSending}
         >
@@ -84,7 +85,7 @@ export function ContextComposer({ conversationId, replyTo, editing, onDone }: { 
 
 const styles = StyleSheet.create({
   container: {
-    padding: 12,
+    padding: space[3],
     borderTopWidth: StyleSheet.hairlineWidth,
     ...Platform.select({
       ios: { paddingBottom: 24 },
@@ -94,7 +95,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     borderWidth: 1,
-    borderRadius: 20,
+    borderRadius: radius.md,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
@@ -102,7 +103,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 24,
     maxHeight: 120,
-    fontSize: 16,
+    ...type.body,
     paddingTop: 0,
     paddingBottom: 0,
   },
@@ -111,12 +112,12 @@ const styles = StyleSheet.create({
     marginLeft: 12,
     paddingHorizontal: 16,
     paddingVertical: 6,
-    borderRadius: 16,
+    borderRadius: radius.md,
     justifyContent: 'center',
     alignItems: 'center',
   },
   sendText: {
     fontWeight: '600',
-    fontSize: 14,
+    ...type.label,
   },
 });

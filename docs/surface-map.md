@@ -106,3 +106,11 @@ The public `/` page verifies the current browser's OpenChat session. Signed-in
 visitors see **Signed in as [name]** and **Open OpenChat**; signed-out visitors
 see **Sign in**. It refreshes on return and cross-tab sign-out. Agent setup links
 to the shared `/agents` guide instead of maintaining separate MCP snippets.
+
+### Chat Stream cards and composer
+
+Chat → Stream uses **All**, **Saved** and **Back channel** filters. Back channel
+posts show the author, real agent attribution, kind and relative time. More,
+hover or long-press reveals actions; **Ask agents** requires an explicit press.
+The quiet shared composer starts as one line and expands on focus. Private entry
+remains a separate action labeled Only you; posting does not scan asks automatically.
