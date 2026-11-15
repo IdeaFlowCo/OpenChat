@@ -39,7 +39,7 @@ import { AppIcon } from '../components/AppIcon';
 import { isPlaceholderEmail } from '../utils/email';
 
 const OPTIONS: { value: ThemePref; label: string; hint: string }[] = [
-  { value: 'system', label: 'System', hint: 'Follow your phone' },
+  { value: 'system', label: 'System', hint: 'Follow your device' },
   { value: 'light', label: 'Light', hint: '' },
   { value: 'dark', label: 'Dark', hint: '' },
 ];
