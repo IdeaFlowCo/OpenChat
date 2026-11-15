@@ -50,10 +50,10 @@ vi.mock('react-native', async () => {
     RefreshControl: () => null,
     Pressable: 'Pressable',
     Modal: ({ visible, children }: any) => (visible ? children : null),
-    FlatList: React.forwardRef(({ data, renderItem, ListEmptyComponent, ListHeaderComponent }: any) =>
+    FlatList: React.forwardRef(({ data, renderItem, ListEmptyComponent, ListHeaderComponent, onRefresh }: any) =>
       React.createElement(
         'FlatList',
-        null,
+        { onRefresh },
         ListHeaderComponent,
         data && data.length
           ? data.map((item: any, index: number) =>
@@ -236,7 +236,7 @@ describe('ConversationThoughtsScreen parity & search', () => {
     expect(JSON.stringify(screen!.toJSON())).toContain('Private memory with Context off');
     expect(button('Context posts')).toBeUndefined();
     expect(screen!.root.findAllByType(ContextComposer)).toHaveLength(0);
-    expect(screen!.root.findAllByProps({ accessibilityLabel: 'Search conversation content' })[0].props.placeholder).toBe('Search Stream');
+    expect(screen!.root.findAllByProps({ accessibilityLabel: 'Search conversation content' })[0].props.placeholder).toBe('Search this chat’s Stream');
     await act(async () => button('Private entry').props.onPress());
     await act(async () => screen!.root.findAllByType('TextInput' as any).find(node => node.props.accessibilityLabel === 'Stream entry text')!.props.onChangeText('Saved privately'));
     await act(async () => button('Save entry').props.onPress());
@@ -252,7 +252,7 @@ describe('ConversationThoughtsScreen parity & search', () => {
   it('a changed private entry cannot be shared using a previous on-screen preview', async () => {
     mocks.content.mockResolvedValue({ items: [entry('Reviewed private text')] }); await mount();
     await act(async () => button('Share & pin…').props.onPress());
-    mocks.content.mockResolvedValue({ items: [entry('Changed private text')] }); await act(async () => button('Refresh').props.onPress());
+    mocks.content.mockResolvedValue({ items: [entry('Changed private text')] }); await act(async () => screen!.root.findByType('FlatList' as any).props.onRefresh());
     expect(button('Share & pin to this chat').props.disabled).toBe(true); expect(mocks.pin).not.toHaveBeenCalled();
     expect(JSON.stringify(screen!.toJSON())).toContain('Entry changed. Cancel and review');
   });
@@ -314,7 +314,7 @@ describe('ConversationThoughtsScreen parity & search', () => {
   it('switching account synchronously removes private rows and ignores the old pending read', async () => {
     mocks.content.mockResolvedValue({ items: [entry('Alice private')] }); await mount();
     let complete!: (value: any) => void; mocks.content.mockReturnValueOnce(new Promise(resolve => { complete = resolve; }));
-    await act(async () => button('Refresh').props.onPress());
+    await act(async () => screen!.root.findByType('FlatList' as any).props.onRefresh());
     mocks.chat.currentUser = { userId: 'bob', name: 'Bob' }; mocks.content.mockResolvedValue({ items: [] });
     await act(async () => screen!.update(React.createElement(ConversationThoughtsScreen)));
     expect(JSON.stringify(screen!.toJSON())).not.toContain('Alice private');
@@ -323,7 +323,7 @@ describe('ConversationThoughtsScreen parity & search', () => {
   it('permission loss removes private rows instead of retaining cached content', async () => {
     mocks.content.mockResolvedValue({ items: [entry('Alice private')] }); await mount();
     mocks.content.mockRejectedValue(Object.assign(new Error('Access removed'), { status: 403 }));
-    await act(async () => button('Refresh').props.onPress()); expect(JSON.stringify(screen!.toJSON())).not.toContain('Alice private'); expect(JSON.stringify(screen!.toJSON())).toContain('Access removed');
+    await act(async () => screen!.root.findByType('FlatList' as any).props.onRefresh()); expect(JSON.stringify(screen!.toJSON())).not.toContain('Alice private'); expect(JSON.stringify(screen!.toJSON())).toContain('Access removed');
   });
 
   it('ChatScreen renders a visible Stream button satisfying the Front-Door Test', async () => {

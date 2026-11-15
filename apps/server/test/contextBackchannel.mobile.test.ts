@@ -5,9 +5,10 @@ const mocks = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), edit: vi.fn(),
 vi.mock('react-native', () => ({
   Platform: { select: () => ({}) }, StyleSheet: { create: (s: any) => s, hairlineWidth: 1 },
   AppState: { currentState: 'active', addEventListener: () => ({ remove: () => {} }) },
-  View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', TextInput: 'TextInput', ActivityIndicator: 'ActivityIndicator',
+  Pressable: 'Pressable', View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', TextInput: 'TextInput', ActivityIndicator: 'ActivityIndicator',
   FlatList: ({ data, renderItem, ListEmptyComponent, ListFooterComponent }: any) => React.createElement('List', {}, data.length ? data.map((item: any) => React.createElement(React.Fragment, { key: item.id ?? item.post?.id }, renderItem({ item }))) : ListEmptyComponent, ListFooterComponent),
 }));
+vi.mock('../../mobile/src/components/Avatar', () => ({ Avatar: () => null }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn() }));
 vi.mock('@react-navigation/native', () => ({ useFocusEffect: (fn: any) => React.useEffect(fn, [fn]) }));
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
@@ -55,9 +56,10 @@ it('shows agent attribution, sends a threaded reply, and preserves a conflicting
   mocks.create.mockResolvedValue(post('reply', { replyToId: 'root' }));
   await act(async () => { tree = create(React.createElement(ContextLane, { conversationId: 'room' })); });
   expect(JSON.stringify(tree!.toJSON())).toContain('Hermes');
+  await act(async () => button('More').props.onPress());
   await act(async () => button('Reply').props.onPress());
-  await act(async () => tree!.root.findByProps({ accessibilityLabel: 'Reply in context' }).props.onChangeText('Following up'));
-  const reply = tree!.root.findByProps({ accessibilityLabel: 'Post to context' });
+  await act(async () => tree!.root.findByProps({ accessibilityLabel: 'Reply in Stream' }).props.onChangeText('Following up'));
+  const reply = tree!.root.findByProps({ accessibilityLabel: 'Post to Stream' });
   await act(async () => reply.props.onPress()); expect(mocks.create).toHaveBeenCalledWith('room', 'Following up', expect.any(String), 'note', 'root');
   await act(async () => tree!.unmount());
   mocks.edit.mockRejectedValue(Object.assign(new Error('conflict'), { status: 409 }));
@@ -69,6 +71,14 @@ it('shows agent attribution, sends a threaded reply, and preserves a conflicting
 it('queues agent help only from an explicit Ask agents action', async () => {
   mocks.list.mockResolvedValue({ posts: [post('question', { kind: 'ask' })] }); mocks.ask.mockResolvedValue({ queued: 2, available: 2 });
   await act(async () => { tree = create(React.createElement(ContextLane, { conversationId: 'room' })); });
-  expect(mocks.ask).not.toHaveBeenCalled(); await act(async () => button('Ask agents').props.onPress());
+  expect(mocks.ask).not.toHaveBeenCalled(); await act(async () => button('More').props.onPress()); await act(async () => button('Ask agents').props.onPress());
   expect(mocks.ask).toHaveBeenCalledWith('room', 'question'); expect(JSON.stringify(tree!.toJSON())).toContain('Requested help from 2 agents');
+});
+it('keeps multiline fixed and preserves the draft when the composer expands', async () => {
+  await act(async () => { tree = create(React.createElement(ContextComposer, { conversationId: 'room' })); });
+  const input = () => tree!.root.findByType('TextInput' as any);
+  expect(input().props.multiline).toBe(true);
+  await act(async () => input().props.onChangeText('Keep this draft'));
+  await act(async () => input().props.onFocus());
+  expect(input().props.multiline).toBe(true); expect(input().props.value).toBe('Keep this draft');
 });
