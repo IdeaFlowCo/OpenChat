@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   updates: { isEnabled: false, isEmbeddedLaunch: true, updateId: null as string | null },
 }));
 
+vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 vi.mock('react-native', () => ({
   Platform: { OS: 'ios' },
   StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
