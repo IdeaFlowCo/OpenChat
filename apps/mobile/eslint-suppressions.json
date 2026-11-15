@@ -44,11 +44,6 @@
       "count": 2
     }
   },
-  "src/components/ContextComposer.tsx": {
-    "no-restricted-syntax": {
-      "count": 7
-    }
-  },
   "src/components/ContextDraftCard.tsx": {
     "no-restricted-syntax": {
       "count": 9
@@ -57,11 +52,6 @@
   "src/components/ContextIntentionControls.tsx": {
     "no-restricted-syntax": {
       "count": 4
-    }
-  },
-  "src/components/ContextLane.tsx": {
-    "no-restricted-syntax": {
-      "count": 8
     }
   },
   "src/components/ContextStreamEntry.tsx": {

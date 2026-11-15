@@ -119,3 +119,11 @@ Settings keeps Account first, then Agents. Experience and Appearance use one
 radio style; Stories and quiet-search pause use native Switch controls. More
 reveals Feedback, Data, Invite, About and Legal without hiding Sign out. Stream
 and message metadata share the list/bubble/card time-formatting module.
+
+### Chat Stream cards and composer
+
+Chat → Stream uses **All**, **Saved** and **Back channel** filters. Back channel
+posts show the author, real agent attribution, kind and relative time. More,
+hover or long-press reveals actions; **Ask agents** requires an explicit press.
+The quiet shared composer starts as one line and expands on focus. Private entry
+remains a separate action labeled Only you; posting does not scan asks automatically.
