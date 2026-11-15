@@ -15,13 +15,14 @@ import { registerDesktopKeyboardHandler } from '../../mobile/src/services/deskto
 
 let tree: ReactTestRenderer | undefined;
 let listeners: Set<(event: KeyboardEvent) => void>;
+let captureListener = false;
 const disposers: (() => void)[] = [];
 beforeEach(() => {
   mocks.platform.OS = 'web'; mocks.desktop = true; vi.clearAllMocks();
-  listeners = new Set();
+  listeners = new Set(); captureListener = false;
   vi.stubGlobal('document', {
-    addEventListener: (type: string, handler: (e: KeyboardEvent) => void) => { if (type === 'keydown') listeners.add(handler); },
-    removeEventListener: (type: string, handler: (e: KeyboardEvent) => void) => { if (type === 'keydown') listeners.delete(handler); },
+    addEventListener: (type: string, handler: (e: KeyboardEvent) => void, capture: boolean) => { if (type === 'keydown') { listeners.add(handler); captureListener = capture; } },
+    removeEventListener: (type: string, handler: (e: KeyboardEvent) => void, capture: boolean) => { if (type === 'keydown' && capture === captureListener) listeners.delete(handler); },
   });
 });
 afterEach(async () => {
@@ -38,6 +39,7 @@ function key(value: string, meta = false) {
 
 it('keeps one shell listener when Chats blurs to Search, so Escape and global shortcuts still work', async () => {
   await mount();
+  expect(captureListener).toBe(true); // RN-web inputs stop bubble-phase keydown.
   const chatHandler = vi.fn(); const blur = registerDesktopKeyboardHandler(chatHandler); disposers.push(blur);
   key('k', true); expect(chatHandler).toHaveBeenCalledTimes(1);
   expect(mocks.navigation.dispatch).not.toHaveBeenCalled(); expect(listeners.size).toBe(1);

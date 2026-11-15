@@ -29,8 +29,10 @@ export function DesktopKeyboardShortcuts({ enabled }: { enabled: boolean }) {
         navigationRef.goBack();
       }
     };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    // RN-web TextInput stops keydown bubbling. Capture keeps Escape and
+    // global shortcuts available while Search or a composer owns focus.
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
   }, [enabled, desktop]);
   return null;
 }
