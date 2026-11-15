@@ -220,8 +220,8 @@ export function ContactProfileScreen() {
               OpenChat name: {officialName}
             </Text>
           )}
-          {!!card?.headline && <Text style={[type.body, styles.centeredText, { color: r.textSecondary }]} numberOfLines={2}>{card.headline}</Text>}
-          {!!statusText && <Text style={[type.body, styles.centeredText, { color: r.text }]} numberOfLines={2}>{statusText}</Text>}
+          {!!card?.headline && <Text selectable style={[type.body, styles.centeredText, { color: r.textSecondary }]} numberOfLines={2}>{card.headline}</Text>}
+          {!!statusText && <Text selectable style={[type.body, styles.centeredText, { color: r.text }]} numberOfLines={2}>{statusText}</Text>}
           {!!safeEmail && safeEmail !== displayName && (
             <Text style={[type.label, { color: r.textSecondary }]} numberOfLines={1}>{safeEmail}</Text>
           )}

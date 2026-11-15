@@ -40,7 +40,7 @@ function PublishedAskRows({ publisherId }: { publisherId?: string }) {
     {!publisherId && !loading && !error && !items.length && <Text style={{ ...type.body, color: c.textMetadata }}>No asks are currently shared directly with you.</Text>}
     {items.map(item => <View key={item.id} style={{ borderColor: c.border, borderWidth: 1, borderRadius: radius.md, padding: space[3], gap: space[2] }}>
       <Text style={{ ...type.label, color: c.textMetadata }}>{item.publisher.displayName} · {item.audience === 'public' ? 'Public' : 'Shared with you'} · {item.lifecycle}</Text>
-      <Text style={{ ...type.body, color: c.textPrimary }}>{item.text}</Text>
+      <Text selectable style={{ ...type.body, color: c.textPrimary }}>{item.text}</Text>
     </View>)}
     {loading && <ActivityIndicator color={c.primary} />}
     {cursor && !error && <TouchableOpacity accessibilityRole="button" disabled={loading} onPress={() => void more()} style={{ minHeight: touchTarget, justifyContent: 'center' }}><Text style={{ ...type.label, color: c.primary }}>Load more</Text></TouchableOpacity>}

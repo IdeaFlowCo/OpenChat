@@ -172,9 +172,9 @@ function AsksInventory() {
                 <Text style={[styles.state, { color: c.textMetadata }]}>{item.draft.state.toUpperCase()} DRAFT</Text>
                 <Text style={[styles.date, { color: c.textMetadata }]}>{new Date(item.draft.updatedAt).toLocaleDateString()}</Text>
               </View>
-              <Text style={[styles.cardTitle, { color: c.textPrimary }]}>{draftTitle(item.draft)}</Text>
-              {item.draft.seeks.length > 0 && <Text style={[styles.detail, { color: c.textSecondary }]}>Looking for · {item.draft.seeks.join(', ')}</Text>}
-              {item.draft.brings.length > 0 && <Text style={[styles.detail, { color: c.textSecondary }]}>Can bring · {item.draft.brings.join(', ')}</Text>}
+              <Text selectable style={[styles.cardTitle, { color: c.textPrimary }]}>{draftTitle(item.draft)}</Text>
+              {item.draft.seeks.length > 0 && <Text selectable style={[styles.detail, { color: c.textSecondary }]}>Looking for · {item.draft.seeks.join(', ')}</Text>}
+              {item.draft.brings.length > 0 && <Text selectable style={[styles.detail, { color: c.textSecondary }]}>Can bring · {item.draft.brings.join(', ')}</Text>}
               {item.draft.state === 'pending' && <><View style={[styles.consentPreview, { borderColor: c.border, backgroundColor: c.background }]}>
                 <Text style={[styles.consentTitle, { color: c.textPrimary }]}>Before you approve</Text>
                 <Text style={[styles.detail, { color: c.textSecondary }]}>Audience · all eligible agents in your OpenChat network</Text>
@@ -192,7 +192,7 @@ function AsksInventory() {
           ) : item.kind === 'intention' ? (
             <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
               <Text style={[styles.state, { color: c.textMetadata }]}>{item.intention.kind === 'offer' ? 'OFFER' : 'ASK'} · {item.intention.lifecycleState.toUpperCase()}</Text>
-              <Text style={[styles.cardTitle, { color: c.textPrimary }]}>{item.intention.goal || item.intention.seeks[0] || item.intention.brings[0] || 'Intention'}</Text>
+              <Text selectable style={[styles.cardTitle, { color: c.textPrimary }]}>{item.intention.goal || item.intention.seeks[0] || item.intention.brings[0] || 'Intention'}</Text>
               <Text style={[styles.detail, { color: c.textMetadata }]}>One intention · {item.intention.contextPosts.length} Context post{item.intention.contextPosts.length === 1 ? '' : 's'} · {item.intention.stories.length} Story projection{item.intention.stories.length === 1 ? '' : 's'}</Text>
               <Text style={[styles.detail, { color: c.textMetadata }]}>Agent search · {item.intention.searchStatus}{item.intention.expiresAt ? ` · expires ${new Date(item.intention.expiresAt).toLocaleDateString()}` : ''}</Text>
               {item.intention.contextPosts.map(source => <TouchableOpacity key={source.postId} accessibilityRole="button" onPress={() => navigation.navigate('Chat', { conversationId: source.conversationId, lane: 'context' })} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: c.primary }}>Context · {source.conversationTitle}{source.sourceChanged ? ' · Source edited' : ''}</Text></TouchableOpacity>)}
@@ -200,7 +200,7 @@ function AsksInventory() {
                 const story = stories.find(owned => owned.id === projection.id) || projection;
                 return <View key={story.id}>
                   <Text style={[styles.detail, { color: c.textMetadata }]}>{story.humanVisible ? story.explicitQuietSearch ? 'Stories and agents' : 'Stories only' : 'Agents only'} · {isStoryExpired(story) ? 'expired' : story.status} · {story.audience.conversationIds.length} selected chat{story.audience.conversationIds.length === 1 ? '' : 's'}</Text>
-                  {story.text && <Text style={[styles.detail, { color: c.textPrimary }]}>{story.text}</Text>}
+                  {story.text && <Text selectable style={[styles.detail, { color: c.textPrimary }]}>{story.text}</Text>}
                   {relevantExpiresAt(story) && <Text style={[styles.detail, { color: c.textMetadata }]}>Expires · {inventoryExpiry(story)}</Text>}
                   {item.intention.lifecycleState === 'open' && ['active', 'paused'].includes(story.status) && <TouchableOpacity disabled={busyId === story.id} onPress={() => void pauseStory(story)} style={[styles.outlineSmall, { borderColor: c.border, marginTop: 12, alignSelf: 'flex-start' }]}>
                     <Text style={{ color: c.primary, fontWeight: '700' }}>{story.status === 'paused' ? `Resume ${story.humanVisible ? 'Story' : 'search'}` : `Pause ${story.humanVisible ? 'Story' : 'search'}`}</Text>

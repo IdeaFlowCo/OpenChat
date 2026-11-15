@@ -115,17 +115,17 @@ export function PeopleAsks({ onOpenPerson, onOpenAsk, onOpenSource }: { onOpenPe
             <Text style={[styles.asker, { color: c.primary }]} numberOfLines={1}>{ask.authorParty.name}</Text>
           </TouchableOpacity>
         )}
-        <Text style={[styles.text, { color: closed ? c.textSecondary : c.textPrimary }]}>{ask.text}</Text>
+        <Text selectable style={[styles.text, { color: closed ? c.textSecondary : c.textPrimary }]}>{ask.text}</Text>
         <Text style={[styles.meta, { color: ask.needsRecheck ? c.primary : c.textMetadata }]}>{askMeta(ask)}{ask.status === 'stale' ? ` · ${STATUS_LABEL.stale}` : ''}</Text>
         {askParties(ask) ? <Text style={[styles.meta, { color: c.textSecondary }]}>{askParties(ask)}</Text> : null}
         {ask.evidence && (ask.evidence.label || ask.evidence.url) && (
           ask.evidence.url
             ? <Text accessibilityRole="link" onPress={() => void Linking.openURL(ask.evidence!.url!)} style={[styles.meta, { color: c.primary }]} numberOfLines={1}>{ask.evidence.label ?? 'Source'}{ask.evidence.seenAt ? ` · seen ${ask.evidence.seenAt}` : ''}</Text>
-            : <Text style={[styles.meta, { color: c.textMetadata }]} numberOfLines={2}>{ask.evidence.label}{ask.evidence.seenAt && !ask.evidence.label?.includes(ask.evidence.seenAt) ? ` · seen ${ask.evidence.seenAt}` : ''}</Text>
+            : <Text selectable style={[styles.meta, { color: c.textMetadata }]} numberOfLines={2}>{ask.evidence.label}{ask.evidence.seenAt && !ask.evidence.label?.includes(ask.evidence.seenAt) ? ` · seen ${ask.evidence.seenAt}` : ''}</Text>
         )}
         {onOpenAsk && <TouchableOpacity accessibilityRole="link" onPress={() => onOpenAsk(ask.id)} style={styles.toggle}><Text style={{ ...type.label, color: c.primary }}>Details & sources</Text></TouchableOpacity>}
         {ask.sources?.map(source => <View key={`${source.app}:${source.conversationId}:${source.messageId}:${source.itemIndex}`}>
-          <Text style={[styles.meta, { color: c.textMetadata }]}>{source.assertion === 'inferred' ? 'Inferred from' : 'From'} {source.app} · {source.excerpt}</Text>
+          <Text selectable style={[styles.meta, { color: c.textMetadata }]}>{source.assertion === 'inferred' ? 'Inferred from' : 'From'} {source.app} · {source.excerpt}</Text>
           {source.app === 'openchat' && onOpenSource && <TouchableOpacity accessibilityRole="link" onPress={() => onOpenSource(source.conversationId, source.sourceMessageId ?? source.messageId)} style={styles.toggle}><Text style={{ ...type.label, color: c.primary }}>Open source conversation</Text></TouchableOpacity>}
         </View>)}
         <View style={styles.actions}>

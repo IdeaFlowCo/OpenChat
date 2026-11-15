@@ -17,7 +17,6 @@ import { messageLinks } from '../utils/messageLinks';
 import { useState } from 'react';
 import {
   Alert,
-  Clipboard,
   Modal,
   Platform,
   Pressable,
@@ -34,6 +33,8 @@ import { type } from '../theme/tokens';
 import { Message, ReactionSummary } from '../api/client';
 import { ReactionPicker } from './ReactionPicker';
 import { AppIcon } from './AppIcon';
+import { copyText, messageCopyText } from '../utils/copyText';
+import { SelectableTextPanel } from './SelectableTextSheet';
 
 export interface ReplyToData {
   messageId: string;
@@ -119,7 +120,7 @@ export function MessageActionSheet({
 
   // Sub-sheet state: null = main, 'report' = report picker, 'other' = freeform,
   // 'react' = emoji picker, 'assistant' = "ask about this" question prompt.
-  const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react' | 'assistant' | 'links'>(null);
+  const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react' | 'assistant' | 'links' | 'select'>(null);
   const [freeformText, setFreeformText] = useState('');
   const [visionSelection, setVisionSelection] = useState('');
   const [visionBusy, setVisionBusy] = useState(false);
@@ -151,8 +152,9 @@ export function MessageActionSheet({
     handleDismiss();
   };
 
-  // Press-and-hold → Copy (openchat-651). Uses RN's built-in Clipboard (same as
-  // the rest of the app); a brief alert confirms since the sheet just closes.
+  // Press-and-hold → Copy (openchat-651). expo-clipboard (RN core Clipboard is
+  // deprecated). Copies the text, or a voice message's transcript when it has
+  // no text (copy/select audit 2026-11).
   const photoCount = (message?.attachments ?? []).filter(a => a.type !== 'audio' && a.type !== 'file' && /^https?:/.test(a.url)).length;
   const saveVerb = Platform.OS === 'web' ? 'Download' : 'Save';
   const handleSavePhotos = () => {
@@ -161,9 +163,10 @@ export function MessageActionSheet({
     onSavePhotos?.(message);
   };
 
+  const copyable = message ? messageCopyText(message) : '';
   const handleCopy = () => {
-    if (!message) return;
-    Clipboard.setString(message.content ?? '');
+    if (!copyable) return;
+    void copyText(copyable).then(ok => { if (!ok) Alert.alert('Could not copy', 'Try Select text… instead.'); });
     handleDismiss();
   };
 
@@ -285,6 +288,14 @@ export function MessageActionSheet({
       paddingBottom: Platform.OS === 'ios' ? 34 : 16,
     },
   ];
+
+  // "Select text…": the bubble's long-press opens this sheet on native, so it
+  // cannot also start text selection. Select part of the message here instead.
+  if (subSheet === 'select') {
+    return <Modal transparent animationType="fade" visible={visible} onRequestClose={handleDismiss}>
+      <SelectableTextPanel text={copyable} title="Select message text" onClose={handleDismiss} />
+    </Modal>;
+  }
 
   if (subSheet === 'links') {
     return <Modal transparent animationType="fade" visible={visible} onRequestClose={handleDismiss}>
@@ -467,15 +478,27 @@ export function MessageActionSheet({
               </TouchableOpacity>
             )}
 
-            {/* Copy — always shown (even for deleted, harmless) (openchat-651) */}
-            {!message.deletedAt && (
+            {/* Copy + Select text — every message with text or a transcript (openchat-651, copy/select audit 2026-11) */}
+            {!!copyable && (
               <TouchableOpacity
                 style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
                 onPress={handleCopy}
                 activeOpacity={0.7}
+                accessibilityRole="button"
               >
                 <View style={styles.actionIconBox}><AppIcon name="copy" color={c.textPrimary} size={20} /></View>
-                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Copy</Text>
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>{message.content?.trim() ? 'Copy' : 'Copy transcript'}</Text>
+              </TouchableOpacity>
+            )}
+            {!!copyable && (
+              <TouchableOpacity
+                style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+                onPress={() => setSubSheet('select')}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+              >
+                <View style={styles.actionIconBox} />
+                <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Select text…</Text>
               </TouchableOpacity>
             )}
 

@@ -92,7 +92,7 @@ export function MessageRow({ message, network, onOpenPerson }: { message: Import
   const r = useImportedRoles();
   const [showOriginal, setShowOriginal] = useState(false);
   if (message.kind === 'system') {
-    return <Text style={[type.meta, styles.system, { color: r.textMeta }]}>{message.text ?? 'Chat event'} · {messageTime(message.sentAt)}</Text>;
+    return <Text selectable style={[type.meta, styles.system, { color: r.textMeta }]}>{message.text ?? 'Chat event'} · {messageTime(message.sentAt)}</Text>;
   }
   const sender = message.sender;
   return (

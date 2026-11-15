@@ -197,7 +197,7 @@ export function AgentOverlayScreen({ embedded = false, onClose, onOpenConversati
               return (
                 <View style={[styles.threadBubble, own ? styles.threadBubbleOwn : styles.threadBubbleAgent, { backgroundColor: own ? c.primaryMuted : c.surface, borderColor: c.border }]}>
                   {!own && <Text style={[styles.threadSender, { color: c.primary }]}>OpenChat Agent</Text>}
-                  <Text style={[styles.threadText, { color: c.textPrimary }]}>{item.content}</Text>
+                  <Text selectable style={[styles.threadText, { color: c.textPrimary }]}>{item.content}</Text>
                 </View>
               );
             }}

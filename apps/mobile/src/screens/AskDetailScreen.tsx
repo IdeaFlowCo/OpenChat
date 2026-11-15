@@ -27,11 +27,11 @@ function AskDetail({ askId }: { askId: string }) {
   }, [askId]));
   return <ScrollView style={{ backgroundColor: c.background }} contentContainerStyle={{ padding: space[4], gap: space[3] }}>
     {error ? <Text accessibilityRole="alert" style={{ ...type.body, color: c.danger }}>{error}</Text> : !ask ? <ActivityIndicator color={c.primary} /> : <>
-      <Text style={{ ...type.heading, color: c.textPrimary }}>{ask.text}</Text>
+      <Text selectable style={{ ...type.heading, color: c.textPrimary }}>{ask.text}</Text>
       <Text style={{ ...type.body, color: c.textMetadata }}>{askMeta(ask)}</Text>
       {!!askParties(ask) && <Text style={{ ...type.body, color: c.textSecondary }}>{askParties(ask)}</Text>}
       <Text style={{ ...type.label, color: c.textMetadata }}>Recorded by {ask.recordedBy ?? 'unknown'} · {ask.recordedVia ?? 'unknown source'}</Text>
-      {ask.evidence?.quote && <Text style={{ ...type.body, color: c.textSecondary }}>{ask.evidence.quote}</Text>}
+      {ask.evidence?.quote && <Text selectable style={{ ...type.body, color: c.textSecondary }}>{ask.evidence.quote}</Text>}
       <AskPublicationControls ask={ask} />
       <Text style={{ ...type.heading, color: c.textPrimary }}>Sources</Text>
       {!ask.sources?.length && <Text style={{ ...type.body, color: c.textMetadata }}>No message receipt was recorded by the original client.</Text>}

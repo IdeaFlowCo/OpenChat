@@ -1816,7 +1816,7 @@ export function ChatScreen({
               return (
                 <View key={i}>
                   {hasTranscript && (
-                    <Text style={{ fontSize: 16, color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, marginBottom: 6 }}>
+                    <Text selectable style={{ fontSize: 16, color: isOwn ? c.bubbleOwnText : c.bubbleOtherText, marginBottom: 6 }}>
                       {m.transcript}
                     </Text>
                   )}

@@ -82,7 +82,7 @@ export function PrivateNotes({ subject, notes, onChange }: { subject: PrivateSub
       <Text style={[styles.heading, { color: c.textPrimary }]}>Notes</Text>
       {notes.map(note => (
         <View key={note.id} style={[styles.item, { borderBottomColor: c.divider }]}>
-          <Text style={{ color: c.textPrimary, fontSize: 15 }}>{note.text}</Text>
+          <Text selectable style={{ color: c.textPrimary, fontSize: 15 }}>{note.text}</Text>
           <View style={styles.itemMeta}>
             <Text style={{ color: c.textMetadata, fontSize: 12 }}>{new Date(note.createdAt).toLocaleDateString()}</Text>
             <TouchableOpacity onPress={() => void remove(note.id)} disabled={busy}><Text style={{ color: c.textSecondary, fontSize: 13 }}>Delete</Text></TouchableOpacity>
@@ -201,7 +201,7 @@ export function PrivateLinks({ subject, links, onChange, onOpenThing, onOpenPers
           <TouchableOpacity onPress={() => void remove(link.id)} disabled={busy} accessibilityLabel={`Remove link to ${link.other.name}`} style={styles.textButton}>
             <Text style={{ color: c.textSecondary, fontSize: 13 }}>Remove</Text>
           </TouchableOpacity>
-        </View>{sourceOpen === link.id && sources[link.id] && <View style={{ gap: 6 }}><Text style={{ color: c.textMetadata, fontSize: 12 }}>Your private note · {new Date(sources[link.id]!.createdAt).toLocaleDateString()}</Text><Text style={{ color: c.textPrimary, lineHeight: 21 }}>{sources[link.id]!.text}</Text></View>}</View>
+        </View>{sourceOpen === link.id && sources[link.id] && <View style={{ gap: 6 }}><Text style={{ color: c.textMetadata, fontSize: 12 }}>Your private note · {new Date(sources[link.id]!.createdAt).toLocaleDateString()}</Text><Text selectable style={{ color: c.textPrimary, lineHeight: 21 }}>{sources[link.id]!.text}</Text></View>}</View>
       ))}
       {error && <Text style={{ color: c.danger }}>{error}</Text>}
     </View>

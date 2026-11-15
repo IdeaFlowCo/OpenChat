@@ -20,9 +20,9 @@ export function AddMeCardView({ card }: { card: StrangerCard }) {
       <Avatar name={card.name} avatarUrl={card.avatarUrl ?? undefined} isBot={card.isBot} size={88} />
       <Text style={[styles.name, { color: c.textPrimary }]}>{card.name}</Text>
       {card.headline ? (
-        <Text style={[styles.headline, { color: c.textPrimary }]}>{card.headline}</Text>
+        <Text selectable style={[styles.headline, { color: c.textPrimary }]}>{card.headline}</Text>
       ) : null}
-      {status ? <Text style={[styles.status, { color: c.textMetadata }]}>{status}</Text> : null}
+      {status ? <Text selectable style={[styles.status, { color: c.textMetadata }]}>{status}</Text> : null}
       {card.linkedIn ? (
         <TouchableOpacity onPress={() => void Linking.openURL(card.linkedIn!)} accessibilityRole="link">
           <Text style={[styles.link, { color: c.primary }]} numberOfLines={1}>

@@ -6,8 +6,10 @@ import { api } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import type { RouteProps } from '../navigation/types';
+import { CopyButton } from '../components/CopyButton';
 
-/** Read-only original context. A saved capture never grants access to its source. */
+/** Read-only original context. A saved capture never grants access to its source.
+ *  Every message's text is selectable and has its own Copy (copy/select audit 2026-11). */
 export function OriginalMessageScreen() {
   const { params } = useRoute<RouteProps<'OriginalMessage'>>();
   const { scheme } = useTheme(); const c = getColors(scheme);
@@ -28,8 +30,9 @@ export function OriginalMessageScreen() {
       <Text style={{ color: c.textMetadata, marginVertical: 16 }}>{context.conversation.name || 'Original chat'}</Text>
       {context.messages.map(m => <View key={m.id} style={{ padding: 14, marginBottom: 8, borderRadius: 10, backgroundColor: m.id === context.messageId ? c.primaryMuted : c.surface, borderWidth: m.id === context.messageId ? 2 : 1, borderColor: m.id === context.messageId ? c.primary : c.border }}>
         {m.id === context.messageId && <Text style={{ color: c.primary, fontWeight: '600' }}>Saved message</Text>}
-        <Text style={{ color: c.textMetadata, marginBottom: 6 }}>{m.senderName || 'Participant'} · {new Date(m.createdAt).toLocaleString()}</Text>
-        <Text style={{ color: c.textPrimary, fontSize: 15 }}>{m.content}</Text>
+        <Text selectable style={{ color: c.textMetadata, marginBottom: 6 }}>{m.senderName || 'Participant'} · {new Date(m.createdAt).toLocaleString()}</Text>
+        <Text selectable testID={`original-message-text-${m.id}`} style={{ color: c.textPrimary, fontSize: 15 }}>{m.content}</Text>
+        {!!m.content && <View style={{ flexDirection: 'row' }}><CopyButton text={m.content} label={m.id === context.messageId ? 'Copy saved message' : 'Copy'} accessibilityLabel={`Copy message from ${m.senderName || 'Participant'}`} testID={`original-message-copy-${m.id}`} /></View>}
       </View>)}
       <TouchableOpacity onPress={() => navigationRef.dispatch(CommonActions.navigate({ name: 'Main', params: { screen: 'ChatsTab', params: { screen: 'Chat', params: { conversationId: context.conversation.id } } } }))} accessibilityRole="button" style={{ paddingVertical: 16 }}><Text style={{ color: c.primary, fontWeight: '600' }}>Open chat</Text></TouchableOpacity>
     </>}
