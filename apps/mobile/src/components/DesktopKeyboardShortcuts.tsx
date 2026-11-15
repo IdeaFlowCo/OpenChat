@@ -11,7 +11,7 @@ export function DesktopKeyboardShortcuts({ enabled }: { enabled: boolean }) {
   useEffect(() => {
     if (!enabled || !desktop || Platform.OS !== 'web' || typeof document === 'undefined') return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || !navigationRef.isReady()) return;
+      if (event.isComposing || event.keyCode === 229 || event.defaultPrevented || !navigationRef.isReady()) return;
       if (dispatchDesktopKeyboardHandler(event)) return;
       const meta = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();

@@ -32,14 +32,18 @@ afterEach(async () => {
 async function mount(enabled = true) {
   await act(async () => { tree = create(React.createElement(DesktopKeyboardShortcuts, { enabled })); });
 }
-function key(value: string, meta = false) {
-  const event = { key: value, metaKey: meta, ctrlKey: false, shiftKey: false, defaultPrevented: false, preventDefault: vi.fn() } as unknown as KeyboardEvent;
+function key(value: string, meta = false, isComposing = false) {
+  const event = { key: value, metaKey: meta, ctrlKey: false, shiftKey: false, isComposing, defaultPrevented: false, preventDefault: vi.fn() } as unknown as KeyboardEvent;
   listeners.forEach(handler => handler(event)); return event;
 }
 
 it('keeps one shell listener when Chats blurs to Search, so Escape and global shortcuts still work', async () => {
   await mount();
   expect(captureListener).toBe(true); // RN-web inputs stop bubble-phase keydown.
+  key('Escape', false, true);
+  expect(mocks.navigation.goBack).not.toHaveBeenCalled();
+  key('k', true, true);
+  expect(mocks.navigation.dispatch).not.toHaveBeenCalled();
   const chatHandler = vi.fn(); const blur = registerDesktopKeyboardHandler(chatHandler); disposers.push(blur);
   key('k', true); expect(chatHandler).toHaveBeenCalledTimes(1);
   expect(mocks.navigation.dispatch).not.toHaveBeenCalled(); expect(listeners.size).toBe(1);
