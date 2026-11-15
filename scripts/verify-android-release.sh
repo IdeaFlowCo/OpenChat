@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Verify a published APK without credentials or installing it.
+set -euo pipefail
+
+if [ "${1:-}" = --help ]; then
+  echo "Usage: $0 [release-tag [expected-bytes]]"
+  echo 'Defaults: android-20261115, 103835096 bytes. Requires curl, unzip, and sha256sum or shasum.'
+  exit 0
+fi
+[ "$#" -le 2 ] || { echo 'Expected at most a release tag and byte count.' >&2; exit 1; }
+tag=${1:-android-20261115}
+expected_bytes=${2:-103835096}
+[[ "$tag" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]] || { echo 'Invalid release tag.' >&2; exit 1; }
+[[ "$expected_bytes" =~ ^[1-9][0-9]*$ ]] || { echo 'Expected bytes must be a positive integer.' >&2; exit 1; }
+
+for tool in curl unzip; do
+  command -v "$tool" >/dev/null || { echo "Missing command: $tool" >&2; exit 1; }
+done
+if command -v sha256sum >/dev/null; then
+  sha_tool=sha256sum
+elif command -v shasum >/dev/null; then
+  sha_tool=shasum
+else
+  echo 'Missing sha256sum or shasum.' >&2; exit 1
+fi
+
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/openchat-android-verify.XXXXXX")
+trap 'rm -rf "$work_dir"' EXIT
+base="https://github.com/IdeaFlowCo/OpenChat/releases/download/$tag"
+url="$base/OpenChat.apk"
+apk="$work_dir/OpenChat.apk"
+
+fail() { echo "Android release verification failed: $*" >&2; exit 1; }
+# Follow redirects, but require HTTPS on every hop. Drafts and expired artifacts fail.
+head_result=$(curl --fail --silent --show-error --location --head \
+  --proto '=https' --proto-redir '=https' --max-redirs 10 --max-time 60 \
+  --dump-header "$work_dir/headers" --output /dev/null \
+  --write-out '%{http_code}|%{content_type}' "$url")
+IFS='|' read -r head_status head_type <<< "$head_result"
+[ "$head_status" = 200 ] || fail "HEAD returned HTTP $head_status"
+[ "${head_type%%;*}" = application/vnd.android.package-archive ] || fail "HEAD content type: $head_type"
+# Inspect only the final response's Content-Length, when the server provides one.
+head_bytes=$(awk 'toupper($1) ~ /^HTTP\// {n=""} tolower($1)=="content-length:" {n=$2; sub(/\r$/, "", n)} END {print n}' "$work_dir/headers")
+[ -z "$head_bytes" ] || [ "$head_bytes" = "$expected_bytes" ] || fail "HEAD size: $head_bytes"
+
+get_result=$(curl --fail --silent --show-error --location \
+  --proto '=https' --proto-redir '=https' --max-redirs 10 --max-time 180 \
+  --output "$apk" --write-out '%{http_code}|%{content_type}' "$url")
+IFS='|' read -r get_status get_type <<< "$get_result"
+[ "$get_status" = 200 ] || fail "download returned HTTP $get_status"
+[ "${get_type%%;*}" = application/vnd.android.package-archive ] || fail "download content type: $get_type"
+actual_bytes=$(wc -c < "$apk" | tr -d '[:space:]')
+[ "$actual_bytes" = "$expected_bytes" ] || fail "expected $expected_bytes bytes, got $actual_bytes"
+
+sums_status=$(curl --fail --silent --show-error --location \
+  --proto '=https' --proto-redir '=https' --max-redirs 10 --max-time 60 \
+  --output "$work_dir/SHA256SUMS" --write-out '%{http_code}' "$base/SHA256SUMS")
+[ "$sums_status" = 200 ] || fail "SHA256SUMS returned HTTP $sums_status"
+expected_sha=$(awk '$2=="OpenChat.apk" || $2=="*OpenChat.apk" {print tolower($1)}' "$work_dir/SHA256SUMS")
+[[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]] || fail 'SHA256SUMS must contain exactly one SHA-256 for OpenChat.apk'
+if [ "$sha_tool" = sha256sum ]; then
+  actual_sha=$(sha256sum "$apk" | awk '{print $1}')
+else
+  actual_sha=$(shasum -a 256 "$apk" | awk '{print $1}')
+fi
+[ "$actual_sha" = "$expected_sha" ] || fail 'SHA-256 does not match SHA256SUMS'
+
+unzip -tq "$apk" >/dev/null || fail 'invalid or corrupt ZIP archive'
+unzip -Z1 "$apk" > "$work_dir/entries"
+grep -Fxq AndroidManifest.xml "$work_dir/entries" || fail 'missing AndroidManifest.xml'
+grep -Fxq classes.dex "$work_dir/entries" || fail 'missing classes.dex'
+
+printf 'Verified: %s\nHTTP: 200\nBytes: %s\nSHA-256: %s\nAPK: AndroidManifest.xml and classes.dex present; ZIP integrity passed\n' "$url" "$actual_bytes" "$actual_sha"
+if command -v apksigner >/dev/null; then
+  apksigner verify --verbose --print-certs "$apk"
+else
+  echo 'Signature not checked here (apksigner unavailable).'
+fi

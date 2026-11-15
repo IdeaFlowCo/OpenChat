@@ -31,3 +31,21 @@ A successful current-source build is required; do not label a guessed cause fixe
 
 Play internal testing remains a separate configured route; do not claim a Play
 release until its actual tester opt-in URL and released version are verified.
+
+## Automated public-download gate
+
+After publishing the GitHub release with `--latest=false`, and before changing
+the live landing link, run from the repository root:
+
+```sh
+scripts/verify-android-release.sh
+# For a subsequent release, pass its tag and expected byte count:
+scripts/verify-android-release.sh android-20261115 103835096
+```
+
+The script follows HTTPS redirects, checks HEAD/download status and APK content
+type, checks the expected size, matches the public `SHA256SUMS`, and tests ZIP
+integrity plus the manifest and DEX entries. A draft release fails these checks.
+It runs `apksigner verify` if available; otherwise signature verification still
+needs the Android build-tools step described above. It neither installs the APK
+nor verifies sign-in/runtime behavior. Temporary downloads are removed on exit.
