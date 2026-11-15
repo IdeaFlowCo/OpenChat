@@ -30,6 +30,7 @@ export function ContextComposer({ conversationId, replyTo, editing, onDone }: { 
       else await contextLaneManager.addPost(conversationId, value, pending.current.id, kind, replyTo?.id);
       pending.current = null;
       setText('');
+      setExpanded(false);
       onDone?.();
     } catch (e) {
       setError((e as { status?: number })?.status === 409 ? 'This post changed. Your draft is saved here; cancel to reload the latest version before editing again.' : e instanceof Error ? e.message : 'Could not post to Stream. Try again.');

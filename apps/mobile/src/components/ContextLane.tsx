@@ -86,7 +86,7 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
     const parent = item.replyTo || state.posts.find(p => p.id === item.replyToId);
     return <Pressable onHoverIn={() => setActionsFor(item.id)} onLongPress={() => setActionsFor(item.id)} style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, marginLeft: reply ? 16 : 0 }]}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'baseline' }}>
-        <Avatar name={item.agent?.name || item.author?.name} avatarUrl={item.author?.avatarUrl} isBot={!!item.agent} size={28} />
+        <Avatar name={item.agent?.name || item.author?.name} avatarUrl={item.agent ? undefined : item.author?.avatarUrl} isBot={!!item.agent} size={28} />
         <Text style={[type.label, { color: c.textPrimary, fontWeight: '600' }]}>{item.author?.name || (own ? 'You' : 'Chat participant')}</Text>
         {item.agent && <Text style={{ color: c.textMetadata, ...type.meta }}>via {item.agent.name} · Agent</Text>}
         <Text style={{ color: c.textMetadata, ...type.meta }}>{item.kind === 'ask' ? 'ASK' : item.kind === 'offer' ? 'OFFER' : 'NOTE'}</Text>
@@ -105,7 +105,7 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
           setFeedback({ text: result.queued ? `Requested help from ${result.queued} agent${result.queued === 1 ? '' : 's'}. Replies will appear here.` : 'These agents have already received this request. Replies will appear here.', error: false });
         }))}
       </View>}
-      {!item.isDeleted && <ContextIntentionControls post={item} conversationId={conversationId} onChange={() => void load()} />}
+      {!item.isDeleted && actionsFor === item.id && <ContextIntentionControls post={item} conversationId={conversationId} onChange={() => void load()} />}
       {confirmDelete === item.id && <View><Text style={{ color: c.textMetadata }}>Delete this post? Replies will remain.</Text><View style={styles.actions}>{button('Confirm delete', () => void action(item.id, () => contextLaneManager.deletePost(conversationId, item.id)), true)}{button('Cancel', () => setConfirmDelete(undefined))}</View></View>}
       {reporting === item.id && <View><Text style={{ color: c.textMetadata }}>Report this post for review</Text><View style={styles.actions}>{['Spam', 'Harassment', 'Other'].map(reason => <React.Fragment key={reason}>{button(reason, () => void action(item.id, () => api.reportContextPost(conversationId, item.id, reason.toLowerCase()), 'Report submitted.'))}</React.Fragment>)}{button('Cancel', () => setReporting(undefined))}</View></View>}
       {busy === item.id && <ActivityIndicator color={c.primary} accessibilityLabel="Working" />}
