@@ -39,13 +39,15 @@ the live landing link, run from the repository root:
 
 ```sh
 scripts/verify-android-release.sh
-# For a subsequent release, pass its tag and expected byte count:
-scripts/verify-android-release.sh android-20261115 103835096
+# For a subsequent release, pass its tag, byte count, version name, and version code:
+scripts/verify-android-release.sh android-20261115 103835096 1.0.20 4
 ```
 
 The script follows HTTPS redirects, checks HEAD/download status and APK content
 type, checks the expected size, matches the public `SHA256SUMS`, and tests ZIP
-integrity plus the manifest and DEX entries. A draft release fails these checks.
+integrity plus the manifest and DEX entries. Android build-tools `aapt2` (or `aapt`)
+must be on PATH, or supplied via `AAPT=/path/to/aapt2`; it checks the package
+`com.jacobcole.openchat`, version name, and version code against the expected values. A draft release fails these checks.
 It runs `apksigner verify` if available; otherwise signature verification still
 needs the Android build-tools step described above. It neither installs the APK
 nor verifies sign-in/runtime behavior. Temporary downloads are removed on exit.

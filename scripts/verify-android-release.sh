@@ -3,15 +3,21 @@
 set -euo pipefail
 
 if [ "${1:-}" = --help ]; then
-  echo "Usage: $0 [release-tag [expected-bytes]]"
-  echo 'Defaults: android-20261115, 103835096 bytes. Requires curl, unzip, and sha256sum or shasum.'
+  echo "Usage: $0 [release-tag [expected-bytes [version [version-code]]]]"
+  echo 'Defaults: android-20261115, 103835096 bytes, version 1.0.20, code 4. Requires curl, unzip, aapt2/aapt, and sha256sum or shasum.'
   exit 0
 fi
-[ "$#" -le 2 ] || { echo 'Expected at most a release tag and byte count.' >&2; exit 1; }
+[ "$#" -le 4 ] || { echo 'Expected a release tag, byte count, version, and version code at most.' >&2; exit 1; }
 tag=${1:-android-20261115}
 expected_bytes=${2:-103835096}
+expected_version=${3:-1.0.20}
+expected_code=${4:-4}
+expected_package=com.jacobcole.openchat
+aapt_tool=${AAPT:-$(command -v aapt2 || command -v aapt || true)}
 [[ "$tag" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]] || { echo 'Invalid release tag.' >&2; exit 1; }
 [[ "$expected_bytes" =~ ^[1-9][0-9]*$ ]] || { echo 'Expected bytes must be a positive integer.' >&2; exit 1; }
+
+[ -n "$aapt_tool" ] && [ -x "$aapt_tool" ] || { echo 'Missing aapt2/aapt (set AAPT to its executable path).' >&2; exit 1; }
 
 for tool in curl unzip; do
   command -v "$tool" >/dev/null || { echo "Missing command: $tool" >&2; exit 1; }
@@ -70,9 +76,18 @@ unzip -Z1 "$apk" > "$work_dir/entries"
 grep -Fxq AndroidManifest.xml "$work_dir/entries" || fail 'missing AndroidManifest.xml'
 grep -Fxq classes.dex "$work_dir/entries" || fail 'missing classes.dex'
 
-printf 'Verified: %s\nHTTP: 200\nBytes: %s\nSHA-256: %s\nAPK: AndroidManifest.xml and classes.dex present; ZIP integrity passed\n' "$url" "$actual_bytes" "$actual_sha"
+"$aapt_tool" dump badging "$apk" > "$work_dir/badging"
+package=$(sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p" "$work_dir/badging")
+version=$(sed -n "s/^package: .*versionName='\\([^']*\\)'.*/\\1/p" "$work_dir/badging")
+code=$(sed -n "s/^package: .*versionCode='\\([^']*\\)'.*/\\1/p" "$work_dir/badging")
+[ "$package" = "$expected_package" ] || fail "package: expected $expected_package, got $package"
+[ "$version" = "$expected_version" ] || fail "version: expected $expected_version, got $version"
+[ "$code" = "$expected_code" ] || fail "version code: expected $expected_code, got $code"
+
 if command -v apksigner >/dev/null; then
   apksigner verify --verbose --print-certs "$apk"
 else
   echo 'Signature not checked here (apksigner unavailable).'
 fi
+printf 'Verified: %s\nHTTP: 200\nBytes: %s\nSHA-256: %s\nAPK: AndroidManifest.xml and classes.dex present; ZIP integrity passed\n' "$url" "$actual_bytes" "$actual_sha"
+printf 'Package: %s\nVersion: %s (%s)\n' "$package" "$version" "$code"
