@@ -88,8 +88,19 @@ code=$(sed -n "s/^package: .*versionCode='\\([^']*\\)'.*/\\1/p" "$work_dir/badgi
 
 if command -v apksigner >/dev/null; then
   apksigner verify --verbose --print-certs "$apk" > "$work_dir/signature"
-  # Exactly one signer must match; missing, malformed or additional signers fail.
-  signer=$(awk '/^Signer #[0-9]+ certificate SHA-256 digest:/ {print tolower($NF)}' "$work_dir/signature")
+  # Classify certificate records broadly, then validate the complete grammar.
+  # Other certificate attributes are allowed only in the known single-signer form.
+  signer=$(awk '
+    tolower($0) ~ /signer.*certificate/ {
+      if ($0 ~ /^Signer #1 certificate DN: /) next
+      if ($0 ~ /^Signer #1 certificate SHA-1 digest: [0-9A-Fa-f]+$/ && NF == 6 && length($6) == 40) next
+      if ($0 ~ /^Signer #1 certificate MD5 digest: [0-9A-Fa-f]+$/ && NF == 6 && length($6) == 32) next
+      count++
+      if ($0 !~ /^Signer #1 certificate SHA-256 digest: [0-9A-Fa-f]+$/ || NF != 6 || length($6) != 64) bad = 1
+      else digest = tolower($6)
+    }
+    END { if (bad || count != 1) exit 1; print digest }
+  ' "$work_dir/signature") || fail 'Malformed, missing or multiple APK signer certificate records (pinned signer required)'
   [ "$signer" = "$expected_signer" ] || fail 'APK signer does not match the pinned release certificate'
   cat "$work_dir/signature"
   printf 'Signer certificate pin matched: %s\n' "$expected_signer"

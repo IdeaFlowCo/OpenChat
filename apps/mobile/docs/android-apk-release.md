@@ -52,6 +52,8 @@ When `apksigner` is available, it verifies the APK signature and requires exactl
 one signer whose certificate SHA-256 is
 `dc568c4ccbf4dde1ed7c411a01e3e40f519cc93a57a26a6e8b32708b61ce8cea`.
 A different, missing or additional signer fails, even if `SHA256SUMS` matches.
+The complete certificate-digest record must contain a single 64-hex field;
+malformed or ambiguous certificate records are rejected rather than ignored.
 Signing-key rotation requires a separately reviewed pin update; the public
 checksum file cannot change the expected certificate. Without `apksigner`, the
 script checks download integrity only, not publisher authentication; complete

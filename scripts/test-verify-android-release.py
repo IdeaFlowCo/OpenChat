@@ -73,11 +73,25 @@ if case == 'signer-public-key':
     sys.exit()
 if case == 'signer-malformed':
     pin += ' junk'
+if case == 'signer-leading-junk':
+    pin = 'junk ' + pin
+if case == 'signer-metadata-valid':
+    print('Signer #1 certificate DN: CN=Fixture')
+    print('Signer #1 certificate SHA-1 digest: ' + '1' * 40)
+    print('Signer #1 certificate MD5 digest: ' + '2' * 32)
 print('Signer #1 certificate SHA-256 digest: ' + pin)
 if case == 'signer-extra':
     print('Signer #2 certificate SHA-256 digest: ' + '0' * 64)
 if case == 'signer-duplicate':
     print('Signer #1 certificate SHA-256 digest: ' + pin)
+if case == 'signer-extra-no-colon':
+    print('Signer #2 certificate SHA-256 digest ' + '0' * 64)
+if case == 'signer-extra-leading-junk':
+    print('Signer #2 certificate SHA-256 digest: junk ' + '0' * 64)
+if case == 'signer-extra-unknown':
+    print('Signer #2 certificate SHA256 digest: ' + '0' * 64)
+if case == 'signer-extra-dn':
+    print('Signer #2 certificate DN: CN=Other')
 '''
 CASES = {
     'valid': None,
@@ -103,8 +117,14 @@ CASES = {
     'signer-malformed': 'pinned',
     'signer-public-key': 'pinned',
     'signer-failure': '',
+    'signer-leading-junk': 'certificate records',
+    'signer-extra-no-colon': 'certificate records',
+    'signer-extra-leading-junk': 'certificate records',
+    'signer-extra-unknown': 'certificate records',
+    'signer-extra-dn': 'certificate records',
+    'signer-metadata-valid': None,
 }
-POSITIVES = {'valid', 'signer-uppercase', 'signer-unavailable'}
+POSITIVES = {'valid', 'signer-uppercase', 'signer-unavailable', 'signer-metadata-valid'}
 
 
 def executable(path, source):
