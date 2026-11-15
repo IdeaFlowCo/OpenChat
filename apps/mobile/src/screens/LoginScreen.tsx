@@ -1,3 +1,4 @@
+import { AppIcon } from '../components/AppIcon';
 import { radius, type } from '../theme/tokens';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -730,7 +731,7 @@ export function LoginScreen() {
                 <Text style={{ fontSize: type.bubble.fontSize, fontWeight: '600', color: c.textPrimary }}>Get the iOS app · App Store</Text>
                 <Text style={{ fontSize: type.label.fontSize, color: c.textSecondary, marginTop: 4 }}>Install the native app on iPhone or iPad</Text>
               </View>
-              <Text style={{ color: c.textMuted, fontSize: type.title.fontSize }}>›</Text>
+              <AppIcon name="chevron-right" color={c.textMuted} size={17} />
             </TouchableOpacity>
 
             {Platform.OS !== 'web' ? (
@@ -759,7 +760,7 @@ export function LoginScreen() {
                   <Text style={{ fontSize: type.bubble.fontSize, fontWeight: '600', color: c.textPrimary }}>Open in browser</Text>
                   <Text style={{ fontSize: type.label.fontSize, color: c.textSecondary, marginTop: 4 }}>Continue on the web version</Text>
                 </View>
-                <Text style={{ color: c.textMuted, fontSize: type.title.fontSize }}>›</Text>
+                <AppIcon name="chevron-right" color={c.textMuted} size={17} />
               </TouchableOpacity>
             )}
           </View>

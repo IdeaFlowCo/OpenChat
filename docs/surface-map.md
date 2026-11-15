@@ -121,3 +121,8 @@ Settings, Profile, Edit profile and New message keep the Chats sidebar at deskto
 widths. Their existing screens occupy the detail pane, with a title and Back.
 Selecting a sidebar chat returns to Chats and preserves the selected conversation.
 Phone widths retain the existing stack headers and modal presentation.
+
+Settings keeps Account first, then Agents. Experience and Appearance use one
+radio style; Stories and quiet-search pause use native Switch controls. More
+reveals Feedback, Data, Invite, About and Legal without hiding Sign out. Stream
+and message metadata share the list/bubble/card time-formatting module.
