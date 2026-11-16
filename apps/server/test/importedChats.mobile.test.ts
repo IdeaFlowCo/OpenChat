@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   identityVerified: true,
   route: { params: {} as Record<string, unknown> },
   api: {
-    getTripMemory: vi.fn(), saveTripMessage: vi.fn(), getImportedMessage: vi.fn(), listImportedChats: vi.fn(), getImportedChat: vi.fn(), listImportedMessages: vi.fn(), listImportedPeople: vi.fn(),
+    removeChatSave: vi.fn(), dismissChatSuggestion: vi.fn(), getChatMemory: vi.fn(), saveChatMessage: vi.fn(), getImportedMessage: vi.fn(), listImportedChats: vi.fn(), getImportedChat: vi.fn(), listImportedMessages: vi.fn(), listImportedPeople: vi.fn(),
     listImportedAsks: vi.fn(), setImportedAskStatus: vi.fn(), getImportedPerson: vi.fn(),
   },
 }));
@@ -201,12 +201,12 @@ describe('imported person mini-profile', () => {
   });
 });
 
-describe('private Trip memory', () => {
+describe('private Chat memory', () => {
   it('searches suggestions and saves distinct source messages without carrying saved state', async () => {
     mocks.route.params = {chatId: chat.id, tab: 'memory'};
-    mocks.api.getTripMemory.mockResolvedValue({scannedMessages: 2, truncated: false, items: [{id: 'link', category: 'links', label: 'example.com/cabin', url: 'https://example.com/cabin', sourceMessageIds: ['source-a', 'source-b']}]});
+    mocks.api.getChatMemory.mockResolvedValue({scannedMessages: 2, truncated: false, items: [{id: 'link', category: 'links', label: 'example.com/cabin', url: 'https://example.com/cabin', sourceMessageIds: ['source-a', 'source-b']}]});
     mocks.api.getImportedMessage.mockImplementation(async (_chat, id) => message(id, {text: `Original ${id}`}));
-    mocks.api.saveTripMessage.mockResolvedValue({saved: true});
+    mocks.api.saveChatMessage.mockResolvedValue({saved: true});
     await render(React.createElement(ImportedChatScreen));
     expect(texts()).toContain('Private to you');
     await act(async () => button('View source 1').props.onPress());
@@ -217,9 +217,42 @@ describe('private Trip memory', () => {
     expect(texts()).toContain('Original source-b');
     expect(button('Save this message')).toBeDefined();
     await act(async () => button('Save this message').props.onPress());
-    expect(mocks.api.saveTripMessage.mock.calls).toEqual([[chat.id, 'source-a'], [chat.id, 'source-b']]);
+    expect(mocks.api.saveChatMessage.mock.calls).toEqual([[chat.id, 'source-a'], [chat.id, 'source-b']]);
     const search = root!.root.findByType('TextInput' as any);
     await act(async () => search.props.onChangeText('not present'));
     expect(texts()).not.toContain('example.com/cabin');
+  });
+});
+
+describe('generic chat memory states', () => {
+  it('supports a non-trip direct chat, explicit tags, suggestions and private owner choices across reload', async () => {
+    mocks.route.params = {chatId: 'direct-example', tab: 'memory'};
+    mocks.api.getImportedChat.mockResolvedValue({...chat, id: 'direct-example', chatType: 'direct', title: 'Apartment maintenance'});
+    const tag = {id: 'tag', category: 'hashtags', label: '#address', url: null, sourceMessageIds: ['source']};
+    const suggestion = {id: 'place', category: 'places', label: '123 Example Road', url: null, sourceMessageIds: ['source']};
+    const saved = {id: 'saved', category: 'saved', label: 'Original saved message', url: null, sourceMessageIds: ['source']};
+    let items: any[] = [tag, suggestion];
+    mocks.api.getChatMemory.mockImplementation(async () => ({items, scannedMessages: 1, truncated: false}));
+    mocks.api.saveChatMessage.mockImplementation(async () => {items = [...items, saved]; return {saved: true};});
+    mocks.api.dismissChatSuggestion.mockImplementation(async () => {items = items.filter(item => item.id !== 'place'); return {dismissed: true};});
+    mocks.api.removeChatSave.mockImplementation(async () => {items = items.filter(item => item.id !== 'saved'); return {removed: true};});
+    await render(React.createElement(ImportedChatScreen));
+    expect(texts()).toContain('Suggested Places');
+    await act(async () => button('Save message').props.onPress());
+    await act(async () => button('Dismiss suggestion').props.onPress());
+    expect(texts()).not.toContain('123 Example Road');
+    await act(async () => button('Tagged').props.onPress());
+    expect(texts()).toContain('#address');
+    await act(async () => button('Saved').props.onPress());
+    expect(texts()).toContain('Original saved message');
+    await act(async () => button('View source').props.onPress());
+    expect(texts()).toContain('Source message');
+    await act(async () => button('Remove save').props.onPress());
+    expect(texts()).not.toContain('Source message');
+    expect(texts()).not.toContain('Original saved message');
+    await act(async () => button('Tagged').props.onPress());
+    items = [];
+    await act(async () => button('Refresh memory').props.onPress());
+    expect(texts()).toContain('No explicit #hashtags found in the scanned messages.');
   });
 });

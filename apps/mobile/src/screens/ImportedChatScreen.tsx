@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, TextInput, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { api, type ImportedAsk, type ImportedChatSummary, type ImportedMessage, type ImportedPerson, type TripMemory } from '../api/client';
+import { api, type ImportedAsk, type ImportedChatSummary, type ImportedMessage, type ImportedPerson, type ChatMemory } from '../api/client';
 import { Avatar } from '../components/Avatar';
 import { AskCard, participantName, ProvenanceStrip, useImportedRoles } from '../components/ImportedChatParts';
 import { Button, Card, Chip, ListRow } from '../components/ui';
@@ -15,7 +15,7 @@ import { NOT_LINKED, membershipLabel, messageTime, networkName } from '../utils/
 import type { NavProp, RouteProps } from '../navigation/types';
 
 export type ImportedChatTab = 'conversation' | 'people' | 'asks' | 'memory';
-const TABS: Array<{ id: ImportedChatTab; label: string }> = [{ id: 'conversation', label: 'Conversation' }, { id: 'people', label: 'People' }, { id: 'asks', label: 'Asks' }, { id: 'memory', label: 'Trip memory' }];
+const TABS: Array<{ id: ImportedChatTab; label: string }> = [{ id: 'conversation', label: 'Conversation' }, { id: 'people', label: 'People' }, { id: 'asks', label: 'Asks' }, { id: 'memory', label: 'Memory' }];
 
 export function ImportedChatScreen() {
   const navigation = useNavigation<NavProp<'ImportedChat'>>();
@@ -50,7 +50,7 @@ export function ImportedChatScreen() {
         })}
       </View>
       {tab === 'conversation' ? <ConversationTab chatId={chat.id} network={chat.network} onOpenPerson={openPerson} /> : null}
-      {tab === 'memory' ? <TripMemoryTab chatId={chat.id} network={chat.network} onOpenPerson={openPerson} /> : null}
+      {tab === 'memory' ? <ChatMemoryTab chatId={chat.id} network={chat.network} onOpenPerson={openPerson} /> : null}
       {tab === 'people' ? <PeopleTab chatId={chat.id} onOpenPerson={openPerson} /> : null}
       {tab === 'asks' ? <AsksTab chatId={chat.id} onOpenPerson={openPerson} onChanged={() => void loadChat()} /> : null}
     </View>
@@ -98,7 +98,7 @@ export function MessageRow({ message, network, onOpenPerson, chatId }: { message
   const save = async () => {
     if (!chatId) return;
     setSaving(true); setSaveError(false);
-    try { await api.saveTripMessage(chatId, message.sourceMessageId); setSaved(true); }
+    try { await api.saveChatMessage(chatId, message.sourceMessageId); setSaved(true); }
     catch { setSaveError(true); } finally { setSaving(false); }
   };
   if (message.kind === 'system') {
@@ -132,16 +132,17 @@ export function MessageRow({ message, network, onOpenPerson, chatId }: { message
   );
 }
 
-function TripMemoryTab({chatId, network, onOpenPerson}: {chatId: string; network: string; onOpenPerson: (id: string) => void}) {
+function ChatMemoryTab({chatId, network, onOpenPerson}: {chatId: string; network: string; onOpenPerson: (id: string) => void}) {
   const r = useImportedRoles();
-  const [memory, setMemory] = useState<TripMemory | null>(null);
+  const [memory, setMemory] = useState<ChatMemory | null>(null);
   const [query, setQuery] = useState('');
+  const [view, setView] = useState<'tagged' | 'suggested' | 'saved'>('suggested');
   const [error, setError] = useState(false);
   const [source, setSource] = useState<ImportedMessage | null>(null);
   const [sourceBusy, setSourceBusy] = useState(false);
   const load = useCallback(async () => {
     setError(false);
-    try { setMemory(await api.getTripMemory(chatId)); } catch { setError(true); }
+    try { setMemory(await api.getChatMemory(chatId)); } catch { setError(true); }
   }, [chatId]);
   useEffect(() => { void load(); }, [load]);
   const openSource = async (id: string) => {
@@ -149,29 +150,40 @@ function TripMemoryTab({chatId, network, onOpenPerson}: {chatId: string; network
     try { setSource(await api.getImportedMessage(chatId, id)); } catch { setError(true); }
     finally { setSourceBusy(false); }
   };
-  const categories = ['saved', 'links', 'places', 'dates', 'bookings', 'files', 'tasks', 'decisions'] as const;
-  const labels = {saved: 'Saved messages', links: 'Links', places: 'Places', dates: 'Dates & times', bookings: 'Bookings & confirmations', files: 'Files & photos', tasks: 'To-dos', decisions: 'Decisions'};
+  const changeMemory = async (action: () => Promise<unknown>) => {
+    setError(false);
+    try { await action(); setSource(null); await load(); } catch { setError(true); }
+  };
+  const categories = ['saved', 'hashtags', 'links', 'places', 'dates', 'bookings', 'files', 'tasks', 'decisions'] as const;
+  const labels = {saved: 'Saved messages', hashtags: 'Explicit #hashtags', links: 'Links', places: 'Places', dates: 'Dates & times', bookings: 'Bookings & confirmations', files: 'Files & photos', tasks: 'To-dos', decisions: 'Decisions'};
   const items = memory?.items.filter(item => `${item.label} ${item.category} ${item.url ?? ''}`.toLowerCase().includes(query.toLowerCase())) ?? [];
   return <ScrollView contentContainerStyle={styles.pad} keyboardShouldPersistTaps="handled">
-    <Text style={[type.title, {color: r.text}]}>Trip memory</Text>
-    <Text style={[type.meta, {color: r.textMeta}]}>Private to you. Suggestions from this copy; verify dates, bookings and decisions against their source.</Text>
-    <TextInput accessibilityLabel="Search trip memory" placeholder="Search trip memory" placeholderTextColor={r.textMeta} value={query} onChangeText={setQuery} style={[type.body, styles.search, {color: r.text, borderColor: r.line}]} />
+    <Text style={[type.title, {color: r.text}]}>Memory</Text>
+    <Text style={[type.meta, {color: r.textMeta}]}>Private to you. Explicit #hashtags and suggested items from this chat. Suggestions are not saved until you choose Save this message.</Text>
+    <TextInput accessibilityLabel="Search memory" placeholder="Search memory" placeholderTextColor={r.textMeta} value={query} onChangeText={setQuery} style={[type.body, styles.search, {color: r.text, borderColor: r.line}]} />
     {memory ? <Text style={[type.meta, {color: r.textMeta}]}>{memory.scannedMessages} messages scanned{memory.truncated ? ' · latest 2,000 only' : ''}. Mirror coverage shown above. Link labels come from URLs; previews and media bytes are not fetched.</Text> : !error ? <ActivityIndicator color={r.accent} /> : null}
     {error ? <Text accessibilityRole="alert" style={[type.meta, {color: r.danger}]}>Could not load. Try again.</Text> : null}
     <Button label="Refresh memory" variant="ghost" size="sm" onPress={() => void load()} />
     {sourceBusy ? <ActivityIndicator color={r.accent} /> : null}
     {source ? <Card><Text style={[type.label, {color: r.text}]}>Source message</Text><MessageRow key={source.id} message={source} network={network} onOpenPerson={onOpenPerson} chatId={chatId} /><Button label="Close source" size="sm" variant="ghost" onPress={() => setSource(null)} /></Card> : null}
-    {categories.map(category => {
+    <View style={styles.tabs}>{(['tagged', 'suggested', 'saved'] as const).map(value => <Chip key={value} label={value[0].toUpperCase() + value.slice(1)} selected={view === value} onPress={() => setView(value)} />)}</View>
+    {categories.filter(category => view === 'tagged' ? category === 'hashtags' : view === 'saved' ? category === 'saved' : category !== 'saved' && category !== 'hashtags').map(category => {
       const group = items.filter(item => item.category === category);
       return <View key={category} style={styles.memoryGroup}>
-        <Text style={[type.label, {color: r.text}]}>{labels[category]} · {group.length}</Text>
+        <Text style={[type.label, {color: r.text}]}>{category !== 'saved' && category !== 'hashtags' ? 'Suggested ' : ''}{labels[category]} · {group.length}</Text>
         {group.map(item => <Card key={item.id}>
-          <Text selectable style={[type.body, {color: r.text}]}>{item.label}</Text>
+          {item.category === 'hashtags'
+            ? <Chip label={item.label} selected={query === item.label} onPress={() => setQuery(query === item.label ? '' : item.label)} />
+            : <Text selectable style={[type.body, {color: r.text}]}>{item.label}</Text>}
           {item.url ? <Text selectable style={[type.meta, {color: r.textMeta}]}>{item.url}</Text> : null}
           {item.category === 'places' && !item.url ? <Text selectable style={[type.meta, {color: r.textMeta}]}>{`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.label)}`}</Text> : null}
+          {item.category === 'saved'
+            ? <Button label="Remove save" size="sm" variant="ghost" onPress={() => void changeMemory(() => Promise.all(item.sourceMessageIds.map(id => api.removeChatSave(chatId, id))))} />
+            : <Button label="Save message" size="sm" variant="ghost" onPress={() => void changeMemory(() => api.saveChatMessage(chatId, item.sourceMessageIds[0]!))} />}
+          {item.category !== 'saved' && item.category !== 'hashtags' ? <Button label="Dismiss suggestion" size="sm" variant="ghost" onPress={() => void changeMemory(() => api.dismissChatSuggestion(chatId, item.id))} /> : null}
           {item.sourceMessageIds.map((id, index) => <Button key={id} label={`View source${item.sourceMessageIds.length > 1 ? ` ${index + 1}` : ''}`} size="sm" variant="ghost" onPress={() => void openSource(id)} />)}
         </Card>)}
-        {!group.length ? <Text style={[type.meta, {color: r.textMeta}]}>No matching items.</Text> : null}
+        {!group.length ? <Text style={[type.meta, {color: r.textMeta}]}>{category === 'hashtags' && !query ? 'No explicit #hashtags found in the scanned messages.' : 'No matching items.'}</Text> : null}
       </View>;
     })}
   </ScrollView>;

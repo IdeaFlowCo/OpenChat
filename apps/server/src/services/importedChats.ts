@@ -754,7 +754,7 @@ export async function getImportedMessage(ownerUserId: string, chatId: string, so
 export async function tripMemoryThingId(ownerUserId: string, chatId: string): Promise<string | null> {
   return read(async tx => (await requireChat(tx, ownerUserId, chatId)).tripMemoryThingId as string ?? null);
 }
-export async function bindTripMemoryThing(ownerUserId: string, chatId: string, thingId: string, previousId: string | null = null): Promise<string> {
+export async function bindChatMemoryThing(ownerUserId: string, chatId: string, thingId: string, previousId: string | null = null): Promise<string> {
   return write(async tx => {
     // Setting a property dependent on itself obtains the node write lock before reading.
     const result = await tx.run(`MATCH (c:OpenChatImportedChat {id: $chatId, ownerUserId: $ownerUserId})
