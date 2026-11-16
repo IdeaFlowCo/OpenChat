@@ -736,3 +736,30 @@ export async function deleteImportedChat(ownerUserId: string, chatId: string): P
     return { deleted: true as const };
   });
 }
+
+/** Exact citation lookup; never enters a live conversation or changes read state. */
+export async function getImportedMessage(ownerUserId: string, chatId: string, sourceMessageId: string): Promise<ImportedMessageView> {
+  return read(async tx => {
+    await requireChat(tx, ownerUserId, chatId);
+    const result = await tx.run(`MATCH (m:OpenChatImportedMessage {chatId: $chatId, ownerUserId: $ownerUserId, sourceMessageId: $sourceMessageId})
+      OPTIONAL MATCH (p:OpenChatImportedParticipant {chatId: $chatId, ownerUserId: $ownerUserId, id: m.senderParticipantId})
+      RETURN ${MESSAGE_VIEW}`, {chatId, ownerUserId, sourceMessageId});
+    if (!result.records.length) return fail(404, 'Message not found');
+    const record = result.records[0]!;
+    return messageView(record.get('m'), record.get('p'));
+  });
+}
+
+/** Stable owner-private storage pointer; project names remain freely editable. */
+export async function tripMemoryThingId(ownerUserId: string, chatId: string): Promise<string | null> {
+  return read(async tx => (await requireChat(tx, ownerUserId, chatId)).tripMemoryThingId as string ?? null);
+}
+export async function bindTripMemoryThing(ownerUserId: string, chatId: string, thingId: string, previousId: string | null = null): Promise<string> {
+  return write(async tx => {
+    // Setting a property dependent on itself obtains the node write lock before reading.
+    const result = await tx.run(`MATCH (c:OpenChatImportedChat {id: $chatId, ownerUserId: $ownerUserId})
+      SET c.tripMemoryThingId = CASE WHEN c.tripMemoryThingId IS NULL OR c.tripMemoryThingId = $previousId THEN $thingId ELSE c.tripMemoryThingId END
+      RETURN c.tripMemoryThingId AS thingId`, {ownerUserId, chatId, thingId, previousId});
+    return result.records[0]?.get('thingId') as string ?? notFound();
+  });
+}

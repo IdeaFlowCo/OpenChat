@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   identityVerified: true,
   route: { params: {} as Record<string, unknown> },
   api: {
-    listImportedChats: vi.fn(), getImportedChat: vi.fn(), listImportedMessages: vi.fn(), listImportedPeople: vi.fn(),
+    getTripMemory: vi.fn(), saveTripMessage: vi.fn(), getImportedMessage: vi.fn(), listImportedChats: vi.fn(), getImportedChat: vi.fn(), listImportedMessages: vi.fn(), listImportedPeople: vi.fn(),
     listImportedAsks: vi.fn(), setImportedAskStatus: vi.fn(), getImportedPerson: vi.fn(),
   },
 }));
@@ -198,5 +198,28 @@ describe('imported person mini-profile', () => {
     expect(shown).toContain('I run a soil-health lab.');
     expect(shown).toContain('Name from their own message · Current member');
     expect(shown).toContain('Hi all, Ada here.');
+  });
+});
+
+describe('private Trip memory', () => {
+  it('searches suggestions and saves distinct source messages without carrying saved state', async () => {
+    mocks.route.params = {chatId: chat.id, tab: 'memory'};
+    mocks.api.getTripMemory.mockResolvedValue({scannedMessages: 2, truncated: false, items: [{id: 'link', category: 'links', label: 'example.com/cabin', url: 'https://example.com/cabin', sourceMessageIds: ['source-a', 'source-b']}]});
+    mocks.api.getImportedMessage.mockImplementation(async (_chat, id) => message(id, {text: `Original ${id}`}));
+    mocks.api.saveTripMessage.mockResolvedValue({saved: true});
+    await render(React.createElement(ImportedChatScreen));
+    expect(texts()).toContain('Private to you');
+    await act(async () => button('View source 1').props.onPress());
+    expect(texts()).toContain('Original source-a');
+    await act(async () => button('Save this message').props.onPress());
+    expect(texts()).toContain('Saved privately');
+    await act(async () => button('View source 2').props.onPress());
+    expect(texts()).toContain('Original source-b');
+    expect(button('Save this message')).toBeDefined();
+    await act(async () => button('Save this message').props.onPress());
+    expect(mocks.api.saveTripMessage.mock.calls).toEqual([[chat.id, 'source-a'], [chat.id, 'source-b']]);
+    const search = root!.root.findByType('TextInput' as any);
+    await act(async () => search.props.onChangeText('not present'));
+    expect(texts()).not.toContain('example.com/cabin');
   });
 });

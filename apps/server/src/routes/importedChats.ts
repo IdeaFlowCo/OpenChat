@@ -9,9 +9,13 @@ import express, { Router, type NextFunction, type Request, type RequestHandler, 
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import { resolveActor } from '../middleware/resolveActor.js';
 import {
-  deleteImportedChat, getImportedChat, getImportedPerson, importChat, ImportedChatError, listImportedAsks, listImportedChats,
+  deleteImportedChat, getImportedChat, getImportedMessage, getImportedPerson, importChat, ImportedChatError, listImportedAsks, listImportedChats,
   listImportedMessages, listImportedPeople, setImportedAskStatus,
 } from '../services/importedChats.js';
+
+import { getTripMemory, saveTripMessage } from '../services/tripMemory.js';
+import { PrivateGraphError } from '../services/privateGraph.js';
+import { provenanceFor } from './privateGraph.js';
 
 export const IMPORT_PATH = '/api/imported-chats/import';
 /**
@@ -37,7 +41,7 @@ router.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 function fail(error: unknown, res: Response): void {
-  if (error instanceof ImportedChatError) { res.status(error.status).json({ ...(error.details ?? {}), error: error.message }); return; }
+  if (error instanceof ImportedChatError || error instanceof PrivateGraphError) { res.status(error.status).json({ ...(error.details ?? {}), error: error.message }); return; }
   console.error('Imported chat request failed:', error instanceof Error ? error.message : 'unknown error');
   res.status(500).json({ error: 'Could not do that. Try again.' });
 }
@@ -87,3 +91,13 @@ router.patch('/:chatId/asks/:askId', async (req: Request, res: Response) => {
 });
 
 export default router;
+
+router.get('/:chatId/memory', async (req: Request, res: Response) => {
+  try { res.json(await getTripMemory(owner(req), param(req, 'chatId'))); } catch (error) { fail(error, res); }
+});
+router.post('/:chatId/memory/saved', async (req: Request, res: Response) => {
+  try { res.json(await saveTripMessage(owner(req), param(req, 'chatId'), req.body, provenanceFor(req))); } catch (error) { fail(error, res); }
+});
+router.get('/:chatId/messages/:sourceMessageId', async (req: Request, res: Response) => {
+  try { res.json(await getImportedMessage(owner(req), param(req, 'chatId'), param(req, 'sourceMessageId'))); } catch (error) { fail(error, res); }
+});
