@@ -1022,6 +1022,8 @@ export interface ImportedCoverage { asOf: string | null; method: string | null; 
 export interface ImportedChatSummary { id: string; network: string; chatType: 'group' | 'direct'; title: string; coverage: ImportedCoverage; counts: { messages: number; participants: number; openAsks: number } }
 export interface ImportedParticipantRef { participantId: string; label: string; displayName: string | null; isOwner: boolean }
 export interface ImportedPerson extends ImportedParticipantRef { nameSource: 'contact' | 'push_name' | 'profile' | 'self_stated' | 'owner' | 'unknown'; membership?: 'current' | 'former' | 'unknown'; messageCount: number; firstMessageAt: string | null; lastMessageAt: string | null; factCount: number; askCount: number }
+export interface TripMemoryItem { id: string; category: 'links' | 'places' | 'dates' | 'bookings' | 'files' | 'tasks' | 'decisions' | 'saved'; label: string; url: string | null; sourceMessageIds: string[] }
+export interface TripMemory { items: TripMemoryItem[]; scannedMessages: number; truncated: boolean }
 export interface ImportedMessage { id: string; sourceMessageId: string; sentAt: string; kind: 'text' | 'media' | 'system' | 'deleted'; text: string | null; mediaType: string | null; edited: boolean; editedAt: string | null; originalText: string | null; deletedAtSource: string | null; replyToSourceMessageId: string | null; sender: ImportedParticipantRef | null }
 export interface ImportedSourceExcerpt { sourceMessageId: string; sentAt: string | null; sender: ImportedParticipantRef | null; text: string | null; available: boolean }
 export type ImportedAskStatus = 'open' | 'resolved' | 'withdrawn' | 'needs_review' | 'unknown';
@@ -1751,6 +1753,9 @@ export const api = {
   // Imported chats — read-only; nothing here sends, invites or notifies anyone.
   listImportedChats: () => request<{ chats: ImportedChatSummary[] }>('/api/imported-chats'),
   getImportedChat: (chatId: string) => request<ImportedChatSummary>(importedChatPath(chatId)),
+  getTripMemory: (chatId: string) => request<TripMemory>(`${importedChatPath(chatId)}/memory`),
+  saveTripMessage: (chatId: string, sourceMessageId: string) => request<{saved: boolean}>(`${importedChatPath(chatId)}/memory/saved`, {method: 'POST', body: JSON.stringify({sourceMessageId})}),
+  getImportedMessage: (chatId: string, sourceMessageId: string) => request<ImportedMessage>(`${importedChatPath(chatId)}/messages/${encodeURIComponent(sourceMessageId)}`),
   listImportedMessages: (chatId: string, before?: string | null, limit = 100) =>
     request<{ messages: ImportedMessage[]; nextCursor: string | null }>(`${importedChatPath(chatId)}/messages?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`),
   listImportedPeople: (chatId: string) => request<{ people: ImportedPerson[] }>(`${importedChatPath(chatId)}/people`),

@@ -65,7 +65,7 @@ export type RootStackParamList = {
   CatchUp: undefined;
   /** The owner's private, read-only copies of chats from other networks (OpenChat-061g). */
   ImportedChats: undefined;
-  ImportedChat: { chatId: string; title?: string; tab?: 'conversation' | 'people' | 'asks' };
+  ImportedChat: { chatId: string; title?: string; tab?: 'conversation' | 'people' | 'asks' | 'memory' };
   /** A small, evidenced profile of one person in an imported chat. */
   ImportedPerson: { chatId: string; participantId: string };
   /** Agent API keys list (OpenChat-7c9). */

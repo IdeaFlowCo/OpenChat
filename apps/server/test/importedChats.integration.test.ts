@@ -80,6 +80,48 @@ integration('imported chat mirrors — real Neo4j + HTTP', { timeout: 60_000 }, 
     await driver.close(); await db.closeDatabase();
   });
 
+  it('trip memory and exact citations preserve owner and key scope fences', async () => {
+    const body = payload(); body.source.chatKey += '-trip';
+    const imported = await as(token(alice)).put('/import', body);
+    const id = imported.body.chatId;
+    expect(imported.status).toBe(201);
+    const base = `/api/imported-chats/${id}`;
+    const memory = await request(app).get(`${base}/memory`).set('Authorization', token(alice));
+    expect(memory.status).toBe(200);
+    expect(memory.body.scannedMessages).toBe(body.messages.length);
+    expect((await request(app).get(`${base}/memory`).set('Authorization', token(mallory))).status).toBe(404);
+    const sourceMessageId = body.messages.find((m: any) => m.kind === 'text').sourceMessageId;
+    const sourcePath = `${base}/messages/${encodeURIComponent(sourceMessageId)}`;
+    expect((await request(app).get(sourcePath).set('Authorization', token(alice))).status).toBe(200);
+    expect((await request(app).get(sourcePath).set('Authorization', token(mallory))).status).toBe(404);
+    expect((await request(app).post(`${base}/memory/saved`).set('Authorization', `Bearer ${readKey}`).send({sourceMessageId})).status).toBe(404);
+    expect((await request(app).post(`${base}/memory/saved`).set('Authorization', token(mallory)).send({sourceMessageId})).status).toBe(404);
+    const saved = await request(app).post(`${base}/memory/saved`).set('Authorization', token(alice)).send({sourceMessageId});
+    expect(saved.status).toBe(200);
+    const retry = await request(app).post(`${base}/memory/saved`).set('Authorization', token(alice)).send({sourceMessageId});
+    expect(retry.body.thingId).toBe(saved.body.thingId);
+    // Existing storage remains discoverable after ordinary owner edits.
+    const graph = await import('../src/services/privateGraph.js');
+    await graph.updatePrivateThing(alice, saved.body.thingId, {name: 'Renamed trip', kind: 'idea'});
+    const after = await request(app).get(`${base}/memory`).set('Authorization', token(alice));
+    expect(after.status).toBe(200);
+    expect(after.body.items.some((item: any) => item.category === 'saved' && item.sourceMessageIds.includes(sourceMessageId))).toBe(true);
+    const detail = await graph.getThing(alice, saved.body.thingId);
+    expect(detail.notes).toHaveLength(1);
+    await graph.deletePrivateThing(alice, saved.body.thingId);
+    const withoutSaved = await request(app).get(`${base}/memory`).set('Authorization', token(alice));
+    expect(withoutSaved.status).toBe(200);
+    expect(withoutSaved.body.scannedMessages).toBe(body.messages.length);
+    expect(withoutSaved.body.items.some((item: any) => item.category === 'saved')).toBe(false);
+    const rebound = await request(app).post(`${base}/memory/saved`).set('Authorization', token(alice)).send({sourceMessageId});
+    expect(rebound.status).toBe(200);
+    expect(rebound.body.thingId).not.toBe(saved.body.thingId);
+    const restored = await request(app).get(`${base}/memory`).set('Authorization', token(alice));
+    expect(restored.body.items.some((item: any) => item.category === 'saved')).toBe(true);
+    await graph.deletePrivateThing(alice, rebound.body.thingId);
+    await as(token(alice)).delete(`/${id}`);
+  });
+
   it('dry run reports the plan and writes nothing', async () => {
     const before = await importedNodes();
     const res = await as(token(alice)).put('/import?dryRun=1', payload());

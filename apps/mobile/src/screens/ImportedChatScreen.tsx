@@ -4,9 +4,9 @@
  * reaches anyone in the chat. Chats › Imported chats › a chat.
  */
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, TextInput, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { api, type ImportedAsk, type ImportedChatSummary, type ImportedMessage, type ImportedPerson } from '../api/client';
+import { api, type ImportedAsk, type ImportedChatSummary, type ImportedMessage, type ImportedPerson, type TripMemory } from '../api/client';
 import { Avatar } from '../components/Avatar';
 import { AskCard, participantName, ProvenanceStrip, useImportedRoles } from '../components/ImportedChatParts';
 import { Button, Card, Chip, ListRow } from '../components/ui';
@@ -14,8 +14,8 @@ import { space, type } from '../theme/tokens';
 import { NOT_LINKED, membershipLabel, messageTime, networkName } from '../utils/importedChats';
 import type { NavProp, RouteProps } from '../navigation/types';
 
-export type ImportedChatTab = 'conversation' | 'people' | 'asks';
-const TABS: Array<{ id: ImportedChatTab; label: string }> = [{ id: 'conversation', label: 'Conversation' }, { id: 'people', label: 'People' }, { id: 'asks', label: 'Asks' }];
+export type ImportedChatTab = 'conversation' | 'people' | 'asks' | 'memory';
+const TABS: Array<{ id: ImportedChatTab; label: string }> = [{ id: 'conversation', label: 'Conversation' }, { id: 'people', label: 'People' }, { id: 'asks', label: 'Asks' }, { id: 'memory', label: 'Trip memory' }];
 
 export function ImportedChatScreen() {
   const navigation = useNavigation<NavProp<'ImportedChat'>>();
@@ -50,6 +50,7 @@ export function ImportedChatScreen() {
         })}
       </View>
       {tab === 'conversation' ? <ConversationTab chatId={chat.id} network={chat.network} onOpenPerson={openPerson} /> : null}
+      {tab === 'memory' ? <TripMemoryTab chatId={chat.id} network={chat.network} onOpenPerson={openPerson} /> : null}
       {tab === 'people' ? <PeopleTab chatId={chat.id} onOpenPerson={openPerson} /> : null}
       {tab === 'asks' ? <AsksTab chatId={chat.id} onOpenPerson={openPerson} onChanged={() => void loadChat()} /> : null}
     </View>
@@ -79,7 +80,7 @@ function ConversationTab({ chatId, network, onOpenPerson }: { chatId: string; ne
       data={messages}
       keyExtractor={message => message.id}
       contentContainerStyle={styles.transcript}
-      renderItem={({ item }) => <MessageRow message={item} network={network} onOpenPerson={onOpenPerson} />}
+      renderItem={({ item }) => <MessageRow message={item} network={network} onOpenPerson={onOpenPerson} chatId={chatId} />}
       ListHeaderComponent={<Text style={[type.meta, styles.readOnly, { color: r.textMeta }]}>Read-only copy. Nothing here is sent to anyone.</Text>}
       ListFooterComponent={cursor ? <Button label="Load earlier messages" size="sm" variant="ghost" loading={loading} onPress={() => void load(cursor)} style={styles.earlier} /> : null}
       ListEmptyComponent={<Text style={[type.body, { color: r.textSecondary }]}>No messages in this copy.</Text>}
@@ -88,9 +89,18 @@ function ConversationTab({ chatId, network, onOpenPerson }: { chatId: string; ne
 }
 
 /** A transcript row, not a bubble: these were never OpenChat messages. */
-export function MessageRow({ message, network, onOpenPerson }: { message: ImportedMessage; network: string; onOpenPerson: (id: string) => void }) {
+export function MessageRow({ message, network, onOpenPerson, chatId }: { message: ImportedMessage; chatId?: string; network: string; onOpenPerson: (id: string) => void }) {
   const r = useImportedRoles();
   const [showOriginal, setShowOriginal] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const save = async () => {
+    if (!chatId) return;
+    setSaving(true); setSaveError(false);
+    try { await api.saveTripMessage(chatId, message.sourceMessageId); setSaved(true); }
+    catch { setSaveError(true); } finally { setSaving(false); }
+  };
   if (message.kind === 'system') {
     return <Text style={[type.meta, styles.system, { color: r.textMeta }]}>{message.text ?? 'Chat event'} · {messageTime(message.sentAt)}</Text>;
   }
@@ -111,6 +121,8 @@ export function MessageRow({ message, network, onOpenPerson }: { message: Import
             {message.kind === 'media' ? <Text style={[type.meta, { color: r.textMeta }]}>{message.mediaType ? `${message.mediaType[0]!.toUpperCase()}${message.mediaType.slice(1)}` : 'Attachment'} · not imported</Text> : null}
             {message.text ? <Text selectable style={[type.bubble, { color: r.text }]}>{message.text}</Text> : null}
           </>}
+      {chatId && message.kind !== 'deleted' ? <Button label={saved ? 'Saved privately' : 'Save this message'} size="sm" variant="ghost" loading={saving} disabled={saved || saving} onPress={() => void save()} /> : null}
+      {saveError ? <Text accessibilityRole="alert" style={[type.meta, {color: r.danger}]}>Could not save. Try again.</Text> : null}
       {message.edited ? <View style={styles.edited}>
         <Text style={[type.meta, { color: r.textMeta }]}>Edited{message.editedAt ? ` ${messageTime(message.editedAt)}` : ''}</Text>
         {message.originalText ? <Button label={showOriginal ? 'Hide original' : 'Show original'} size="sm" variant="ghost" onPress={() => setShowOriginal(value => !value)} /> : null}
@@ -118,6 +130,51 @@ export function MessageRow({ message, network, onOpenPerson }: { message: Import
       {showOriginal && message.originalText ? <Text selectable style={[type.body, { color: r.textSecondary }]}>{message.originalText}</Text> : null}
     </View>
   );
+}
+
+function TripMemoryTab({chatId, network, onOpenPerson}: {chatId: string; network: string; onOpenPerson: (id: string) => void}) {
+  const r = useImportedRoles();
+  const [memory, setMemory] = useState<TripMemory | null>(null);
+  const [query, setQuery] = useState('');
+  const [error, setError] = useState(false);
+  const [source, setSource] = useState<ImportedMessage | null>(null);
+  const [sourceBusy, setSourceBusy] = useState(false);
+  const load = useCallback(async () => {
+    setError(false);
+    try { setMemory(await api.getTripMemory(chatId)); } catch { setError(true); }
+  }, [chatId]);
+  useEffect(() => { void load(); }, [load]);
+  const openSource = async (id: string) => {
+    setSourceBusy(true); setError(false);
+    try { setSource(await api.getImportedMessage(chatId, id)); } catch { setError(true); }
+    finally { setSourceBusy(false); }
+  };
+  const categories = ['saved', 'links', 'places', 'dates', 'bookings', 'files', 'tasks', 'decisions'] as const;
+  const labels = {saved: 'Saved messages', links: 'Links', places: 'Places', dates: 'Dates & times', bookings: 'Bookings & confirmations', files: 'Files & photos', tasks: 'To-dos', decisions: 'Decisions'};
+  const items = memory?.items.filter(item => `${item.label} ${item.category} ${item.url ?? ''}`.toLowerCase().includes(query.toLowerCase())) ?? [];
+  return <ScrollView contentContainerStyle={styles.pad} keyboardShouldPersistTaps="handled">
+    <Text style={[type.title, {color: r.text}]}>Trip memory</Text>
+    <Text style={[type.meta, {color: r.textMeta}]}>Private to you. Suggestions from this copy; verify dates, bookings and decisions against their source.</Text>
+    <TextInput accessibilityLabel="Search trip memory" placeholder="Search trip memory" placeholderTextColor={r.textMeta} value={query} onChangeText={setQuery} style={[type.body, styles.search, {color: r.text, borderColor: r.line}]} />
+    {memory ? <Text style={[type.meta, {color: r.textMeta}]}>{memory.scannedMessages} messages scanned{memory.truncated ? ' · latest 2,000 only' : ''}. Mirror coverage shown above. Link labels come from URLs; previews and media bytes are not fetched.</Text> : !error ? <ActivityIndicator color={r.accent} /> : null}
+    {error ? <Text accessibilityRole="alert" style={[type.meta, {color: r.danger}]}>Could not load. Try again.</Text> : null}
+    <Button label="Refresh memory" variant="ghost" size="sm" onPress={() => void load()} />
+    {sourceBusy ? <ActivityIndicator color={r.accent} /> : null}
+    {source ? <Card><Text style={[type.label, {color: r.text}]}>Source message</Text><MessageRow key={source.id} message={source} network={network} onOpenPerson={onOpenPerson} chatId={chatId} /><Button label="Close source" size="sm" variant="ghost" onPress={() => setSource(null)} /></Card> : null}
+    {categories.map(category => {
+      const group = items.filter(item => item.category === category);
+      return <View key={category} style={styles.memoryGroup}>
+        <Text style={[type.label, {color: r.text}]}>{labels[category]} · {group.length}</Text>
+        {group.map(item => <Card key={item.id}>
+          <Text selectable style={[type.body, {color: r.text}]}>{item.label}</Text>
+          {item.url ? <Text selectable style={[type.meta, {color: r.textMeta}]}>{item.url}</Text> : null}
+          {item.category === 'places' && !item.url ? <Text selectable style={[type.meta, {color: r.textMeta}]}>{`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.label)}`}</Text> : null}
+          {item.sourceMessageIds.map((id, index) => <Button key={id} label={`View source${item.sourceMessageIds.length > 1 ? ` ${index + 1}` : ''}`} size="sm" variant="ghost" onPress={() => void openSource(id)} />)}
+        </Card>)}
+        {!group.length ? <Text style={[type.meta, {color: r.textMeta}]}>No matching items.</Text> : null}
+      </View>;
+    })}
+  </ScrollView>;
 }
 
 function PeopleTab({ chatId, onOpenPerson }: { chatId: string; onOpenPerson: (id: string) => void }) {
@@ -180,8 +237,10 @@ function AsksTab({ chatId, onOpenPerson, onChanged }: { chatId: string; onOpenPe
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  search: {padding: space[3], borderWidth: StyleSheet.hairlineWidth},
+  memoryGroup: {gap: space[2]},
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space[2], padding: space[4] },
-  tabs: { flexDirection: 'row', gap: space[2], paddingHorizontal: space[4], paddingVertical: space[2], borderBottomWidth: StyleSheet.hairlineWidth },
+  tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2], paddingHorizontal: space[4], paddingVertical: space[2], borderBottomWidth: StyleSheet.hairlineWidth },
   transcript: { paddingHorizontal: space[4], paddingVertical: space[2] },
   readOnly: { textAlign: 'center', paddingVertical: space[3] },
   earlier: { alignSelf: 'center', marginVertical: space[2] },
