@@ -245,7 +245,10 @@ describe('generic chat memory states', () => {
     expect(texts()).toContain('#address');
     await act(async () => button('Saved').props.onPress());
     expect(texts()).toContain('Original saved message');
+    await act(async () => button('View source').props.onPress());
+    expect(texts()).toContain('Source message');
     await act(async () => button('Remove save').props.onPress());
+    expect(texts()).not.toContain('Source message');
     expect(texts()).not.toContain('Original saved message');
     await act(async () => button('Tagged').props.onPress());
     items = [];

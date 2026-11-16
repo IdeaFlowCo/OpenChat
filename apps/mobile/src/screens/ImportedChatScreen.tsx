@@ -152,7 +152,7 @@ function ChatMemoryTab({chatId, network, onOpenPerson}: {chatId: string; network
   };
   const changeMemory = async (action: () => Promise<unknown>) => {
     setError(false);
-    try { await action(); await load(); } catch { setError(true); }
+    try { await action(); setSource(null); await load(); } catch { setError(true); }
   };
   const categories = ['saved', 'hashtags', 'links', 'places', 'dates', 'bookings', 'files', 'tasks', 'decisions'] as const;
   const labels = {saved: 'Saved messages', hashtags: 'Explicit #hashtags', links: 'Links', places: 'Places', dates: 'Dates & times', bookings: 'Bookings & confirmations', files: 'Files & photos', tasks: 'To-dos', decisions: 'Decisions'};
