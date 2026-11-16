@@ -13,7 +13,7 @@ import {
   listImportedMessages, listImportedPeople, setImportedAskStatus,
 } from '../services/importedChats.js';
 
-import { getTripMemory, saveTripMessage } from '../services/tripMemory.js';
+import { dismissChatSuggestion, removeChatSave, getChatMemory, saveChatMessage } from '../services/chatMemory.js';
 import { PrivateGraphError } from '../services/privateGraph.js';
 import { provenanceFor } from './privateGraph.js';
 
@@ -93,11 +93,18 @@ router.patch('/:chatId/asks/:askId', async (req: Request, res: Response) => {
 export default router;
 
 router.get('/:chatId/memory', async (req: Request, res: Response) => {
-  try { res.json(await getTripMemory(owner(req), param(req, 'chatId'))); } catch (error) { fail(error, res); }
+  try { res.json(await getChatMemory(owner(req), param(req, 'chatId'))); } catch (error) { fail(error, res); }
 });
 router.post('/:chatId/memory/saved', async (req: Request, res: Response) => {
-  try { res.json(await saveTripMessage(owner(req), param(req, 'chatId'), req.body, provenanceFor(req))); } catch (error) { fail(error, res); }
+  try { res.json(await saveChatMessage(owner(req), param(req, 'chatId'), req.body, provenanceFor(req))); } catch (error) { fail(error, res); }
 });
 router.get('/:chatId/messages/:sourceMessageId', async (req: Request, res: Response) => {
   try { res.json(await getImportedMessage(owner(req), param(req, 'chatId'), param(req, 'sourceMessageId'))); } catch (error) { fail(error, res); }
+});
+
+router.delete('/:chatId/memory/saved/:sourceMessageId', async (req: Request, res: Response) => {
+  try { res.json(await removeChatSave(owner(req), param(req, 'chatId'), param(req, 'sourceMessageId'))); } catch (error) { fail(error, res); }
+});
+router.post('/:chatId/memory/dismissed', async (req: Request, res: Response) => {
+  try { res.json(await dismissChatSuggestion(owner(req), param(req, 'chatId'), req.body, provenanceFor(req))); } catch (error) { fail(error, res); }
 });

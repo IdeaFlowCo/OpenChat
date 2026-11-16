@@ -80,7 +80,7 @@ integration('imported chat mirrors — real Neo4j + HTTP', { timeout: 60_000 }, 
     await driver.close(); await db.closeDatabase();
   });
 
-  it('trip memory and exact citations preserve owner and key scope fences', async () => {
+  it('chat memory and exact citations preserve owner and key scope fences', async () => {
     const body = payload(); body.source.chatKey += '-trip';
     const imported = await as(token(alice)).put('/import', body);
     const id = imported.body.chatId;
@@ -108,6 +108,18 @@ integration('imported chat mirrors — real Neo4j + HTTP', { timeout: 60_000 }, 
     expect(after.body.items.some((item: any) => item.category === 'saved' && item.sourceMessageIds.includes(sourceMessageId))).toBe(true);
     const detail = await graph.getThing(alice, saved.body.thingId);
     expect(detail.notes).toHaveLength(1);
+    const suggestion = after.body.items.find((item: any) => item.category !== 'saved' && item.category !== 'hashtags');
+    expect(suggestion).toBeDefined();
+    expect((await request(app).post(`${base}/memory/dismissed`).set('Authorization', `Bearer ${readKey}`).send({itemId: suggestion.id})).status).toBe(404);
+    for (let retry = 0; retry < 2; retry++) expect((await request(app).post(`${base}/memory/dismissed`).set('Authorization', token(alice)).send({itemId: suggestion.id})).status).toBe(200);
+    const dismissed = await request(app).get(`${base}/memory`).set('Authorization', token(alice));
+    expect(dismissed.body.items.some((item: any) => item.id === suggestion.id)).toBe(false);
+    expect((await request(app).delete(`${base}/memory/saved/${encodeURIComponent(sourceMessageId)}`).set('Authorization', token(mallory))).status).toBe(404);
+    for (let retry = 0; retry < 2; retry++) expect((await request(app).delete(`${base}/memory/saved/${encodeURIComponent(sourceMessageId)}`).set('Authorization', token(alice))).status).toBe(200);
+    const removed = await request(app).get(`${base}/memory`).set('Authorization', token(alice));
+    expect(removed.body.items.some((item: any) => item.category === 'saved')).toBe(false);
+    expect((await request(app).post(`${base}/memory/saved`).set('Authorization', token(alice)).send({sourceMessageId})).status).toBe(200);
+
     await graph.deletePrivateThing(alice, saved.body.thingId);
     const withoutSaved = await request(app).get(`${base}/memory`).set('Authorization', token(alice));
     expect(withoutSaved.status).toBe(200);
