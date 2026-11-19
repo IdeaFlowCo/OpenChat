@@ -18,6 +18,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  AppState,
   FlatList,
   Image,
   Keyboard,
@@ -388,6 +389,11 @@ export function ChatScreen({
   const textInputRef = useRef<TextInput>(null);
   const sendInFlightRef = useRef(false);
   const listRef = useRef<FlatList<RenderRow>>(null);
+  const keyboardScrollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const cancelKeyboardScroll = useCallback(() => {
+    clearTimeout(keyboardScrollTimer.current);
+    keyboardScrollTimer.current = undefined;
+  }, []);
   const typingTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Fetching never sits in the input handler: a short debounce plus the
@@ -978,38 +984,49 @@ export function ChatScreen({
     listRef.current?.scrollToEnd({ animated: true });
   };
 
-  // Keyboard show: when iOS keyboard pushes the composer up, the visible
-  // area of the list shrinks. If the user WAS at the bottom, they should
-  // stay pinned there after the layout settles. (If they were reading
-  // history, leave them alone.)
-  useEffect(() => {
-    // A banner can appear or leave without resizing this screen's width, so
-    // re-measure as the keyboard starts to open rather than only on layout.
-    const willShowSub = Keyboard.addListener('keyboardWillShow', measureTop);
-    const showSub = Keyboard.addListener('keyboardDidShow', () => {
-      if (isAtBottomRef.current) {
-        // Defer past the layout animation so contentSize reflects the new
-        // (smaller) layout before we scroll.
-        setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 50);
-      }
-    });
-    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+  useFocusEffect(useCallback(() => {
+    if (Platform.OS === 'web' || activeConversationLane !== 'chat') return;
+
+    const resetKeyboardUI = () => {
+      cancelKeyboardScroll();
+      setKeyboardVisible(false);
       setMentionQuery(null);
       setHashtagDismissed(true);
-    });
-    // iOS fires the Will* events, Android only the Did* ones.
-    const visibleSubs = Platform.OS === 'ios'
-      ? [Keyboard.addListener('keyboardWillShow', () => setKeyboardVisible(true)),
-        Keyboard.addListener('keyboardWillHide', () => setKeyboardVisible(false))]
-      : [Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true)),
-        Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false))];
-    return () => {
-      willShowSub.remove();
-      showSub.remove();
-      hideSub.remove();
-      visibleSubs.forEach((sub) => sub.remove());
     };
-  }, [measureTop]);
+    const endComposerEditing = () => {
+      const input = textInputRef.current;
+      // A destination screen may already own focus by the time we blur.
+      if (input?.isFocused()) input.blur();
+      resetKeyboardUI();
+    };
+
+    // Banner layout can affect the iOS avoidance offset as the keyboard opens.
+    const willShow = Platform.OS === 'ios' ? Keyboard.addListener('keyboardWillShow', measureTop) : null;
+    const didShow = Keyboard.addListener('keyboardDidShow', () => {
+      if (!textInputRef.current?.isFocused()) return;
+      setKeyboardVisible(true);
+      cancelKeyboardScroll();
+      if (isAtBottomRef.current) {
+        // Let the resized list settle before pinning the latest message.
+        keyboardScrollTimer.current = setTimeout(() => {
+          keyboardScrollTimer.current = undefined;
+          listRef.current?.scrollToEnd({ animated: false });
+        }, 50);
+      }
+    });
+    const didHide = Keyboard.addListener('keyboardDidHide', resetKeyboardUI);
+    const appState = AppState.addEventListener('change', state => {
+      // iOS also enters inactive transiently, such as when a system prompt opens.
+      if (state === 'background') endComposerEditing();
+    });
+    return () => {
+      willShow?.remove();
+      didShow.remove();
+      didHide.remove();
+      appState.remove();
+      endComposerEditing();
+    };
+  }, [activeConversationLane, cancelKeyboardScroll, conversationId, measureTop]));
 
   const handleTextChange = (next: string) => {
     setText(next);
@@ -2079,8 +2096,9 @@ export function ChatScreen({
           ref={listRef}
           data={rows}
           keyExtractor={r => r.key}
-          keyboardDismissMode="interactive"
+          keyboardDismissMode={Platform.OS === 'android' ? 'on-drag' : 'interactive'}
           keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={cancelKeyboardScroll}
           contentContainerStyle={{ padding: 12, gap: 8 }}
           onScroll={handleScroll}
           // Throttle scroll events to ~60fps; high enough to catch the
