@@ -387,6 +387,43 @@ export function ChatScreen({
   // Drives the composer's hide-keyboard button (native only).
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const textInputRef = useRef<TextInput>(null);
+  const nativeChatFocused = useRef(false);
+  const cancelPendingComposerFocus = useRef<(() => void) | null>(null);
+  const cancelComposerFocus = useCallback(() => {
+    const cancel = cancelPendingComposerFocus.current;
+    cancelPendingComposerFocus.current = null;
+    cancel?.();
+  }, []);
+  const scheduleComposerFocus = useCallback((cursor?: number) => {
+    const isNative = Platform.OS !== 'web';
+    const canFocus = () => nativeChatFocused.current && AppState.currentState === 'active';
+    if (isNative) {
+      if (!canFocus()) return;
+      cancelComposerFocus();
+    }
+
+    let cancel: () => void;
+    const restoreFocus = () => {
+      if (isNative) {
+        // A canceled or replaced callback can outlive a blur and quick return.
+        if (cancelPendingComposerFocus.current !== cancel) return;
+        cancelPendingComposerFocus.current = null;
+        if (!canFocus()) return;
+      }
+      const input = textInputRef.current;
+      input?.focus();
+      if (cursor !== undefined) input?.setNativeProps({ selection: { start: cursor, end: cursor } });
+    };
+
+    if (cursor === undefined) {
+      const timer = setTimeout(restoreFocus, 80);
+      cancel = () => clearTimeout(timer);
+    } else {
+      const frame = requestAnimationFrame(restoreFocus);
+      cancel = () => cancelAnimationFrame(frame);
+    }
+    if (isNative) cancelPendingComposerFocus.current = cancel;
+  }, [cancelComposerFocus]);
   const sendInFlightRef = useRef(false);
   const listRef = useRef<FlatList<RenderRow>>(null);
   const keyboardScrollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -986,6 +1023,7 @@ export function ChatScreen({
 
   useFocusEffect(useCallback(() => {
     if (Platform.OS === 'web' || activeConversationLane !== 'chat') return;
+    nativeChatFocused.current = true;
 
     const resetKeyboardUI = () => {
       cancelKeyboardScroll();
@@ -994,6 +1032,7 @@ export function ChatScreen({
       setHashtagDismissed(true);
     };
     const endComposerEditing = () => {
+      cancelComposerFocus();
       const input = textInputRef.current;
       // A destination screen may already own focus by the time we blur.
       if (input?.isFocused()) input.blur();
@@ -1016,17 +1055,20 @@ export function ChatScreen({
     });
     const didHide = Keyboard.addListener('keyboardDidHide', resetKeyboardUI);
     const appState = AppState.addEventListener('change', state => {
-      // iOS also enters inactive transiently, such as when a system prompt opens.
       if (state === 'background') endComposerEditing();
+      // System prompts can make iOS inactive briefly. Leave the current
+      // editor alone, but drop requests to focus it later.
+      else if (state !== 'active') cancelComposerFocus();
     });
     return () => {
+      nativeChatFocused.current = false;
       willShow?.remove();
       didShow.remove();
       didHide.remove();
       appState.remove();
       endComposerEditing();
     };
-  }, [activeConversationLane, cancelKeyboardScroll, conversationId, measureTop]));
+  }, [activeConversationLane, cancelComposerFocus, cancelKeyboardScroll, conversationId, measureTop]));
 
   const handleTextChange = (next: string) => {
     setText(next);
@@ -1093,13 +1135,8 @@ export function ChatScreen({
 
     // Keep the software keyboard open after a tap and place the caret after
     // the inserted space so mobile composition continues without another tap.
-    requestAnimationFrame(() => {
-      textInputRef.current?.focus();
-      textInputRef.current?.setNativeProps({
-        selection: { start: applied.cursor, end: applied.cursor },
-      });
-    });
-  }, [activeHashtag, text]);
+    scheduleComposerFocus(applied.cursor);
+  }, [activeHashtag, scheduleComposerFocus, text]);
 
   // Live count for DOM listeners that outlive a render.
   const pendingCountRef = useRef(0);
@@ -1466,10 +1503,10 @@ export function ChatScreen({
   // long-press menu or swiping a message (OpenChat-imt).
   const handleReply = useCallback((data: ReplyToData) => {
     setReplyTo(data);
-    // Defer focus until the next tick so the reply pill has a chance to mount
+    // Wait for the reply pill to mount before focusing
     // (otherwise the layout shift can swallow the focus event on Android).
-    setTimeout(() => textInputRef.current?.focus(), 80);
-  }, []);
+    scheduleComposerFocus();
+  }, [scheduleComposerFocus]);
 
   // Edit: load message content into composer in edit mode (OpenChat-q9h).
   const beginEdit = useCallback((message: Message) => {
@@ -2569,7 +2606,7 @@ export function ChatScreen({
           setText(assembled);
           setNvcVisible(false);
           // Focus the composer so the user can revise before sending.
-          setTimeout(() => textInputRef.current?.focus(), 80);
+          scheduleComposerFocus();
         }}
       />
       </>
