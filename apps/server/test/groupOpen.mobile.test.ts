@@ -12,6 +12,13 @@ const mocks = vi.hoisted(() => ({
   route: { name: 'Chat', params: { conversationId: 'sailing' } },
   receive: vi.fn(),
   scroll: vi.fn(),
+  keyboardEvents: new Map<string, () => void>(),
+  appStateEvents: new Set<(state: string) => void>(),
+  inputFocused: false,
+  appState: 'active',
+  focusInput: vi.fn(() => { mocks.inputFocused = true; }),
+  setInputProps: vi.fn(),
+  blurInput: vi.fn(() => { mocks.inputFocused = false; }),
   privateName: null as string | null,
   platform: 'ios',
   focused: true,
@@ -36,14 +43,33 @@ vi.mock('react-native', async () => {
     },
     Easing: { out: (fn: unknown) => fn, quad: (t: number) => t },
     Pressable: 'Pressable',
-    Keyboard: { addListener: vi.fn(() => ({ remove: vi.fn() })) },
+    AppState: {
+      get currentState() { return mocks.appState; },
+      addEventListener: (_event: string, listener: (state: string) => void) => {
+        mocks.appStateEvents.add(listener);
+        return { remove: () => mocks.appStateEvents.delete(listener) };
+      },
+    },
+    Keyboard: { addListener: (event: string, listener: () => void) => {
+      mocks.keyboardEvents.set(event, listener);
+      return { remove: () => mocks.keyboardEvents.delete(event) };
+    } },
     ActivityIndicator: 'ActivityIndicator', Image: 'Image', ScrollView: 'ScrollView',
     KeyboardAvoidingView: 'KeyboardAvoidingView',
-    Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View',
+    Text: 'Text', TouchableOpacity: 'TouchableOpacity', View: 'View',
+    TextInput: React.forwardRef((props: any, ref) => {
+      React.useImperativeHandle(ref, () => ({
+        isFocused: () => mocks.inputFocused,
+        blur: mocks.blurInput,
+        focus: mocks.focusInput,
+        setNativeProps: mocks.setInputProps,
+      }));
+      return React.createElement('TextInput', props);
+    }),
     Modal: ({ visible, children }: any) => visible ? children : null,
-    FlatList: React.forwardRef(({ data, renderItem, ListEmptyComponent, ListHeaderComponent }: any, ref) => {
+    FlatList: React.forwardRef(({ data, renderItem, ListEmptyComponent, ListHeaderComponent, keyboardDismissMode, onScrollBeginDrag }: any, ref) => {
       React.useImperativeHandle(ref, () => ({ scrollToEnd: mocks.scroll }));
-      return React.createElement('FlatList', null, ListHeaderComponent,
+      return React.createElement('FlatList', { keyboardDismissMode, onScrollBeginDrag }, ListHeaderComponent,
         data.length ? data.map((item: any, index: number) => React.createElement(
           React.Fragment, { key: item.key ?? item.userId }, renderItem({ item, index }),
         )) : ListEmptyComponent);
@@ -81,9 +107,9 @@ vi.mock('../../mobile/src/components/BotBadge', () => ({ BotBadge: () => null })
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 vi.mock('../../mobile/src/components/JumpToBottomButton', () => ({ JumpToBottomButton: () => null }));
 vi.mock('../../mobile/src/components/VoiceMessageBubble', () => ({ VoiceMessageBubble: () => null }));
-vi.mock('../../mobile/src/components/HashtagAutocomplete', () => ({ HashtagAutocomplete: () => null }));
+vi.mock('../../mobile/src/components/HashtagAutocomplete', () => ({ HashtagAutocomplete: (props: any) => React.createElement('HashtagAutocomplete', props) }));
 vi.mock('../../mobile/src/components/TransformButton', () => ({ TransformButton: () => null }));
-vi.mock('../../mobile/src/components/NVCComposerModal', () => ({ NVCComposerModal: () => null }));
+vi.mock('../../mobile/src/components/NVCComposerModal', () => ({ NVCComposerModal: (props: any) => React.createElement('NVCComposerModal', props) }));
 vi.mock('../../mobile/src/components/LinkPreviewCard', () => ({ LinkPreviewCard: () => null }));
 vi.mock('../../mobile/src/components/AgentNetworkCard', () => ({ AgentNetworkCard: () => null }));
 vi.mock('../../mobile/src/components/AgentOverlayButton', () => ({ AgentOverlayButton: () => null }));
@@ -91,6 +117,7 @@ vi.mock('../../mobile/src/components/ExportSheet', () => ({ ExportSheet: () => n
 
 import { pickDocumentWeb, uploadFile, pickImages, checkPhotosForSend } from '../../mobile/src/services/attachments';
 import { Alert } from 'react-native';
+import { fetchHashtagSuggestions } from '../../mobile/src/services/hashtagSuggestions';
 import { ApiError, errorFromResponse } from '../../mobile/src/api/errors';
 import { ChatScreen } from '../../mobile/src/screens/ChatScreen.js';
 
@@ -117,6 +144,10 @@ beforeEach(() => {
   mocks.privateName = null;
   mocks.platform = 'ios';
   mocks.focused = true;
+  mocks.inputFocused = false;
+  mocks.appState = 'active';
+  mocks.keyboardEvents.clear();
+  mocks.appStateEvents.clear();
   mocks.visibilityReleases = [];
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.chat = {
@@ -144,8 +175,186 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => { screen?.unmount(); });
   screen = undefined;
+  vi.unstubAllGlobals();
   vi.useRealTimers();
   delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+});
+
+describe('chat keyboard lifecycle', () => {
+  async function openKeyboard() {
+    mocks.inputFocused = true;
+    await act(async () => {
+      if (mocks.platform === 'ios') mocks.keyboardEvents.get('keyboardWillShow')?.();
+      mocks.keyboardEvents.get('keyboardDidShow')?.();
+    });
+  }
+
+  function hideButton() {
+    return screen!.root.findAll(node => node.type === 'TouchableOpacity' && node.props.accessibilityLabel === 'Hide keyboard');
+  }
+
+  it.each([['ios', 'interactive'], ['android', 'on-drag']])('uses %s list dismissal', async (platform, mode) => {
+    mocks.platform = platform;
+    await render();
+    expect(screen!.root.findByType('FlatList').props.keyboardDismissMode).toBe(mode);
+  });
+
+  it('blurs only the focused composer when navigation leaves a mounted chat', async () => {
+    await render();
+    await act(async () => screen!.root.findByType('TextInput').props.onChangeText('Retained draft'));
+    await openKeyboard();
+    expect(hideButton()).toHaveLength(1);
+    mocks.scroll.mockClear();
+    mocks.focused = false;
+    await render();
+    expect(mocks.blurInput).toHaveBeenCalledOnce();
+    expect(hideButton()).toHaveLength(0);
+    expect(mocks.appStateEvents.size).toBe(0);
+    expect(mocks.keyboardEvents.size).toBe(0);
+    await act(async () => { vi.advanceTimersByTime(50); });
+    expect(mocks.scroll).not.toHaveBeenCalled();
+    mocks.focused = true;
+    await render();
+    expect(screen!.root.findByType('TextInput').props.value).toBe('Retained draft');
+    expect(mocks.inputFocused).toBe(false);
+  });
+
+  it('dismisses on background, retains the draft and does not reopen on resume', async () => {
+    await render();
+    await act(async () => screen!.root.findByType('TextInput').props.onChangeText('Background draft'));
+    await openKeyboard();
+    await act(async () => mocks.appStateEvents.forEach(listener => listener('inactive')));
+    expect(mocks.blurInput).not.toHaveBeenCalled();
+    await act(async () => mocks.appStateEvents.forEach(listener => listener('background')));
+    await act(async () => mocks.appStateEvents.forEach(listener => listener('active')));
+    expect(mocks.blurInput).toHaveBeenCalledOnce();
+    expect(hideButton()).toHaveLength(0);
+    expect(screen!.root.findByType('TextInput').props.value).toBe('Background draft');
+    expect(mocks.inputFocused).toBe(false);
+  });
+
+  it('cancels the pending scroll-to-latest when a user begins dragging', async () => {
+    await render();
+    mocks.scroll.mockClear();
+    await openKeyboard();
+    await act(async () => screen!.root.findByType('FlatList').props.onScrollBeginDrag());
+    await act(async () => { vi.advanceTimersByTime(50); });
+    expect(mocks.scroll).not.toHaveBeenCalled();
+  });
+
+  it('keeps the iOS hide button until a keyboard dismissal completes', async () => {
+    await render();
+    await openKeyboard();
+    await act(async () => { mocks.keyboardEvents.get('keyboardWillHide')?.(); });
+    expect(hideButton()).toHaveLength(1);
+    await act(async () => { mocks.keyboardEvents.get('keyboardDidHide')?.(); });
+    expect(hideButton()).toHaveLength(0);
+  });
+
+  it('ignores keyboard events for an input other than the chat composer', async () => {
+    await render();
+    mocks.scroll.mockClear();
+    await act(async () => {
+      mocks.keyboardEvents.get('keyboardWillShow')?.();
+      mocks.keyboardEvents.get('keyboardDidShow')?.();
+      vi.advanceTimersByTime(50);
+    });
+    expect(hideButton()).toHaveLength(0);
+    expect(mocks.scroll).not.toHaveBeenCalled();
+  });
+
+  it('keeps the input open and clears text after a synthetic send', async () => {
+    await render();
+    await openKeyboard();
+    await act(async () => screen!.root.findByType('TextInput').props.onChangeText('Synthetic send'));
+    const send = screen!.root.find(node => node.type === 'TouchableOpacity' && node.props.accessibilityLabel === 'Send message');
+    await act(async () => { await send.props.onPress(); });
+    expect(mocks.chat.sendMessageToConversation).toHaveBeenCalledWith('sailing', 'Synthetic send', undefined, undefined, undefined, { assistantScope: 'universal' });
+    expect(screen!.root.findByType('TextInput').props.value).toBe('');
+    expect(mocks.inputFocused).toBe(true);
+    expect(mocks.blurInput).not.toHaveBeenCalled();
+  });
+});
+
+describe('deferred native composer refocus', () => {
+  const suggestion = { tag: 'design', source: 'chat' as const, ownCount: 0, chatCount: 1 };
+
+  async function selectHashtag() {
+    vi.mocked(fetchHashtagSuggestions).mockResolvedValueOnce([suggestion]);
+    await act(async () => screen!.root.findByType('TextInput').props.onChangeText('#de'));
+    await act(async () => { vi.advanceTimersByTime(160); });
+    await act(async () => screen!.root.findByType('HashtagAutocomplete').props.onSelect(suggestion));
+  }
+
+  const actions = [
+    {
+      label: 'Reply',
+      run: async () => act(async () => screen!.root.findByType('MessageActionSheet').props.onReply({
+        messageId: 'synthetic-message', senderId: 'alice', senderName: 'Alice', content: 'Fixture reply',
+      })),
+    },
+    {
+      label: 'NVC submit',
+      run: async () => act(async () => screen!.root.findByType('NVCComposerModal').props.onSubmit('Fixture NVC draft')),
+    },
+    { label: 'hashtag selection', run: selectHashtag },
+  ];
+
+  beforeEach(() => {
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+    vi.stubGlobal('cancelAnimationFrame', clearTimeout);
+  });
+
+  async function setAppState(state: string) {
+    mocks.appState = state;
+    await act(async () => mocks.appStateEvents.forEach(listener => listener(state)));
+  }
+
+  it.each(actions)('cancels $label refocus across a fast navigation blur and return', async ({ run }) => {
+    await render();
+    await run();
+    mocks.focused = false;
+    await render();
+    mocks.focused = true;
+    await render();
+    await act(async () => { vi.advanceTimersByTime(100); });
+    expect(mocks.focusInput).not.toHaveBeenCalled();
+    expect(mocks.setInputProps).not.toHaveBeenCalled();
+  });
+
+  it.each(actions)('cancels $label refocus across a fast background and resume', async ({ run }) => {
+    await render();
+    await run();
+    const draft = screen!.root.findByType('TextInput').props.value;
+    await setAppState('background');
+    await setAppState('active');
+    await act(async () => { vi.advanceTimersByTime(100); });
+    expect(mocks.focusInput).not.toHaveBeenCalled();
+    expect(mocks.setInputProps).not.toHaveBeenCalled();
+    expect(screen!.root.findByType('TextInput').props.value).toBe(draft);
+  });
+
+  it('keeps the draft without refocusing when NVC submits in the background', async () => {
+    await render();
+    const nvcSubmit = screen!.root.findByType('NVCComposerModal').props.onSubmit;
+    await setAppState('background');
+    await act(async () => nvcSubmit('Late NVC draft'));
+    await setAppState('active');
+    await act(async () => { vi.advanceTimersByTime(100); });
+    expect(mocks.focusInput).not.toHaveBeenCalled();
+    expect(screen!.root.findByType('TextInput').props.value).toBe('Late NVC draft');
+  });
+
+  it.each(actions)('still runs $label refocus while active', async ({ label, run }) => {
+    await render();
+    await run();
+    await act(async () => { vi.advanceTimersByTime(100); });
+    expect(mocks.focusInput).toHaveBeenCalledOnce();
+    if (label === 'hashtag selection') {
+      expect(screen!.root.findByType('TextInput').props.value).toBe('#design ');
+      expect(mocks.setInputProps).toHaveBeenCalledWith({ selection: { start: 8, end: 8 } });
+    }
+  });
 });
 
 describe('opening a group on the native client', () => {

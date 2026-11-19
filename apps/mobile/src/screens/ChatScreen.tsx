@@ -18,6 +18,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  AppState,
   FlatList,
   Image,
   Keyboard,
@@ -386,8 +387,50 @@ export function ChatScreen({
   // Drives the composer's hide-keyboard button (native only).
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const textInputRef = useRef<TextInput>(null);
+  const nativeChatFocused = useRef(false);
+  const cancelPendingComposerFocus = useRef<(() => void) | null>(null);
+  const cancelComposerFocus = useCallback(() => {
+    const cancel = cancelPendingComposerFocus.current;
+    cancelPendingComposerFocus.current = null;
+    cancel?.();
+  }, []);
+  const scheduleComposerFocus = useCallback((cursor?: number) => {
+    const isNative = Platform.OS !== 'web';
+    const canFocus = () => nativeChatFocused.current && AppState.currentState === 'active';
+    if (isNative) {
+      if (!canFocus()) return;
+      cancelComposerFocus();
+    }
+
+    let cancel: () => void;
+    const restoreFocus = () => {
+      if (isNative) {
+        // A canceled or replaced callback can outlive a blur and quick return.
+        if (cancelPendingComposerFocus.current !== cancel) return;
+        cancelPendingComposerFocus.current = null;
+        if (!canFocus()) return;
+      }
+      const input = textInputRef.current;
+      input?.focus();
+      if (cursor !== undefined) input?.setNativeProps({ selection: { start: cursor, end: cursor } });
+    };
+
+    if (cursor === undefined) {
+      const timer = setTimeout(restoreFocus, 80);
+      cancel = () => clearTimeout(timer);
+    } else {
+      const frame = requestAnimationFrame(restoreFocus);
+      cancel = () => cancelAnimationFrame(frame);
+    }
+    if (isNative) cancelPendingComposerFocus.current = cancel;
+  }, [cancelComposerFocus]);
   const sendInFlightRef = useRef(false);
   const listRef = useRef<FlatList<RenderRow>>(null);
+  const keyboardScrollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const cancelKeyboardScroll = useCallback(() => {
+    clearTimeout(keyboardScrollTimer.current);
+    keyboardScrollTimer.current = undefined;
+  }, []);
   const typingTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Fetching never sits in the input handler: a short debounce plus the
@@ -978,38 +1021,54 @@ export function ChatScreen({
     listRef.current?.scrollToEnd({ animated: true });
   };
 
-  // Keyboard show: when iOS keyboard pushes the composer up, the visible
-  // area of the list shrinks. If the user WAS at the bottom, they should
-  // stay pinned there after the layout settles. (If they were reading
-  // history, leave them alone.)
-  useEffect(() => {
-    // A banner can appear or leave without resizing this screen's width, so
-    // re-measure as the keyboard starts to open rather than only on layout.
-    const willShowSub = Keyboard.addListener('keyboardWillShow', measureTop);
-    const showSub = Keyboard.addListener('keyboardDidShow', () => {
-      if (isAtBottomRef.current) {
-        // Defer past the layout animation so contentSize reflects the new
-        // (smaller) layout before we scroll.
-        setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 50);
-      }
-    });
-    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+  useFocusEffect(useCallback(() => {
+    if (Platform.OS === 'web' || activeConversationLane !== 'chat') return;
+    nativeChatFocused.current = true;
+
+    const resetKeyboardUI = () => {
+      cancelKeyboardScroll();
+      setKeyboardVisible(false);
       setMentionQuery(null);
       setHashtagDismissed(true);
-    });
-    // iOS fires the Will* events, Android only the Did* ones.
-    const visibleSubs = Platform.OS === 'ios'
-      ? [Keyboard.addListener('keyboardWillShow', () => setKeyboardVisible(true)),
-        Keyboard.addListener('keyboardWillHide', () => setKeyboardVisible(false))]
-      : [Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true)),
-        Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false))];
-    return () => {
-      willShowSub.remove();
-      showSub.remove();
-      hideSub.remove();
-      visibleSubs.forEach((sub) => sub.remove());
     };
-  }, [measureTop]);
+    const endComposerEditing = () => {
+      cancelComposerFocus();
+      const input = textInputRef.current;
+      // A destination screen may already own focus by the time we blur.
+      if (input?.isFocused()) input.blur();
+      resetKeyboardUI();
+    };
+
+    // Banner layout can affect the iOS avoidance offset as the keyboard opens.
+    const willShow = Platform.OS === 'ios' ? Keyboard.addListener('keyboardWillShow', measureTop) : null;
+    const didShow = Keyboard.addListener('keyboardDidShow', () => {
+      if (!textInputRef.current?.isFocused()) return;
+      setKeyboardVisible(true);
+      cancelKeyboardScroll();
+      if (isAtBottomRef.current) {
+        // Let the resized list settle before pinning the latest message.
+        keyboardScrollTimer.current = setTimeout(() => {
+          keyboardScrollTimer.current = undefined;
+          listRef.current?.scrollToEnd({ animated: false });
+        }, 50);
+      }
+    });
+    const didHide = Keyboard.addListener('keyboardDidHide', resetKeyboardUI);
+    const appState = AppState.addEventListener('change', state => {
+      if (state === 'background') endComposerEditing();
+      // System prompts can make iOS inactive briefly. Leave the current
+      // editor alone, but drop requests to focus it later.
+      else if (state !== 'active') cancelComposerFocus();
+    });
+    return () => {
+      nativeChatFocused.current = false;
+      willShow?.remove();
+      didShow.remove();
+      didHide.remove();
+      appState.remove();
+      endComposerEditing();
+    };
+  }, [activeConversationLane, cancelComposerFocus, cancelKeyboardScroll, conversationId, measureTop]));
 
   const handleTextChange = (next: string) => {
     setText(next);
@@ -1076,13 +1135,8 @@ export function ChatScreen({
 
     // Keep the software keyboard open after a tap and place the caret after
     // the inserted space so mobile composition continues without another tap.
-    requestAnimationFrame(() => {
-      textInputRef.current?.focus();
-      textInputRef.current?.setNativeProps({
-        selection: { start: applied.cursor, end: applied.cursor },
-      });
-    });
-  }, [activeHashtag, text]);
+    scheduleComposerFocus(applied.cursor);
+  }, [activeHashtag, scheduleComposerFocus, text]);
 
   // Live count for DOM listeners that outlive a render.
   const pendingCountRef = useRef(0);
@@ -1449,10 +1503,10 @@ export function ChatScreen({
   // long-press menu or swiping a message (OpenChat-imt).
   const handleReply = useCallback((data: ReplyToData) => {
     setReplyTo(data);
-    // Defer focus until the next tick so the reply pill has a chance to mount
+    // Wait for the reply pill to mount before focusing
     // (otherwise the layout shift can swallow the focus event on Android).
-    setTimeout(() => textInputRef.current?.focus(), 80);
-  }, []);
+    scheduleComposerFocus();
+  }, [scheduleComposerFocus]);
 
   // Edit: load message content into composer in edit mode (OpenChat-q9h).
   const beginEdit = useCallback((message: Message) => {
@@ -2079,8 +2133,9 @@ export function ChatScreen({
           ref={listRef}
           data={rows}
           keyExtractor={r => r.key}
-          keyboardDismissMode="interactive"
+          keyboardDismissMode={Platform.OS === 'android' ? 'on-drag' : 'interactive'}
           keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={cancelKeyboardScroll}
           contentContainerStyle={{ padding: 12, gap: 8 }}
           onScroll={handleScroll}
           // Throttle scroll events to ~60fps; high enough to catch the
@@ -2551,7 +2606,7 @@ export function ChatScreen({
           setText(assembled);
           setNvcVisible(false);
           // Focus the composer so the user can revise before sending.
-          setTimeout(() => textInputRef.current?.focus(), 80);
+          scheduleComposerFocus();
         }}
       />
       </>
