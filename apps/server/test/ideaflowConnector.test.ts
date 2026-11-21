@@ -2,9 +2,12 @@ import { createHash, createHmac, randomUUID } from 'node:crypto';
 import express from 'express';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { beforeAll,afterAll,beforeEach,describe,it,expect,vi } from 'vitest';
+import { beforeAll,afterAll,beforeEach,afterEach,describe,it,expect,vi } from 'vitest';
 const state=vi.hoisted(()=>({linked:true,duplicate:false,member:true,run:vi.fn(),mutations:0}));
-vi.mock('../src/db.js',()=>({getDriver:()=>({session:()=>({run:state.run,close:async()=>{},executeRead:async(fn:any)=>fn({run:state.run}),executeWrite:async(fn:any)=>fn({run:state.run})})})}));
+vi.mock('../src/db.js',()=>({getDriver:()=>({session:(options?: { database?: string; defaultAccessMode?: string })=>{
+  const run = (query: string, params: unknown) => state.run(query,params,options);
+  return {run,close:async()=>{},executeRead:async(fn:any)=>fn({run}),executeWrite:async(fn:any)=>fn({run})};
+}})}));
 import { handleIdeaflowConnector, connectorOperationGuard } from '../src/routes/ideaflowConnector.js';
 import { resolveActor } from '../src/middleware/resolveActor.js';
 import { verifyConnectorAssertion,issueConnectorOperation,getConnectorPrincipal } from '../src/lib/ideaflowConnector.js';
@@ -52,6 +55,7 @@ describe('unified OpenChat connector trust boundary',()=>{
     const body=JSON.stringify({jsonrpc:'2.0',id:1,method,...(params?{params}:{})});
     return fetch(`${base}/api/connector/mcp`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${sign(body,claims)}`},body});
   }
+  afterEach(()=>vi.unstubAllEnvs());
   it('accepts exact signature and bytes once; rejects scope/audience/lifetime/issuer tampering',()=>{
     const clock=vi.spyOn(Date,'now').mockReturnValue(1_793_926_800_000);
     try {
@@ -66,22 +70,25 @@ describe('unified OpenChat connector trust boundary',()=>{
     expect(verifyConnectorAssertion(sign(body),Buffer.from(body),'')).toBeNull();
     } finally { clock.mockRestore(); }
   });
-  it('projects only the linked owner’s canonical asks and standalone notes, without evidence or stale rows', async () => {
+  it.each([undefined, 'fixture-overlay'])('routes exact owners to canonical asks and standalone notes (configured database %s)', async (database) => {
+    vi.stubEnv('NEO4J_DATABASE', database);
+    const canonical = database ?? 'neo4j';
     const issuer = 'https://id.ideaflow.app/api/auth';
     const when = '2026-11-20T12:00:00.000Z';
     let deleted = false;
     let revokeDuringRead = false;
     let linked = true;
-    state.run.mockImplementation(async (q: string, p: Record<string, unknown>) => {
+    state.run.mockImplementation(async (q: string, p: Record<string, unknown>, options?: { database?: string; defaultAccessMode?: string }) => {
       const subject = p.subject as string;
       if (q.includes('RETURN u.id AS id LIMIT 2')) {
+        expect(options?.database).toBeUndefined();
         return { records: linked ? [record({id: subject})] : [] };
       }
       if (q.includes("kind: 'ask'")) {
         const actor = ['alice', 'bob'].find(candidate => p.ownerKey === ownerKeyFor(issuer, candidate));
         if (!actor || deleted && actor === 'alice') return { records: [] };
         return { records: [record({ entity: {
-          id: 'same-id-1', askText: `${actor} canonical ask`, askStatus: 'open',
+          id: 'same-id-1', askText: options?.database === canonical ? `${actor} canonical ask` : 'stale default database ask', askStatus: 'open',
           createdAt: when, updatedAt: when, revision: 2,
           evidenceQuote: 'private chat evidence', exposureChat: 'private-chat-id',
         } })] };
@@ -91,6 +98,7 @@ describe('unified OpenChat connector trust boundary',()=>{
       expect(q).toContain('t.scopeConversationId IS NULL');
       expect(q).toContain('NOT EXISTS { MATCH (t)-[:FROM_MESSAGE|PINNED_IN]->() }');
       expect(q).not.toContain('t.text');
+      expect(options).toEqual({ defaultAccessMode: 'READ' });
       expect(p).toMatchObject({userId: subject, issuer});
       if (revokeDuringRead) linked = false;
       return { records: deleted && subject === 'alice' ? [] : [record({
