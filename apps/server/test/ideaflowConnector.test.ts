@@ -2,13 +2,17 @@ import { createHash, createHmac, randomUUID } from 'node:crypto';
 import express from 'express';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { beforeAll,afterAll,beforeEach,describe,it,expect,vi } from 'vitest';
+import { beforeAll,afterAll,beforeEach,afterEach,describe,it,expect,vi } from 'vitest';
 const state=vi.hoisted(()=>({linked:true,duplicate:false,member:true,run:vi.fn(),mutations:0}));
-vi.mock('../src/db.js',()=>({getDriver:()=>({session:()=>({run:state.run,close:async()=>{},executeRead:async(fn:any)=>fn({run:state.run}),executeWrite:async(fn:any)=>fn({run:state.run})})})}));
+vi.mock('../src/db.js',()=>({getDriver:()=>({session:(options?: { database?: string; defaultAccessMode?: string })=>{
+  const run = (query: string, params: unknown) => state.run(query,params,options);
+  return {run,close:async()=>{},executeRead:async(fn:any)=>fn({run}),executeWrite:async(fn:any)=>fn({run})};
+}})}));
 import { handleIdeaflowConnector, connectorOperationGuard } from '../src/routes/ideaflowConnector.js';
 import { resolveActor } from '../src/middleware/resolveActor.js';
 import { verifyConnectorAssertion,issueConnectorOperation,getConnectorPrincipal } from '../src/lib/ideaflowConnector.js';
 import { peopleSuggestions } from '../src/services/peopleSuggestions.js';
+import { ownerKeyFor } from '../src/services/overlay/contract.js';
 import contextRoutes from '../src/routes/context.js';
 import contentRoutes from '../src/routes/conversationContent.js';
 const secret='test-only-connector-secret-32-bytes-minimum';
@@ -51,6 +55,7 @@ describe('unified OpenChat connector trust boundary',()=>{
     const body=JSON.stringify({jsonrpc:'2.0',id:1,method,...(params?{params}:{})});
     return fetch(`${base}/api/connector/mcp`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${sign(body,claims)}`},body});
   }
+  afterEach(()=>vi.unstubAllEnvs());
   it('accepts exact signature and bytes once; rejects scope/audience/lifetime/issuer tampering',()=>{
     const clock=vi.spyOn(Date,'now').mockReturnValue(1_793_926_800_000);
     try {
@@ -64,6 +69,70 @@ describe('unified OpenChat connector trust boundary',()=>{
     expect(verifyConnectorAssertion(sign(body),Buffer.from(body+' '),secret)).toBeNull();
     expect(verifyConnectorAssertion(sign(body),Buffer.from(body),'')).toBeNull();
     } finally { clock.mockRestore(); }
+  });
+  it.each([undefined, 'fixture-overlay'])('routes exact owners to canonical asks and standalone notes (configured database %s)', async (database) => {
+    vi.stubEnv('NEO4J_DATABASE', database);
+    const canonical = database ?? 'neo4j';
+    const issuer = 'https://id.ideaflow.app/api/auth';
+    const when = '2026-11-20T12:00:00.000Z';
+    let deleted = false;
+    let revokeDuringRead = false;
+    let linked = true;
+    state.run.mockImplementation(async (q: string, p: Record<string, unknown>, options?: { database?: string; defaultAccessMode?: string }) => {
+      const subject = p.subject as string;
+      if (q.includes('RETURN u.id AS id LIMIT 2')) {
+        expect(options?.database).toBeUndefined();
+        return { records: linked ? [record({id: subject})] : [] };
+      }
+      if (q.includes("kind: 'ask'")) {
+        const actor = ['alice', 'bob'].find(candidate => p.ownerKey === ownerKeyFor(issuer, candidate));
+        if (!actor || deleted && actor === 'alice') return { records: [] };
+        return { records: [record({ entity: {
+          id: 'same-id-1', askText: options?.database === canonical ? `${actor} canonical ask` : 'stale default database ask', askStatus: 'open',
+          createdAt: when, updatedAt: when, revision: 2,
+          evidenceQuote: 'private chat evidence', exposureChat: 'private-chat-id',
+        } })] };
+      }
+      expect(q).toContain('t.userId = $userId');
+      expect(q).toContain("t.kind = 'observation' AND t.deletedAt IS NULL");
+      expect(q).toContain('t.scopeConversationId IS NULL');
+      expect(q).toContain('NOT EXISTS { MATCH (t)-[:FROM_MESSAGE|PINNED_IN]->() }');
+      expect(q).not.toContain('t.text');
+      expect(options).toEqual({ defaultAccessMode: 'READ' });
+      expect(p).toMatchObject({userId: subject, issuer});
+      if (revokeDuringRead) linked = false;
+      return { records: deleted && subject === 'alice' ? [] : [record({
+        id: `${subject}-note`, createdAt: when, updatedAt: when, text: 'private note',
+      })] };
+    });
+    const params = {name: 'oc_read_stream_references', arguments: {}};
+    const read = async (sub: string) => {
+      const response = await call('tools/call', params, {sub, scope: 'openchat:read'});
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      return JSON.parse((await response.json() as any).result.content[0].text);
+    };
+    const alice = await read('alice');
+    expect(alice).toEqual({version: 1, truncated: false, items: [
+      {owner: ownerKeyFor(issuer, 'alice'), audience: 'owner', origin: 'openchat',
+        namespace: 'noos.ask', sourceId: 'same-id-1', kind: 'ask', revision: 2,
+        time: when, status: 'open', excerpt: 'alice canonical ask'},
+      {owner: ownerKeyFor(issuer, 'alice'), audience: 'owner', origin: 'openchat',
+        namespace: 'openchat.thought', sourceId: 'alice-note', kind: 'note', revision: when, time: when},
+    ]});
+    const bob = await read('bob');
+    expect(bob.items[0]).toMatchObject({owner: ownerKeyFor(issuer, 'bob'), excerpt: 'bob canonical ask'});
+    expect(JSON.stringify(bob)).not.toContain('alice');
+    expect(await read('alice')).toEqual(alice);
+    expect((await call('tools/call', {...params, arguments: {owner: 'bob'}}, {sub:'alice'})).status).toBe(400);
+    expect((await call('tools/call', params, {sub:'alice', scope:'openchat:write'})).status).toBe(403);
+    deleted = true;
+    expect((await read('alice')).items).toEqual([]);
+    revokeDuringRead = true;
+    const revoked = await call('tools/call', params, {sub:'bob'});
+    expect(revoked.status).toBe(409);
+    expect(JSON.stringify(await revoked.json())).not.toContain('bob canonical ask');
+    expect(state.mutations).toBe(0);
   });
   it('pages private people and accepts bounded structured source cards without owner spoofing',async()=>{
     const read=await call('tools/call',{name:'oc_list_private_things',arguments:{kind:'person',limit:73,details:true,after:'synthetic-cursor'}},{scope:'openchat:read'});

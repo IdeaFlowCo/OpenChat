@@ -1,12 +1,16 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { getDriver } from '../db.js';
 import { parseMessageProvenance, AGENT_HANDLE } from '../services/visionBridge.js';
+import { readVisionStreamReferences } from '../services/visionStreamReferences.js';
 import { verifyConnectorAssertion, issueConnectorOperation, consumeConnectorOperation, revokeConnectorOperation } from '../lib/ideaflowConnector.js';
 
 const router = Router();
 type Operation = { method: string; path: string; body?: unknown };
 type Argument = { type: 'string' | 'integer' | 'boolean' | 'array' | 'object' | ['integer','null']; properties?: Record<string,unknown>; required?: string[]; additionalProperties?: boolean; items?: Record<string,unknown>; maxItems?:number; description?: string; minLength?: number; maxLength?: number; minimum?: number; maximum?: number; enum?: string[] };
-type Tool = { name: string; description: string; scope: 'openchat:read' | 'openchat:write'; inputSchema: { type:'object'; properties:Record<string,Argument>; required:string[]; additionalProperties:false }; operation:(args:Record<string,any>)=>Operation };
+type Tool = { name: string; description: string; scope: 'openchat:read' | 'openchat:write'; inputSchema: { type:'object'; properties:Record<string,Argument>; required:string[]; additionalProperties:false } } & (
+  { operation: (args:Record<string,any>)=>Operation } |
+  { read: typeof readVisionStreamReferences }
+);
 const id: Argument = {type:'string',minLength:1,maxLength:200};
 const text: Argument = {type:'string',minLength:1,maxLength:20000};
 const limit: Argument = {type:'integer',minimum:1,maximum:100};
@@ -58,6 +62,7 @@ const subjectKind: Argument = {type:'string',enum:['user','thing','unlinked'],de
 // Optional: the Vision note this message was sent from (validated again by the send route).
 const provenance: Argument = {type:'object',description:"Only when sending a Vision note: {service:'vision', noteId, noteRevision?, loopId?, ownerSubject}. ownerSubject must be the signed-in owner's own Ideaflow subject.",properties:{service:{type:'string',enum:['vision']},noteId:{type:'string',maxLength:200},noteRevision:{type:'integer',minimum:0},loopId:{type:'string',maxLength:200},ownerSubject:{type:'string',maxLength:512}},required:['service','noteId','ownerSubject'],additionalProperties:false};
 const tools:Tool[] = [
+  {name:'oc_read_stream_references',description:'Read a bounded owner-only page of canonical ask excerpts and standalone note references. Excludes message bodies, chat-linked notes, evidence and recipients.',scope:'openchat:read',inputSchema:schema({}),read:readVisionStreamReferences},
   {name:'oc_list_story_feed',description:'Read only the human Story/ask feed currently shared with the linked account. OpenChat enforces audience, membership, blocks, status and expiry. Private saved asks and agent-only structured terms are excluded. Optional authorId narrows to one exact OpenChat user; never publishes or sends.',scope:'openchat:read',inputSchema:schema({authorId:{type:'string',minLength:1,maxLength:128}}),operation:a=>({method:'GET',path:query('/api/stories/feed',{author:a.authorId})})},
   {name:'oc_suggest_people',description:'Find addressable people using OpenChat discovery and mutual blocks. Returns minimal identity and separate accepted-friend and actual human direct-message signals; no message bodies, email, group activity, imports or empty-thread recency. Empty queries return known people only. Never sends or creates a conversation.',scope:'openchat:read',inputSchema:schema({q:{type:'string',maxLength:100},limit,subjects:{type:'array',items:{type:'string',maxLength:512},maxItems:50}}),operation:a=>({method:'POST',path:'/api/chat/people-suggestions',body:a})},
   {name:'oc_list_conversations',description:'List conversations belonging to the linked OpenChat account.',scope:'openchat:read',inputSchema:schema({}),operation:()=>({method:'GET',path:'/api/chat/conversations'})},
@@ -181,6 +186,14 @@ export async function handleIdeaflowConnector(req:Request,res:Response):Promise<
   if(!scopes.includes(tool.scope)){fail(403,-32003,`Missing ${tool.scope} scope`);return;}
   const args=body.params?.arguments??{};
   if(!validArguments(tool,args)){fail(400,-32602,'Invalid tool arguments');return;}
+  if ('read' in tool) {
+    try {
+      const projection = await tool.read(userId, identity.identity_issuer, identity.sub);
+      if (!projection) { fail(409,-32001,'account_link_required'); return; }
+      result({ content: [{ type: 'text', text: JSON.stringify(projection) }] });
+    } catch { fail(503,-32001,'OpenChat Stream references unavailable'); }
+    return;
+  }
   const operation=tool.operation(args);
   // The URL comes only from an allowlisted builder and the bound local listening port.
   // The caller cannot select a remote host or arbitrary REST endpoint.
