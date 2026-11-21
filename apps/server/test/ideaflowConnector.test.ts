@@ -9,6 +9,7 @@ import { handleIdeaflowConnector, connectorOperationGuard } from '../src/routes/
 import { resolveActor } from '../src/middleware/resolveActor.js';
 import { verifyConnectorAssertion,issueConnectorOperation,getConnectorPrincipal } from '../src/lib/ideaflowConnector.js';
 import { peopleSuggestions } from '../src/services/peopleSuggestions.js';
+import { ownerKeyFor } from '../src/services/overlay/contract.js';
 import contextRoutes from '../src/routes/context.js';
 import contentRoutes from '../src/routes/conversationContent.js';
 const secret='test-only-connector-secret-32-bytes-minimum';
@@ -64,6 +65,66 @@ describe('unified OpenChat connector trust boundary',()=>{
     expect(verifyConnectorAssertion(sign(body),Buffer.from(body+' '),secret)).toBeNull();
     expect(verifyConnectorAssertion(sign(body),Buffer.from(body),'')).toBeNull();
     } finally { clock.mockRestore(); }
+  });
+  it('projects only the linked owner’s canonical asks and standalone notes, without evidence or stale rows', async () => {
+    const issuer = 'https://id.ideaflow.app/api/auth';
+    const when = '2026-11-20T12:00:00.000Z';
+    let deleted = false;
+    let revokeDuringRead = false;
+    let linked = true;
+    state.run.mockImplementation(async (q: string, p: Record<string, unknown>) => {
+      const subject = p.subject as string;
+      if (q.includes('RETURN u.id AS id LIMIT 2')) {
+        return { records: linked ? [record({id: subject})] : [] };
+      }
+      if (q.includes("kind: 'ask'")) {
+        const actor = ['alice', 'bob'].find(candidate => p.ownerKey === ownerKeyFor(issuer, candidate));
+        if (!actor || deleted && actor === 'alice') return { records: [] };
+        return { records: [record({ entity: {
+          id: 'same-id-1', askText: `${actor} canonical ask`, askStatus: 'open',
+          createdAt: when, updatedAt: when, revision: 2,
+          evidenceQuote: 'private chat evidence', exposureChat: 'private-chat-id',
+        } })] };
+      }
+      expect(q).toContain('t.userId = $userId');
+      expect(q).toContain("t.kind = 'observation' AND t.deletedAt IS NULL");
+      expect(q).toContain('t.scopeConversationId IS NULL');
+      expect(q).toContain('NOT EXISTS { MATCH (t)-[:FROM_MESSAGE|PINNED_IN]->() }');
+      expect(q).not.toContain('t.text');
+      expect(p).toMatchObject({userId: subject, issuer});
+      if (revokeDuringRead) linked = false;
+      return { records: deleted && subject === 'alice' ? [] : [record({
+        id: `${subject}-note`, createdAt: when, updatedAt: when, text: 'private note',
+      })] };
+    });
+    const params = {name: 'oc_read_stream_references', arguments: {}};
+    const read = async (sub: string) => {
+      const response = await call('tools/call', params, {sub, scope: 'openchat:read'});
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      return JSON.parse((await response.json() as any).result.content[0].text);
+    };
+    const alice = await read('alice');
+    expect(alice).toEqual({version: 1, truncated: false, items: [
+      {owner: ownerKeyFor(issuer, 'alice'), audience: 'owner', origin: 'openchat',
+        namespace: 'noos.ask', sourceId: 'same-id-1', kind: 'ask', revision: 2,
+        time: when, status: 'open', excerpt: 'alice canonical ask'},
+      {owner: ownerKeyFor(issuer, 'alice'), audience: 'owner', origin: 'openchat',
+        namespace: 'openchat.thought', sourceId: 'alice-note', kind: 'note', revision: when, time: when},
+    ]});
+    const bob = await read('bob');
+    expect(bob.items[0]).toMatchObject({owner: ownerKeyFor(issuer, 'bob'), excerpt: 'bob canonical ask'});
+    expect(JSON.stringify(bob)).not.toContain('alice');
+    expect(await read('alice')).toEqual(alice);
+    expect((await call('tools/call', {...params, arguments: {owner: 'bob'}}, {sub:'alice'})).status).toBe(400);
+    expect((await call('tools/call', params, {sub:'alice', scope:'openchat:write'})).status).toBe(403);
+    deleted = true;
+    expect((await read('alice')).items).toEqual([]);
+    revokeDuringRead = true;
+    const revoked = await call('tools/call', params, {sub:'bob'});
+    expect(revoked.status).toBe(409);
+    expect(JSON.stringify(await revoked.json())).not.toContain('bob canonical ask');
+    expect(state.mutations).toBe(0);
   });
   it('pages private people and accepts bounded structured source cards without owner spoofing',async()=>{
     const read=await call('tools/call',{name:'oc_list_private_things',arguments:{kind:'person',limit:73,details:true,after:'synthetic-cursor'}},{scope:'openchat:read'});
