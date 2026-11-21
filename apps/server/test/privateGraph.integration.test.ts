@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import neo4j, { type Driver } from 'neo4j-driver';
 
@@ -9,7 +10,8 @@ const integration = uri && user && password ? describe.sequential : describe.ski
 integration('private graph: one owner, never anyone else', () => {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const [alice, bob, carol, blocked, bot, erin] = ['pg-alice', 'pg-bob', 'pg-carol', 'pg-blocked', 'pg-bot', 'pg-erin'].map(prefix => `${prefix}-${suffix}`) as [string, string, string, string, string, string];
-  const userIds = [alice, bob, carol, blocked, bot, erin];
+  const departing = `pg-g1-departing-${suffix}`;
+  const userIds = [alice, bob, carol, blocked, bot, erin, departing];
   const refOf = (userId: string) => `openchat:user:${userId}`;
   let driver: Driver;
   let graph: typeof import('../src/services/privateGraph.js');
@@ -206,6 +208,68 @@ integration('private graph: one owner, never anyone else', () => {
     expect(await status(()=>graph.readContactState(carol,id))).toBe(404);
     await graph.updatePersonCard(alice,bob,{important:false},by,'grant:two');
     expect((await graph.readContactState(alice,id)).peopleState).toMatchObject({revision:committed.revision+1,actorId:'grant:two'});
+  });
+
+  it('erases the departing account’s curated refs across owners and preserves surviving People data', async () => {
+    const { ownerKeyFor } = await import('../src/services/overlay/contract.js');
+    const { OverlayStore } = await import('../src/services/overlay/store.js');
+    const overlay = new OverlayStore(driver, 'neo4j');
+    await overlay.initialize();
+    const principal = (id: string) => ({ app: 'openchat', ownerKey: ownerKeyFor('https://chat.ideaflow.app/openchat-user', id) });
+    const aliceOwner = principal(alice);
+    const carolOwner = principal(carol);
+    const digest = (ref: string) => `ref:${createHash('sha256').update(ref).digest('hex')}`;
+    const targetRef = refOf(departing);
+    const key = digest(targetRef);
+    const otherKey = digest(refOf(blocked));
+    const identityKey = `identity:${ownerKeyFor('https://synthetic.example.test', 'other-verified-person')}`;
+    const createPerson = async (owner: typeof aliceOwner, name: string, ref?: string) =>
+      (await overlay.ensure(owner, { kind: 'person', name, ref })).entity.id;
+    const bindingOnly = await createPerson(aliceOwner, 'Synthetic binding-only person');
+    const head = await createPerson(carolOwner, 'Synthetic retained head');
+    const member = await createPerson(carolOwner, 'Synthetic retained member');
+    await overlay.addNote(carolOwner, member, 'Synthetic note survives account erasure');
+    await overlay.mergePeople(carolOwner, { ids: [head, member], headId: head, rule: 'fixture', operationId: 'synthetic-g1-merge' });
+    await overlay.update(carolOwner, head, { addRef: targetRef });
+    const soleLegacy = await createPerson(aliceOwner, 'Synthetic retained legacy person', targetRef);
+    const session = driver.session();
+    try {
+      await session.run(`UNWIND $bindings AS row
+        MATCH (p:OverlayEntity {ownerKey:row.ownerKey,id:row.id})
+        CREATE (p)-[:OVERLAY_PEOPLE_BINDING {key:row.key,basis:row.basis}]->(p)`, {
+        bindings: [
+          { ownerKey: aliceOwner.ownerKey, id: bindingOnly, key, basis: 'approved_ref' },
+          { ownerKey: carolOwner.ownerKey, id: member, key, basis: 'approved_ref' },
+          { ownerKey: aliceOwner.ownerKey, id: soleLegacy, key: otherKey, basis: 'approved_ref' },
+          { ownerKey: carolOwner.ownerKey, id: head, key: identityKey, basis: 'verified_identity' },
+        ],
+      });
+      const keys = async () => {
+        const result = await session.run(`MATCH (p:OverlayEntity)-[b:OVERLAY_PEOPLE_BINDING]->(p)
+          WHERE p.ownerKey IN $owners RETURN collect(b.key) AS keys`, { owners: [aliceOwner.ownerKey, carolOwner.ownerKey] });
+        return (result.records[0]!.get('keys') as string[]).sort();
+      };
+      expect(await keys()).toEqual([key, key, otherKey, identityKey].sort());
+
+      // Account deletion calls this service inside its own transaction.
+      const tx = session.beginTransaction();
+      try { await graph.deletePrivateGraphForUser(tx, departing); } finally { await tx.rollback(); }
+      expect(await keys()).toEqual([key, key, otherKey, identityKey].sort());
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await session.executeWrite(tx => graph.deletePrivateGraphForUser(tx, departing));
+        expect(await keys()).toEqual([otherKey, identityKey].sort());
+        expect(await overlay.lookup(aliceOwner, targetRef)).toBeNull();
+        expect(await overlay.lookup(carolOwner, targetRef)).toBeNull();
+        expect((await overlay.get(aliceOwner, bindingOnly)).id).toBe(bindingOnly);
+        expect((await overlay.get(aliceOwner, soleLegacy)).id).toBe(soleLegacy);
+        const retained = await overlay.get(carolOwner, member);
+        expect(retained.id).toBe(head);
+        expect(retained.notes.map(note => note.text)).toContain('Synthetic note survives account erasure');
+        expect(await graph.exportPrivateGraph(alice)).toMatchObject({ peopleBindings: [expect.objectContaining({ key: otherKey, personId: soleLegacy })] });
+        expect(await graph.exportPrivateGraph(carol)).toMatchObject({ peopleBindings: [expect.objectContaining({ key: identityKey, personId: head })] });
+      }
+    } finally { await session.close(); }
   });
 
 });

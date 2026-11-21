@@ -9,7 +9,7 @@ import neo4j from 'neo4j-driver';
 import type { Driver, ManagedTransaction } from 'neo4j-driver';
 import { nanoid } from 'nanoid';
 import {
-  ASK_EXPOSURES, ASK_HORIZONS, ASK_STATUSES, ASKER_KINDS, CARRIER_KINDS, placementKey, askKeyOf, askName, askRecheckAfter, cleanDescription, cleanKind, cleanLinkAttributes, cleanName, cleanNamedKind, cleanProvenance, cleanRef,
+  ASK_EXPOSURES, ASK_HORIZONS, ASK_STATUSES, ASKER_KINDS, CARRIER_KINDS, approvedPeopleRefKey, placementKey, askKeyOf, askName, askRecheckAfter, cleanDescription, cleanKind, cleanLinkAttributes, cleanName, cleanNamedKind, cleanProvenance, cleanRef,
   cleanRelation, cleanRelationType, cleanRequestId, cleanText, EMPTY_CARD, fail, intervalAfterContact, isId, isOwnerKey, isSeparateRef, LIMITS, nameKey, nextDue, OverlayError,
   parseAskFilter, parseAskInput, parseAskPatch, parseLinkPatch, readProvenance, readRelationType, relationTypeOf, separateRef,
 } from './contract.js';
@@ -788,14 +788,17 @@ export class OverlayStore {
   }
 
   /** The owner's whole overlay as plain rows. */
-  async exportOwner(principal: OverlayPrincipal | null): Promise<{ entities: unknown[]; notes: unknown[]; links: unknown[]; blurbs?: unknown; contactSources?: unknown[]; mergeEvents?: unknown[]; identityDecisions?: unknown[]; noteRevisions?: unknown[]; fieldAssertions?: unknown[]; fieldDecisions?: unknown[]; fieldOperations?: unknown[]; identityDecisionReverts?: unknown[] }> {
+  async exportOwner(principal: OverlayPrincipal | null): Promise<{ entities: unknown[]; notes: unknown[]; links: unknown[]; blurbs?: unknown; contactSources?: unknown[]; mergeEvents?: unknown[]; identityDecisions?: unknown[]; identityDecisionReverts?: unknown[]; noteRevisions?: unknown[]; fieldAssertions?: unknown[]; fieldDecisions?: unknown[]; fieldOperations?: unknown[] }> {
     const ownerKey = this.owner(principal);
     return this.read(async tx => {
       const blurbState = await loadBlurbs(tx,ownerKey);
       const rows = async (query: string) => (await tx.run(query, { ownerKey })).records.map(record => record.get('row'));
       const contactSources=await rows('MATCH (s:OverlayContactSource {ownerKey:$ownerKey}) RETURN properties(s) AS row ORDER BY s.sourceKey');
       const merges = await exportMergesIn(tx, ownerKey);
+      const peopleBindings = await rows(`MATCH (e:OverlayEntity {ownerKey:$ownerKey})-[b:OVERLAY_PEOPLE_BINDING]->(e)
+        RETURN b { .key, .basis, .boundAt, .approvedBy, personId: e.id } AS row ORDER BY e.id, b.key`);
       return {
+        ...(peopleBindings.length ? {peopleBindings} : {}),
         ...(merges.mergeEvents.length ? {mergeEvents: merges.mergeEvents} : {}),
         ...(merges.identityDecisions.length ? {identityDecisions: merges.identityDecisions} : {}),
         ...(merges.identityDecisionReverts.length ? {identityDecisionReverts: merges.identityDecisionReverts} : {}),
@@ -872,11 +875,14 @@ export async function deleteOwnerIn(tx: Pick<ManagedTransaction, 'run'>, ownerKe
 }
 
 export async function purgeRefIn(tx: Pick<ManagedTransaction, 'run'>, rawRef: unknown): Promise<{ entitiesRemoved: number; refsRemoved: number }> {
-  const ref = cleanRef(rawRef);
+  const ref = cleanRef(rawRef), bindingKey = approvedPeopleRefKey(ref);
   const candidates = await tx.run(`MATCH (r:OverlayRef {ref:$ref})-[:REF_OF]->(e:OverlayEntity)
     RETURN DISTINCT e.ownerKey AS ownerKey,e.id AS id`, {ref});
   const initialRefs = await tx.run('MATCH (r:OverlayRef {ref:$ref}) RETURN count(r) AS total', {ref});
-  const owners = [...new Set(candidates.records.map(record => String(record.get('ownerKey'))))].sort();
+  // A curated binding may exist without a legacy OverlayRef.
+  const bindingOwners = await tx.run(`MATCH (p:OverlayEntity)-[:OVERLAY_PEOPLE_BINDING {key:$bindingKey, basis:'approved_ref'}]->(p)
+    RETURN DISTINCT p.ownerKey AS ownerKey`, { bindingKey });
+  const owners = [...new Set([...candidates.records, ...bindingOwners.records].map(record => String(record.get('ownerKey'))))].sort();
   for (const ownerKey of owners) await lockBlurbClock(tx, ownerKey);
   let entitiesRemoved = 0;
   for (const record of candidates.records) {
@@ -884,14 +890,17 @@ export async function purgeRefIn(tx: Pick<ManagedTransaction, 'run'>, rawRef: un
     const eligible = await tx.run(`MATCH (e:OverlayEntity {ownerKey:$ownerKey,id:$id}) SET e._lock=true REMOVE e._lock
       WITH e WHERE EXISTS { MATCH (:OverlayRef {ref:$ref})-[:REF_OF]->(e) }
         AND NOT EXISTS { MATCH (other:OverlayRef)-[:REF_OF]->(e) WHERE other.ref <> $ref }
+        AND NOT EXISTS { MATCH (e)-[other:OVERLAY_PEOPLE_BINDING]->(e) WHERE other.key <> $bindingKey }
         AND NOT EXISTS { MATCH (s:OverlayContactSource {ownerKey:$ownerKey,entityId:$id}) }
         AND e.mergedInto IS NULL AND NOT EXISTS { MATCH (:OverlayEntity {ownerKey:$ownerKey, mergedInto:$id}) }
-      RETURN e.id AS id`, {ownerKey,id,ref});
+      RETURN e.id AS id`, {ownerKey,id,ref,bindingKey});
     if (eligible.records.length) { await deleteEntityIn(tx,ownerKey,id); entitiesRemoved++; }
   }
   await tx.run(`MATCH (a:OverlayEntity {kind: 'ask'}) WHERE $ref IN coalesce(a.placements, [])
     SET a.placements = [placement IN a.placements WHERE placement <> $ref]`, { ref });
   await tx.run('MATCH (r:OverlayRef {ref:$ref}) DETACH DELETE r', {ref});
+  await tx.run(`MATCH (p:OverlayEntity)-[b:OVERLAY_PEOPLE_BINDING {key:$bindingKey, basis:'approved_ref'}]->(p)
+    DELETE b`, { bindingKey });
   return {entitiesRemoved, refsRemoved:number(initialRefs.records[0]?.get('total'))};
 }
 

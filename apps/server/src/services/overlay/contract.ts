@@ -137,6 +137,10 @@ export function cleanRef(value: unknown): string {
   return value;
 }
 
+// Shared by owner approval and the trusted app erasure path.
+export const approvedPeopleRefKey = (ref: string): string =>
+  `ref:${createHash('sha256').update(ref).digest('hex')}`;
+
 /**
  * An imported LinkedIn contact: `linkedin:in:<sha256 hex of the canonical
  * slug>`. The slug is canonical as Unlinked defines it (`linkedinSlug()` in its
