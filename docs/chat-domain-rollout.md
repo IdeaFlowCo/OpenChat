@@ -1,9 +1,12 @@
 # OpenChat domain rollout
 
-The target canonical public host is `chat.ideaflow.app`. Keep `chat.globalbr.ai`
-serving the same OpenChat backend and responsive client indefinitely for old
-bookmarks, installed native clients, Universal Links, and OAuth state held in
-that browser origin. Do not redirect the old host during this rollout.
+The canonical public host is `chat.ideaflow.app`. The existing 2026-10-02 nginx
+rule redirects browser document navigations on `chat.globalbr.ai` to the same
+path and query on the canonical host, including `/`, `/app/*`, `/i/*`, `/u/*`,
+and `/c/*`. Preserve that existing behavior. Machine-facing requests, OAuth
+callbacks and returns, Socket.IO/WebSocket, and AASA remain on the old host.
+See the verified update below; the September sections describe earlier rollout
+planning rather than current production state.
 
 ## Observed starting point (2026-09-30)
 
@@ -96,3 +99,89 @@ Socket.IO still work.
 - Verify the web deployment, native TestFlight build, signed Mac build, and
   physical device behavior separately. A source merge alone updates none of
   these clients.
+
+## Verified existing browser redirects (2026-11-15)
+
+Owner: root `d3caa262`; execution: `6d59c895`; tracking: `OpenChat-2au`.
+
+Read-only probes accepted the new Google callback (account-selection page,
+`prompt=select_account`, no redirect mismatch) and IdeaFlow ID callback
+(`prompt=none` returned `login_required` to the correct callback). The existing
+ASC reviewer account completed IdeaFlow ID authentication, authorization with
+matching state, code exchange, and authenticated `/api/auth/me` on the new
+host. No provider registration or credentials changed. Full Google account
+sign-in was not performed; its verification boundary is callback acceptance.
+
+The existing October nginx rule already covers root and `/app/*`, so no
+additional redirect rule is needed. Its method, Fetch Metadata/Accept, OAuth
+query, WebSocket, monitoring, and machine-route guards remain intact. Jacob's
+latest direction from root explicitly preserves the existing `/i`, `/u`, and
+`/c` browser redirects: no concrete breakage was found to justify narrowing
+these. The earlier task-added path restriction was removed, restoring nginx
+byte-for-byte to its pre-task configuration. `nginx -t` and graceful reload
+passed. The separately deployed System-theme frontend remains intact.
+
+A redundant Cloudflare trial rule was removed. Final readback confirms only
+the pre-existing WikiHub redirect rule remains in that phase. No application,
+environment, database, DNS, TLS, or provider change was needed for redirects.
+
+### Backups and rollback
+
+The original exact nginx config, private `/opt/openchat` archive, image ID and
+saved image remain on Noos in mode-0700 directory:
+
+`/opt/openchat-domain-backups/20261115T091733Z-openchat-browser-only`
+
+Both archives were checked before the initial mutation; secrets/image contents
+stayed on Noos. Before restoring the established redirect behavior, a fresh
+mode-0700 backup saved the then-current nginx and the restored result:
+
+`/opt/openchat-domain-backups/20261115T094714Z-restore-existing-browser-redirects`
+
+That directory includes `nginx.before.conf`, `nginx.after.conf`, and a
+syntax-checked `rollback.py`. The rollback script checks for subsequent shared
+nginx changes before restoring the pre-restoration snapshot; that would
+reintroduce the superseded narrowing and should only be used deliberately.
+The final nginx SHA-256 equals the original pre-task backup:
+
+`d969f84a0c4ebd5167e56647897c15d437d8507db57eae6e64c64dd6f989b1f6`
+
+### Curl acceptance after restoration
+
+| Request on legacy host | Verified result |
+| --- | --- |
+| HTML `/`, `/app/`, `/app/c/test?x=1` | 302, same path/query on canonical host |
+| HTML `/i/test?x=1`, `/u/test?x=1`, `/c/test?x=1` | Existing 302, same path/query on canonical host |
+| `/app/` without HTML Accept | 200, no redirect |
+| HTML `/app/?code=test&state=test` | 200, same origin |
+| `/api/openapi.json`, `/api/auth/ideaflow/config` | 200, no redirect |
+| `/auth/ideaflow/callback` | Existing same-origin 302 to `/app/?provider=ideaflow` |
+| Socket.IO polling | 200, no redirect |
+| Socket.IO WebSocket upgrade | 101 Switching Protocols |
+| `/.well-known/apple-app-site-association` | 200, no redirect |
+
+This is HTTP/auth verification, not physical iPhone or macOS behavior validation.
+Raw curl headers and sanitized ASC receipts live under
+`/home/dev/code/openchat-domain-listing-20261115/evidence` on jacob-dev-1.
+
+### App Store metadata prepared, not submitted
+
+App `6774991932` (`com.jacobcole.openchat`) currently distributes iOS 1.0.6 as
+**OpenChat - Agentic Chat**, subtitle **Group chat with AI agents**. Apple had
+no editable App Information, so an iOS **1.0.7** draft was created with manual
+release and `PREPARE_FOR_SUBMISSION` status. The en-US draft now has:
+
+- Name: **OpenChat: Agentic Chat** (22 characters).
+- Subtitle: **by Ideaflow** (11 characters).
+
+Apple accepted the name/subtitle PATCH (HTTP 200), and a separate GET confirmed
+the exact values. This establishes acceptance for this app's editable draft;
+it is not a guarantee of future App Review approval. The live version remains
+unchanged. No build was associated, no review submission was created, and no
+TestFlight or App Store submission was performed. Existing ASC key and reviewer
+credentials were used in place on M5; no key was copied to Linux or created.
+
+Apple documents the edit-state restrictions in [editable properties](https://developer.apple.com/help/app-store-connect/reference/app-information/required-localizable-and-editable-properties)
+and the [localization update API](https://developer.apple.com/documentation/appstoreconnectapi/patch-v1-appinfolocalizations-_id_).
+Sanitized before/after receipts also remain on M5 in
+`/Users/jacobcole/code/openchat-domain-listing-20261115`.
