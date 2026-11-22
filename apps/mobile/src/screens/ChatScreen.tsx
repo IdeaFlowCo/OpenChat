@@ -39,7 +39,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { threadBottomInset } from '../utils/threadChrome';
 import { useTheme } from '../contexts/ThemeContext';
-import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useNavigationState, useRoute } from '@react-navigation/native';
 import { useHeaderHeight, type HeaderOptions } from '@react-navigation/elements';
 import { Attachment, Conversation, ExportRangeKey, Message, api } from '../api/client';
 import { MessageActionSheet, ReplyToData } from '../components/MessageActionSheet';
@@ -357,9 +357,10 @@ export function ChatScreen({
   // open, close or an interactive swipe-down.
   const { width: windowWidth } = useWindowDimensions();
   const safeArea = useSafeAreaInsets();
+  // Subscribed, so popping back to a deep-linked root thread drops the strip.
+  const stackIndex = useNavigationState(state => state?.index ?? 0);
   const composerBottomInset = threadBottomInset({
-    platform: Platform.OS, embedded, windowWidth,
-    stackIndex: navigation.getState?.()?.index ?? 0,
+    platform: Platform.OS, embedded, windowWidth, stackIndex,
     safeAreaBottom: safeArea.bottom,
   });
   const kbOffset = embedded ? 0 : Platform.OS === 'ios' ? (measuredTop ?? headerHeight) - composerBottomInset : 0;

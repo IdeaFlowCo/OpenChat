@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   recording: {} as Record<string, any>,
   vision: {saveToVision:vi.fn(),reviewVisionSave:vi.fn(),connectVision:vi.fn()},
   uuid:vi.fn(()=>'synthetic-fresh-attempt'),
-  navigation: { setOptions: vi.fn(), navigate: vi.fn(), getState: () => ({ index: mocks.stackIndex }) },
+  navigation: { setOptions: vi.fn(), navigate: vi.fn() },
   route: { name: 'Chat', params: { conversationId: 'sailing' } },
   receive: vi.fn(),
   scroll: vi.fn(),
@@ -83,7 +83,8 @@ vi.mock('react-native', async () => {
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 47, right: 0, bottom: mocks.safeBottom, left: 0 }) }));
 vi.mock('@react-navigation/native', () => ({
   useFocusEffect: (fn: any) => React.useEffect(() => mocks.focused ? fn() : undefined, [fn, mocks.focused]),
-  useNavigation: () => mocks.navigation, useRoute: () => mocks.route,
+  useNavigation: () => mocks.navigation,
+  useNavigationState: (select: (state: { index: number }) => number) => select({ index: mocks.stackIndex }), useRoute: () => mocks.route,
 }));
 vi.mock('@react-navigation/elements', () => ({ useHeaderHeight: () => 56 }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn(async () => true) }));
@@ -211,6 +212,22 @@ describe('phone thread bottom edge', () => {
     await render();
     expect(inset()).toHaveLength(0);
     if (mocks.platform === 'ios') expect(avoidanceOffset()).toBe(56);
+  });
+
+  it('drops the strip when the thread becomes the stack root again', async () => {
+    await render();
+    expect(inset()).toHaveLength(1);
+    mocks.stackIndex = 0;
+    await render();
+    expect(inset()).toHaveLength(0);
+  });
+
+  it('uses the same phone breakpoint App.tsx hides the tab bar at', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { PHONE_THREAD_MAX_WIDTH } = await import('../../mobile/src/utils/threadChrome');
+    const app = await readFile(new URL('../../mobile/App.tsx', import.meta.url), 'utf8');
+    expect(app).toContain(`const narrow = width < ${PHONE_THREAD_MAX_WIDTH};`);
+    expect(app).toContain('const hideInThread = narrow && chatCanGoBack(navState);');
   });
 
   it('adds nothing in the embedded wide pane', async () => {
