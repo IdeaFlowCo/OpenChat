@@ -33,6 +33,10 @@ beforeAll(async () => {
       res.end(JSON.stringify({ success: true, token: `wfb1.${String(req.headers.authorization).slice(7)}`, expires_at: Math.floor(Date.now() / 1000) + 900, scope: 'create-issue' }));
       return;
     }
+    if (req.url === '/create-issue') {
+      res.end(JSON.stringify({ success: true, issue: { id: 'i1', slug: 'openchat-bug' } }));
+      return;
+    }
     res.end(JSON.stringify({ intake_id: 'receipt-1', status: 'held_for_review' }));
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -45,6 +49,7 @@ beforeAll(async () => {
   svc = await import('../src/services/witFeedback.js');
 });
 beforeEach(() => {
+  vi.stubEnv("WIT_PRODUCT_FEEDBACK", "on");
   requests.length = 0;
   delegation = 200;
   h.users = {
@@ -60,6 +65,12 @@ afterAll(async () => {
 const create = () => requests.find((r) => r.path === '/product-feedback')!;
 
 describe('fileFeedback', () => {
+  it('keeps the existing WIT route when the feature is off', async () => {
+    vi.stubEnv('WIT_PRODUCT_FEEDBACK', '');
+    const result = await svc.fileFeedback({ userId: 'legacy', message: 'Existing route', source: 'app' });
+    expect(result.ok).toBe(true);
+    expect(requests.map(request => request.path)).toEqual(['/create-issue']);
+  });
   it('uses the app-scoped token and returns the held receipt', async () => {
     const idempotencyKey = 'bad1d8ec-5398-4b6b-94ac-a6e7e97fac32';
     const result = await svc.fileFeedback({ userId: 'linked', message: 'Search is slow', source: 'app', idempotencyKey });
@@ -77,6 +88,14 @@ describe('fileFeedback', () => {
     expect(create().headers.authorization).toBeUndefined();
     expect(create().headers['x-agent-key']).toBeUndefined();
     expect(JSON.stringify(create().body)).not.toMatch(/Ada|linked/);
+  });
+
+  it('keeps a linked sender from falling back to a second receipt identity', async () => {
+    delegation = 503;
+    h.users.failed = { name: 'Test', issuer: 'https://id.ideaflow.app/api/auth', subject: 'sub-failed' };
+    const result = await svc.fileFeedback({ userId: 'failed', message: 'Test', source: 'app' });
+    expect(result).toMatchObject({ ok: false, status: 503 });
+    expect(requests.map(request => request.path)).toEqual(['/delegate']);
   });
 
   it('uses the shared connector key without a reporter claim when no caller token exists', async () => {

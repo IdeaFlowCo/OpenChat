@@ -928,7 +928,7 @@ export const openapiSpec = {
       },
     },
     '/api/feedback': {
-      post: { operationId: 'submitFeedback', tags: ['Feedback'], summary: 'Submit feedback → creates a WorldIssueTracker issue', requestBody: { required: true, content: json({ type: 'object', properties: { message: { type: 'string' }, context: { type: 'string' } }, required: ['message'] }) }, responses: { '201': ok({ type: 'object', properties: { url: { type: 'string' }, id: { type: 'string' } } }, 'Created'), '400': errResp('message required'), '503': errResp('Feedback not configured (WIT_AGENT_KEY unset)') } },
+      post: { operationId: 'submitFeedback', tags: ['Feedback'], summary: 'Submit feedback to the current WIT board or the shared intake if enabled', requestBody: { required: true, content: json({ type: 'object', properties: { message: { type: 'string' }, context: { type: 'string' }, anonymous: { type: 'boolean' }, idempotency_key: { type: 'string', format: 'uuid', description: 'Retry key for shared intake only.' } }, required: ['message'] }) }, responses: { '201': ok({ type: 'object', properties: { url: { type: 'string' }, id: { type: 'string' }, receiptStatus: { type: 'string' } } }, 'Feedback accepted'), '400': errResp('message required'), '503': errResp('Feedback not configured (WIT_AGENT_KEY unset)') } },
     },
   },
 } as const;

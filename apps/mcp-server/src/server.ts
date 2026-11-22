@@ -510,14 +510,14 @@ export function buildServer(
       title: 'Submit feedback',
       description:
         'File feedback (bug report, feature request, or note) about OpenChat. Maps to POST /api/feedback. ' +
-        'Returns a WIT receipt, which may be held for private review. Reuse idempotency_key across retries.',
+        'Uses the current WIT board by default. If the shared intake is enabled, returns a receipt that may be held privately. Use the same idempotency_key only for retries on the shared intake.',
       inputSchema: {
         message: z.string().min(1).describe('The feedback message'),
         context: z
           .string()
           .optional()
           .describe('Optional extra context, e.g. page, conversation id, or steps to reproduce'),
-        idempotency_key: z.string().uuid().optional().describe('Generate once and reuse for this report.'),
+        idempotency_key: z.string().uuid().optional().describe('Shared-intake only. Legacy filing does not deduplicate retries.'),
         anonymous: z
           .boolean()
           .optional()

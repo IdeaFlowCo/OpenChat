@@ -56,7 +56,7 @@ router.post('/', resolveActor, async (req: Request, res: Response) => {
     return;
   }
 
-  if (idempotency_key !== undefined && (typeof idempotency_key !== 'string' || !/^[0-9a-f-]{36}$/i.test(idempotency_key))) {
+  if (idempotency_key !== undefined && (typeof idempotency_key !== 'string' || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(idempotency_key))) {
     res.status(400).json({ error: 'Invalid idempotency key' });
     return;
   }
