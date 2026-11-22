@@ -28,7 +28,7 @@ jobs:
       - name: Group opening, message loading, and contact card privacy
         working-directory: apps/server
         run: >-
-          npx vitest run test/appStamp.mobile.test.ts test/themePreference.mobile.test.ts test/groupOpen.mobile.test.ts test/chatLoading.mobile.test.ts
+          npx vitest run test/appStamp.mobile.test.ts test/themePreference.mobile.test.ts test/groupOpen.mobile.test.ts test/chatLoading.mobile.test.ts test/chatRowRenders.mobile.test.ts
           test/offlineChat.test.ts test/offlineShell.test.ts
           test/authenticatedRequests.mobile.test.ts
           test/translation.route.test.ts test/translation.mobile.test.ts
