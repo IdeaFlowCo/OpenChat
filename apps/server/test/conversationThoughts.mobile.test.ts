@@ -41,6 +41,7 @@ vi.mock('react-native', async () => {
     ActivityIndicator: 'ActivityIndicator',
     Image: 'Image',
     KeyboardAvoidingView: 'KeyboardAvoidingView',
+    useWindowDimensions: () => ({ width: 390, height: 844 }),
     Text: 'Text',
     TextInput: 'TextInput',
     TouchableOpacity: 'TouchableOpacity',
@@ -69,6 +70,7 @@ vi.mock('react-native', async () => {
   };
 });
 
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 47, right: 0, bottom: 34, left: 0 }) }));
 vi.mock('@react-navigation/native', () => ({
   useNavigation: () => mocks.navigation,
   useRoute: () => mocks.route,

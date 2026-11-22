@@ -34,7 +34,10 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { threadBottomInset } from '../utils/threadChrome';
 import { useTheme } from '../contexts/ThemeContext';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { useHeaderHeight, type HeaderOptions } from '@react-navigation/elements';
@@ -347,7 +350,19 @@ export function ChatScreen({
       if (Number.isFinite(y) && y >= 0) setMeasuredTop(y);
     });
   }, []);
-  const kbOffset = embedded ? 0 : Platform.OS === 'ios' ? (measuredTop ?? headerHeight) : 0;
+  // A phone thread hides the tab bar, so the composer clears the home
+  // indicator itself. With the keyboard up that strip belongs under the
+  // keyboard: lowering the avoidance offset by the same amount keeps the
+  // composer flush on the keyboard, with no state flip (so no jump) on
+  // open, close or an interactive swipe-down.
+  const { width: windowWidth } = useWindowDimensions();
+  const safeArea = useSafeAreaInsets();
+  const composerBottomInset = threadBottomInset({
+    platform: Platform.OS, embedded, windowWidth,
+    stackIndex: navigation.getState?.()?.index ?? 0,
+    safeAreaBottom: safeArea.bottom,
+  });
+  const kbOffset = embedded ? 0 : Platform.OS === 'ios' ? (measuredTop ?? headerHeight) - composerBottomInset : 0;
   const {
     retryPendingMessage, discardPendingMessage, currentUser, conversations, messages: activeMessages, loadingMessages, messageLoadError, retryMessages, isConnected,
     loadOlderMessages, hasMoreMessages, loadingOlderMessages,
@@ -2565,6 +2580,11 @@ export function ChatScreen({
           </TouchableOpacity>
         )}
       </View>
+      {/* Home-indicator strip under the composer in a phone thread (see
+          composerBottomInset); the keyboard covers it while open. */}
+      {composerBottomInset > 0 && (
+        <View testID="composer-home-indicator-inset" style={{ height: composerBottomInset, backgroundColor: c.surface }} />
+      )}
 
       {/* Fullscreen photo viewer (OpenChat-6bg, paging OpenChat-wpmb) */}
       <PhotoViewer

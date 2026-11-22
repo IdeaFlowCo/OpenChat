@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   recording: {} as Record<string, any>,
   vision: {saveToVision:vi.fn(),reviewVisionSave:vi.fn(),connectVision:vi.fn()},
   uuid:vi.fn(()=>'synthetic-fresh-attempt'),
-  navigation: { setOptions: vi.fn(), navigate: vi.fn() },
+  navigation: { setOptions: vi.fn(), navigate: vi.fn(), getState: () => ({ index: mocks.stackIndex }) },
   route: { name: 'Chat', params: { conversationId: 'sailing' } },
   receive: vi.fn(),
   scroll: vi.fn(),
@@ -23,6 +23,9 @@ const mocks = vi.hoisted(() => ({
   platform: 'ios',
   focused: true,
   visibilityReleases: [] as ReturnType<typeof vi.fn>[],
+  windowWidth: 390,
+  safeBottom: 34,
+  stackIndex: 1,
 }));
 
 // Exercise the real ChatScreen hooks/render tree, with the OS boundary replaced
@@ -56,6 +59,7 @@ vi.mock('react-native', async () => {
     } },
     ActivityIndicator: 'ActivityIndicator', Image: 'Image', ScrollView: 'ScrollView',
     KeyboardAvoidingView: 'KeyboardAvoidingView',
+    useWindowDimensions: () => ({ width: mocks.windowWidth, height: 844 }),
     Text: 'Text', TouchableOpacity: 'TouchableOpacity', View: 'View',
     TextInput: React.forwardRef((props: any, ref) => {
       React.useImperativeHandle(ref, () => ({
@@ -76,6 +80,7 @@ vi.mock('react-native', async () => {
     }),
   };
 });
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 47, right: 0, bottom: mocks.safeBottom, left: 0 }) }));
 vi.mock('@react-navigation/native', () => ({
   useFocusEffect: (fn: any) => React.useEffect(() => mocks.focused ? fn() : undefined, [fn, mocks.focused]),
   useNavigation: () => mocks.navigation, useRoute: () => mocks.route,
@@ -143,6 +148,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.privateName = null;
   mocks.platform = 'ios';
+  mocks.windowWidth = 390;
+  mocks.safeBottom = 34;
+  mocks.stackIndex = 1;
   mocks.focused = true;
   mocks.inputFocused = false;
   mocks.appState = 'active';
@@ -178,6 +186,38 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+});
+
+describe('phone thread bottom edge', () => {
+  const inset = () => screen!.root.findAll(node => node.props.testID === 'composer-home-indicator-inset' && node.type === 'View');
+  const avoidanceOffset = () => screen!.root.findByType('KeyboardAvoidingView').props.keyboardVerticalOffset;
+
+  it('clears the home indicator under the composer and lets the keyboard cover that strip', async () => {
+    await render();
+    expect(inset()).toHaveLength(1);
+    expect(inset()[0].props.style.height).toBe(34);
+    // Header height 56 until the screen is measured, lowered by the same 34.
+    expect(avoidanceOffset()).toBe(22);
+  });
+
+  it.each([
+    ['the tab bar shows (thread is the stack root)', () => { mocks.stackIndex = 0; }],
+    ['a tablet-width window keeps the tab bar', () => { mocks.windowWidth = 820; }],
+    ['Android', () => { mocks.platform = 'android'; }],
+    ['web', () => { mocks.platform = 'web'; }],
+    ['no home indicator', () => { mocks.safeBottom = 0; }],
+  ])('adds nothing when %s', async (_case, arrange) => {
+    arrange();
+    await render();
+    expect(inset()).toHaveLength(0);
+    if (mocks.platform === 'ios') expect(avoidanceOffset()).toBe(56);
+  });
+
+  it('adds nothing in the embedded wide pane', async () => {
+    await act(async () => { screen = create(React.createElement(ChatScreen, { conversationId: 'sailing', embedded: true })); });
+    expect(inset()).toHaveLength(0);
+    expect(avoidanceOffset()).toBe(0);
+  });
 });
 
 describe('chat keyboard lifecycle', () => {
