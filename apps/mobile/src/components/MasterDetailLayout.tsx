@@ -222,7 +222,14 @@ export function MasterDetailLayout({ detail }: { detail?: ReactNode } = {}) {
   const menuOpenSettings = useCallback(() => { setAccountMenuOpen(false); openSettings(); }, [openSettings]);
   const menuSignOut = useCallback(() => { setAccountMenuOpen(false); void signOut(); }, [signOut]);
   // Web only: opens the WIT feedback panel in place (no floating launcher).
-  const menuSendFeedback = useCallback(() => { setAccountMenuOpen(false); if (!openWitFeedback()) openSettings(); }, [openSettings]);
+  const menuSendFeedback = useCallback(() => {
+    setAccountMenuOpen(false);
+    if (process.env.EXPO_PUBLIC_WIT_PRODUCT_FEEDBACK === 'on') {
+      Linking.openURL('https://worldissuetracker.com/feedback/send/openchat').catch(openSettings);
+      return;
+    }
+    if (!openWitFeedback()) openSettings();
+  }, [openSettings]);
   // Web + Ideaflow enabled only: app-local sign-out, then the Ideaflow
   // account chooser (prompt=select_account). OpenChat-3ag.12.
   const ideaflowSwitch = useIdeaflowAccountSwitch();

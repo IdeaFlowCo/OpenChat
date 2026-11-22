@@ -200,6 +200,14 @@ JS must match that binary's native modules.
 
 ## 5. How testers give feedback
 
+The destinations below stay active by default. After WIT’s shared intake is
+live and verified, qualify `WIT_PRODUCT_FEEDBACK=on` for the OpenChat server,
+`EXPO_PUBLIC_WIT_PRODUCT_FEEDBACK=on` for Expo builds, and
+`VITE_WIT_PRODUCT_FEEDBACK=on` for the standalone web build. The shared
+text form can return a private review receipt. For an API retry with an
+`idempotency_key`, keep the same account and payload. The existing route does
+not deduplicate retries.
+
 Feedback from inside OpenChat creates a **WorldIssueTracker** issue
 (`worldissuetracker.com`) labeled `openchat-feedback`, so the team sees it in
 one place.

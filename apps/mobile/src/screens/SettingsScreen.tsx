@@ -141,6 +141,10 @@ export function SettingsScreen() {
   const [sendingFeedback, setSendingFeedback] = useState(false);
   const [feedbackModalVisible, setFeedbackModalVisible] = useState(false);
   const handleSendFeedback = useCallback(() => {
+    if (process.env.EXPO_PUBLIC_WIT_PRODUCT_FEEDBACK === 'on') {
+      Linking.openURL('https://worldissuetracker.com/feedback/send/openchat').catch(() => Alert.alert('Couldn’t open feedback', 'Try again in a moment.'));
+      return;
+    }
     // Web (/app): the WIT panel opens in place with a verified sender.
     if (openWitFeedback()) return;
     setFeedbackModalVisible(true);

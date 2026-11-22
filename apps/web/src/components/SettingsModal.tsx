@@ -281,6 +281,9 @@ function RootView({
       <section>
         <h3 className={labelCls}>Feedback</h3>
         <div className={`mt-2 ${sectionCls} p-4`}>
+          {import.meta.env.VITE_WIT_PRODUCT_FEEDBACK === 'on' ? (
+            <a href="https://worldissuetracker.com/feedback/send/openchat" target="_blank" rel="noopener noreferrer" className="underline">Send feedback</a>
+          ) : <>
           <textarea
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
@@ -299,6 +302,7 @@ function RootView({
           {feedbackStatus && (
             <p role="status" className={`mt-2 text-sm ${feedbackStatus.kind === 'success' ? 'text-green-700 dark:text-green-400' : 'text-red-600'}`}>{feedbackStatus.message}</p>
           )}
+          </>}
         </div>
       </section>
 

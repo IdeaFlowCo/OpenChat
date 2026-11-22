@@ -1,20 +1,5 @@
-/**
- * OpenChat feedback -> World Issue Tracker (OpenChat-0xjt).
- *
- * One filing path for the Settings modal (POST /api/feedback), the MCP tool
- * and the Assistant's submit_feedback tool.
- *
- * Attribution, in order:
- *   1. "account" — the filer's unified Ideaflow account. Ideaflow ID mints a
- *      short-lived WIT-scoped token for the filer (first-party delegation);
- *      WIT records the issue under that person's own profile.
- *   2. "name_only" — the filer has no Ideaflow identity yet, or delegation is
- *      unavailable. Filed with the server key, reporter = the filer's OpenChat
- *      display name. Never silently filed as the server-key owner.
- * Anonymous is opt-in only. Through delegation, WIT shows "Anonymous" publicly
- * but keeps the author privately so the filer can still edit their issue.
- * Without delegation, anonymous omits every identifying detail.
- */
+// OpenChat product feedback uses WIT's screened intake and stable receipts.
+import { randomUUID } from 'node:crypto';
 import { getDriver } from '../db.js';
 import { appBridgeConfigured } from './appSources.js';
 
@@ -23,6 +8,8 @@ const WIT_AUDIENCE = 'https://worldissuetracker.com';
 // WIT moved to GCP on 2026-10-04; the Supabase project is frozen read-only.
 export const witApiBase = (): string =>
   process.env.WIT_API_BASE || 'https://api.worldissuetracker.com/functions/v1';
+// Same board as OpenChat web (#215) and native (#217) in-app feedback.
+// The old 'openchat' board is being retired (world-issue-tracker-julr).
 const witSite = (): string => process.env.WIT_SITE_URL || 'https://worldissuetracker.com';
 // Same board as OpenChat web (#215) and native (#217) in-app feedback.
 // The old 'openchat' board is being retired (world-issue-tracker-julr).
@@ -49,9 +36,9 @@ function rateLimited(userId: string): boolean {
 }
 
 export type FeedbackSource = 'app' | 'assistant' | 'agent';
-export type PostedAs = 'account' | 'name_only' | 'anonymous';
+export type PostedAs = 'account' | 'connector' | 'anonymous' | 'name_only';
 export type FeedbackResult =
-  | { ok: true; url: string; id?: string; postedAs: PostedAs; displayName?: string; note?: string }
+  | { ok: true; url?: string; receiptStatus?: string; id?: string; postedAs: PostedAs; displayName?: string; note?: string }
   | { ok: false; status: number; error: string };
 
 type Filer = { name: string | null; issuer: string | null; subject: string | null };
@@ -148,6 +135,62 @@ export async function witWidgetToken(userId: string): Promise<WitWidgetToken | n
 }
 
 export async function fileFeedback(params: {
+  userId: string;
+  message: string;
+  context?: string;
+  anonymous?: boolean;
+  source: FeedbackSource;
+  idempotencyKey?: string;
+}): Promise<FeedbackResult> {
+  if (process.env.WIT_PRODUCT_FEEDBACK !== 'on') return fileLegacyFeedback(params);
+  const msg = params.message.trim().slice(0, FEEDBACK_MAX_MESSAGE);
+  if (!msg) return { ok: false, status: 400, error: 'message is required' };
+  if (rateLimited(params.userId)) {
+    return { ok: false, status: 429, error: 'Feedback rate limit reached — please try again later.' };
+  }
+  const anonymous = params.anonymous === true;
+  const filer = await loadFiler(params.userId);
+  const linked = filer.issuer === IDENTITY_ISSUER && Boolean(filer.subject);
+  const token = !anonymous && linked ? (await witWidgetToken(params.userId))?.token : null;
+  if (!anonymous && linked && !token) {
+    return { ok: false, status: 503, error: 'Feedback identity is temporarily unavailable. Retry with the same account and request key.' };
+  }
+  const key = !anonymous && !linked ? process.env.WIT_AGENT_KEY : null;
+  if (!anonymous && !token && !key) return { ok: false, status: 503, error: 'Feedback is not configured on the server.' };
+
+  const postedAs: PostedAs = anonymous ? 'anonymous' : token ? 'account' : 'connector';
+  const displayName = filer.name ?? 'An OpenChat user';
+  const firstLine = msg.split('\n')[0]!.slice(0, 80);
+  const body = {
+    app: 'openchat', kind: 'other', title: firstLine || 'OpenChat feedback', details: msg,
+    idempotency_key: params.idempotencyKey ?? randomUUID(),
+  };
+
+  try {
+    const response = await fetch(`${witApiBase()}/product-feedback`, {
+      method: 'POST',
+      redirect: 'error',
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : key ? { 'X-Agent-Key': key } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json().catch(() => null) as { intake_id?: string; status?: string; issue_url?: string } | null;
+    if (!response.ok || !data?.intake_id || !data.status) {
+      return { ok: false, status: response.status === 429 ? 429 : 502, error: 'Feedback receipt could not be confirmed' };
+    }
+    return {
+      ok: true, url: data.issue_url, id: data.intake_id,
+      receiptStatus: data.status, postedAs, ...(token ? { displayName } : {}),
+    };
+  } catch {
+    return { ok: false, status: 502, error: 'Failed to reach feedback service' };
+  }
+}
+
+async function fileLegacyFeedback(params: {
   userId: string;
   message: string;
   context?: string;

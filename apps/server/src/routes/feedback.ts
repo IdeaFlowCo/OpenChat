@@ -32,10 +32,11 @@ router.post('/wit-token', requireAuth, requireDirectSession, async (req: Request
 // Filed under the filer's unified Ideaflow account unless anonymous:true.
 router.post('/', resolveActor, async (req: Request, res: Response) => {
   const userId = req.user?.userId;
-  const { message, context, anonymous } = req.body as {
+  const { message, context, anonymous, idempotency_key } = req.body as {
     message?: string;
     context?: string;
     anonymous?: boolean;
+    idempotency_key?: string;
   };
 
   if (!userId) {
@@ -55,7 +56,12 @@ router.post('/', resolveActor, async (req: Request, res: Response) => {
     return;
   }
 
+  if (idempotency_key !== undefined && (typeof idempotency_key !== 'string' || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(idempotency_key))) {
+    res.status(400).json({ error: 'Invalid idempotency key' });
+    return;
+  }
   const result = await fileFeedback({
+    idempotencyKey: idempotency_key,
     userId,
     message,
     context: typeof context === 'string' ? context : undefined,
