@@ -18,7 +18,6 @@ import QRCode from 'react-native-qrcode-svg';
 import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
-import * as Device from 'expo-device';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme, ThemePref } from '../contexts/ThemeContext';
@@ -31,9 +30,6 @@ import { getColors } from '../theme/colors';
 import type { NavProp } from '../navigation/types';
 import { registerForPushNotificationsAsync } from '../services/notifications';
 import { ExportSheet } from '../components/ExportSheet';
-import { FeedbackModal } from '../components/FeedbackModal';
-import { openWitFeedback } from '../services/witWidget';
-import { submitNativeFeedback, type FeedbackScreenshot } from '../services/witNativeFeedback';
 import { saveJsonDownload } from '../services/exportDownload';
 import { describeDesktopUpdate, useDesktopShell } from '../services/desktopShell';
 import { AppStamp } from '../components/AppStamp';
@@ -134,52 +130,11 @@ export function SettingsScreen() {
     }
   }, [mintingSetup]);
 
-  // Send feedback -> server creates a WorldIssueTracker issue (oc8.3).
-  // A cross-platform modal (FeedbackModal) replaces Alert.prompt, which only
-  // iOS implements — Android and web previously had no in-app path at all
-  // (OpenChat-k9hj).
-  const [sendingFeedback, setSendingFeedback] = useState(false);
-  const [feedbackModalVisible, setFeedbackModalVisible] = useState(false);
   const handleSendFeedback = useCallback(() => {
-    // Web (/app): the WIT panel opens in place with a verified sender.
-    if (openWitFeedback()) return;
-    setFeedbackModalVisible(true);
+    Linking.openURL('https://worldissuetracker.com/feedback/send/openchat').catch(() => {
+      Alert.alert('Couldn’t open feedback', 'Try again in a moment.');
+    });
   }, []);
-  // Native: files straight to WIT's openchat-feedback board with a verified
-  // `wfb1.` sender token (julr.11); falls back to anonymous if none.
-  const handleSubmitFeedback = useCallback(async (text: string, anonymous: boolean, screenshot: FeedbackScreenshot | null) => {
-    setSendingFeedback(true);
-    try {
-      const build = Platform.OS === 'ios'
-        ? Constants.platform?.ios?.buildNumber ?? Constants.expoConfig?.ios?.buildNumber
-        : Constants.expoConfig?.android?.versionCode;
-      const { issueUrl, verified, attachmentError } = await submitNativeFeedback({
-        message: text,
-        anonymous,
-        screenshot,
-        context: {
-          app: 'OpenChat',
-          version: Constants.expoConfig?.version ?? '?',
-          build: build != null ? String(build) : null,
-          source: 'Settings',
-          device: `${Device.modelName ?? 'Unknown device'}, ${Device.osName ?? Platform.OS} ${Device.osVersion ?? String(Platform.Version)}`,
-          platform: Platform.OS,
-        },
-      });
-      setFeedbackModalVisible(false);
-      const name = currentUser?.name?.trim();
-      const as = verified ? (name ? ` as ${name}` : '') : ' anonymously';
-      const shotNote = attachmentError ? '\n\nThe screenshot couldn’t be attached.' : '';
-      Alert.alert('Sent', `Thanks — your feedback was sent${as}.${shotNote}${issueUrl ? `\n\n${issueUrl}` : ''}`);
-    } catch (err) {
-      Alert.alert(
-        'Couldn’t send feedback',
-        err instanceof Error ? err.message : 'Please try again later.'
-      );
-    } finally {
-      setSendingFeedback(false);
-    }
-  }, [currentUser?.name]);
 
   const handleDeleteAccount = useCallback(() => {
     // First confirmation alert
@@ -683,12 +638,11 @@ export function SettingsScreen() {
           <TouchableOpacity
             style={[styles.optionRow]}
             onPress={handleSendFeedback}
-            disabled={sendingFeedback}
             activeOpacity={0.7}
           >
             <View style={{ flex: 1 }}>
               <Text style={[styles.optionLabel, { color: c.textPrimary }]}>
-                {sendingFeedback ? 'Sending…' : 'Send feedback'}
+                Send feedback
               </Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>
                 Report a bug or request a feature
@@ -903,14 +857,6 @@ export function SettingsScreen() {
         busyRange={exportBusyRange}
         onClose={() => !exportBusyRange && setExportSheetVisible(false)}
         onExport={handleAccountExport}
-      />
-
-      <FeedbackModal
-        visible={feedbackModalVisible}
-        sending={sendingFeedback}
-        filerName={currentUser?.name}
-        onSubmit={handleSubmitFeedback}
-        onCancel={() => setFeedbackModalVisible(false)}
       />
 
       {/* Android delete-account confirmation modal (fallback for platforms without Alert.prompt) */}

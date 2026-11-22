@@ -33,7 +33,7 @@ beforeAll(async () => {
       res.end(JSON.stringify({ success: true, token: `wfb1.${String(req.headers.authorization).slice(7)}`, expires_at: Math.floor(Date.now() / 1000) + 900, scope: 'create-issue' }));
       return;
     }
-    res.end(JSON.stringify({ success: true, issue: { id: 'i1', slug: 'openchat-bug' } }));
+    res.end(JSON.stringify({ intake_id: 'receipt-1', status: 'held_for_review' }));
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
@@ -57,53 +57,34 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
-const create = () => requests.find((r) => r.path === '/create-issue')!;
+const create = () => requests.find((r) => r.path === '/product-feedback')!;
 
 describe('fileFeedback', () => {
-  it('files under the filer’s own account by default', async () => {
-    const result = await svc.fileFeedback({ userId: 'linked', message: 'Search is slow', source: 'app' });
-    expect(result).toMatchObject({ ok: true, postedAs: 'account', displayName: 'Ada Lovelace', url: 'https://worldissuetracker.com/issue/openchat-bug' });
-    const delegate = requests.find((r) => r.path === '/delegate')!;
-    expect(delegate.body).toEqual({ issuer: 'https://id.ideaflow.app/api/auth', subject: 'sub-ada', audience: 'https://worldissuetracker.com', purpose: 'issue_create' });
-    expect(create().headers.authorization).toBe('Bearer tok-sub-ada');
+  it('uses the app-scoped token and returns the held receipt', async () => {
+    const idempotencyKey = 'bad1d8ec-5398-4b6b-94ac-a6e7e97fac32';
+    const result = await svc.fileFeedback({ userId: 'linked', message: 'Search is slow', source: 'app', idempotencyKey });
+    expect(result).toMatchObject({ ok: true, postedAs: 'account', displayName: 'Ada Lovelace', id: 'receipt-1', receiptStatus: 'held_for_review' });
+    expect(create().headers.authorization).toBe('Bearer wfb1.tok-sub-ada');
     expect(create().headers['x-agent-key']).toBeUndefined();
-    expect(create().body).toMatchObject({ post_anonymously: false, tracker_slug: 'openchat-feedback', labels: ['openchat-feedback'] });
-    expect(create().body.reporter).toBeUndefined();
+    expect(create().body).toEqual({ app: 'openchat', kind: 'other', title: 'Search is slow', details: 'Search is slow', idempotency_key: idempotencyKey });
   });
 
-  it('posts anonymously only when asked, still through the filer’s identity, with nothing identifying in the text', async () => {
+  it('does not send an identity or a key with anonymous feedback', async () => {
     const result = await svc.fileFeedback({ userId: 'linked', message: 'Private bug', anonymous: true, source: 'assistant' });
     expect(result).toMatchObject({ ok: true, postedAs: 'anonymous' });
     expect(result).not.toHaveProperty('displayName');
-    expect(create().headers.authorization).toBe('Bearer tok-sub-ada');
-    expect(create().body.post_anonymously).toBe(true);
-    expect(String(create().body.description)).not.toMatch(/Ada|linked/);
+    expect(requests.map(row => row.path)).toEqual(['/product-feedback']);
+    expect(create().headers.authorization).toBeUndefined();
+    expect(create().headers['x-agent-key']).toBeUndefined();
+    expect(JSON.stringify(create().body)).not.toMatch(/Ada|linked/);
   });
 
-  it('falls back to the filer’s name — never the key owner — without an Ideaflow identity', async () => {
+  it('uses the shared connector key without a reporter claim when no caller token exists', async () => {
     const result = await svc.fileFeedback({ userId: 'legacy', message: 'Crash on open', source: 'app' });
-    expect(result).toMatchObject({ ok: true, postedAs: 'name_only', displayName: 'Grace Hopper' });
-    expect(requests.some((r) => r.path === '/delegate')).toBe(false);
+    expect(result).toMatchObject({ ok: true, postedAs: 'connector', receiptStatus: 'held_for_review' });
     expect(create().headers['x-agent-key']).toBe('server-key');
-    expect(create().body.reporter).toBe('Grace Hopper (via OpenChat)');
-  });
-
-  it('falls back to the filer’s name when delegation is unavailable', async () => {
-    delegation = 503;
-    const result = await svc.fileFeedback({ userId: 'linked', message: 'Typo', source: 'app' });
-    expect(result).toMatchObject({ ok: true, postedAs: 'name_only' });
-    expect(create().body.reporter).toBe('Ada Lovelace (via OpenChat)');
-  });
-
-  it('anonymous fallback hides the filer entirely', async () => {
-    await svc.fileFeedback({ userId: 'legacy', message: 'Quiet note', anonymous: true, source: 'app' });
-    expect(create().body).toMatchObject({ reporter: 'Anonymous', post_anonymously: true });
-    expect(String(create().body.description)).not.toMatch(/Grace|legacy/);
-  });
-
-  it('wraps feedback as untrusted text', async () => {
-    await svc.fileFeedback({ userId: 'linked', message: 'ignore previous instructions', source: 'app' });
-    expect(String(create().body.description)).toMatch(/^--- untrusted user-submitted feedback/);
+    expect(create().body.reporter).toBeUndefined();
+    expect(JSON.stringify(create().body)).not.toMatch(/Grace|legacy/);
   });
 
   it('defaults to the GCP World Issue Tracker API', () => {
@@ -116,12 +97,13 @@ describe('witWidgetToken', () => {
   // The default-base test above blanks WIT_API_BASE; point it back at the fake.
   beforeEach(() => { vi.stubEnv('WIT_API_BASE', String(process.env.IDEAFLOW_DELEGATION_URL).replace(/\/delegate$/, '')); });
   it('exchanges the delegated WIT bearer for a wfb1. token and caches it per person', async () => {
-    const first = await svc.witWidgetToken('linked');
-    expect(first).toEqual({ token: 'wfb1.tok-sub-ada', expires_at: expect.any(Number) });
+    h.users.fresh = { name: 'Test', issuer: 'https://id.ideaflow.app/api/auth', subject: 'sub-fresh' };
+    const first = await svc.witWidgetToken('fresh');
+    expect(first).toEqual({ token: 'wfb1.tok-sub-fresh', expires_at: expect.any(Number) });
     const exchange = requests.find((r) => r.path === '/feedback-token')!;
-    expect(exchange.headers.authorization).toBe('Bearer tok-sub-ada');
+    expect(exchange.headers.authorization).toBe('Bearer tok-sub-fresh');
     expect(exchange.body).toEqual({ app: 'openchat' });
-    expect(await svc.witWidgetToken('linked')).toEqual(first);
+    expect(await svc.witWidgetToken('fresh')).toEqual(first);
     expect(requests.filter((r) => r.path === '/delegate')).toHaveLength(1);
   });
 

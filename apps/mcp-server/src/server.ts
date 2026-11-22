@@ -510,25 +510,26 @@ export function buildServer(
       title: 'Submit feedback',
       description:
         'File feedback (bug report, feature request, or note) about OpenChat. Maps to POST /api/feedback. ' +
-        "Posts a public World Issue Tracker issue under the key owner's Ideaflow account unless anonymous is true. " +
-        'Returns the issue URL and how it was posted.',
+        'Returns a WIT receipt, which may be held for private review. Reuse idempotency_key across retries.',
       inputSchema: {
         message: z.string().min(1).describe('The feedback message'),
         context: z
           .string()
           .optional()
           .describe('Optional extra context, e.g. page, conversation id, or steps to reproduce'),
+        idempotency_key: z.string().uuid().optional().describe('Generate once and reuse for this report.'),
         anonymous: z
           .boolean()
           .optional()
           .describe('Only true when the user explicitly asks to post anonymously'),
       },
     },
-    async ({ message, context, anonymous }) => {
+    async ({ message, context, anonymous, idempotency_key }) => {
       try {
         requireApiKey(api, 'Submitting feedback');
-        const result = await api.submitFeedback({ message, context, anonymous });
+        const result = await api.submitFeedback({ message, context, anonymous, idempotency_key });
         const lines = ['Feedback submitted.'];
+        if (result?.receiptStatus) lines.push(`status: ${result.receiptStatus}`);
         if (result?.postedAs) lines.push(`posted as: ${result.postedAs === 'anonymous' ? 'Anonymous' : result.displayName ?? result.postedAs}`);
         if (result?.id) lines.push(`id: ${result.id}`);
         if (result?.url) lines.push(`url: ${result.url}`);

@@ -171,9 +171,6 @@ function RootView({
 }) {
   const [minting, setMinting] = useState(false);
   const [setupStatus, setSetupStatus] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
-  const [feedback, setFeedback] = useState('');
-  const [sendingFeedback, setSendingFeedback] = useState(false);
-  const [feedbackStatus, setFeedbackStatus] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
   const [notifPerm, setNotifPerm] = useState<NotificationPermission | 'unsupported'>(
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission
   );
@@ -192,22 +189,6 @@ function RootView({
       setSetupStatus({ kind: 'error', message: err instanceof Error ? err.message : 'Failed to create agent setup.' });
     } finally {
       setMinting(false);
-    }
-  };
-
-  const handleSendFeedback = async () => {
-    const text = feedback.trim();
-    if (!text || sendingFeedback) return;
-    setSendingFeedback(true);
-    setFeedbackStatus(null);
-    try {
-      const { url } = await api.submitFeedback(text);
-      setFeedback('');
-      setFeedbackStatus({ kind: 'success', message: `Thanks! Your feedback was sent.${url ? ` ${url}` : ''}` });
-    } catch (err) {
-      setFeedbackStatus({ kind: 'error', message: err instanceof Error ? err.message : 'Could not send feedback.' });
-    } finally {
-      setSendingFeedback(false);
     }
   };
 
@@ -281,24 +262,9 @@ function RootView({
       <section>
         <h3 className={labelCls}>Feedback</h3>
         <div className={`mt-2 ${sectionCls} p-4`}>
-          <textarea
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            rows={3}
-            placeholder="What's working, broken, or missing?"
-            className="w-full resize-none rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-          />
-          <button
-            type="button"
-            onClick={handleSendFeedback}
-            disabled={!feedback.trim() || sendingFeedback}
-            className="mt-2 min-h-[40px] w-full rounded-lg bg-gray-900 dark:bg-slate-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {sendingFeedback ? 'Sending…' : 'Send feedback'}
-          </button>
-          {feedbackStatus && (
-            <p role="status" className={`mt-2 text-sm ${feedbackStatus.kind === 'success' ? 'text-green-700 dark:text-green-400' : 'text-red-600'}`}>{feedbackStatus.message}</p>
-          )}
+          <a href="https://worldissuetracker.com/feedback/send/openchat" target="_blank" rel="noopener noreferrer" className="underline">
+            Send feedback
+          </a>
         </div>
       </section>
 
