@@ -61,6 +61,7 @@ vi.mock('react-native', async () => {
     } },
     ActivityIndicator: 'ActivityIndicator', Image: 'Image', ScrollView: 'ScrollView',
     KeyboardAvoidingView: 'KeyboardAvoidingView',
+    useWindowDimensions: () => ({ width: 390, height: 844 }),
     Text: 'Text', TouchableOpacity: 'TouchableOpacity', View: 'View',
     TextInput: React.forwardRef((props: any, ref) => {
       React.useImperativeHandle(ref, () => ({
@@ -83,9 +84,11 @@ vi.mock('react-native', async () => {
     }),
   };
 });
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 47, right: 0, bottom: 34, left: 0 }) }));
 vi.mock('@react-navigation/native', () => ({
   useFocusEffect: (fn: any) => React.useEffect(() => mocks.focused ? fn() : undefined, [fn, mocks.focused]),
-  useNavigation: () => mocks.navigation, useRoute: () => mocks.route,
+  useNavigation: () => mocks.navigation,
+  useNavigationState: (select: (state: { index: number }) => number) => select({ index: 1 }), useRoute: () => mocks.route,
 }));
 vi.mock('@react-navigation/elements', () => ({ useHeaderHeight: () => 56 }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn(async () => true) }));
