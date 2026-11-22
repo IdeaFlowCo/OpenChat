@@ -215,7 +215,7 @@ function renderContentWithMentions(
   return <Text>{parts}</Text>;
 }
 
-interface RenderRow {
+export interface RenderRow {
   type: 'message' | 'day';
   key: string;
   message?: Message & { _failed?: boolean };
@@ -263,6 +263,16 @@ function buildRows(messages: Message[], myId: string | undefined, isGroup: boole
     });
   }
   return out;
+}
+
+const ROW_FIELDS = ['type', 'label', 'message', 'isOwn', 'showSender', 'isLastInRun'] as const;
+
+/** Returns `next`, with each row that is field-for-field unchanged replaced by its previous object. */
+export function reuseUnchangedRows(previous: ReadonlyMap<string, RenderRow>, next: RenderRow[]): RenderRow[] {
+  return next.map(row => {
+    const old = previous.get(row.key);
+    return old && ROW_FIELDS.every(field => old[field] === row[field]) ? old : row;
+  });
 }
 
 /**
@@ -315,7 +325,8 @@ export function ChatScreen({
         : '');
   const laneProp = routeRaw.name === 'Chat' ? ((routeRaw.params as any)?.lane as 'chat' | 'context' | undefined) : undefined;
   const { scheme } = useTheme();
-  const c = getColors(scheme);
+  // Stable per scheme, so the memoized message rows below don't re-render.
+  const c = useMemo(() => getColors(scheme), [scheme]);
   const { enhanced } = useSocialExperience();
   // Dynamic keyboard offset for KeyboardAvoidingView. This is the distance
   // from the top of the screen to the top of the KAV — i.e. the height of
@@ -902,8 +913,12 @@ export function ChatScreen({
     return `rgba(${r},${g},${b},${opacity})`;
   }, [c.bubbleOwnText]);
 
+  const previousRows = useRef(new Map<string, RenderRow>());
   const rows = useMemo(() => {
-    const built = buildRows(messages, currentUser?.userId, isGroup);
+    // Keep unchanged rows identical so the list's memoized cells skip them:
+    // a new or edited message then re-renders one row, not the whole thread.
+    const built = reuseUnchangedRows(previousRows.current, buildRows(messages, currentUser?.userId, isGroup));
+    previousRows.current = new Map(built.map(row => [row.key, row]));
     // Rebuild messageId → row index map for scroll-to-quoted.
     const map = new Map<string, number>();
     built.forEach((r, i) => {
@@ -1724,7 +1739,10 @@ export function ChatScreen({
   // One row = one server-supplied message. Extracted from the FlatList so each
   // row can sit inside its own ErrorBoundary: a malformed message then renders a
   // placeholder instead of taking down the whole app (openchat-dwk).
-  const renderMessageRow = (item: RenderRow) => {
+  // Memoized with everything a row reads, so typing, the keyboard, typing
+  // indicators and scroll state re-render the screen without re-rendering
+  // every message cell (VirtualizedList cells are pure on renderItem).
+  const renderMessageRow = useCallback((item: RenderRow) => {
     if (item.type === 'day') {
       return (
         <View style={styles.dayWrap}>
@@ -2003,7 +2021,26 @@ export function ChatScreen({
         </View>{/* end column wrapper */}
       </View>
     );
-  };
+  }, [
+    MessageBubble, activeConversationId, activeConversationLane, c, conversationId, currentUser,
+    discardPendingMessage, getTickState, handleLongPress, handleReact, isGroup, manualTranslations,
+    mentionableParticipants, navigation, openPhotoViewer, other, ownTint, retryPendingMessage, scheme,
+    scrollToMessage, translationFocused,
+  ]);
+  const renderListItem = useCallback(({ item }: { item: RenderRow }) => (
+    <ErrorBoundary
+      scope="chat-message"
+      resetKey={item.key}
+      render={() => renderMessageRow(item)}
+      fallback={() => (
+        <View style={styles.dayWrap}>
+          <Text style={[styles.dayLabel, { color: c.textMetadata }]}>
+            Message unavailable
+          </Text>
+        </View>
+      )}
+    />
+  ), [renderMessageRow, c.textMetadata]);
 
   return (
     <View ref={rootRef} style={styles.root} onLayout={measureTop} collapsable={false}>
@@ -2159,20 +2196,7 @@ export function ChatScreen({
               <ChatEmptyState conversation={conversation} currentUser={currentUser} />
             ) : null
           }
-          renderItem={({ item }) => (
-            <ErrorBoundary
-              scope="chat-message"
-              resetKey={item.key}
-              render={() => renderMessageRow(item)}
-              fallback={() => (
-                <View style={styles.dayWrap}>
-                  <Text style={[styles.dayLabel, { color: c.textMetadata }]}>
-                    Message unavailable
-                  </Text>
-                </View>
-              )}
-            />
-          )}
+          renderItem={renderListItem}
         />
         {!isAtBottom && (
           <JumpToBottomButton unreadCount={unreadCount} onPress={handlePillPress} />
