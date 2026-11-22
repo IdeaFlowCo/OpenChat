@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   focused: true,
   visibilityReleases: [] as ReturnType<typeof vi.fn>[],
   rowRenders: 0,
+  scheme: 'light' as 'light' | 'dark',
+  ticks: 0,
 }));
 
 // Counts message-row renders through the real ChatScreen, with FlatList cells
@@ -87,7 +89,7 @@ vi.mock('@react-navigation/native', () => ({
 }));
 vi.mock('@react-navigation/elements', () => ({ useHeaderHeight: () => 56 }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn(async () => true) }));
-vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
+vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: mocks.scheme }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => mocks.chat }));
 vi.mock('../../mobile/src/contexts/SocialExperienceContext', () => ({ useSocialExperience: () => ({ enhanced: false }) }));
 vi.mock('../../mobile/src/contexts/RecordingContext', () => ({ useRecording: () => mocks.recording }));
@@ -153,6 +155,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   mocks.platform = 'ios';
+  mocks.scheme = 'light';
   mocks.focused = true;
   mocks.inputFocused = false;
   mocks.keyboardEvents.clear();
@@ -238,6 +241,33 @@ describe('chat row render budget', () => {
     expect(await rendersDuring(() => screen!.root.findByType('TextInput').props.onChangeText('Hi'))).toBe(0);
     mocks.chat = { ...mocks.chat, typingByConv: new Map([['sailing', new Set(['alice'])]]) };
     expect(await rendersDuring(render)).toBe(0);
+  });
+
+  it('re-renders rows for a theme change', async () => {
+    await render();
+    mocks.scheme = 'dark';
+    expect(await rendersDuring(render)).toBeGreaterThanOrEqual(MESSAGES.length);
+  });
+
+  it('re-renders rows when the other person reads the thread', async () => {
+    mocks.chat = { ...mocks.chat, conversations: [{ id: 'sailing', type: 'direct', participants: [
+      { user: { id: 'alice', name: 'Alice' } }, { user: { id: 'bob', name: 'Bob' } },
+    ] } as Conversation] };
+    await render();
+    const readTicks = () => JSON.stringify(screen!.toJSON()).match(/"✓✓"/g)?.length ?? 0;
+    const before = readTicks();
+    mocks.chat = { ...mocks.chat, readByOthers: new Map([['sailing', new Map([['alice', '2026-12-31T00:00:00Z']])]]) };
+    expect(await rendersDuring(render)).toBeGreaterThanOrEqual(MESSAGES.length);
+    expect(before).toBe(0);
+    expect(readTicks()).toBeGreaterThan(0);
+  });
+
+  it('re-renders a row when its reactions change', async () => {
+    await render();
+    const reacted = MESSAGES.map((m, i) => i === 3 ? { ...m, content: 'Reacted text', reactions: [{ emoji: '👍', count: 1, byMe: true }] } : m);
+    mocks.chat = { ...mocks.chat, messages: reacted };
+    expect(await rendersDuring(render)).toBe(1);
+    expect(JSON.stringify(screen!.toJSON())).toContain('Reacted text');
   });
 
   it('still re-renders rows when their inputs change', async () => {
