@@ -218,7 +218,7 @@ describe('chat row render budget', () => {
     mocks.chat = { ...mocks.chat, messages: edited };
     const count = await rendersDuring(render);
     expect(JSON.stringify(screen!.toJSON())).toContain('Edited text');
-    expect(count).toBeLessThan(MESSAGES.length);
+    expect(count).toBe(1);
   });
 
   it('renders only the new row and the previous run end when a message arrives', async () => {
