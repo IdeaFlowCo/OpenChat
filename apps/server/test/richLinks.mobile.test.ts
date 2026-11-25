@@ -57,6 +57,7 @@ describe('link rules', () => {
     ['[index](<file:///Users/sam/My Notes/INDEX.html>)', [['path', 'index', '/Users/sam/My Notes/INDEX.html']]],
     ['[notes](/Users/sam/notes/plan.md)', [['path', 'notes', '/Users/sam/notes/plan.md']]],
     ['[win](file:///C:/Users/sam/plan.docx)', [['path', 'win', 'C:/Users/sam/plan.docx']]],
+    ['file:///tmp//a.txt', [['path', '/tmp//a.txt', '/tmp//a.txt']]],
     ['file:///Users/sam/a%20b.html and more', [['path', '/Users/sam/a b.html', '/Users/sam/a b.html'], ['text', ' and more']]],
     ['Open file://localhost/Users/sam/x.', [['text', 'Open '], ['path', '/Users/sam/x', '/Users/sam/x'], ['text', '.']]],
   ])('file links become paths, never links: %s', (content, expected) => {
@@ -69,6 +70,9 @@ describe('link rules', () => {
     '[x](https://user:pw@example.com)', '[x](https://)', '[x](ftp://example.com/a)', '[x](mailto:sam@example.com)', '[ ](https://example.com)',
     '[x](javascript:https://example.com)', '[a](java%09script:x)', '<javascript:alert(2)>', '[x](file://server.example/share/a)', 'file://nas.example/share/a.txt', '[x](file:///Users/sam/%E0%A4%A)', '[x](file://user@host/a)',
     'javascript:alert(1) data:text/html,hi vbscript:x', 'file:relative/path', 'myfile:///Users/sam/a',
+    // A file address is written file://…, and never names another machine by a doubled slash.
+    '[x](file:foo)', '[x](file:/tmp/a)', '[x](file:////server.example/share/a)', 'file:////server.example/share/a',
+    'file://localhost//server.example/share', 'file://///x', '[x](file:///%2Fserver.example/share)', 'file:///%2F%2Fserver.example/share', '[x](file:///%5C%5Cserver%5Cshare)', '[x](file:///%2Ftmp)',
     // Nothing invisible, direction-changing or shell-active may reach the clipboard or hide in an address.
     '[report.pdf](file:///tmp/%E2%80%AEgpj.exe)', '[x](file:///tmp/a%C2%85b)', '[x](file:///tmp/a%E2%80%A8b)', '[x](file:///tmp/a%3Bopen%20b)',
     '[x](/Users/sam/a;open)', 'file:///tmp/a%7Csh', '[x](https://ok.example.com/\u200b)', '[x](https://ok.example.com/\u202egpj)',
@@ -95,7 +99,7 @@ describe('link rules', () => {
   it('reads a path out of a file address', () => {
     expect(fileUrlToPath('file:///Users/sam/a%20b.html')).toBe('/Users/sam/a b.html');
     expect(fileUrlToPath('FILE://LOCALHOST/Users/sam/x')).toBe('/Users/sam/x');
-    expect(fileUrlToPath('file:/Users/sam/x')).toBe('/Users/sam/x');
+    for (const not of ['file:/Users/sam/x', 'file:foo', 'file:////server/share']) expect(fileUrlToPath(not)).toBeNull();
     expect(fileUrlToPath('file:///Users/%zz')).toBe('/Users/%zz'); expect(fileUrlToPath('file:///a%25b%')).toBe('/a%b%');
     for (const bad of ['file://', 'file:', 'file:///Users/%0Aevil', 'file:///a%0Ab', 'file:///a%E0%A4%A', 'https://example.com/a']) expect(fileUrlToPath(bad)).toBeNull();
   });
@@ -135,7 +139,7 @@ describe.each([
   it('copies a file path instead of opening it, and says where to paste it', async () => {
     await mount(React.createElement(React.Fragment, {}, render(MIXED), React.createElement(GlobalNotice)));
     const chip = host('button')[0]!;
-    expect(chip.props.accessibilityLabel).toBe('Copy path: /Users/sam/My Notes/INDEX.html');
+    expect(chip.props.accessibilityLabel).toBe('the index (copy path /Users/sam/My Notes/INDEX.html)');
     expect(chip.props.href).toBeUndefined();
     await act(async () => { chip.props.onPress(press); });
     expect(os.copy).toHaveBeenCalledWith('/Users/sam/My Notes/INDEX.html'); expect(os.open).not.toHaveBeenCalled();
@@ -147,13 +151,24 @@ describe.each([
     await act(async () => { host('button')[0]!.props.onPress(press); });
     expect(tree!.root.findByProps({ role: 'status' }).props.children).toBe('Couldn’t copy. Path: /Users/sam/My Notes/INDEX.html'.replace('’', "'"));
   });
-  it('reveals the path in the file manager when a desktop shell offers that, instead of copying', async () => {
-    const revealPath = vi.fn(async () => undefined);
-    vi.stubGlobal('ideaflowDesktop', { revealPath, openPath: vi.fn() });
+  it('hands the path to a desktop shell when one offers to open it, and copies when that fails', async () => {
+    const openPath = vi.fn(async function (this: unknown) { return this === shell ? '' : 'lost this'; });
+    const shell = { openPath };
+    vi.stubGlobal('ideaflowDesktop', shell);
     try {
-      await mount(render(MIXED));
+      await mount(React.createElement(React.Fragment, {}, render(MIXED), React.createElement(GlobalNotice)));
       await act(async () => { host('button')[0]!.props.onPress(press); });
-      expect(revealPath).toHaveBeenCalledWith('/Users/sam/My Notes/INDEX.html'); expect(os.copy).not.toHaveBeenCalled(); expect(os.open).not.toHaveBeenCalled();
+      expect(openPath).toHaveBeenCalledWith('/Users/sam/My Notes/INDEX.html'); expect(os.copy).not.toHaveBeenCalled(); expect(os.open).not.toHaveBeenCalled();
+      shell.openPath = vi.fn(async () => undefined) as any;
+      await act(async () => { host('button')[0]!.props.onPress(press); });
+      expect(os.copy).not.toHaveBeenCalled();
+      // Electron's shell.openPath reports failure as a non-empty string; a throw counts too.
+      for (const failure of [async () => 'Failed to open path', async () => false, async () => { throw new Error('denied'); }]) {
+        os.copy.mockClear(); shell.openPath = vi.fn(failure) as any;
+        await act(async () => { host('button')[0]!.props.onPress(press); });
+        expect(os.copy).toHaveBeenCalledWith('/Users/sam/My Notes/INDEX.html');
+        expect(tree!.root.findByProps({ role: 'status' }).props.children).toBe('Path copied: paste in Finder (⇧⌘G)');
+      }
     } finally { vi.unstubAllGlobals(); }
   });
   it('puts the full path in a tooltip on web and never renders a file anchor', async () => {

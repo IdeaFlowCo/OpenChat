@@ -16,14 +16,19 @@ export const PATH_COPIED = 'Path copied: paste in Finder (⇧⌘G)';
 export const pathNotCopied = (path: string) => `Couldn't copy. Path: ${path}`;
 
 /**
- * A desktop shell may offer `window.ideaflowDesktop.revealPath(path)`, which shows the item in
- * the file manager. It is "reveal", never "open": opening a path chosen by whoever wrote the
- * message could run a program. No shell provides it today, so the path is copied.
+ * A desktop shell may offer `window.ideaflowDesktop.openPath(path)`. Its contract, shared with
+ * the Ideaflow Dashboard: the shell must reveal the item (for example in Finder) or ask before
+ * launching anything, because the path is someone else's text. A thrown error, `false`, or a
+ * non-empty string result (how Electron's shell.openPath reports failure) means it did not
+ * work, and the path is copied instead. No shell provides the hook today.
  */
 export async function copyLocalPath(path: string): Promise<void> {
-  const reveal = (globalThis as { ideaflowDesktop?: { revealPath?: unknown } }).ideaflowDesktop?.revealPath;
-  if (typeof reveal === 'function') {
-    try { await (reveal as (path: string) => unknown)(path); return; } catch { /* fall back to copying */ }
+  const desktop = (globalThis as { ideaflowDesktop?: { openPath?: unknown } }).ideaflowDesktop;
+  if (desktop && typeof desktop.openPath === 'function') {
+    try {
+      const result = await (desktop.openPath as (path: string) => unknown).call(desktop, path);
+      if (result !== false && !(typeof result === 'string' && result)) return;
+    } catch { /* fall back to copying */ }
   }
   try {
     const copied = await Clipboard.setStringAsync(path);
@@ -36,7 +41,7 @@ export function PathChip({ label, path, color, background, onLongPress }: {
 }) {
   // A bare path is its own label and reads best in monospace; a named link keeps the body face.
   const named = label !== path;
-  const chip = <Text accessibilityRole="button" accessibilityLabel={`Copy path: ${path}`}
+  const chip = <Text accessibilityRole="button" accessibilityLabel={`${label} (copy path ${path})`}
     accessibilityHint="Copies the path. It is a location on a computer, not a web link."
     onPress={event => { event?.stopPropagation?.(); void copyLocalPath(path); }} onLongPress={onLongPress}
     style={[{ color, backgroundColor: background, borderRadius: radius.sm, textDecorationLine: 'underline', textDecorationStyle: 'dotted' },

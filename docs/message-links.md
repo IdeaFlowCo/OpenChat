@@ -58,10 +58,13 @@ link labelled with its own address shows the decoded path. A `file:` address nam
 path that would carry a control, invisible or direction-changing character or
 one of `; | & $ \` < >`. A
 line that is nothing but a bare path keeps its spaces; inside a sentence a
-bare path ends at the next space. If a desktop shell provides `window.ideaflowDesktop.revealPath(path)`, the
-path is shown in the file manager instead of copied. It is "reveal", never
-"open": opening a path chosen by whoever wrote the message could run a
-program. No shell provides it today. If the clipboard refuses, the notice
+bare path ends at the next space. If a desktop shell provides `window.ideaflowDesktop.openPath(path)`, it is
+called instead of copying. Its contract: the shell must reveal the item (for
+example in Finder) or ask before launching anything, because the path is
+someone else's text. A thrown error, `false`, or a non-empty string result counts
+as failure and the path is copied. No shell provides it today. A `file:` address
+must be written `file://…`, and its decoded path may not begin with `//` or a backslash pair. The button's
+accessible name is its label followed by "(copy path …)". If the clipboard refuses, the notice
 reads "Couldn't copy. Path: …" so the path can still be read. These rules
 are shared with the Ideaflow Dashboard's description field; a markdown
 destination keeps one level of balanced parentheses.
