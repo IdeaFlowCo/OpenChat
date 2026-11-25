@@ -71,14 +71,18 @@ describe('Stream text parts', () => {
   it.each([
     ['Saved in ~/notes/plan.md, see also (/home/sam/a b.txt) and C:\\Users\\sam\\plan.docx.', ['~/notes/plan.md', '/home/sam/a', 'C:\\Users\\sam\\plan.docx']],
     ['/Volumes/Backup/Workshop Planning/index.html   \nnext line', ['/Volumes/Backup/Workshop Planning/index.html']],
+    ['/tmp/build is where I left it\n~/notes has the rest', ['/tmp/build', '~/notes']],
+    ['Folder:\n/Users/sam/My Notes/\nand then more', ['/Users/sam/My Notes/']],
     ['and/or /shrug 3/4 2026/11/20 either/or/Users/x https://example.org/Users/sam/file a/home/b ~ / ~/', []],
   ])('treats only device file locations as paths: %s', (content, expected) => {
     expect(filePaths(content).map(p => content.slice(p.start, p.end))).toEqual(expected);
     expect(streamTextParts(content).map(p => p.text).join('')).toBe(content);
   });
   it('never turns a file location or an unsafe scheme into a link', () => {
-    const parts = streamTextParts('file:///Users/sam/a.html javascript:alert(1) /Users/sam/site.com/index.html');
+    const content = 'file:///Users/sam/a.html javascript:alert(1) /Users/sam/site.com/index.html';
+    const parts = streamTextParts(content);
     expect(parts.filter(p => p.t === 'link')).toEqual([]);
+    expect(parts.filter(p => p.t === 'path').map(p => p.text)).toEqual(['/Users/sam/site.com/index.html']);
   });
   it('stays linear on a long run of slashes and dots', () => {
     const started = Date.now(); streamTextParts(('/Users/' + 'a/'.repeat(4000) + ' ').repeat(5) + 'x.'.repeat(5000));
@@ -108,6 +112,8 @@ describe('Back channel posts', () => {
     const all = flatten(tree!.toJSON());
     expect(all).toContain('Who can review the speaker list? See the draft or www.example.net/agenda.');
     expect(all).toContain(text);
+    // An agent's post stays selectable, as a person's is.
+    expect(tree!.root.findAll(node => node.type === 'Text' && node.props.selectable === true).length).toBeGreaterThanOrEqual(2);
     await act(async () => { for (const link of links()) { link.props.onPressIn?.(); link.props.onPress({ stopPropagation: vi.fn() }); } });
     expect(os.open.mock.calls.map(call => call[0])).toEqual(['https://docs.example.com/speakers', 'https://www.example.net/agenda', 'https://docs.example.com/speakers', 'https://www.example.net/agenda']);
   });

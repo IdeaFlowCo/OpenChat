@@ -22,10 +22,12 @@ export function filePaths(content: string): Array<{ start: number; end: number }
     if (!/[\s(]/.test(before)) continue;
     const lineEnd = content.indexOf('\n', start);
     const line = content.slice(start, lineEnd < 0 ? content.length : lineEnd);
-    // A path on its own line may contain spaces; inside a sentence it ends at the next space.
-    const ownLine = before === '\n';
-    let text = ownLine ? line.trimEnd() : line.split(/\s/, 1)[0]!;
-    if (!ownLine) text = text.replace(/[.,;:!?)]+$/, '');
+    // A line that is nothing but a path may contain spaces ("/Users/sam/My Notes/plan.html"):
+    // it starts the line and ends in a file name or a slash. Anywhere else, such as
+    // "/tmp/x is where I left it", the path ends at the next space.
+    const wholeLine = before === '\n' && /(?:\.[A-Za-z0-9]{1,8}|[\\/])\s*$/.test(line);
+    let text = wholeLine ? line.trimEnd() : line.split(/\s/, 1)[0]!;
+    if (!wholeLine) text = text.replace(/[.,;:!?)]+$/, '');
     if (text.length > 3) found.push({ start, end: start + text.length });
     PATH_START.lastIndex = start + Math.max(text.length, 1);
   }
