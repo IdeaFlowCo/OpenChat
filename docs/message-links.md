@@ -56,7 +56,8 @@ escape is a literal character of the name (`file:///tmp/100%done.txt`). A file
 link labelled with its own address shows the decoded path. A `file:` address naming another machine
 (`file://server/share/…`) is not a local path and stays as typed, as does any
 path that would carry a control, invisible or direction-changing character or
-one of `; | & $ \` < > "`. A line
+one of `; | & $ \` < > " ! { }`, or that goes on after a space to a flag, an
+assignment or a second path (`[docs](/tmp/x -o /tmp/y)` copies nothing). A line
 that is nothing but a bare path keeps its spaces: one that ends in a separator
 or in an extension on a name with few spaces (`/Users/sam/my notes/plan.html`),
 or that reads like a name rather than a sentence (`/Users/sam/My Projects/Index
@@ -64,8 +65,8 @@ Folder`: no closing punctuation, no lowercase word after a space). A line that g
 flag, an assignment or a second path (`/tmp/a -o /tmp/b`) is a command, so each
 path in it stands alone. Otherwise a bare path ends at the next space. A markdown destination that is a path may
 contain spaces. In an agent's Markdown, paths are read from the raw text before
-emphasis, so `/Users/me/__pycache__/x` copies exactly. If a desktop shell provides `window.ideaflowDesktop.openPath(path)`, it is
-called instead of copying. Its contract: the shell must reveal the item (for
+emphasis, so `/Users/me/__pycache__/x` copies exactly. If a desktop shell provides `window.ideaflowDesktop.revealPath(path)` (or the
+older name `openPath`), it is called instead of copying. Its contract: the shell must reveal the item (for
 example in Finder) or ask before launching anything, because the path is
 someone else's text. A thrown error, `false`, or a non-empty string result counts
 as failure and the path is copied. No shell provides it today. A `file:` address
