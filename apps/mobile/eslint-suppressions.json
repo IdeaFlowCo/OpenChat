@@ -281,7 +281,7 @@
   },
   "src/screens/ChatScreen.tsx": {
     "no-restricted-syntax": {
-      "count": 41
+      "count": 39
     }
   },
   "src/screens/ComposeScreen.tsx": {
