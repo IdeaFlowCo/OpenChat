@@ -35,10 +35,19 @@ const BARE_FILE_URL = /file:\/\/[^\s<>"“”‘’`]+/gi;
 /**
  * Characters a copied path must never carry: control characters, the invisible
  * and direction-changing ones that make a path read as something else, and the
- * shell's command separators and the double quote (a path is meant for a file
- * dialog, but may be pasted into a terminal). Text containing them is left exactly as typed.
+ * characters a shell acts on (a path is meant for a file dialog, but may be
+ * pasted into a terminal). Text containing them is left exactly as typed.
  */
-const UNSAFE_IN_PATH = /[\u0000-\u001f\u007f\u0085\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff;|&$`<>"]/;
+const UNSAFE_IN_PATH = /[\u0000-\u001f\u007f\u0085\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff;|&$`<>"!{}]/;
+
+/**
+ * Text that goes on, after a space, to a flag, an assignment or a second path is a command
+ * ("/tmp/x -o /tmp/y", "/usr/bin/env X=1 /tmp/x.sh"), not one path. "My Notes - Draft" is fine:
+ * the dash must be followed by a character to count as a flag.
+ */
+const LOOKS_LIKE_COMMAND = /\s(?:-\S|[\/~]|[A-Za-z]:\\|\S*=)/;
+/** Whether text may be offered as a path to copy. */
+const copyable = (path: string) => !UNSAFE_IN_PATH.test(path) && !LOOKS_LIKE_COMMAND.test(path);
 
 /** The path a `file:` address names, or null when it is not a usable one. */
 export function fileUrlToPath(url: string): string | null {
@@ -52,7 +61,7 @@ export function fileUrlToPath(url: string): string | null {
   try { path = decodeURIComponent(match[2]!.replace(/%(?![0-9a-f]{2})/gi, '%25')); } catch { return null; }
   const host = match[1] ?? '';
   // Checked after decoding, so %2F cannot smuggle the second slash (or a backslash) in.
-  if (/^[\\/][\\/]/.test(path) || !/[^/]/.test(path) || UNSAFE_IN_PATH.test(path) || UNSAFE_IN_PATH.test(host) || /[\s@:]/.test(host)) return null;
+  if (/^[\\/][\\/]/.test(path) || !/[^/]/.test(path) || !copyable(path) || UNSAFE_IN_PATH.test(host) || /[\s@:]/.test(host)) return null;
   if (/^\/[A-Za-z]:[\\/]/.test(path)) path = path.slice(1);
   // A file on another machine (file://server/share/…) is not a local path; it stays as typed.
   return host && host.toLowerCase() !== 'localhost' ? null : path;
@@ -78,8 +87,7 @@ export function pathEnd(content: string, start: number): number {
   const name = whole.slice(Math.max(whole.lastIndexOf('/'), whole.lastIndexOf('\\')) + 1);
   const looksLikeFile = /[\\/]$/.test(whole) || (/\.[A-Za-z0-9]{1,8}$/.test(whole) && name.split(' ').length <= 4);
   const looksLikeName = !/[.,;:!?]$/.test(whole) && !/\s[a-z]/.test(whole);
-  const looksLikeCommand = /\s(?:-\S|[\/~]|[A-Za-z]:\\|\S*=)/.test(whole);
-  const wholeLine = before === '\n' && !looksLikeCommand && (looksLikeFile || looksLikeName);
+  const wholeLine = before === '\n' && !LOOKS_LIKE_COMMAND.test(whole) && (looksLikeFile || looksLikeName);
   let text = wholeLine ? whole : line.split(/\s/, 1)[0]!;
   if (!wholeLine) text = text.replace(/[.,;:!?)]+$/, '');
   return text.length > 3 && !UNSAFE_IN_PATH.test(text) ? start + text.length : -1;
@@ -100,7 +108,7 @@ export function filePaths(content: string): Array<{ start: number; end: number }
 export function linkDestination(raw: string): { url: string } | { path: string } | null {
   const dest = raw.startsWith('<') && raw.endsWith('>') ? raw.slice(1, -1).trim() : raw.trim();
   if (/^file:/i.test(dest)) { const path = fileUrlToPath(dest); return path ? { path } : null; }
-  if (IS_LOCAL_PATH.test(dest)) return UNSAFE_IN_PATH.test(dest) ? null : { path: dest };
+  if (IS_LOCAL_PATH.test(dest)) return copyable(dest) ? { path: dest } : null;
   const url = safeMessageUrl(dest);
   return url ? { url } : null;
 }

