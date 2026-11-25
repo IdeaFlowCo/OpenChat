@@ -25,6 +25,8 @@ export const ROOTS = String.raw`(?:~\/|\/(?:Users|home|Volumes|private|var|tmp|e
  * Only well-known roots count, so ordinary slashes ("and/or", "/shrug", dates) stay text.
  */
 const PATH_START = new RegExp(`${ROOTS}\\S`, 'g');
+/** The run of non-space characters at a position (sticky, so it never looks further). */
+const TOKEN = /\S*/y;
 const IS_LOCAL_PATH = new RegExp(`^${ROOTS}[^\\n]+$`);
 // Label and destination lengths are bounded and neither may hold a newline, so matching stays linear.
 // A destination may hold one level of balanced parentheses, as in https://example.org/a_(b).
@@ -70,38 +72,47 @@ export function fileUrlToPath(url: string): string | null {
 }
 
 /**
- * Where the path that starts at `start` ends, or -1 when nothing there should be offered as a
- * path. The caller has found a path root at `start`.
+ * Looks at the path root found at `start`. `end` is where the path ends, or -1 when nothing there
+ * should be offered as a path; `examined` is how far the scan read to decide. A caller that is
+ * refused moves on past what was examined, so one long unbroken run of text is read once, not
+ * once for every path root inside it.
  */
-export function pathEnd(content: string, start: number): number {
+export function pathScan(content: string, start: number): { end: number; examined: number } {
   const before = start ? content[start - 1]! : '\n';
-  if (!/[\s(]/.test(before) || hiddenAt(content, start - 1)) return -1;
-  const lineEnd = content.indexOf('\n', start);
-  const line = content.slice(start, lineEnd < 0 ? content.length : lineEnd);
-  // A line that is nothing but a path may contain spaces. It is one when it starts the line and
-  // either looks like a file or folder ("/Users/sam/my notes/plan.html", "/Users/sam/my notes/":
-  // ends in a separator, or in an extension on a name with few spaces), or reads like a name
-  // rather than a sentence ("/Users/sam/My Projects/Index Folder": no closing punctuation and no
-  // lowercase word after a space). A line that goes on to a flag, an assignment or a second path
-  // ("/tmp/a -o /tmp/b", "/usr/bin/env X=1 /tmp/x.sh") is a command, not a path. Anywhere else,
-  // such as "/tmp/x is where I left it", the path ends at the next space.
-  const whole = line.trimEnd();
-  const name = whole.slice(Math.max(whole.lastIndexOf('/'), whole.lastIndexOf('\\')) + 1);
-  const looksLikeFile = /[\\/]$/.test(whole) || (/\.[A-Za-z0-9]{1,8}$/.test(whole) && name.split(' ').length <= 4);
-  const looksLikeName = !/[.,;:!?]$/.test(whole) && !/\s[a-z]/.test(whole);
-  const wholeLine = before === '\n' && !LOOKS_LIKE_COMMAND.test(whole) && (looksLikeFile || looksLikeName);
-  let text = wholeLine ? whole : line.split(/\s/, 1)[0]!;
-  if (!wholeLine) text = text.replace(/[.,;:!?)]+$/, '');
-  return text.length > 3 && !UNSAFE_IN_PATH.test(text) ? start + text.length : -1;
+  if (!/[\s(]/.test(before) || hiddenAt(content, start - 1)) return { end: -1, examined: 1 };
+  // Inside a line only the next word is looked at, so a line holding thousands of paths costs
+  // what its length costs and no more. The whole line is read once, when a path starts it.
+  TOKEN.lastIndex = start;
+  const token = TOKEN.exec(content)![0];
+  let text = token.replace(/[.,;:!?)]+$/, '');
+  if (before === '\n') {
+    const lineEnd = content.indexOf('\n', start);
+    const whole = content.slice(start, lineEnd < 0 ? content.length : lineEnd).trimEnd();
+    // A line that is nothing but a path may contain spaces. It is one when it starts the line and
+    // either looks like a file or folder ("/Users/sam/my notes/plan.html", "/Users/sam/my notes/":
+    // ends in a separator, or in an extension on a name with few spaces), or reads like a name
+    // rather than a sentence ("/Users/sam/My Projects/Index Folder": no closing punctuation and no
+    // lowercase word after a space). A line that goes on to a flag, an assignment or a second path
+    // ("/tmp/a -o /tmp/b", "/usr/bin/env X=1 /tmp/x.sh") is a command, not a path. Anywhere else,
+    // such as "/tmp/x is where I left it", the path ends at the next space.
+    const name = whole.slice(Math.max(whole.lastIndexOf('/'), whole.lastIndexOf('\\')) + 1);
+    const looksLikeFile = /[\\/]$/.test(whole) || (/\.[A-Za-z0-9]{1,8}$/.test(whole) && name.split(' ').length <= 4);
+    const looksLikeName = !/[.,;:!?]$/.test(whole) && !/\s[a-z]/.test(whole);
+    if (!LOOKS_LIKE_COMMAND.test(whole) && (looksLikeFile || looksLikeName)) text = whole;
+  }
+  return text.length > 3 && !UNSAFE_IN_PATH.test(text) ? { end: start + text.length, examined: text.length } : { end: -1, examined: Math.max(token.length, 1) };
 }
+
+/** Where the path that starts at `start` ends, or -1 (see pathScan). */
+export const pathEnd = (content: string, start: number) => pathScan(content, start).end;
 
 export function filePaths(content: string): Array<{ start: number; end: number }> {
   const found: Array<{ start: number; end: number }> = [];
   PATH_START.lastIndex = 0;
   for (let m = PATH_START.exec(content); m; m = PATH_START.exec(content)) {
-    const end = pathEnd(content, m.index);
+    const { end, examined } = pathScan(content, m.index);
     if (end > 0) found.push({ start: m.index, end });
-    PATH_START.lastIndex = end > 0 ? end : m.index + 1;
+    PATH_START.lastIndex = end > 0 ? end : m.index + examined;
   }
   return found;
 }
@@ -119,7 +130,11 @@ type Mark = { start: number; end: number; part?: LinkPart };
 
 export function linkParts(content: string): LinkPart[] {
   const marks: Mark[] = [];
-  const free = (start: number, end: number) => !marks.some(mark => mark.start < end && start < mark.end);
+  // Which characters are already spoken for. Asking costs the length of the span asked about, so
+  // thousands of candidates do not each walk the whole list of earlier ones.
+  const taken = new Uint8Array(content.length);
+  const free = (start: number, end: number) => { for (let i = start; i < end; i++) if (taken[i]) return false; return true; };
+  const claim = (mark: Mark) => { marks.push(mark); taken.fill(1, mark.start, mark.end); };
 
   // 1. [label](destination). A match with an unusable destination is still claimed,
   //    so nothing inside it is promoted by the later passes.
@@ -127,14 +142,14 @@ export function linkParts(content: string): LinkPart[] {
   for (let m = MARKDOWN_LINK.exec(content); m; m = MARKDOWN_LINK.exec(content)) {
     const start = m.index, end = start + m[0].length, source = m[0], label = m[1]!;
     const dest = label.trim() ? linkDestination(m[2]!) : null;
-    marks.push({ start, end, part: !dest ? undefined
+    claim({ start, end, part: !dest ? undefined
       : 'url' in dest ? { t: 'link', source, label, url: dest.url, start }
       // A link labelled with its own address shows the path it copies, like a bare address.
       : { t: 'path', source, label: label.trim() === m[2]!.trim() ? dest.path : label, path: dest.path, start } });
   }
   // 2. Bare web addresses.
   for (const link of messageLinks(content)) {
-    if (free(link.start, link.end)) marks.push({ start: link.start, end: link.end, part: { t: 'link', source: link.text, label: link.text, url: link.url, start: link.start } });
+    if (free(link.start, link.end)) claim({ start: link.start, end: link.end, part: { t: 'link', source: link.text, label: link.text, url: link.url, start: link.start } });
   }
   // 3. Bare file: addresses.
   BARE_FILE_URL.lastIndex = 0;
@@ -143,12 +158,12 @@ export function linkParts(content: string): LinkPart[] {
     if (start && (!/[\s(<]/.test(content[start - 1]!) || hiddenAt(content, start - 1))) continue;
     const source = m[0].replace(/[.,;:!?)'…]+$/, '');
     const path = fileUrlToPath(source);
-    if (path && free(start, start + source.length)) marks.push({ start, end: start + source.length, part: { t: 'path', source, label: path, path, start } });
+    if (path && free(start, start + source.length)) claim({ start, end: start + source.length, part: { t: 'path', source, label: path, path, start } });
   }
   // 4. Bare paths.
   for (const span of filePaths(content)) {
     const source = content.slice(span.start, span.end);
-    if (free(span.start, span.end)) marks.push({ ...span, part: { t: 'path', source, label: source, path: source, start: span.start } });
+    if (free(span.start, span.end)) claim({ ...span, part: { t: 'path', source, label: source, path: source, start: span.start } });
   }
 
   marks.sort((a, b) => a.start - b.start);

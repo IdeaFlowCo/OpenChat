@@ -8,7 +8,7 @@
  * plain text. Only http(s) links without credentials become tappable.
  */
 import { BARE_DOMAIN, hiddenAt, isBareDomain, safeMessageUrl } from './messageLinks';
-import { ROOTS, fileUrlToPath, linkDestination, pathEnd } from './richLinks';
+import { ROOTS, fileUrlToPath, linkDestination, pathScan } from './richLinks';
 
 export type Inline =
   | { t: 'text'; v: string }
@@ -86,7 +86,9 @@ export function parseInline(text: string): Inline[] {
       pushText((m[6] ?? m[8]) ?? '');
       out.push({ t: 'italic', c: parseInline((m[7] ?? m[9])!) });
     } else if (m[11] !== undefined) {
-      const end = pathEnd(text, m.index);
+      const { end } = pathScan(text, m.index);
+      // Refused: only the matched root is passed over, so a code span, link or emphasis that
+      // follows it directly is still read. (Text here is at most MAX_INLINE_LENGTH long.)
       if (end < 0) { pushText(m[0]); continue; }
       const path = text.slice(m.index, end);
       out.push({ t: 'path', label: path, path });
