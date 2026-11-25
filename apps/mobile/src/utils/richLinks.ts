@@ -12,7 +12,7 @@
  *
  * No character is lost: joining every part's `source` gives the input back.
  */
-import { messageLinks, safeMessageUrl } from './messageLinks';
+import { INVISIBLE, hiddenAt, messageLinks, safeMessageUrl } from './messageLinks';
 
 export type LinkPart =
   | { t: 'text'; source: string }
@@ -38,7 +38,8 @@ const BARE_FILE_URL = /file:\/\/[^\s<>"“”‘’`]+/gi;
  * characters a shell acts on (a path is meant for a file dialog, but may be
  * pasted into a terminal). Text containing them is left exactly as typed.
  */
-const UNSAFE_IN_PATH = /[\u0000-\u001f\u007f\u0085\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff;|&$`<>"!{}]/;
+const SHELL_ACTIVE = /[;|&$`<>"!{}]/;
+const UNSAFE_IN_PATH = { test: (text: string) => INVISIBLE.test(text) || SHELL_ACTIVE.test(text) };
 
 /**
  * Text that goes on, after a space, to a flag, an assignment or a second path is a command
@@ -73,7 +74,7 @@ export function fileUrlToPath(url: string): string | null {
  */
 export function pathEnd(content: string, start: number): number {
   const before = start ? content[start - 1]! : '\n';
-  if (!/[\s(]/.test(before)) return -1;
+  if (!/[\s(]/.test(before) || hiddenAt(content, start - 1)) return -1;
   const lineEnd = content.indexOf('\n', start);
   const line = content.slice(start, lineEnd < 0 ? content.length : lineEnd);
   // A line that is nothing but a path may contain spaces. It is one when it starts the line and
@@ -138,7 +139,7 @@ export function linkParts(content: string): LinkPart[] {
   BARE_FILE_URL.lastIndex = 0;
   for (let m = BARE_FILE_URL.exec(content); m; m = BARE_FILE_URL.exec(content)) {
     const start = m.index;
-    if (start && !/[\s(<]/.test(content[start - 1]!)) continue;
+    if (start && (!/[\s(<]/.test(content[start - 1]!) || hiddenAt(content, start - 1))) continue;
     const source = m[0].replace(/[.,;:!?)'…]+$/, '');
     const path = fileUrlToPath(source);
     if (path && free(start, start + source.length)) marks.push({ start, end: start + source.length, part: { t: 'path', source, label: path, path, start } });

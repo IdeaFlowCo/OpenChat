@@ -7,7 +7,7 @@
  * URLs (including bare domains such as unlinked.ai). Anything else stays
  * plain text. Only http(s) links without credentials become tappable.
  */
-import { BARE_DOMAIN, isBareDomain } from './messageLinks';
+import { BARE_DOMAIN, hiddenAt, isBareDomain, safeMessageUrl } from './messageLinks';
 import { ROOTS, fileUrlToPath, linkDestination, pathEnd } from './richLinks';
 
 export type Inline =
@@ -29,6 +29,8 @@ export type Block =
 /** A tappable destination, or null. Adds https:// to www. links and bare domains. */
 export function safeHref(raw: string): string | null {
   const candidate = /^www\./i.test(raw) || isBareDomain(raw) ? `https://${raw}` : raw;
+  // Judged as written, before the URL parser can normalise a hidden character into another host.
+  if (!safeMessageUrl(candidate)) return null;
   try {
     const url = new URL(candidate);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
@@ -92,6 +94,8 @@ export function parseInline(text: string): Inline[] {
     } else if (m[10] !== undefined) {
       // A domain inside an email address or a longer word stays text.
       if (!/^(https?:|www\.)/i.test(m[10]) && m.index && /[\w@.-]/.test(text[m.index - 1]!)) { pushText(m[0]); continue; }
+      // Nothing is offered right beside a hidden character (see hiddenAt).
+      if (hiddenAt(text, m.index - 1) || hiddenAt(text, m.index + m[0].length)) { pushText(m[0]); continue; }
       // Sentence punctuation after a URL stays outside the link.
       const [raw, trail] = splitTrailing(m[10]);
       if (/^file:/i.test(raw)) {
