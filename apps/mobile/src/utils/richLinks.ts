@@ -52,15 +52,16 @@ const copyable = (path: string) => !UNSAFE_IN_PATH.test(path) && !LOOKS_LIKE_COM
 
 /** The path a `file:` address names, or null when it is not a usable one. */
 export function fileUrlToPath(url: string): string | null {
-  const match = /^file:(?:\/\/([^/]*))?(\/.*)$/i.exec(url.trim());
+  // It must be written file://…, and its path may not begin with a second pair of slashes:
+  // file:/tmp/a is not an address anyone meant, and file:////server/share names another machine.
+  const match = /^file:\/\/([^/]*)(\/.*)$/i.exec(url.trim());
   if (!match) return null;
   let path: string;
-  // An address that does not decode (a stray %, or escapes that are not text) stays as typed.
-  try { path = decodeURIComponent(match[2]!); } catch { return null; }
+  // A '%' that does not start a %XX escape is a literal character of the file name
+  // ("100% done.txt"); escapes that do not decode as text still leave the address as typed.
+  try { path = decodeURIComponent(match[2]!.replace(/%(?![0-9a-f]{2})/gi, '%25')); } catch { return null; }
   const host = match[1] ?? '';
-  // A path may never begin with two separators: that names another machine (file:////server/share),
-  // and pasting it can make the reader's computer sign in to a server the author chose. Checked
-  // after decoding, so %2F cannot smuggle the second slash (or a backslash) in.
+  // Checked after decoding, so %2F cannot smuggle the second slash (or a backslash) in.
   if (/^[\\/][\\/]/.test(path) || !/[^/]/.test(path) || !copyable(path) || UNSAFE_IN_PATH.test(host) || /[\s@:]/.test(host)) return null;
   if (/^\/[A-Za-z]:[\\/]/.test(path)) path = path.slice(1);
   // A file on another machine (file://server/share/…) is not a local path; it stays as typed.
@@ -127,7 +128,8 @@ export function linkParts(content: string): LinkPart[] {
     const dest = label.trim() ? linkDestination(m[2]!) : null;
     marks.push({ start, end, part: !dest ? undefined
       : 'url' in dest ? { t: 'link', source, label, url: dest.url, start }
-      : { t: 'path', source, label, path: dest.path, start } });
+      // A link labelled with its own address shows the path it copies, like a bare address.
+      : { t: 'path', source, label: label.trim() === m[2]!.trim() ? dest.path : label, path: dest.path, start } });
   }
   // 2. Bare web addresses.
   for (const link of messageLinks(content)) {
@@ -137,7 +139,7 @@ export function linkParts(content: string): LinkPart[] {
   BARE_FILE_URL.lastIndex = 0;
   for (let m = BARE_FILE_URL.exec(content); m; m = BARE_FILE_URL.exec(content)) {
     const start = m.index;
-    if (start && (!/[\s(]/.test(content[start - 1]!) || hiddenAt(content, start - 1))) continue;
+    if (start && (!/[\s(<]/.test(content[start - 1]!) || hiddenAt(content, start - 1))) continue;
     const source = m[0].replace(/[.,;:!?)'…]+$/, '');
     const path = fileUrlToPath(source);
     if (path && free(start, start + source.length)) marks.push({ start, end: start + source.length, part: { t: 'path', source, label: path, path, start } });

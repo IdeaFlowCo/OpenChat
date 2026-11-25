@@ -16,14 +16,16 @@ export const PATH_COPIED = 'Path copied: paste in Finder (⇧⌘G)';
 export const pathNotCopied = (path: string) => `Couldn't copy. Path: ${path}`;
 
 /**
- * A desktop shell may offer `window.ideaflowDesktop.revealPath(path)`. Its contract, shared with
- * the Ideaflow Dashboard: the shell reveals the item (for example in Finder) and never launches
- * it, because the path is someone else's text. A thrown error, `false`, or a non-empty string
- * result means it did not work, and the path is copied instead. No shell provides it today.
+ * A desktop shell may offer `window.ideaflowDesktop.revealPath(path)` (`openPath` is accepted as
+ * an older name for the same thing). Its contract, shared with the Ideaflow Dashboard: the shell
+ * must reveal the item (for example in Finder) or ask before launching anything, because the
+ * path is someone else's text. A thrown error, `false`, or a non-empty string result (how
+ * Electron's shell.openPath reports failure) means it did not work, and the path is copied
+ * instead. No shell provides the hook today.
  */
 export async function copyLocalPath(path: string): Promise<void> {
-  const desktop = (globalThis as { ideaflowDesktop?: { revealPath?: unknown } }).ideaflowDesktop;
-  const hook = desktop && typeof desktop.revealPath === 'function' ? desktop.revealPath : null;
+  const desktop = (globalThis as { ideaflowDesktop?: { revealPath?: unknown; openPath?: unknown } }).ideaflowDesktop;
+  const hook = desktop && (typeof desktop.revealPath === 'function' ? desktop.revealPath : typeof desktop.openPath === 'function' ? desktop.openPath : null);
   if (desktop && hook) {
     try {
       const result = await (hook as (path: string) => unknown).call(desktop, path);

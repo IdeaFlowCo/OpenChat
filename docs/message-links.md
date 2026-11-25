@@ -51,8 +51,9 @@ path is never an anchor. It is a button: pressing it copies the path and shows
 "Path copied: paste in Finder (⇧⌘G)". The full path is the tooltip on web and
 the screen-reader label everywhere. `file:///Users/a/My%20Notes/x.html` and
 `file://localhost/…` decode to `/Users/a/My Notes/x.html`;
-`file:///C:/Users/a/x` to `C:/Users/a/x`. An address that
-does not decode (a stray `%`) stays as typed. A `file:` address naming another machine
+`file:///C:/Users/a/x` to `C:/Users/a/x`. A `%` that does not start a `%XX`
+escape is a literal character of the name (`file:///tmp/100%done.txt`). A file
+link labelled with its own address shows the decoded path. A `file:` address naming another machine
 (`file://server/share/…`) is not a local path and stays as typed, as does any
 path that would carry a control, invisible or direction-changing character or
 one of `; | & $ \` < > " ! { }`, or that goes on after a space to a dash, an
@@ -65,14 +66,12 @@ Folder`: no closing punctuation, no lowercase word after a space). A line that g
 flag, an assignment or a second path (`/tmp/a -o /tmp/b`) is a command, so each
 path in it stands alone. Otherwise a bare path ends at the next space. A markdown destination that is a path may
 contain spaces. In an agent's Markdown, paths are read from the raw text before
-emphasis, so `/Users/me/__pycache__/x` copies exactly. If a desktop shell provides `window.ideaflowDesktop.revealPath(path)`, it is
-called instead of copying. Its contract: the shell must reveal the item (for
+emphasis, so `/Users/me/__pycache__/x` copies exactly. If a desktop shell provides `window.ideaflowDesktop.revealPath(path)` (or the
+older name `openPath`), it is called instead of copying. Its contract: the shell must reveal the item (for
 example in Finder) or ask before launching anything, because the path is
 someone else's text. A thrown error, `false`, or a non-empty string result counts
-as failure and the path is copied. No shell provides it today. A path may
-never begin with two separators, checked after decoding: that names another
-machine, and pasting it can make the reader's computer sign in to a server the
-author chose. The button's
+as failure and the path is copied. No shell provides it today. A `file:` address
+must be written `file://…`, and its decoded path may not begin with `//` or a backslash pair. The button's
 accessible name is its label followed by "(copy path …)". If the clipboard refuses, the notice
 reads "Couldn't copy. Path: …" so the path can still be read. These rules
 are shared with the Ideaflow Dashboard's description field; a markdown

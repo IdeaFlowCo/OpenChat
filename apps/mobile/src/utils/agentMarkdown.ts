@@ -79,7 +79,7 @@ export function parseInline(text: string): Inline[] {
       const dest = linkDestination(m[3]!);
       const href = dest && 'url' in dest ? safeHref(dest.url) : null;
       if (href) out.push({ t: 'link', c: parseInline(m[2]), href });
-      else if (dest && 'path' in dest && m[2].trim()) out.push({ t: 'path', label: m[2], path: dest.path });
+      else if (dest && 'path' in dest && m[2].trim()) out.push({ t: 'path', label: m[2].trim() === m[3]!.trim() ? dest.path : m[2], path: dest.path });
       else pushText(m[0]);
     } else if (m[4] !== undefined || m[5] !== undefined) out.push({ t: 'bold', c: parseInline((m[4] ?? m[5])!) });
     else if (m[7] !== undefined || m[9] !== undefined) {
