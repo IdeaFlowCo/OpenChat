@@ -237,7 +237,7 @@ export interface RenderRow {
   isFirstInRun?: boolean;
 }
 
-function buildRows(messages: Message[], myId: string | undefined, isGroup: boolean): RenderRow[] {
+export function buildRows(messages: Message[], myId: string | undefined, isGroup: boolean): RenderRow[] {
   const out: RenderRow[] = [];
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
@@ -275,7 +275,7 @@ function buildRows(messages: Message[], myId: string | undefined, isGroup: boole
   return out;
 }
 
-const ROW_FIELDS = ['type', 'label', 'message', 'isOwn', 'showSender', 'isLastInRun'] as const;
+const ROW_FIELDS = ['type', 'label', 'message', 'isOwn', 'showSender', 'isLastInRun', 'isFirstInRun'] as const;
 
 /** Returns `next`, with each row that is field-for-field unchanged replaced by its previous object. */
 export function reuseUnchangedRows(previous: ReadonlyMap<string, RenderRow>, next: RenderRow[]): RenderRow[] {
@@ -1970,13 +1970,10 @@ export function ChatScreen({
               ))
           }
           <View style={styles.bubbleFooter}>
-            {/* Every message keeps its visible "Actions" word (OpenChat-ps5s). The 44pt reach
-                comes from hitSlop, so the word no longer makes each bubble a line taller. */}
             <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Message actions: ${m.deletedAt ? 'Deleted message' : (m.content?.slice(0, 80) || 'Attachment')}`}
               onPress={() => handleLongPress(m, isOwn, getUserDisplayName(m.sender))}
-              hitSlop={{ top: 14, bottom: 14, left: 12, right: 8 }}
-              style={styles.bubbleActions}>
-              <Text style={{ color: emojiOnly ? c.textMetadata : isOwn ? ownTint(0.7) : c.textMetadata, ...type.caption }}>Actions</Text>
+              style={{ minHeight: 44, minWidth: 44, justifyContent: 'center', marginRight: 8 }}>
+              <Text style={{ color: emojiOnly ? c.textMetadata : isOwn ? c.bubbleOwnText : c.bubbleOtherText, ...type.meta }}>Actions</Text>
             </TouchableOpacity>
             <Text style={{ color: emojiOnly ? c.textMetadata : isOwn ? ownTint(0.7) : c.textMetadata, fontSize: 10, flexShrink: 1 }}>
               {failed
@@ -2739,7 +2736,6 @@ const styles = StyleSheet.create({
   sender: { fontSize: 12, marginBottom: 2, fontWeight: '500' },
   forwardedLabel: { fontSize: 11, fontStyle: 'italic', marginBottom: 3 },
   bubbleFooter: { marginTop: 4, flexDirection: 'row', alignItems: 'center' },
-  bubbleActions: { minHeight: 16, justifyContent: 'center', marginRight: 8 },
   dayWrap: {
     flexDirection: 'row',
     alignItems: 'center',
