@@ -51,7 +51,9 @@ path is never an anchor. It is a button: pressing it copies the path and shows
 "Path copied: paste in Finder (⇧⌘G)". The full path is the tooltip on web and
 the screen-reader label everywhere. `file:///Users/a/My%20Notes/x.html` and
 `file://localhost/…` decode to `/Users/a/My Notes/x.html`;
-`file:///C:/Users/a/x` to `C:/Users/a/x`. A `file:` address naming another machine
+`file:///C:/Users/a/x` to `C:/Users/a/x`. A `%` that does not start a `%XX`
+escape is a literal character of the name (`file:///tmp/100%done.txt`). A file
+link labelled with its own address shows the decoded path. A `file:` address naming another machine
 (`file://server/share/…`) is not a local path and stays as typed, as does any
 path that would carry a control, invisible or direction-changing character or
 one of `; | & $ \` < >`. A
