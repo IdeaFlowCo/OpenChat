@@ -40,8 +40,10 @@ const UNSAFE_IN_PATH = /[\u0000-\u001f\u007f\u0085\u200b-\u200f\u2028\u2029\u202
 
 /** The path a `file:` address names, or null when it is not a usable one. */
 export function fileUrlToPath(url: string): string | null {
-  const match = /^file:(?:\/\/([^/]*))?(\/.*)$/i.exec(url.trim());
-  if (!match) return null;
+  // It must be written file://…, and its path may not begin with a second pair of slashes:
+  // file:/tmp/a is not an address anyone meant, and file:////server/share names another machine.
+  const match = /^file:\/\/([^/]*)(\/.*)$/i.exec(url.trim());
+  if (!match || match[2]!.startsWith('//')) return null;
   let path: string;
   // A '%' that does not start a %XX escape is a literal character of the file name
   // ("100% done.txt"); escapes that do not decode as text still leave the address as typed.
