@@ -86,9 +86,10 @@ export function parseInline(text: string): Inline[] {
       pushText((m[6] ?? m[8]) ?? '');
       out.push({ t: 'italic', c: parseInline((m[7] ?? m[9])!) });
     } else if (m[11] !== undefined) {
-      const { end, examined } = pathScan(text, m.index);
-      // Refused: move on past what was examined, as the plain-text scan does.
-      if (end < 0) { const skip = Math.max(examined, m[0].length); pushText(text.slice(m.index, m.index + skip)); last = m.index + skip; INLINE.lastIndex = last; continue; }
+      const { end } = pathScan(text, m.index);
+      // Refused: only the matched root is passed over, so a code span, link or emphasis that
+      // follows it directly is still read. (Text here is at most MAX_INLINE_LENGTH long.)
+      if (end < 0) { pushText(m[0]); continue; }
       const path = text.slice(m.index, end);
       out.push({ t: 'path', label: path, path });
       last = end; INLINE.lastIndex = end;

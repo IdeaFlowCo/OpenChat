@@ -186,7 +186,9 @@ describe('link rules', () => {
     expect(linkParts('(/tmp/a;(/tmp/b').filter(part => part.t === 'path')).toEqual([]);
     // With a space between them each stands alone (a trailing ; is sentence punctuation and is trimmed).
     expect(linkParts('(/tmp/a; (/tmp/b)').flatMap(part => part.t === 'path' ? [part.path] : [])).toEqual(['/tmp/a', '/tmp/b']);
-    expect(parseInline('(/tmp/a;(/tmp/b and /tmp/c')).toEqual([{ t: 'text', v: '(/tmp/a;(/tmp/b and ' }, { t: 'path', label: '/tmp/c', path: '/tmp/c' }]);
+    // In an agent's Markdown a refused path does not swallow the markup that follows it.
+    expect(parseInline('see /tmp/a;`code` and /tmp/a;**bold** and /tmp/a;[l](https://e.example.org)').filter(node => node.t !== 'text').map(node => node.t)).toEqual(['code', 'bold', 'link']);
+    expect(parseInline('see /tmp/a;https://e.example.org/x').some(node => node.t === 'link')).toBe(true);
   });
   it('loses no character and stays quick on hostile input', () => {
     for (const content of ['[a](b) [c](d) [e](https://e.example.com)', '[[[[', ']('.repeat(50), '[x](file:///Users/s/a) /Users/s/b ~/c https://d.example.com file:///e']) {
