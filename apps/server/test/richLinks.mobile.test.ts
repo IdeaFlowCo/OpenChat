@@ -165,6 +165,29 @@ describe('link rules', () => {
   it('still links ordinary addresses, including encoded and non-Latin ones', () => {
     for (const url of ['https://example.org/a?b=c#d', 'https://例え.jp/パス', 'https://example.org/%E2%80%8B', 'https://example.org/~sam/x_(y)']) expect(safeMessageUrl(url)).toBe(url);
   });
+  it('reads a long run of paths once: time grows with length, not with length squared', () => {
+    const shapes: Array<[string, (n: number) => string]> = [
+      ['refused paths with no space between them', n => '(/tmp/a;'.repeat(n)],
+      ['paths then a web address in one unbroken run', n => '(/tmp/a'.repeat(n) + '(https://x.example.com'],
+      ['refused file: addresses', n => '(file:///a;'.repeat(n)],
+      ['thousands of paths on one line', n => '/tmp/a '.repeat(n)],
+      ['thousands of bracketed paths on one line', n => '(/tmp/a '.repeat(n)],
+      ['a path on every line', n => '/tmp/a\n'.repeat(n)],
+    ];
+    for (const [, make] of shapes) {
+      const content = make(10000);
+      const started = Date.now();
+      expect(linkParts(content).map(part => part.source).join('')).toBe(content);
+      // Each took 0.8 to 1.7 seconds before; a few milliseconds now.
+      expect(Date.now() - started).toBeLessThan(400);
+    }
+    expect(linkParts('/tmp/a '.repeat(3)).filter(part => part.t === 'path').map(part => part.source)).toEqual(['/tmp/a', '/tmp/a', '/tmp/a']);
+    // A refused run of text is passed over whole: nothing inside it is offered.
+    expect(linkParts('(/tmp/a;(/tmp/b').filter(part => part.t === 'path')).toEqual([]);
+    // With a space between them each stands alone (a trailing ; is sentence punctuation and is trimmed).
+    expect(linkParts('(/tmp/a; (/tmp/b)').flatMap(part => part.t === 'path' ? [part.path] : [])).toEqual(['/tmp/a', '/tmp/b']);
+    expect(parseInline('(/tmp/a;(/tmp/b and /tmp/c')).toEqual([{ t: 'text', v: '(/tmp/a;(/tmp/b and ' }, { t: 'path', label: '/tmp/c', path: '/tmp/c' }]);
+  });
   it('loses no character and stays quick on hostile input', () => {
     for (const content of ['[a](b) [c](d) [e](https://e.example.com)', '[[[[', ']('.repeat(50), '[x](file:///Users/s/a) /Users/s/b ~/c https://d.example.com file:///e']) {
       expect(linkParts(content).map(part => part.source).join('')).toBe(content);

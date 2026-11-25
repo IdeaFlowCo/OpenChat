@@ -8,7 +8,7 @@
  * plain text. Only http(s) links without credentials become tappable.
  */
 import { BARE_DOMAIN, hiddenAt, isBareDomain, safeMessageUrl } from './messageLinks';
-import { ROOTS, fileUrlToPath, linkDestination, pathEnd } from './richLinks';
+import { ROOTS, fileUrlToPath, linkDestination, pathScan } from './richLinks';
 
 export type Inline =
   | { t: 'text'; v: string }
@@ -86,8 +86,9 @@ export function parseInline(text: string): Inline[] {
       pushText((m[6] ?? m[8]) ?? '');
       out.push({ t: 'italic', c: parseInline((m[7] ?? m[9])!) });
     } else if (m[11] !== undefined) {
-      const end = pathEnd(text, m.index);
-      if (end < 0) { pushText(m[0]); continue; }
+      const { end, examined } = pathScan(text, m.index);
+      // Refused: move on past what was examined, as the plain-text scan does.
+      if (end < 0) { const skip = Math.max(examined, m[0].length); pushText(text.slice(m.index, m.index + skip)); last = m.index + skip; INLINE.lastIndex = last; continue; }
       const path = text.slice(m.index, end);
       out.push({ t: 'path', label: path, path });
       last = end; INLINE.lastIndex = end;
