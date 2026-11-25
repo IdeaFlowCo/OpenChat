@@ -104,7 +104,8 @@ describe('Back channel posts', () => {
     await act(async () => { path.props.onPress({ stopPropagation: vi.fn() }); });
     expect(os.copy).toHaveBeenCalledWith(PATH); expect(os.open).not.toHaveBeenCalled();
     expect(os.notice).toHaveBeenCalledWith('Path copied: paste in Finder (⇧⌘G)');
-    expect(flatten(tree!.toJSON()).replace('📁\u00a0', '')).toContain(NOTE);
+    // Paragraphs are separate blocks now; every character of the note is still there.
+    expect(flatten(tree!.toJSON()).replace('📁\u00a0', '')).toContain(NOTE.replace(/\n\n/g, ''));
   });
   it('holding a link opens the post actions instead of the address', async () => {
     await lane([post('p1', 'See https://example.org/a')]);

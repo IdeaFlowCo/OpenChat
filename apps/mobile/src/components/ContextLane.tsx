@@ -15,6 +15,7 @@ import { getSocket } from '../api/socket';
 import { type, radius, space } from '../theme/tokens';
 import { ContextIntentionControls } from './ContextIntentionControls';
 import { StreamText } from './StreamText';
+import { sharedScopeLabel } from '../utils/streamScope';
 import { StreamCardHeader } from './StreamCardHeader';
 import { AppIcon } from './AppIcon';
 import { Chip } from './ui';
@@ -43,7 +44,10 @@ export function ContextLane({ conversationId }: { conversationId: string }) {
 function ConversationContentSession({ conversationId, accountId }: { conversationId: string; accountId: string }) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
-  const { currentUser } = useChat();
+  const { currentUser, conversations } = useChat();
+  // The scope label names who the chat is with, from its membership; "this chat" when that is unknown.
+  const sharedScope = sharedScopeLabel(conversations?.find(conversation => conversation.id === conversationId), currentUser?.userId);
+  const [quoteOpen, setQuoteOpen] = useState<string>();
   const feed = useConversationContent(accountId, conversationId);
   const search = feed.search;
   const state = { posts: feed.items.flatMap(item => item.origin === 'context' ? [item.context] : []), isLoading: feed.loading, isError: !!feed.error, hasMore: feed.hasMore };
@@ -89,15 +93,18 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
     const parent = item.replyTo || state.posts.find(p => p.id === item.replyToId);
     return <Pressable accessible={false} focusable={false} onHoverIn={() => setActionsFor(item.id)} onLongPress={() => setActionsFor(item.id)} style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, marginLeft: reply ? 16 : 0 }]}>
       <StreamCardHeader name={item.author?.name || (own ? 'You' : 'Chat participant')} avatarUrl={item.author?.avatarUrl} agentName={item.agent?.name}
-        createdAt={item.createdAt} edited={item.revision > 1} audience="shared" kind={item.kind === 'ask' ? 'Ask' : item.kind === 'offer' ? 'Offer' : 'Note'}
+        createdAt={item.createdAt} edited={item.revision > 1} audience="shared" sharedScope={sharedScope} kind={item.kind === 'ask' ? 'Ask' : item.kind === 'offer' ? 'Offer' : 'Note'}
         onShowExactTime={text => setFeedback({ text, error: false })}
         trailing={item.isDeleted ? null : <TouchableOpacity accessibilityRole="button" accessibilityLabel={actionsFor === item.id ? 'Hide actions' : 'More'} accessibilityState={{ expanded: actionsFor === item.id }} disabled={!!busy} hitSlop={14}
           onPress={() => setActionsFor(actionsFor === item.id ? undefined : item.id)}><Text style={[type.label, { color: c.primary }]}>{actionsFor === item.id ? 'Hide actions' : 'More'}</Text></TouchableOpacity>} />
-      {item.replyToId && <View style={[styles.quote, { borderLeftColor: c.border }]}><Text numberOfLines={2} style={{ color: c.textMetadata, ...type.label }}>{parent?.isDeleted ? 'Reply to a deleted post' : parent ? `Reply to ${parent.author?.name || 'a participant'}: ${parent.text}` : 'Reply to an earlier post'}</Text></View>}
-      {item.isDeleted ? <Text style={{ color: c.textMetadata, ...type.body, marginTop: 8 }}>Post deleted</Text>
+      {item.replyToId && <Pressable accessibilityRole="button" accessibilityLabel={quoteOpen === item.id ? 'Collapse quoted post' : 'Expand quoted post'} accessibilityState={{ expanded: quoteOpen === item.id }}
+        onPress={() => setQuoteOpen(quoteOpen === item.id ? undefined : item.id)} style={[styles.quote, { borderLeftColor: c.border }]}>
+        <Text numberOfLines={quoteOpen === item.id ? undefined : 1} style={{ color: c.textMetadata, ...type.label }}>{parent?.isDeleted ? 'Reply to a deleted post' : parent ? `Reply to ${parent.author?.name || 'a participant'}: ${parent.text}` : 'Reply to an earlier post'}</Text>
+      </Pressable>}
+      {item.isDeleted ? <Text style={{ color: c.textMetadata, ...type.body, marginTop: 6 }}>Post deleted</Text>
         // An agent's post is Markdown, as in chat; a person's post keeps its exact characters. Links open in both.
-        : item.agent ? <View style={{ marginTop: 8 }}><AgentMarkdown content={item.text} color={c.textPrimary} linkColor={c.primary} codeBackground={c.surfaceElevated} selectable onLongPress={() => setActionsFor(item.id)} /></View>
-        : <StreamText content={item.text} color={c.textPrimary} linkColor={c.primary} pathBackground={c.surfaceElevated} style={{ marginTop: 8 }} onLongPress={() => setActionsFor(item.id)} />}
+        : item.agent ? <View style={{ marginTop: 6 }}><AgentMarkdown content={item.text} color={c.textPrimary} linkColor={c.primary} codeBackground={c.surfaceElevated} selectable onLongPress={() => setActionsFor(item.id)} /></View>
+        : <StreamText content={item.text} color={c.textPrimary} linkColor={c.primary} pathBackground={c.surfaceElevated} style={{ marginTop: 6 }} onLongPress={() => setActionsFor(item.id)} />}
       {!item.isDeleted && actionsFor === item.id && <View style={styles.actions}>
         {button('Reply', () => { setReplyTo(item); setEditing(undefined); })}
         {own && button('Edit', () => { setEditing(item); setReplyTo(undefined); })}
@@ -134,7 +141,7 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
     {creatingPrivate && <ConversationEntryEditor conversationId={conversationId} onCancel={() => setCreatingPrivate(false)} onDone={() => { setCreatingPrivate(false); void load(); }} />}
     {feedback && <Text accessibilityRole={feedback.error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={{ color: feedback.error ? c.danger : c.textMetadata, padding: 12 }}>{feedback.text}</Text>}
     {state.isError && <View style={{ paddingHorizontal: 16 }}><Text accessibilityRole="alert" style={{ color: c.danger }}>{feed.error} {feed.items.length ? 'Showing previously loaded content.' : ''}</Text>{button('Retry', () => void load())}</View>}
-    <FlatList data={feed.items} keyExtractor={item => item.id} renderItem={({ item }) => item.origin === 'context' ? renderItem({ item: { post: item.context, reply: !!item.context.replyToId } }) : <ContextStreamEntry item={item} conversationId={conversationId} onChange={() => void load()} onTagPress={tag => feed.chooseSearch(tag.replace(/^#/, ''))} />}
+    <FlatList data={feed.items} keyExtractor={item => item.id} renderItem={({ item }) => item.origin === 'context' ? renderItem({ item: { post: item.context, reply: !!item.context.replyToId } }) : <ContextStreamEntry item={item} conversationId={conversationId} sharedScope={sharedScope} onChange={() => void load()} onTagPress={tag => feed.chooseSearch(tag.replace(/^#/, ''))} />}
       contentContainerStyle={{ padding: 12, paddingBottom: 24 }}
       refreshing={state.isLoading} onRefresh={() => void load()}
       onEndReached={() => { if (!state.isError) void load(true); }} onEndReachedThreshold={0.5}
@@ -149,8 +156,8 @@ const styles = StyleSheet.create({
   search: { flexDirection: 'row', alignItems: 'center', gap: space[2], minHeight: 40, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: space[3] },
   searchInput: { flex: 1, minWidth: 0, minHeight: 40, paddingVertical: 0 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
-  card: { padding: space[3], borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, marginBottom: 10 },
-  quote: { borderLeftWidth: 2, paddingLeft: 10, marginTop: 10 },
+  card: { paddingHorizontal: space[3], paddingVertical: space[2] + 2, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, marginBottom: 8 },
+  quote: { borderLeftWidth: 2, paddingLeft: 8, marginTop: 6 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   action: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
 });
