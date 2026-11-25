@@ -100,7 +100,10 @@ export function pathScan(content: string, start: number): { end: number; examine
     const looksLikeName = !/[.,;:!?]$/.test(whole) && !/\s[a-z]/.test(whole);
     if (!LOOKS_LIKE_COMMAND.test(whole) && (looksLikeFile || looksLikeName)) text = whole;
   }
-  return text.length > 3 && !UNSAFE_IN_PATH.test(text) ? { end: start + text.length, examined: text.length } : { end: -1, examined: Math.max(token.length, 1) };
+  // A path that stops at a hidden character is not offered: the reader sees "…/ab.txt" while the
+  // button would copy "…/a".
+  const cutShort = hiddenAt(content, start + token.length) || hiddenAt(content, start + text.length);
+  return text.length > 3 && !cutShort && !UNSAFE_IN_PATH.test(text) ? { end: start + text.length, examined: text.length } : { end: -1, examined: Math.max(token.length, 1) };
 }
 
 /** Where the path that starts at `start` ends, or -1 (see pathScan). */
@@ -156,6 +159,7 @@ export function linkParts(content: string): LinkPart[] {
   for (let m = BARE_FILE_URL.exec(content); m; m = BARE_FILE_URL.exec(content)) {
     const start = m.index;
     if (start && (!/[\s(<]/.test(content[start - 1]!) || hiddenAt(content, start - 1))) continue;
+    if (hiddenAt(content, start + m[0].length)) continue;
     const source = m[0].replace(/[.,;:!?)'…]+$/, '');
     const path = fileUrlToPath(source);
     if (path && free(start, start + source.length)) claim({ start, end: start + source.length, part: { t: 'path', source, label: path, path, start } });

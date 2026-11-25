@@ -146,6 +146,7 @@ describe('link rules', () => {
     expect(Date.now() - started).toBeLessThan(1000);
   });
   it.each([
+    ['line separator', '\u2028'], ['paragraph separator', '\u2029'],
     ['soft hyphen', '\u00ad'], ['combining grapheme joiner', '\u034f'], ['Arabic letter mark', '\u061c'], ['zero-width space', '\u200b'],
     ['right-to-left override', '\u202e'], ['word joiner', '\u2060'], ['invisible times', '\u2062'], ['invisible plus', '\u2064'],
     ['variation selector', '\ufe0f'], ['first variation selector', '\ufe00'], ['byte-order mark', '\ufeff'], ['next line', '\u0085'],
@@ -155,6 +156,11 @@ describe('link rules', () => {
     expect(shape(`[x](file:///tmp/a${encoded}b.txt)`)).toEqual([['text', `[x](file:///tmp/a${encoded}b.txt)`]]);
     // Nothing is offered that contains the hidden character, reaches past it, or sits right beside it:
     // "exam<hidden>ple.org" must never yield a link to ple.org that reads as example.org.
+    // A path cut short by a hidden character is not offered either: the reader would see the longer one.
+    for (const content of [`see /Users/sam/a${hidden}b.txt now`, `see file:///tmp/a${hidden}b.txt now`, `/Users/sam/a${hidden}b.txt`, `/Users/sam/My Notes/a.txt${hidden}`]) {
+      expect(linkParts(content).filter(part => part.t !== 'text')).toEqual([]);
+      expect(parseInline(content).filter(node => node.t !== 'text')).toEqual([]);
+    }
     for (const content of [`[x](https://exam${hidden}ple.org/a)`, `[x](/Users/sam/a${hidden}b.txt)`, `/Users/sam/a${hidden}b.txt`, `https://exam${hidden}ple.org/a`, `see exam${hidden}ple.org now`, `x${hidden}/Users/sam/b.txt`, `${hidden}file:///tmp/b.txt`]) {
       expect(linkParts(content).filter(part => part.t !== 'text')).toEqual([]);
       expect(linkParts(content).map(part => part.source).join('')).toBe(content);
