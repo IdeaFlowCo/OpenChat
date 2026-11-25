@@ -22,7 +22,7 @@ export function ConversationLaneSwitch({ activeLane, onChange }: Props) {
           accessibilityState={{ selected: activeLane === 'chat' }}
           accessibilityLabel="Chat"
         >
-          <Text style={[styles.label, { color: activeLane === 'chat' ? c.textPrimary : c.textMuted }]}>Chat</Text>
+          <Text style={[styles.label, { color: activeLane === 'chat' ? c.textPrimary : c.textMetadata }]}>Chat</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -30,9 +30,9 @@ export function ConversationLaneSwitch({ activeLane, onChange }: Props) {
           onPress={() => onChange('context')}
           accessibilityRole="tab"
           accessibilityState={{ selected: activeLane === 'context' }}
-          accessibilityLabel="Context"
+          accessibilityLabel="Stream"
         >
-          <Text style={[styles.label, { color: activeLane === 'context' ? c.textPrimary : c.textMuted }]}>Context</Text>
+          <Text style={[styles.label, { color: activeLane === 'context' ? c.textPrimary : c.textMetadata }]}>Stream</Text>
         </TouchableOpacity>
       </View>
     </View>

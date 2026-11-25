@@ -873,19 +873,9 @@ export function ChatScreen({
     </HeaderBarButton>
   );
 
-  const headerActions = (
-    <View style={styles.headerActionsRow}>
-      <HeaderBarButton
-        onPress={openConversationThoughts}
-        accessibilityLabel="Stream for this chat"
-        style={styles.headerThoughtsButton}
-      >
-        <AppIcon name="thought" color={c.primary} size={18} />
-        <Text style={[styles.headerThoughtsText, { color: c.primary }]}>Stream</Text>
-      </HeaderBarButton>
-      {moreAction}
-    </View>
-  );
+  // The Chat | Stream switch under the header is the door to this chat's Stream;
+  // a second "Stream" button here only crowded the person's name off the bar.
+  const headerActions = <View style={styles.headerActionsRow}>{moreAction}</View>;
 
   // Browser tab names this conversation (OpenChat-mrl2), embedded or not.
   const documentTitle = privateName.name || headerTitle;
@@ -2684,16 +2674,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-  },
-  headerThoughtsButton: {
-    flexDirection: 'row',
-    gap: 5,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-  },
-  headerThoughtsText: {
-    fontSize: 13,
-    fontWeight: '600',
   },
   headerMoreAction: {
     width: 44,

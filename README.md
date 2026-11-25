@@ -56,8 +56,8 @@ text, even when nothing matches; with empty text it opens a blank entry. The
 editor to save; tap an entry to edit it. New entries are private and unpinned.
 Long-press an entry, or right-click on desktop web, for its available actions.
 
-A chat's **Stream** header button and **Stream for this chat** menu open the same
-collection as **Context**. See [conversation content](docs/conversation-content.md)
+A chat's **Stream** lane (the Chat | Stream switch under its header) and the
+**Stream for this chat** menu item open the same collection. See [conversation content](docs/conversation-content.md)
 for filters, audience labels, private entries, sharing and source access. See
 [Context intention lifecycle](docs/context-intention-lifecycle.md) for tracking
 and linking shared Ask/Offer posts and managing their linked projections.

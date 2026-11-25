@@ -1,8 +1,20 @@
 # Conversation content: Context and Stream
 
-The conversation’s **Context** lane and **Stream for this chat** door now read the same collection. **All**, **Context**, and **Stream** filter that collection. Personal Stream remains separate. Ordinary messages are not duplicated into the feed; an authorized **Original message** action opens provenance.
+A conversation has two lanes, **Chat** and **Stream**, chosen with the switch under its header. The Stream lane and the full-screen **Stream for this chat** door (conversation menu) read the same collection. **All**, **Back channel**, and **Saved** filter that collection. "Context" remains the name of the quiet shared lane in the API and in agent tools; the interface calls its posts the Back channel. Personal Stream remains separate. Ordinary messages are not duplicated into the feed; an authorized **Original message** action opens provenance.
 
-Each row names its audience: **Shared with this chat** or **Only you**. Context posts, pinned Stream entries, and shared inline/reply-tag captures remain conversation content. A direct human session also sees that owner's private message captures and private entries explicitly scoped to the conversation. Agent keys, unified connector calls, delegated calls, and embedded sessions never receive these private rows.
+## What each thing is, and who sees it
+
+| Thing | Made by | Who can read it | Notifies | Where it shows |
+|---|---|---|---|---|
+| Chat message | Sending in Chat; `oc_send_message` | Everyone in the chat | Yes | Chat lane, as a bubble |
+| Back channel post (Note, Ask, Offer) | Posting in the Stream lane; `oc_create_context_post` | Everyone in the chat | No | Stream lane |
+| Stream entry from a message | A `#tag` in a chat message | Everyone in the chat | No | Stream lane |
+| Private Stream entry | **Private entry** | Only its author | No | Stream lane, tinted |
+| Private note about a person | Their profile; `oc_add_private_note` | Only its author, never the person | No | The person's profile, not the chat |
+
+Every Stream card carries the same header (`components/StreamCardHeader.tsx`): author, an agent's name when one wrote it, and the time on the first line; the audience on the second, with what it is (Note, Ask, Offer, From a message, Pinned). A private entry reads **Private · Only you** with a lock on a tinted card, so it cannot be mistaken for something the other person can see.
+
+Each row names its audience: **Shared with this chat** or **Private · Only you**. Context posts, pinned Stream entries, and shared inline/reply-tag captures remain conversation content. A direct human session also sees that owner's private message captures and private entries explicitly scoped to the conversation. Agent keys, unified connector calls, delegated calls, and embedded sessions never receive these private rows.
 
 Context replies keep their parent previews and indentation in the descending feed order, including when the parent is on another page. Context editing, deleting, reporting, and explicit Ask agents remain available. **Private entry** creates a private scoped Stream entry; it does not post or pin. Stream entries retain edit/delete, tag search, pin/unpin, and authorized original-message actions. The entry editor restricts shared hashtag suggestions to this conversation; other people’s private captures never contribute. Sharing a private entry uses a separate **Share & pin** preview. The client submits the reviewed text, and the pin transaction locks the owner, conversation and entry, checks live membership, and rejects changed text with 409. `POST /api/thoughts/:id/pin` requires `{conversationId,expectedText}` with the exact reviewed text (at most 20,000 characters); clients omitting `expectedText` receive 400 and must be updated before pinning.
 

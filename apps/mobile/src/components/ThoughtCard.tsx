@@ -47,9 +47,17 @@ interface ThoughtCardProps {
   /** When set, renders a pin toggle reflecting item.pinned. */
   onTogglePin?: () => void;
   onOpenContext?: () => void;
+  /**
+   * Replaces the card's own time and attribution rows with a caller's header
+   * (the chat Stream's shared one). It receives the card's controls (pinned
+   * mark, badges, collapse) to place on its first line.
+   */
+  header?: (controls: React.ReactNode) => React.ReactNode;
+  /** Sets a private entry apart from shared ones. */
+  tinted?: boolean;
 }
 
-export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onTogglePin, onOpenContext }: ThoughtCardProps) {
+export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onTogglePin, onOpenContext, header, tinted }: ThoughtCardProps) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
 
@@ -71,39 +79,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
   const openActions = () => { setConfirmDelete(false); setActions(true); };
   const action = (label: string, run: () => void) => <TouchableOpacity onPress={() => { setActions(false); run(); }} accessibilityRole="button" style={{ padding: 14 }}><Text style={{ color: c.primary }}>{label}</Text></TouchableOpacity>;
 
-  return (
-    // RN-web's touch responder replaces onContextMenu on TouchableOpacity.
-    // Keep right-click on its View parent and long-press on the touchable.
-    <View {...(Platform.OS === 'web' ? { onContextMenu: (event: { preventDefault: () => void; stopPropagation: () => void }) => { event.preventDefault(); event.stopPropagation(); openActions(); } } : {})}>
-    <TouchableOpacity
-      // A collapsed card's tap reveals it; editing starts from the expanded card.
-      onPress={collapsed ? toggleCollapsed : onPress}
-      accessibilityState={{ expanded: !collapsed }}
-      onLongPress={openActions}
-      activeOpacity={0.7}
-      style={[
-        styles.card,
-        {
-          backgroundColor: c.surface,
-          borderColor: c.border,
-          borderLeftWidth: item.pinned ? 3 : StyleSheet.hairlineWidth,
-          borderLeftColor: item.pinned ? c.primary : c.border,
-
-        },
-      ]}
-    >
-      {/* Body text */}
-      {collapsed
-        ? <Text style={[styles.bodyText, { color: c.textMetadata }]} numberOfLines={1}>{item.text}</Text>
-        // Selection stays a web affordance: on native a selectable body would take the card's tap.
-        : <StreamText content={item.text} color={c.textPrimary} linkColor={c.primary} pathBackground={c.surfaceElevated}
-            style={styles.bodyText} numberOfLines={condensed ? COMPACT_VISIBLE_LINES : undefined}
-            selectable={Platform.OS === 'web'} onLongPress={openActions} />}
-      <View style={styles.cardHeader}>
-        <Text style={[styles.time, { color: c.textMetadata }]}>
-          {formatRelativeTime(item.createdAt)}
-        </Text>
-        <View style={styles.headerSpacer} />
+  const controls = <>
         {item.pinned && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space[1], marginRight: space[2] }}>
             <AppIcon name="pin" color={c.primary} size={16} strokeWidth={2.4} />
@@ -157,7 +133,44 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
         >
           <AppIcon name={collapsed ? 'chevron-right' : 'chevron-down'} color={c.textMuted} size={16} strokeWidth={2} />
         </TouchableOpacity>
-      </View>
+  </>;
+
+  return (
+    // RN-web's touch responder replaces onContextMenu on TouchableOpacity.
+    // Keep right-click on its View parent and long-press on the touchable.
+    <View {...(Platform.OS === 'web' ? { onContextMenu: (event: { preventDefault: () => void; stopPropagation: () => void }) => { event.preventDefault(); event.stopPropagation(); openActions(); } } : {})}>
+    <TouchableOpacity
+      // A collapsed card's tap reveals it; editing starts from the expanded card.
+      onPress={collapsed ? toggleCollapsed : onPress}
+      accessibilityState={{ expanded: !collapsed }}
+      onLongPress={openActions}
+      activeOpacity={0.7}
+      style={[
+        styles.card,
+        {
+          backgroundColor: tinted ? c.surfaceElevated : c.surface,
+          borderColor: c.border,
+          borderLeftWidth: item.pinned ? 3 : StyleSheet.hairlineWidth,
+          borderLeftColor: item.pinned ? c.primary : c.border,
+
+        },
+      ]}
+    >
+      {header ? <View style={styles.customHeader}>{header(controls)}</View> : null}
+      {/* Body text */}
+      {collapsed
+        ? <Text style={[styles.bodyText, { color: c.textMetadata }]} numberOfLines={1}>{item.text}</Text>
+        // Selection stays a web affordance: on native a selectable body would take the card's tap.
+        : <StreamText content={item.text} color={c.textPrimary} linkColor={c.primary} pathBackground={c.surfaceElevated}
+            style={styles.bodyText} numberOfLines={condensed ? COMPACT_VISIBLE_LINES : undefined}
+            selectable={Platform.OS === 'web'} onLongPress={openActions} />}
+      {!header && <View style={styles.cardHeader}>
+        <Text style={[styles.time, { color: c.textMetadata }]}>
+          {formatRelativeTime(item.createdAt)}
+        </Text>
+        <View style={styles.headerSpacer} />
+        {controls}
+      </View>}
 
       <Modal visible={actions} transparent animationType="fade" onRequestClose={() => setActions(false)}>
         <Pressable onPress={() => setActions(false)} style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0006' }}>
@@ -186,7 +199,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
       )}
 
       {/* Provenance / attribution */}
-      {!collapsed && !!subtitle && (
+      {!collapsed && !header && !!subtitle && (
         <Text style={[styles.subtitle, { color: c.textMetadata }]} numberOfLines={1}>
           {subtitle}
         </Text>
@@ -231,6 +244,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   headerSpacer: { flex: 1 },
+  customHeader: { marginBottom: space[2] },
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 3,

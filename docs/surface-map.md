@@ -52,7 +52,7 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | `StoryViewer` | Asks | **Story** (Header: Author name) | Stories rail avatar tap | 1 | View network story, reply directly, or ask OpenChat Agent about it. |
 | `SocialReview` | Asks | **Review** | Asks screen › "Review" card; AgentOverlay Review card | 2 | Review and approve/decline quiet match opportunities. |
 | `Thoughts` | Stream | **Stream** | Bottom tab "Stream" | 1 | Personal entries; see [search, creation and actions](../README.md#messages-and-stream). Internal route names stay compatible. |
-| `ConversationThoughts` | Stream | **Chat Stream** | 1. In-chat header "Stream" button<br>2. In-chat overflow menu › "Stream for this chat" | 2 | Compatibility door into [conversation content](conversation-content.md). |
+| `ConversationThoughts` | Stream | **Chat Stream** | In-chat overflow menu › "Stream for this chat" (full screen) | 2 | Compatibility door into [conversation content](conversation-content.md). |
 | `Settings` | Settings | **Settings** | 1. Profile › "Settings" row<br>2. Desktop: sidebar avatar › account menu › **Settings**<br>3. Desktop shortcut (⌘,) | 2 | Account (Edit profile, email, **Sign out** — top card, no scrolling), experience mode, agent keys, theme, notifications, and legal info. |
 | *(action)* `Sign out` | Me / Account | **Sign out** | 1. Profile › Account › Sign out<br>2. Settings › Account › Sign out<br>3. Desktop: sidebar avatar › account menu › **Sign out** | 2 | Clears the stored token and user, disconnects the socket, and returns to `Login`. The same word in the same places on phone, tablet, and desktop web; desktop adds the avatar menu because its avatar has no visible label. |
 | *(action)* `Switch account` | Me / Account | **Switch account** | 1. Profile › Account › Switch account<br>2. Desktop: sidebar avatar › account menu › **Switch account** | 2 | Web only, when Ideaflow ID is enabled. App-local OpenChat sign-out, then Ideaflow sign-in with the provider's account chooser (`prompt=select_account`). |
@@ -74,7 +74,7 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | *(action)* `ContextWebhookSetup` | Agents | **External agent webhooks** | Chats › Agent drafts › Set up webhooks | 2 | See [owner consent and availability](context-webhooks.md). |
 | `ContextReview` | Agents | **Agent drafts** | Chats list utility row (including collapsed desktop sidebar) | 1 | Owner-only hosted Context inbox, opt-in off by default. Anthropic processing disclosure, exact source/reply/destination/current audience review, separate explicit Publish to quiet Context. Edits create a new draft for review; current and future authorized conversation members can read published replies. |
 | *(action)* `ConnectAgentLink` | Agents | **Connect an agent** | Chats list utility row; Profile; Settings | 1 | Opens the shared Ideaflow connection hub for OpenChat, Unlinked, and Notestream Vision. No connection status is inferred from API key existence. API keys and repeatable setup copy remain in Settings. |
-| `ContextLane` | Context | **Context** | Chats › conversation › Context | 2 | See [conversation content](conversation-content.md) and [Ask/Offer tracking and lifecycle controls](context-intention-lifecycle.md). |
+| `ContextLane` | Stream | **Stream** | Chats › conversation › Stream (the Chat \| Stream switch) | 2 | See [conversation content](conversation-content.md) and [Ask/Offer tracking and lifecycle controls](context-intention-lifecycle.md). |
 
 ---
 
