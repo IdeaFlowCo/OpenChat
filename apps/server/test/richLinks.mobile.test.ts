@@ -47,6 +47,11 @@ describe('link rules', () => {
     ['[Plan](file:///Users/alex/Projects/Demo%20Site/README.md)', [['path', 'Plan', '/Users/alex/Projects/Demo Site/README.md']]],
     ['file:///Users/alex/notes.txt.', [['path', '/Users/alex/notes.txt', '/Users/alex/notes.txt'], ['text', '.']]],
     ['[x](file://localhost/tmp/a)', [['path', 'x', '/tmp/a']]],
+    // A stray % is part of the file name; a link labelled with its own address shows the path.
+    ['[x](file:///bad%ZZ)', [['path', 'x', '/bad%ZZ']]],
+    ['file:///tmp/100%done%20now.txt', [['path', '/tmp/100%done now.txt', '/tmp/100%done now.txt']]],
+    ['[file:///Users/alex/a%20b.txt](file:///Users/alex/a%20b.txt)', [['path', '/Users/alex/a b.txt', '/Users/alex/a b.txt']]],
+    ['<file:///Users/alex/notes.txt>', [['text', '<'], ['path', '/Users/alex/notes.txt', '/Users/alex/notes.txt'], ['text', '>']]],
     ['[index](file:///Users/sam/My%20Notes/INDEX.html)', [['path', 'index', '/Users/sam/My Notes/INDEX.html']]],
     ['[index](file:///Users/sam/My Notes/INDEX.html)', [['path', 'index', '/Users/sam/My Notes/INDEX.html']]],
     ['[index](<file:///Users/sam/My Notes/INDEX.html>)', [['path', 'index', '/Users/sam/My Notes/INDEX.html']]],
@@ -62,7 +67,7 @@ describe('link rules', () => {
   it.each([
     '[x](javascript:alert(1))', '[x](JaVaScRiPt:alert(1))', '[x](data:text/html,hi)', '[x](vbscript:msgbox)', '[x](intent://scan/#Intent;end)',
     '[x](https://user:pw@example.com)', '[x](https://)', '[x](ftp://example.com/a)', '[x](mailto:sam@example.com)', '[ ](https://example.com)',
-    '[x](javascript:https://example.com)', '[a](java%09script:x)', '<javascript:alert(2)>', '[x](file://server.example/share/a)', 'file://nas.example/share/a.txt', '[x](file:///Users/sam/%E0%A4%A)', '[x](file:///bad%ZZ)', '[x](file://user@host/a)',
+    '[x](javascript:https://example.com)', '[a](java%09script:x)', '<javascript:alert(2)>', '[x](file://server.example/share/a)', 'file://nas.example/share/a.txt', '[x](file:///Users/sam/%E0%A4%A)', '[x](file://user@host/a)',
     'javascript:alert(1) data:text/html,hi vbscript:x', 'file:relative/path', 'myfile:///Users/sam/a',
     // Nothing invisible, direction-changing or shell-active may reach the clipboard or hide in an address.
     '[report.pdf](file:///tmp/%E2%80%AEgpj.exe)', '[x](file:///tmp/a%C2%85b)', '[x](file:///tmp/a%E2%80%A8b)', '[x](file:///tmp/a%3Bopen%20b)',
@@ -91,7 +96,8 @@ describe('link rules', () => {
     expect(fileUrlToPath('file:///Users/sam/a%20b.html')).toBe('/Users/sam/a b.html');
     expect(fileUrlToPath('FILE://LOCALHOST/Users/sam/x')).toBe('/Users/sam/x');
     expect(fileUrlToPath('file:/Users/sam/x')).toBe('/Users/sam/x');
-    for (const bad of ['file://', 'file:', 'file:///Users/%0Aevil', 'file:///Users/%zz', 'https://example.com/a']) expect(fileUrlToPath(bad)).toBeNull();
+    expect(fileUrlToPath('file:///Users/%zz')).toBe('/Users/%zz'); expect(fileUrlToPath('file:///a%25b%')).toBe('/a%b%');
+    for (const bad of ['file://', 'file:', 'file:///Users/%0Aevil', 'file:///a%0Ab', 'file:///a%E0%A4%A', 'https://example.com/a']) expect(fileUrlToPath(bad)).toBeNull();
   });
 
   it('gives an agent’s Markdown the same file rules', () => {

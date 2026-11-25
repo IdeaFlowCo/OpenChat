@@ -43,7 +43,9 @@ export function fileUrlToPath(url: string): string | null {
   const match = /^file:(?:\/\/([^/]*))?(\/.*)$/i.exec(url.trim());
   if (!match) return null;
   let path: string;
-  try { path = decodeURIComponent(match[2]!); } catch { return null; }
+  // A '%' that does not start a %XX escape is a literal character of the file name
+  // ("100% done.txt"); escapes that do not decode as text still leave the address as typed.
+  try { path = decodeURIComponent(match[2]!.replace(/%(?![0-9a-f]{2})/gi, '%25')); } catch { return null; }
   const host = match[1] ?? '';
   if (!/[^/]/.test(path) || UNSAFE_IN_PATH.test(path) || UNSAFE_IN_PATH.test(host) || /[\s@:]/.test(host)) return null;
   if (/^\/[A-Za-z]:[\\/]/.test(path)) path = path.slice(1);
@@ -95,7 +97,8 @@ export function linkParts(content: string): LinkPart[] {
     const dest = label.trim() ? linkDestination(m[2]!) : null;
     marks.push({ start, end, part: !dest ? undefined
       : 'url' in dest ? { t: 'link', source, label, url: dest.url, start }
-      : { t: 'path', source, label, path: dest.path, start } });
+      // A link labelled with its own address shows the path it copies, like a bare address.
+      : { t: 'path', source, label: label.trim() === m[2]!.trim() ? dest.path : label, path: dest.path, start } });
   }
   // 2. Bare web addresses.
   for (const link of messageLinks(content)) {
@@ -105,7 +108,7 @@ export function linkParts(content: string): LinkPart[] {
   BARE_FILE_URL.lastIndex = 0;
   for (let m = BARE_FILE_URL.exec(content); m; m = BARE_FILE_URL.exec(content)) {
     const start = m.index;
-    if (start && !/[\s(]/.test(content[start - 1]!)) continue;
+    if (start && !/[\s(<]/.test(content[start - 1]!)) continue;
     const source = m[0].replace(/[.,;:!?)'…]+$/, '');
     const path = fileUrlToPath(source);
     if (path && free(start, start + source.length)) marks.push({ start, end: start + source.length, part: { t: 'path', source, label: path, path, start } });
