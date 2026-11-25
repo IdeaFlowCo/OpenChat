@@ -50,7 +50,7 @@ function splitTrailing(url: string): [string, string] {
 export const MAX_INLINE_LENGTH = 4000;
 // Order matters: code spans first so their contents are literal. No lookbehind
 // (Safari before 16.4 cannot parse it): italics capture the preceding character.
-const INLINE_SOURCE = new RegExp(/`([^`\n]+)`|\[([^\]\n]{1,300})\]\((<[^>\n]{1,2000}>|file:[^)\n]{1,2000}|[^)\s]{1,2000})\)|\*\*(?=\S)([^*\n]*?\S)\*\*|__(?=\S)([^_\n]*?\S)__|(^|[^\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])|(^|[^\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])/.source
+const INLINE_SOURCE = new RegExp(/`([^`\n]+)`|\[([^\]\n]{1,300})\]\((<[^>\n]{1,2000}>|file:[^)\n]{1,2000}|(?:[^()\s]|\([^()\s]{0,500}\)){1,2000})\)|\*\*(?=\S)([^*\n]*?\S)\*\*|__(?=\S)([^_\n]*?\S)__|(^|[^\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])|(^|[^\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])/.source
   + String.raw`|(https?:\/\/[^\s<>]{1,2000}|file:\/\/[^\s<>]{1,2000}|www\.[^\s<>]{1,2000}|${BARE_DOMAIN})`, 'i');
 
 export function parseInline(text: string): Inline[] {

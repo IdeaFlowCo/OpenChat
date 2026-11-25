@@ -1,5 +1,5 @@
 /**
- * "Show links as typed": a device preference, off by default. When on, message
+ * "Show links as text": a device preference, off by default. When on, message
  * and Stream text is shown exactly as written, with nothing turned into a link.
  */
 import { useCallback, useSyncExternalStore } from 'react';

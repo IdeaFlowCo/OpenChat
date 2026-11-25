@@ -22,7 +22,7 @@ export function AgentMarkdown({ content, color, linkColor, codeBackground, rende
   selectable?: boolean;
 }) {
   const [asTyped] = useLinksAsTyped();
-  // "Show links as typed" shows an agent's message as written, like anyone else's.
+  // "Show links as text" shows an agent's message as written, like anyone else's.
   const blocks = useMemo(() => asTyped ? [] : parseAgentMarkdown(content), [content, asTyped]);
 
   const inline = (nodes: Inline[], key = 'i'): ReactNode => nodes.map((node, index) => {

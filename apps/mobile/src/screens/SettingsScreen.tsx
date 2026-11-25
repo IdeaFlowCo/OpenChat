@@ -547,10 +547,10 @@ export function SettingsScreen() {
           })}
           <View style={[styles.optionRow, { borderTopColor: c.divider, borderTopWidth: StyleSheet.hairlineWidth }]}>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Show links as typed</Text>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Show links as text</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>Shows message and Stream text exactly as written, with nothing turned into a link</Text>
             </View>
-            <Switch accessibilityLabel="Show links as typed" value={linksAsTyped} onValueChange={setLinksAsTyped} trackColor={{ true: c.primary }} />
+            <Switch accessibilityLabel="Show links as text" value={linksAsTyped} onValueChange={setLinksAsTyped} trackColor={{ true: c.primary }} />
           </View>
         </View>
       </View>
