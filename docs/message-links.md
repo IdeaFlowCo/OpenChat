@@ -61,9 +61,9 @@ line that is nothing but a bare path keeps its spaces; inside a sentence a
 bare path ends at the next space. If a desktop shell provides `window.ideaflowDesktop.openPath(path)`, it is
 called instead of copying. Its contract: the shell must reveal the item (for
 example in Finder) or ask before launching anything, because the path is
-someone else's text. A thrown error or a non-empty string result counts as
-failure and the path is copied. No shell provides it today. A `file:` address
-must be written `file://…`, and its path may not begin with `//`. The button's
+someone else's text. A thrown error, `false`, or a non-empty string result counts
+as failure and the path is copied. No shell provides it today. A `file:` address
+must be written `file://…`, and its decoded path may not begin with `//` or a backslash pair. The button's
 accessible name is its label followed by "(copy path …)". If the clipboard refuses, the notice
 reads "Couldn't copy. Path: …" so the path can still be read. These rules
 are shared with the Ideaflow Dashboard's description field; a markdown

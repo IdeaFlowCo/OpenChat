@@ -43,13 +43,14 @@ export function fileUrlToPath(url: string): string | null {
   // It must be written file://…, and its path may not begin with a second pair of slashes:
   // file:/tmp/a is not an address anyone meant, and file:////server/share names another machine.
   const match = /^file:\/\/([^/]*)(\/.*)$/i.exec(url.trim());
-  if (!match || match[2]!.startsWith('//')) return null;
+  if (!match) return null;
   let path: string;
   // A '%' that does not start a %XX escape is a literal character of the file name
   // ("100% done.txt"); escapes that do not decode as text still leave the address as typed.
   try { path = decodeURIComponent(match[2]!.replace(/%(?![0-9a-f]{2})/gi, '%25')); } catch { return null; }
   const host = match[1] ?? '';
-  if (!/[^/]/.test(path) || UNSAFE_IN_PATH.test(path) || UNSAFE_IN_PATH.test(host) || /[\s@:]/.test(host)) return null;
+  // Checked after decoding, so %2F cannot smuggle the second slash (or a backslash) in.
+  if (/^[\\/][\\/]/.test(path) || !/[^/]/.test(path) || UNSAFE_IN_PATH.test(path) || UNSAFE_IN_PATH.test(host) || /[\s@:]/.test(host)) return null;
   if (/^\/[A-Za-z]:[\\/]/.test(path)) path = path.slice(1);
   // A file on another machine (file://server/share/…) is not a local path; it stays as typed.
   return host && host.toLowerCase() !== 'localhost' ? null : path;

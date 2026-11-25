@@ -18,16 +18,16 @@ export const pathNotCopied = (path: string) => `Couldn't copy. Path: ${path}`;
 /**
  * A desktop shell may offer `window.ideaflowDesktop.openPath(path)`. Its contract, shared with
  * the Ideaflow Dashboard: the shell must reveal the item (for example in Finder) or ask before
- * launching anything, because the path is someone else's text. A thrown error or a non-empty
- * string result (how Electron's shell.openPath reports failure) means it did not work, and the
- * path is copied instead. No shell provides the hook today.
+ * launching anything, because the path is someone else's text. A thrown error, `false`, or a
+ * non-empty string result (how Electron's shell.openPath reports failure) means it did not
+ * work, and the path is copied instead. No shell provides the hook today.
  */
 export async function copyLocalPath(path: string): Promise<void> {
   const desktop = (globalThis as { ideaflowDesktop?: { openPath?: unknown } }).ideaflowDesktop;
   if (desktop && typeof desktop.openPath === 'function') {
     try {
       const result = await (desktop.openPath as (path: string) => unknown).call(desktop, path);
-      if (!(typeof result === 'string' && result)) return;
+      if (result !== false && !(typeof result === 'string' && result)) return;
     } catch { /* fall back to copying */ }
   }
   try {
