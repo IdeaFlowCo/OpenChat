@@ -18,6 +18,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import type { Thought } from '../api/client';
 import { AppIcon } from './AppIcon';
+import { StreamText } from './StreamText';
 import { radius, space, type } from '../theme/tokens';
 import * as Clipboard from 'expo-clipboard';
 import { originalMessageUrl } from '../utils/parseOpenChatUrl';
@@ -92,12 +93,12 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
       ]}
     >
       {/* Body text */}
-      <Text
-        style={[styles.bodyText, { color: collapsed ? c.textMetadata : c.textPrimary }]}
-        numberOfLines={collapsed ? 1 : condensed ? COMPACT_VISIBLE_LINES : undefined}
-      >
-        {item.text}
-      </Text>
+      {collapsed
+        ? <Text style={[styles.bodyText, { color: c.textMetadata }]} numberOfLines={1}>{item.text}</Text>
+        // Selection stays a web affordance: on native a selectable body would take the card's tap.
+        : <StreamText content={item.text} color={c.textPrimary} linkColor={c.primary} pathBackground={c.surfaceElevated}
+            style={styles.bodyText} numberOfLines={condensed ? COMPACT_VISIBLE_LINES : undefined}
+            selectable={Platform.OS === 'web'} onLongPress={openActions} />}
       <View style={styles.cardHeader}>
         <Text style={[styles.time, { color: c.textMetadata }]}>
           {formatRelativeTime(item.createdAt)}

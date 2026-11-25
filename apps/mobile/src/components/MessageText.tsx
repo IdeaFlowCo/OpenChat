@@ -10,7 +10,7 @@ export async function openMessageLink(url: string): Promise<void> {
   catch { Alert.alert('Could not open link', 'You can copy the link from the message actions.'); }
 }
 
-function InlineLink({ text, url, color, onLongPress }: {
+export function InlineLink({ text, url, color, onLongPress }: {
   text: string; url: string; color: string; onLongPress: () => void;
 }) {
   const held = useRef(false);
