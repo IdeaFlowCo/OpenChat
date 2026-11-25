@@ -152,6 +152,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
           borderColor: c.border,
           borderLeftWidth: item.pinned ? 3 : StyleSheet.hairlineWidth,
           borderLeftColor: item.pinned ? c.primary : c.border,
+          ...(header ? { paddingVertical: space[2] + 2 } : null),
 
         },
       ]}
@@ -190,7 +191,8 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
           </Pressable>
         </Pressable>
       </Modal>
-      {!collapsed && onOpenContext && <TouchableOpacity onPress={onOpenContext} accessibilityRole="button" style={{ paddingVertical: 8 }}><Text style={[type.meta, { color: c.textMetadata }]}>Original message</Text></TouchableOpacity>}
+      {/* With a caller's header the source link sits on its one metadata line. */}
+      {!collapsed && !header && onOpenContext && <TouchableOpacity onPress={onOpenContext} accessibilityRole="button" style={{ paddingVertical: 8 }}><Text style={[type.meta, { color: c.textMetadata }]}>Original message</Text></TouchableOpacity>}
       {collapseError && <Text accessibilityRole="alert" style={[styles.subtitle, { color: c.danger }]}>Could not save. Try again.</Text>}
       {!collapsed && compact && long && (
         <TouchableOpacity onPress={() => setRevealed((r) => !r)} accessibilityRole="button" style={{ paddingVertical: 6 }}>
@@ -207,7 +209,7 @@ export function ThoughtCard({ item, onPress, onDelete, onTagPress, subtitle, onT
 
       {/* Tag chips — visually distinct from the kind badge (pill, monospace #). */}
       {!collapsed && tags.length > 0 && (
-        <View style={styles.tagRow}>
+        <View style={[styles.tagRow, !!header && styles.compactTags]}>
           {tags.map((tag) => (
             <TouchableOpacity
               key={tag}
@@ -244,7 +246,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   headerSpacer: { flex: 1 },
-  customHeader: { marginBottom: space[2] },
+  customHeader: { marginBottom: space[1] + 2 },
+  compactTags: { marginTop: space[1] + 2 },
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 3,

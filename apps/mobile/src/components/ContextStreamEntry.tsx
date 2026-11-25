@@ -9,6 +9,7 @@ import type { NavProp } from '../navigation/types';
 import { ThoughtCard } from './ThoughtCard';
 import { StreamTextInput } from './StreamEditor';
 import { StreamCardHeader } from './StreamCardHeader';
+import { type } from '../theme/tokens';
 
 /** Same paper surface/14px metadata/44px words as Context; audience leads every saved entry. */
 export function ConversationEntryEditor({ conversationId, thought, onDone, onCancel }: { conversationId: string; thought?: Thought; onDone: () => void; onCancel: () => void }) {
@@ -33,7 +34,7 @@ export function ConversationEntryEditor({ conversationId, thought, onDone, onCan
     </View>
   </View>;
 }
-export function ContextStreamEntry({ item, conversationId, onChange, onTagPress }: { item: Extract<ConversationContentItem, { origin: 'stream' }>; conversationId: string; onChange: () => void; onTagPress: (tag: string) => void }) {
+export function ContextStreamEntry({ item, conversationId, sharedScope, onChange, onTagPress }: { item: Extract<ConversationContentItem, { origin: 'stream' }>; conversationId: string; sharedScope?: string; onChange: () => void; onTagPress: (tag: string) => void }) {
   const c = getColors(useTheme().scheme), navigation = useNavigation<NavProp<'ConversationThoughts'>>();
   const { currentUser } = useChat(); const t = item.thought, own = t.authorId === currentUser?.userId;
   const [editing, setEditing] = useState(false), [share, setShare] = useState<string>(), [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -43,13 +44,14 @@ export function ContextStreamEntry({ item, conversationId, onChange, onTagPress 
     try { await fn(); setShare(undefined); onChange(); } catch (e) { setError(e instanceof Error ? e.message : 'Could not update this entry.'); } finally { running.current = false; setBusy(false); }
   };
   const kind = item.provenance === 'pinned' ? 'Pinned' : item.provenance === 'message_capture' ? 'From a message' : 'Stream entry';
-  return <View style={{ marginBottom: 10 }}>
+  const openSource = t.sourceMessageId ? () => navigation.navigate('OriginalMessage', { thoughtId: t.id }) : undefined;
+  return <View style={{ marginBottom: 8 }}>
     {editing ? <ConversationEntryEditor conversationId={conversationId} thought={t} onCancel={() => setEditing(false)} onDone={() => { setEditing(false); onChange(); }} /> : <ThoughtCard item={t} tinted={item.visibility === 'private'}
-      header={controls => <StreamCardHeader name={own ? 'You' : t.authorName || 'A participant'} avatarName={t.authorName || undefined} createdAt={t.createdAt} audience={item.visibility === 'private' ? 'private' : 'shared'} kind={kind} trailing={controls} />}
+      header={controls => <StreamCardHeader name={own ? 'You' : t.authorName || 'A participant'} avatarName={t.authorName || undefined} createdAt={t.createdAt} audience={item.visibility === 'private' ? 'private' : 'shared'} sharedScope={sharedScope} kind={kind} onOpenSource={openSource} trailing={controls} />}
       onPress={own ? () => setEditing(true) : undefined} onDelete={own ? () => void change(() => api.deleteThought(t.id)) : undefined} onTagPress={onTagPress}
-      onOpenContext={t.sourceMessageId ? () => navigation.navigate('OriginalMessage', { thoughtId: t.id }) : undefined} />}
+      onOpenContext={openSource} />}
     {t.hasSourceMessage && !t.sourceMessageId && <Text style={{ color: c.textMetadata, fontSize: 12 }}>Original message unavailable</Text>}
-    {(own || (t.pinned && t.pinnedBy === currentUser?.userId)) && !editing && <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => t.pinned ? void change(() => api.unpinThought(t.id, conversationId)) : setShare(t.text)} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 10 }}><Text style={{ color: c.primary }}>{t.pinned ? 'Unpin from chat' : item.visibility === 'private' ? 'Share & pin…' : 'Pin to chat…'}</Text></TouchableOpacity>}
+    {(own || (t.pinned && t.pinnedBy === currentUser?.userId)) && !editing && <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => t.pinned ? void change(() => api.unpinThought(t.id, conversationId)) : setShare(t.text)} hitSlop={{ top: 6, bottom: 6, left: 8, right: 8 }} style={{ alignSelf: 'flex-start', minHeight: 32, justifyContent: 'center', paddingHorizontal: 12 }}><Text style={[type.label, { color: c.primary }]}>{t.pinned ? 'Unpin from chat' : item.visibility === 'private' ? 'Share & pin…' : 'Pin to chat…'}</Text></TouchableOpacity>}
     {share !== undefined && <View style={{ padding: 12, borderWidth: 1, borderColor: c.border, borderRadius: 8, backgroundColor: c.surface }}>
       <Text style={{ color: c.textPrimary, fontWeight: '600' }}>Share and pin this exact entry?</Text>
       <Text selectable style={{ color: c.textPrimary, marginVertical: 8 }}>{share}</Text>
