@@ -12,11 +12,12 @@ import { StreamCompactToggle } from './StreamCompactToggle';
 import { applyCollapsed } from '../services/streamDisplay';
 import { useConversationContent } from '../services/useConversationContent';
 import { getSocket } from '../api/socket';
-import { Avatar } from './Avatar';
 import { type, radius, space } from '../theme/tokens';
-import { formatRelativeTime } from './ThoughtCard';
 import { ContextIntentionControls } from './ContextIntentionControls';
 import { StreamText } from './StreamText';
+import { StreamCardHeader } from './StreamCardHeader';
+import { AppIcon } from './AppIcon';
+import { Chip } from './ui';
 import { AgentMarkdown } from './AgentMarkdown';
 
 /** Group loaded replies below their root, while retaining orphan previews across pages. */
@@ -54,7 +55,6 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
   const [actionsFor, setActionsFor] = useState<string>();
   const [busy, setBusy] = useState<string>();
   const [feedback, setFeedback] = useState<{ text: string; error: boolean }>();
-  const [exactTimeFor, setExactTimeFor] = useState<string>();
 
   useEffect(() => { contextLaneManager.setAccount(accountId); }, [accountId]);
   useEffect(() => { if (feed.contextAvailable === false) { setEditing(undefined); setReplyTo(undefined); setConfirmDelete(undefined); setReporting(undefined); } }, [feed.contextAvailable]);
@@ -88,30 +88,16 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
     const own = item.authorId === currentUser?.userId;
     const parent = item.replyTo || state.posts.find(p => p.id === item.replyToId);
     return <Pressable accessible={false} focusable={false} onHoverIn={() => setActionsFor(item.id)} onLongPress={() => setActionsFor(item.id)} style={[styles.card, { backgroundColor: c.surface, borderColor: c.border, marginLeft: reply ? 16 : 0 }]}>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'baseline' }}>
-        <Avatar name={item.agent?.name || item.author?.name} avatarUrl={item.agent ? undefined : item.author?.avatarUrl} isBot={!!item.agent} size={28} />
-        <Text style={[type.label, { color: c.textPrimary, fontWeight: '600' }]}>{item.author?.name || (own ? 'You' : 'Chat participant')}</Text>
-        {item.agent && <Text style={{ color: c.textMetadata, ...type.meta }}>via {item.agent.name} · Agent</Text>}
-        <Text style={{ color: c.textMetadata, ...type.meta }}>{item.kind === 'ask' ? 'ASK' : item.kind === 'offer' ? 'OFFER' : 'NOTE'}</Text>
-      </View>
-      <View style={{ position: 'relative', zIndex: exactTimeFor === item.id ? 1 : 0 }}>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Show exact time: ${new Date(item.createdAt).toLocaleString()}`}
-          onPress={() => setFeedback({ text: new Date(item.createdAt).toLocaleString(), error: false })}
-          onHoverIn={() => setExactTimeFor(item.id)} onHoverOut={() => setExactTimeFor(undefined)}
-          onFocus={() => setExactTimeFor(item.id)} onBlur={() => setExactTimeFor(undefined)}
-          style={({ pressed }) => ({ minHeight: 44, justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}>
-          <Text style={{ color: c.textMetadata, ...type.meta }}>Shared with this chat · {formatRelativeTime(item.createdAt)}{item.revision > 1 ? ' · Edited' : ''}</Text>
-        </Pressable>
-        {exactTimeFor === item.id && <View pointerEvents="none" style={{ position: 'absolute', top: 44, left: 0, padding: 8, borderRadius: radius.sm, backgroundColor: c.background, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border }}>
-          <Text role="tooltip" style={{ color: c.textPrimary, ...type.meta }}>{new Date(item.createdAt).toLocaleString()}</Text>
-        </View>}
-      </View>
+      <StreamCardHeader name={item.author?.name || (own ? 'You' : 'Chat participant')} avatarUrl={item.author?.avatarUrl} agentName={item.agent?.name}
+        createdAt={item.createdAt} edited={item.revision > 1} audience="shared" kind={item.kind === 'ask' ? 'Ask' : item.kind === 'offer' ? 'Offer' : 'Note'}
+        onShowExactTime={text => setFeedback({ text, error: false })}
+        trailing={item.isDeleted ? null : <TouchableOpacity accessibilityRole="button" accessibilityLabel={actionsFor === item.id ? 'Hide actions' : 'More'} accessibilityState={{ expanded: actionsFor === item.id }} disabled={!!busy} hitSlop={12}
+          onPress={() => setActionsFor(actionsFor === item.id ? undefined : item.id)}><Text style={[type.label, { color: c.primary }]}>{actionsFor === item.id ? 'Hide actions' : 'More'}</Text></TouchableOpacity>} />
       {item.replyToId && <View style={[styles.quote, { borderLeftColor: c.border }]}><Text numberOfLines={2} style={{ color: c.textMetadata, ...type.label }}>{parent?.isDeleted ? 'Reply to a deleted post' : parent ? `Reply to ${parent.author?.name || 'a participant'}: ${parent.text}` : 'Reply to an earlier post'}</Text></View>}
       {item.isDeleted ? <Text style={{ color: c.textMetadata, ...type.body, marginTop: 8 }}>Post deleted</Text>
         // An agent's post is Markdown, as in chat; a person's post keeps its exact characters. Links open in both.
         : item.agent ? <View style={{ marginTop: 8 }}><AgentMarkdown content={item.text} color={c.textPrimary} linkColor={c.primary} codeBackground={c.surfaceElevated} selectable onLongPress={() => setActionsFor(item.id)} /></View>
         : <StreamText content={item.text} color={c.textPrimary} linkColor={c.primary} pathBackground={c.surfaceElevated} style={{ marginTop: 8 }} onLongPress={() => setActionsFor(item.id)} />}
-      {!item.isDeleted && button(actionsFor === item.id ? 'Hide actions' : 'More', () => setActionsFor(actionsFor === item.id ? undefined : item.id))}
       {!item.isDeleted && actionsFor === item.id && <View style={styles.actions}>
         {button('Reply', () => { setReplyTo(item); setEditing(undefined); })}
         {own && button('Edit', () => { setEditing(item); setReplyTo(undefined); })}
@@ -129,11 +115,21 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
     </Pressable>;
   };
   return <View style={styles.container}>
-    <View style={[styles.toolbar, { borderBottomColor: c.border }]}>
-      <TextInput accessibilityLabel="Search conversation content" placeholder="Search this chat’s Stream" placeholderTextColor={c.textMuted} value={search} onChangeText={feed.chooseSearch} style={[styles.search, { color: c.textPrimary, backgroundColor: c.surface, borderColor: c.border }]} />
-      {search ? button('Clear search', () => feed.chooseSearch('')) : null}{button('Refresh Stream', () => void load())}
+    <View style={styles.toolbar}>
+      <View style={[styles.search, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <AppIcon name="search" color={c.textMuted} size={16} />
+        <TextInput accessibilityLabel="Search conversation content" placeholder="Search this chat’s Stream" placeholderTextColor={c.textMuted} value={search} onChangeText={feed.chooseSearch} style={[type.body, styles.searchInput, { color: c.textPrimary }]} />
+        {search ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear search" hitSlop={12} onPress={() => feed.chooseSearch('')}><Text style={[type.label, { color: c.primary }]}>Clear search</Text></TouchableOpacity> : null}
+      </View>
+      <View style={styles.filters}>
+        {(feed.contextAvailable === false ? ['stream'] as const : ['all', 'context', 'stream'] as const).map(filter => <Chip key={filter}
+          label={filter === 'all' ? 'All' : filter === 'context' ? 'Back channel' : 'Saved'}
+          accessibilityLabel={filter === 'all' ? 'All content' : filter === 'context' ? 'Back channel posts' : 'Stream entries'}
+          selected={feed.contextAvailable === false || feed.filter === filter} onPress={() => feed.chooseFilter(filter)} />)}
+        <StreamCompactToggle />
+        <Chip icon="lock" label="Private entry" onPress={() => setCreatingPrivate(true)} />
+      </View>
     </View>
-    <View style={[styles.actions, { paddingHorizontal: 12 }]}>{(feed.contextAvailable === false ? ['stream'] as const : ['all', 'context', 'stream'] as const).map(filter => <TouchableOpacity key={filter} accessibilityRole="button" accessibilityLabel={`${filter === 'all' ? 'All content' : filter === 'context' ? 'Back channel posts' : 'Stream entries'}`} accessibilityState={{ selected: feed.contextAvailable === false || feed.filter === filter }} onPress={() => feed.chooseFilter(filter)} style={[styles.action, { backgroundColor: feed.contextAvailable === false || feed.filter === filter ? c.primaryMuted : undefined, borderRadius: radius.sm }]}><Text style={{ color: c.primary }}>{filter === 'all' ? 'All' : filter === 'context' ? 'Back channel' : 'Saved'}</Text></TouchableOpacity>)}{button('Private entry', () => setCreatingPrivate(true))}<StreamCompactToggle /></View>
     {feed.contextAvailable === false && <Text style={{ color: c.textMetadata, paddingHorizontal: 16 }}>Back channel is unavailable. This chat’s Stream and your private entries remain available.</Text>}
     {creatingPrivate && <ConversationEntryEditor conversationId={conversationId} onCancel={() => setCreatingPrivate(false)} onDone={() => { setCreatingPrivate(false); void load(); }} />}
     {feedback && <Text accessibilityRole={feedback.error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={{ color: feedback.error ? c.danger : c.textMetadata, padding: 12 }}>{feedback.text}</Text>}
@@ -149,9 +145,11 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
 }
 const styles = StyleSheet.create({
   container: { flex: 1, width: '100%', maxWidth: 720, alignSelf: 'center' },
-  toolbar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
-  search: { flex: 1, minWidth: 0, height: 44, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.sm, paddingHorizontal: 10, marginVertical: 8 },
-  card: { padding: space[3], borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, marginBottom: 10 },
+  toolbar: { paddingHorizontal: space[3], paddingTop: space[3], gap: space[2] },
+  search: { flexDirection: 'row', alignItems: 'center', gap: space[2], minHeight: 40, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: space[3] },
+  searchInput: { flex: 1, minWidth: 0, minHeight: 40, paddingVertical: 0 },
+  filters: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  card: { padding: space[3], borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, marginBottom: 10 },
   quote: { borderLeftWidth: 2, paddingLeft: 10, marginTop: 10 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   action: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },

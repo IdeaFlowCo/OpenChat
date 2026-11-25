@@ -8,6 +8,7 @@ import { getColors } from '../theme/colors';
 import type { NavProp } from '../navigation/types';
 import { ThoughtCard } from './ThoughtCard';
 import { StreamTextInput } from './StreamEditor';
+import { StreamCardHeader } from './StreamCardHeader';
 
 /** Same paper surface/14px metadata/44px words as Context; audience leads every saved entry. */
 export function ConversationEntryEditor({ conversationId, thought, onDone, onCancel }: { conversationId: string; thought?: Thought; onDone: () => void; onCancel: () => void }) {
@@ -41,9 +42,11 @@ export function ContextStreamEntry({ item, conversationId, onChange, onTagPress 
     if (running.current) return; running.current = true; setBusy(true); setError('');
     try { await fn(); setShare(undefined); onChange(); } catch (e) { setError(e instanceof Error ? e.message : 'Could not update this entry.'); } finally { running.current = false; setBusy(false); }
   };
+  const kind = item.provenance === 'pinned' ? 'Pinned' : item.provenance === 'message_capture' ? 'From a message' : 'Stream entry';
   return <View style={{ marginBottom: 10 }}>
-    <Text style={{ color: c.textMetadata, fontSize: 12, marginBottom: 6 }}>{item.visibility === 'private' ? 'Only you' : 'Shared with this chat'} · {item.provenance === 'pinned' ? 'Pinned Stream entry' : item.provenance === 'message_capture' ? 'Stream · message capture' : 'Private Stream entry'}</Text>
-    {editing ? <ConversationEntryEditor conversationId={conversationId} thought={t} onCancel={() => setEditing(false)} onDone={() => { setEditing(false); onChange(); }} /> : <ThoughtCard item={t} subtitle={`by ${t.authorName || 'a participant'}`} onPress={own ? () => setEditing(true) : undefined} onDelete={own ? () => void change(() => api.deleteThought(t.id)) : undefined} onTagPress={onTagPress}
+    {editing ? <ConversationEntryEditor conversationId={conversationId} thought={t} onCancel={() => setEditing(false)} onDone={() => { setEditing(false); onChange(); }} /> : <ThoughtCard item={t} tinted={item.visibility === 'private'}
+      header={controls => <StreamCardHeader name={own ? 'You' : t.authorName || 'A participant'} avatarName={t.authorName || undefined} createdAt={t.createdAt} audience={item.visibility === 'private' ? 'private' : 'shared'} kind={kind} trailing={controls} />}
+      onPress={own ? () => setEditing(true) : undefined} onDelete={own ? () => void change(() => api.deleteThought(t.id)) : undefined} onTagPress={onTagPress}
       onOpenContext={t.sourceMessageId ? () => navigation.navigate('OriginalMessage', { thoughtId: t.id }) : undefined} />}
     {t.hasSourceMessage && !t.sourceMessageId && <Text style={{ color: c.textMetadata, fontSize: 12 }}>Original message unavailable</Text>}
     {(own || (t.pinned && t.pinnedBy === currentUser?.userId)) && !editing && <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => t.pinned ? void change(() => api.unpinThought(t.id, conversationId)) : setShare(t.text)} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 10 }}><Text style={{ color: c.primary }}>{t.pinned ? 'Unpin from chat' : item.visibility === 'private' ? 'Share & pin…' : 'Pin to chat…'}</Text></TouchableOpacity>}

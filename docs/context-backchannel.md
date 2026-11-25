@@ -12,7 +12,7 @@ explicit owner tracking and linking are described in
 The unified app feed and its refresh/cache behavior are described in
 [Conversation content](conversation-content.md). Context mutations remain quiet.
 
-Returning to a conversation with Back keeps its selected Chat or Context lane.
+Returning to a conversation with Back keeps its selected Chat or Stream lane.
 Opening a notification, banner or Context link instead selects its destination
 as described in [the user guide](../README.md#notifications-and-conversation-links).
 

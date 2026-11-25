@@ -329,51 +329,25 @@ describe('ConversationThoughtsScreen parity & search', () => {
     await act(async () => screen!.root.findByType('FlatList' as any).props.onRefresh()); expect(JSON.stringify(screen!.toJSON())).not.toContain('Alice private'); expect(JSON.stringify(screen!.toJSON())).toContain('Access removed');
   });
 
-  it('ChatScreen renders a visible Stream button satisfying the Front-Door Test', async () => {
+  it('ChatScreen offers one visible Stream door, the Chat | Stream switch, satisfying the Front-Door Test', async () => {
     let chatScreen: ReturnType<typeof create> | undefined;
-    mocks.route = {
-      name: 'Chat' as any,
-      params: { conversationId: 'conv-1' } as any,
-    };
+    mocks.route = { name: 'Chat' as any, params: { conversationId: 'conv-1' } as any };
+    mocks.chat.setActiveConversationLane = vi.fn();
+    await act(async () => { chatScreen = create(React.createElement(ChatScreen, { conversationId: 'conv-1' })); });
 
-    await act(async () => {
-      chatScreen = create(React.createElement(ChatScreen, { conversationId: 'conv-1' }));
-    });
+    // The visible word is the tab under the header; one tap selects this chat's Stream.
+    const tab = chatScreen!.root.findByProps({ accessibilityRole: 'tab', accessibilityLabel: 'Stream' });
+    expect(tab.findByProps({ children: 'Stream' })).toBeDefined();
+    await act(async () => { tab.props.onPress(); });
+    expect(mocks.chat.setActiveConversationLane).toHaveBeenCalledWith('context');
 
-    // Check headerRight was set on navigation
-    expect(mocks.navigation.setOptions).toHaveBeenCalledWith(
-      expect.objectContaining({
-        headerRight: expect.any(Function),
-      })
-    );
-
+    // The header no longer repeats it, so the person's name keeps the bar.
     const headerRightFn = mocks.navigation.setOptions.mock.calls[0][0].headerRight;
-    const headerElement = headerRightFn();
     let renderedHeader: ReturnType<typeof create> | undefined;
-    await act(async () => {
-      renderedHeader = create(headerElement);
-    });
+    await act(async () => { renderedHeader = create(headerRightFn()); });
+    expect(renderedHeader!.root.findAllByProps({ accessibilityLabel: 'Stream for this chat' })).toHaveLength(0);
+    expect(renderedHeader!.root.findAllByProps({ accessibilityLabel: 'More conversation actions' }).length).toBeGreaterThan(0);
 
-    // Verify the visible word "Thoughts" exists in the button
-    const thoughtsBtn = renderedHeader!.root.findByProps({ accessibilityLabel: 'Stream for this chat' });
-    expect(thoughtsBtn).toBeDefined();
-
-    const labelText = thoughtsBtn.findByProps({ children: 'Stream' });
-    expect(labelText).toBeDefined();
-
-    // Verify tapping the button navigates to ConversationThoughts
-    await act(async () => {
-      thoughtsBtn.props.onPress();
-    });
-
-    expect(mocks.navigation.navigate).toHaveBeenCalledWith('ConversationThoughts', {
-      conversationId: 'conv-1',
-      title: 'Team Chat',
-    });
-
-    await act(async () => {
-      renderedHeader?.unmount();
-      chatScreen?.unmount();
-    });
+    await act(async () => { renderedHeader?.unmount(); chatScreen?.unmount(); });
   });
 });
