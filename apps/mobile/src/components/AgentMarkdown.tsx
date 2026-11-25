@@ -10,12 +10,14 @@ import { radius, space, type } from '../theme/tokens';
 
 const mono = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'ui-monospace, SFMono-Regular, Menlo, monospace' });
 
-export function AgentMarkdown({ content, color, linkColor, codeBackground, renderText, onLongPress }: {
+export function AgentMarkdown({ content, color, linkColor, codeBackground, renderText, onLongPress, selectable }: {
   content: string; color: string; linkColor: string; codeBackground: string;
   /** Styles plain text runs, e.g. @mentions in a group. */
   renderText?: (text: string) => ReactNode;
   /** The bubble's long-press, so links still open the message menu. */
   onLongPress?: () => void;
+  /** Lets a reader select and copy the text (Stream cards; chat bubbles manage their own). */
+  selectable?: boolean;
 }) {
   const blocks = useMemo(() => parseAgentMarkdown(content), [content]);
 
@@ -39,12 +41,12 @@ export function AgentMarkdown({ content, color, linkColor, codeBackground, rende
       {blocks.map((block, index) => {
         const key = `b${index}`;
         switch (block.t) {
-          case 'p': return <Text key={key} style={[styles.body, { color }]}>{inline(block.c, key)}</Text>;
-          case 'heading': return <Text key={key} style={[styles.body, styles.bold, { color }]} accessibilityRole="header">{inline(block.c, key)}</Text>;
-          case 'quote': return <Text key={key} style={[styles.body, styles.quote, { color, borderLeftColor: codeBackground }]}>{inline(block.c, key)}</Text>;
+          case 'p': return <Text key={key} selectable={selectable} style={[styles.body, { color }]}>{inline(block.c, key)}</Text>;
+          case 'heading': return <Text key={key} selectable={selectable} style={[styles.body, styles.bold, { color }]} accessibilityRole="header">{inline(block.c, key)}</Text>;
+          case 'quote': return <Text key={key} selectable={selectable} style={[styles.body, styles.quote, { color, borderLeftColor: codeBackground }]}>{inline(block.c, key)}</Text>;
           case 'code': return (
             <View key={key} style={[styles.codeBlock, { backgroundColor: codeBackground }]}>
-              <Text style={[styles.codeText, { color }]}>{block.v}</Text>
+              <Text selectable={selectable} style={[styles.codeText, { color }]}>{block.v}</Text>
             </View>
           );
           case 'list': return (
@@ -52,7 +54,7 @@ export function AgentMarkdown({ content, color, linkColor, codeBackground, rende
               {block.items.map((item, i) => (
                 <View key={`${key}.${i}`} style={styles.item}>
                   <Text style={[styles.body, styles.marker, { color }]}>{block.ordered ? `${block.start + i}.` : '•'}</Text>
-                  <Text style={[styles.body, styles.itemText, { color }]}>{inline(item, `${key}.${i}`)}</Text>
+                  <Text selectable={selectable} style={[styles.body, styles.itemText, { color }]}>{inline(item, `${key}.${i}`)}</Text>
                 </View>
               ))}
             </View>

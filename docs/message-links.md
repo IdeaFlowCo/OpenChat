@@ -25,7 +25,22 @@ non-link message content opens message actions. The labeled More button also
 works with keyboard and voice navigation. On native, a link tap opens the URL;
 a long press opens message actions without subsequently opening the URL.
 
+## Links in the chat's Stream
+
+Back channel posts and Stream entries open web addresses by the same rules and
+the same link component as chat bubbles (`components/StreamText.tsx`,
+`utils/streamText.ts`). An agent's Back channel post renders as Markdown, as an
+agent's chat message does; a person's post keeps its exact characters. A
+collapsed Stream entry is one plain line; expand it to use its links. Holding a
+link opens the card's actions rather than the address.
+
+A file location on someone's own computer (`/Users/…`, `/home/…`, `~/…`,
+`C:\…`) is shown in monospace as a path and is never a link: it cannot open
+for a reader, and `file:` destinations stay blocked.
+
 ## Verification
+
+For the Stream: `npx vitest run test/streamLinks.mobile.test.ts --maxWorkers=1`.
 
 From `apps/server`, run:
 

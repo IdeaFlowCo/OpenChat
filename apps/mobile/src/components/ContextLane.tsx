@@ -16,6 +16,8 @@ import { Avatar } from './Avatar';
 import { type, radius, space } from '../theme/tokens';
 import { formatRelativeTime } from './ThoughtCard';
 import { ContextIntentionControls } from './ContextIntentionControls';
+import { StreamText } from './StreamText';
+import { AgentMarkdown } from './AgentMarkdown';
 
 /** Group loaded replies below their root, while retaining orphan previews across pages. */
 export function contextThreads(posts: ContextPost[]): { post: ContextPost; reply: boolean }[] {
@@ -105,7 +107,10 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
         </View>}
       </View>
       {item.replyToId && <View style={[styles.quote, { borderLeftColor: c.border }]}><Text numberOfLines={2} style={{ color: c.textMetadata, ...type.label }}>{parent?.isDeleted ? 'Reply to a deleted post' : parent ? `Reply to ${parent.author?.name || 'a participant'}: ${parent.text}` : 'Reply to an earlier post'}</Text></View>}
-      <Text selectable style={{ color: item.isDeleted ? c.textMetadata : c.textPrimary, ...type.body, marginTop: 8 }}>{item.isDeleted ? 'Post deleted' : item.text}</Text>
+      {item.isDeleted ? <Text style={{ color: c.textMetadata, ...type.body, marginTop: 8 }}>Post deleted</Text>
+        // An agent's post is Markdown, as in chat; a person's post keeps its exact characters. Links open in both.
+        : item.agent ? <View style={{ marginTop: 8 }}><AgentMarkdown content={item.text} color={c.textPrimary} linkColor={c.primary} codeBackground={c.surfaceElevated} selectable onLongPress={() => setActionsFor(item.id)} /></View>
+        : <StreamText content={item.text} color={c.textPrimary} linkColor={c.primary} pathBackground={c.surfaceElevated} style={{ marginTop: 8 }} onLongPress={() => setActionsFor(item.id)} />}
       {!item.isDeleted && button(actionsFor === item.id ? 'Hide actions' : 'More', () => setActionsFor(actionsFor === item.id ? undefined : item.id))}
       {!item.isDeleted && actionsFor === item.id && <View style={styles.actions}>
         {button('Reply', () => { setReplyTo(item); setEditing(undefined); })}
