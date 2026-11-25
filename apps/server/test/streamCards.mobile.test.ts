@@ -74,6 +74,22 @@ describe('Stream cards say who can read them', () => {
     const [byAgent, byPerson] = cards();
     expect(byAgent).toContain('via Workshop assistant · Agent'); expect(byPerson).not.toContain('Agent');
   });
+  it('offers exact time as a working button on posts, and as plain text where nothing would happen', async () => {
+    await lane([post('p1', 'note'), entry('t1', 'conversation', 'message_capture')]);
+    const buttons = tree!.root.findAll(node => node.type === 'Pressable' && String(node.props.accessibilityLabel).startsWith('Show exact time:'));
+    expect(buttons).toHaveLength(1);
+    await act(async () => { buttons[0]!.props.onPress(); });
+    expect(flatten(tree!.toJSON())).toContain(new Date(when).toLocaleString());
+  });
+  it('opens and closes a post’s actions from its More button', async () => {
+    await lane([post('p1', 'note')]);
+    const more = () => tree!.root.findAll(node => node.type === 'TouchableOpacity' && ['More', 'Hide actions'].includes(node.props.accessibilityLabel))[0]!;
+    expect(more().props.accessibilityState).toEqual({ expanded: false }); expect(cards()[0]).not.toContain('Reply');
+    await act(async () => { more().props.onPress(); });
+    expect(more().props.accessibilityLabel).toBe('Hide actions'); expect(more().props.accessibilityState).toEqual({ expanded: true }); expect(cards()[0]).toContain('Reply');
+    await act(async () => { more().props.onPress(); });
+    expect(cards()[0]).not.toContain('Reply');
+  });
   it('keeps a deleted post free of actions', async () => {
     await lane([post('gone', 'note', { isDeleted: true })]);
     expect(cards()[0]).toContain('Post deleted'); expect(cards()[0]).not.toContain('More');

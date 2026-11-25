@@ -91,7 +91,7 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
       <StreamCardHeader name={item.author?.name || (own ? 'You' : 'Chat participant')} avatarUrl={item.author?.avatarUrl} agentName={item.agent?.name}
         createdAt={item.createdAt} edited={item.revision > 1} audience="shared" kind={item.kind === 'ask' ? 'Ask' : item.kind === 'offer' ? 'Offer' : 'Note'}
         onShowExactTime={text => setFeedback({ text, error: false })}
-        trailing={item.isDeleted ? null : <TouchableOpacity accessibilityRole="button" accessibilityLabel={actionsFor === item.id ? 'Hide actions' : 'More'} accessibilityState={{ expanded: actionsFor === item.id }} disabled={!!busy} hitSlop={12}
+        trailing={item.isDeleted ? null : <TouchableOpacity accessibilityRole="button" accessibilityLabel={actionsFor === item.id ? 'Hide actions' : 'More'} accessibilityState={{ expanded: actionsFor === item.id }} disabled={!!busy} hitSlop={14}
           onPress={() => setActionsFor(actionsFor === item.id ? undefined : item.id)}><Text style={[type.label, { color: c.primary }]}>{actionsFor === item.id ? 'Hide actions' : 'More'}</Text></TouchableOpacity>} />
       {item.replyToId && <View style={[styles.quote, { borderLeftColor: c.border }]}><Text numberOfLines={2} style={{ color: c.textMetadata, ...type.label }}>{parent?.isDeleted ? 'Reply to a deleted post' : parent ? `Reply to ${parent.author?.name || 'a participant'}: ${parent.text}` : 'Reply to an earlier post'}</Text></View>}
       {item.isDeleted ? <Text style={{ color: c.textMetadata, ...type.body, marginTop: 8 }}>Post deleted</Text>
@@ -119,7 +119,7 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
       <View style={[styles.search, { backgroundColor: c.surface, borderColor: c.border }]}>
         <AppIcon name="search" color={c.textMuted} size={16} />
         <TextInput accessibilityLabel="Search conversation content" placeholder="Search this chat’s Stream" placeholderTextColor={c.textMuted} value={search} onChangeText={feed.chooseSearch} style={[type.body, styles.searchInput, { color: c.textPrimary }]} />
-        {search ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear search" hitSlop={12} onPress={() => feed.chooseSearch('')}><Text style={[type.label, { color: c.primary }]}>Clear search</Text></TouchableOpacity> : null}
+        {search ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear search" hitSlop={14} onPress={() => feed.chooseSearch('')}><Text style={[type.label, { color: c.primary }]}>Clear search</Text></TouchableOpacity> : null}
       </View>
       <View style={styles.filters}>
         {(feed.contextAvailable === false ? ['stream'] as const : ['all', 'context', 'stream'] as const).map(filter => <Chip key={filter}

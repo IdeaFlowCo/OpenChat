@@ -48,9 +48,10 @@ export function StreamCardHeader({ name, avatarName, avatarUrl, agentName, creat
       <Text numberOfLines={1} style={[type.label, styles.name, { color: c.textPrimary }]}>{name}</Text>
       {agentName ? <Text numberOfLines={1} style={[type.meta, styles.agent, { color: c.textMetadata }]}>via {agentName} · Agent</Text> : null}
       <View style={styles.spacer} />
-      <View style={{ zIndex: hovered ? 1 : 0 }}>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Show exact time: ${exact}`} hitSlop={12}
-          onPress={() => onShowExactTime?.(exact)}
+      {/* Without a handler the time is plain text: a button that does nothing is worse than none. */}
+      {onShowExactTime ? <View style={{ zIndex: hovered ? 1 : 0 }}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Show exact time: ${exact}`} hitSlop={14}
+          onPress={() => onShowExactTime(exact)}
           onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)}
           onFocus={() => setHovered(true)} onBlur={() => setHovered(false)}
           style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>
@@ -59,7 +60,7 @@ export function StreamCardHeader({ name, avatarName, avatarUrl, agentName, creat
         {hovered && <View pointerEvents="none" style={[styles.tooltip, { backgroundColor: c.background, borderColor: c.border }]}>
           <Text role="tooltip" numberOfLines={1} style={[type.meta, { color: c.textPrimary }]}>{exact}</Text>
         </View>}
-      </View>
+      </View> : <Text accessibilityLabel={exact} style={[type.meta, { color: c.textMetadata }]}>{formatRelativeTime(createdAt)}</Text>}
       {trailing}
     </View>
     <View style={styles.audience}>
