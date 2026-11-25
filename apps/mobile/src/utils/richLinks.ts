@@ -44,10 +44,10 @@ const UNSAFE_IN_PATH = { test: (text: string) => INVISIBLE.test(text) || SHELL_A
 
 /**
  * Text that goes on, after a space, to a flag, an assignment or a second path is a command
- * ("/tmp/x -o /tmp/y", "/usr/bin/env X=1 /tmp/x.sh"), not one path. Any dash after a space
- * counts, as on the Dashboard, so "My Notes - Draft" is left as typed too.
+ * ("/tmp/x -o /tmp/y", "/usr/bin/env X=1 /tmp/x.sh"), not one path. "My Notes - Draft" is fine:
+ * the dash must be followed by a character to count as a flag. Agreed with the Dashboard.
  */
-const LOOKS_LIKE_COMMAND = /\s(?:-|[\/~]|[A-Za-z]:\\|\S*=)/;
+const LOOKS_LIKE_COMMAND = /\s(?:-\S|[\/~]|[A-Za-z]:\\|\S*=)/;
 /** Whether text may be offered as a path to copy. */
 const copyable = (path: string) => !UNSAFE_IN_PATH.test(path) && !LOOKS_LIKE_COMMAND.test(path);
 

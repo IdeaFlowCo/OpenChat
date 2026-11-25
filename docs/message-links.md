@@ -56,9 +56,10 @@ escape is a literal character of the name (`file:///tmp/100%done.txt`). A file
 link labelled with its own address shows the decoded path. A `file:` address naming another machine
 (`file://server/share/…`) is not a local path and stays as typed, as does any
 path that would carry a control, invisible or direction-changing character or
-one of `; | & $ \` < > " ! { }`, or that goes on after a space to a dash, an
-assignment or a second path (`[docs](/tmp/x -o /tmp/y)` copies nothing; neither
-does a name like `2024 - Taxes`). A line
+one of `; | & $ \` < > " ! { }`, or that goes on after a space to a flag, an
+assignment or a second path (`[docs](/tmp/x -o /tmp/y)` copies nothing; a name
+like `2024 - Taxes` is fine, since a dash is a flag only when a character
+follows it). A line
 that is nothing but a bare path keeps its spaces: one that ends in a separator
 or in an extension on a name with few spaces (`/Users/sam/my notes/plan.html`),
 or that reads like a name rather than a sentence (`/Users/sam/My Projects/Index

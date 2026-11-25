@@ -91,10 +91,11 @@ describe('link rules', () => {
     ['/Users/x is where files go.', [['path', '/Users/x', '/Users/x'], ['text', ' is where files go.']]],
     ['/tmp/build is where I left v2.0', [['path', '/tmp/build', '/tmp/build'], ['text', ' is where I left v2.0']]],
     ['/Users/sam/Notes And More, see below', [['path', '/Users/sam/Notes', '/Users/sam/Notes'], ['text', ' And More, see below']]],
-    // Any dash after a space counts as option-like, so these names are not offered whole.
-    ['[taxes](/Users/sam/2024 - Taxes/summary.pdf)', [['text', '[taxes](/Users/sam/2024 - Taxes/summary.pdf)']]],
-    ['/Users/sam/My Notes - Draft/Plan Final.html', [['path', '/Users/sam/My', '/Users/sam/My'], ['text', ' Notes - Draft/Plan Final.html']]],
-    ['[taxes](/Users/sam/2024-Taxes/summary.pdf)', [['path', 'taxes', '/Users/sam/2024-Taxes/summary.pdf']]],
+    // A dash counts as a flag only when a character follows it, so names with " - " are fine.
+    ['[taxes](/Users/sam/2024 - Taxes/summary.pdf)', [['path', 'taxes', '/Users/sam/2024 - Taxes/summary.pdf']]],
+    ['/Users/sam/My Notes - Draft/Plan Final.html', [['path', '/Users/sam/My Notes - Draft/Plan Final.html', '/Users/sam/My Notes - Draft/Plan Final.html']]],
+    ['/usr/bin/sudo -S Run /etc/x.sh', [['path', '/usr/bin/sudo', '/usr/bin/sudo'], ['text', ' -S Run '], ['path', '/etc/x.sh', '/etc/x.sh']]],
+    ['[docs](/tmp/x -rf /)', [['text', '[docs](/tmp/x -rf /)']]],
     // A line that goes on to a flag, an assignment or a second path is a command: each path stands alone.
     ['/tmp/a -o /tmp/b', [['path', '/tmp/a', '/tmp/a'], ['text', ' -o '], ['path', '/tmp/b', '/tmp/b']]],
     ['/usr/bin/env FOO=1 /tmp/x.sh', [['path', '/usr/bin/env', '/usr/bin/env'], ['text', ' FOO=1 '], ['path', '/tmp/x.sh', '/tmp/x.sh']]],
