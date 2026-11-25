@@ -29,22 +29,51 @@ Link preview cards sit below the bubble on their own opaque surface, the same
 for sent and received messages, so they read on the conversation background in
 both themes.
 
-## Links in the chat's Stream
+## One set of rules everywhere
 
-Back channel posts and Stream entries open web addresses by the same rules and
-the same link component as chat bubbles (`components/StreamText.tsx`,
-`utils/streamText.ts`). An agent's Back channel post renders as Markdown, as an
-agent's chat message does; a person's post keeps its exact characters. A
-collapsed Stream entry is one plain line; expand it to use its links. Holding a
-link opens the card's actions rather than the address.
+Chat bubbles, Back channel posts, Stream entries and agent Markdown share one
+tokenizer, `apps/mobile/src/utils/richLinks.ts`. Scanning left to right:
 
-A file location on someone's own computer (`/Users/…`, `/home/…`, `~/…`,
-`C:\…`) is shown in monospace as a path and is never a link: it cannot open
-for a reader, and `file:` destinations stay blocked.
+| Written as | Shown as |
+|---|---|
+| `[label](https://…)`, `[label](www.…)`, `[label](bare.domain/…)` | A link showing `label` |
+| `https://…`, `www.…`, a bare domain | A link showing the address |
+| `[label](file:///…)`, `[label](/Users/…)` | A **path** showing 📁 `label` |
+| `file:///…`, or a bare path under `/Users/`, `/home/`, `/Volumes/`, `~/`, `C:\` and a few system roots | A **path** showing 📁 and the decoded path |
+| `[label](javascript:…)`, `data:`, `vbscript:`, `intent:`, any other scheme, an address with credentials, a malformed address | Exactly what was typed |
+
+A person's message gets links by these rules and no other formatting; an
+agent's message is also rendered as Markdown. Joining every part's source text
+gives the original back, so no character is ever lost.
+
+**Paths.** A browser will not open a `file:` address from a web page, so a
+path is never an anchor. It is a button: pressing it copies the path and shows
+"Path copied: paste in Finder (⇧⌘G)". The full path is the tooltip on web and
+the screen-reader label everywhere. `file:///Users/a/My%20Notes/x.html` and
+`file://localhost/…` decode to `/Users/a/My Notes/x.html`;
+`file:///C:/Users/a/x` to `C:/Users/a/x`; another host to `//host/path`. A
+line that is nothing but a bare path keeps its spaces; inside a sentence a
+bare path ends at the next space. The desktop shell has no command for opening
+a local path, so it copies too. If one is added, it should reveal the item in
+the file manager rather than open it: opening a path chosen by whoever wrote
+the message could run a program.
+
+**Named links.** `[label](address)` can show one name and go somewhere else.
+On web, hovering shows the real address as for any link; **Links · Open or
+copy** in the message actions lists the address under the label.
+
+**Show links as typed** (Settings › Appearance, off by default, stored on the
+device) shows message and Stream text exactly as written, with nothing linked.
+
+A collapsed Stream entry is one plain line; expand it to use its links.
+Holding a link or a path opens the card's or message's actions.
+
+Link preview cards sit below the bubble on their own opaque surface, the same
+for sent and received messages.
 
 ## Verification
 
-For the Stream: `npx vitest run test/streamLinks.mobile.test.ts --maxWorkers=1`.
+For the shared rules and the Stream: `npx vitest run test/richLinks.mobile.test.ts test/streamLinks.mobile.test.ts --maxWorkers=1`.
 
 From `apps/server`, run:
 

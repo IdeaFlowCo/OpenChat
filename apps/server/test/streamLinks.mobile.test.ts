@@ -6,9 +6,9 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { filePaths, streamTextParts } from '../../mobile/src/utils/streamText.js';
+import { filePaths, linkParts } from '../../mobile/src/utils/richLinks.js';
 
-const os = vi.hoisted(() => ({ platform: 'ios', open: vi.fn(), content: vi.fn(), collapsed: false }));
+const os = vi.hoisted(() => ({ platform: 'ios', open: vi.fn(), content: vi.fn(), collapsed: false, copy: vi.fn(), notice: vi.fn() }));
 vi.mock('react-native', () => ({
   Platform: { get OS() { return os.platform; }, select: (values: any) => values[os.platform] ?? values.default },
   Alert: { alert: vi.fn() }, Linking: { openURL: os.open },
@@ -17,7 +17,9 @@ vi.mock('react-native', () => ({
   Modal: () => null, Pressable: 'Pressable', View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', TextInput: 'TextInput', ActivityIndicator: 'ActivityIndicator',
   FlatList: ({ data, renderItem }: any) => React.createElement('List', {}, data.map((item: any) => React.createElement(React.Fragment, { key: item.id }, renderItem({ item })))),
 }));
-vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn() }));
+vi.mock('expo-clipboard', () => ({ setStringAsync: os.copy }));
+vi.mock('@react-native-async-storage/async-storage', () => ({ default: { getItem: async () => null, setItem: async () => undefined } }));
+vi.mock('../../mobile/src/services/notice', () => ({ showNotice: os.notice }));
 vi.mock('@react-navigation/native', () => ({ useFocusEffect: (fn: any) => React.useEffect(fn, [fn]), useNavigation: () => ({ navigate: vi.fn() }) }));
 vi.mock('../../mobile/src/components/Avatar', () => ({ Avatar: () => null }));
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
@@ -58,15 +60,15 @@ const lane = async (items: unknown[]) => {
   await act(async () => { tree = create(React.createElement(ContextLane, { conversationId: 'room' })); });
   await act(async () => { await Promise.resolve(); });
 };
-beforeEach(() => { vi.clearAllMocks(); os.platform = 'ios'; os.collapsed = false; os.open.mockResolvedValue(undefined); });
+beforeEach(() => { vi.clearAllMocks(); os.platform = 'ios'; os.collapsed = false; os.open.mockResolvedValue(undefined); os.copy.mockResolvedValue(true); });
 afterEach(async () => { if (tree) await act(async () => tree!.unmount()); tree = undefined; });
 
 describe('Stream text parts', () => {
   it('finds the web address and the local file in a reference note, and loses no character', () => {
-    const parts = streamTextParts(NOTE);
-    expect(parts.filter(p => p.t === 'link')).toEqual([expect.objectContaining({ text: 'https://signup.example.org/', url: 'https://signup.example.org/' })]);
-    expect(parts.filter(p => p.t === 'path').map(p => p.text)).toEqual([PATH]);
-    expect(parts.map(p => p.text).join('')).toBe(NOTE);
+    const parts = linkParts(NOTE);
+    expect(parts.filter(p => p.t === 'link')).toEqual([expect.objectContaining({ label: 'https://signup.example.org/', url: 'https://signup.example.org/' })]);
+    expect(parts.flatMap(p => p.t === 'path' ? [p.path] : [])).toEqual([PATH]);
+    expect(parts.map(p => p.source).join('')).toBe(NOTE);
   });
   it.each([
     ['Saved in ~/notes/plan.md, see also (/home/sam/a b.txt) and C:\\Users\\sam\\plan.docx.', ['~/notes/plan.md', '/home/sam/a', 'C:\\Users\\sam\\plan.docx']],
@@ -76,16 +78,16 @@ describe('Stream text parts', () => {
     ['and/or /shrug 3/4 2026/11/20 either/or/Users/x https://example.org/Users/sam/file a/home/b ~ / ~/', []],
   ])('treats only device file locations as paths: %s', (content, expected) => {
     expect(filePaths(content).map(p => content.slice(p.start, p.end))).toEqual(expected);
-    expect(streamTextParts(content).map(p => p.text).join('')).toBe(content);
+    expect(linkParts(content).map(p => p.source).join('')).toBe(content);
   });
   it('never turns a file location or an unsafe scheme into a link', () => {
     const content = 'file:///Users/sam/a.html javascript:alert(1) /Users/sam/site.com/index.html';
-    const parts = streamTextParts(content);
+    const parts = linkParts(content);
     expect(parts.filter(p => p.t === 'link')).toEqual([]);
-    expect(parts.filter(p => p.t === 'path').map(p => p.text)).toEqual(['/Users/sam/site.com/index.html']);
+    expect(parts.flatMap(p => p.t === 'path' ? [p.path] : [])).toEqual(['/Users/sam/a.html', '/Users/sam/site.com/index.html']);
   });
   it('stays linear on a long run of slashes and dots', () => {
-    const started = Date.now(); streamTextParts(('/Users/' + 'a/'.repeat(4000) + ' ').repeat(5) + 'x.'.repeat(5000));
+    const started = Date.now(); linkParts(('/Users/' + 'a/'.repeat(4000) + ' ').repeat(5) + 'x.'.repeat(5000));
     expect(Date.now() - started).toBeLessThan(1000);
   });
 });
@@ -96,9 +98,13 @@ describe('Back channel posts', () => {
     expect(links().map(node => flatten(node.props.children))).toEqual(['https://signup.example.org/']);
     await act(async () => { links()[0]!.props.onPressIn(); links()[0]!.props.onPress({ stopPropagation: vi.fn() }); });
     expect(os.open).toHaveBeenCalledWith('https://signup.example.org/');
-    const path = tree!.root.findByProps({ accessibilityLabel: `File path, not a link: ${PATH}` });
-    expect(path.props.onPress).toBeUndefined();
-    expect(flatten(tree!.toJSON())).toContain(NOTE);
+    // The file on the author's laptop is something to copy, never something to open.
+    const path = tree!.root.findAll(node => node.type === 'Text' && node.props.accessibilityLabel === `Copy file path: ${PATH}`)[0]!;
+    expect(path.props.href).toBeUndefined(); os.open.mockClear();
+    await act(async () => { path.props.onPress({ stopPropagation: vi.fn() }); });
+    expect(os.copy).toHaveBeenCalledWith(PATH); expect(os.open).not.toHaveBeenCalled();
+    expect(os.notice).toHaveBeenCalledWith('Path copied: paste in Finder (⇧⌘G)');
+    expect(flatten(tree!.toJSON()).replace('📁\u00a0', '')).toContain(NOTE);
   });
   it('holding a link opens the post actions instead of the address', async () => {
     await lane([post('p1', 'See https://example.org/a')]);
@@ -106,12 +112,12 @@ describe('Back channel posts', () => {
     expect(os.open).not.toHaveBeenCalled();
     expect(flatten(tree!.toJSON())).toContain('Hide actions');
   });
-  it('renders an agent’s post as Markdown with working links, and keeps a person’s characters exact', async () => {
+  it('renders an agent’s post as Markdown; a person’s post gets links by the same rules but no other formatting', async () => {
     const text = 'Who can review the **speaker list**? See [the draft](https://docs.example.com/speakers) or www.example.net/agenda.';
     await lane([post('agent', text, { agent: { id: 'a', name: 'Workshop assistant' } }), post('person', text)]);
     const all = flatten(tree!.toJSON());
     expect(all).toContain('Who can review the speaker list? See the draft or www.example.net/agenda.');
-    expect(all).toContain(text);
+    expect(all).toContain('Who can review the **speaker list**? See the draft or www.example.net/agenda.');
     // An agent's post stays selectable, as a person's is.
     expect(tree!.root.findAll(node => node.type === 'Text' && node.props.selectable === true).length).toBeGreaterThanOrEqual(2);
     await act(async () => { for (const link of links()) { link.props.onPressIn?.(); link.props.onPress({ stopPropagation: vi.fn() }); } });

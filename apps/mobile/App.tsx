@@ -109,6 +109,7 @@ import { AppIcon, AppIconName } from './src/components/AppIcon';
 import { serif } from './src/theme/typography';
 import { getColors } from './src/theme/colors';
 import { OfflineBanner } from './src/components/OfflineBanner';
+import { GlobalNotice } from './src/components/GlobalNotice';
 import { InAppMessageBanner } from './src/components/InAppMessageBanner';
 import { PushSoftAsk } from './src/components/PushSoftAsk';
 import { GlobalRecordingBar } from './src/components/GlobalRecordingBar';
@@ -716,6 +717,7 @@ export function Shell() {
       />
       {isUnlinkedEmbed() && <UnlinkedSessionGate active />}
       <OfflineBanner />
+      <GlobalNotice />
       {!isUnlinkedEmbed() && <PushSoftAsk isAuthed={isAuthed && onboardingDone === true} />}
       <EntryRouter />
       <ComposeRouter ready={isAuthed && onboardingChecked === true} />

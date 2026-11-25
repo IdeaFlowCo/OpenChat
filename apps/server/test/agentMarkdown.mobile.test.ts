@@ -7,6 +7,8 @@ vi.mock('react-native', async () => {
   const host = (name: string) => ({ children, ...props }: any) => React.createElement(name, props, children);
   return { Platform: { OS: 'ios', select: (v: any) => v.ios ?? v.default }, StyleSheet: { create: (s: unknown) => s }, Linking: { openURL }, Text: host('Text'), View: host('View') };
 });
+vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn(async () => true) }));
+vi.mock('@react-native-async-storage/async-storage', () => ({ default: { getItem: async () => null, setItem: async () => undefined } }));
 import { AgentMarkdown } from '../../mobile/src/components/AgentMarkdown.js';
 const textOf = (node: any): string => node.children.map((c: any) => (typeof c === 'string' ? c : textOf(c))).join('');
 

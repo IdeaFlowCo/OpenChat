@@ -1,6 +1,9 @@
-import React, { useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { Alert, Linking, Platform, Text } from 'react-native';
-import { messageLinks, safeMessageUrl } from '../utils/messageLinks';
+import { safeMessageUrl } from '../utils/messageLinks';
+import { linkParts } from '../utils/richLinks';
+import { useLinksAsTyped } from '../services/linkDisplay';
+import { PathChip } from './PathChip';
 import { type } from '../theme/tokens';
 
 export async function openMessageLink(url: string): Promise<void> {
@@ -35,16 +38,15 @@ export function MessageText({ content, color, renderPlain, onLongPress }: {
   content: string; color: string; renderPlain?: (text: string) => React.ReactNode;
   onLongPress: () => void;
 }) {
-  const parts: React.ReactNode[] = [];
-  let cursor = 0;
-  for (const link of messageLinks(content)) {
-    if (link.start > cursor) parts.push(<React.Fragment key={`text-${cursor}`}>
-      {renderPlain ? renderPlain(content.slice(cursor, link.start)) : content.slice(cursor, link.start)}
-    </React.Fragment>);
-    parts.push(<InlineLink key={`link-${link.start}`} {...link} color={color} onLongPress={onLongPress} />);
-    cursor = link.end;
-  }
-  const rest = content.slice(cursor);
-  parts.push(<React.Fragment key={`text-${cursor}`}>{renderPlain ? renderPlain(rest) : rest}</React.Fragment>);
-  return <Text selectable style={{ ...type.bubble, color }}>{parts}</Text>;
+  const [asTyped] = useLinksAsTyped();
+  const parts = useMemo(() => asTyped ? [{ t: 'text' as const, source: content }] : linkParts(content), [content, asTyped]);
+  const plain = (text: string) => renderPlain ? renderPlain(text) : text;
+  return <Text selectable style={{ ...type.bubble, color }}>
+    {parts.map((part, index) => part.t === 'link'
+      ? <InlineLink key={`link-${part.start}`} text={part.label} url={part.url} color={color} onLongPress={onLongPress} />
+      : part.t === 'path'
+        ? <PathChip key={`path-${part.start}`} label={part.label} path={part.path} color={color} background="transparent" onLongPress={onLongPress} />
+        : <React.Fragment key={`text-${index}`}>{plain(part.source)}</React.Fragment>)}
+    {parts.length ? null : plain('')}
+  </Text>;
 }

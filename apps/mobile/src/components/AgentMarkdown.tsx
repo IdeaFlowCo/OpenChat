@@ -7,6 +7,8 @@ import { Fragment, useMemo, type ReactNode } from 'react';
 import { Linking, Platform, StyleSheet, Text, View } from 'react-native';
 import { parseAgentMarkdown, type Inline } from '../utils/agentMarkdown';
 import { radius, space, type } from '../theme/tokens';
+import { PathChip } from './PathChip';
+import { useLinksAsTyped } from '../services/linkDisplay';
 
 const mono = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'ui-monospace, SFMono-Regular, Menlo, monospace' });
 
@@ -19,7 +21,9 @@ export function AgentMarkdown({ content, color, linkColor, codeBackground, rende
   /** Lets a reader select and copy the text (Stream cards; chat bubbles manage their own). */
   selectable?: boolean;
 }) {
-  const blocks = useMemo(() => parseAgentMarkdown(content), [content]);
+  const [asTyped] = useLinksAsTyped();
+  // "Show links as typed" shows an agent's message as written, like anyone else's.
+  const blocks = useMemo(() => asTyped ? [] : parseAgentMarkdown(content), [content, asTyped]);
 
   const inline = (nodes: Inline[], key = 'i'): ReactNode => nodes.map((node, index) => {
     const k = `${key}.${index}`;
@@ -28,6 +32,7 @@ export function AgentMarkdown({ content, color, linkColor, codeBackground, rende
       case 'bold': return <Text key={k} style={styles.bold}>{inline(node.c, k)}</Text>;
       case 'italic': return <Text key={k} style={styles.italic}>{inline(node.c, k)}</Text>;
       case 'code': return <Text key={k} style={[styles.code, { backgroundColor: codeBackground }]}>{node.v}</Text>;
+      case 'path': return <PathChip key={k} label={node.label} path={node.path} color={linkColor} background={codeBackground} onLongPress={onLongPress} />;
       case 'link': return (
         <Text key={k} accessibilityRole="link" style={[styles.link, { color: linkColor }]} onPress={() => { void Linking.openURL(node.href).catch(() => {}); }} onLongPress={onLongPress}>
           {inline(node.c, k)}
@@ -36,6 +41,7 @@ export function AgentMarkdown({ content, color, linkColor, codeBackground, rende
     }
   });
 
+  if (asTyped) return <Text selectable={selectable} style={[styles.body, { color }]}>{content}</Text>;
   return (
     <View style={styles.root}>
       {blocks.map((block, index) => {

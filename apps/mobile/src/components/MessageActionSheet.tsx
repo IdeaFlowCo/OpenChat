@@ -1,5 +1,5 @@
 import { MessageLinkActions } from './MessageLinkActions';
-import { messageLinks } from '../utils/messageLinks';
+import { webLinks } from '../utils/richLinks';
 /**
  * MessageActionSheet — modal bottom sheet that appears on long-press of a
  * message bubble in ChatScreen.
@@ -453,7 +453,7 @@ export function MessageActionSheet({
             {/* Inline emoji reaction picker — always shown (OpenChat-7bd) */}
             <ReactionPicker myReactions={myReactions} onPick={handleReactPick} />
 
-            {!message.deletedAt && messageLinks(message.content).length > 0 && (
+            {!message.deletedAt && webLinks(message.content).length > 0 && (
               <TouchableOpacity accessibilityRole="button" style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
                 onPress={() => setSubSheet('links')}>
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Links · Open or copy</Text>
