@@ -327,9 +327,10 @@ export function ChatScreen({
         ? ((routeRaw.params as { conversationId?: string } | undefined)?.conversationId ?? '')
         : '');
   const laneProp = routeRaw.name === 'Chat' ? ((routeRaw.params as any)?.lane as 'chat' | 'context' | undefined) : undefined;
-  const { scheme } = useTheme();
-  // Stable per scheme, so the memoized message rows below don't re-render.
-  const c = useMemo(() => getColors(scheme), [scheme]);
+  const { scheme, look } = useTheme();
+  // Stable per scheme and palette (getColors reads the palette chosen in Appearance),
+  // so the memoized message rows below do not re-render.
+  const c = useMemo(() => getColors(scheme), [scheme, look]);
   const { enhanced } = useSocialExperience();
   // Dynamic keyboard offset for KeyboardAvoidingView. This is the distance
   // from the top of the screen to the top of the KAV — i.e. the height of

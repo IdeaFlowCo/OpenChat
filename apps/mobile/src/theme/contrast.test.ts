@@ -6,7 +6,8 @@
  * These assertions stop either token from silently drifting back under target.
  */
 import { describe, expect, it } from 'vitest';
-import { palette } from './palette';
+import { palettes } from './palette';
+import { resolveLook } from './look';
 import { roles } from './tokens';
 
 const NORMAL_TEXT_MIN = 4.5;
@@ -52,8 +53,19 @@ describe('contrast helper', () => {
   });
 });
 
-describe.each(['light', 'dark'] as const)('%s theme contrast', scheme => {
-  const c = palette[scheme];
+describe('look selection', () => {
+  it('defaults to Slate and preserves an explicit Paper choice', () => {
+    expect(resolveLook('', 'paper')).toEqual({ look: 'paper', remember: false });
+    expect(resolveLook('', null)).toEqual({ look: 'slate', remember: false });
+    expect(resolveLook('?experience=simple', 'slate')).toEqual({ look: 'slate', remember: false });
+    expect(resolveLook('?look=slate', null)).toEqual({ look: 'slate', remember: true });
+    expect(resolveLook('?a=1&look=paper', 'slate')).toEqual({ look: 'paper', remember: true });
+    expect(resolveLook('?look=neon', 'bogus')).toEqual({ look: 'slate', remember: false });
+  });
+});
+
+describe.each([['paper', 'light'], ['paper', 'dark'], ['slate', 'light'], ['slate', 'dark']] as const)('%s %s theme contrast', (look, scheme) => {
+  const c = palettes[look][scheme];
 
   it('renders content on the accent above the normal-text threshold', () => {
     expect(contrastRatio(c.onPrimary, c.primary)).toBeGreaterThanOrEqual(NORMAL_TEXT_MIN);
@@ -76,6 +88,13 @@ describe.each(['light', 'dark'] as const)('%s theme contrast', scheme => {
     for (const ground of [c.background, c.surface] as const) {
       expect(contrastRatio(r.onAccentSoft, flatten(r.accentSoft, ground))).toBeGreaterThanOrEqual(NORMAL_TEXT_MIN);
     }
+  });
+
+  it('reads the private layer on every ground and on its own tint', () => {
+    for (const ground of [c.background, c.surface, c.surfaceElevated, c.privateSoft] as const) {
+      expect(contrastRatio(c.privateInk, ground)).toBeGreaterThanOrEqual(NORMAL_TEXT_MIN);
+    }
+    expect(contrastRatio(c.textPrimary, c.privateSoft)).toBeGreaterThanOrEqual(7);
   });
 
   it('reads own-bubble text against its own fill', () => {

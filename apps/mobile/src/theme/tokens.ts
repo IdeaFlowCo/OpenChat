@@ -71,6 +71,8 @@ export const sheetShadow = {
  * - `agent` marks agent-authored content (ochre, no new hue); `ask` and
  *   `offer` colour those eyebrows.
  * - `input` sits darker than the card it is on, never lighter.
+ * - `private` marks what only the viewer can see. It is its own hue so a
+ *   private item can never be mistaken for something said in the chat.
  */
 export function roles(c: Colors) {
   return {
@@ -93,6 +95,9 @@ export function roles(c: Colors) {
     offer: c.presenceAvailable,
     danger: c.danger,
     dangerSoft: c.dangerMuted,
+    /** The viewer-only layer (private to-dos). Always paired with a lock and the words "Only you". */
+    private: c.privateInk,
+    privateSoft: c.privateSoft,
   };
 }
 export type Roles = ReturnType<typeof roles>;

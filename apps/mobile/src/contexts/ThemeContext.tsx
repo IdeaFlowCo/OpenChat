@@ -1,3 +1,5 @@
+import { getLook, setLook as applyLook } from '../theme/look';
+import type { Look } from '../theme/palette';
 /**
  * Theme preference with system-follow option.
  *
@@ -26,6 +28,8 @@ export type ThemePref = 'light' | 'dark' | 'system';
 export type Scheme = 'light' | 'dark';
 
 interface ThemeContextValue {
+  look: Look;
+  setLook: (look: Look) => Promise<void>;
   /** What the user picked. Persisted. */
   preference: ThemePref;
   /** Resolved effective scheme — pass to getColors(). */
@@ -45,11 +49,15 @@ export function useTheme(): ThemeContextValue {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const systemScheme = (useColorScheme() || 'light') as Scheme;
   const [preference, setPrefState] = useState<ThemePref>('system');
+  const [look, setLookState] = useState<Look>(getLook);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
+        const storedLook = await AsyncStorage.getItem('openchat_look');
+        const hasWebPreference = typeof globalThis === 'object' && !!(globalThis as { localStorage?: unknown }).localStorage;
+        if (!hasWebPreference && (storedLook === 'paper' || storedLook === 'slate')) { applyLook(storedLook); setLookState(storedLook); }
         const stored = await AsyncStorage.getItem(STORAGE_KEY);
         if (stored === 'light' || stored === 'dark' || stored === 'system') {
           setPrefState(stored);
@@ -73,11 +81,19 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const setLook = useCallback(async (next: Look) => {
+    applyLook(next); setLookState(next);
+    try {
+      await AsyncStorage.setItem('openchat_look', next);
+      (globalThis as { localStorage?: { setItem(key: string, value: string): void } }).localStorage?.setItem('openchat_look', next);
+    } catch { /* In-memory choice remains usable when storage is unavailable. */ }
+  }, []);
+
   const scheme: Scheme = preference === 'system' ? systemScheme : preference;
 
   const value = useMemo<ThemeContextValue>(
-    () => ({ preference, scheme, setPreference }),
-    [preference, scheme, setPreference]
+    () => ({ preference, scheme, setPreference, look, setLook }),
+    [preference, scheme, setPreference, look, setLook]
   );
 
   // Render even before hydration completes; the worst case is a brief

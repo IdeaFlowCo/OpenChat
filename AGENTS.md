@@ -52,7 +52,9 @@ See `docs/surface-map.md` for the canonical surface map of all client screens an
 
 ## Theme tokens (`apps/mobile/src/theme/`)
 
-`palette.ts` holds the raw "Ink & Paper" values and **must stay free of
+`palette.ts` holds the raw values for both palettes, "Slate" (the default) and
+"Ink & Paper" (kept as a choice under Settings › Appearance; `theme/look.ts`
+remembers it), and **must stay free of
 `react-native` imports** — that is what lets `contrast.test.ts` assert WCAG
 ratios directly. `colors.ts` only resolves the scheme (`getColors`).
 
