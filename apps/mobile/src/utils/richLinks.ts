@@ -30,7 +30,8 @@ const IS_LOCAL_PATH = new RegExp(`^${ROOTS}[^\\n]+$`);
 // A destination may hold one level of balanced parentheses, as in https://example.org/a_(b).
 // A file: or local-path destination may contain spaces and runs to the closing parenthesis, so one
 // that fails the checks below leaves the whole [label](destination) as typed, not a stray piece of it.
-const MARKDOWN_LINK = new RegExp(String.raw`\[([^\]\n]{1,300})\]\((<[^>\n]{1,2000}>|file:[^)\n]{1,2000}|${ROOTS}[^)\n]{1,2000}|(?:[^()\s]|\([^()\s]{0,500}\)){1,2000})\)`, 'gi');
+// A local path may also hold one level of balanced parentheses: "/Users/sam/Report (final).pdf".
+const MARKDOWN_LINK = new RegExp(String.raw`\[([^\]\n]{1,300})\]\((<[^>\n]{1,2000}>|file:[^)\n]{1,2000}|${ROOTS}(?:[^()\n]|\([^()\n]{0,500}\)){1,2000}|(?:[^()\s]|\([^()\s]{0,500}\)){1,2000})\)`, 'gi');
 const BARE_FILE_URL = /file:\/\/[^\s<>"“”‘’`]+/gi;
 /**
  * Characters a copied path must never carry: control characters, the invisible
@@ -43,10 +44,10 @@ const UNSAFE_IN_PATH = { test: (text: string) => INVISIBLE.test(text) || SHELL_A
 
 /**
  * Text that goes on, after a space, to a flag, an assignment or a second path is a command
- * ("/tmp/x -o /tmp/y", "/usr/bin/env X=1 /tmp/x.sh"), not one path. Any dash after a space
- * counts, as on the Dashboard, so "My Notes - Draft" is left as typed too.
+ * ("/tmp/x -o /tmp/y", "/usr/bin/env X=1 /tmp/x.sh"), not one path. "My Notes - Draft" is fine:
+ * the dash must be followed by a character to count as a flag. Agreed with the Dashboard.
  */
-const LOOKS_LIKE_COMMAND = /\s(?:-|[\/~]|[A-Za-z]:\\|\S*=)/;
+const LOOKS_LIKE_COMMAND = /\s(?:-\S|[\/~]|[A-Za-z]:\\|\S*=)/;
 /** Whether text may be offered as a path to copy. */
 const copyable = (path: string) => !UNSAFE_IN_PATH.test(path) && !LOOKS_LIKE_COMMAND.test(path);
 
