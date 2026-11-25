@@ -218,6 +218,10 @@ function renderContentWithMentions(
   return <Text>{parts}</Text>;
 }
 
+/** Bubbles in one author's run sit 3 apart; a new author or day adds 8 more. */
+const BUBBLE_GAP = 3;
+const RUN_GAP = 8;
+
 export interface RenderRow {
   type: 'message' | 'day';
   key: string;
@@ -229,9 +233,11 @@ export interface RenderRow {
   /** Last message of a run from this author (next message is different author / day / EOF).
    *  Used to render the avatar only on the bottom of a run in group chats. */
   isLastInRun?: boolean;
+  /** First message of a run from this author: runs sit apart, messages within one sit close. */
+  isFirstInRun?: boolean;
 }
 
-function buildRows(messages: Message[], myId: string | undefined, isGroup: boolean): RenderRow[] {
+export function buildRows(messages: Message[], myId: string | undefined, isGroup: boolean): RenderRow[] {
   const out: RenderRow[] = [];
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
@@ -263,12 +269,13 @@ function buildRows(messages: Message[], myId: string | undefined, isGroup: boole
       isOwn,
       showSender,
       isLastInRun,
+      isFirstInRun: !prev || prev.senderId !== m.senderId || !sameDay(prev.createdAt, m.createdAt),
     });
   }
   return out;
 }
 
-const ROW_FIELDS = ['type', 'label', 'message', 'isOwn', 'showSender', 'isLastInRun'] as const;
+const ROW_FIELDS = ['type', 'label', 'message', 'isOwn', 'showSender', 'isLastInRun', 'isFirstInRun'] as const;
 
 /** Returns `next`, with each row that is field-for-field unchanged replaced by its previous object. */
 export function reuseUnchangedRows(previous: ReadonlyMap<string, RenderRow>, next: RenderRow[]): RenderRow[] {
@@ -1787,7 +1794,7 @@ export function ChatScreen({
     // iMessage; `emojiSize` from a held send makes it bigger still.
     const emojiOnly = !m.deletedAt && !failed && !m.attachments?.length && isSingleEmoji(m.content);
     return (
-      <View style={[styles.row, { justifyContent: isOwn ? 'flex-end' : 'flex-start', alignItems: 'flex-end' }]}>
+      <View style={[styles.row, { justifyContent: isOwn ? 'flex-end' : 'flex-start', alignItems: 'flex-end', marginTop: item.isFirstInRun ? RUN_GAP : 0 }]}>
         {showGroupAvatar && (
           <View style={styles.avatarSlot}>
             {item.isLastInRun && (
@@ -2020,7 +2027,6 @@ export function ChatScreen({
           <LinkPreviewCard
             key={preview.url}
             preview={preview}
-            isOwn={isOwn}
             scheme={scheme}
           />
         ))}
@@ -2179,7 +2185,7 @@ export function ChatScreen({
           keyboardDismissMode={Platform.OS === 'android' ? 'on-drag' : 'interactive'}
           keyboardShouldPersistTaps="handled"
           onScrollBeginDrag={cancelKeyboardScroll}
-          contentContainerStyle={{ padding: 12, gap: 8 }}
+          contentContainerStyle={{ padding: 12, gap: BUBBLE_GAP }}
           onScroll={handleScroll}
           // Throttle scroll events to ~60fps; high enough to catch the
           // user reaching bottom quickly, low enough not to thrash JS.

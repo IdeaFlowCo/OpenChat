@@ -121,7 +121,7 @@
   },
   "src/components/LinkPreviewCard.tsx": {
     "no-restricted-syntax": {
-      "count": 5
+      "count": 4
     }
   },
   "src/components/MasterDetailLayout.tsx": {

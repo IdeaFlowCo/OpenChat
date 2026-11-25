@@ -128,7 +128,7 @@ vi.mock('../../mobile/src/components/MessageText', () => ({
 }));
 vi.mock('../../mobile/src/components/ExportSheet', () => ({ ExportSheet: () => null }));
 
-import { ChatScreen } from '../../mobile/src/screens/ChatScreen.js';
+import { ChatScreen, buildRows, reuseUnchangedRows } from '../../mobile/src/screens/ChatScreen.js';
 
 function message(id: string, overrides: Partial<Message> = {}): Message {
   return {
@@ -277,5 +277,32 @@ describe('chat row render budget', () => {
     await render();
     mocks.chat = { ...mocks.chat, activeConversationLane: 'chat', activeConversationId: 'other' };
     expect(await rendersDuring(render)).toBeGreaterThanOrEqual(MESSAGES.length);
+  });
+});
+
+describe('message runs', () => {
+  const at = (minute: number) => `2026-11-20T10:${String(minute).padStart(2, '0')}:00Z`;
+  const rowsFor = (messages: Message[]) => buildRows(messages, 'me', false).filter(row => row.type === 'message');
+  it('marks the first message of each author run and of each day', () => {
+    const rows = rowsFor([
+      message('a1', { senderId: 'other', createdAt: at(1) }), message('a2', { senderId: 'other', createdAt: at(2) }),
+      message('b1', { senderId: 'me', createdAt: at(3) }), message('a3', { senderId: 'other', createdAt: at(4) }),
+      message('a4', { senderId: 'other', createdAt: '2026-11-21T10:00:00Z' }),
+    ]);
+    expect(rows.map(row => [row.key, row.isFirstInRun])).toEqual([['a1', true], ['a2', false], ['b1', true], ['a3', true], ['a4', true]]);
+  });
+  it('does not keep a stale run start when an older message from the same author loads above it', () => {
+    const newer = message('a2', { senderId: 'other', createdAt: at(2) });
+    const before = rowsFor([newer]);
+    expect(before[0]!.isFirstInRun).toBe(true);
+    const after = reuseUnchangedRows(new Map(before.map(row => [row.key, row])), rowsFor([message('a1', { senderId: 'other', createdAt: at(1) }), newer]));
+    expect(after.map(row => [row.key, row.isFirstInRun])).toEqual([['a1', true], ['a2', false]]);
+    expect(after[1]).not.toBe(before[0]);
+  });
+  it('still reuses a row whose run position did not change', () => {
+    const first = message('a1', { senderId: 'other', createdAt: at(1) });
+    const before = rowsFor([first]);
+    const after = reuseUnchangedRows(new Map(before.map(row => [row.key, row])), rowsFor([first]));
+    expect(after[0]).toBe(before[0]);
   });
 });

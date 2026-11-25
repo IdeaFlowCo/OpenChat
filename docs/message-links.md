@@ -25,6 +25,10 @@ non-link message content opens message actions. The labeled More button also
 works with keyboard and voice navigation. On native, a link tap opens the URL;
 a long press opens message actions without subsequently opening the URL.
 
+Link preview cards sit below the bubble on their own opaque surface, the same
+for sent and received messages, so they read on the conversation background in
+both themes.
+
 ## Links in the chat's Stream
 
 Back channel posts and Stream entries open web addresses by the same rules and
