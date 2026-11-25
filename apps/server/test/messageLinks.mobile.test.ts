@@ -99,6 +99,6 @@ it('reports open failures without an unhandled rejection', async () => {
 });
 
 it('does not expose unsafe preview destinations as an alternate link action', async () => {
-  await act(async () => { screen = create(React.createElement(LinkPreviewCard, { preview: { url: 'javascript:alert(1)', title: 'Unsafe' }, isOwn: false, scheme: 'light' })); });
+  await act(async () => { screen = create(React.createElement(LinkPreviewCard, { preview: { url: 'javascript:alert(1)', title: 'Unsafe' }, scheme: 'light' })); });
   expect(screen.toJSON()).toBeNull(); expect(os.open).not.toHaveBeenCalled();
 });
