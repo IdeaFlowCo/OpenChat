@@ -76,6 +76,12 @@ reads "Couldn't copy. Path: …" so the path can still be read. These rules
 are shared with the Ideaflow Dashboard's description field; a markdown
 destination keeps one level of balanced parentheses.
 
+**Hidden characters.** An address or path carrying a control, invisible or
+direction-changing character (the set is `INVISIBLE` in `utils/messageLinks.ts`,
+shared with the Dashboard) stays exactly as typed, in people's messages and in
+an agent's Markdown alike; an agent's address is judged as written, before the
+URL parser can normalise it into another host.
+
 **Named links.** `[label](address)` can show one name and go somewhere else.
 On web, hovering shows the real address as for any link; **Links · Open or
 copy** in the message actions lists the address under the label.

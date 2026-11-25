@@ -6,6 +6,7 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fileUrlToPath, linkParts, webLinks } from '../../mobile/src/utils/richLinks.js';
+import { messageLinks, safeMessageUrl, trimLink } from '../../mobile/src/utils/messageLinks.js';
 import { parseInline } from '../../mobile/src/utils/agentMarkdown.js';
 
 const os = vi.hoisted(() => ({ platform: 'ios', open: vi.fn(), copy: vi.fn(), stored: null as string | null, setItem: vi.fn(async () => undefined) }));
@@ -109,6 +110,53 @@ describe('link rules', () => {
     // At most the folder itself is offered; the command never is.
     expect(linkParts(line).flatMap(part => part.t === 'path' ? [part.path] : [])).toEqual(['/Users/sam/']);
     expect(linkParts('/tmp/a;open b and `/tmp/b`').filter(part => part.t === 'path')).toEqual([]);
+  });
+  it('trims the end of an address in one pass, with the same result as counting brackets each time', () => {
+    // The previous rule, kept here as the reference: it recounted every bracket for each character dropped.
+    const reference = (input: string) => {
+      let text = input, previous: string;
+      do {
+        previous = text; text = text.replace(/[.,!?;:'…]+$/, '');
+        for (const [open, close] of [['(', ')'], ['[', ']'], ['{', '}']]) while (text.endsWith(close!) && text.split(close!).length > text.split(open!).length) text = text.slice(0, -1);
+      } while (text !== previous);
+      return text;
+    };
+    const alphabet = ['a', '/', '(', ')', '[', ']', '{', '}', '.', ',', '!', '?', ';', ':', "'", '…', '_'];
+    let seed = 20261125; const next = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff);
+    for (let round = 0; round < 4000; round++) {
+      let text = 'https://e.example.org/'; for (let i = next() % 24; i > 0; i--) text += alphabet[next() % alphabet.length];
+      expect(trimLink(text)).toBe(reference(text));
+    }
+    for (const fixed of ['https://example.com/a(b)).', 'https://example.com/a_(b)', 'https://example.com/x]})', 'https://example.com/…', '', ')))']) expect(trimLink(fixed)).toBe(reference(fixed));
+  });
+  it('draws a message that ends in thousands of brackets without stalling', () => {
+    const started = Date.now();
+    for (const tail of [')'.repeat(20000), ').'.repeat(10000), ']'.repeat(20000), '})]'.repeat(6000), '(' + ')'.repeat(19999)]) {
+      const content = 'https://a.example.org/x' + tail;
+      expect(messageLinks(content).map(link => link.url)).toEqual([tail.startsWith('(') ? 'https://a.example.org/x()' : 'https://a.example.org/x']);
+      expect(linkParts(content).map(part => part.source).join('')).toBe(content);
+    }
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+  it.each([
+    ['soft hyphen', '\u00ad'], ['combining grapheme joiner', '\u034f'], ['Arabic letter mark', '\u061c'], ['zero-width space', '\u200b'],
+    ['right-to-left override', '\u202e'], ['word joiner', '\u2060'], ['invisible times', '\u2062'], ['invisible plus', '\u2064'],
+    ['variation selector', '\ufe0f'], ['first variation selector', '\ufe00'], ['byte-order mark', '\ufeff'], ['next line', '\u0085'],
+  ])('leaves an address or path hiding a %s exactly as typed', (_name, hidden) => {
+    expect(safeMessageUrl(`https://exam${hidden}ple.org/a`)).toBeNull();
+    const encoded = encodeURIComponent(hidden);
+    expect(shape(`[x](file:///tmp/a${encoded}b.txt)`)).toEqual([['text', `[x](file:///tmp/a${encoded}b.txt)`]]);
+    // Nothing is offered that contains the hidden character, reaches past it, or sits right beside it:
+    // "exam<hidden>ple.org" must never yield a link to ple.org that reads as example.org.
+    for (const content of [`[x](https://exam${hidden}ple.org/a)`, `[x](/Users/sam/a${hidden}b.txt)`, `/Users/sam/a${hidden}b.txt`, `https://exam${hidden}ple.org/a`, `see exam${hidden}ple.org now`, `x${hidden}/Users/sam/b.txt`, `${hidden}file:///tmp/b.txt`]) {
+      expect(linkParts(content).filter(part => part.t !== 'text')).toEqual([]);
+      expect(linkParts(content).map(part => part.source).join('')).toBe(content);
+    }
+    // In an agent's Markdown the address is judged as written, before any normalising.
+    expect(parseInline(`[x](https://exam${hidden}ple.org/a) https://exam${hidden}ple.org/b and exam${hidden}ple.org`).filter(node => node.t !== 'text')).toEqual([]);
+  });
+  it('still links ordinary addresses, including encoded and non-Latin ones', () => {
+    for (const url of ['https://example.org/a?b=c#d', 'https://例え.jp/パス', 'https://example.org/%E2%80%8B', 'https://example.org/~sam/x_(y)']) expect(safeMessageUrl(url)).toBe(url);
   });
   it('loses no character and stays quick on hostile input', () => {
     for (const content of ['[a](b) [c](d) [e](https://e.example.com)', '[[[[', ']('.repeat(50), '[x](file:///Users/s/a) /Users/s/b ~/c https://d.example.com file:///e']) {
