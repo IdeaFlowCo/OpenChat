@@ -29,7 +29,13 @@ const IS_LOCAL_PATH = new RegExp(`^${ROOTS}[^\\n]+$`);
 // Label and destination lengths are bounded and neither may hold a newline, so matching stays linear.
 const MARKDOWN_LINK = /\[([^\]\n]{1,300})\]\((<[^>\n]{1,2000}>|file:[^)\n]{1,2000}|[^)\s]{1,2000})\)/gi;
 const BARE_FILE_URL = /file:\/\/[^\s<>"“”‘’`]+/gi;
-const CONTROL = /[\u0000-\u001f\u007f]/;
+/**
+ * Characters a copied path must never carry: control characters, the invisible
+ * and direction-changing ones that make a path read as something else, and the
+ * shell's command separators (a path is meant for a file dialog, but may be
+ * pasted into a terminal). Text containing them is left exactly as typed.
+ */
+const UNSAFE_IN_PATH = /[\u0000-\u001f\u007f\u0085\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff;|&$`<>]/;
 
 /** The path a `file:` address names, or null when it is not a usable one. */
 export function fileUrlToPath(url: string): string | null {
@@ -38,7 +44,7 @@ export function fileUrlToPath(url: string): string | null {
   let path: string;
   try { path = decodeURIComponent(match[2]!); } catch { return null; }
   const host = match[1] ?? '';
-  if (!/[^/]/.test(path) || CONTROL.test(path) || CONTROL.test(host) || /[\s@:]/.test(host)) return null;
+  if (!/[^/]/.test(path) || UNSAFE_IN_PATH.test(path) || UNSAFE_IN_PATH.test(host) || /[\s@:]/.test(host)) return null;
   if (/^\/[A-Za-z]:[\\/]/.test(path)) path = path.slice(1);
   return host && host.toLowerCase() !== 'localhost' ? `//${host}${path}` : path;
 }
@@ -58,7 +64,7 @@ export function filePaths(content: string): Array<{ start: number; end: number }
     const wholeLine = before === '\n' && /(?:\.[A-Za-z0-9]{1,8}|[\\/])\s*$/.test(line);
     let text = wholeLine ? line.trimEnd() : line.split(/\s/, 1)[0]!;
     if (!wholeLine) text = text.replace(/[.,;:!?)]+$/, '');
-    if (text.length > 3) found.push({ start, end: start + text.length });
+    if (text.length > 3 && !UNSAFE_IN_PATH.test(text)) found.push({ start, end: start + text.length });
     PATH_START.lastIndex = start + Math.max(text.length, 1);
   }
   return found;
@@ -68,7 +74,7 @@ export function filePaths(content: string): Array<{ start: number; end: number }
 export function linkDestination(raw: string): { url: string } | { path: string } | null {
   const dest = raw.startsWith('<') && raw.endsWith('>') ? raw.slice(1, -1).trim() : raw.trim();
   if (/^file:/i.test(dest)) { const path = fileUrlToPath(dest); return path ? { path } : null; }
-  if (IS_LOCAL_PATH.test(dest) && !CONTROL.test(dest)) return { path: dest };
+  if (IS_LOCAL_PATH.test(dest)) return UNSAFE_IN_PATH.test(dest) ? null : { path: dest };
   const url = safeMessageUrl(dest);
   return url ? { url } : null;
 }

