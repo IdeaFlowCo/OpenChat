@@ -6,7 +6,7 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fileUrlToPath, linkParts, webLinks } from '../../mobile/src/utils/richLinks.js';
-import { messageLinks, safeMessageUrl, trimLink } from '../../mobile/src/utils/messageLinks.js';
+import { INVISIBLE, hiddenAt, messageLinks, safeMessageUrl, trimLink } from '../../mobile/src/utils/messageLinks.js';
 import { parseInline } from '../../mobile/src/utils/agentMarkdown.js';
 
 const os = vi.hoisted(() => ({ platform: 'ios', open: vi.fn(), copy: vi.fn(), stored: null as string | null, setItem: vi.fn(async () => undefined) }));
@@ -167,6 +167,35 @@ describe('link rules', () => {
     }
     // In an agent's Markdown the address is judged as written, before any normalising.
     expect(parseInline(`[x](https://exam${hidden}ple.org/a) https://exam${hidden}ple.org/b and exam${hidden}ple.org`).filter(node => node.t !== 'text')).toEqual([]);
+  });
+  it('treats exactly the agreed characters as hidden, checked against Unicode for every code point', () => {
+    // The set is written out by hand so it runs on every engine; this keeps it honest.
+    const ignorable = /\p{Default_Ignorable_Code_Point}/u;
+    const extra = (c: number) => c <= 0x1f || c === 0x7f || c === 0x85 || c === 0x2028 || c === 0x2029 || c === 0x2800 || (c >= 0xfff9 && c <= 0xfffb);
+    const wrong: string[] = [];
+    for (let c = 0; c <= 0x10ffff && wrong.length < 5; c++) {
+      if (c >= 0xd800 && c <= 0xdfff) continue;
+      const ch = String.fromCodePoint(c);
+      if (INVISIBLE.test(ch) !== (ignorable.test(ch) || extra(c))) wrong.push(c.toString(16));
+    }
+    expect(wrong).toEqual([]);
+    // Either half of a surrogate pair answers for the whole character; ordinary astral characters are not hidden.
+    const tag = String.fromCodePoint(0xe0041), smile = String.fromCodePoint(0x1f600);
+    expect([hiddenAt(`a${tag}b`, 1), hiddenAt(`a${tag}b`, 2), hiddenAt(`a${smile}b`, 1), hiddenAt(`a${smile}b`, 2), hiddenAt('ab', 5), hiddenAt('a\nb', 1)]).toEqual([true, true, false, false, false, false]);
+  });
+  it.each([0x180e, 0x3164, 0xffa0, 0x115f, 0x1160, 0x2800, 0x2065, 0x206a, 0x206f, 0xfff9, 0xfffb, 0xe0001, 0xe0041, 0xe007f, 0x17b4, 0x17b5, 0x1bca0, 0x1d173])('offers nothing in or beside U+%s', code => {
+    const hidden = String.fromCodePoint(code);
+    for (const content of [`exam${hidden}ple.org`, `https://exam${hidden}ple.org/a`, `[x](https://exam${hidden}ple.org/a)`, `/Users/sam/a${hidden}b.txt`, `x${hidden}/Users/sam/b.txt`,
+      `${hidden}file:///tmp/b.txt`, `[x](file:///tmp/a${encodeURIComponent(hidden)}b.txt)`, `see /Users/sam/a${hidden}b.txt now`, `example.org${hidden}`, `${hidden}example.org`]) {
+      expect(linkParts(content).filter(part => part.t !== 'text')).toEqual([]);
+      expect(linkParts(content).map(part => part.source).join('')).toBe(content);
+      expect(parseInline(content).filter(node => node.t !== 'text')).toEqual([]);
+    }
+  });
+  it('still links and offers paths in ordinary text in other scripts and with emoji', () => {
+    expect(shape('한국 https://example.org/a 😀')).toEqual([['text', '한국 '], ['link', 'https://example.org/a', 'https://example.org/a'], ['text', ' 😀']]);
+    expect(shape('Café /Users/sam/résumé.pdf')).toEqual([['text', 'Café '], ['path', '/Users/sam/résumé.pdf', '/Users/sam/résumé.pdf']]);
+    expect(shape('😀 example.org 😀')).toEqual([['text', '😀 '], ['link', 'example.org', 'https://example.org'], ['text', ' 😀']]);
   });
   it('still links ordinary addresses, including encoded and non-Latin ones', () => {
     for (const url of ['https://example.org/a?b=c#d', 'https://例え.jp/パス', 'https://example.org/%E2%80%8B', 'https://example.org/~sam/x_(y)']) expect(safeMessageUrl(url)).toBe(url);

@@ -80,7 +80,8 @@ destination keeps one level of balanced parentheses.
 
 **Hidden characters.** An address or path carrying a control, invisible or
 direction-changing character (the set is `INVISIBLE` in `utils/messageLinks.ts`,
-shared with the Dashboard) stays exactly as typed, in people's messages and in
+shared with the Dashboard: control characters, every Unicode default-ignorable
+code point, the braille blank and the interlinear annotation marks) stays exactly as typed, in people's messages and in
 an agent's Markdown alike; an agent's address is judged as written, before the
 URL parser can normalise it into another host.
 

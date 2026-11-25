@@ -19,21 +19,37 @@ export const isBareDomain = (value: string) => BARE_DOMAIN_ONLY.test(value);
 /**
  * Characters that are not seen, or that change how the text around them reads. An address or a
  * path carrying one may not be what it looks like, so it is left exactly as typed. Shared with
- * the Ideaflow Dashboard: control characters, soft hyphen, combining grapheme joiner, Arabic
- * letter mark, zero-width and direction marks, line and paragraph separators, direction
- * embeddings and isolates, word joiner and invisible operators, variation selectors, and the
- * byte-order mark.
+ * the Ideaflow Dashboard: control characters, next line, line and paragraph separators, every
+ * Unicode default-ignorable code point (soft hyphen, zero-width and direction marks, Hangul and
+ * Khmer fillers, Mongolian and other variation selectors, word joiner and invisible operators,
+ * shorthand and musical format controls, tag characters), the braille blank and the interlinear
+ * annotation marks.
+ *
+ * Written out by code point, with the three astral ranges as surrogate pairs, so it needs neither
+ * the `u` flag nor Unicode property escapes from the JavaScript engine. A test compares it with
+ * \p{Default_Ignorable_Code_Point} for every code point.
  */
-export const INVISIBLE = /[\u0000-\u001f\u007f\u0085\u00ad\u034f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufe00-\ufe0f\ufeff]/;
+export const INVISIBLE = new RegExp(
+  '[\\u0000-\\u001f\\u007f\\u0085\\u00ad\\u034f\\u061c\\u115f\\u1160\\u17b4\\u17b5\\u180b-\\u180f\\u200b-\\u200f\\u2028\\u2029'
+  + '\\u202a-\\u202e\\u2060-\\u206f\\u2800\\u3164\\ufe00-\\ufe0f\\ufeff\\uffa0\\ufff0-\\ufffb]'
+  // U+1BCA0–1BCA3, U+1D173–1D17A, U+E0000–E0FFF
+  + '|\\ud82f[\\udca0-\\udca3]|\\ud834[\\udd73-\\udd7a]|[\\udb40-\\udb43][\\udc00-\\udfff]',
+);
 const WHITESPACE_OR_BACKSLASH = /[\s\\]/;
+const isHigh = (ch: string | undefined) => ch !== undefined && ch >= '\ud800' && ch <= '\udbff';
+const isLow = (ch: string | undefined) => ch !== undefined && ch >= '\udc00' && ch <= '\udfff';
 /**
  * Whether the character at `index` is hidden (and not an ordinary tab or line break). Nothing is
  * offered right beside one: "exam<hidden>ple.org" must not become a link to ple.org that reads
- * as example.org.
+ * as example.org. The whole character is judged, so either half of a surrogate pair answers for
+ * the pair.
  */
 export const hiddenAt = (content: string, index: number) => {
   const ch = content[index];
-  return ch !== undefined && ch !== '\t' && ch !== '\n' && ch !== '\r' && INVISIBLE.test(ch);
+  if (ch === undefined || ch === '\t' || ch === '\n' || ch === '\r') return false;
+  if (isLow(ch) && isHigh(content[index - 1])) return INVISIBLE.test(content[index - 1] + ch);
+  if (isHigh(ch) && isLow(content[index + 1])) return INVISIBLE.test(ch + content[index + 1]);
+  return INVISIBLE.test(ch);
 };
 
 /** Only web URLs are actionable. Never promote an arbitrary pasted scheme. */
