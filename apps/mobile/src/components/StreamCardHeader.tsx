@@ -66,7 +66,7 @@ export function StreamCardHeader({ name, avatarName, avatarUrl, agentName, creat
       </View> : <Text accessibilityLabel={exact} style={meta}>{formatRelativeTime(createdAt)}</Text>}
       <AudienceChip audience={audience} sharedScope={sharedScope} />
       {/* What it is. When it was saved from a chat message, that label is the way back to the message. */}
-      {onOpenSource ? <Pressable accessibilityRole="link" accessibilityLabel="Original message" hitSlop={14} onPress={onOpenSource}
+      {onOpenSource ? <Pressable accessibilityRole="link" accessibilityLabel={`${kind || 'Original message'}: open the original message`} hitSlop={14} onPress={onOpenSource}
         style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}><Text style={[type.meta, styles.source, { color: c.primary }]}>{kind || 'Original message'}</Text></Pressable>
         : kind ? <Text style={meta}>{kind}</Text> : null}
     </View>
@@ -81,7 +81,7 @@ const styles = StyleSheet.create({
   trailing: { flexDirection: 'row', alignItems: 'center', gap: space[1], minHeight: 20 },
   name: { fontWeight: '600', flexShrink: 1 },
   agent: { flexShrink: 1 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: space[1], minHeight: 18, borderRadius: radius.pill },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: space[1], minHeight: 18, borderRadius: radius.pill, flexShrink: 1, maxWidth: '100%' },
   strong: { fontWeight: '600' },
   source: { fontWeight: '500' },
   tooltip: { position: 'absolute', top: 20, left: 0, padding: space[2], borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth },

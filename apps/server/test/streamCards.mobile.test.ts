@@ -58,14 +58,14 @@ describe('Stream cards say who can read them', () => {
     await lane([post('p1', 'note'), post('p2', 'ask'), post('p3', 'offer'), entry('t1', 'conversation', 'message_capture'), entry('t2', 'conversation', 'pinned')]);
     const text = cards();
     expect(text).toHaveLength(5);
-    for (const card of text) { expect(card).toContain('You and Morgan'); expect(card).not.toContain('Only you'); expect(card).toContain('Morgan Example'); }
-    expect(text.map(card => /You and Morgan (Note|Ask|Offer|From a message|Pinned)/.exec(card)?.[1])).toEqual(['Note', 'Ask', 'Offer', 'From a message', 'Pinned']);
+    for (const card of text) { expect(card).toContain('You and Morgan Example'); expect(card).not.toContain('Only you'); expect(card).toContain('Morgan Example'); }
+    expect(text.map(card => /You and Morgan Example (Note|Ask|Offer|From a message|Pinned)/.exec(card)?.[1])).toEqual(['Note', 'Ask', 'Offer', 'From a message', 'Pinned']);
   });
   it('sets a private entry apart: lock label, tinted card, and never the shared label', async () => {
     await lane([entry('mine', 'private', 'private_note', 'alice'), entry('theirs', 'conversation', 'message_capture')]);
     const [mine, theirs] = cards();
     expect(mine).toContain('Only you'); expect(mine).not.toContain('Shared with'); expect(mine).not.toContain('You and'); expect(mine).toContain('You');
-    expect(theirs).toContain('You and Morgan'); expect(theirs).not.toContain('Only you');
+    expect(theirs).toContain('You and Morgan Example'); expect(theirs).not.toContain('Only you');
     const surfaces = tree!.root.findAll(node => node.type === 'TouchableOpacity' && node.props.accessibilityState && 'expanded' in node.props.accessibilityState && Array.isArray(node.props.style))
       .map(node => Object.assign({}, ...node.props.style.flat()).backgroundColor);
     expect(surfaces).toHaveLength(2); expect(surfaces[0]).not.toBe(surfaces[1]);
@@ -76,9 +76,15 @@ describe('Stream cards say who can read them', () => {
       const label = tree!.root.findAll(node => node.type === 'View' && String(node.props.accessibilityLabel).startsWith('Privacy scope: '))[0]!.props.accessibilityLabel;
       await act(async () => tree!.unmount()); tree = undefined; return label;
     };
-    expect(await scope([{ id: 'room', type: 'direct', participants: people('Morgan Example') }])).toBe('Privacy scope: You and Morgan');
+    expect(await scope([{ id: 'room', type: 'direct', participants: people('Morgan Example') }])).toBe('Privacy scope: You and Morgan Example');
     expect(await scope([{ id: 'room', type: 'group', title: 'Workshop crew', participants: people('Morgan Example', 'Sam Example') }])).toBe('Privacy scope: Shared with Workshop crew');
-    expect(await scope([{ id: 'room', type: 'group', participants: people('Morgan Example', 'Sam Example', 'Kit Example') }])).toBe('Privacy scope: Shared with 3 people');
+    expect(await scope([{ id: 'room', type: 'group', participants: people('Morgan Example', 'Sam Example', 'Kit Example') }])).toBe('Privacy scope: You and 3 others');
+    expect(await scope([{ id: 'room', type: 'group', participants: people('Morgan Example') }])).toBe('Privacy scope: You and 1 other');
+    // A bot is a participant like any other; a long name shortens to its first word.
+    expect(await scope([{ id: 'room', type: 'direct', participants: [...people(), { user: { id: 'bot', name: 'Workshop assistant', isBot: true } }] }])).toBe('Privacy scope: You and Workshop assistant');
+    expect(await scope([{ id: 'room', type: 'direct', participants: people('Maximiliana Featherstonehaugh-Example') }])).toBe('Privacy scope: You and Maximiliana');
+    // A nameless member is never given a placeholder name.
+    expect(await scope([{ id: 'room', type: 'direct', participants: [...people(), { user: { id: 'x', name: '', email: 'x@example.test' } }] }])).toBe('Privacy scope: Shared with this chat');
     // Unknown chat, or a chat with nobody else in it: say only what is known.
     expect(await scope([{ id: 'other', type: 'direct', participants: people('Someone Else') }])).toBe('Privacy scope: Shared with this chat');
     expect(await scope([{ id: 'room', type: 'direct', participants: people() }])).toBe('Privacy scope: Shared with this chat');
@@ -87,16 +93,21 @@ describe('Stream cards say who can read them', () => {
   it('puts the source on the metadata line: one tap opens the original message, with no separate row', async () => {
     const captured = entry('t1', 'conversation', 'message_capture');
     await lane([{ ...captured, thought: { ...captured.thought, hasSourceMessage: true, sourceMessageId: 'm1' } }]);
-    const sources = tree!.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'Original message');
+    const sources = tree!.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'From a message: open the original message');
     expect(sources).toHaveLength(1);
     expect(flatten(sources[0]!)).toBe('From a message'); expect(cards()[0]).not.toContain('Original message');
     await act(async () => { sources[0]!.props.onPress(); });
     expect(os.navigate).toHaveBeenCalledWith('OriginalMessage', { thoughtId: 't1' });
   });
   it('shows a note’s paragraphs with one small gap, however many blank lines were typed', async () => {
-    await lane([post('p1', 'note', { text: 'First paragraph\n\n\n\n  \nSecond paragraph\nsame paragraph\n\nThird' })]);
+    await lane([post('p1', 'note', { text: 'First paragraph\n\n\n\n  \nSecond paragraph\nsame paragraph\r\n\r\n    indented third\n' })]);
     const blocks = tree!.root.findAll(node => node.type === 'Text' && node.props.selectable === true).map(node => flatten(node));
-    expect(blocks).toEqual(['First paragraph', 'Second paragraph\nsame paragraph', 'Third']);
+    expect(blocks).toEqual(['First paragraph', 'Second paragraph\nsame paragraph', '    indented third\n']);
+  });
+  it('labels an entry pinned here with this chat’s scope, and a private one never with a shared scope', async () => {
+    await lane([entry('pin', 'conversation', 'pinned'), entry('mine', 'private', 'private_note', 'alice')]);
+    const labels = tree!.root.findAll(node => node.type === 'View' && String(node.props.accessibilityLabel).startsWith('Privacy scope: ')).map(node => node.props.accessibilityLabel);
+    expect(labels).toEqual(['Privacy scope: You and Morgan Example', 'Privacy scope: Only you']);
   });
   it('shows a quoted post as one line that expands on tap', async () => {
     const long = 'A long earlier post. '.repeat(20).trim();

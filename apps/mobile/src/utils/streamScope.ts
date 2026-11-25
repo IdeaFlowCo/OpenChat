@@ -14,17 +14,22 @@ export function sharedScopeLabel(conversation: ScopeConversation | null | undefi
   const others = (conversation?.participants ?? []).flatMap(p => p?.user && p.user.id !== myId ? [p.user] : []);
   if (!conversation || !myId || !others.length) return 'Shared with this chat';
   if (conversation.type === 'direct' && others.length === 1) {
-    // In a two-person chat the scope is exactly two people; the first name keeps it short.
-    const name = getUserDisplayName(others[0] as { name: string; email: string }).trim().split(/\s+/)[0];
-    return name ? `You and ${name}` : 'Shared with this chat';
+    // Only a real name is used: a placeholder would name someone who is not in the chat.
+    const name = others[0]!.name?.trim();
+    if (!name) return 'Shared with this chat';
+    return `You and ${name.length <= 22 ? name : name.split(/\s+/)[0]}`;
   }
   const title = conversation.title?.trim();
-  return `Shared with ${title || `${others.length} ${others.length === 1 ? 'person' : 'people'}`}`;
+  // The count is everyone else in the chat, so "You and 3 others" is four readers.
+  return title ? `Shared with ${title}` : `You and ${others.length} ${others.length === 1 ? 'other' : 'others'}`;
 }
 
-/** Paragraphs of a note: runs of blank lines become one break, so a card is not mostly air. */
+/**
+ * Paragraphs of a note: a run of blank lines becomes one break, so a card is
+ * not mostly air. Only the blank lines go; indentation and every other
+ * character of each paragraph stay.
+ */
 export function paragraphs(text: string): string[] {
-  const parts = text.replace(/\r\n?/g, '\n').split(/\n[^\S\n]*(?:\n[^\S\n]*)+/).map(part => part.replace(/^\n+|\n+$/g, ''));
-  const kept = parts.filter(part => part.trim());
+  const kept = text.replace(/\r\n?/g, '\n').split(/\n(?:[^\S\n]*\n)+/).filter(part => part.trim());
   return kept.length ? kept : [text];
 }
