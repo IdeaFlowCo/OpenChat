@@ -19,7 +19,7 @@ export type LinkPart =
   | { t: 'link'; source: string; label: string; url: string; start: number }
   | { t: 'path'; source: string; label: string; path: string; start: number };
 
-const ROOTS = String.raw`(?:~\/|\/(?:Users|home|Volumes|private|var|tmp|etc|opt|usr|mnt|srv|Library|Applications)\/|[A-Za-z]:\\)`;
+export const ROOTS = String.raw`(?:~\/|\/(?:Users|home|Volumes|private|var|tmp|etc|opt|usr|mnt|srv|Library|Applications)\/|[A-Za-z]:\\)`;
 /**
  * Where a path on someone's own computer starts, such as /Users/sam/plan.html.
  * Only well-known roots count, so ordinary slashes ("and/or", "/shrug", dates) stay text.
@@ -58,30 +58,40 @@ export function fileUrlToPath(url: string): string | null {
   return host && host.toLowerCase() !== 'localhost' ? null : path;
 }
 
+/**
+ * Where the path that starts at `start` ends, or -1 when nothing there should be offered as a
+ * path. The caller has found a path root at `start`.
+ */
+export function pathEnd(content: string, start: number): number {
+  const before = start ? content[start - 1]! : '\n';
+  if (!/[\s(]/.test(before)) return -1;
+  const lineEnd = content.indexOf('\n', start);
+  const line = content.slice(start, lineEnd < 0 ? content.length : lineEnd);
+  // A line that is nothing but a path may contain spaces. It is one when it starts the line and
+  // either looks like a file or folder ("/Users/sam/my notes/plan.html", "/Users/sam/my notes/":
+  // ends in a separator, or in an extension on a name with few spaces), or reads like a name
+  // rather than a sentence ("/Users/sam/My Projects/Index Folder": no closing punctuation and no
+  // lowercase word after a space). A line that goes on to a flag, an assignment or a second path
+  // ("/tmp/a -o /tmp/b", "/usr/bin/env X=1 /tmp/x.sh") is a command, not a path. Anywhere else,
+  // such as "/tmp/x is where I left it", the path ends at the next space.
+  const whole = line.trimEnd();
+  const name = whole.slice(Math.max(whole.lastIndexOf('/'), whole.lastIndexOf('\\')) + 1);
+  const looksLikeFile = /[\\/]$/.test(whole) || (/\.[A-Za-z0-9]{1,8}$/.test(whole) && name.split(' ').length <= 4);
+  const looksLikeName = !/[.,;:!?]$/.test(whole) && !/\s[a-z]/.test(whole);
+  const looksLikeCommand = /\s(?:-\S|[\/~]|[A-Za-z]:\\|\S*=)/.test(whole);
+  const wholeLine = before === '\n' && !looksLikeCommand && (looksLikeFile || looksLikeName);
+  let text = wholeLine ? whole : line.split(/\s/, 1)[0]!;
+  if (!wholeLine) text = text.replace(/[.,;:!?)]+$/, '');
+  return text.length > 3 && !UNSAFE_IN_PATH.test(text) ? start + text.length : -1;
+}
+
 export function filePaths(content: string): Array<{ start: number; end: number }> {
   const found: Array<{ start: number; end: number }> = [];
   PATH_START.lastIndex = 0;
   for (let m = PATH_START.exec(content); m; m = PATH_START.exec(content)) {
-    const start = m.index;
-    const before = start ? content[start - 1]! : '\n';
-    if (!/[\s(]/.test(before)) continue;
-    const lineEnd = content.indexOf('\n', start);
-    const line = content.slice(start, lineEnd < 0 ? content.length : lineEnd);
-    // A line that is nothing but a path may contain spaces. It is one when it starts the line and
-    // either looks like a file or folder ("/Users/sam/my notes/plan.html", "/Users/sam/my notes/":
-    // ends in a separator, or in an extension on a name with few spaces), or reads like a name
-    // rather than a sentence ("/Users/sam/My Projects/Index Folder": no closing punctuation and no
-    // lowercase word after a space). Anywhere else, such as "/tmp/x is where I left it" or
-    // "/tmp/build is where I left v2.0", the path ends at the next space.
-    const whole = line.trimEnd();
-    const name = whole.slice(Math.max(whole.lastIndexOf('/'), whole.lastIndexOf('\\')) + 1);
-    const looksLikeFile = /[\\/]$/.test(whole) || (/\.[A-Za-z0-9]{1,8}$/.test(whole) && name.split(' ').length <= 4);
-    const looksLikeName = !/[.,;:!?]$/.test(whole) && !/\s[a-z]/.test(whole);
-    const wholeLine = before === '\n' && (looksLikeFile || looksLikeName);
-    let text = wholeLine ? line.trimEnd() : line.split(/\s/, 1)[0]!;
-    if (!wholeLine) text = text.replace(/[.,;:!?)]+$/, '');
-    if (text.length > 3 && !UNSAFE_IN_PATH.test(text)) found.push({ start, end: start + text.length });
-    PATH_START.lastIndex = start + Math.max(text.length, 1);
+    const end = pathEnd(content, m.index);
+    if (end > 0) found.push({ start: m.index, end });
+    PATH_START.lastIndex = end > 0 ? end : m.index + 1;
   }
   return found;
 }

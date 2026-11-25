@@ -60,8 +60,9 @@ one of `; | & $ \` < > "`. A line
 that is nothing but a bare path keeps its spaces: one that ends in a separator
 or in an extension on a name with few spaces (`/Users/sam/my notes/plan.html`),
 or that reads like a name rather than a sentence (`/Users/sam/My Projects/Index
-Folder`: no closing punctuation, no lowercase word after a space). Otherwise a
-bare path ends at the next space. A markdown destination that is a path may
+Folder`: no closing punctuation, no lowercase word after a space). A line that goes on to a
+flag, an assignment or a second path (`/tmp/a -o /tmp/b`) is a command, so each
+path in it stands alone. Otherwise a bare path ends at the next space. A markdown destination that is a path may
 contain spaces. In an agent's Markdown, paths are read from the raw text before
 emphasis, so `/Users/me/__pycache__/x` copies exactly. If a desktop shell provides `window.ideaflowDesktop.openPath(path)`, it is
 called instead of copying. Its contract: the shell must reveal the item (for
