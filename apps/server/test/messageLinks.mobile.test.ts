@@ -5,11 +5,12 @@ import { messageLinks, preserveBrowserMenu, safeMessageUrl } from '../../mobile/
 
 const os = vi.hoisted(() => ({ platform: 'ios', open: vi.fn(), alert: vi.fn(), copy: vi.fn() }));
 vi.mock('react-native', () => ({
-  Platform: { get OS() { return os.platform; } }, Alert: { alert: os.alert }, Linking: { openURL: os.open },
+  Platform: { get OS() { return os.platform; }, select: (values: any) => values[os.platform] ?? values.default }, Alert: { alert: os.alert }, Linking: { openURL: os.open },
   StyleSheet: { create: (s: unknown) => s, hairlineWidth: 1 }, Image: 'Image',
   Text: 'Text', View: 'View', ScrollView: 'ScrollView', TouchableOpacity: 'TouchableOpacity',
 }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: os.copy }));
+vi.mock('@react-native-async-storage/async-storage', () => ({ default: { getItem: async () => null, setItem: async () => undefined } }));
 import { MessageText, openMessageLink } from '../../mobile/src/components/MessageText.js';
 import { LinkPreviewCard } from '../../mobile/src/components/LinkPreviewCard.js';
 import { MessageLinkActions } from '../../mobile/src/components/MessageLinkActions.js';

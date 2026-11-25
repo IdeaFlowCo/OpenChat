@@ -50,7 +50,7 @@ export function ToastMessage({ visible, message, duration = 2500 }: Props) {
         { backgroundColor: scheme === 'dark' ? '#1e293b' : '#1f2937', opacity },
       ]}
     >
-      <Text style={styles.text}>{message}</Text>
+      <Text role="status" accessibilityLiveRegion="polite" style={styles.text}>{message}</Text>
     </Animated.View>
   );
 }

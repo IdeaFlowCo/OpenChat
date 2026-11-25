@@ -22,6 +22,7 @@ import * as Device from 'expo-device';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme, ThemePref } from '../contexts/ThemeContext';
+import { useLinksAsTyped } from '../services/linkDisplay';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useChat } from '../contexts/ChatContext';
 import { useSocialExperience, type LayoutPreference } from '../contexts/SocialExperienceContext';
@@ -51,6 +52,7 @@ type NotifStatus = 'granted' | 'denied' | 'undetermined' | 'unknown';
 export function SettingsScreen() {
   const navigation = useNavigation<NavProp<'Settings'>>();
   const { preference, setPreference, scheme } = useTheme();
+  const [linksAsTyped, setLinksAsTyped] = useLinksAsTyped();
   const { currentUser, isConnected, signOut } = useChat();
   const {
     preferences: socialPreferences,
@@ -543,6 +545,13 @@ export function SettingsScreen() {
               </TouchableOpacity>
             );
           })}
+          <View style={[styles.optionRow, { borderTopColor: c.divider, borderTopWidth: StyleSheet.hairlineWidth }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Show links as typed</Text>
+              <Text style={[styles.optionHint, { color: c.textSecondary }]}>Shows message and Stream text exactly as written, with nothing turned into a link</Text>
+            </View>
+            <Switch accessibilityLabel="Show links as typed" value={linksAsTyped} onValueChange={setLinksAsTyped} trackColor={{ true: c.primary }} />
+          </View>
         </View>
       </View>
 

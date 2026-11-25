@@ -8,13 +8,16 @@
  * plain text. Only http(s) links without credentials become tappable.
  */
 import { BARE_DOMAIN, isBareDomain } from './messageLinks';
+import { fileUrlToPath, linkDestination } from './richLinks';
 
 export type Inline =
   | { t: 'text'; v: string }
   | { t: 'bold'; c: Inline[] }
   | { t: 'italic'; c: Inline[] }
   | { t: 'code'; v: string }
-  | { t: 'link'; c: Inline[]; href: string };
+  | { t: 'link'; c: Inline[]; href: string }
+  /** A file on someone's own computer: shown to copy, never opened (utils/richLinks.ts). */
+  | { t: 'path'; label: string; path: string };
 
 export type Block =
   | { t: 'p'; c: Inline[] }
@@ -47,8 +50,8 @@ function splitTrailing(url: string): [string, string] {
 export const MAX_INLINE_LENGTH = 4000;
 // Order matters: code spans first so their contents are literal. No lookbehind
 // (Safari before 16.4 cannot parse it): italics capture the preceding character.
-const INLINE_SOURCE = new RegExp(/`([^`\n]+)`|\[([^\]\n]{1,300})\]\(([^)\s]{1,2000})\)|\*\*(?=\S)([^*\n]*?\S)\*\*|__(?=\S)([^_\n]*?\S)__|(^|[^\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])|(^|[^\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])/.source
-  + String.raw`|(https?:\/\/[^\s<>]{1,2000}|www\.[^\s<>]{1,2000}|${BARE_DOMAIN})`, 'i');
+const INLINE_SOURCE = new RegExp(/`([^`\n]+)`|\[([^\]\n]{1,300})\]\((<[^>\n]{1,2000}>|file:[^)\n]{1,2000}|[^)\s]{1,2000})\)|\*\*(?=\S)([^*\n]*?\S)\*\*|__(?=\S)([^_\n]*?\S)__|(^|[^\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])|(^|[^\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])/.source
+  + String.raw`|(https?:\/\/[^\s<>]{1,2000}|file:\/\/[^\s<>]{1,2000}|www\.[^\s<>]{1,2000}|${BARE_DOMAIN})`, 'i');
 
 export function parseInline(text: string): Inline[] {
   if (text.length > MAX_INLINE_LENGTH) return [{ t: 'text', v: text }];
@@ -67,8 +70,10 @@ export function parseInline(text: string): Inline[] {
     last = m.index + m[0].length;
     if (m[1] !== undefined) out.push({ t: 'code', v: m[1] });
     else if (m[2] !== undefined) {
-      const href = safeHref(m[3]!);
+      const dest = linkDestination(m[3]!);
+      const href = dest && 'url' in dest ? safeHref(dest.url) : null;
       if (href) out.push({ t: 'link', c: parseInline(m[2]), href });
+      else if (dest && 'path' in dest && m[2].trim()) out.push({ t: 'path', label: m[2], path: dest.path });
       else pushText(m[0]);
     } else if (m[4] !== undefined || m[5] !== undefined) out.push({ t: 'bold', c: parseInline((m[4] ?? m[5])!) });
     else if (m[7] !== undefined || m[9] !== undefined) {
@@ -79,6 +84,12 @@ export function parseInline(text: string): Inline[] {
       if (!/^(https?:|www\.)/i.test(m[10]) && m.index && /[\w@.-]/.test(text[m.index - 1]!)) { pushText(m[0]); continue; }
       // Sentence punctuation after a URL stays outside the link.
       const [raw, trail] = splitTrailing(m[10]);
+      if (/^file:/i.test(raw)) {
+        const path = fileUrlToPath(raw);
+        if (path) out.push({ t: 'path', label: path, path }); else pushText(raw);
+        pushText(trail);
+        continue;
+      }
       const href = safeHref(raw);
       if (href) out.push({ t: 'link', c: [{ t: 'text', v: raw }], href }); else pushText(raw);
       pushText(trail);

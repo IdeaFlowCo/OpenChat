@@ -19,7 +19,8 @@ export const isBareDomain = (value: string) => BARE_DOMAIN_ONLY.test(value);
 /** Only web URLs are actionable. Never promote an arbitrary pasted scheme. */
 export function safeMessageUrl(value: string): string | null {
   const url = /^www\./i.test(value) || isBareDomain(value) ? `https://${value}` : value;
-  if (!/^https?:\/\//i.test(url) || /[\s\u0000-\u001f\u007f\\]/.test(url)) return null;
+  // No whitespace, control, invisible or direction-changing character may hide in an address.
+  if (!/^https?:\/\//i.test(url) || /[\s\u0000-\u001f\u007f\u0085\u200b-\u200f\u202a-\u202e\u2066-\u2069\\]/.test(url)) return null;
   try {
     const parsed = new URL(url);
     return parsed.hostname && !parsed.username && !parsed.password ? url : null;
