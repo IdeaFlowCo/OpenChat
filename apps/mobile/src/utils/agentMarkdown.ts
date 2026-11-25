@@ -8,7 +8,7 @@
  * plain text. Only http(s) links without credentials become tappable.
  */
 import { BARE_DOMAIN, isBareDomain } from './messageLinks';
-import { fileUrlToPath, linkDestination } from './richLinks';
+import { ROOTS, fileUrlToPath, linkDestination, pathEnd } from './richLinks';
 
 export type Inline =
   | { t: 'text'; v: string }
@@ -50,8 +50,12 @@ function splitTrailing(url: string): [string, string] {
 export const MAX_INLINE_LENGTH = 4000;
 // Order matters: code spans first so their contents are literal. No lookbehind
 // (Safari before 16.4 cannot parse it): italics capture the preceding character.
-const INLINE_SOURCE = new RegExp(/`([^`\n]+)`|\[([^\]\n]{1,300})\]\((<[^>\n]{1,2000}>|file:[^)\n]{1,2000}|(?:[^()\s]|\([^()\s]{0,500}\)){1,2000})\)|\*\*(?=\S)([^*\n]*?\S)\*\*|__(?=\S)([^_\n]*?\S)__|(^|[^\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])|(^|[^\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])/.source
-  + String.raw`|(https?:\/\/[^\s<>]{1,2000}|file:\/\/[^\s<>]{1,2000}|www\.[^\s<>]{1,2000}|${BARE_DOMAIN})`, 'i');
+const INLINE_SOURCE = new RegExp(/`([^`\n]+)`|\[([^\]\n]{1,300})\]\((<[^>\n]{1,2000}>|file:[^)\n]{1,2000}|(?:~\/|\/(?:Users|home|Volumes|private|var|tmp|etc|opt|usr|mnt|srv|Library|Applications)\/|[A-Za-z]:\\)[^)\n]{1,2000}|(?:[^()\s]|\([^()\s]{0,500}\)){1,2000})\)|\*\*(?=\S)([^*\n]*?\S)\*\*|__(?=\S)([^_\n]*?\S)__|(^|[^\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])|(^|[^\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])/.source
+  + String.raw`|(https?:\/\/[^\s<>]{1,2000}|file:\/\/[^\s<>]{1,2000}|www\.[^\s<>]{1,2000}|${BARE_DOMAIN})`
+  // Where a path on someone's computer starts. It is tried at each position before emphasis can
+  // begin inside it, so /Users/me/__pycache__/x keeps its underscores; code spans and links that
+  // start earlier still win.
+  + String.raw`|(${ROOTS}\S)`, 'i');
 
 export function parseInline(text: string): Inline[] {
   if (text.length > MAX_INLINE_LENGTH) return [{ t: 'text', v: text }];
@@ -79,6 +83,12 @@ export function parseInline(text: string): Inline[] {
     else if (m[7] !== undefined || m[9] !== undefined) {
       pushText((m[6] ?? m[8]) ?? '');
       out.push({ t: 'italic', c: parseInline((m[7] ?? m[9])!) });
+    } else if (m[11] !== undefined) {
+      const end = pathEnd(text, m.index);
+      if (end < 0) { pushText(m[0]); continue; }
+      const path = text.slice(m.index, end);
+      out.push({ t: 'path', label: path, path });
+      last = end; INLINE.lastIndex = end;
     } else if (m[10] !== undefined) {
       // A domain inside an email address or a longer word stays text.
       if (!/^(https?:|www\.)/i.test(m[10]) && m.index && /[\w@.-]/.test(text[m.index - 1]!)) { pushText(m[0]); continue; }
