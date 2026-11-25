@@ -50,7 +50,7 @@ type NotifStatus = 'granted' | 'denied' | 'undetermined' | 'unknown';
 
 export function SettingsScreen() {
   const navigation = useNavigation<NavProp<'Settings'>>();
-  const { preference, setPreference, scheme } = useTheme();
+  const { preference, setPreference, scheme, look, setLook } = useTheme();
   const { currentUser, isConnected, signOut } = useChat();
   const {
     preferences: socialPreferences,
@@ -543,6 +543,29 @@ export function SettingsScreen() {
               </TouchableOpacity>
             );
           })}
+          <View accessibilityRole="radiogroup" accessibilityLabel="Palette">
+            {([['slate', 'Slate', 'Cool neutrals with a blue accent'], ['paper', 'Ink & Paper', 'Warm paper with a sienna accent']] as const).map(([value, label, hint]) => {
+              const selected = look === value;
+              return (
+                <TouchableOpacity
+                  key={value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: selected }}
+                  style={[styles.optionRow, { borderTopColor: c.divider, borderTopWidth: StyleSheet.hairlineWidth }]}
+                  onPress={() => void setLook(value)}
+                  activeOpacity={0.7}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.optionLabel, { color: c.textPrimary }]}>{label}</Text>
+                    <Text style={[styles.optionHint, { color: c.textSecondary }]}>{hint}</Text>
+                  </View>
+                  <View style={[styles.radio, { borderColor: selected ? c.primary : c.border }]}>
+                    {selected && <View style={[styles.radioDot, { backgroundColor: c.primary }]} />}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </View>
       </View>
 

@@ -12,7 +12,8 @@ import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
  * (Jacob scoped it out); the RN app is the flagship surface.
  */
 import { Appearance, ColorSchemeName } from 'react-native';
-import { palette, type ColorScheme } from './palette';
+import { palette, palettes, type ColorScheme } from './palette';
+import { getLook } from './look';
 
 export type { Colors, ColorScheme } from './palette';
 
@@ -22,5 +23,5 @@ function normalize(scheme: ColorSchemeName | ColorScheme | undefined | null): Co
 
 export function getColors(scheme?: ColorSchemeName | ColorScheme): typeof palette.light {
   if (isUnlinkedEmbed()) return { ...palette.light, background: '#f5f6fc', surface: '#ffffff', surfaceElevated: '#eef0fa', border: '#e6e8ef', divider: '#e6e8ef', textPrimary: '#16181d', textSecondary: '#606576', textMetadata: '#606576', primary: '#4349c4', primaryActive: '#353ba4', primaryMuted: '#ebecfa', bubbleOwn: '#4349c4', bubbleOwnText: '#ffffff', bubbleOther: '#ffffff', bubbleOtherText: '#16181d' };
-  return palette[normalize(scheme ?? Appearance.getColorScheme())];
+  return palettes[getLook()][normalize(scheme ?? Appearance.getColorScheme())];
 }
