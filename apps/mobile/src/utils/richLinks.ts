@@ -30,7 +30,8 @@ const IS_LOCAL_PATH = new RegExp(`^${ROOTS}[^\\n]+$`);
 // A destination may hold one level of balanced parentheses, as in https://example.org/a_(b).
 // A file: or local-path destination may contain spaces and runs to the closing parenthesis, so one
 // that fails the checks below leaves the whole [label](destination) as typed, not a stray piece of it.
-const MARKDOWN_LINK = new RegExp(String.raw`\[([^\]\n]{1,300})\]\((<[^>\n]{1,2000}>|file:[^)\n]{1,2000}|${ROOTS}[^)\n]{1,2000}|(?:[^()\s]|\([^()\s]{0,500}\)){1,2000})\)`, 'gi');
+// A local path may also hold one level of balanced parentheses: "/Users/sam/Report (final).pdf".
+const MARKDOWN_LINK = new RegExp(String.raw`\[([^\]\n]{1,300})\]\((<[^>\n]{1,2000}>|file:[^)\n]{1,2000}|${ROOTS}(?:[^()\n]|\([^()\n]{0,500}\)){1,2000}|(?:[^()\s]|\([^()\s]{0,500}\)){1,2000})\)`, 'gi');
 const BARE_FILE_URL = /file:\/\/[^\s<>"“”‘’`]+/gi;
 /**
  * Characters a copied path must never carry: control characters, the invisible

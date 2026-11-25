@@ -65,7 +65,7 @@ or that reads like a name rather than a sentence (`/Users/sam/My Projects/Index
 Folder`: no closing punctuation, no lowercase word after a space). A line that goes on to a
 flag, an assignment or a second path (`/tmp/a -o /tmp/b`) is a command, so each
 path in it stands alone. Otherwise a bare path ends at the next space. A markdown destination that is a path may
-contain spaces. In an agent's Markdown, paths are read from the raw text before
+contain spaces and one level of balanced parentheses (`Report (final).pdf`). In an agent's Markdown, paths are read from the raw text before
 emphasis, so `/Users/me/__pycache__/x` copies exactly. If a desktop shell provides `window.ideaflowDesktop.revealPath(path)` (or the
 older name `openPath`), it is called instead of copying. Its contract: the shell must reveal the item (for
 example in Finder) or ask before launching anything, because the path is

