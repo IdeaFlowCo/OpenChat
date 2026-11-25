@@ -99,7 +99,7 @@ describe('Back channel posts', () => {
     await act(async () => { links()[0]!.props.onPressIn(); links()[0]!.props.onPress({ stopPropagation: vi.fn() }); });
     expect(os.open).toHaveBeenCalledWith('https://signup.example.org/');
     // The file on the author's laptop is something to copy, never something to open.
-    const path = tree!.root.findAll(node => node.type === 'Text' && node.props.accessibilityLabel === `Copy file path: ${PATH}`)[0]!;
+    const path = tree!.root.findAll(node => node.type === 'Text' && node.props.accessibilityLabel === `Copy path: ${PATH}`)[0]!;
     expect(path.props.href).toBeUndefined(); os.open.mockClear();
     await act(async () => { path.props.onPress({ stopPropagation: vi.fn() }); });
     expect(os.copy).toHaveBeenCalledWith(PATH); expect(os.open).not.toHaveBeenCalled();

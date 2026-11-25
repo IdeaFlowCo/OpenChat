@@ -61,7 +61,7 @@ Every screen in `apps/mobile` (the canonical served client), its organizing noun
 | `BlockedUsers` | Settings | **Blocked users** | Settings › Legal & Account › Blocked users | 3 | Manage blocked contacts. |
 | `GroupSettings` | Chats | **Group Info** | In-chat header tap on a group conversation | 2 | Group member roster and controls; Unlinked-managed groups follow the [community membership rules](../README.md#message-with-openchat-from-unlinked). |
 | Stream display | Stream | **Compact view** | Personal Stream toolbar; chat conversation-content toolbar | 2 | Device-local display control; see [Stream usage](../README.md#messages-and-stream). |
-| Link display | Settings | **Show links as typed** | Settings › Appearance | 2 | Device-local; shows message and Stream text as written with nothing linked. See [links](message-links.md). |
+| Link display | Settings | **Show links as text** | Settings › Appearance | 2 | Device-local; shows message and Stream text as written with nothing linked. See [links](message-links.md). |
 | Message actions | Chats | **Actions** | Chats › conversation › message footer | 2 | Visible on phone and desktop; opens the same menu as message long-press. It does not expand message text. |
 | Inline pin state | Stream | **Pinned**, **Unpin from chat** | Conversation Stream entry | — | Pinned cards show an icon and label for all viewers. The author or pinner can unpin from the chronological entry. |
 | Story matching details | Stories | **Matching details (optional)** | Story composer | — | Advanced goal, seeks/brings and matching mode fields are collapsed initially; an imported intent draft reveals its existing details. Ordinary Stories require no Ask/Offer classification. |

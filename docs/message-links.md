@@ -51,18 +51,24 @@ path is never an anchor. It is a button: pressing it copies the path and shows
 "Path copied: paste in Finder (⇧⌘G)". The full path is the tooltip on web and
 the screen-reader label everywhere. `file:///Users/a/My%20Notes/x.html` and
 `file://localhost/…` decode to `/Users/a/My Notes/x.html`;
-`file:///C:/Users/a/x` to `C:/Users/a/x`; another host to `//host/path`. A
+`file:///C:/Users/a/x` to `C:/Users/a/x`. A `file:` address naming another machine
+(`file://server/share/…`) is not a local path and stays as typed, as does any
+path that would carry a control, invisible or direction-changing character or
+one of `; | & $ \` < >`. A
 line that is nothing but a bare path keeps its spaces; inside a sentence a
-bare path ends at the next space. The desktop shell has no command for opening
-a local path, so it copies too. If one is added, it should reveal the item in
-the file manager rather than open it: opening a path chosen by whoever wrote
-the message could run a program.
+bare path ends at the next space. If a desktop shell provides `window.ideaflowDesktop.revealPath(path)`, the
+path is shown in the file manager instead of copied. It is "reveal", never
+"open": opening a path chosen by whoever wrote the message could run a
+program. No shell provides it today. If the clipboard refuses, the notice
+reads "Couldn't copy. Path: …" so the path can still be read. These rules
+are shared with the Ideaflow Dashboard's description field; a markdown
+destination keeps one level of balanced parentheses.
 
 **Named links.** `[label](address)` can show one name and go somewhere else.
 On web, hovering shows the real address as for any link; **Links · Open or
 copy** in the message actions lists the address under the label.
 
-**Show links as typed** (Settings › Appearance, off by default, stored on the
+**Show links as text** (Settings › Appearance, off by default, stored on the
 device) shows message and Stream text exactly as written, with nothing linked.
 
 A collapsed Stream entry is one plain line; expand it to use its links.

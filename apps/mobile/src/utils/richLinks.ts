@@ -27,7 +27,8 @@ const ROOTS = String.raw`(?:~\/|\/(?:Users|home|Volumes|private|var|tmp|etc|opt|
 const PATH_START = new RegExp(`${ROOTS}\\S`, 'g');
 const IS_LOCAL_PATH = new RegExp(`^${ROOTS}[^\\n]+$`);
 // Label and destination lengths are bounded and neither may hold a newline, so matching stays linear.
-const MARKDOWN_LINK = /\[([^\]\n]{1,300})\]\((<[^>\n]{1,2000}>|file:[^)\n]{1,2000}|[^)\s]{1,2000})\)/gi;
+// A destination may hold one level of balanced parentheses, as in https://example.org/a_(b).
+const MARKDOWN_LINK = /\[([^\]\n]{1,300})\]\((<[^>\n]{1,2000}>|file:[^)\n]{1,2000}|(?:[^()\s]|\([^()\s]{0,500}\)){1,2000})\)/gi;
 const BARE_FILE_URL = /file:\/\/[^\s<>"“”‘’`]+/gi;
 /**
  * Characters a copied path must never carry: control characters, the invisible
@@ -46,7 +47,8 @@ export function fileUrlToPath(url: string): string | null {
   const host = match[1] ?? '';
   if (!/[^/]/.test(path) || UNSAFE_IN_PATH.test(path) || UNSAFE_IN_PATH.test(host) || /[\s@:]/.test(host)) return null;
   if (/^\/[A-Za-z]:[\\/]/.test(path)) path = path.slice(1);
-  return host && host.toLowerCase() !== 'localhost' ? `//${host}${path}` : path;
+  // A file on another machine (file://server/share/…) is not a local path; it stays as typed.
+  return host && host.toLowerCase() !== 'localhost' ? null : path;
 }
 
 export function filePaths(content: string): Array<{ start: number; end: number }> {
