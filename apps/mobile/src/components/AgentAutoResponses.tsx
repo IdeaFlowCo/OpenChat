@@ -19,7 +19,8 @@ export function describeRule(rule: Pick<AutoResponseRule, 'whenAway' | 'fromUser
   if (rule.topics.length) parts.push(`about ${rule.topics.join(', ')}`);
   const what = rule.action === 'agent' ? 'my agent writes a reply' : 'reply with my text';
   const how = rule.delivery === 'send' ? 'sent automatically' : 'draft for my approval';
-  return `${parts.join(' · ')} → ${what}, ${how}`;
+  const when = parts.join(' · ');
+  return `${when.charAt(0).toUpperCase()}${when.slice(1)} → ${what}, ${how}`;
 }
 
 const emptyRule = (): AutoResponseRuleInput => ({ whenAway: true, fromUserIds: [], topics: [], action: 'reply', replyText: '', delivery: 'draft' });
@@ -85,7 +86,7 @@ export function AgentAutoResponses() {
       <View style={styles.row}>
         <View style={{ flex: 1 }}>
           <Text style={{ ...type.bodyStrong, color: c.textPrimary }}>Let people ask my agent</Text>
-          <Text style={{ ...type.body, color: c.textSecondary }}>Anyone in a chat with you can tap “Ask your agent” on your message. It answers right away, labelled as your agent, not you, using only your public card and the notes you shared in that chat. It never reads your private notes.</Text>
+          <Text style={{ ...type.body, color: c.textSecondary }}>Anyone in a chat with you can choose “Ask {your name}’s agent” on one of your messages. It answers right away, labelled as your agent, not you, using only your public card and the notes you shared in that chat. It never reads your private notes.</Text>
         </View>
         <Switch
           value={settings?.profileAgentEnabled ?? true}
@@ -110,10 +111,10 @@ export function AgentAutoResponses() {
           multiline maxLength={2000}
           style={[styles.input, styles.multiline, { borderColor: c.border, color: c.textPrimary, backgroundColor: c.background }]}
         />
-        <Text style={{ ...type.meta, color: c.textMetadata }}>They will see “Drafted by your OpenChat agent · approved by you”.</Text>
+        <Text style={{ ...type.meta, color: c.textMetadata }}>{draft.action === 'agent' ? 'They will see “Drafted by your OpenChat agent · approved by you”.' : 'They will see “Auto-reply · approved by you”.'}</Text>
         <View style={styles.actions}>
           <Button label="Discard" variant="secondary" disabled={!!busy} onPress={() => { void act(`discard:${draft.id}`, () => api.discardAutoResponseDraft(draft.id)); }} />
-          <Button label="Send" disabled={!!busy || !(draftText[draft.id] ?? draft.text).trim()} onPress={() => { void act(`send:${draft.id}`, () => api.sendAutoResponseDraft(draft.id, (draftText[draft.id] ?? draft.text).trim())); }} />
+          <Button label="Send" variant="primary" disabled={!!busy || !(draftText[draft.id] ?? draft.text).trim()} onPress={() => { void act(`send:${draft.id}`, () => api.sendAutoResponseDraft(draft.id, (draftText[draft.id] ?? draft.text).trim())); }} />
         </View>
       </View>)}
     </>}
