@@ -193,6 +193,8 @@ interface ChatContextValue {
   // convIds that received new messages during a recent reconnect catch-up.
   // Used by the conversation list to briefly pulse those rows.
   reconnectNewConvIds: Set<string>;
+  /** Invalidates community views after realtime membership/configuration changes. */
+  communityRevision: number;
 
   // Lifecycle
   /** explicit=false for a session that expired rather than a person signing out. */
@@ -658,16 +660,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // reconnectNewConvIds: conversations that received messages during the last
   // catch-up. Cleared automatically after 3 seconds (enough for a pulse animation).
+  const [communityRevision, setCommunityRevision] = useState(0);
   const [reconnectNewConvIds, setReconnectNewConvIds] = useState<Set<string>>(new Set());
   const missingConversationFetchesRef = useRef<Set<string>>(new Set());
+  const conversationRefreshRevision = useRef(0);
   // ────────────────────────────────────────────────────────────────────────────
 
   const refreshConversations = useCallback(async () => {
     const session = sendSessionRef.current;
+    const refreshRevision = ++conversationRefreshRevision.current;
     if (!verifiedAccountRef.current || !await offlineRef.current?.isActive()) return;
     try {
       const data = await api.getConversations();
-      if (session !== sendSessionRef.current || !await offlineRef.current?.isActive()) return;
+      if (session !== sendSessionRef.current || refreshRevision !== conversationRefreshRevision.current || !await offlineRef.current?.isActive()) return;
       setConversations(sortConversationsByRecent(data));
       setUnreadByConv(unreadCountsFromConversations(data));
       setConversationsLoaded(true);
@@ -888,8 +893,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     const currentUserId = currentUser?.userId;
 
+    const onCommunityChanged = (event?: { communityId?: string }) => {
+      // Hide a possibly revoked admin composer before the authoritative read
+      // completes. An older in-flight list cannot restore stale permissions.
+      setConversations(previous => previous.map(conversation =>
+        conversation.communityKind === 'announcements' && (!event?.communityId || conversation.communityId === event.communityId)
+          ? { ...conversation, canPost: false } : conversation));
+      setCommunityRevision(value => value + 1);
+      void refreshConversations();
+    };
     const onConnect = () => {
       setIsConnected(true);
+      setCommunityRevision(value => value + 1);
       if (!wasEverConnectedRef.current) void refreshConversations();
       // Repair failed initial loads and truncated catch-up for the open thread.
       if (activeConvIdRef.current) {
@@ -1209,6 +1224,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     sock.on('match:updated', onMatchUpdated);
     sock.on('read:updated', onReadUpdated);
     sock.on('user:profile-updated', onProfileUpdated);
+    sock.on('community:changed', onCommunityChanged);
 
     setIsConnected(sock.connected);
 
@@ -1230,6 +1246,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sock.off('match:updated', onMatchUpdated);
       sock.off('read:updated', onReadUpdated);
       sock.off('user:profile-updated', onProfileUpdated);
+      sock.off('community:changed', onCommunityChanged);
     };
   }, [isAuthed, chatSocket, currentUser?.userId, refreshConversations, fetchMissingConversationForMessage, refetchMatches, retryMessages, patchMessage, mergeCreationMessages, isChatVisible]);
 
@@ -1677,7 +1694,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     mutedConvs, muteConv,
     readByOthers, onlineUsers, markConversationRead,
     updateProfile,
-    reconnectNewConvIds,
+    reconnectNewConvIds, communityRevision,
     signOut, bootstrapIfAuthed,
   }), [
     currentUser, isAuthed, authInitialized, isIdentityVerified, isConnected,
@@ -1697,7 +1714,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     mutedConvs, muteConv,
     readByOthers, onlineUsers, markConversationRead,
     updateProfile,
-    reconnectNewConvIds,
+    reconnectNewConvIds, communityRevision,
     signOut, bootstrapIfAuthed, visibleConversation,
   ]);
 

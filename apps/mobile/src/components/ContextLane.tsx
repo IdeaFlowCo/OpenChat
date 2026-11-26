@@ -45,6 +45,8 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const { currentUser, conversations } = useChat();
+  const conversation = conversations?.find(item => item.id === conversationId);
+  const announcementReadOnly = conversation?.communityKind === 'announcements' && conversation.canPost !== true;
   // The scope label names who the chat is with, from its membership; "this chat" when that is unknown.
   const sharedScope = sharedScopeLabel(conversations?.find(conversation => conversation.id === conversationId), currentUser?.userId);
   const [quoteOpen, setQuoteOpen] = useState<string>();
@@ -106,17 +108,17 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
         : item.agent ? <View style={{ marginTop: 6 }}><AgentMarkdown content={item.text} color={c.textPrimary} linkColor={c.primary} codeBackground={c.surfaceElevated} selectable onLongPress={() => setActionsFor(item.id)} /></View>
         : <StreamText content={item.text} color={c.textPrimary} linkColor={c.primary} pathBackground={c.surfaceElevated} style={{ marginTop: 6 }} onLongPress={() => setActionsFor(item.id)} />}
       {!item.isDeleted && actionsFor === item.id && <View style={styles.actions}>
-        {button('Reply', () => { setReplyTo(item); setEditing(undefined); })}
-        {own && button('Edit', () => { setEditing(item); setReplyTo(undefined); })}
-        {own && button('Delete', () => setConfirmDelete(item.id), true)}
+        {!announcementReadOnly && button('Reply', () => { setReplyTo(item); setEditing(undefined); })}
+        {!announcementReadOnly && own && button('Edit', () => { setEditing(item); setReplyTo(undefined); })}
+        {!announcementReadOnly && own && button('Delete', () => setConfirmDelete(item.id), true)}
         {!own && button('Report', () => setReporting(item.id))}
-        {item.kind === 'ask' && (!item.intention || item.intention.lifecycleState === 'open') && button('Ask agents', () => void action(item.id, async () => {
+        {!announcementReadOnly && item.kind === 'ask' && (!item.intention || item.intention.lifecycleState === 'open') && button('Ask agents', () => void action(item.id, async () => {
           const result = await api.askContextAgents(conversationId, item.id);
           setFeedback({ text: result.queued ? `Requested help from ${result.queued} agent${result.queued === 1 ? '' : 's'}. Replies will appear here.` : 'These agents have already received this request. Replies will appear here.', error: false });
         }))}
       </View>}
-      {!item.isDeleted && actionsFor === item.id && <ContextIntentionControls post={item} conversationId={conversationId} onChange={() => void load()} />}
-      {confirmDelete === item.id && <View><Text style={{ color: c.textMetadata }}>Delete this post? Replies will remain.</Text><View style={styles.actions}>{button('Confirm delete', () => void action(item.id, () => contextLaneManager.deletePost(conversationId, item.id)), true)}{button('Cancel', () => setConfirmDelete(undefined))}</View></View>}
+      {!announcementReadOnly && !item.isDeleted && actionsFor === item.id && <ContextIntentionControls post={item} conversationId={conversationId} onChange={() => void load()} />}
+      {!announcementReadOnly && confirmDelete === item.id && <View><Text style={{ color: c.textMetadata }}>Delete this post? Replies will remain.</Text><View style={styles.actions}>{button('Confirm delete', () => void action(item.id, () => contextLaneManager.deletePost(conversationId, item.id)), true)}{button('Cancel', () => setConfirmDelete(undefined))}</View></View>}
       {reporting === item.id && <View><Text style={{ color: c.textMetadata }}>Report this post for review</Text><View style={styles.actions}>{['Spam', 'Harassment', 'Other'].map(reason => <React.Fragment key={reason}>{button(reason, () => void action(item.id, () => api.reportContextPost(conversationId, item.id, reason.toLowerCase()), 'Report submitted.'))}</React.Fragment>)}{button('Cancel', () => setReporting(undefined))}</View></View>}
       {busy === item.id && <ActivityIndicator color={c.primary} accessibilityLabel="Working" />}
     </Pressable>;
@@ -147,7 +149,8 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
       onEndReached={() => { if (!state.isError) void load(true); }} onEndReachedThreshold={0.5}
       ListFooterComponent={state.hasMore && feed.items.length ? button('Load older content', () => void load(true)) : null}
       ListEmptyComponent={state.isLoading ? <ActivityIndicator color={c.primary} style={{ margin: 24 }} /> : !state.isError ? <Text style={{ color: c.textMetadata, textAlign: 'center', margin: 24 }}>{search ? 'No matching conversation content.' : feed.contextAvailable === false ? 'This chat’s Stream entries appear here. Private entries are labeled Only you.' : 'Notes and saved items for this chat appear here. Private entries are labeled Only you.'}</Text> : null} />
-    {feed.contextAvailable === true && <ContextComposer key={`${conversationId}:${editing?.id || replyTo?.id || 'new'}`} conversationId={conversationId} editing={editing} replyTo={replyTo} onDone={() => { setEditing(undefined); setReplyTo(undefined); void load(); }} />}
+    {announcementReadOnly && <Text style={[type.body, { color: c.textMetadata, padding: space[3] }]}>Only community admins can contribute to announcements. Private entries are only for you.</Text>}
+    {!announcementReadOnly && feed.contextAvailable === true && <ContextComposer key={`${conversationId}:${editing?.id || replyTo?.id || 'new'}`} conversationId={conversationId} editing={editing} replyTo={replyTo} onDone={() => { setEditing(undefined); setReplyTo(undefined); void load(); }} />}
   </View>;
 }
 const styles = StyleSheet.create({

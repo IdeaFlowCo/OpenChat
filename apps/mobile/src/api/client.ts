@@ -105,10 +105,29 @@ export interface Participant {
   role?: 'owner' | 'member';
 }
 
+export type CommunityRole = 'owner' | 'admin' | 'member';
+export interface CommunitySummary {
+  id: string;
+  name: string;
+  description: string;
+  role: CommunityRole;
+  announcementsId: string;
+  memberCount: number;
+}
+export interface CommunityDetail extends CommunitySummary {
+  groups: Array<{ id: string; title: string; joined: boolean }>;
+  members: Array<{ id: string; name: string; role: CommunityRole }>;
+}
+
 export interface Conversation {
   id: string;
   title?: string | null;
   type: 'direct' | 'group';
+  communityKind?: 'announcements' | null;
+  communityId?: string | null;
+  unlinkedGroupId?: string | null;
+  /** Authoritative caller-specific announcement posting permission. */
+  canPost?: boolean;
   participants?: Participant[];
   /** Caller-specific unread total returned by GET /api/chat/conversations. */
   unreadCount?: number;
@@ -1132,6 +1151,19 @@ export const api = {
     { status: 'unclaimed'; name: string } | { status: 'unavailable' }
   >('/api/unlinked/recipient', { method: 'POST', body: JSON.stringify({ profile }) }),
   getMe: () => timedRequest<User>('/api/auth/me'),
+  listCommunities: () => request<CommunitySummary[]>('/api/communities', { expireAuthOnForbidden: false }),
+  getCommunity: (id: string) => request<CommunityDetail>(`/api/communities/${encodeURIComponent(id)}`, { expireAuthOnForbidden: false }),
+  createCommunity: (name: string, description: string) => request<CommunitySummary>('/api/communities', { method: 'POST', body: JSON.stringify({ name, description }), expireAuthOnForbidden: false }),
+  updateCommunity: (id: string, name: string, description: string) => request<CommunitySummary>(`/api/communities/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ name, description }), expireAuthOnForbidden: false }),
+  joinCommunity: (token: string) => request<CommunitySummary>('/api/communities/join', { method: 'POST', body: JSON.stringify({ token }), expireAuthOnForbidden: false }),
+  createCommunityGroup: (id: string, title: string) => request<{ conversationId: string }>(`/api/communities/${encodeURIComponent(id)}/groups`, { method: 'POST', body: JSON.stringify({ title }), expireAuthOnForbidden: false }),
+  linkCommunityGroup: (id: string, conversationId: string) => request<{ conversationId: string }>(`/api/communities/${encodeURIComponent(id)}/groups/link`, { method: 'POST', body: JSON.stringify({ conversationId, allowCommunityJoin: true }), expireAuthOnForbidden: false }),
+  unlinkCommunityGroup: (id: string, conversationId: string) => request<void>(`/api/communities/${encodeURIComponent(id)}/groups/${encodeURIComponent(conversationId)}`, { method: 'DELETE', expireAuthOnForbidden: false }),
+  joinCommunityGroup: (id: string, conversationId: string) => request<{ conversationId: string }>(`/api/communities/${encodeURIComponent(id)}/groups/${encodeURIComponent(conversationId)}/join`, { method: 'POST', expireAuthOnForbidden: false }),
+  setCommunityMemberRole: (id: string, userId: string, role: CommunityRole) => request<void>(`/api/communities/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: 'PATCH', body: JSON.stringify({ role }), expireAuthOnForbidden: false }),
+  removeCommunityMember: (id: string, userId: string) => request<void>(`/api/communities/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE', expireAuthOnForbidden: false }),
+  createCommunityInvite: (id: string) => request<{ token: string }>(`/api/communities/${encodeURIComponent(id)}/invites`, { method: 'POST', expireAuthOnForbidden: false }),
+  revokeCommunityInvites: (id: string) => request<void>(`/api/communities/${encodeURIComponent(id)}/invites`, { method: 'DELETE', expireAuthOnForbidden: false }),
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
   getConversation: (conversationId: string) =>
     request<Conversation>(`/api/chat/conversations/${conversationId}`),

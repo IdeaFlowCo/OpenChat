@@ -25,6 +25,8 @@ export type RootStackParamList = {
   Conversations: undefined;
   Chat: { conversationId: string; lane?: 'chat' | 'context'; entryId?: string };
   NewConversation: undefined;
+  Communities: undefined;
+  Community: { communityId: string };
   OriginalMessage: { thoughtId: string } | { messageId: string };
   Compose: import('../utils/composeIntent').ComposeIntent & { requestRevision?: string };
   InvitePerson: undefined;
