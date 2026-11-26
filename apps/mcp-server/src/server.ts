@@ -1235,7 +1235,7 @@ export function buildServer(
     ({ subjectKind, subjectId, depth }) => api.getPrivateNeighbourhood({ kind: subjectKind, id: subjectId }, depth));
 
   privateTool('oc_get_unlinked_person_private', 'Read private card for an Unlinked person',
-    `Read the owner's private notes and relations about an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address. ${PRIVATE_PEOPLE}`,
+    `Read the owner's private notes and relations about an Unlinked person: a published profile id, a connection id from unlinked_list_connections (an imported LinkedIn contact) or a linkedin.com/in/ address. A unique existing card returns thingId; identity conflicts return owner-only candidate thingIds to inspect with oc_get_private_thing and select explicitly for a subjectKind thing write. ${PRIVATE_PEOPLE}`,
     { profileId: z.string().min(1).max(512) }, ({ profileId }) => api.getUnlinkedPersonPrivate(profileId));
 
   privateTool('oc_save_private_thing', 'Find or save a private person, company, idea, project or topic',
