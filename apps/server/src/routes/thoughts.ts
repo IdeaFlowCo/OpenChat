@@ -71,7 +71,7 @@ export function mergeDuplicateThoughtsFromSameMessage(
 
   for (const thought of thoughts) {
     const sourceMessageId = thought.sourceMessageId as string | null | undefined;
-    const key = sourceMessageId ? `${sourceMessageId}::${thought.text as string}` : null;
+    const key = thought.captureMethod === 'message-status' ? `message-status:${thought.id as string}` : sourceMessageId ? `${sourceMessageId}::${thought.text as string}` : null;
     if (!key) {
       merged.push(thought);
       continue;
@@ -269,7 +269,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       OPTIONAL MATCH (t)-[:FROM_MESSAGE]->(m:Message)
       OPTIONAL MATCH (conv:Conversation { id: m.conversationId })
       RETURN t {
-        .id, .text, .kind, .status, .createdAt, .updatedAt,
+        .id, .text, .kind, .status, .createdAt, .updatedAt, .captureMethod,
         tags: coalesce(t.tags, []),
         hasSourceMessage: m IS NOT NULL,
         sourceMessageId: CASE WHEN EXISTS { MATCH (u)-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.id ELSE null END,
@@ -340,7 +340,7 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
       OPTIONAL MATCH (author:User {id: t.userId})
       OPTIONAL MATCH (t)-[:FROM_MESSAGE]->(m:Message)
       RETURN t {
-        .id, .text, .kind, .status, .createdAt, .updatedAt,
+        .id, .text, .kind, .status, .createdAt, .updatedAt, .captureMethod,
         tags: coalesce(t.tags, []),
         authorId: t.userId,
         authorName: author.name,
@@ -386,7 +386,7 @@ router.get('/conversation/:conversationId', requireAuth, async (req: Request, re
       ${fromChatWhere}
       OPTIONAL MATCH (author:User {id: t.userId})
       RETURN t {
-        .id, .text, .kind, .status, .createdAt, .updatedAt,
+        .id, .text, .kind, .status, .createdAt, .updatedAt, .captureMethod,
         tags: coalesce(t.tags, []),
         hasSourceMessage: m IS NOT NULL,
         sourceMessageId: CASE WHEN EXISTS { MATCH (:User {id: $userId})-[:PARTICIPATES_IN]->(:Conversation {id: m.conversationId}) } THEN m.id ELSE null END,
@@ -672,7 +672,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         MERGE (t)-[p:PINNED_IN]->(conv)
         ON CREATE SET p.pinnedBy = $userId, p.pinnedAt = datetime($now)
       )
-      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, .scopeConversationId, tags: coalesce(t.tags, []), hasSourceMessage: m IS NOT NULL, sourceMessageId: m.id, sourceConversationId: m.conversationId, pinned: $pinToConversationId IS NOT NULL } AS thought
+      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, .captureMethod, .scopeConversationId, tags: coalesce(t.tags, []), hasSourceMessage: m IS NOT NULL, sourceMessageId: m.id, sourceConversationId: m.conversationId, pinned: $pinToConversationId IS NOT NULL } AS thought
       `,
       {
         userId,
@@ -757,7 +757,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
           t.kind      = CASE WHEN $kind   IS NOT NULL THEN $kind   ELSE t.kind   END,
           t.status    = CASE WHEN $status IS NOT NULL THEN $status ELSE t.status END,
           t.updatedAt = datetime($now)
-      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, tags: coalesce(t.tags, []) } AS thought
+      RETURN t { .id, .text, .kind, .status, .createdAt, .updatedAt, .captureMethod, tags: coalesce(t.tags, []) } AS thought
       `,
       {
         userId,

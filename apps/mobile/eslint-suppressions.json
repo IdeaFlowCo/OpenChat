@@ -374,11 +374,6 @@
       "count": 7
     }
   },
-  "src/screens/SecretaryScreen.tsx": {
-    "no-restricted-syntax": {
-      "count": 18
-    }
-  },
   "src/screens/SettingsScreen.tsx": {
     "no-restricted-syntax": {
       "count": 4

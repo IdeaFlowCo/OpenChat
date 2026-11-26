@@ -14,6 +14,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { api, type SecretaryAnswer, type SecretaryConfig } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
+import { radius, space, type, touchTarget } from '../theme/tokens';
 
 export function SecretaryScreen() {
   const { scheme } = useTheme();
@@ -111,14 +112,14 @@ export function SecretaryScreen() {
     <ScrollView style={{ backgroundColor: c.background }} contentContainerStyle={styles.content}>
       <View style={[styles.hero, { backgroundColor: c.surface, borderColor: c.border }]}>
         <View style={styles.heroCopy}>
-          <Text style={[styles.title, { color: c.textPrimary }]}>Routine questions, handled</Text>
-          <Text style={[styles.body, { color: c.textSecondary }]}>Your Secretary replies in direct chats using only the exact answers you approve here.</Text>
+          <Text style={[styles.title, { color: c.textPrimary }]}>Auto replies</Text>
+          <Text style={[styles.body, { color: c.textSecondary }]}>The built-in Secretary replies in direct chats using only the exact answers you approve here.</Text>
         </View>
         <Switch
           value={config?.enabled ?? false}
           onValueChange={(value) => void toggleEnabled(value)}
           trackColor={{ false: c.border, true: c.primary }}
-          accessibilityLabel="Enable Secretary auto-replies"
+          accessibilityLabel="Enable auto replies"
         />
       </View>
 
@@ -168,7 +169,7 @@ export function SecretaryScreen() {
         <View style={styles.actions}>
           {editingId && (
             <TouchableOpacity onPress={resetForm} style={[styles.secondaryButton, { borderColor: c.border }]}>
-              <Text style={{ color: c.textPrimary, fontWeight: '600' }}>Cancel</Text>
+              <Text style={{ ...type.label, color: c.textPrimary }}>Cancel</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
@@ -186,26 +187,26 @@ export function SecretaryScreen() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  content: { padding: 16, gap: 12, paddingBottom: 48 },
-  hero: { borderWidth: 1, borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 16 },
+  content: { padding: space[4], gap: space[3], paddingBottom: space[10] },
+  hero: { borderWidth: 1, borderRadius: radius.lg, padding: space[4], flexDirection: 'row', alignItems: 'center', gap: space[4] },
   heroCopy: { flex: 1 },
-  title: { fontSize: 20, fontWeight: '700', marginBottom: 5 },
-  body: { fontSize: 14, lineHeight: 20 },
-  notice: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12 },
-  noticeText: { fontSize: 13, lineHeight: 18 },
-  sectionLabel: { fontSize: 12, fontWeight: '700', letterSpacing: 0.7, marginTop: 8 },
-  card: { borderWidth: 1, borderRadius: 14, padding: 14 },
-  question: { fontSize: 15, fontWeight: '600' },
-  answer: { fontSize: 14, lineHeight: 20, marginTop: 5 },
-  cardHint: { fontSize: 11, marginTop: 9 },
-  empty: { fontSize: 14, paddingVertical: 10, textAlign: 'center' },
-  form: { borderWidth: 1, borderRadius: 16, padding: 14, gap: 8, marginTop: 4 },
-  formTitle: { fontSize: 17, fontWeight: '700', marginBottom: 3 },
-  inputLabel: { fontSize: 12, fontWeight: '600', marginTop: 3 },
-  input: { borderWidth: 1, borderRadius: 10, minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
-  answerInput: { minHeight: 88, textAlignVertical: 'top' },
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 6 },
-  secondaryButton: { minHeight: 44, justifyContent: 'center', borderWidth: 1, borderRadius: 10, paddingHorizontal: 18 },
-  primaryButton: { minHeight: 44, minWidth: 110, alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingHorizontal: 18 },
-  primaryButtonText: { fontWeight: '700' },
+  title: { ...type.heading, marginBottom: space[1] },
+  body: { ...type.body },
+  notice: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, padding: space[3] },
+  noticeText: { ...type.label },
+  sectionLabel: { ...type.eyebrow, marginTop: space[2] },
+  card: { borderWidth: 1, borderRadius: radius.lg, padding: space[3] },
+  question: { ...type.bodyStrong },
+  answer: { ...type.body, marginTop: space[1] },
+  cardHint: { ...type.meta, marginTop: space[2] },
+  empty: { ...type.body, paddingVertical: space[3], textAlign: 'center' },
+  form: { borderWidth: 1, borderRadius: radius.lg, padding: space[3], gap: space[2], marginTop: space[1] },
+  formTitle: { ...type.title, marginBottom: space[1] },
+  inputLabel: { ...type.label, marginTop: space[1] },
+  input: { ...type.body, borderWidth: 1, borderRadius: radius.md, minHeight: touchTarget, paddingHorizontal: space[3], paddingVertical: space[2] },
+  answerInput: { minHeight: touchTarget * 2, textAlignVertical: 'top' },
+  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space[2], marginTop: space[2] },
+  secondaryButton: { minHeight: touchTarget, justifyContent: 'center', borderWidth: 1, borderRadius: radius.md, paddingHorizontal: space[4] },
+  primaryButton: { minHeight: touchTarget, minWidth: touchTarget * 2, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md, paddingHorizontal: space[4] },
+  primaryButtonText: { ...type.label },
 });

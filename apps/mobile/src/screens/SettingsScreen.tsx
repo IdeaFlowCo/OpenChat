@@ -506,7 +506,7 @@ export function SettingsScreen() {
             activeOpacity={0.7}
           >
             <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Secretary</Text>
+              <Text style={[styles.optionLabel, { color: c.textPrimary }]}>Auto replies</Text>
               <Text style={[styles.optionHint, { color: c.textSecondary }]}>Auto-answer repetitive questions using replies you approve</Text>
             </View>
             <AppIcon name="chevron-right" color={c.textMuted} size={18} />

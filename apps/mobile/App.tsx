@@ -312,7 +312,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen
         name="Secretary"
         component={SecretaryScreen}
-        options={{ title: 'Secretary' }}
+        options={{ title: 'Auto replies' }}
       />
       {/* Chat-scoped Stream: pinned + captured-from-this-chat */}
       <ChatsStack.Screen
