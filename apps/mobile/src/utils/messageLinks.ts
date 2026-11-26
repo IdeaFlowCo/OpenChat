@@ -82,6 +82,21 @@ export function trimLink(text: string): string {
   return text.slice(0, end);
 }
 
+// No percent sign: an encoded line break or separator must not ride in on the address.
+const MAILTO = /^mailto:([A-Za-z0-9._+-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.){1,8}[A-Za-z]{2,24})$/i;
+/**
+ * A mailto: address that does one thing: open the mail app with one recipient filled in. Nothing
+ * is sent. An address carrying a subject, body, cc or bcc is left as typed, so a link cannot
+ * pre-write a message or add hidden recipients.
+ */
+export function safeMailto(value: string): string | null {
+  const match = MAILTO.exec(value);
+  return match && !match[1]!.includes('..') ? `mailto:${match[1]}` : null;
+}
+
+/** Where a written link may lead: a web address or a plain mailto: address. */
+export const safeLinkUrl = (value: string): string | null => safeMessageUrl(value) ?? safeMailto(value);
+
 export function messageLinks(content: string): MessageLink[] {
   const links: MessageLink[] = [];
   const candidates = new RegExp(String.raw`(?:https?:\/\/|www\.)[^\s<>"“”‘’\`]+|${BARE_DOMAIN}`, 'gi');

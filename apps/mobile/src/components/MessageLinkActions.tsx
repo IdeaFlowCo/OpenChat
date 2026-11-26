@@ -23,7 +23,7 @@ export function MessageLinkActions({ content, color, borderColor }: {
         <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Copy link: ${link.text}`}
           style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }}
           onPress={async () => {
-            try { setStatus(await Clipboard.setStringAsync(link.url) ? 'Link copied' : 'Could not copy link'); }
+            try { setStatus(await Clipboard.setStringAsync(link.url.replace(/^mailto:/i, '')) ? 'Link copied' : 'Could not copy link'); }
             catch { setStatus('Could not copy link'); }
           }}>
           <Text style={{ color, fontWeight: '600' }}>Copy link</Text>

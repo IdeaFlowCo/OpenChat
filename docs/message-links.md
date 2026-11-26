@@ -37,10 +37,11 @@ tokenizer, `apps/mobile/src/utils/richLinks.ts`. Scanning left to right:
 | Written as | Shown as |
 |---|---|
 | `[label](https://…)`, `[label](www.…)`, `[label](bare.domain/…)` | A link showing `label` |
+| `[label](mailto:name@example.org)` | A link showing `label` that opens the mail app with that one address filled in. Nothing is sent. With a subject, body, cc, bcc or a second address it stays as typed; a bare `mailto:` or e-mail address in text is not linked |
 | `https://…`, `www.…`, a bare domain | A link showing the address |
 | `[label](file:///…)`, `[label](/Users/…)` | A **path** showing 📁 `label` |
 | `file:///…`, or a bare path under `/Users/`, `/home/`, `/Volumes/`, `~/`, `C:\` and a few system roots | A **path** showing 📁 and the decoded path |
-| `[label](javascript:…)`, `data:`, `vbscript:`, `intent:`, any other scheme, an address with credentials, a malformed address | Exactly what was typed |
+| `[label](javascript:…)`, `data:`, `vbscript:`, `intent:`, any other scheme (not `mailto:`, above), an address with credentials, a malformed address | Exactly what was typed |
 
 A person's message gets links by these rules and no other formatting; an
 agent's message is also rendered as Markdown. Joining every part's source text
