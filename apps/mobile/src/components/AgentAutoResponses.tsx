@@ -139,6 +139,7 @@ export function AgentAutoResponses() {
           onValueChange={enabled => { void act(`toggle:${rule.id}`, () => api.updateAutoResponseRule(rule.id, { enabled })); }} />
       </View>
       {rule.action === 'reply' && !!rule.replyText && <Text style={{ ...type.meta, color: c.textSecondary }}>“{rule.replyText}”</Text>}
+      {rule.action === 'agent' && !settings?.profileAgentEnabled && <Text style={{ ...type.meta, color: c.textPrimary }}>Paused: your agent is off. Turn it on above for this rule to write replies.</Text>}
       <Button label="Delete rule" variant="ghost" disabled={!!busy} onPress={() => { void act(`delete:${rule.id}`, () => api.deleteAutoResponseRule(rule.id)); }} />
     </View>)}
 
@@ -161,6 +162,7 @@ export function AgentAutoResponses() {
         <Chip label="Reply with my text" accessibilityRole="radio" selected={form.action === 'reply'} onPress={() => setForm(f => ({ ...f, action: 'reply' }))} />
         <Chip label="Let my agent write it" accessibilityRole="radio" selected={form.action === 'agent'} onPress={() => setForm(f => ({ ...f, action: 'agent' }))} />
       </View>
+      {form.action === 'agent' && !settings?.profileAgentEnabled && <Text style={{ ...type.meta, color: c.textPrimary }}>Agent-written replies only run while your agent is turned on above.</Text>}
       {form.action === 'reply' && <TextInput accessibilityLabel="Reply text" value={form.replyText ?? ''} onChangeText={replyText => setForm(f => ({ ...f, replyText }))}
         placeholder="Thanks — I’m away until Monday." placeholderTextColor={c.textMuted} multiline maxLength={1000}
         style={[styles.input, styles.multiline, { borderColor: c.border, color: c.textPrimary, backgroundColor: c.background }]} />}

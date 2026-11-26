@@ -89,8 +89,7 @@ export interface ShareableContext {
 export async function loadShareableContext(
   tx: ManagedTransaction,
   input: { askerId: string; ownerId: string; conversationId: string; messageId: string },
-  // "Ask {name}'s agent" needs the owner's explicit opt-in. An owner's own agent-written
-  // auto-response rule is itself that owner's opt-in for that rule, so it passes false.
+  // All agent-written text needs the owner's explicit opt-in (one switch for asks and agent rules).
   requireOptIn = true,
 ): Promise<ShareableContext> {
   // Copy only the identifiers so callers can never pass extra objects as query parameters.
@@ -354,7 +353,7 @@ export async function generateMeteredReply(input: MeteredInput): Promise<Metered
       await acquireContextAclLocks(tx, { userIds: [input.ownerId, input.askerId] });
       const now = new Date().toISOString();
       const ids = { askerId: input.askerId, ownerId: input.ownerId, conversationId: input.conversationId, messageId: input.messageId };
-      const context = await loadShareableContext(tx, ids, input.purpose === 'answer');
+      const context = await loadShareableContext(tx, ids, true);
       if (input.rateLimited) await checkRateLimits(tx, { ...ids, now });
       // Auto-drafts are bounded by the owner's hourly limit too, so strangers cannot drain the allowance.
       else await checkOwnerRate(tx, { ownerId: ids.ownerId, now });
@@ -477,7 +476,9 @@ export async function profileAgentAvailability(driver: Driver, askerId: string, 
       MATCH (:User {id:$askerId})-[:PARTICIPATES_IN]->(c:Conversation)
       MATCH (m:Message {id:$messageId, conversationId:c.id}) WHERE m.deletedAt IS NULL
       MATCH (owner:User {id:m.senderId})
-      RETURN coalesce(owner.profileAgentEnabled,false) AND owner.id <> $askerId AND NOT coalesce(owner.isBot,false) AS enabled`, { askerId, messageId });
+      MATCH (asker:User {id:$askerId})
+      RETURN coalesce(owner.profileAgentEnabled,false) AND owner.id <> $askerId AND NOT coalesce(owner.isBot,false)
+        AND NOT EXISTS { MATCH (owner)-[:BLOCKED]-(asker) } AS enabled`, { askerId, messageId });
     if (!r.records.length) return null;
     return { enabled: r.records[0]!.get('enabled') === true, available: isProfileAgentAvailable() };
   } finally { await session.close(); }

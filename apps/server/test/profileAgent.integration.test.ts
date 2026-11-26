@@ -171,6 +171,9 @@ integration('OpenChat profile agent answers only from what the owner shared here
     const s2 = driver.session();
     try { await auto.setProfileAgentEnabled(s2, id('dan'), true); } finally { await s2.close(); }
     expect(await agent.profileAgentAvailability(driver, id('ana'), id('mDan'))).toEqual({ enabled: true, available: true });
+    await run('MATCH (a:User {id:$ana}),(d:User {id:$dan}) CREATE (d)-[:BLOCKED]->(a)', { ana: id('ana'), dan: id('dan') });
+    expect(await agent.profileAgentAvailability(driver, id('ana'), id('mDan'))).toEqual({ enabled: false, available: true });
+    await run('MATCH (:User {id:$dan})-[b:BLOCKED]->() DELETE b', { dan: id('dan') });
     await run('MATCH (d:User {id:$dan}) REMOVE d.profileAgentEnabled', { dan: id('dan') });
   });
 
@@ -290,6 +293,25 @@ integration('OpenChat profile agent answers only from what the owner shared here
         await auto.deleteRule(s, id('ana'), rule.id);
         rule = await auto.createRule(s, id('ana'), { whenAway: true, action: 'reply', replyText: 'Away.', delivery: 'send' });
         expect(await trigger(await send('cd2', 'Synthetic: two'), 'Synthetic: two', false)).toBe('skipped');
+        await auto.deleteRule(s, id('ana'), rule.id);
+      } finally { await s.close(); }
+    });
+
+    it('agent-written rules need the same opt-in: unset or switched off means no agent text in the owner’s name', async () => {
+      const s = session();
+      try {
+        const rule = await auto.createRule(s, id('ana'), { whenAway: true, action: 'agent', delivery: 'send' });
+        prompts.length = 0;
+        for (const value of [null, false]) {
+          await run('MATCH (a:User {id:$ana}) SET a.profileAgentEnabled=$value', { ana: id('ana'), value });
+          await run('MATCH (n) WHERE (n:AutoResponseEvent OR n:AutoResponseDraft) AND n.ownerId = $ana DETACH DELETE n', { ana: id('ana') });
+          const name = await send(`optin-${value}`, 'Synthetic: are you there?');
+          expect(await trigger(name, 'Synthetic: are you there?', false)).toBe('skipped');
+          const posted = await run('MATCH (m:Message {replyToId:$id}) RETURN count(m) AS n', { id: id(name) });
+          expect(posted.records[0]!.get('n').toNumber()).toBe(0);
+        }
+        expect(prompts).toHaveLength(0);
+        await run('MATCH (a:User {id:$ana}) SET a.profileAgentEnabled=true', { ana: id('ana') });
         await auto.deleteRule(s, id('ana'), rule.id);
       } finally { await s.close(); }
     });
