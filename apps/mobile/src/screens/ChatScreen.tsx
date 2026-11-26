@@ -41,6 +41,7 @@ import { Attachment, Conversation, ExportRangeKey, Message, api } from '../api/c
 import { MessageActionSheet, ReplyToData } from '../components/MessageActionSheet';
 import { ReactionsBar } from '../components/ReactionsBar';
 import { MessageStatusChips } from '../components/MessageStatusChips';
+import { AutoResponseDraftNotice } from '../components/AutoResponseDraftNotice';
 import { useMessageStatuses } from '../hooks/useMessageStatuses';
 import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
@@ -1798,6 +1799,14 @@ export function ChatScreen({
               ◇ Secretary auto-reply
             </Text>
           )}
+          {/* Trust label from the server flags, never from message text (anyone can type a label). */}
+          {!!(m.viaProfileAgent || m.viaAutoResponse) && !m.deletedAt && (
+            <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.78) : c.textMetadata }]} numberOfLines={1}>
+              {m.viaProfileAgent
+                ? `◇ OpenChat agent · not ${getUserDisplayName(m.sender)}`
+                : m.autoResponseApproved ? '◇ Auto-reply · approved' : '◇ Automatic reply'}
+            </Text>
+          )}
           {!!m.forwardedFromMessageId && (
             <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.7) : c.textMetadata }]} numberOfLines={1}>
               {'↪ Forwarded from '}{m.forwardedFromSenderName || 'Unknown'}
@@ -2347,6 +2356,7 @@ export function ChatScreen({
           <Text style={{ color: c.textMetadata, fontSize: 14, marginLeft: 8 }}>Recording cancelled</Text>
         </View>
       )}
+      {activeConversationLane === 'chat' && !!conversationId && <AutoResponseDraftNotice conversationId={conversationId} onReview={() => navigation.navigate('Secretary')} />}
 
       <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
         {/* Hide-keyboard button: a visible way out while typing, beyond the

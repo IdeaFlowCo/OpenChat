@@ -64,6 +64,6 @@ export function ProfileAgentAskControls({ messageId, name, onAnswered }: { messa
     {!!error && <Text accessibilityRole="alert" style={{ ...type.body, color: c.danger }}>{error}</Text>}
     <Button label={busy ? 'Asking…' : 'Ask now'} disabled={busy} onPress={() => { void ask(); }} />
     {busy && <ActivityIndicator accessibilityLabel="Waiting for the agent" color={c.primary} />}
-    <Text style={{ ...type.meta, color: c.textMetadata }}>Everyone in this chat sees the question’s answer.</Text>
+    <Text style={{ ...type.meta, color: c.textMetadata }}>Everyone in this chat sees the answer, your question, and that you asked.</Text>
   </View>;
 }
