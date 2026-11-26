@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { conversationUrl, originalMessageUrl, parseOpenChatUrl } from './parseOpenChatUrl';
+import { conversationUrl, messageUrl, originalMessageUrl, parseOpenChatUrl } from './parseOpenChatUrl';
 
 describe('parseOpenChatUrl AddMe cards', () => {
   const token = 'AbCdEfGhIjKlMnOpQrStUvWx';
@@ -46,6 +46,13 @@ describe('message permalinks', () => {
     expect(parseOpenChatUrl('openchat://message/old-message_1')).toEqual({ type: 'message', messageId: 'old-message_1' });
   });
   it('does not accept a lookalike origin, malformed ID or extra path', () => {
-    for (const raw of ['https://evil.invalid/app/message/old-message', 'https://chat.ideaflow.app/app/message/bad%20id', 'openchat://message/id/extra', 'https://chat.ideaflow.app/app/message/']) expect(parseOpenChatUrl(raw)).toEqual({ type: 'unknown' });
+    for (const raw of ['https://evil.invalid/app/message/old-message', 'https://chat.ideaflow.app/app/message/bad%ZZid', 'openchat://message/id/extra', 'https://chat.ideaflow.app/app/message/']) expect(parseOpenChatUrl(raw)).toEqual({ type: 'unknown' });
   });
+});
+
+it('round-trips opaque persisted message IDs without changing or double-decoding them', () => {
+  for (const id of ['client:legacy-1', 'a/b?c#d%2F', 'unicode-東京', 'a b', 'a'.repeat(300), '.', '..']) {
+    expect(parseOpenChatUrl(messageUrl(id))).toEqual({ type: 'message', messageId: id });
+    expect(parseOpenChatUrl(`openchat://message?${new URLSearchParams({id})}`)).toEqual({ type: 'message', messageId: id });
+  }
 });

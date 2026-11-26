@@ -37,7 +37,7 @@ function parseSaved(raw: string | null): PendingNavigationIntent | null {
     if (!Number.isFinite(saved.capturedAt) || Date.now() - saved.capturedAt > 60 * 60 * 1000) return null;
     const revision = typeof saved.revision === 'string' ? saved.revision : `legacy:${raw}`;
     if (saved.kind === 'message') {
-      return typeof saved.messageId === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(saved.messageId)
+      return typeof saved.messageId === 'string' && saved.messageId.length > 0
         ? { kind: 'message', messageId: saved.messageId, revision } : null;
     }
     if (saved.kind === 'original') {
@@ -61,7 +61,7 @@ export async function captureOriginalIntent(thoughtId: string): Promise<void> {
   listeners.forEach(listener => listener());
 }
 export async function captureMessageIntent(messageId: string): Promise<void> {
-  if (!/^[A-Za-z0-9_-]{1,200}$/.test(messageId)) return;
+  if (typeof messageId !== 'string' || messageId.length === 0) return;
   await serialize(() => writePending(JSON.stringify({ kind: 'message', messageId, capturedAt: Date.now(), revision: `${Date.now()}-${++sequence}-${Math.random().toString(36).slice(2)}` })));
   listeners.forEach(listener => listener());
 }

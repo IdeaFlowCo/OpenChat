@@ -19,7 +19,7 @@ integration('message permalinks against an isolated graph', () => {
   beforeAll(async () => {
     process.env.NEO4J_URI = uri!; process.env.NEO4J_USER = user!; process.env.NEO4J_PASSWORD = password!;
     db = await import('../src/db.js'); driver = neo4j.driver(uri!, neo4j.auth.basic(user!, password!));
-    app.use('/api/chat/messages', (await import('../src/routes/messageContext.js')).default);
+    app.use('/api/chat/message-context', (await import('../src/routes/messageContext.js')).default);
     await run(`
       CREATE (viewer:User {id:$viewer,fixture:$fixture}), (other:User {id:$other,fixture:$fixture})
       CREATE (chat:Conversation {id:$chat,name:'Synthetic chat',fixture:$fixture})
@@ -36,7 +36,7 @@ integration('message permalinks against an isolated graph', () => {
     await driver.close(); await db.closeDatabase();
   });
   it('resolves an old exact message with bounded neighbors without loading recent history first', async () => {
-    const result = await request(app).get(`/api/chat/messages/${id('m10')}/context`).set('Authorization', auth());
+    const result = await request(app).get(`/api/chat/message-context?messageId=${encodeURIComponent(id('m10'))}`).set('Authorization', auth());
     expect(result.status).toBe(200);
     expect(result.body.messageId).toBe(id('m10'));
     expect(result.body.messages).toHaveLength(11);
@@ -46,15 +46,22 @@ integration('message permalinks against an isolated graph', () => {
     expect(result.headers['cache-control']).toBe('no-store');
   });
   it('returns the same unavailable result for absent, deleted and nonmember sources', async () => {
-    const get = (message: string, viewer = 'viewer') => request(app).get(`/api/chat/messages/${id(message)}/context`).set('Authorization', auth(viewer));
+    const get = (message: string, viewer = 'viewer') => request(app).get(`/api/chat/message-context?messageId=${encodeURIComponent(id(message))}`).set('Authorization', auth(viewer));
     const absent = await get('missing'); const denied = await get('m10', 'other');
     await run('MATCH (m:Message {id:$id}) SET m.deletedAt=datetime()', { id: id('m11') });
     const deleted = await get('m11');
     for (const response of [absent, denied, deleted]) { expect(response.status).toBe(404); expect(response.body).toEqual({ error:'Message unavailable' }); }
   });
+  it('retrieves an opaque legacy client ID with punctuation through its encoded query link', async () => {
+    const opaque = id('client:legacy/a?b#c%2F');
+    await run("CREATE (:Message {id:$opaque,conversationId:$chat,fixture:$fixture,content:'Opaque ID target',createdAt:datetime('2021-01-01T00:00:00Z')})", {opaque,chat:id('chat')});
+    const result = await request(app).get(`/api/chat/message-context?messageId=${encodeURIComponent(opaque)}`).set('Authorization',auth());
+    expect(result.status).toBe(200);expect(result.body.messageId).toBe(opaque);
+    expect(result.body.messages.find((m:{id:string})=>m.id===opaque).content).toBe('Opaque ID target');
+  });
   it('removes access when conversation membership is revoked', async () => {
     await run('MATCH (:User {id:$viewer})-[p:PARTICIPATES_IN]->(:Conversation {id:$chat}) DELETE p', { viewer:id('viewer'),chat:id('chat') });
-    const result = await request(app).get(`/api/chat/messages/${id('m10')}/context`).set('Authorization', auth());
+    const result = await request(app).get(`/api/chat/message-context?messageId=${encodeURIComponent(id('m10'))}`).set('Authorization', auth());
     expect(result.status).toBe(404); expect(result.body).toEqual({ error:'Message unavailable' });
   });
 });

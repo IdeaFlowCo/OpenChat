@@ -26,7 +26,7 @@ const press = async (label: string) => act(async () => { await screen.root.findB
 it.each([false, true])('offers stable copy link and ID for another sender, attachment-only or deleted message (deleted=%s)', async deleted => {
   await mount(deleted);
   await press('Copy link to message');
-  expect(mocks.copy).toHaveBeenLastCalledWith('https://chat.ideaflow.app/app/message/synthetic-message');
+  expect(mocks.copy).toHaveBeenLastCalledWith('https://chat.ideaflow.app/app/message?id=synthetic-message');
   expect(mocks.copied).toHaveBeenLastCalledWith('Message link copied');
   await press('Copy message ID');
   expect(mocks.copy).toHaveBeenLastCalledWith('synthetic-message');

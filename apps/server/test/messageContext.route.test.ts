@@ -11,13 +11,13 @@ describe('message permalink context', () => {
   let server: Server; let base: string;
   const authorization = `Bearer ${jwt.sign({ userId: 'synthetic-viewer', email: 'viewer@example.test' }, 'dev-secret-change-me')}`;
   beforeAll(async () => {
-    const app = express(); app.use('/api/chat/messages', router);
+    const app = express(); app.use('/api/chat/message-context', router);
     await new Promise<void>(resolve => { server = app.listen(0, '127.0.0.1', resolve); });
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });
   afterAll(async () => { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
   beforeEach(() => { vi.resetAllMocks(); });
-  const get = (id = 'old-message', auth = authorization) => fetch(`${base}/api/chat/messages/${id}/context`, { headers: auth ? { Authorization: auth } : {} });
+  const get = (id = 'old-message', auth = authorization) => fetch(`${base}/api/chat/message-context?messageId=${encodeURIComponent(id)}`, { headers: auth ? { Authorization: auth } : {} });
 
   it('requires authentication and does not look up a message for anonymous callers', async () => {
     expect((await get('old-message', '')).status).toBe(401);
@@ -56,9 +56,15 @@ describe('message permalink context', () => {
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: 'Message unavailable' });
   });
-  it('rejects malformed ids before the database and never includes errors or content in a failure response', async () => {
-    expect((await get('bad%20id')).status).toBe(404);
-    expect(mocks.run).not.toHaveBeenCalled();
+  it('passes a valid persisted punctuation ID unchanged to both parameterized reads', async () => {
+    const opaque = 'client:legacy/a?b#c%2F';
+    mocks.run.mockResolvedValueOnce({ records: [{ get: () => ({ id: 'chat' }) }] }).mockResolvedValueOnce({ records: [{ get: () => ({ id: opaque, content: 'Synthetic' }) }] });
+    const response = await get(opaque);
+    expect(response.status).toBe(200);
+    expect((await response.json()).messageId).toBe(opaque);
+    expect(mocks.run.mock.calls.every(([, params]) => params.messageId === opaque)).toBe(true);
+  });
+  it('never includes errors or content in a failure response', async () => {
     mocks.run.mockRejectedValue(new Error('synthetic private database detail'));
     const response = await get();
     expect(response.status).toBe(500);

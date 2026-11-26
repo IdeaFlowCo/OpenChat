@@ -3,7 +3,6 @@ import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
-const messageId = /^[A-Za-z0-9_-]{1,200}$/;
 const unavailable = { error: 'Message unavailable' };
 const plain = (value: unknown): unknown => {
   if (value === null || value === undefined) return value;
@@ -14,12 +13,12 @@ const plain = (value: unknown): unknown => {
 };
 
 /** A message URL grants no access: membership is checked on both reads. */
-router.get('/:id/context', requireAuth, async (req: Request, res: Response) => {
+router.get('/', requireAuth, async (req: Request, res: Response) => {
   res.set('Cache-Control', 'no-store');
-  if (typeof req.params.id !== 'string' || !messageId.test(req.params.id)) { res.status(404).json(unavailable); return; }
+  if (typeof req.query.messageId !== 'string' || req.query.messageId.length === 0) { res.status(404).json(unavailable); return; }
   const session = getDriver().session();
   try {
-    const parameters = { userId: req.user!.userId, messageId: req.params.id };
+    const parameters = { userId: req.user!.userId, messageId: req.query.messageId };
     const result = await session.run(`
       MATCH (viewer:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation)
       MATCH (m:Message {id: $messageId, conversationId: c.id})

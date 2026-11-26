@@ -17,8 +17,9 @@ export function OriginalMessageScreen() {
   const { scheme } = useTheme(); const c = getColors(scheme);
   const [context, setContext] = useState<Awaited<ReturnType<typeof api.getMessageContext>> | null>(null);
   const [error, setError] = useState('');
+  const [showContext, setShowContext] = useState(false);
   useEffect(() => {
-    let current = true; setContext(null); setError('');
+    let current = true; setContext(null); setError(''); setShowContext(false);
     const request = linkedMessageId ? api.getMessageContext(linkedMessageId) : api.getThoughtContext(thoughtId!);
     request.then(value => { if (current) setContext(value); }).catch(() => {
       if (current) setError('Message unavailable. It may have been deleted, or you may no longer have access to its chat.');
@@ -32,11 +33,12 @@ export function OriginalMessageScreen() {
     {context && <>
       <Text style={{ ...type.body, color: c.textMetadata, marginVertical: space[4] }}>{context.conversation.name || 'Original chat'}</Text>
       <Text style={{ ...type.meta, color: c.textMetadata, marginBottom: space[3] }}>Only people with access to this chat can open this message link.</Text>
-      {context.messages.map(m => <View key={m.id} accessibilityLabel={m.id === context.messageId ? 'Linked message' : undefined} style={{ padding: space[4], marginBottom: space[2], borderRadius: radius.md, backgroundColor: m.id === context.messageId ? c.primaryMuted : c.surface, borderWidth: m.id === context.messageId ? 2 : 1, borderColor: m.id === context.messageId ? c.primary : c.border }}>
+      {(showContext ? context.messages : context.messages.filter(m => m.id === context.messageId)).map(m => <View key={m.id} accessibilityLabel={m.id === context.messageId ? 'Linked message' : undefined} style={{ padding: space[4], marginBottom: space[2], borderRadius: radius.md, backgroundColor: m.id === context.messageId ? c.primaryMuted : c.surface, borderWidth: m.id === context.messageId ? 2 : 1, borderColor: m.id === context.messageId ? c.primary : c.border }}>
         {m.id === context.messageId && <Text style={{ ...type.label, color: c.primary }}>{linkedMessageId ? 'Linked message' : 'Saved message'}</Text>}
         <Text style={{ ...type.meta, color: c.textMetadata, marginBottom: space[2] }}>{m.senderName || 'Participant'} · {new Date(m.createdAt).toLocaleString()}</Text>
         <MessageText content={m.content || 'Attachment or voice message · open chat to view'} color={c.textPrimary} onLongPress={() => undefined} />
       </View>)}
+      {context.messages.length > 1 && <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showContext }} onPress={() => setShowContext(value => !value)} style={{ paddingVertical: space[4] }}><Text style={{ ...type.label, color: c.primary }}>{showContext ? 'Hide surrounding messages' : 'Show surrounding messages'}</Text></TouchableOpacity>}
       <TouchableOpacity onPress={() => navigationRef.dispatch(CommonActions.navigate({ name: 'Main', params: { screen: 'ChatsTab', params: { screen: 'Chat', params: { conversationId: context.conversation.id } } } }))} accessibilityRole="button" style={{ paddingVertical: space[4] }}><Text style={{ ...type.label, color: c.primary }}>Open chat</Text></TouchableOpacity>
     </>}
   </ScrollView>;

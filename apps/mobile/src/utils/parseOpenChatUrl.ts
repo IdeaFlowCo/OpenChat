@@ -32,7 +32,14 @@ export const originalMessageUrl = (thoughtId: string) => `https://chat.ideaflow.
 export const conversationUrl = (conversationId: string) => `https://chat.ideaflow.app/app/chat/${encodeURIComponent(conversationId)}`;
 
 /** Stable message link. Opening it always rechecks conversation membership. */
-export const messageUrl = (messageId: string) => `https://chat.ideaflow.app/app/message/${encodeURIComponent(messageId)}`;
+export const messageUrl = (messageId: string) => `https://chat.ideaflow.app/app/message?${new URLSearchParams({ id: messageId })}`;
+
+// IDs are opaque: REST/WebSocket clients can supply punctuation, slashes and
+// Unicode. Decode one path segment exactly once, then keep it as bound data.
+export function decodeMessageId(encoded: string): string | null {
+  try { const value = decodeURIComponent(encoded); return value.length > 0 ? value : null; }
+  catch { return null; }
+}
 
 export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
   let url: URL;
@@ -43,8 +50,11 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
   }
 
   if (url.protocol === 'openchat:' && url.hostname === 'message') {
-    const id = url.pathname.replace(/^\//, '');
-    if (/^[A-Za-z0-9_-]{1,200}$/.test(id)) return { type: 'message', messageId: id };
+    const queryId = url.searchParams.get('id');
+    if ((!url.pathname || url.pathname === '/') && queryId) return { type: 'message', messageId: queryId };
+    const segment = url.pathname.match(/^\/([^/]+)$/)?.[1];
+    const id = segment ? decodeMessageId(segment) : null;
+    if (id !== null) return { type: 'message', messageId: id };
   }
 
   // openchat://user/<userId>
@@ -86,8 +96,15 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
     const cardMatch = url.pathname.match(/^\/c\/([^/]+)\/?$/);
     if (cardMatch?.[1]) return { type: 'card', token: cardMatch[1] };
 
-    const messageMatch = url.pathname.match(/^\/app\/message\/([A-Za-z0-9_-]{1,200})\/?$/);
-    if (messageMatch) return { type: 'message', messageId: messageMatch[1] };
+    if (/^\/app\/message\/?$/.test(url.pathname)) {
+      const id = url.searchParams.get('id');
+      if (id) return { type: 'message', messageId: id };
+    }
+    const messageMatch = url.pathname.match(/^\/app\/message\/([^/]+)\/?$/);
+    if (messageMatch) {
+      const id = decodeMessageId(messageMatch[1]);
+      if (id !== null) return { type: 'message', messageId: id };
+    }
 
     // A Stream entry's original message; the screen re-checks access on open.
     const originalMatch = url.pathname.match(/^\/app\/original\/([^\/]+)\/?$/);

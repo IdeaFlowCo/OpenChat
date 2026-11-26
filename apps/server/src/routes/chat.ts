@@ -57,7 +57,7 @@ function getS3(): S3Client {
 }
 
 const router = Router();
-router.use('/messages', messageContextRoutes);
+router.use('/message-context', messageContextRoutes);
 
 const EXPORT_RANGES = {
   last_hour: { label: 'Last hour', ms: 60 * 60 * 1000 },

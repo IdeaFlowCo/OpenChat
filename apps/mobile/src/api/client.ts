@@ -1891,7 +1891,7 @@ export const api = {
     conversation: { id: string; name?: string; type: string };
     messageId: string;
     messages: { id: string; content: string; createdAt: string; senderName?: string; messageType?: string }[];
-  }>(`/api/chat/messages/${encodeURIComponent(id)}/context`),
+  }>(`/api/chat/message-context?${new URLSearchParams({ messageId: id })}`),
 
   getThoughtContext: (id: string) => request<{
     conversation: { id: string; name?: string; type: string };
