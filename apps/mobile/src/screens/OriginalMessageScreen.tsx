@@ -17,21 +17,26 @@ export function OriginalMessageScreen() {
   const thoughtId = 'thoughtId' in params ? params.thoughtId : null;
   const { scheme } = useTheme(); const c = getColors(scheme);
   const { isIdentityVerified, currentUser } = useChat();
-  const [context, setContext] = useState<Awaited<ReturnType<typeof api.getMessageContext>> | null>(null);
+  const ownerId = currentUser?.userId ?? null;
+  const target = JSON.stringify(linkedMessageId ? ['message', linkedMessageId] : ['thought', thoughtId]);
+  const [loaded, setLoaded] = useState<{ ownerId: string; target: string; value: Awaited<ReturnType<typeof api.getMessageContext>> } | null>(null);
+  // Rendering must enforce this boundary too: passive-effect cleanup occurs
+  // after a render and cannot prevent an old owner's/target's first-frame flash.
+  const context = isIdentityVerified && ownerId !== null && loaded?.ownerId === ownerId && loaded.target === target ? loaded.value : null;
   const [error, setError] = useState('');
   const [showContext, setShowContext] = useState(false);
   useEffect(() => {
-    let current = true; setContext(null); setError(''); setShowContext(false);
+    let current = true; setLoaded(null); setError(''); setShowContext(false);
     // A restored token opens the app before its owner has been verified.
     // Wait for the same identity gate as authenticated requests, and retire
     // the previous owner's context immediately on an account transition.
-    if (!isIdentityVerified) return () => { current = false; };
+    if (!isIdentityVerified || !ownerId) return () => { current = false; };
     const request = linkedMessageId ? api.getMessageContext(linkedMessageId) : api.getThoughtContext(thoughtId!);
-    request.then(value => { if (current) setContext(value); }).catch(() => {
+    request.then(value => { if (current) setLoaded({ ownerId, target, value }); }).catch(() => {
       if (current) setError('Message unavailable. It may have been deleted, or you may no longer have access to its chat.');
     });
     return () => { current = false; };
-  }, [linkedMessageId, thoughtId, isIdentityVerified, currentUser?.userId]);
+  }, [linkedMessageId, thoughtId, isIdentityVerified, ownerId, target]);
   return <ScrollView style={{ flex: 1, backgroundColor: c.background }} contentContainerStyle={{ padding: space[5] }}>
     <Text style={{ ...type.title, color: c.textPrimary }}>{linkedMessageId ? 'Linked message' : 'Original message'}</Text>
     {!!error && <Text accessibilityRole="alert" style={{ ...type.body, color: c.textMetadata, marginTop: space[4] }}>{error}</Text>}

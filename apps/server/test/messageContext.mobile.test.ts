@@ -1,18 +1,21 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ params: { messageId: 'old-message' } as {messageId:string}|{thoughtId:string}, verified: true, userId: 'synthetic-owner', get: vi.fn(), thought: vi.fn(), dispatch: vi.fn() }));
+const mocks = vi.hoisted(() => ({ params: { messageId: 'old-message' } as {messageId:string}|{thoughtId:string}, verified: true, userId: 'synthetic-owner', rendered: [] as {ownerId:string;verified:boolean;target:string;text:unknown}[], get: vi.fn(), thought: vi.fn(), dispatch: vi.fn() }));
 vi.mock('react-native', () => ({ ActivityIndicator:'ActivityIndicator',ScrollView:'ScrollView',Text:'Text',TouchableOpacity:'TouchableOpacity',View:'View' }));
 vi.mock('@react-navigation/native', () => ({ useRoute:()=>({params:mocks.params}),CommonActions:{navigate:(value:unknown)=>value} }));
 vi.mock('../../mobile/src/services/notifications', () => ({ navigationRef:{dispatch:mocks.dispatch} }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme:()=>({scheme:'light'}) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat:()=>({isIdentityVerified:mocks.verified,currentUser:{userId:mocks.userId}}) }));
-vi.mock('../../mobile/src/components/MessageText', () => ({MessageText:(props:unknown)=>React.createElement('MessageText',props as any)}));
+vi.mock('../../mobile/src/components/MessageText', () => ({MessageText:(props:any)=>{
+ mocks.rendered.push({ownerId:mocks.userId,verified:mocks.verified,target:'messageId' in mocks.params?mocks.params.messageId:mocks.params.thoughtId,text:props.content});
+ return React.createElement('MessageText',props);
+}}));
 vi.mock('../../mobile/src/api/client', () => ({api:{getMessageContext:mocks.get,getThoughtContext:mocks.thought}}));
 import { OriginalMessageScreen } from '../../mobile/src/screens/OriginalMessageScreen';
 let screen:ReturnType<typeof create>;
 const context = (id='old-message') => ({conversation:{id:'synthetic-chat',name:'Synthetic chat',type:'group'},messageId:id,messages:[{id:'before',content:'Earlier long message '.repeat(500),createdAt:'2020-01-01'}, {id,content:'Exact target',createdAt:'2020-01-01'},{id:'after',content:'Later message',createdAt:'2020-01-01'}]});
-beforeEach(()=>{vi.clearAllMocks();mocks.params={messageId:'old-message'};mocks.verified=true;mocks.userId='synthetic-owner';mocks.get.mockResolvedValue(context());(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;});
+beforeEach(()=>{vi.clearAllMocks();mocks.params={messageId:'old-message'};mocks.verified=true;mocks.userId='synthetic-owner';mocks.rendered=[];mocks.get.mockResolvedValue(context());(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;});
 afterEach(async()=>{await act(async()=>screen?.unmount());delete(globalThis as any).IS_REACT_ACT_ENVIRONMENT;});
 const mount=()=>act(async()=>{screen=create(React.createElement(OriginalMessageScreen));});
 it('puts the exact linked message first without earlier long messages hiding it; context is explicitly expandable',async()=>{
@@ -52,4 +55,15 @@ it('clears the old owner content while the next account is unverified and ignore
  mocks.verified=true;mocks.get.mockResolvedValueOnce({...context(),messages:[{id:'old-message',content:'New owner authorized context',createdAt:'2020-01-01'}]});
  await act(async()=>screen.update(React.createElement(OriginalMessageScreen)));
  expect(screen.root.findAllByType('MessageText').map(n=>n.props.content)).toEqual(['New owner authorized context']);
+});
+it.each(['owner','target','verification'] as const)('does not render old content during the %s transition, before passive cleanup',async transition=>{
+ await mount();expect(screen.root.findAllByType('MessageText')).toHaveLength(1);
+ mocks.rendered=[];mocks.get.mockReturnValueOnce(new Promise(()=>{}));
+ if(transition==='owner')mocks.userId='different-owner';
+ if(transition==='target')mocks.params={messageId:'different-message'};
+ if(transition==='verification')mocks.verified=false;
+ await act(async()=>screen.update(React.createElement(OriginalMessageScreen)));
+ // This records each actual MessageText render, including renders preceding
+ // useEffect cleanup; checking only screen.root after act would miss a flash.
+ expect(mocks.rendered).toEqual([]);
 });
