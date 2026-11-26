@@ -77,7 +77,7 @@ The client signs a person out on 403, so these routes never return it.
 | `POST /things`, `POST /things/resolve` | `{kind, name, description?}` / `{kind, name, description?, createNew?, clientRequestId?}`: find or save by name under the no-merge rules below. A description is stored on a new thing and fills an existing thing's blank one; it never replaces one |
 | `GET /due` | People whose catch-up date has passed |
 | `GET /links?q=` | Every link the owner recorded, newest first, filtered by a name or relation |
-| `GET /unlinked-people/:profileId` | Card, notes and links for an Unlinked profile (never creates, never calls Unlinked) |
+| `GET /unlinked-people/:profileId` | Card, notes and links for an Unlinked profile (never creates; missing profile refs may resolve the public LinkedIn identity) |
 | `POST /unlinked-people/:profileId/notes`, `POST /unlinked-people/:profileId/links` | Note or link about an Unlinked profile |
 
 ### Pagination
@@ -594,3 +594,17 @@ relation edits, search, neighbourhood), `contacts.owner.integration.test.ts`
 `privateAsks.integration.test.ts` (asks, owner isolation, the migration),
 which run against a real Neo4j when
 `NEO4J_TEST_URI`, `NEO4J_TEST_USER` and `NEO4J_TEST_PASSWORD` are set.
+
+### Private-card identity recovery
+
+A card saved under an exact LinkedIn ref can predate its public Unlinked profile.
+When a profile-id read has no matching private profile ref, OpenChat now resolves
+that readable profile through the owner-scoped Unlinked lookup and checks the
+existing public-profile and LinkedIn refs (at most two). It does not create a card
+or attach aliases. A unique match returns its writable `thingId`; if the two
+exact refs name different records, HTTP409 `identity_conflict` returns the owner's
+`candidates: [{id, thingId, kind, name}]`. Inspect each with
+`oc_get_private_thing`, select one explicitly and use `subjectKind: "thing"` for
+a note or link write. Sharing remains a separate action. Known private profile
+refs still read without an upstream request. An upstream outage must not be
+presented as an empty card.

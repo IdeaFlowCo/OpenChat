@@ -545,20 +545,29 @@ async function unlinkedPersonEntity(ownerId: string, raw: string): Promise<{ pri
   return { principal, entityId: entity.id, contact: result.contact };
 }
 
-/** The owner's existing entity for an Unlinked person, without writing anything. Published ids never ask Unlinked. */
+/** The owner's existing entity for an Unlinked person, without writing anything. */
 async function findUnlinkedEntity(ownerId: string, principal: OverlayPrincipal, raw: unknown): Promise<{ target: UnlinkedTarget; found: EntityDetail | null; contact: UnlinkedContact | null }> {
   const target = cleanUnlinkedTarget(raw);
-  if (target.by === 'profileId') return { target, found: await overlayCall(overlay => overlay.lookup(principal, unlinkedRef(target.value))), contact: null };
-  const result = await lookupUnlinkedContactForIdentity(await ownerIdentity(ownerId), target.by === 'connectionId' ? { connectionId: target.value } : { linkedinUrl: target.value });
+  if (target.by === 'profileId') {
+    const known = await overlayCall(overlay => overlay.lookup(principal, unlinkedRef(target.value)));
+    if (known) return { target, found: known, contact: null };
+  }
+  // A person may have been saved by their exact LinkedIn ref before their
+  // public profile existed. A missing profile ref is not an empty card.
+  const result = await lookupUnlinkedContactForIdentity(await ownerIdentity(ownerId), target.by === 'profileId' ? { profileId: target.value } : target.by === 'connectionId' ? { connectionId: target.value } : { linkedinUrl: target.value });
   if (!result.ok) {
     if (result.code === 'not_found') return { target, found: null, contact: null };
     return unlinkedFailure(result.code, target);
   }
-  for (const ref of unlinkedRefs(result.contact)) {
+  const matches = new Map<string, EntityDetail>();
+  for (const ref of new Set(unlinkedRefs(result.contact))) {
     const found = await overlayCall(overlay => overlay.lookup(principal, ref));
-    if (found) return { target, found, contact: result.contact };
+    if (found) matches.set(found.id, found);
   }
-  return { target, found: null, contact: result.contact };
+  if (matches.size > 1) return fail(409, 'Exact references name different private records. Inspect the candidates and choose a thing id.', {
+    code: 'identity_conflict', candidates: [...matches.values()].map(entity => ({ id: entity.id, thingId: entity.id, kind: entity.kind, name: entity.name })),
+  });
+  return { target, found: matches.values().next().value ?? null, contact: result.contact };
 }
 
 /**
@@ -739,8 +748,9 @@ export async function updateLink(ownerId: string, linkId: string, change: unknow
 
 /**
  * Read the owner's private card for an Unlinked person: a published profile id
- * (never asks Unlinked), or an owner connection id / LinkedIn address (asks
- * Unlinked which contact it is, read-only). Never creates anything.
+ * (known profile refs need no upstream lookup), or an owner connection id /
+ * LinkedIn address. Missing profile refs resolve the current public LinkedIn
+ * identity too, read-only. Never creates anything.
  */
 export async function getUnlinkedPersonOverlay(ownerId: string, raw: string): Promise<UnlinkedPersonOverlay> {
   const principal = await ownerPrincipal(ownerId);
