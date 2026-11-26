@@ -55,6 +55,7 @@ integration('message status visible to the chat reuses the Stream pin',()=>{
   expect(saved.body).toMatchObject({status:'closed',visibility:'private'});
   expect((await list('ben')).body.statuses.some((s:any)=>s.messageId===id('m1'))).toBe(false);
   const pins=await run('MATCH (:Thought {id:$t})-[p:PINNED_IN]->() RETURN count(p) AS n',{t:saved.body.thoughtId});expect(pins.records[0]!.get('n').toNumber()).toBe(0);
+  expect(events.filter(e=>e.event==='thought:unpinned')).toHaveLength(1);
   const withdrawn=events.find(e=>e.event==='message-status:changed')!;expect(withdrawn.payload).toMatchObject({status:'none',visibility:'private'});
  });
  it('clearing a shared status removes the chip and the pin; outsiders cannot list',async()=>{
