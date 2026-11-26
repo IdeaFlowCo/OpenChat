@@ -347,6 +347,7 @@ export function ChatScreen({
     aiDisclosureAcceptedAt, mutedConvs, muteConv, blockUser,
     readByOthers, onlineUsers, markConversationRead,
     activeConversationId, activeConversationLane, setActiveConversationLane, isChatVisible, registerConversationVisibility,
+    isIdentityVerified,
   } = useChat();
 
   const conversation = useMemo<Conversation | undefined>(
@@ -360,7 +361,7 @@ export function ChatScreen({
     [activeMessages, conversationId]
   );
 
-  const { statuses: messageStatuses, refresh: refreshMessageStatuses } = useMessageStatuses(conversationId, currentUser?.userId);
+  const { statuses: messageStatuses, refresh: refreshMessageStatuses } = useMessageStatuses(conversationId, currentUser?.userId, isIdentityVerified);
   const { preference: translationPreference } = useChatTranslation(conversationId);
   const [translationFocused, setTranslationFocused] = useState(false);
   useFocusEffect(useCallback(() => { setTranslationFocused(true); return () => setTranslationFocused(false); }, []));

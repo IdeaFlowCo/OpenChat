@@ -4,9 +4,10 @@ import { expect, it, vi } from 'vitest';
 vi.mock('react-native',()=>({Text:'Text',View:'View',StyleSheet:{create:(s:unknown)=>s,hairlineWidth:1}}));
 vi.mock('../../mobile/src/contexts/ThemeContext',()=>({useTheme:()=>({scheme:'light'})}));
 vi.mock('../../mobile/src/api/socket',()=>({getSocket:()=>null}));
-vi.mock('../../mobile/src/api/client',()=>({api:{}}));
+const hookMocks=vi.hoisted(()=>({list:vi.fn()}));
+vi.mock('../../mobile/src/api/client',()=>({api:{getConversationMessageStatuses:hookMocks.list}}));
 import { MessageStatusChips, messageStatusChipLabel } from '../../mobile/src/components/MessageStatusChips';
-import { applyMessageStatus, groupMessageStatuses } from '../../mobile/src/hooks/useMessageStatuses';
+import { applyMessageStatus, groupMessageStatuses, useMessageStatuses } from '../../mobile/src/hooks/useMessageStatuses';
 const entry=(over:Record<string,unknown>)=>({messageId:'m',userId:'ana',userName:'Ana Synthetic',status:'open',visibility:'chat',own:false,...over}) as any;
 it('labels chips with Stream status words and who set them',()=>{
  expect(messageStatusChipLabel(entry({}))).toBe('● Open · Ana Synthetic');
@@ -27,4 +28,14 @@ it('renders nothing without statuses and an accessible chip per person, own firs
  let tree!:ReactTestRenderer;act(()=>{tree=create(React.createElement(MessageStatusChips,{isOwn:false,statuses:[entry({userId:'ben',userName:'Ben'}),entry({own:true,userId:'me',visibility:'private'})]}));});
  const labels=tree.root.findAll(n=>typeof n.props.accessibilityLabel==='string').map(n=>n.props.accessibilityLabel);
  expect(labels).toEqual(['Status Open, set by you, visible only to you','Status Open, set by Ben']);
+});
+it('waits for the verified account before loading, then loads the chat’s statuses', async () => {
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ hookMocks.list.mockResolvedValue({conversationId:'c',statuses:[entry({})]});
+ let seen:any;const Probe=({ready}:{ready:boolean})=>{seen=useMessageStatuses('c','me',ready).statuses;return null;};
+ let tree!:ReactTestRenderer;await act(async()=>{tree=create(React.createElement(Probe,{ready:false}));});
+ expect(hookMocks.list).not.toHaveBeenCalled();
+ await act(async()=>{tree.update(React.createElement(Probe,{ready:true}));});
+ expect(hookMocks.list).toHaveBeenCalledExactlyOnceWith('c');expect(seen.m).toHaveLength(1);
+ await act(async()=>tree.unmount());
 });
