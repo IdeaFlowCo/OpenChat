@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Text, TextInput, View } from 'react-native';
 import { api, ApiError } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
@@ -13,7 +13,7 @@ export function profileAgentErrorText(error: unknown, name: string): string {
   const status = error instanceof ApiError ? error.status : undefined;
   let code: string | undefined;
   if (error instanceof ApiError) { try { code = JSON.parse(error.body)?.code; } catch { code = undefined; } }
-  if (code === 'off') return `${name} has turned off their OpenChat agent.`;
+  if (code === 'off') return `${name} hasn’t turned on their OpenChat agent.`;
   if (code === 'self') return 'This is your own message.';
   if (code === 'automatic') return 'Agents do not answer automatic replies.';
   if (code === 'cap') return `${name}'s agent has used its allowance for now. Try again later.`;
@@ -34,6 +34,15 @@ export function ProfileAgentAskControls({ messageId, name, onAnswered }: { messa
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const sending = useRef(false);
+  // Opt-in: check first whether this person turned their agent on (null while checking or unknown).
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    let current = true;
+    api.getProfileAgentAvailability(messageId)
+      .then(value => { if (current) setEnabled(value.enabled && value.available); })
+      .catch(() => { if (current) setEnabled(true); }); // The server still enforces opt-in when asked.
+    return () => { current = false; };
+  }, [messageId]);
 
   const ask = async () => {
     if (sending.current) return;
@@ -45,6 +54,13 @@ export function ProfileAgentAskControls({ messageId, name, onAnswered }: { messa
       setError(profileAgentErrorText(e, name));
     } finally { sending.current = false; setBusy(false); }
   };
+
+  if (enabled === false) {
+    return <View style={{ gap: space[3], paddingHorizontal: space[4], paddingTop: space[2] }}>
+      <Text style={{ ...type.title, color: c.textPrimary }}>Ask {name}’s agent</Text>
+      <Text accessibilityRole="alert" style={{ ...type.body, color: c.textMetadata }}>{name} hasn’t turned on their OpenChat agent. You can reply to them directly.</Text>
+    </View>;
+  }
 
   return <View style={{ gap: space[3], paddingHorizontal: space[4], paddingTop: space[2] }}>
     <Text style={{ ...type.title, color: c.textPrimary }}>Ask {name}’s agent</Text>
@@ -62,7 +78,7 @@ export function ProfileAgentAskControls({ messageId, name, onAnswered }: { messa
       style={{ ...type.body, minHeight: 64, padding: space[3], borderRadius: radius.md, borderWidth: 1, borderColor: c.border, backgroundColor: c.surfaceElevated, color: c.textPrimary }}
     />
     {!!error && <Text accessibilityRole="alert" style={{ ...type.body, color: c.danger }}>{error}</Text>}
-    <Button label={busy ? 'Asking…' : 'Ask now'} variant="primary" disabled={busy} onPress={() => { void ask(); }} />
+    <Button label={busy ? 'Asking…' : 'Ask now'} variant="primary" disabled={busy || enabled === null} onPress={() => { void ask(); }} />
     {busy && <ActivityIndicator accessibilityLabel="Waiting for the agent" color={c.primary} />}
     <Text style={{ ...type.meta, color: c.textMetadata }}>Everyone in this chat sees the answer, your question, and that you asked.</Text>
   </View>;

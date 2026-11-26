@@ -89,6 +89,9 @@ export interface ShareableContext {
 export async function loadShareableContext(
   tx: ManagedTransaction,
   input: { askerId: string; ownerId: string; conversationId: string; messageId: string },
+  // "Ask {name}'s agent" needs the owner's explicit opt-in. An owner's own agent-written
+  // auto-response rule is itself that owner's opt-in for that rule, so it passes false.
+  requireOptIn = true,
 ): Promise<ShareableContext> {
   // Copy only the identifiers so callers can never pass extra objects as query parameters.
   input = { askerId: input.askerId, ownerId: input.ownerId, conversationId: input.conversationId, messageId: input.messageId };
@@ -100,7 +103,8 @@ export async function loadShareableContext(
     OPTIONAL MATCH (sender:User {id:m.senderId})
     OPTIONAL MATCH (owner)-[:HAS_ADDME_CARD]->(card:AddMeCard) WHERE card.revokedAt IS NULL
     RETURN owner.name AS ownerName, coalesce(owner.isBot,false) AS ownerIsBot,
-      coalesce(owner.profileAgentEnabled,true) AS enabled,
+      // Opt-in: agent replies are stored with the owner as sender, so silence means off.
+      coalesce(owner.profileAgentEnabled,false) AS enabled,
       owner.profileStatusText AS statusText, owner.profileStatusEmoji AS statusEmoji,
       asker.name AS askerName, coalesce(asker.isBot,false) AS askerIsBot,
       EXISTS { MATCH (owner)-[:BLOCKED]-(asker) } AS blocked,
@@ -112,7 +116,7 @@ export async function loadShareableContext(
   if (!row) throw new ProfileAgentError(404, 'unavailable', 'Message unavailable');
   if (row.get('ownerIsBot') || row.get('askerIsBot')) throw new ProfileAgentError(400, 'bot', 'Agents can only be asked about people');
   if (row.get('blocked')) throw new ProfileAgentError(404, 'unavailable', 'Message unavailable');
-  if (!row.get('enabled')) throw new ProfileAgentError(409, 'off', 'This person has turned off their OpenChat agent');
+  if (requireOptIn && !row.get('enabled')) throw new ProfileAgentError(409, 'off', 'This person has not turned on their OpenChat agent');
   if (row.get('automatic')) throw new ProfileAgentError(400, 'automatic', 'Agents do not answer automatic replies');
 
   const ownerName = safeName(row.get('ownerName'));
@@ -314,11 +318,11 @@ export async function settleBudget(tx: ManagedTransaction, input: { ownerId: str
 
 export async function getOwnerUsage(tx: ManagedTransaction, ownerId: string, month = monthKey()) {
   const r = await tx.run(`MATCH (u:User {id:$ownerId})
-    RETURN coalesce(u.profileAgentEnabled,true) AS enabled,
+    RETURN coalesce(u.profileAgentEnabled,false) AS enabled, u.profileAgentEnabled IS NOT NULL AS decided,
       CASE WHEN u.profileAgentMonth=$month THEN coalesce(u.profileAgentSpentMicros,0) ELSE 0 END AS spent`, { ownerId, month });
   const row = r.records[0];
   if (!row) return null;
-  return { enabled: row.get('enabled') === true, spentMicros: Number(row.get('spent')?.toNumber?.() ?? row.get('spent')), capMicros: OWNER_MONTHLY_CAP_MICROS };
+  return { enabled: row.get('enabled') === true, decided: row.get('decided') === true, spentMicros: Number(row.get('spent')?.toNumber?.() ?? row.get('spent')), capMicros: OWNER_MONTHLY_CAP_MICROS };
 }
 
 // ── Generation with metering ─────────────────────────────────────────────────
@@ -350,7 +354,7 @@ export async function generateMeteredReply(input: MeteredInput): Promise<Metered
       await acquireContextAclLocks(tx, { userIds: [input.ownerId, input.askerId] });
       const now = new Date().toISOString();
       const ids = { askerId: input.askerId, ownerId: input.ownerId, conversationId: input.conversationId, messageId: input.messageId };
-      const context = await loadShareableContext(tx, ids);
+      const context = await loadShareableContext(tx, ids, input.purpose === 'answer');
       if (input.rateLimited) await checkRateLimits(tx, { ...ids, now });
       // Auto-drafts are bounded by the owner's hourly limit too, so strangers cannot drain the allowance.
       else await checkOwnerRate(tx, { ownerId: ids.ownerId, now });
@@ -463,4 +467,18 @@ export async function askProfileAgent(input: {
   if (input.io && input.broadcast) await input.broadcast(input.io, source.conversationId, posted.message);
   dispatchMessageEvent(posted.message, posted.participantIds);
   return posted;
+}
+
+/** Whether the author of a message has opted in, for a participant of that chat. Nothing else is revealed. */
+export async function profileAgentAvailability(driver: Driver, askerId: string, messageId: string): Promise<{ enabled: boolean; available: boolean } | null> {
+  const session = driver.session();
+  try {
+    const r = await session.run(`
+      MATCH (:User {id:$askerId})-[:PARTICIPATES_IN]->(c:Conversation)
+      MATCH (m:Message {id:$messageId, conversationId:c.id}) WHERE m.deletedAt IS NULL
+      MATCH (owner:User {id:m.senderId})
+      RETURN coalesce(owner.profileAgentEnabled,false) AND owner.id <> $askerId AND NOT coalesce(owner.isBot,false) AS enabled`, { askerId, messageId });
+    if (!r.records.length) return null;
+    return { enabled: r.records[0]!.get('enabled') === true, available: isProfileAgentAvailable() };
+  } finally { await session.close(); }
 }

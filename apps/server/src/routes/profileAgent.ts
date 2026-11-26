@@ -3,7 +3,7 @@ import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import { broadcastMessageToParticipants } from '../websocket/chatHandler.js';
-import { askProfileAgent, getOwnerUsage, isProfileAgentAvailable, ProfileAgentError } from '../services/profileAgent.js';
+import { askProfileAgent, getOwnerUsage, isProfileAgentAvailable, profileAgentAvailability, ProfileAgentError } from '../services/profileAgent.js';
 import {
   AutoResponseError, createRule, deleteRule, discardDraft, listDrafts, listRules, sendDraft, setProfileAgentEnabled, updateRule,
 } from '../services/autoResponses.js';
@@ -41,6 +41,16 @@ agentReplyRouter.post('/', requireAuth, humanOnly, async (req: Request, res: Res
   } catch (error) { fail(res, error); }
 });
 
+agentReplyRouter.get('/availability', requireAuth, humanOnly, async (req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-store');
+  if (typeof req.query.messageId !== 'string' || !req.query.messageId) { res.status(400).json({ error: 'messageId is required' }); return; }
+  try {
+    const result = await profileAgentAvailability(getDriver(), req.user!.userId, req.query.messageId);
+    if (!result) { res.status(404).json({ error: 'Message unavailable' }); return; }
+    res.json(result);
+  } catch (error) { fail(res, error); }
+});
+
 /** /api/auto-responses — the owner's agent switch, rules and drafts. */
 export const autoResponsesRouter = Router();
 autoResponsesRouter.use(requireAuth, humanOnly, (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
@@ -54,11 +64,12 @@ const withSession = (action: (req: Request, session: ReturnType<ReturnType<typeo
 
 autoResponsesRouter.get('/settings', withSession(async (req, s) => {
   const usage = await s.executeRead(tx => getOwnerUsage(tx, req.user!.userId));
-  return { profileAgentEnabled: usage?.enabled ?? true, available: isProfileAgentAvailable(), spentMicros: usage?.spentMicros ?? 0, capMicros: usage?.capMicros };
+  // profileAgentDecided: false until the owner answers the one-time prompt (either way).
+  return { profileAgentEnabled: usage?.enabled ?? false, profileAgentDecided: usage?.decided ?? false, available: isProfileAgentAvailable(), spentMicros: usage?.spentMicros ?? 0, capMicros: usage?.capMicros };
 }));
 autoResponsesRouter.put('/settings', withSession(async (req, s) => {
   const { enabled } = await setProfileAgentEnabled(s, req.user!.userId, req.body?.profileAgentEnabled);
-  return { profileAgentEnabled: enabled, available: isProfileAgentAvailable() };
+  return { profileAgentEnabled: enabled, profileAgentDecided: true, available: isProfileAgentAvailable() };
 }));
 autoResponsesRouter.get('/rules', withSession(async (req, s) => ({ rules: await listRules(s, req.user!.userId) })));
 autoResponsesRouter.post('/rules', withSession(async (req, s) => ({ rule: await createRule(s, req.user!.userId, req.body) }), 201));

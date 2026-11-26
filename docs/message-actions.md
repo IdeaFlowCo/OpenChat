@@ -46,8 +46,13 @@ Hold a message in the canonical client to open its actions.
     treats it as untrusted. The model has no tools and at most 400 output tokens. Replies are
     capped at 1,200 characters, forged label lines are removed, and links are kept only
     when the owner's shared material contains them.
-  - **Owner control and limits:** Auto replies → *Let people ask my agent* (on by
-    default; off returns 409 `code:"off"`). Each owner's agent is metered against a
+  - **Owner control and limits:** **opt-in.** The agent is off until its owner turns it on,
+    because its replies are stored with the owner as sender. Auto replies shows a one-time
+    prompt (*Let people ask my agent?* with *Turn on my agent* or *Not now*); either answer is
+    recorded, and the switch stays there. When off, asking returns 409 `code:"off"`, and the Ask
+    sheet says so up front via `GET /api/chat/agent-reply/availability?messageId=`
+    (participants only; reveals only whether the author opted in). An owner's own
+    agent-written auto-response rule is that owner's opt-in for that rule. Each owner's agent is metered against a
     **$2 per month** cap from actual token usage (worst case reserved first), plus a global
     monthly ceiling (`OPENCHAT_PROFILE_AGENT_GLOBAL_MONTHLY_USD`, default 50). Rate
     limits: 10 asks per asker per hour, 5 per asker and owner, 40 per owner, and 2 per

@@ -794,7 +794,7 @@ export type ThoughtStatus = 'none' | 'open' | 'closed';
 export type MessageStatusVisibility = 'chat' | 'private';
 export interface MessageStatusValue { messageId: string; thoughtId: string | null; status: ThoughtStatus; visibility: MessageStatusVisibility }
 export interface MessageStatusEntry { messageId: string; userId: string; userName: string; status: ThoughtStatus; visibility: MessageStatusVisibility; own: boolean; updatedAt?: string }
-export interface AutoResponseSettings { profileAgentEnabled: boolean; available: boolean; spentMicros: number; capMicros?: number }
+export interface AutoResponseSettings { profileAgentEnabled: boolean; /** False until the owner answers the one-time prompt. */ profileAgentDecided: boolean; available: boolean; spentMicros: number; capMicros?: number }
 export interface AutoResponseRuleInput { enabled?: boolean; whenAway: boolean; fromUserIds: string[]; topics: string[]; action: 'reply' | 'agent'; replyText: string | null; delivery: 'draft' | 'send' }
 export interface AutoResponseRule extends Required<AutoResponseRuleInput> { id: string; createdAt: string; updatedAt: string }
 export interface AutoResponseDraft { id: string; conversationId: string; sourceMessageId: string; ruleId: string; text: string; action: 'reply' | 'agent'; senderName: string; sourceText: string; createdAt: string; expiresAt: string }
@@ -1556,6 +1556,9 @@ export const api = {
       return await request<{ message: Message }>('/api/chat/agent-reply', { method: 'POST', body: JSON.stringify(question ? { messageId, question } : { messageId }), signal: controller.signal, expireAuthOnForbidden: false });
     } finally { clearTimeout(timer); }
   },
+  /** Whether the message's author has turned on their agent (participants only). */
+  getProfileAgentAvailability: (messageId: string) =>
+    timedRequest<{ enabled: boolean; available: boolean }>(`/api/chat/agent-reply/availability?messageId=${encodeURIComponent(messageId)}`, { expireAuthOnForbidden: false }),
   getAutoResponseSettings: () => request<AutoResponseSettings>('/api/auto-responses/settings'),
   setProfileAgentEnabled: (profileAgentEnabled: boolean) =>
     request<{ profileAgentEnabled: boolean; available: boolean }>('/api/auto-responses/settings', { method: 'PUT', body: JSON.stringify({ profileAgentEnabled }) }),
