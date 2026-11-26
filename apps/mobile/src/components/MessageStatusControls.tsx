@@ -12,7 +12,7 @@ const choices = [
   { value: 'none', label: 'No status' },
 ] as const;
 
-/** Status is an owner-private Stream capture, never a shared chat reaction. */
+/** Status starts in the owner’s Stream; this action never shares or posts it. */
 export function MessageStatusControls({ messageId }: { messageId: string }) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
@@ -65,7 +65,8 @@ export function MessageStatusControls({ messageId }: { messageId: string }) {
 
   return <View style={{ gap: space[3] }}>
     <Text style={{ ...type.title, color: c.textPrimary }}>Message status</Text>
-    <Text style={{ ...type.body, color: c.textMetadata }}>Only you · saved in your Stream</Text>
+    <Text style={{ ...type.body, color: c.textMetadata }}>Private by default · saved in your Stream</Text>
+    <Text style={{ ...type.meta, color: c.textMetadata }}>Sharing is a separate action in Stream.</Text>
     {status === null && !error && <ActivityIndicator accessibilityLabel="Loading message status" color={c.primary} />}
     {!!error && <Text accessibilityRole="alert" style={{ ...type.body, color: c.danger }}>{error}</Text>}
     {status === null && !!error && <Button label="Retry" variant="secondary" onPress={() => setRevision(value => value + 1)} />}
@@ -80,6 +81,6 @@ export function MessageStatusControls({ messageId }: { messageId: string }) {
       />)}
     </>}
     {busy && <ActivityIndicator accessibilityLabel="Saving message status" color={c.primary} />}
-    {saved && <Text accessibilityLiveRegion="polite" style={{ ...type.meta, color: c.textMetadata }}>Status saved · only you</Text>}
+    {saved && <Text accessibilityLiveRegion="polite" style={{ ...type.meta, color: c.textMetadata }}>Status saved</Text>}
   </View>;
 }

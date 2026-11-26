@@ -8,7 +8,9 @@ Hold a message in the canonical client to open its actions.
   deletion on both reads and locked writes. One deterministic owner/message
   Thought (`captureMethod:message-status`) is reused across retries. Its text is a bounded source excerpt; the source-message link retains the full original. Clearing an
   absent status creates nothing. The capture is not pinned and no chat message
-  is sent. Only the owner receives Stream update events. Status captures stay
+  is sent. An owner can separately share a capture using Stream’s existing reviewed
+  Pin action; later status changes remain visible there. This status action emits
+  only to the owner’s Stream. Status captures stay
   distinct from ordinary saved copies in the legacy deduper.
 - **Get agent reply now** forwards the selected source and a reply request to
   the owner's private built-in OpenChat Agent using the existing forward API.
