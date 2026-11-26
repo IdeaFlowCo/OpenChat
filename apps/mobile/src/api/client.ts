@@ -785,6 +785,10 @@ export interface SearchResults {
 
 export type ThoughtKind = 'fact' | 'decision' | 'commitment' | 'reminder' | 'observation';
 export type ThoughtStatus = 'none' | 'open' | 'closed';
+/** Who can see a message status: this chat (a pinned Stream capture) or only its owner. */
+export type MessageStatusVisibility = 'chat' | 'private';
+export interface MessageStatusValue { messageId: string; thoughtId: string | null; status: ThoughtStatus; visibility: MessageStatusVisibility }
+export interface MessageStatusEntry { messageId: string; userId: string; userName: string; status: ThoughtStatus; visibility: MessageStatusVisibility; own: boolean; updatedAt?: string }
 
 export interface Thought {
   id: string;
@@ -1122,8 +1126,9 @@ export const api = {
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
   getConversation: (conversationId: string) =>
     request<Conversation>(`/api/chat/conversations/${conversationId}`),
-  getMessageStatus: (id: string) => timedRequest<{messageId:string;thoughtId:string|null;status:ThoughtStatus}>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`),
-  setMessageStatus: (id: string, status: ThoughtStatus) => timedRequest<{messageId:string;thoughtId:string|null;status:ThoughtStatus}>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`, {method:'PUT',body:JSON.stringify({status})}),
+  getMessageStatus: (id: string) => timedRequest<MessageStatusValue>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`),
+  setMessageStatus: (id: string, status: ThoughtStatus, visibility?: MessageStatusVisibility) => timedRequest<MessageStatusValue>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`, {method:'PUT',body:JSON.stringify(visibility ? {status,visibility} : {status})}),
+  getConversationMessageStatuses: (conversationId: string) => timedRequest<{conversationId:string;statuses:MessageStatusEntry[]}>(`/api/chat/message-status/conversation?conversationId=${encodeURIComponent(conversationId)}`),
   getMessages: (conversationId: string) =>
     request<{ messages: Message[]; hasMore: boolean }>(`/api/chat/conversations/${conversationId}/messages`),
   getMessagesBefore: (conversationId: string, before: string, limit = 50) =>
