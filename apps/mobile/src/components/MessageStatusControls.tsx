@@ -92,7 +92,7 @@ export function MessageStatusControls({ messageId, onSaved }: { messageId: strin
     ? 'Everyone in this chat sees the status on the message.'
     : 'Only you see it. It stays in your Stream.';
 
-  return <View style={{ gap: space[3] }}>
+  return <View style={{ gap: space[3], paddingHorizontal: space[4], paddingTop: space[2] }}>
     <Text style={{ ...type.title, color: c.textPrimary }}>Message status</Text>
     <Text style={{ ...type.body, color: c.textMetadata }}>Same states as your Stream items.</Text>
     {status === null && !error && <ActivityIndicator accessibilityLabel="Loading message status" color={c.primary} />}
