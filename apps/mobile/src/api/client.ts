@@ -1887,6 +1887,12 @@ export const api = {
     return request<HashtagSuggestion[]>(`/api/thoughts/tags/suggestions?${params}`);
   },
 
+  getMessageContext: (id: string) => request<{
+    conversation: { id: string; name?: string; type: string };
+    messageId: string;
+    messages: { id: string; content: string; createdAt: string; senderName?: string; messageType?: string }[];
+  }>(`/api/chat/message-context?${new URLSearchParams({ messageId: id })}`),
+
   getThoughtContext: (id: string) => request<{
     conversation: { id: string; name?: string; type: string };
     messageId: string;

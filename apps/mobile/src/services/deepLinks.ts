@@ -1,4 +1,4 @@
-import { captureComposeIntent } from './composeIntents';
+import { captureComposeIntent, captureMessageIntent } from './composeIntents';
 import { Linking, Platform } from 'react-native';
 import { parseOpenChatUrl } from '../utils/parseOpenChatUrl';
 import { createEntryIntent, notifyEntryIntentCaptured, saveEntryIntent, EntryTarget } from './entryIntents';
@@ -14,6 +14,11 @@ export function installDeepLinkHandling(): () => void {
     if (parsed.type === 'compose') {
       const { type: _type, ...intent } = parsed;
       await captureComposeIntent(intent);
+      return;
+    }
+
+    if (parsed.type === 'message') {
+      await captureMessageIntent(parsed.messageId);
       return;
     }
 
