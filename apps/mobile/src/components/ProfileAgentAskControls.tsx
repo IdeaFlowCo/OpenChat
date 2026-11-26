@@ -46,7 +46,7 @@ export function ProfileAgentAskControls({ messageId, name, onAnswered }: { messa
     } finally { sending.current = false; setBusy(false); }
   };
 
-  return <View style={{ gap: space[3] }}>
+  return <View style={{ gap: space[3], paddingHorizontal: space[4], paddingTop: space[2] }}>
     <Text style={{ ...type.title, color: c.textPrimary }}>Ask {name}’s agent</Text>
     <Text style={{ ...type.body, color: c.textMetadata }}>
       {name}’s built-in OpenChat agent answers here right away, labelled as their agent, not {name}. It only knows what {name} shared in this chat and on their public card.
