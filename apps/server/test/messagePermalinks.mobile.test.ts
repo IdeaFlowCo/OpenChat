@@ -9,6 +9,7 @@ vi.mock('react-native', () => ({
 }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: mocks.copy }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
+vi.mock('../../mobile/src/components/MessageStatusControls', () => ({ MessageStatusControls: () => null }));
 vi.mock('../../mobile/src/components/ReactionPicker', () => ({ ReactionPicker: () => null }));
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 vi.mock('../../mobile/src/components/MessageLinkActions', () => ({ MessageLinkActions: () => null }));

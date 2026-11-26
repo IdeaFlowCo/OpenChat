@@ -1122,6 +1122,8 @@ export const api = {
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
   getConversation: (conversationId: string) =>
     request<Conversation>(`/api/chat/conversations/${conversationId}`),
+  getMessageStatus: (id: string) => timedRequest<{messageId:string;thoughtId:string|null;status:ThoughtStatus}>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`),
+  setMessageStatus: (id: string, status: ThoughtStatus) => timedRequest<{messageId:string;thoughtId:string|null;status:ThoughtStatus}>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`, {method:'PUT',body:JSON.stringify({status})}),
   getMessages: (conversationId: string) =>
     request<{ messages: Message[]; hasMore: boolean }>(`/api/chat/conversations/${conversationId}/messages`),
   getMessagesBefore: (conversationId: string, before: string, limit = 50) =>

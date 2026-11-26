@@ -59,6 +59,12 @@ describe('mergeDuplicateThoughtsFromSameMessage (OpenChat-kb7f legacy dedupe)', 
     expect(merged[0].tags).toEqual(['decision', 'fact']);
   });
 
+  it('keeps a deliberate private message-status capture distinct from an ordinary saved copy', () => {
+    const rows = [{id:'manual',text:'same',status:'none',sourceMessageId:'m'}, {id:'status',text:'same',status:'open',sourceMessageId:'m',captureMethod:'message-status'}];
+    expect(mergeDuplicateThoughtsFromSameMessage(rows)).toHaveLength(2);
+    expect(mergeDuplicateThoughtsFromSameMessage(rows)[1]).toMatchObject({id:'status',status:'open'});
+  });
+
   it('leaves thoughts without a source message untouched', () => {
     const rows = [
       { id: 'a', text: 'hello', tags: [], sourceMessageId: null },

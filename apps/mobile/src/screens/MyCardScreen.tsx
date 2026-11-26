@@ -308,6 +308,7 @@ export function MyCardScreen() {
         <ListRow icon="bot" title="OpenChat Agent" subtitle="Private conversation, asks and agent coordination" divider disabled={openingAgent}
           trailing={openingAgent ? <ActivityIndicator size="small" color={r.accent} /> : undefined} chevron={!openingAgent} onPress={() => void handleOpenAgent()} />
         <View style={{ borderTopColor: r.line, borderTopWidth: StyleSheet.hairlineWidth }}><ConnectAgentLink detail /></View>
+        <ListRow icon="bot" title="Auto replies" subtitle="Configure approved replies for routine direct-chat questions" divider onPress={() => navigation.navigate('Secretary')} />
         <ListRow icon="settings" title="Settings" subtitle="Preferences, notifications and account" divider onPress={() => navigation.navigate('Settings')} />
       </Card>
 

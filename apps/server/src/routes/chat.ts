@@ -1,4 +1,5 @@
 import messageContextRoutes from './messageContext.js';
+import messageStatusRoutes from './messageStatus.js';
 import { peopleSuggestions } from '../services/peopleSuggestions.js';
 import { Router, Request, Response } from 'express';
 import type { Server as IOServer } from 'socket.io';
@@ -58,6 +59,7 @@ function getS3(): S3Client {
 
 const router = Router();
 router.use('/message-context', messageContextRoutes);
+router.use('/message-status', messageStatusRoutes);
 
 const EXPORT_RANGES = {
   last_hour: { label: 'Last hour', ms: 60 * 60 * 1000 },
