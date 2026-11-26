@@ -64,6 +64,8 @@ async function checkContextAccess(
   if (agentKeyId && !agentScopes?.includes(scope)) return false;
   const result = await tx.run(
     `MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+     WITH u,c WHERE $scope <> 'write' OR coalesce(c.communityKind,'') <> 'announcements'
+       OR EXISTS { MATCH (u)-[cm:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:c.communityId}) WHERE cm.role IN ['owner','admin'] }
      ${agentKeyId ? `MATCH (k:AgentKey {id: $agentKeyId, ownerUserId: $userId})
      WHERE k.revokedAt IS NULL
        AND (k.expiresAt IS NULL OR k.expiresAt > $now)

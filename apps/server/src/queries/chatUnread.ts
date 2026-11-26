@@ -53,6 +53,7 @@ export const CONVERSATIONS_QUERY = `
     // Returns ISO timestamp, the literal 'always', or null.
     mutedUntil: myRel.mutedUntil,
     lastReadAt: myRel.lastReadAt,
+    canPost: CASE WHEN c.communityKind='announcements' THEN EXISTS { MATCH (u)-[cm:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:c.communityId}) WHERE cm.role IN ['owner','admin'] } ELSE true END,
     // A conversation the member marked unread counts as at least one unread
     // until it is read again; read receipts (lastReadAt) are not changed.
     markedUnread: myRel.markedUnreadAt IS NOT NULL,

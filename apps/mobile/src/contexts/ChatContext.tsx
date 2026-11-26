@@ -1065,7 +1065,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     const onConversationUpdated = (e: ConversationEvent) => {
       const conv = e.conversation;
-      if (!conv?.id) return;
+      if (!conv?.id) {
+        // Content-free roster invalidations are safe across revocation races.
+        // Fetch this account's current projection rather than broadcasting a roster.
+        if (e.conversationId) void refreshConversations();
+        return;
+      }
       setConversations(prev => prev.map(c => (c.id === conv.id ? { ...c, ...conv } : c)));
     };
 

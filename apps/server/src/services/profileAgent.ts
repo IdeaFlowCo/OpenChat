@@ -407,6 +407,7 @@ export async function postAutomaticMessage(driver: Driver, input: {
         MATCH (owner:User {id:$ownerId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
         MATCH (source:Message {id:$replyToId, conversationId:c.id}) WHERE source.deletedAt IS NULL
         AND NOT EXISTS { MATCH (:Message {automaticKey:$key}) }
+        AND (coalesce(c.communityKind,'') <> 'announcements' OR EXISTS { MATCH (owner)-[cm:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:c.communityId}) WHERE cm.role IN ['owner','admin'] })
         CREATE (m:Message {id:$id, content:$content, senderId:$ownerId, conversationId:c.id, messageType:'text',
           replyToId:$replyToId, automaticKey:$key, createdAt:datetime($now)})
         SET m += $props

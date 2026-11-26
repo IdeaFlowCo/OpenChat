@@ -188,7 +188,12 @@ export async function persistMessage(
     const result = await s.run(
       `
       MATCH (c:Conversation {id: $conversationId})
-      MATCH (sender:User {id: $senderId})
+      SET c.contextAclRevision=coalesce(c.contextAclRevision,0)+1
+      WITH c MATCH (sender:User {id: $senderId})
+      WHERE coalesce(c.communityKind,'') <> 'announcements' OR EXISTS {
+        MATCH (sender)-[:PARTICIPATES_IN]->(c)
+        MATCH (sender)-[cm:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:c.communityId}) WHERE cm.role IN ['owner','admin']
+      }
       ${messageIdentity}
       ON CREATE SET
         m.id = $id,
