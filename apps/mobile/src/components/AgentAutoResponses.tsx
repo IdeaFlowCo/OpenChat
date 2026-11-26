@@ -86,7 +86,7 @@ export function AgentAutoResponses() {
       <View style={styles.row}>
         <View style={{ flex: 1 }}>
           <Text style={{ ...type.bodyStrong, color: c.textPrimary }}>Let people ask my agent</Text>
-          <Text style={{ ...type.body, color: c.textSecondary }}>Anyone in a chat with you can choose “Ask {your name}’s agent” on one of your messages. It answers right away, labelled as your agent, not you, using only your public card and the notes you shared in that chat. It never reads your private notes.</Text>
+          <Text style={{ ...type.body, color: c.textSecondary }}>Anyone in a chat with you can choose {'“Ask <your name>’s agent”'} on one of your messages. It answers right away, labelled as your agent, not you, using only your public card and the notes you shared in that chat. It never reads your private notes.</Text>
         </View>
         <Switch
           value={settings?.profileAgentEnabled ?? true}
