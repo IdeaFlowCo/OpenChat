@@ -54,7 +54,7 @@ export async function acquireContextAclLocks(
  * expiry, or a scope change. Mutations call this after acquiring the ACL locks.
  */
 async function checkContextAccess(
-  tx: ManagedTransaction,
+  tx: Pick<ManagedTransaction,'run'>,
   userId: string,
   conversationId: string,
   scope: 'read' | 'write',
@@ -77,14 +77,14 @@ async function checkContextAccess(
 }
 
 export async function checkContextReadAccess(
-  tx: ManagedTransaction, userId: string, conversationId: string,
+  tx: Pick<ManagedTransaction,'run'>, userId: string, conversationId: string,
   agentKeyId?: string, agentScopes?: string[]
 ): Promise<boolean> {
   return checkContextAccess(tx, userId, conversationId, 'read', agentKeyId, agentScopes);
 }
 
 export async function checkContextWriteAccess(
-  tx: ManagedTransaction, userId: string, conversationId: string,
+  tx: Pick<ManagedTransaction,'run'>, userId: string, conversationId: string,
   agentKeyId?: string, agentScopes?: string[]
 ): Promise<boolean> {
   return checkContextAccess(tx, userId, conversationId, 'write', agentKeyId, agentScopes);

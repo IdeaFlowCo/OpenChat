@@ -149,6 +149,25 @@ integration('communities preserve explicit chat membership and announcement auth
     expect((await post(`/api/chat/conversations/${announcementsId}/messages`,{content:'After leave'})).status).toBe(201);
     await new Promise(resolve=>setTimeout(resolve,60));expect(messages).toEqual([]);sock.disconnect();
   });
+  it('holds announcement reactions through the membership recheck and returns no summary after revocation',async()=>{
+    const found=await run(`MATCH (m:Message {conversationId:$id,content:'Synthetic announcement'}) RETURN m.id AS id`,{id:announcementsId});
+    const messageId=found.records[0]!.get('id') as string;
+    for(const method of ['post','delete'] as const){
+      const s=driver.session(),tx=s.beginTransaction();let responseFinished=false;
+      await tx.run(`MATCH (c:Conversation {id:$id}) SET c.contextAclRevision=coalesce(c.contextAclRevision,0)+1`,{id:announcementsId});
+      const url=`/api/chat/messages/${messageId}/reactions${method==='delete'?'/'+encodeURIComponent('👍'):''}`;
+      const pending=(method==='post'?post(url,{emoji:'👍'},'admin'):request(app).delete(url).set('Authorization',auth('admin')))
+        .then(r=>{responseFinished=true;return r;});
+      try{
+        await new Promise(resolve=>setTimeout(resolve,100));expect(responseFinished).toBe(false);
+        await tx.run(`MATCH (:User {id:$userId})-[p:PARTICIPATES_IN]->(:Conversation {id:$id}) DELETE p
+          WITH 1 AS ignored MATCH (:User {id:$userId})-[r:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:$communityId}) DELETE r`,{userId:id('admin'),id:announcementsId,communityId});
+        await tx.commit();
+      }finally{await tx.close();await s.close();}
+      const response=await pending;expect(response.status).toBe(404);expect(response.body).not.toHaveProperty('reactions');
+      expect((await join('admin')).status).toBe(200);
+    }
+  });
   it('invalidates revoked, replaced, expired and blocked invitations without leaking community metadata',async()=>{
     expect((await join('member')).status).toBe(200);
     const old=token;token=(await post(api('/invites'),{})).body.token;

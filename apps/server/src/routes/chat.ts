@@ -2361,7 +2361,7 @@ const ALLOWED_KINDS = ['filed'];
 // separately from plain reactions with the same emoji so clients can render
 // them distinctly (e.g. a tappable filed badge).
 async function getReactionSummary(
-  session: ReturnType<ReturnType<typeof getDriver>['session']>,
+  session: Pick<ManagedTransaction,'run'>,
   messageId: string,
   userId: string
 ): Promise<Array<{ emoji: string; count: number; byMe: boolean; kind?: string; href?: string }>> {
@@ -2429,7 +2429,7 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
     const check = await session.run(`
       MATCH (m:Message {id: $messageId})
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: m.conversationId})
-      RETURN m.conversationId AS conversationId
+      RETURN m.conversationId AS conversationId,c.communityKind AS communityKind
     `, { messageId, userId });
 
     if (check.records.length === 0) {
@@ -2440,15 +2440,18 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
     const conversationId = check.records[0].get('conversationId') as string;
     const now = new Date().toISOString();
 
+    const announcement=check.records[0].get('communityKind') === 'announcements';
+    const mutate=async (tx: Pick<ManagedTransaction,'run'>) => {
+      if (announcement && !(await checkContextReadAccess(tx,userId,conversationId))) throw new InviteError('Message not found or not accessible',404);
     if (isKindReaction) {
-      await session.run(`
+      await tx.run(`
         MATCH (u:User {id: $userId}), (m:Message {id: $messageId})
         MERGE (u)-[r:REACTED {emoji: $emoji, kind: $kind}]->(m)
         ON CREATE SET r.createdAt = datetime($now)
         SET r.href = $href
       `, { userId, messageId, emoji, now, kind, href: href ?? null });
     } else {
-      await session.run(`
+      await tx.run(`
         MATCH (u:User {id: $userId}), (m:Message {id: $messageId})
         OPTIONAL MATCH (u)-[existing:REACTED {emoji: $emoji}]->(m)
         WHERE existing.kind IS NULL
@@ -2459,7 +2462,10 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
       `, { userId, messageId, emoji, now });
     }
 
-    const reactions = await getReactionSummary(session, messageId, userId);
+    return getReactionSummary(tx, messageId, userId);
+
+    };
+    const reactions=announcement?await withConversationLock(conversationId,mutate):await mutate(session);
 
     const io = req.app.get('io') as IOServer | undefined;
     const payload = { messageId, conversationId, reactions };
@@ -2467,6 +2473,7 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
 
     res.status(201).json({ reactions });
   } catch (error) {
+    if (error instanceof InviteError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error adding reaction:', error);
     res.status(500).json({ error: 'Failed to add reaction' });
   } finally {
@@ -2491,7 +2498,7 @@ router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Reques
     const check = await session.run(`
       MATCH (m:Message {id: $messageId})
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: m.conversationId})
-      RETURN m.conversationId AS conversationId
+      RETURN m.conversationId AS conversationId,c.communityKind AS communityKind
     `, { messageId, userId });
 
     if (check.records.length === 0) {
@@ -2501,15 +2508,21 @@ router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Reques
 
     const conversationId = check.records[0].get('conversationId') as string;
 
+    const announcement=check.records[0].get('communityKind') === 'announcements';
+    const mutate=async (tx: Pick<ManagedTransaction,'run'>) => {
+      if (announcement && !(await checkContextReadAccess(tx,userId,conversationId))) throw new InviteError('Message not found or not accessible',404);
     // Match on kind too: null kind removes only the plain reaction; a supplied
     // kind removes that specific kind edge, leaving any plain reaction intact.
-    await session.run(`
+    await tx.run(`
       MATCH (u:User {id: $userId})-[r:REACTED {emoji: $emoji}]->(m:Message {id: $messageId})
       WHERE r.kind = $kind OR (r.kind IS NULL AND $kind IS NULL)
       DELETE r
     `, { userId, messageId, emoji, kind });
 
-    const reactions = await getReactionSummary(session, messageId, userId);
+    return getReactionSummary(tx, messageId, userId);
+
+    };
+    const reactions=announcement?await withConversationLock(conversationId,mutate):await mutate(session);
 
     const io = req.app.get('io') as IOServer | undefined;
     const payload = { messageId, conversationId, reactions };
@@ -2517,6 +2530,7 @@ router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Reques
 
     res.json({ reactions });
   } catch (error) {
+    if (error instanceof InviteError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error removing reaction:', error);
     res.status(500).json({ error: 'Failed to remove reaction' });
   } finally {
