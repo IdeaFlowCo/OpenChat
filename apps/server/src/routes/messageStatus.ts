@@ -56,8 +56,8 @@ router.get('/conversation', requireAuth, async (req: Request, res: Response) => 
       MATCH (:User {id:$userId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
       OPTIONAL MATCH (m:Message {conversationId:c.id})<-[:FROM_MESSAGE]-(t:Thought)
       WHERE m.deletedAt IS NULL AND t.deletedAt IS NULL AND (t.lane IS NULL OR t.lane <> 'context')
-        AND t.status IN ['open','closed']
-        AND ((t.userId = $userId AND t.captureMethod = 'message-status') OR EXISTS { MATCH (t)-[:PINNED_IN]->(c) })
+        AND t.status IN ['open','closed'] AND t.captureMethod = 'message-status'
+        AND (t.userId = $userId OR (EXISTS { MATCH (t)-[:PINNED_IN]->(c) } AND EXISTS { MATCH (:User {id:t.userId})-[:PARTICIPATES_IN]->(c) }))
       OPTIONAL MATCH (author:User {id:t.userId})
       WITH c, m, t, author ORDER BY t.updatedAt DESC
       WITH c, collect(CASE WHEN t IS NULL THEN null ELSE {
@@ -115,7 +115,8 @@ router.put('/', requireAuth, async (req: Request, res: Response) => {
         SET t.status=$status, t.updatedAt=datetime($now)
         MERGE (u)-[:HAS_THOUGHT]->(t)
         MERGE (t)-[:FROM_MESSAGE]->(m)
-        WITH u,c,m,t
+        // Read the pin state again inside the locked write, so events reflect what this write changed.
+        WITH u,c,m,t, EXISTS { MATCH (t)-[:PINNED_IN]->(c) } AS sharedBefore
         CALL {
           WITH c,t
           WITH c,t WHERE $visibility = 'chat'
@@ -131,12 +132,12 @@ router.put('/', requireAuth, async (req: Request, res: Response) => {
         }
         RETURN t { .id,.text,.kind,.status,.createdAt,.updatedAt,.scopeConversationId,.captureMethod,
           tags:coalesce(t.tags,[]),hasSourceMessage:true,sourceMessageId:m.id,sourceConversationId:c.id,pinned:$visibility='chat' } AS thought,
-          coalesce(u.name,'Member') AS userName
+          coalesce(u.name,'Member') AS userName, sharedBefore
       `, { userId, id, thoughtId, conversationId, status, visibility, now: new Date().toISOString() });
       if (!result.records.length) return null;
       const raw = result.records[0]!.get('thought') as Record<string, unknown>;
       const thought = { ...raw, createdAt: String(raw.createdAt), updatedAt: String(raw.updatedAt) };
-      return { thoughtId, status, visibility, thought, created: !existing, conversationId, wasShared, userName: String(result.records[0]!.get('userName')) };
+      return { thoughtId, status, visibility, thought, created: !existing, conversationId, wasShared: result.records[0]!.get('sharedBefore') === true, userName: String(result.records[0]!.get('userName')) };
     });
     if (!saved) { res.status(404).json({ error: 'Message unavailable' }); return; }
     const io = req.app.get('io');

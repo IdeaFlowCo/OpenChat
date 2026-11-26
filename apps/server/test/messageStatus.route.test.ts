@@ -67,7 +67,7 @@ it('shares a status with the chat through the Stream pin and tells participants 
 });
 it('withdrawing a shared status tells the chat only that it is gone', async () => {
   const thoughtId=messageStatusThoughtId('synthetic-owner','m');
-  mocks.run.mockResolvedValueOnce({records:[record({conversationId:'chat',thoughtId,shared:true})]}).mockResolvedValueOnce({records:[record({thought:{id:thoughtId,text:'Synthetic',status:'closed',createdAt:'2026-01-01',updatedAt:'2026-01-01'},userName:'Synthetic Owner'})]});
+  mocks.run.mockResolvedValueOnce({records:[record({conversationId:'chat',thoughtId,shared:true})]}).mockResolvedValueOnce({records:[record({thought:{id:thoughtId,text:'Synthetic',status:'closed',createdAt:'2026-01-01',updatedAt:'2026-01-01'},userName:'Synthetic Owner',sharedBefore:true})]});
   const response=await request(app).put('/api/chat/message-status?messageId=m').set('Authorization',auth).send({status:'closed',visibility:'private'});
   expect(response.body).toMatchObject({status:'closed',visibility:'private'});
   const event=mocks.publish.mock.calls.find(call=>call[2]==='message-status:changed')!;
@@ -87,6 +87,7 @@ it('lists chat statuses only for participants and filters other people’s priva
   const response=await request(app).get('/api/chat/message-status/conversation?conversationId=chat').set('Authorization',auth);
   expect(response.status).toBe(200);expect(response.body.statuses).toEqual([{messageId:'m',status:'open',userId:'peer',userName:'Peer',visibility:'chat',own:false}]);
   const query=mocks.run.mock.calls[1]![0] as string;
-  expect(query).toContain("(t.userId = $userId AND t.captureMethod = 'message-status') OR EXISTS { MATCH (t)-[:PINNED_IN]->(c) }");
+  expect(query).toContain("t.captureMethod = 'message-status'");
+  expect(query).toContain('(t.userId = $userId OR (EXISTS { MATCH (t)-[:PINNED_IN]->(c) } AND EXISTS { MATCH (:User {id:t.userId})-[:PARTICIPATES_IN]->(c) }))');
   expect(query).toContain('PARTICIPATES_IN');
 });
