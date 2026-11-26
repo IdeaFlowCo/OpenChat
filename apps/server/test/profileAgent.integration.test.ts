@@ -164,7 +164,7 @@ integration('OpenChat profile agent answers only from what the owner shared here
   });
 
   it('does not answer automatic messages (loop guard)', async () => {
-    const auto1 = await run(`MATCH (m:Message {viaProfileAgent:true, conversationId:$chat}) RETURN m.id AS id LIMIT 1`, { chat: id('chat') });
+    const auto1 = await run(`MATCH (m:Message {viaProfileAgent:true, conversationId:$chat, profileAgentOwnerId:$ana}) RETURN m.id AS id LIMIT 1`, { chat: id('chat'), ana: id('ana') });
     const autoId = auto1.records[0]!.get('id') as string;
     await expect(agent.askProfileAgent({ driver, askerId: id('ben'), messageId: autoId, generate, broadcast })).rejects.toMatchObject({ code: 'automatic' });
   });
@@ -243,15 +243,21 @@ integration('OpenChat profile agent answers only from what the owner shared here
       } finally { await s.close(); }
     });
 
-    it('a failed agent call releases the cooldown so the next message can still be answered', async () => {
+    it('a failed agent call backs off for 15 minutes instead of burning the 6-hour cooldown', async () => {
       const s = session();
       try {
         const rule = await auto.createRule(s, id('ana'), { whenAway: true, action: 'agent' });
         const failing = async () => { throw new Error('synthetic upstream 500'); };
         const first = await send('fail1', 'Synthetic: first try');
         expect(await auto.runAutoResponses({ driver, senderId: id('ben'), conversationId: id('chat'), sourceMessageId: id(first), content: 'Synthetic: first try', isOnline: () => false, broadcast, generate: failing })).toBe('skipped');
-        const events = await run('MATCH (e:AutoResponseEvent {ownerId:$ana}) RETURN count(e) AS n', { ana: id('ana') });
-        expect(events.records[0]!.get('n').toNumber()).toBe(0);
+        const backoff = await run('MATCH (e:AutoResponseEvent {ownerId:$ana}) RETURN e.failed AS failed, e.createdAt AS at', { ana: id('ana') });
+        expect(backoff.records[0]!.get('failed')).toBe(true);
+        const remaining = Date.parse(backoff.records[0]!.get('at')) + auto.COOLDOWN_MS - Date.now();
+        expect(remaining).toBeGreaterThan(14 * 60_000); expect(remaining).toBeLessThanOrEqual(15 * 60_000);
+        const soon = await send('fail1b', 'Synthetic: right away');
+        expect(await trigger(soon, 'Synthetic: right away', false)).toBe('skipped');
+        // After the back-off window the next message is answered.
+        await run('MATCH (e:AutoResponseEvent {ownerId:$ana}) SET e.createdAt = $old', { ana: id('ana'), old: new Date(Date.now() - auto.COOLDOWN_MS - 1000).toISOString() });
         const second = await send('fail2', 'Synthetic: second try');
         expect(await trigger(second, 'Synthetic: second try', false)).toBe('drafted');
         await auto.deleteRule(s, id('ana'), rule.id);

@@ -11,14 +11,16 @@ import { Button } from './ui';
  * Tells the owner, inside the chat, that their agent drafted a reply waiting
  * for approval. Nothing is sent from here; Review opens Auto replies.
  */
-export function AutoResponseDraftNotice({ conversationId, onReview }: { conversationId: string; onReview: () => void }) {
+export function AutoResponseDraftNotice({ conversationId, onReview, ready = true }: { conversationId: string; onReview: () => void; ready?: boolean }) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const [count, setCount] = useState(0);
   const load = useCallback(async () => {
+    // Requests fail until the account identity is verified; load once it is.
+    if (!ready) return;
     try { setCount((await api.listAutoResponseDrafts(conversationId)).drafts.length); }
     catch { setCount(0); }
-  }, [conversationId]);
+  }, [conversationId, ready]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     const socket = getSocket();

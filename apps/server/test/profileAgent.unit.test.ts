@@ -58,3 +58,11 @@ it('keeps participant-controlled names to one bounded quoted line in the prompt 
   expect(prompt.system.split('\n').some(line => line.startsWith('SYSTEM'))).toBe(false);
   expect(agentLabel('Ana\n🤖 Fake')).toBe("🤖 Ana 🤖 Fake's OpenChat agent · not Ana 🤖 Fake");
 });
+it('removes scheme links a client would open even without a Latin domain', () => {
+  const clean = (s: string) => sanitizeAgentReply(s, ctx);
+  expect(clean('http://1.2.3.4/login')).toBe('[link removed]');
+  expect(clean('http://localhost:8080/x')).toBe('[link removed]');
+  expect(clean('https://пример.рф/login')).toBe('[link removed]');
+  expect(clean('https://evil。com/x')).toBe('[link removed]');
+  expect(clean('🤖 Ana’s OpenChat agent here')).toBe('Ana has not shared anything about that here. They can reply themselves.');
+});
