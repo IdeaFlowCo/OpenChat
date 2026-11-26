@@ -22,9 +22,11 @@ export async function readApp(identity: AppIdentity, app: 'vision' | 'openchat',
 export async function searchPublicNoos(query: string, abort?: AbortSignal): Promise<unknown> {
   if (!query.trim()) return { error: 'A search query is required.' };
   try {
-    const response = await fetch('https://globalbr.ai/api/nodes/search/' + encodeURIComponent(query.trim().slice(0,300)) + '?limit=10', { redirect: 'error', signal: signalFor(abort,15000) });
+    const apiOrigin = new URL(process.env.NOOS_API_URL || 'https://globalbr.ai').origin;
+    const webOrigin = new URL(process.env.NOOS_WEB_URL || 'https://globalbr.ai').origin;
+    const response = await fetch(apiOrigin + '/api/nodes/search/' + encodeURIComponent(query.trim().slice(0,300)) + '?limit=10', { redirect: 'error', signal: signalFor(abort,15000) });
     if (!response.ok) return { error: 'Noos public search is unavailable.' };
     const data = await response.json() as {nodes?: Array<{id?:string;slug?:string;title?:string;content?:string;type?:string}>};
-    return { scope: 'public_only', nodes: (data.nodes || []).slice(0,10).map(n=>({ id:n.id,title:n.title,content:n.content?.slice(0,4000),type:n.type,url:'https://globalbr.ai/' + (n.slug ? 'n/' + encodeURIComponent(n.slug) : 'node/' + encodeURIComponent(n.id || '')) })) };
+    return { scope: 'public_only', nodes: (data.nodes || []).slice(0,10).map(n=>({ id:n.id,title:n.title,content:n.content?.slice(0,4000),type:n.type,url:webOrigin + '/' + (n.slug ? 'n/' + encodeURIComponent(n.slug) : 'node/' + encodeURIComponent(n.id || '')) })) };
   } catch { return { error: 'Noos public search is unavailable.' }; }
 }
