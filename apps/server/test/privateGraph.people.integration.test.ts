@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import neo4j, { type Driver } from 'neo4j-driver';
 
 // Unlinked is asked only to confirm a profile id the first time it is written,
-// and to resolve imported contacts (connection id or LinkedIn address).
+// and to resolve imported contacts or a profile whose private card predates its public profile.
 const unlinked = vi.hoisted(() => ({ read: vi.fn(), byHash: vi.fn() }));
 vi.mock('../src/services/unlinkedProvision.js', async () => {
   const actual = await vi.importActual<typeof import('../src/services/unlinkedProvision.js')>('../src/services/unlinkedProvision.js');
@@ -145,7 +145,7 @@ integration('private people: names, Unlinked profiles and retries', { timeout: 3
       expect(refs.records[0]!.get('ids')).toEqual([card.thingId]);
     } finally { await session.close(); }
 
-    // Unknown profiles are refused and nothing is saved; reading never asks Unlinked.
+    // Unknown profiles are refused and nothing is saved; read recovery never creates.
     expect(await failure(() => graph.addNote(dana, { kind: 'unlinked', id: 'nobody' }, 'x'))).toMatchObject({ status: 404 });
     expect(await failure(() => graph.addLink(dana, { kind: 'user', id: alex }, 'knows', { kind: 'unlinked', id: 'bad id!' }))).toMatchObject({ status: 400 });
     expect((await graph.getUnlinkedPersonOverlay(dana, 'nobody')).thingId).toBeNull();
