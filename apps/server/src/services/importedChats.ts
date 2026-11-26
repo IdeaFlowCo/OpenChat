@@ -244,12 +244,15 @@ export async function importChat(ownerUserId: string, body: unknown, options: { 
   const payload = parseImportPayload(body);
   const session = getDriver().session();
   try {
-    const work = (tx: ManagedTransaction) => applyImport(tx, ownerUserId, payload, !!options.dryRun, options.importedBy);
+    const work = (tx: ManagedTransaction) => importChatInTransaction(tx, ownerUserId, payload, options);
     return options.dryRun ? await session.executeRead(work) : await session.executeWrite(work);
   } finally { await session.close(); }
 }
 
-async function applyImport(tx: ManagedTransaction, ownerUserId: string, payload: ImportPayload, dryRun: boolean, importedBy: string): Promise<ImportResult> {
+/** Internal shared transaction body. Caller parses before writes and owns the
+ * owner/connection/job fences and commit; this never starts a nested session. */
+export async function importChatInTransaction(tx: ManagedTransaction, ownerUserId: string, payload: ImportPayload, options: {dryRun?: boolean; importedBy:string}): Promise<ImportResult> {
+  const dryRun=!!options.dryRun, importedBy=options.importedBy;
   const { source, coverage } = payload;
   const now = new Date().toISOString();
   const chatImportKey = compositeKey(ownerUserId, source.network, source.accountKey, source.chatKey);
