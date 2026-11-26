@@ -191,7 +191,7 @@ export function buildAgentPrompt(ctx: ShareableContext, question: string | undef
 /** Invisible, bidi and control characters, removed after NFKC folds lookalikes (fullwidth etc.). */
 const INVISIBLE = /[\p{Cc}\p{Cf}\u2028\u2029]/gu;
 export function cleanText(value: string): string {
-  return value.normalize('NFKC').replace(/\r\n?/g, '\n').replace(/[^\S\n]+/g, ' ').replace(INVISIBLE, ch => (ch === '\n' ? ch : ''));
+  return value.normalize('NFKC').replace(/[\u3002\uff61\uff0e]/g, '.').replace(/\r\n?/g, '\n').replace(/[^\S\n]+/g, ' ').replace(INVISIBLE, ch => (ch === '\n' ? ch : ''));
 }
 /** A display name safe for the prompt and the label: one line, no invisible characters, at most 80 chars. */
 export function safeName(raw: unknown): string {
@@ -203,7 +203,7 @@ export function safeName(raw: unknown): string {
  * Anything a client might turn into a link: schemes, scheme-less //, www., and
  * bare domains with any 2+ letter ending (a superset of the client linkifier).
  */
-const LINK_CANDIDATE = /(?:\b[a-z][a-z0-9+.-]*:\/*|\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d{1,5})?(?:[/?#][^\s<>()[\]"'“”‘’`]*)?/giu;
+const LINK_CANDIDATE = /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>"'“”‘’`]+|(?:\b[a-z][a-z0-9+.-]*:\/*|\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d{1,5})?(?:[/?#][^\s<>()[\]"'“”‘’`]*)?/giu;
 const normalizeLink = (link: string) => link.replace(/[.,;:!?)\]]+$/, '').replace(/^[a-z][a-z0-9+.-]*:\/*|^\/\//i, '').replace(/^www\./i, '').toLowerCase();
 /** Links found in text the owner wrote and shared here. */
 export function ownerLinks(ctx: ShareableContext): Set<string> {
@@ -223,6 +223,8 @@ export function sanitizeAgentReply(raw: string, ctx: ShareableContext): string {
   const quoted = text.match(/^["“](.*)["”]$/s);
   if (quoted) text = quoted[1]!.trim();
   text = text.replace(/\n{3,}/g, '\n\n');
+  // If hygiene removed everything (e.g. only a self-introduction line), say the honest default.
+  if (!text) text = `${safeName(ctx.ownerName)} has not shared anything about that here. They can reply themselves.`;
   if (text.length > MAX_REPLY_CHARS) text = `${text.slice(0, MAX_REPLY_CHARS - 1).trimEnd()}…`;
   return text;
 }

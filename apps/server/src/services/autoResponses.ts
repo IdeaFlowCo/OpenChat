@@ -41,6 +41,7 @@ export interface AutoResponseDraft {
 export const MAX_RULES = 10;
 export const COOLDOWN_MS = 6 * 3600_000;
 const SENDING_LEASE_MS = 2 * 60_000;
+const FAILURE_BACKOFF_MS = 15 * 60_000;
 const DRAFT_TTL_MS = 24 * 3600_000;
 const AWAY_STATUSES = new Set(['away', 'busy', 'invisible', 'offline']);
 
@@ -300,8 +301,12 @@ export async function runAutoResponses(input: TriggerInput): Promise<'none' | 's
     console.warn('[auto-responses] failed:', error instanceof Error ? error.message : 'unknown');
     return 'skipped';
   } finally {
-    // A claim that produced nothing (model failure, cap, chat changed) must not burn the cooldown.
-    if (claimKey && !finished) await session.run('MATCH (e:AutoResponseEvent {key:$key}) DETACH DELETE e', { key: claimKey }).catch(() => undefined);
+    // A claim that produced nothing (model failure, cap, chat changed) must not burn the 6-hour cooldown,
+    // but backs off for 15 minutes so a failing model is not retried on every message.
+    if (claimKey && !finished) {
+      const backoff = new Date(Date.now() - COOLDOWN_MS + FAILURE_BACKOFF_MS).toISOString();
+      await session.run('MATCH (e:AutoResponseEvent {key:$key}) SET e.createdAt=$backoff, e.failed=true', { key: claimKey, backoff }).catch(() => undefined);
+    }
     await session.close();
   }
 }
