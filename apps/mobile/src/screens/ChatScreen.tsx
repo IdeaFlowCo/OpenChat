@@ -45,6 +45,7 @@ import { Attachment, Conversation, ExportRangeKey, Message, api } from '../api/c
 import { MessageActionSheet, ReplyToData } from '../components/MessageActionSheet';
 import { ReactionsBar } from '../components/ReactionsBar';
 import { MessageStatusChips } from '../components/MessageStatusChips';
+import { AutoResponseDraftNotice } from '../components/AutoResponseDraftNotice';
 import { useMessageStatuses } from '../hooks/useMessageStatuses';
 import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
@@ -1838,6 +1839,8 @@ export function ChatScreen({
               borderWidth: failed ? 1 : (isOwn || emojiOnly ? 0 : StyleSheet.hairlineWidth),
             },
             emojiOnly && { paddingHorizontal: 4, paddingVertical: 0 },
+            // Agent and automatic replies are never the person: a dashed outline marks them.
+            (m.viaProfileAgent || m.viaAutoResponse) && !failed && { borderStyle: 'dashed', borderWidth: 1, borderColor: c.primary },
             // Reply-message accent stripe (OpenChat-imt): a 3px colored
             // bar on the bubble's leading edge gives at-a-glance
             // distinction that this message is a reply. Stripe sits on
@@ -1879,6 +1882,14 @@ export function ChatScreen({
           {!!m.viaSecretary && !m.deletedAt && (
             <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.78) : c.textMetadata }]}>
               ◇ Secretary auto-reply
+            </Text>
+          )}
+          {/* Trust label from the server flags, never from message text (anyone can type a label). */}
+          {!!(m.viaProfileAgent || m.viaAutoResponse) && !m.deletedAt && (
+            <Text style={[styles.forwardedLabel, { color: isOwn ? ownTint(0.78) : c.textMetadata }]} numberOfLines={1}>
+              {m.viaProfileAgent
+                ? `◇ OpenChat agent · not ${getUserDisplayName(m.sender)}`
+                : m.autoResponseApproved ? '◇ Auto-reply · approved' : '◇ Automatic reply'}
             </Text>
           )}
           {!!m.forwardedFromMessageId && (
@@ -2437,6 +2448,7 @@ export function ChatScreen({
           <Text style={{ color: c.textMetadata, fontSize: 14, marginLeft: 8 }}>Recording cancelled</Text>
         </View>
       )}
+      {activeConversationLane === 'chat' && !!conversationId && <AutoResponseDraftNotice conversationId={conversationId} ready={isIdentityVerified} onReview={() => navigation.navigate('Secretary')} />}
 
       <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
         {/* Hide-keyboard button: a visible way out while typing, beyond the
@@ -2615,6 +2627,7 @@ export function ChatScreen({
         onDismiss={() => setActionSheetVisible(false)}
         onCopiedReference={showToast}
         onStatusSaved={() => { void refreshMessageStatuses(); }}
+        onProfileAgentAnswered={() => showToast('Agent answered in this chat')}
         onReply={handleReply}
         onTranslate={m => setManualTranslations(previous => ({ ...previous, [m.id]: { content: m.content, version: (previous[m.id]?.version || 0) + 1 } }))}
         translateLanguage={translationPreference.language}

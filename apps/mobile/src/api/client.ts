@@ -197,6 +197,11 @@ export interface Message {
   transcript?: string;
   /** Owner-approved automatic reply sent by personal Secretary mode. */
   viaSecretary?: boolean;
+  /** Answer from the author's built-in OpenChat agent (labelled; not written by the person). */
+  viaProfileAgent?: boolean;
+  /** Sent by an auto-response rule, or an agent draft the owner approved. */
+  viaAutoResponse?: boolean;
+  autoResponseApproved?: boolean;
   /** Hold-to-grow size (1..4) of an emoji-only message (OpenChat-3aiu). */
   emojiSize?: number | null;
   /** Originating service for messages sent from elsewhere; 'vision' = sent from Vision. */
@@ -789,6 +794,10 @@ export type ThoughtStatus = 'none' | 'open' | 'closed';
 export type MessageStatusVisibility = 'chat' | 'private';
 export interface MessageStatusValue { messageId: string; thoughtId: string | null; status: ThoughtStatus; visibility: MessageStatusVisibility }
 export interface MessageStatusEntry { messageId: string; userId: string; userName: string; status: ThoughtStatus; visibility: MessageStatusVisibility; own: boolean; updatedAt?: string }
+export interface AutoResponseSettings { profileAgentEnabled: boolean; /** False until the owner answers the one-time prompt. */ profileAgentDecided: boolean; available: boolean; spentMicros: number; capMicros?: number }
+export interface AutoResponseRuleInput { enabled?: boolean; whenAway: boolean; fromUserIds: string[]; topics: string[]; action: 'reply' | 'agent'; replyText: string | null; delivery: 'draft' | 'send' }
+export interface AutoResponseRule extends Required<AutoResponseRuleInput> { id: string; createdAt: string; updatedAt: string }
+export interface AutoResponseDraft { id: string; conversationId: string; sourceMessageId: string; ruleId: string; text: string; action: 'reply' | 'agent'; senderName: string; sourceText: string; createdAt: string; expiresAt: string }
 
 export interface Thought {
   id: string;
@@ -1536,6 +1545,34 @@ export const api = {
     }),
   deleteSecretaryAnswer: (id: string) =>
     request<{ ok: boolean }>(`/api/secretary/answers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // ── Built-in OpenChat agent and auto-responses ────────────────────────────
+  /** Ask the message author's built-in agent; its labelled answer is posted into the chat. */
+  askProfileAgent: async (messageId: string, question?: string) => {
+    // The model call can take a while; a refusal must never sign the asker out.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    try {
+      return await request<{ message: Message }>('/api/chat/agent-reply', { method: 'POST', body: JSON.stringify(question ? { messageId, question } : { messageId }), signal: controller.signal, expireAuthOnForbidden: false });
+    } finally { clearTimeout(timer); }
+  },
+  /** Whether the message's author has turned on their agent (participants only). */
+  getProfileAgentAvailability: (messageId: string) =>
+    timedRequest<{ enabled: boolean; available: boolean }>(`/api/chat/agent-reply/availability?messageId=${encodeURIComponent(messageId)}`, { expireAuthOnForbidden: false }),
+  getAutoResponseSettings: () => request<AutoResponseSettings>('/api/auto-responses/settings'),
+  setProfileAgentEnabled: (profileAgentEnabled: boolean) =>
+    request<{ profileAgentEnabled: boolean; available: boolean }>('/api/auto-responses/settings', { method: 'PUT', body: JSON.stringify({ profileAgentEnabled }) }),
+  listAutoResponseRules: () => request<{ rules: AutoResponseRule[] }>('/api/auto-responses/rules'),
+  createAutoResponseRule: (rule: AutoResponseRuleInput) =>
+    request<{ rule: AutoResponseRule }>('/api/auto-responses/rules', { method: 'POST', body: JSON.stringify(rule) }),
+  updateAutoResponseRule: (id: string, rule: Partial<AutoResponseRuleInput>) =>
+    request<{ rule: AutoResponseRule }>(`/api/auto-responses/rules/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(rule) }),
+  deleteAutoResponseRule: (id: string) => request<void>(`/api/auto-responses/rules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  listAutoResponseDrafts: (conversationId?: string) =>
+    request<{ drafts: AutoResponseDraft[] }>(`/api/auto-responses/drafts${conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : ''}`),
+  sendAutoResponseDraft: (id: string, text: string) =>
+    request<{ message: Message }>(`/api/auto-responses/drafts/${encodeURIComponent(id)}/send`, { method: 'POST', body: JSON.stringify({ text }) }),
+  discardAutoResponseDraft: (id: string) => request<void>(`/api/auto-responses/drafts/${encodeURIComponent(id)}/discard`, { method: 'POST' }),
 
   /**
    * Request a presigned PUT URL for an avatar image upload (OpenChat-x2s).

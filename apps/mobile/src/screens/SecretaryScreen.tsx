@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { api, type SecretaryAnswer, type SecretaryConfig } from '../api/client';
+import { AgentAutoResponses } from '../components/AgentAutoResponses';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
 import { radius, space, type, touchTarget } from '../theme/tokens';
@@ -181,6 +182,8 @@ export function SecretaryScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      <AgentAutoResponses />
     </ScrollView>
   );
 }

@@ -35,6 +35,8 @@ import agentKeysRoutes from './routes/agentKeys.js';
 import { handleIdeaflowConnector, connectorOperationGuard } from './routes/ideaflowConnector.js';
 import contextHostedRoutes from './routes/contextHosted.js';
 import { ensureHostedContextIndexes, startHostedContextWorker } from './services/contextHosted.js';
+import { agentReplyRouter, autoResponsesRouter } from './routes/profileAgent.js';
+import { ensureProfileAgentIndexes } from './services/autoResponses.js';
 import { createConnectorDelegation } from './routes/connectorDelegation.js';
 import webhooksRoutes from './routes/webhooks.js';
 import feedbackRoutes from './routes/feedback.js';
@@ -459,6 +461,8 @@ app.use('/api', connectorDelegation.guard);
 app.use('/api/connector-delegations', connectorDelegation.routes);
 app.use('/api/auth', authRoutes);
 app.use('/api/chat/context-hosted', contextHostedRoutes);
+app.use('/api/chat/agent-reply', agentReplyRouter);
+app.use('/api/auto-responses', autoResponsesRouter);
 app.use('/api/chat/context-webhooks', contextWebhooksRoutes);
 app.use('/api/chat', contextIntentionsRoutes);
 app.use('/api/chat', conversationContentRoutes);
@@ -657,6 +661,7 @@ async function start() {
     await ensureContextWebhookIndexes(getDriver());
     stopContextWebhookWorker = startContextWebhookWorker(getDriver());
     await ensureHostedContextIndexes(getDriver());
+    await ensureProfileAgentIndexes(getDriver());
     stopHostedContextWorker = startHostedContextWorker(getDriver());
     stopVisionReplyWorker = startVisionReplyWorker(getDriver());
 
