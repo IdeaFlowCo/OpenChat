@@ -22,18 +22,19 @@ export function groupMessageStatuses(entries: MessageStatusEntry[]): MessageStat
  * the viewer's own private ones. Live updates arrive per participant; a private
  * change from the viewer arrives through `refresh()` after their own save.
  */
-export function useMessageStatuses(conversationId: string | undefined, viewerId: string | undefined) {
+// `ready`: requests fail until the account identity is verified, so wait for it rather than failing silently once.
+export function useMessageStatuses(conversationId: string | undefined, viewerId: string | undefined, ready = true) {
   const [statuses, setStatuses] = useState<MessageStatusMap>({});
   const generation = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (!conversationId) return;
+    if (!conversationId || !ready) return;
     const current = ++generation.current;
     try {
       const value = await api.getConversationMessageStatuses(conversationId);
       if (current === generation.current) setStatuses(groupMessageStatuses(value.statuses));
     } catch { /* Chips are secondary; the sheet reports its own errors. */ }
-  }, [conversationId]);
+  }, [conversationId, ready]);
 
   useEffect(() => { setStatuses({}); void refresh(); }, [refresh]);
 
