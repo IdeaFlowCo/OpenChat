@@ -1,6 +1,7 @@
 import * as ExpoClipboard from 'expo-clipboard';
 import { messageUrl } from '../utils/parseOpenChatUrl';
 import { MessageStatusControls } from './MessageStatusControls';
+import { ProfileAgentAskControls } from './ProfileAgentAskControls';
 import { MessageLinkActions } from './MessageLinkActions';
 import { messageLinks } from '../utils/messageLinks';
 /**
@@ -93,6 +94,8 @@ interface Props {
   onTickle?: (userId: string, displayName: string) => void;
   /** A status was saved from the Set status sheet; refresh the chips. */
   onStatusSaved?: () => void;
+  /** The author's built-in agent answered in this chat (Ask {name}'s agent). */
+  onProfileAgentAnswered?: () => void;
 }
 
 const REPORT_REASONS = ['Spam', 'Inappropriate', 'Abuse', 'Other'] as const;
@@ -120,6 +123,7 @@ export function MessageActionSheet({
   onTranslate,
   onTickle,
   onStatusSaved,
+  onProfileAgentAnswered,
   translateLanguage = 'English',
 }: Props) {
   const { scheme } = useTheme();
@@ -127,7 +131,7 @@ export function MessageActionSheet({
 
   // Sub-sheet state: null = main, 'report' = report picker, 'other' = freeform,
   // 'react' = emoji picker, 'assistant' = "ask about this" question prompt.
-  const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react' | 'assistant' | 'links' | 'status'>(null);
+  const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react' | 'assistant' | 'links' | 'status' | 'profileAgent'>(null);
   const [freeformText, setFreeformText] = useState('');
   const [visionSelection, setVisionSelection] = useState('');
   const [visionBusy, setVisionBusy] = useState(false);
@@ -141,6 +145,9 @@ export function MessageActionSheet({
     try { if (await onSaveToVision(message, selected)) { setVisionSelection(''); handleDismiss(); } }
     finally { setVisionBusy(false); }
   };
+  // Ask the author's agent: other people's real messages only, never bots or automatic replies.
+  const canAskAuthorsAgent = !!message && !isOwn && !message.deletedAt && !message.sender?.isBot
+    && !message.viaProfileAgent && !message.viaAutoResponse && !message.viaSecretary && !message.id.startsWith('local-');
   const handleDismiss = () => {
     setSubSheet(null);
     setFreeformText('');
@@ -322,6 +329,17 @@ export function MessageActionSheet({
           </View>
         </Pressable>
       </Pressable>
+    </Modal>;
+  }
+
+  if (subSheet === 'profileAgent' && message && visible) {
+    return <Modal transparent animationType="fade" visible={visible} onRequestClose={handleDismiss}>
+      <Pressable style={overlayStyle} onPress={handleDismiss}><Pressable onPress={() => undefined}>
+        <View style={sheetStyle}>
+          <ProfileAgentAskControls key={message.id} messageId={message.id} name={senderName} onAnswered={() => { handleDismiss(); onProfileAgentAnswered?.(); }} />
+          <TouchableOpacity accessibilityRole="button" style={[styles.cancelRow, { borderColor: c.border }]} onPress={handleDismiss}><Text style={[styles.cancelLabel, { color: c.textSecondary }]}>Cancel</Text></TouchableOpacity>
+        </View>
+      </Pressable></Pressable>
     </Modal>;
   }
 
@@ -613,6 +631,10 @@ export function MessageActionSheet({
             {!message.deletedAt && <TouchableOpacity accessibilityRole="button" style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]} onPress={() => setSubSheet('status')}>
               <View style={styles.actionIconBox}><AppIcon name="thought" color={c.textPrimary} size={20} /></View>
               <View style={{ flex: 1 }}><Text style={[styles.actionLabel, { color: c.textPrimary }]}>Set status…</Text><Text style={{ ...type.meta, color: c.textMetadata }}>Open or Closed · shown on the message</Text></View>
+            </TouchableOpacity>}
+            {canAskAuthorsAgent && <TouchableOpacity accessibilityRole="button" style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]} onPress={() => setSubSheet('profileAgent')}>
+              <View style={styles.actionIconBox}><AppIcon name="bot" color={c.textPrimary} size={20} /></View>
+              <View style={{ flex: 1 }}><Text style={[styles.actionLabel, { color: c.textPrimary }]}>Ask {senderName}’s agent</Text><Text style={{ ...type.meta, color: c.textMetadata }}>Instant answer in this chat · from what they shared</Text></View>
             </TouchableOpacity>}
             {!message.deletedAt && <TouchableOpacity accessibilityRole="button" style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]} onPress={() => { const selected = message; handleDismiss(); onAskAssistant(selected, 'Please respond to this message now. Give me a useful reply to review privately; do not send it to the source chat.'); }}>
               <View style={styles.actionIconBox}><AppIcon name="bot" color={c.textPrimary} size={20} /></View>
