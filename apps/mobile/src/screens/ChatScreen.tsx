@@ -2448,7 +2448,7 @@ export function ChatScreen({
           <Text style={{ color: c.textMetadata, fontSize: 14, marginLeft: 8 }}>Recording cancelled</Text>
         </View>
       )}
-      {activeConversationLane === 'chat' && !!conversationId && <AutoResponseDraftNotice conversationId={conversationId} onReview={() => navigation.navigate('Secretary')} />}
+      {activeConversationLane === 'chat' && !!conversationId && <AutoResponseDraftNotice conversationId={conversationId} ready={isIdentityVerified} onReview={() => navigation.navigate('Secretary')} />}
 
       <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
         {/* Hide-keyboard button: a visible way out while typing, beyond the
