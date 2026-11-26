@@ -19,6 +19,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Machine agent authorization and relay
+        run: |
+          node --import tsx --test scripts/machine-agent/*.test.mjs
+          npm exec --workspace apps/server -- vitest run test/machineAgent.mobile.test.ts
       - name: Mobile typecheck
         run: npx tsc --noEmit -p apps/mobile/tsconfig.json
       - name: Mobile design-token lint (no new fontSize/radius/hex literals)

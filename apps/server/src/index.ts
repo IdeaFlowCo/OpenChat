@@ -20,6 +20,7 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import { attachMachineRelay } from './websocket/machineRelay.js';
 import { marked } from 'marked';
 import { initDatabase, closeDatabase, getDriver } from './db.js';
 import authRoutes from './routes/auth.js';
@@ -107,6 +108,8 @@ const io = new Server(httpServer, {
     credentials: true
   }
 });
+
+attachMachineRelay(io);
 
 // Middleware
 app.use(cors({
