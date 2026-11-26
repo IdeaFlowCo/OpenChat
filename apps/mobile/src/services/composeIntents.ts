@@ -7,7 +7,8 @@ const listeners = new Set<() => void>();
 export type PendingComposeIntent = { intent: ComposeIntent; revision: string };
 export type PendingNavigationIntent =
   | (PendingComposeIntent & { kind: 'compose' })
-  | { kind: 'original'; thoughtId: string; revision: string };
+  | { kind: 'original'; thoughtId: string; revision: string }
+  | { kind: 'message'; messageId: string; revision: string };
 let sequence = 0;
 // Each embedded tab owns its pending recipient, even when browser storage is
 // blocked. Never consume a standalone tab's pending compose request.
@@ -35,6 +36,10 @@ function parseSaved(raw: string | null): PendingNavigationIntent | null {
     const saved = JSON.parse(raw);
     if (!Number.isFinite(saved.capturedAt) || Date.now() - saved.capturedAt > 60 * 60 * 1000) return null;
     const revision = typeof saved.revision === 'string' ? saved.revision : `legacy:${raw}`;
+    if (saved.kind === 'message') {
+      return typeof saved.messageId === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(saved.messageId)
+        ? { kind: 'message', messageId: saved.messageId, revision } : null;
+    }
     if (saved.kind === 'original') {
       return typeof saved.thoughtId === 'string' && saved.thoughtId.trim()
         ? { kind: 'original', thoughtId: saved.thoughtId, revision } : null;
@@ -53,6 +58,11 @@ export async function captureComposeIntent(intent: ComposeIntent): Promise<void>
 export async function captureOriginalIntent(thoughtId: string): Promise<void> {
   if (!thoughtId.trim()) return;
   await serialize(() => writePending(JSON.stringify({ kind: 'original', thoughtId, capturedAt: Date.now(), revision: `${Date.now()}-${++sequence}-${Math.random().toString(36).slice(2)}` })));
+  listeners.forEach(listener => listener());
+}
+export async function captureMessageIntent(messageId: string): Promise<void> {
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(messageId)) return;
+  await serialize(() => writePending(JSON.stringify({ kind: 'message', messageId, capturedAt: Date.now(), revision: `${Date.now()}-${++sequence}-${Math.random().toString(36).slice(2)}` })));
   listeners.forEach(listener => listener());
 }
 export function loadPendingNavigationIntent(): Promise<PendingNavigationIntent | null> {

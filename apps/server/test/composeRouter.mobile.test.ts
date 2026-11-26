@@ -12,7 +12,7 @@ vi.mock('../../mobile/src/services/notifications', () => ({ navigationRef: {
   isReady: () => true, getCurrentRoute: () => ({ name: 'Conversations' }), dispatch: mocks.dispatch,
   addListener: (name: string, listener: () => void) => { mocks.listeners.set(name, listener); return () => mocks.listeners.delete(name); },
 } }));
-import { captureOriginalIntent, loadPendingNavigationIntent, captureComposeIntent, loadPendingComposeIntent } from '../../mobile/src/services/composeIntents';
+import { captureMessageIntent, captureOriginalIntent, loadPendingNavigationIntent, captureComposeIntent, loadPendingComposeIntent } from '../../mobile/src/services/composeIntents';
 import { ComposeRouter } from '../../mobile/src/navigation/ComposeRouter';
 let root: ReturnType<typeof create> | undefined;
 beforeEach(() => { vi.clearAllMocks(); mocks.storage.clear(); mocks.listeners.clear(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
@@ -48,6 +48,18 @@ it('retains an original-message destination through authentication and consumes 
   await act(async () => { root!.update(React.createElement(ComposeRouter, { ready: true })); });
   expect(mocks.dispatch).toHaveBeenCalledWith({
     name: 'Main', params: { screen: 'ThoughtsTab', params: { screen: 'OriginalMessage', params: { thoughtId: 'thought-123' } } },
+  });
+  expect(await loadPendingNavigationIntent()).toBeNull();
+});
+
+it('retains a direct message destination through authentication and consumes it only after routing', async () => {
+  await captureMessageIntent('message-123');
+  await act(async () => { root = create(React.createElement(ComposeRouter, { ready: false })); });
+  expect(mocks.dispatch).not.toHaveBeenCalled();
+  expect(await loadPendingNavigationIntent()).toMatchObject({ kind: 'message', messageId: 'message-123' });
+  await act(async () => { root!.update(React.createElement(ComposeRouter, { ready: true })); });
+  expect(mocks.dispatch).toHaveBeenCalledWith({
+    name: 'Main', params: { screen: 'ChatsTab', params: { screen: 'OriginalMessage', params: { messageId: 'message-123' } } },
   });
   expect(await loadPendingNavigationIntent()).toBeNull();
 });

@@ -22,6 +22,7 @@ export type ParsedOpenChatUrl =
   | { type: 'context'; conversationId: string; entryId: string }
   | { type: 'conversation'; conversationId: string }
   | { type: 'original'; thoughtId: string }
+  | { type: 'message'; messageId: string }
   | ({ type: 'compose' } & ComposeIntent)
   | { type: 'unknown' };
 
@@ -30,12 +31,20 @@ export const originalMessageUrl = (thoughtId: string) => `https://chat.ideaflow.
 /** Shareable web link that opens a conversation (parsed back as `conversation`). */
 export const conversationUrl = (conversationId: string) => `https://chat.ideaflow.app/app/chat/${encodeURIComponent(conversationId)}`;
 
+/** Stable message link. Opening it always rechecks conversation membership. */
+export const messageUrl = (messageId: string) => `https://chat.ideaflow.app/app/message/${encodeURIComponent(messageId)}`;
+
 export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
     return { type: 'unknown' };
+  }
+
+  if (url.protocol === 'openchat:' && url.hostname === 'message') {
+    const id = url.pathname.replace(/^\//, '');
+    if (/^[A-Za-z0-9_-]{1,200}$/.test(id)) return { type: 'message', messageId: id };
   }
 
   // openchat://user/<userId>
@@ -76,6 +85,9 @@ export function parseOpenChatUrl(raw: string): ParsedOpenChatUrl {
 
     const cardMatch = url.pathname.match(/^\/c\/([^/]+)\/?$/);
     if (cardMatch?.[1]) return { type: 'card', token: cardMatch[1] };
+
+    const messageMatch = url.pathname.match(/^\/app\/message\/([A-Za-z0-9_-]{1,200})\/?$/);
+    if (messageMatch) return { type: 'message', messageId: messageMatch[1] };
 
     // A Stream entry's original message; the screen re-checks access on open.
     const originalMatch = url.pathname.match(/^\/app\/original\/([^\/]+)\/?$/);

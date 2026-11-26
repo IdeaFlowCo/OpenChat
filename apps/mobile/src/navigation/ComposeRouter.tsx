@@ -21,6 +21,8 @@ export function ComposeRouter({ ready }: { ready: boolean }) {
           if (active && pending && canRoute()) {
             navigationRef.dispatch(CommonActions.navigate(pending.kind === 'original'
               ? { name: 'Main', params: { screen: 'ThoughtsTab', params: { screen: 'OriginalMessage', params: { thoughtId: pending.thoughtId } } } }
+              : pending.kind === 'message'
+                ? { name: 'Main', params: { screen: 'ChatsTab', params: { screen: 'OriginalMessage', params: { messageId: pending.messageId } } } }
               : { name: 'Main', params: { screen: 'ChatsTab', params: { screen: 'Compose', params: { ...pending.intent, requestRevision: pending.revision } } } }));
             await consumeComposeIntent(pending.revision);
           }
