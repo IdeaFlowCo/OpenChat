@@ -1,13 +1,13 @@
 import React, { useMemo, useRef } from 'react';
 import { Alert, Linking, Platform, Text } from 'react-native';
-import { safeMessageUrl } from '../utils/messageLinks';
+import { safeLinkUrl } from '../utils/messageLinks';
 import { linkParts } from '../utils/richLinks';
 import { useLinksAsTyped } from '../services/linkDisplay';
 import { PathChip } from './PathChip';
 import { type } from '../theme/tokens';
 
 export async function openMessageLink(url: string): Promise<void> {
-  const safe = safeMessageUrl(url);
+  const safe = safeLinkUrl(url);
   if (!safe) return;
   try { await Linking.openURL(safe); }
   catch { Alert.alert('Could not open link', 'You can copy the link from the message actions.'); }
@@ -19,7 +19,8 @@ export function InlineLink({ text, url, color, onLongPress }: {
   const held = useRef(false);
   const webProps = Platform.OS === 'web' ? {
     href: url,
-    hrefAttrs: { target: '_blank', rel: 'noopener noreferrer' },
+    // A mail address opens the mail app; it needs no new tab.
+    hrefAttrs: /^mailto:/i.test(url) ? { rel: 'noopener noreferrer' } : { target: '_blank', rel: 'noopener noreferrer' },
   } : {};
   return <Text {...webProps} accessibilityRole="link" style={{ color, textDecorationLine: 'underline' }}
     onPressIn={Platform.OS === 'web' ? undefined : () => { held.current = false; }}

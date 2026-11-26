@@ -7,7 +7,7 @@
  * URLs (including bare domains such as unlinked.ai). Anything else stays
  * plain text. Only http(s) links without credentials become tappable.
  */
-import { BARE_DOMAIN, hiddenAt, isBareDomain, safeMessageUrl } from './messageLinks';
+import { BARE_DOMAIN, hiddenAt, isBareDomain, safeMailto, safeMessageUrl } from './messageLinks';
 import { ROOTS, fileUrlToPath, linkDestination, pathScan } from './richLinks';
 
 export type Inline =
@@ -28,6 +28,7 @@ export type Block =
 
 /** A tappable destination, or null. Adds https:// to www. links and bare domains. */
 export function safeHref(raw: string): string | null {
+  if (/^mailto:/i.test(raw)) return safeMailto(raw);
   const candidate = /^www\./i.test(raw) || isBareDomain(raw) ? `https://${raw}` : raw;
   // Judged as written, before the URL parser can normalise a hidden character into another host.
   if (!safeMessageUrl(candidate)) return null;

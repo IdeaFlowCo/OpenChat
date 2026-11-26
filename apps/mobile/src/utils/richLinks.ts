@@ -3,7 +3,8 @@
  * entries (docs/message-links.md):
  *
  * - `[label](destination)` shows the label; a bare web address shows itself.
- * - A web destination becomes a link only if `safeMessageUrl` accepts it.
+ * - A web destination becomes a link only if `safeMessageUrl` accepts it; `[label](mailto:…)`
+ *   only if `safeMailto` does (one recipient, nothing pre-written).
  * - A `file:` address or a path on someone's own computer becomes a *path*:
  *   never a link (a browser cannot open it from a web page), but something a
  *   reader can copy.
@@ -12,7 +13,7 @@
  *
  * No character is lost: joining every part's `source` gives the input back.
  */
-import { INVISIBLE, hiddenAt, messageLinks, safeMessageUrl } from './messageLinks';
+import { INVISIBLE, hiddenAt, messageLinks, safeLinkUrl } from './messageLinks';
 
 export type LinkPart =
   | { t: 'text'; source: string }
@@ -125,7 +126,9 @@ export function linkDestination(raw: string): { url: string } | { path: string }
   const dest = raw.startsWith('<') && raw.endsWith('>') ? raw.slice(1, -1).trim() : raw.trim();
   if (/^file:/i.test(dest)) { const path = fileUrlToPath(dest); return path ? { path } : null; }
   if (IS_LOCAL_PATH.test(dest)) return copyable(dest) ? { path: dest } : null;
-  const url = safeMessageUrl(dest);
+  // Written as a link, a destination may also be a plain mailto: address. Bare text is never
+  // turned into one: only http(s), www. and known domains link on their own.
+  const url = safeLinkUrl(dest);
   return url ? { url } : null;
 }
 

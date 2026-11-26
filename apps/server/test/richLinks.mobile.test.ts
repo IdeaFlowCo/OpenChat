@@ -40,6 +40,9 @@ describe('link rules', () => {
     ['[docs](https://example.org/a_(b))', [['link', 'docs', 'https://example.org/a_(b)']]],
     ['([docs](https://example.org/a_(b)_c)).', [['text', '('], ['link', 'docs', 'https://example.org/a_(b)_c'], ['text', ').']]],
     ['www.example.com/x, then', [['link', 'www.example.com/x', 'https://www.example.com/x'], ['text', ', then']]],
+    // A written link may lead to one mail address; the mail app opens and nothing is sent.
+    ['Write to [Sam](mailto:sam@example.com).', [['text', 'Write to '], ['link', 'Sam', 'mailto:sam@example.com'], ['text', '.']]],
+    ['[x](MAILTO:Sam.Lee+notes@mail.example.co.uk)', [['link', 'x', 'mailto:Sam.Lee+notes@mail.example.co.uk']]],
     ['![img](https://example.com/a.png)', [['text', '!'], ['link', 'img', 'https://example.com/a.png']]],
     ['plain https://example.org/x, then text', [['text', 'plain '], ['link', 'https://example.org/x', 'https://example.org/x'], ['text', ', then text']]],
   ])('web links: %s', (content, expected) => { expect(shape(content)).toEqual(expected); });
@@ -68,9 +71,13 @@ describe('link rules', () => {
 
   it.each([
     '[x](javascript:alert(1))', '[x](JaVaScRiPt:alert(1))', '[x](data:text/html,hi)', '[x](vbscript:msgbox)', '[x](intent://scan/#Intent;end)',
-    '[x](https://user:pw@example.com)', '[x](https://)', '[x](ftp://example.com/a)', '[x](mailto:sam@example.com)', '[ ](https://example.com)',
+    '[x](https://user:pw@example.com)', '[x](https://)', '[x](ftp://example.com/a)', '[ ](https://example.com)',
     '[x](javascript:https://example.com)', '[a](java%09script:x)', '<javascript:alert(2)>', '[x](file://server.example/share/a)', 'file://nas.example/share/a.txt', '[x](file:///Users/sam/%E0%A4%A)', '[x](file://user@host/a)',
     'javascript:alert(1) data:text/html,hi vbscript:x', 'file:relative/path', 'myfile:///Users/sam/a',
+    // mailto: is a link only as a written destination with one plain address: nothing pre-written, no extra recipients.
+    'mailto:sam@example.com', 'sam@example.com', '[x](mailto:)', '[x](mailto:sam)', '[x](mailto:sam@example)', '[x](mailto:sam@example.com?subject=Hi)',
+    '[x](mailto:sam@example.com?bcc=other@example.org)', '[x](mailto:sam@example.com,other@example.org)', '[x](mailto:sam@example.com&body=x)',
+    '[x](mailto:sam@exam\u200bple.com)', '[x](mailto:sam..lee@example.com)', '[x](mailto://sam@example.com)', '[x](mailto:sam@example.com/path)', '[x](mailto:%0Asam@example.com)', '[x](mailto:sam%40evil.example@example.com)',
     // A file address is written file://…, and never names another machine by a doubled slash.
     '[x](file:foo)', '[x](file:/tmp/a)', '[x](file:////server.example/share/a)', 'file:////server.example/share/a',
     'file://localhost//server.example/share', 'file://///x', '[x](file:///%2Fserver.example/share)', 'file:///%2F%2Fserver.example/share', '[x](file:///%5C%5Cserver%5Cshare)', '[x](file:///%2Ftmp)',
@@ -353,6 +360,27 @@ describe.each([
     await act(async () => { set(false); });
     expect(host('link')).toHaveLength(1);
   });
+});
+
+it('opens the mail app for a written mail link, as a plain anchor on web, and copies the bare address', async () => {
+  const content = 'Write to [Sam](mailto:sam@example.com) or see https://example.org';
+  await mount(React.createElement(MessageText, { content, color: '#000', onLongPress: vi.fn() }));
+  const mail = host('link')[0]!;
+  await act(async () => { mail.props.onPressIn(); mail.props.onPress(press); });
+  expect(os.open).toHaveBeenCalledWith('mailto:sam@example.com');
+  await act(async () => tree!.unmount()); tree = undefined;
+  os.platform = 'web';
+  await mount(React.createElement(MessageText, { content, color: '#000', onLongPress: vi.fn() }));
+  const anchors = host('link');
+  expect(anchors.map(node => [node.props.href, node.props.hrefAttrs.target])).toEqual([['mailto:sam@example.com', undefined], ['https://example.org', '_blank']]);
+  await act(async () => tree!.unmount()); tree = undefined; os.platform = 'ios';
+  expect(parseInline('Write to [Sam](mailto:sam@example.com) not [x](mailto:sam@example.com?bcc=a@b.example)')).toEqual([
+    { t: 'text', v: 'Write to ' }, { t: 'link', c: [{ t: 'text', v: 'Sam' }], href: 'mailto:sam@example.com' }, { t: 'text', v: ' not [x](mailto:sam@example.com?bcc=a@b.example)' },
+  ]);
+  await mount(React.createElement(MessageLinkActions, { content, color: '#000', borderColor: '#ddd' }));
+  const copy = tree!.root.findAllByType('TouchableOpacity' as any).find(node => node.props.accessibilityLabel === 'Copy link: Sam')!;
+  await act(async () => copy.props.onPress());
+  expect(os.copy).toHaveBeenCalledWith('sam@example.com');
 });
 
 it('lists a named link with its real destination in the message link actions', async () => {
