@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
-vi.mock('react-native',()=>({Text:'Text',View:'View',AppState:{addEventListener:()=>({remove(){}})},StyleSheet:{create:(s:unknown)=>s,hairlineWidth:1}}));
+vi.mock('react-native',()=>({Text:'Text',View:'View',StyleSheet:{create:(s:unknown)=>s,hairlineWidth:1}}));
 vi.mock('../../mobile/src/contexts/ThemeContext',()=>({useTheme:()=>({scheme:'light'})}));
 vi.mock('../../mobile/src/api/socket',()=>({getSocket:()=>null}));
 vi.mock('../../mobile/src/api/client',()=>({api:{}}));

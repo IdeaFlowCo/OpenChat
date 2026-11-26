@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
 import { api, type MessageStatusEntry } from '../api/client';
 import { getSocket } from '../api/socket';
 
@@ -52,12 +51,11 @@ export function useMessageStatuses(conversationId: string | undefined, viewerId:
         visibility: 'chat', own: false,
       }));
     };
-    // Live events can be missed while disconnected or backgrounded: re-read on reconnect and on return.
+    // Live events can be missed while disconnected (including after the app was backgrounded): re-read on reconnect.
     const resync = () => { void refresh(); };
     socket?.on('message-status:changed', onChanged);
     socket?.on('connect', resync);
-    const appState = AppState.addEventListener?.('change', state => { if (state === 'active') resync(); });
-    return () => { socket?.off('message-status:changed', onChanged); socket?.off('connect', resync); appState?.remove(); };
+    return () => { socket?.off('message-status:changed', onChanged); socket?.off('connect', resync); };
   }, [conversationId, viewerId, refresh]);
 
   return { statuses, refresh };
