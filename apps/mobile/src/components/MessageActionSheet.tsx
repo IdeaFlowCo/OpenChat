@@ -1,5 +1,6 @@
 import * as ExpoClipboard from 'expo-clipboard';
 import { messageUrl } from '../utils/parseOpenChatUrl';
+import { MessageStatusControls } from './MessageStatusControls';
 import { MessageLinkActions } from './MessageLinkActions';
 import { webLinks } from '../utils/richLinks';
 /**
@@ -123,7 +124,7 @@ export function MessageActionSheet({
 
   // Sub-sheet state: null = main, 'report' = report picker, 'other' = freeform,
   // 'react' = emoji picker, 'assistant' = "ask about this" question prompt.
-  const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react' | 'assistant' | 'links'>(null);
+  const [subSheet, setSubSheet] = useState<null | 'report' | 'other' | 'react' | 'assistant' | 'links' | 'status'>(null);
   const [freeformText, setFreeformText] = useState('');
   const [visionSelection, setVisionSelection] = useState('');
   const [visionBusy, setVisionBusy] = useState(false);
@@ -318,6 +319,17 @@ export function MessageActionSheet({
           </View>
         </Pressable>
       </Pressable>
+    </Modal>;
+  }
+
+  if (subSheet === 'status' && message && visible) {
+    return <Modal transparent animationType="fade" visible={visible} onRequestClose={handleDismiss}>
+      <Pressable style={overlayStyle} onPress={handleDismiss}><Pressable onPress={() => undefined}>
+        <View style={sheetStyle}>
+          <MessageStatusControls key={message.id} messageId={message.id} />
+          <TouchableOpacity accessibilityRole="button" style={[styles.cancelRow, { borderColor: c.border }]} onPress={handleDismiss}><Text style={[styles.cancelLabel, { color: c.textSecondary }]}>Done</Text></TouchableOpacity>
+        </View>
+      </Pressable></Pressable>
     </Modal>;
   }
 
@@ -594,6 +606,15 @@ export function MessageActionSheet({
                 </View>
               </TouchableOpacity>
             )}
+
+            {!message.deletedAt && <TouchableOpacity accessibilityRole="button" style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]} onPress={() => setSubSheet('status')}>
+              <View style={styles.actionIconBox}><AppIcon name="thought" color={c.textPrimary} size={20} /></View>
+              <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Message status…</Text>
+            </TouchableOpacity>}
+            {!message.deletedAt && <TouchableOpacity accessibilityRole="button" style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]} onPress={() => { const selected = message; handleDismiss(); onAskAssistant(selected, 'Please respond to this message now. Give me a useful reply to review privately; do not send it to the source chat.'); }}>
+              <View style={styles.actionIconBox}><AppIcon name="bot" color={c.textPrimary} size={20} /></View>
+              <View style={{ flex: 1 }}><Text style={[styles.actionLabel, { color: c.textPrimary }]}>Get agent reply now</Text><Text style={{ ...type.meta, color: c.textMetadata }}>Private · opens OpenChat Agent</Text></View>
+            </TouchableOpacity>}
 
             {/* Forward to Assistant — private "ask my agent" (openchat-ug6).
                 Always shown (own and others'), skip if deleted. Drops the
