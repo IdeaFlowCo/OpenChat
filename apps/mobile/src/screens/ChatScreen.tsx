@@ -40,6 +40,8 @@ import { useHeaderHeight, type HeaderOptions } from '@react-navigation/elements'
 import { Attachment, Conversation, ExportRangeKey, Message, api } from '../api/client';
 import { MessageActionSheet, ReplyToData } from '../components/MessageActionSheet';
 import { ReactionsBar } from '../components/ReactionsBar';
+import { MessageStatusChips } from '../components/MessageStatusChips';
+import { useMessageStatuses } from '../hooks/useMessageStatuses';
 import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
 import { ConversationLaneSwitch } from '../components/ConversationLaneSwitch';
@@ -358,6 +360,7 @@ export function ChatScreen({
     [activeMessages, conversationId]
   );
 
+  const { statuses: messageStatuses, refresh: refreshMessageStatuses } = useMessageStatuses(conversationId, currentUser?.userId);
   const { preference: translationPreference } = useChatTranslation(conversationId);
   const [translationFocused, setTranslationFocused] = useState(false);
   useFocusEffect(useCallback(() => { setTranslationFocused(true); return () => setTranslationFocused(false); }, []));
@@ -1933,6 +1936,7 @@ export function ChatScreen({
             </TouchableOpacity>
           </View>
         )}
+        {!m.deletedAt && <MessageStatusChips statuses={messageStatuses[m.id]} isOwn={isOwn} />}
         {/* Reactions bar below bubble (OpenChat-7bd) */}
         {!!(m.reactions && m.reactions.length > 0) && (
           <ReactionsBar reactions={m.reactions!} isOwn={isOwn} onToggle={(emoji) => void handleReact(m.id, emoji)} />
@@ -2512,6 +2516,7 @@ export function ChatScreen({
         senderName={actionSheetSenderName}
         onDismiss={() => setActionSheetVisible(false)}
         onCopiedReference={showToast}
+        onStatusSaved={() => { void refreshMessageStatuses(); }}
         onReply={handleReply}
         onTranslate={m => setManualTranslations(previous => ({ ...previous, [m.id]: { content: m.content, version: (previous[m.id]?.version || 0) + 1 } }))}
         translateLanguage={translationPreference.language}

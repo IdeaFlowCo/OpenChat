@@ -149,6 +149,6 @@ native Button, Chip and ListRow retain pressed opacity. Dates older than a week
 keep the shared short month/day contract, adding the year only when it differs.
 
 | Message link | Chats → long-press a message → Copy link to message / Copy message ID | Any message, including attachment-only messages; link opens authenticated exact context, with Open chat. Membership is checked when opened; links do not share access. |
-| Message status | Chat → hold any message → Message status… | Private Stream status: Open, Closed or No status. One retry-safe owner capture per message; never pins or shares. |
+| Message status | Chat → hold any message → **Set status…** | Same states as Stream items: Open, Closed or No status, with **Visible to: This chat / Only me** (new statuses default to This chat). Shown as a compact chip under the message; “This chat” shares the same retry-safe owner capture through the Stream pin. |
 | Immediate agent reply | Chat → hold any message → Get agent reply now | Quotes the selected message to the owner’s private built-in OpenChat Agent and requests a reply. Nothing is sent to the original chat. |
 | Auto replies | Chats → Profile → Auto replies | Existing Secretary configuration: enabled only by the owner, exact approved answers, visibly labeled replies, direct chats only. |

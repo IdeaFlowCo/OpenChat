@@ -91,6 +91,8 @@ interface Props {
   translateLanguage?: string;
   /** Tickle the sender (OpenChat-m0xp) — others' messages from people, not bots. */
   onTickle?: (userId: string, displayName: string) => void;
+  /** A status was saved from the Set status sheet; refresh the chips. */
+  onStatusSaved?: () => void;
 }
 
 const REPORT_REASONS = ['Spam', 'Inappropriate', 'Abuse', 'Other'] as const;
@@ -117,6 +119,7 @@ export function MessageActionSheet({
   onSavePhotos,
   onTranslate,
   onTickle,
+  onStatusSaved,
   translateLanguage = 'English',
 }: Props) {
   const { scheme } = useTheme();
@@ -326,7 +329,7 @@ export function MessageActionSheet({
     return <Modal transparent animationType="fade" visible={visible} onRequestClose={handleDismiss}>
       <Pressable style={overlayStyle} onPress={handleDismiss}><Pressable onPress={() => undefined}>
         <View style={sheetStyle}>
-          <MessageStatusControls key={message.id} messageId={message.id} />
+          <MessageStatusControls key={message.id} messageId={message.id} onSaved={onStatusSaved} />
           <TouchableOpacity accessibilityRole="button" style={[styles.cancelRow, { borderColor: c.border }]} onPress={handleDismiss}><Text style={[styles.cancelLabel, { color: c.textSecondary }]}>Done</Text></TouchableOpacity>
         </View>
       </Pressable></Pressable>
@@ -609,7 +612,7 @@ export function MessageActionSheet({
 
             {!message.deletedAt && <TouchableOpacity accessibilityRole="button" style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]} onPress={() => setSubSheet('status')}>
               <View style={styles.actionIconBox}><AppIcon name="thought" color={c.textPrimary} size={20} /></View>
-              <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Message status…</Text>
+              <View style={{ flex: 1 }}><Text style={[styles.actionLabel, { color: c.textPrimary }]}>Set status…</Text><Text style={{ ...type.meta, color: c.textMetadata }}>Open or Closed · shown on the message</Text></View>
             </TouchableOpacity>}
             {!message.deletedAt && <TouchableOpacity accessibilityRole="button" style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]} onPress={() => { const selected = message; handleDismiss(); onAskAssistant(selected, 'Please respond to this message now. Give me a useful reply to review privately; do not send it to the source chat.'); }}>
               <View style={styles.actionIconBox}><AppIcon name="bot" color={c.textPrimary} size={20} /></View>
