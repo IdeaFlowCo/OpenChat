@@ -147,3 +147,5 @@ tap. The composer keeps multiline mounted and grows with content up to 120px.
 The card wrapper stays non-accessible so its nested controls remain separate;
 native Button, Chip and ListRow retain pressed opacity. Dates older than a week
 keep the shared short month/day contract, adding the year only when it differs.
+
+| Message link | Chats → long-press a message → Copy link to message / Copy message ID | Any message, including attachment-only messages; link opens authenticated exact context, with Open chat. Membership is checked when opened; links do not share access. |

@@ -162,7 +162,7 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         options={{ title: '' /* set dynamically in screen */ }}
       />
       <ChatsStack.Screen name="Compose" component={ComposeScreen} getId={({ params }) => params.requestRevision} options={{ title: isUnlinkedEmbed() ? 'New message' : 'Message with OpenChat' }} />
-      <ChatsStack.Screen name="OriginalMessage" component={OriginalMessageScreen} options={{ title: 'Original message' }} />
+      <ChatsStack.Screen name="OriginalMessage" component={OriginalMessageScreen} options={{ title: 'Message' }} />
       <ChatsStack.Screen
         name="NewConversation"
         component={NewMessageDetail}

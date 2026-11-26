@@ -2511,6 +2511,7 @@ export function ChatScreen({
         isOwn={actionSheetIsOwn}
         senderName={actionSheetSenderName}
         onDismiss={() => setActionSheetVisible(false)}
+        onCopiedReference={showToast}
         onReply={handleReply}
         onTranslate={m => setManualTranslations(previous => ({ ...previous, [m.id]: { content: m.content, version: (previous[m.id]?.version || 0) + 1 } }))}
         translateLanguage={translationPreference.language}

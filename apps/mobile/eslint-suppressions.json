@@ -344,11 +344,6 @@
       "count": 20
     }
   },
-  "src/screens/OriginalMessageScreen.tsx": {
-    "no-restricted-syntax": {
-      "count": 3
-    }
-  },
   "src/screens/PermissionsScreen.tsx": {
     "no-restricted-syntax": {
       "count": 9

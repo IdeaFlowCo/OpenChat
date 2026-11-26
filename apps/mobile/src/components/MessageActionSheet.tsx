@@ -1,3 +1,5 @@
+import * as ExpoClipboard from 'expo-clipboard';
+import { messageUrl } from '../utils/parseOpenChatUrl';
 import { MessageLinkActions } from './MessageLinkActions';
 import { messageLinks } from '../utils/messageLinks';
 /**
@@ -48,6 +50,7 @@ interface Props {
   isOwn: boolean;
   senderName: string;
   onDismiss: () => void;
+  onCopiedReference?: (message: string) => void;
   /** Reply action — sets replyTo in composer */
   onReply: (data: ReplyToData) => void;
   /** Forward action — opens ForwardPickerScreen (OpenChat-hhc) */
@@ -98,6 +101,7 @@ export function MessageActionSheet({
   isOwn,
   senderName,
   onDismiss,
+  onCopiedReference,
   onReply,
   onForward,
   onForwardToAssistant,
@@ -165,6 +169,18 @@ export function MessageActionSheet({
     if (!message) return;
     Clipboard.setString(message.content ?? '');
     handleDismiss();
+  };
+
+  const copyReference = async (kind: 'link' | 'id') => {
+    if (!message) return;
+    try {
+      const copied = await ExpoClipboard.setStringAsync(kind === 'link' ? messageUrl(message.id) : message.id);
+      if (!copied) throw new Error('Clipboard unavailable');
+      handleDismiss();
+      const confirmation = kind === 'link' ? 'Message link copied' : 'Message ID copied';
+      if (onCopiedReference) onCopiedReference(confirmation);
+      else Alert.alert('Copied', confirmation);
+    } catch { Alert.alert('Could not copy', 'Please try again.'); }
   };
 
   const handleForwardPress = () => {
@@ -478,6 +494,19 @@ export function MessageActionSheet({
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Copy</Text>
               </TouchableOpacity>
             )}
+
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Copy link to message"
+              style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+              onPress={() => { void copyReference('link'); }}>
+              <View style={styles.actionIconBox}><AppIcon name="copy" color={c.textPrimary} size={20} /></View>
+              <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Copy link to message</Text>
+            </TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Copy message ID"
+              style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
+              onPress={() => { void copyReference('id'); }}>
+              <View style={styles.actionIconBox}><AppIcon name="copy" color={c.textPrimary} size={20} /></View>
+              <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Copy message ID</Text>
+            </TouchableOpacity>
 
             {/* Save photos — photo messages only (OpenChat-zwt4) */}
             {!message.deletedAt && photoCount > 0 && onSavePhotos && (
