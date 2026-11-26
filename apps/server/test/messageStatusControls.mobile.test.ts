@@ -5,17 +5,17 @@ const mocks=vi.hoisted(()=>({get:vi.fn(),set:vi.fn()}));
 vi.mock('react-native',()=>({ActivityIndicator:'ActivityIndicator',Text:'Text',View:'View'}));
 vi.mock('../../mobile/src/contexts/ThemeContext',()=>({useTheme:()=>({scheme:'light'})}));
 vi.mock('../../mobile/src/api/client',()=>({api:{getMessageStatus:mocks.get,setMessageStatus:mocks.set}}));
-vi.mock('../../mobile/src/components/ui',()=>({Button:(props:unknown)=>React.createElement('Button',props)}));
+vi.mock('../../mobile/src/components/ui',()=>({Button:(props:unknown)=>React.createElement('Button',props),Chip:(props:unknown)=>React.createElement('Chip',props)}));
 import { MessageStatusControls } from '../../mobile/src/components/MessageStatusControls';
 let screen:ReturnType<typeof create>;
-beforeEach(()=>{vi.resetAllMocks();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;mocks.get.mockResolvedValue({status:'none'});mocks.set.mockImplementation(async(_id,status)=>({status}));});
+beforeEach(()=>{vi.resetAllMocks();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;mocks.get.mockResolvedValue({status:'none'});mocks.set.mockImplementation(async(_id,status,visibility)=>({status,visibility}));});
 afterEach(async()=>{await act(async()=>screen?.unmount());delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;});
 const mount=async(id='synthetic-message')=>act(async()=>{screen=create(React.createElement(MessageStatusControls,{messageId:id}));});
 const button=(label:string)=>screen.root.findAllByType('Button').find(b=>b.props.label===label)!;
 it('reads current status, saves via the source-bound API and shows only confirmed success',async()=>{
  await mount();expect(mocks.get).toHaveBeenCalledWith('synthetic-message');expect(mocks.set).not.toHaveBeenCalled();
  await act(async()=>{await button('Open').props.onPress();});
- expect(mocks.set).toHaveBeenCalledWith('synthetic-message','open');
+ expect(mocks.set).toHaveBeenCalledWith('synthetic-message','open','chat');
  expect(button('✓ Open')).toBeDefined();expect(screen.root.findByProps({accessibilityLiveRegion:'polite'}).props.children).toContain('Status saved');
 });
 it('reports a possibly committed response failure honestly and permits idempotent retry',async()=>{
@@ -37,4 +37,16 @@ it('does not let an old message load or save overwrite a new message’s status'
  await act(async()=>{void button('Open').props.onPress();});
  await act(async()=>{screen.update(React.createElement(MessageStatusControls,{messageId:'c'}));});
  await act(async()=>finish({status:'open'}));expect(button('✓ No status')).toBeDefined();
+});
+const chip=(label:string)=>screen.root.findAllByType('Chip').find(b=>b.props.label===label)!;
+it('defaults a new status to this chat, and moving an existing status to Only me saves the same state privately',async()=>{
+ await mount();expect(chip('This chat').props.selected).toBe(true);
+ await act(async()=>{chip('Only me').props.onPress();});expect(mocks.set).not.toHaveBeenCalled();
+ await act(async()=>{await button('Closed').props.onPress();});expect(mocks.set).toHaveBeenLastCalledWith('synthetic-message','closed','private');
+ await act(async()=>{chip('This chat').props.onPress();});expect(mocks.set).toHaveBeenLastCalledWith('synthetic-message','closed','chat');
+ expect(chip('This chat').props.selected).toBe(true);
+});
+it('keeps an existing private status private when the sheet reopens',async()=>{
+ mocks.get.mockResolvedValueOnce({status:'open',visibility:'private'});await mount();
+ expect(chip('Only me').props.selected).toBe(true);expect(screen.root.findAllByType('Text').some(t=>String(t.props.children).includes('Only you see it'))).toBe(true);
 });

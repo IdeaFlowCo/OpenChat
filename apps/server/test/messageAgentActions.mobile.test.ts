@@ -21,5 +21,5 @@ it('offers a one-action private built-in-agent response without prompting for an
  expect(mocks.ask).toHaveBeenCalledExactlyOnceWith(message,expect.stringContaining('do not send it to the source chat'));expect(mocks.dismiss).toHaveBeenCalledOnce();
 });
 it('opens the status controls for the exact selected message without replying or sharing',async()=>{
- await mount();await act(async()=>button('Message status…').props.onPress());expect(screen.root.findByType('MessageStatusControls').props.messageId).toBe(message.id);expect(mocks.ask).not.toHaveBeenCalled();
+ await mount();await act(async()=>button('Set status…').props.onPress());expect(screen.root.findByType('MessageStatusControls').props.messageId).toBe(message.id);expect(mocks.ask).not.toHaveBeenCalled();
 });
