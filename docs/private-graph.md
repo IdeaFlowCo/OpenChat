@@ -608,3 +608,7 @@ exact refs name different records, HTTP409 `identity_conflict` returns the owner
 a note or link write. Sharing remains a separate action. Known private profile
 refs still read without an upstream request. An upstream outage must not be
 presented as an empty card.
+
+For an OpenChat-only owner with no linked Unlinked identity, the legacy empty
+profile-ref read remains available but carries `resolution.complete:false` and
+`reason:"unlinked_not_linked"`; this does not claim a complete cross-app search.

@@ -67,3 +67,11 @@ describe('Unlinked private-card recovery', () => {
     expect(mocks.lookup.mock.calls.at(-1)![0].ownerKey).not.toBe(first);
   });
 });
+
+it('retains a local unlinked owner read without disguising missing recovery capability as complete identity', async () => {
+  mocks.lookup.mockResolvedValue(null);
+  mocks.contact.mockResolvedValue({ ok: false, code: 'not_linked' });
+  expect(await getUnlinkedPersonOverlay('synthetic-local-owner', profile)).toMatchObject({
+    thingId: null, notes: [], links: [], resolution: { complete: false, reason: 'unlinked_not_linked' },
+  });
+});

@@ -81,7 +81,7 @@ export interface PersonOverlay { userId: string; person: PersonBasics; card: Per
 export interface Thing { id: string; kind: ThingKind; name: string; description: string | null }
 export interface ThingDetail extends Thing { card?: PersonCard; peopleState?: unknown; contactSources?: unknown[]; fields?: unknown[]; fieldSuggestions?: unknown[]; notes: PrivateNote[]; links: PrivateLink[]; unlinkedProfileId?: string; linkedinRefHash?: string; unlinkedConnectionId?: string }
 /** An Unlinked person: a published profile (`profileId`) and/or one of the owner's imported contacts (`connectionId`, `linkedinRefHash`). */
-export interface UnlinkedPersonOverlay { profileId: string | null; connectionId: string | null; linkedinRefHash: string | null; thingId: string | null; name: string | null; card: PersonCard; notes: PrivateNote[]; links: PrivateLink[] }
+export interface UnlinkedPersonOverlay { resolution?: { complete: false; reason: 'unlinked_not_linked' }; profileId: string | null; connectionId: string | null; linkedinRefHash: string | null; thingId: string | null; name: string | null; card: PersonCard; notes: PrivateNote[]; links: PrivateLink[] }
 export interface OwnerLink extends Provenance, LinkFacts { id: string; relation: string; relationType: RelationType; from: LinkEnd; to: LinkEnd; createdAt: string; updatedAt: string | null }
 export interface PrivateSearch { things: Array<LinkEnd & { matched: Array<'name' | 'description' | 'note'> }>; links: OwnerLink[]; truncated: boolean }
 export interface PrivateNeighbourhood { center: LinkEnd; depth: 1 | 2; nodes: LinkEnd[]; links: OwnerLink[]; truncated: boolean }
@@ -546,7 +546,7 @@ async function unlinkedPersonEntity(ownerId: string, raw: string): Promise<{ pri
 }
 
 /** The owner's existing entity for an Unlinked person, without writing anything. */
-async function findUnlinkedEntity(ownerId: string, principal: OverlayPrincipal, raw: unknown): Promise<{ target: UnlinkedTarget; found: EntityDetail | null; contact: UnlinkedContact | null }> {
+async function findUnlinkedEntity(ownerId: string, principal: OverlayPrincipal, raw: unknown): Promise<{ target: UnlinkedTarget; found: EntityDetail | null; contact: UnlinkedContact | null; resolution?: { complete: false; reason: 'unlinked_not_linked' } }> {
   const target = cleanUnlinkedTarget(raw);
   if (target.by === 'profileId') {
     const known = await overlayCall(overlay => overlay.lookup(principal, unlinkedRef(target.value)));
@@ -557,6 +557,9 @@ async function findUnlinkedEntity(ownerId: string, principal: OverlayPrincipal, 
   const result = await lookupUnlinkedContactForIdentity(await ownerIdentity(ownerId), target.by === 'profileId' ? { profileId: target.value } : target.by === 'connectionId' ? { connectionId: target.value } : { linkedinUrl: target.value });
   if (!result.ok) {
     if (result.code === 'not_found') return { target, found: null, contact: null };
+    // Local OpenChat owners can inspect profile refs without linking Unlinked.
+    // Missing recovery capability is not a confirmed empty cross-app identity.
+    if (target.by === 'profileId' && result.code === 'not_linked') return { target, found: null, contact: null, resolution: { complete: false, reason: 'unlinked_not_linked' } };
     return unlinkedFailure(result.code, target);
   }
   const matches = new Map<string, EntityDetail>();
@@ -754,11 +757,12 @@ export async function updateLink(ownerId: string, linkId: string, change: unknow
  */
 export async function getUnlinkedPersonOverlay(ownerId: string, raw: string): Promise<UnlinkedPersonOverlay> {
   const principal = await ownerPrincipal(ownerId);
-  const { target, found, contact } = await findUnlinkedEntity(ownerId, principal, raw);
+  const { target, found, contact, resolution } = await findUnlinkedEntity(ownerId, principal, raw);
   const refs = found?.refs ?? [];
   const connections = await connectionsFor(ownerId, [{ refs }, ...(found?.links ?? []).map(link => link.other)], contact?.linkedinRefHash && contact.connectionId ? new Map([[contact.linkedinRefHash, contact.connectionId]]) : new Map());
   const linkedinRefHash = linkedinHashOf(refs) ?? contact?.linkedinRefHash ?? null;
   return {
+    ...(resolution ? { resolution } : {}),
     profileId: unlinkedIdOf(refs) ?? contact?.publishedProfileId ?? (target.by === 'profileId' ? target.value : null),
     connectionId: (linkedinRefHash ? connections.get(linkedinRefHash) : undefined) ?? contact?.connectionId ?? null,
     linkedinRefHash,
