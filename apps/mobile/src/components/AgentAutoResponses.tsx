@@ -80,16 +80,27 @@ export function AgentAutoResponses() {
 
   if (!loaded) return <ActivityIndicator color={c.primary} accessibilityLabel="Loading your agent" />;
 
+  // One-time prompt: the agent is off until the owner chooses. Either answer records the choice.
+  const showPrompt = !!settings && !settings.profileAgentDecided && settings.available;
+
   return <View style={{ gap: space[3] }}>
     <SectionLabel>YOUR OPENCHAT AGENT</SectionLabel>
+    {showPrompt && <View accessibilityRole="summary" style={[styles.card, { backgroundColor: c.surface, borderColor: c.primary }]}>
+      <Text style={{ ...type.title, color: c.textPrimary }}>Let people ask my agent?</Text>
+      <Text style={{ ...type.body, color: c.textSecondary }}>Your agent is off. If you turn it on, people in your chats can ask it to answer one of your messages. It replies in the chat under your name, clearly labelled “your OpenChat agent, not you”, using only your public card and the notes you shared in that chat. It never reads your private notes. You can turn it off any time.</Text>
+      <View style={styles.actions}>
+        <Button label="Not now" variant="secondary" disabled={!!busy} onPress={() => { void act('agent', () => api.setProfileAgentEnabled(false)); }} />
+        <Button label="Turn on my agent" variant="primary" disabled={!!busy} onPress={() => { void act('agent', () => api.setProfileAgentEnabled(true)); }} />
+      </View>
+    </View>}
     <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
       <View style={styles.row}>
         <View style={{ flex: 1 }}>
           <Text style={{ ...type.bodyStrong, color: c.textPrimary }}>Let people ask my agent</Text>
-          <Text style={{ ...type.body, color: c.textSecondary }}>Anyone in a chat with you can choose {'“Ask <your name>’s agent”'} on one of your messages. It answers right away, labelled as your agent, not you, using only your public card and the notes you shared in that chat. It never reads your private notes.</Text>
+          <Text style={{ ...type.body, color: c.textSecondary }}>Anyone in a chat with you can choose {'“Ask <your name>’s agent”'} on one of your messages. Off unless you turn it on. It answers right away, labelled as your agent, not you, using only your public card and the notes you shared in that chat. It never reads your private notes.</Text>
         </View>
         <Switch
-          value={settings?.profileAgentEnabled ?? true}
+          value={settings?.profileAgentEnabled ?? false}
           onValueChange={value => { void act('agent', () => api.setProfileAgentEnabled(value)); }}
           trackColor={{ false: c.border, true: c.primary }}
           accessibilityLabel="Let people ask my agent"

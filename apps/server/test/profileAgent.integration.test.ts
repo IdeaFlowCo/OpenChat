@@ -33,8 +33,8 @@ integration('OpenChat profile agent answers only from what the owner shared here
     agent = await import('../src/services/profileAgent.js');
     auto = await import('../src/services/autoResponses.js');
     await run(`
-      CREATE (ana:User {id:$ana, name:'Ana Synthetic', email:'PRIVATE-CANARY-EMAIL@example.test', profileStatusText:'PRIVATE-CANARY-STATUS-NOT-ON-CARD', fixture:$fixture})
-      CREATE (ben:User {id:$ben, name:'Ben Synthetic', fixture:$fixture})
+      CREATE (ana:User {id:$ana, name:'Ana Synthetic', profileAgentEnabled:true, email:'PRIVATE-CANARY-EMAIL@example.test', profileStatusText:'PRIVATE-CANARY-STATUS-NOT-ON-CARD', fixture:$fixture})
+      CREATE (ben:User {id:$ben, name:'Ben Synthetic', profileAgentEnabled:true, fixture:$fixture})
       CREATE (cal:User {id:$cal, name:'Cal Synthetic', fixture:$fixture})
       CREATE (bot:User {id:$bot, name:'Bot', isBot:true, fixture:$fixture})
       CREATE (chat:Conversation {id:$chat, type:'direct', fixture:$fixture})
@@ -137,7 +137,7 @@ integration('OpenChat profile agent answers only from what the owner shared here
     await run('MATCH (:User {id:$ana})-[b:BLOCKED]->() DELETE b', { ana: id('ana') });
     await run('MATCH (a:User {id:$ana}) SET a.profileAgentEnabled=false', { ana: id('ana') });
     await expect(ask('m1', 'ben')).rejects.toMatchObject({ code: 'off', statusCode: 409 });
-    await run('MATCH (a:User {id:$ana}) REMOVE a.profileAgentEnabled', { ana: id('ana') });
+    await run('MATCH (a:User {id:$ana}) SET a.profileAgentEnabled=true', { ana: id('ana') });
     expect(prompts).toHaveLength(0);
   });
 
@@ -154,6 +154,24 @@ integration('OpenChat profile agent answers only from what the owner shared here
     await expect(ask('m2', 'ben')).rejects.toMatchObject({ code: 'cap', statusCode: 429 });
     expect(prompts.every(p => !p.user.includes('Ignore all previous'))).toBe(true);
     await run('MATCH (a:User {id:$ana}) SET a.profileAgentSpentMicros=0', { ana: id('ana') });
+  });
+
+  it('is opt-in: an owner who never chose has no agent, and the first answer either way is recorded', async () => {
+    // Dan never touched the setting. Ana asks Dan's agent about Dan's message.
+    await expect(ask('mDan', 'ana')).rejects.toMatchObject({ code: 'off', statusCode: 409 });
+    expect(prompts).toHaveLength(0);
+    expect(await agent.profileAgentAvailability(driver, id('ana'), id('mDan'))).toEqual({ enabled: false, available: true });
+    expect(await agent.profileAgentAvailability(driver, id('cal'), id('mDan'))).toBeNull(); // not a participant
+    const usage = async (who: string) => { const s = driver.session(); try { return await s.executeRead(tx => agent.getOwnerUsage(tx, id(who))); } finally { await s.close(); } };
+    expect(await usage('dan')).toMatchObject({ enabled: false, decided: false });
+    const s = driver.session();
+    try { await auto.setProfileAgentEnabled(s, id('dan'), false); } finally { await s.close(); }
+    expect(await usage('dan')).toMatchObject({ enabled: false, decided: true });
+    await expect(ask('mDan', 'ana')).rejects.toMatchObject({ code: 'off' });
+    const s2 = driver.session();
+    try { await auto.setProfileAgentEnabled(s2, id('dan'), true); } finally { await s2.close(); }
+    expect(await agent.profileAgentAvailability(driver, id('ana'), id('mDan'))).toEqual({ enabled: true, available: true });
+    await run('MATCH (d:User {id:$dan}) REMOVE d.profileAgentEnabled', { dan: id('dan') });
   });
 
   it('rate-limits repeat asks for the same message', async () => {

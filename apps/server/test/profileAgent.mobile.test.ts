@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ ask: vi.fn(), settings: vi.fn(), rules: vi.fn(), drafts: vi.fn(), createRule: vi.fn(), send: vi.fn(), convs: vi.fn(), me: vi.fn() }));
+const mocks = vi.hoisted(() => ({ avail: vi.fn(), setEnabled: vi.fn(), ask: vi.fn(), settings: vi.fn(), rules: vi.fn(), drafts: vi.fn(), createRule: vi.fn(), send: vi.fn(), convs: vi.fn(), me: vi.fn() }));
 vi.mock('react-native', () => ({ ActivityIndicator: 'ActivityIndicator', Switch: 'Switch', Text: 'Text', TextInput: 'TextInput', View: 'View', StyleSheet: { create: (s: unknown) => s, hairlineWidth: 1 } }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/components/ui', () => ({
@@ -10,7 +10,7 @@ vi.mock('../../mobile/src/components/ui', () => ({
 }));
 vi.mock('../../mobile/src/api/client', async () => {
   const { ApiError } = await import('../../mobile/src/api/errors');
-  return { ApiError, api: { askProfileAgent: mocks.ask, getAutoResponseSettings: mocks.settings, listAutoResponseRules: mocks.rules, listAutoResponseDrafts: mocks.drafts,
+  return { ApiError, api: { getProfileAgentAvailability: mocks.avail, setProfileAgentEnabled: mocks.setEnabled, askProfileAgent: mocks.ask, getAutoResponseSettings: mocks.settings, listAutoResponseRules: mocks.rules, listAutoResponseDrafts: mocks.drafts,
     createAutoResponseRule: mocks.createRule, sendAutoResponseDraft: mocks.send, getConversations: mocks.convs, getMe: mocks.me } };
 });
 import { ApiError } from '../../mobile/src/api/errors';
@@ -23,6 +23,7 @@ beforeEach(() => {
   mocks.rules.mockResolvedValue({ rules: [] }); mocks.drafts.mockResolvedValue({ drafts: [] });
   mocks.convs.mockResolvedValue([{ id: 'c', type: 'direct', participants: [{ user: { id: 'me', name: 'Me' } }, { user: { id: 'ben', name: 'Ben Synthetic' } }] }]);
   mocks.me.mockResolvedValue({ id: 'me' });
+  mocks.avail.mockResolvedValue({ enabled: true, available: true }); mocks.setEnabled.mockResolvedValue({ profileAgentEnabled: false });
 });
 afterEach(async () => { await act(async () => screen?.unmount()); delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT; });
 const texts = () => screen.root.findAllByType('Text').map(n => [n.props.children].flat().join('')).join(' | ');
@@ -39,7 +40,7 @@ it('explains what the agent sees, sends the optional question once and reports r
   await act(async () => { byLabel('Button', 'Asking…').props.onPress(); });
   expect(mocks.ask).toHaveBeenCalledExactlyOnceWith('m', 'When?');
   await act(async () => resolve({ message: {} })); expect(answered).toHaveBeenCalledOnce();
-  expect(profileAgentErrorText(new ApiError(409, '409', JSON.stringify({ code: 'off' })), 'Ana')).toBe('Ana has turned off their OpenChat agent.');
+  expect(profileAgentErrorText(new ApiError(409, '409', JSON.stringify({ code: 'off' })), 'Ana')).toBe('Ana hasn’t turned on their OpenChat agent.');
   expect(profileAgentErrorText(new ApiError(429, '429', JSON.stringify({ code: 'cap' })), 'Ana')).toContain('allowance');
   expect(profileAgentErrorText(new Error('secret internal'), 'Ana')).toBe('The agent could not answer. Nothing was posted.');
 });
@@ -70,4 +71,32 @@ it('shows drafts for approval and sends the owner-edited text', async () => {
 it('describes rules in plain words', () => {
   expect(describeRule({ whenAway: true, fromUserIds: ['ben'], topics: ['invoice'], action: 'agent', delivery: 'send' }, [{ id: 'ben', name: 'Ben' }]))
     .toBe('When I’m away · from Ben · about invoice → my agent writes a reply, sent automatically');
+});
+
+it('tells the asker plainly when the person has not turned their agent on, and offers no Ask button', async () => {
+  mocks.avail.mockResolvedValueOnce({ enabled: false, available: true });
+  await act(async () => { screen = create(React.createElement(ProfileAgentAskControls, { messageId: 'm', name: 'Ana', onAnswered: vi.fn() })); });
+  expect(mocks.avail).toHaveBeenCalledWith('m');
+  expect(texts()).toContain('Ana hasn’t turned on their OpenChat agent');
+  expect(screen.root.findAllByType('Button')).toHaveLength(0);
+  expect(mocks.ask).not.toHaveBeenCalled();
+});
+
+it('shows the one-time opt-in prompt until the owner chooses; the switch is off by default', async () => {
+  mocks.settings.mockResolvedValue({ profileAgentEnabled: false, profileAgentDecided: false, available: true, spentMicros: 0, capMicros: 2000000 });
+  await act(async () => { screen = create(React.createElement(AgentAutoResponses)); });
+  expect(texts()).toContain('Let people ask my agent?');
+  expect(texts()).toContain('Your agent is off');
+  expect(screen.root.findAllByType('Switch')[0]!.props.value).toBe(false);
+  mocks.settings.mockResolvedValue({ profileAgentEnabled: false, profileAgentDecided: true, available: true, spentMicros: 0, capMicros: 2000000 });
+  await act(async () => { byLabel('Button', 'Not now').props.onPress(); });
+  expect(mocks.setEnabled).toHaveBeenCalledExactlyOnceWith(false);
+  expect(texts()).not.toContain('Let people ask my agent?');
+});
+
+it('“Turn on my agent” is the explicit opt-in', async () => {
+  mocks.settings.mockResolvedValue({ profileAgentEnabled: false, profileAgentDecided: false, available: true, spentMicros: 0, capMicros: 2000000 });
+  await act(async () => { screen = create(React.createElement(AgentAutoResponses)); });
+  await act(async () => { byLabel('Button', 'Turn on my agent').props.onPress(); });
+  expect(mocks.setEnabled).toHaveBeenCalledExactlyOnceWith(true);
 });

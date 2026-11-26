@@ -39,3 +39,8 @@ it('refuses API keys: an agent key cannot spend an agent budget or set auto-send
   expect((await request(app).post('/api/auto-responses/rules').set('Authorization', auth).set('x-test-agent-key', '1').send({ whenAway: true, action: 'agent', delivery: 'send' })).status).toBe(403);
   expect(mocks.ask).not.toHaveBeenCalled(); expect(mocks.createRule).not.toHaveBeenCalled();
 });
+it('availability needs a signed-in human and a messageId', async () => {
+  expect((await request(app).get('/api/chat/agent-reply/availability?messageId=m')).status).toBe(401);
+  expect((await request(app).get('/api/chat/agent-reply/availability').set('Authorization', auth)).status).toBe(400);
+  expect((await request(app).get('/api/chat/agent-reply/availability?messageId=m').set('Authorization', auth).set('x-test-agent-key', '1')).status).toBe(403);
+});
