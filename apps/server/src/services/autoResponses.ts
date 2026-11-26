@@ -16,7 +16,8 @@ import type { Driver, Session } from 'neo4j-driver';
 import type { Server as IOServer } from 'socket.io';
 import { normalizePublicDisplayName } from '../privacy/profilePrivacy.js';
 import { acquireContextAclLocks } from './contextAccess.js';
-import { generateMeteredReply, postAutomaticMessage, type ProfileAgentGenerator, ProfileAgentError } from './profileAgent.js';
+import { generateMeteredReply, postAutomaticMessage, safeName, type ProfileAgentGenerator, ProfileAgentError } from './profileAgent.js';
+import { dispatchMessageEvent } from './webhookDispatch.js';
 
 export type RuleAction = 'reply' | 'agent';
 export type RuleDelivery = 'draft' | 'send';
@@ -39,6 +40,7 @@ export interface AutoResponseDraft {
 
 export const MAX_RULES = 10;
 export const COOLDOWN_MS = 6 * 3600_000;
+const SENDING_LEASE_MS = 2 * 60_000;
 const DRAFT_TTL_MS = 24 * 3600_000;
 const AWAY_STATUSES = new Set(['away', 'busy', 'invisible', 'offline']);
 
@@ -85,8 +87,12 @@ export function matchRule(rules: AutoResponseRule[], input: { senderId: string; 
   ) ?? null;
 }
 
-export const automaticLabel = (ownerName: string) => `🤖 Automatic reply · ${ownerName}'s OpenChat agent, not ${ownerName}`;
-export const approvedDraftLabel = (ownerName: string) => `🤖 Drafted by ${ownerName}'s OpenChat agent · approved by ${ownerName}`;
+export const automaticLabel = (ownerName: string) => { const n = safeName(ownerName); return `🤖 Automatic reply · ${n}'s OpenChat agent, not ${n}`; };
+/** Approved drafts: an agent-written draft says so; the owner's own fixed text is an approved auto-reply. */
+export const approvedDraftLabel = (ownerName: string, action: RuleAction = 'agent') => {
+  const n = safeName(ownerName);
+  return action === 'agent' ? `🤖 Drafted by ${n}'s OpenChat agent · approved by ${n}` : `🤖 Auto-reply · approved by ${n}`;
+};
 
 const fromNode = (p: Record<string, any>): AutoResponseRule => ({
   id: p.id, enabled: p.enabled !== false, whenAway: p.whenAway === true, fromUserIds: p.fromUserIds ?? [], topics: p.topics ?? [],
@@ -137,13 +143,13 @@ export async function setProfileAgentEnabled(session: Session, ownerId: string, 
 // ── Drafts ──────────────────────────────────────────────────────────────────
 export async function listDrafts(session: Session, ownerId: string, conversationId?: string): Promise<AutoResponseDraft[]> {
   const r = await session.run(`
-    MATCH (d:AutoResponseDraft {ownerId:$ownerId, status:'pending'}) WHERE d.expiresAt > $now AND ($conversationId IS NULL OR d.conversationId=$conversationId)
+    MATCH (d:AutoResponseDraft {ownerId:$ownerId}) WHERE (d.status='pending' OR (d.status='sending' AND coalesce(d.sendingAt,'') < $stale)) AND d.expiresAt > $now AND ($conversationId IS NULL OR d.conversationId=$conversationId)
     MATCH (:User {id:$ownerId})-[:PARTICIPATES_IN]->(:Conversation {id:d.conversationId})
     MATCH (source:Message {id:d.sourceMessageId}) WHERE source.deletedAt IS NULL
     OPTIONAL MATCH (sender:User {id:source.senderId})
     RETURN d { .id,.conversationId,.sourceMessageId,.ruleId,.text,.action,.createdAt,.expiresAt } AS draft,
       sender.name AS senderName, left(source.content,300) AS sourceText
-    ORDER BY d.createdAt DESC LIMIT 50`, { ownerId, conversationId: conversationId ?? null, now: new Date().toISOString() });
+    ORDER BY d.createdAt DESC LIMIT 50`, { ownerId, conversationId: conversationId ?? null, now: new Date().toISOString(), stale: new Date(Date.now() - SENDING_LEASE_MS).toISOString() });
   return r.records.map(row => ({ ...row.get('draft'), senderName: normalizePublicDisplayName(row.get('senderName')), sourceText: row.get('sourceText') ?? '' }));
 }
 
@@ -159,26 +165,40 @@ export async function sendDraft(driver: Driver, ownerId: string, id: string, tex
   let draft: { conversationId: string; sourceMessageId: string; action: RuleAction; ownerName: string } | undefined;
   try {
     draft = await session.executeWrite(async tx => {
-      const r = await tx.run(`MATCH (d:AutoResponseDraft {id:$id, ownerId:$ownerId, status:'pending'}) WHERE d.expiresAt > $now
-        MATCH (u:User {id:$ownerId}) SET d.status='sending' RETURN d.conversationId AS c, d.sourceMessageId AS s, d.action AS a, u.name AS n`,
-        { id, ownerId, now: new Date().toISOString() });
+      // A send interrupted mid-way (crash, lock timeout) becomes claimable again after a short lease.
+      const r = await tx.run(`MATCH (d:AutoResponseDraft {id:$id, ownerId:$ownerId})
+        WHERE d.expiresAt > $now AND (d.status='pending' OR (d.status='sending' AND coalesce(d.sendingAt,'') < $stale))
+        MATCH (u:User {id:$ownerId}) SET d.status='sending', d.sendingAt=$now RETURN d.conversationId AS c, d.sourceMessageId AS s, d.action AS a, u.name AS n`,
+        { id, ownerId, now: new Date().toISOString(), stale: new Date(Date.now() - SENDING_LEASE_MS).toISOString() });
       if (!r.records.length) return undefined;
       const row = r.records[0]!;
       return { conversationId: row.get('c'), sourceMessageId: row.get('s'), action: row.get('a'), ownerName: normalizePublicDisplayName(row.get('n')) };
     });
   } finally { await session.close(); }
   if (!draft) throw new AutoResponseError(404, 'Draft not found or already handled');
-  const posted = await postAutomaticMessage(driver, {
-    ownerId, conversationId: draft.conversationId, replyToId: draft.sourceMessageId,
-    content: `${approvedDraftLabel(draft.ownerName)}\n\n${text.trim()}`,
-    idempotencyKey: `auto-draft:${id}`,
-    props: { viaAutoResponse: true, autoResponseApproved: true, autoResponseDraftId: id },
-  });
-  const done = driver.session();
-  try { await done.run(`MATCH (d:AutoResponseDraft {id:$id}) SET d.status=$status`, { id, status: posted ? 'sent' : 'pending' }); }
-  finally { await done.close(); }
-  if (!posted) throw new AutoResponseError(409, 'The chat or message changed; the draft was not sent');
+  let posted: Awaited<ReturnType<typeof postAutomaticMessage>> = null;
+  let alreadySent = false;
+  try {
+    posted = await postAutomaticMessage(driver, {
+      ownerId, conversationId: draft.conversationId, replyToId: draft.sourceMessageId,
+      content: `${approvedDraftLabel(draft.ownerName, draft.action)}\n\n${text.trim()}`,
+      idempotencyKey: `auto-draft:${id}`,
+      props: { viaAutoResponse: true, autoResponseApproved: true, autoResponseDraftId: id, autoResponseAction: draft.action },
+    });
+    if (!posted) {
+      const check = driver.session();
+      try { alreadySent = (await check.run(`MATCH (m:Message {automaticKey:$key}) RETURN m.id LIMIT 1`, { key: `auto-draft:${id}` })).records.length > 0; }
+      finally { await check.close(); }
+    }
+  } finally {
+    // Whatever happened, the draft never stays stuck in "sending".
+    const done = driver.session();
+    try { await done.run(`MATCH (d:AutoResponseDraft {id:$id}) SET d.status=$status`, { id, status: posted || alreadySent ? 'sent' : 'pending' }); }
+    finally { await done.close(); }
+  }
+  if (!posted) throw new AutoResponseError(409, alreadySent ? 'This draft was already sent' : 'The chat or message changed; the draft was not sent');
   if (broadcast) await broadcast(draft.conversationId, posted.message);
+  dispatchMessageEvent(posted.message, posted.participantIds);
   return posted.message;
 }
 
@@ -194,6 +214,8 @@ export interface TriggerInput {
 export async function runAutoResponses(input: TriggerInput): Promise<'none' | 'sent' | 'drafted' | 'skipped'> {
   if (!input.content.trim()) return 'none';
   const session = input.driver.session();
+  let claimKey: string | null = null;
+  let finished = false;
   try {
     const found = await session.run(`
       MATCH (sender:User {id:$senderId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId, type:'direct'})
@@ -202,6 +224,10 @@ export async function runAutoResponses(input: TriggerInput): Promise<'none' | 's
         AND NOT coalesce(sender.isBot,false)
       MATCH (owner:User)-[:PARTICIPATES_IN]->(c)
       WHERE owner.id <> $senderId AND NOT coalesce(owner.isBot,false) AND NOT EXISTS { MATCH (owner)-[:BLOCKED]-(sender) }
+        // Prior contact: the owner has written here themselves, so strangers cannot trigger
+        // paid drafts or learn whether the owner is away.
+        AND EXISTS { MATCH (prior:Message {conversationId:c.id, senderId:owner.id}) WHERE prior.deletedAt IS NULL
+          AND NOT coalesce(prior.viaAutoResponse,false) AND NOT coalesce(prior.viaProfileAgent,false) AND NOT coalesce(prior.viaSecretary,false) }
       MATCH (owner)-[:OWNS_AUTO_RESPONSE_RULE]->(rule:AutoResponseRule {enabled:true})
       RETURN owner.id AS ownerId, owner.name AS ownerName, owner.presenceStatus AS presence, collect(properties(rule)) AS rules LIMIT 1
     `, { senderId: input.senderId, conversationId: input.conversationId, sourceMessageId: input.sourceMessageId });
@@ -211,23 +237,27 @@ export async function runAutoResponses(input: TriggerInput): Promise<'none' | 's
     const ownerAway = !input.isOnline(ownerId) || AWAY_STATUSES.has(String(row.get('presence') ?? ''));
     const rule = matchRule((row.get('rules') as Record<string, unknown>[]).map(fromNode), { senderId: input.senderId, content: input.content, ownerAway });
     if (!rule) return 'none';
-    const ownerName = normalizePublicDisplayName(row.get('ownerName'));
+    const ownerName = safeName(row.get('ownerName'));
 
-    // Claim this rule+chat for the cooldown window; one event per source message.
+    // Claim this owner+chat for the cooldown window (re-creating a rule does not reset it).
     const now = new Date();
+    const key = `${ownerId}:${input.sourceMessageId}`;
     const claimed = await session.executeWrite(async tx => {
       await acquireContextAclLocks(tx, { userIds: [ownerId] });
-      const recent = await tx.run(`MATCH (e:AutoResponseEvent {ruleId:$ruleId, conversationId:$conversationId}) WHERE e.createdAt > $since RETURN count(e) AS n`,
-        { ruleId: rule.id, conversationId: input.conversationId, since: new Date(now.getTime() - COOLDOWN_MS).toISOString() });
+      const recent = await tx.run(`MATCH (e:AutoResponseEvent {ownerId:$ownerId, conversationId:$conversationId}) WHERE e.createdAt > $since RETURN count(e) AS n`,
+        { ownerId, conversationId: input.conversationId, since: new Date(now.getTime() - COOLDOWN_MS).toISOString() });
       if (Number(recent.records[0]?.get('n')?.toNumber?.() ?? 0) > 0) return false;
-      const pending = await tx.run(`MATCH (d:AutoResponseDraft {ownerId:$ownerId, conversationId:$conversationId, status:'pending'}) WHERE d.expiresAt > $now RETURN count(d) AS n`,
+      // Only a draft the owner can still act on (source not deleted) holds back new ones.
+      const pending = await tx.run(`MATCH (d:AutoResponseDraft {ownerId:$ownerId, conversationId:$conversationId, status:'pending'}) WHERE d.expiresAt > $now
+        AND EXISTS { MATCH (source:Message {id:d.sourceMessageId}) WHERE source.deletedAt IS NULL } RETURN count(d) AS n`,
         { ownerId, conversationId: input.conversationId, now: now.toISOString() });
       if (Number(pending.records[0]?.get('n')?.toNumber?.() ?? 0) > 0) return false;
       const created = await tx.run(`MERGE (e:AutoResponseEvent {key:$key}) ON CREATE SET e.ruleId=$ruleId, e.conversationId=$conversationId, e.ownerId=$ownerId, e.createdAt=$now, e.fresh=true
-        ON MATCH SET e.fresh=false RETURN e.fresh AS fresh`, { key: `${rule.id}:${input.sourceMessageId}`, ruleId: rule.id, conversationId: input.conversationId, ownerId, now: now.toISOString() });
+        ON MATCH SET e.fresh=false RETURN e.fresh AS fresh`, { key, ruleId: rule.id, conversationId: input.conversationId, ownerId, now: now.toISOString() });
       return created.records[0]?.get('fresh') === true;
     });
     if (!claimed) return 'skipped';
+    claimKey = key;
 
     let text = rule.replyText ?? '';
     if (rule.action === 'agent') {
@@ -248,11 +278,14 @@ export async function runAutoResponses(input: TriggerInput): Promise<'none' | 's
       const posted = await postAutomaticMessage(input.driver, {
         ownerId, conversationId: input.conversationId, replyToId: input.sourceMessageId,
         content: `${automaticLabel(ownerName)}\n\n${text}`,
-        idempotencyKey: `auto-response:${rule.id}:${input.sourceMessageId}`,
+        idempotencyKey: `auto-response:${ownerId}:${input.sourceMessageId}`,
         props: { viaAutoResponse: true, autoResponseRuleId: rule.id, autoResponseAction: rule.action },
       });
-      if (posted && input.io) await input.broadcast(input.io, input.conversationId, posted.message);
-      return posted ? 'sent' : 'skipped';
+      if (!posted) return 'skipped';
+      finished = true;
+      if (input.io) await input.broadcast(input.io, input.conversationId, posted.message);
+      dispatchMessageEvent(posted.message, posted.participantIds);
+      return 'sent';
     }
     const draftId = nanoid();
     await session.run(`CREATE (:AutoResponseDraft {id:$id, ownerId:$ownerId, conversationId:$conversationId, sourceMessageId:$sourceMessageId,
@@ -260,12 +293,17 @@ export async function runAutoResponses(input: TriggerInput): Promise<'none' | 's
       id: draftId, ownerId, conversationId: input.conversationId, sourceMessageId: input.sourceMessageId, ruleId: rule.id, text,
       action: rule.action, now: now.toISOString(), expiresAt: new Date(now.getTime() + DRAFT_TTL_MS).toISOString(),
     });
+    finished = true;
     input.io?.to(`user:${ownerId}`).emit('auto-response:draft', { draftId, conversationId: input.conversationId });
     return 'drafted';
   } catch (error) {
     console.warn('[auto-responses] failed:', error instanceof Error ? error.message : 'unknown');
     return 'skipped';
-  } finally { await session.close(); }
+  } finally {
+    // A claim that produced nothing (model failure, cap, chat changed) must not burn the cooldown.
+    if (claimKey && !finished) await session.run('MATCH (e:AutoResponseEvent {key:$key}) DETACH DELETE e', { key: claimKey }).catch(() => undefined);
+    await session.close();
+  }
 }
 
 /** Additive indexes only; no data migration. */
@@ -277,6 +315,10 @@ export async function ensureProfileAgentIndexes(driver: Driver) {
     await s.run('CREATE INDEX auto_response_draft_owner IF NOT EXISTS FOR (d:AutoResponseDraft) ON (d.ownerId, d.status)');
     await s.run('CREATE INDEX profile_agent_run_asker IF NOT EXISTS FOR (r:ProfileAgentRun) ON (r.askerId)');
     await s.run('CREATE INDEX profile_agent_run_owner IF NOT EXISTS FOR (r:ProfileAgentRun) ON (r.ownerId)');
+    await s.run('CREATE INDEX auto_response_event_owner IF NOT EXISTS FOR (e:AutoResponseEvent) ON (e.ownerId, e.conversationId)');
+    // Idempotency lookups for agent and automatic posts.
+    await s.run('CREATE INDEX message_automatic_key IF NOT EXISTS FOR (m:Message) ON (m.automaticKey)');
+    await s.run('CREATE CONSTRAINT profile_agent_budget_id IF NOT EXISTS FOR (g:ProfileAgentBudget) REQUIRE g.id IS UNIQUE');
   } finally { await s.close(); }
 }
 

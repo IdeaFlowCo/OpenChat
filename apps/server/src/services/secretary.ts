@@ -144,8 +144,13 @@ async function runSecretary(opts: SecretaryTrigger): Promise<boolean> {
 
       const message = toJS(persisted.records[0]!.get('message')) as Record<string, unknown>;
       const participantIds = persisted.records[0]!.get('participantIds') as string[];
-      if (io) await broadcastMessageToParticipants(io, conversationId, message);
-      dispatchMessageEvent(message, participantIds);
+      // The reply is saved: from here on it counts as handled even if delivery fan-out fails.
+      try {
+        if (io) await broadcastMessageToParticipants(io, conversationId, message);
+        dispatchMessageEvent(message, participantIds);
+      } catch (error) {
+        console.warn('[secretary] delivery after save failed:', error);
+      }
       console.log('[secretary] auto_reply', JSON.stringify({
         ownerId: owner.id,
         conversationId,

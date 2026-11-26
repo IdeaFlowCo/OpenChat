@@ -50,7 +50,11 @@ export function AgentAutoResponses() {
       setError('');
     } catch { setError('Could not load your agent settings.'); }
     finally { setLoaded(true); }
-    // People you have a direct chat with, for "from these people".
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  // People you have a direct chat with, for "from these people" (loaded once).
+  useEffect(() => { void (async () => {
     try {
       const conversations = await api.getConversations();
       const me = await api.getMe().catch(() => null);
@@ -60,8 +64,7 @@ export function AgentAutoResponses() {
       }));
       setPeople([...seen].map(([id, name]) => ({ id, name })).slice(0, 24));
     } catch { setPeople([]); }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
+  })(); }, []);
 
   const act = async (key: string, fn: () => Promise<unknown>) => {
     if (busy) return;

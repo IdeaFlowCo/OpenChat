@@ -36,6 +36,7 @@ export const PEOPLE_SUGGESTIONS_QUERY = `
       AND message.agentKeyId IS NULL AND message.connectorAgentId IS NULL
       AND message.importedAt IS NULL
       AND NOT coalesce(message.viaAssistant, false) AND NOT coalesce(message.viaSecretary, false)
+      AND NOT coalesce(message.viaProfileAgent, false) AND NOT coalesce(message.viaAutoResponse, false)
     RETURN max(message.createdAt) AS lastChattedAt
   }
   RETURN person.id AS userId, person.name AS name,

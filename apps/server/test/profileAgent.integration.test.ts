@@ -55,13 +55,24 @@ integration('OpenChat profile agent answers only from what the owner shared here
       CREATE (ana)-[:HAS_THOUGHT]->(elsewhere)-[:PINNED_IN {pinnedBy:$ana, pinnedAt:datetime()}]->(other)
       CREATE (ana)-[:HAS_THOUGHT]->(:Thought {id:$ctx, userId:$ana, authorId:$ana, conversationId:$chat, lane:'context', text:'CONTEXT-SHARED: prefers mornings', createdAt:datetime(), revision:1, fixture:$fixture})
       CREATE (ana)-[:HAS_THOUGHT]->(:Thought {id:$ctxOther, userId:$ana, authorId:$ana, conversationId:$other, lane:'context', text:'PRIVATE-CANARY-CONTEXT-OTHER-CHAT', createdAt:datetime(), revision:1, fixture:$fixture})
+      CREATE (mEve:Message {id:$mEve, senderId:$ben, conversationId:$chat, content:'LAUNDER-CANARY verify at https://launder.example.test/x', createdAt:datetime(), fixture:$fixture})
+      CREATE (laundered:Thought {id:$laundered, userId:$ana, captureMethod:'message-status', status:'open', kind:'observation', text:'LAUNDER-CANARY verify at https://launder.example.test/x', fixture:$fixture})
+      CREATE (ana)-[:HAS_THOUGHT]->(laundered)-[:PINNED_IN {pinnedBy:$ana, pinnedAt:datetime()}]->(chat)
+      CREATE (laundered)-[:FROM_MESSAGE]->(mEve)
+      CREATE (saved:Thought {id:$savedCopy, userId:$ana, kind:'fact', text:'LAUNDER-CANARY saved copy of Ben', fixture:$fixture})
+      CREATE (ana)-[:HAS_THOUGHT]->(saved)-[:PINNED_IN {pinnedBy:$ana, pinnedAt:datetime()}]->(chat)
+      CREATE (saved)-[:FROM_MESSAGE]->(mEve)
+      CREATE (dan:User {id:$dan, name:'Dan Synthetic', fixture:$fixture})
+      CREATE (fresh:Conversation {id:$fresh, type:'direct', fixture:$fixture})
+      CREATE (ana)-[:PARTICIPATES_IN]->(fresh)<-[:PARTICIPATES_IN]-(dan)
+      CREATE (:Message {id:$mDan, senderId:$dan, conversationId:$fresh, content:'Synthetic stranger: are you away?', createdAt:datetime(), fixture:$fixture})
       CREATE (ana)-[:OWNS_SECRETARY_ANSWER]->(:SecretaryAnswer {id:$sec, question:'salary', answer:'PRIVATE-CANARY-SECRETARY-ANSWER', fixture:$fixture})
       CREATE (ana)-[:OWNS_OVERLAY_NOTE]->(:OverlayNote {id:$note, ownerUserId:$ana, text:'PRIVATE-CANARY-PEOPLE-NOTE about Ben', fixture:$fixture})
       CREATE (:OverlayEntity {id:$entity, ownerUserId:$ana, notes:'PRIVATE-CANARY-PRIVATE-GRAPH', fixture:$fixture})
     `, {
       ana: id('ana'), ben: id('ben'), cal: id('cal'), bot: id('bot'), chat: id('chat'), other: id('other'), token: id('card'), oldToken: id('old-card'),
       m1: id('m1'), m2: id('m2'), m3: id('m3'), mOther: id('mOther'), mBen: id('mBen'), shared: id('shared'), private: id('private'), elsewhere: id('elsewhere'),
-      ctx: id('ctx'), ctxOther: id('ctxOther'), sec: id('sec'), note: id('note'), entity: id('entity'),
+      ctx: id('ctx'), ctxOther: id('ctxOther'), sec: id('sec'), note: id('note'), entity: id('entity'), mEve: id('mEve'), laundered: id('laundered'), savedCopy: id('savedCopy'), dan: id('dan'), fresh: id('fresh'), mDan: id('mDan'),
     });
   });
   beforeEach(() => { prompts.length = 0; broadcasts.length = 0; nextReply = 'Ana shared that the deck is in the pinned note.'; });
@@ -69,7 +80,7 @@ integration('OpenChat profile agent answers only from what the owner shared here
     if (!driver) return;
     await run(`MATCH (n) WHERE (n:ProfileAgentRun OR n:AutoResponseDraft OR n:AutoResponseEvent) AND (n.ownerId = $ana OR n.askerId = $ben) DETACH DELETE n`, { ana: id('ana'), ben: id('ben') });
     await run(`MATCH (:User {id:$ana})-[:OWNS_AUTO_RESPONSE_RULE]->(r) DETACH DELETE r`, { ana: id('ana') });
-    await run(`MATCH (m:Message) WHERE m.conversationId IN $chats DETACH DELETE m`, { chats: [id('chat'), id('other')] });
+    await run(`MATCH (m:Message) WHERE m.conversationId IN $chats DETACH DELETE m`, { chats: [id('chat'), id('other'), id('fresh')] });
     await run('MATCH (n {fixture:$fixture}) DETACH DELETE n');
     await driver.close(); await db.closeDatabase();
   });
@@ -79,6 +90,8 @@ integration('OpenChat profile agent answers only from what the owner shared here
     expect(prompts).toHaveLength(1);
     const input = prompts[0]!.system + prompts[0]!.user;
     expect(input).not.toContain('PRIVATE-CANARY');
+    // Someone else's words pinned by the owner (a shared status or saved copy) are not the owner's notes.
+    expect(input.split('LAUNDER-CANARY').length - 1).toBe(0);
     expect(input).toContain('SHARED-NOTE: deck lives in the team folder');
     expect(input).toContain('CONTEXT-SHARED: prefers mornings');
     expect(input).toContain('Synthetic product designer');
@@ -90,6 +103,7 @@ integration('OpenChat profile agent answers only from what the owner shared here
     const posted = await ask('m1', 'ben');
     const message = posted.message as Record<string, any>;
     expect(String(message.content).split('\n')[0]).toBe("🤖 Ana Synthetic's OpenChat agent · not Ana Synthetic");
+    expect(String(message.content).split('\n')[1]).toBe('Asked by Ben Synthetic');
     expect(message).toMatchObject({ viaProfileAgent: true, profileAgentOwnerId: id('ana'), profileAgentAskerId: id('ben'), replyToId: id('m1'), conversationId: id('chat') });
     expect(broadcasts).toHaveLength(1);
   });
@@ -165,6 +179,7 @@ integration('OpenChat profile agent answers only from what the owner shared here
       return name;
     };
     const session = () => driver.session();
+    beforeEach(async () => { await run('MATCH (n) WHERE (n:AutoResponseEvent OR n:AutoResponseDraft) AND n.ownerId = $ana DETACH DELETE n', { ana: id('ana') }); });
 
     it('defaults to a draft for the owner; nothing is sent to the other side', async () => {
       const s = session();
@@ -178,7 +193,7 @@ integration('OpenChat profile agent answers only from what the owner shared here
         const drafts = await auto.listDrafts(s, id('ana'), id('chat'));
         expect(drafts).toEqual([expect.objectContaining({ text: 'Away until Monday.', sourceMessageId: id(name) })]);
         const message = await auto.sendDraft(driver, id('ana'), drafts[0]!.id, 'Away until Monday — talk then.') as any;
-        expect(String(message.content)).toMatch(/^🤖 Drafted by Ana Synthetic's OpenChat agent · approved by Ana Synthetic\n\nAway until Monday — talk then\.$/);
+        expect(String(message.content)).toBe("🤖 Auto-reply · approved by Ana Synthetic\n\nAway until Monday — talk then.");
         await expect(auto.sendDraft(driver, id('ana'), drafts[0]!.id, 'again')).rejects.toMatchObject({ statusCode: 404 });
         await auto.deleteRule(s, id('ana'), rule.id);
       } finally { await s.close(); }
@@ -213,6 +228,44 @@ integration('OpenChat profile agent answers only from what the owner shared here
         const drafts = await auto.listDrafts(s, id('ana'), id('chat'));
         expect(drafts.some(d => d.text === 'Ana is a product designer, per her card.')).toBe(true);
         for (const d of drafts) await auto.discardDraft(s, id('ana'), d.id);
+        await auto.deleteRule(s, id('ana'), rule.id);
+      } finally { await s.close(); }
+    });
+
+    it('never fires for strangers the owner has not written to (no paid drafts, no presence leak)', async () => {
+      const s = session();
+      try {
+        const rule = await auto.createRule(s, id('ana'), { whenAway: true, action: 'reply', replyText: 'Away.', delivery: 'send' });
+        const result = await auto.runAutoResponses({ driver, senderId: id('dan'), conversationId: id('fresh'), sourceMessageId: id('mDan'),
+          content: 'Synthetic stranger: are you away?', isOnline: () => false, broadcast, generate });
+        expect(result).toBe('none');
+        await auto.deleteRule(s, id('ana'), rule.id);
+      } finally { await s.close(); }
+    });
+
+    it('a failed agent call releases the cooldown so the next message can still be answered', async () => {
+      const s = session();
+      try {
+        const rule = await auto.createRule(s, id('ana'), { whenAway: true, action: 'agent' });
+        const failing = async () => { throw new Error('synthetic upstream 500'); };
+        const first = await send('fail1', 'Synthetic: first try');
+        expect(await auto.runAutoResponses({ driver, senderId: id('ben'), conversationId: id('chat'), sourceMessageId: id(first), content: 'Synthetic: first try', isOnline: () => false, broadcast, generate: failing })).toBe('skipped');
+        const events = await run('MATCH (e:AutoResponseEvent {ownerId:$ana}) RETURN count(e) AS n', { ana: id('ana') });
+        expect(events.records[0]!.get('n').toNumber()).toBe(0);
+        const second = await send('fail2', 'Synthetic: second try');
+        expect(await trigger(second, 'Synthetic: second try', false)).toBe('drafted');
+        await auto.deleteRule(s, id('ana'), rule.id);
+      } finally { await s.close(); }
+    });
+
+    it('re-creating a rule does not reset the per-chat cooldown', async () => {
+      const s = session();
+      try {
+        let rule = await auto.createRule(s, id('ana'), { whenAway: true, action: 'reply', replyText: 'Away.', delivery: 'send' });
+        expect(await trigger(await send('cd1', 'Synthetic: one'), 'Synthetic: one', false)).toBe('sent');
+        await auto.deleteRule(s, id('ana'), rule.id);
+        rule = await auto.createRule(s, id('ana'), { whenAway: true, action: 'reply', replyText: 'Away.', delivery: 'send' });
+        expect(await trigger(await send('cd2', 'Synthetic: two'), 'Synthetic: two', false)).toBe('skipped');
         await auto.deleteRule(s, id('ana'), rule.id);
       } finally { await s.close(); }
     });
