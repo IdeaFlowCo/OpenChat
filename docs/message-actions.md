@@ -30,8 +30,37 @@ Hold a message in the canonical client to open its actions.
 - **Get agent reply now** forwards the selected source and a reply request to
   the owner's private built-in OpenChat Agent using the existing forward API.
   The reply is for private review; nothing is sent back into the source chat.
-- **Auto replies** is reachable at Chats → Profile → Auto replies, as well as
-  Settings → Auto replies. This is the existing opt-in Secretary mode: only
-  owner-approved quick answers in direct chats, with visible auto-reply labels.
-  Merely opening the configuration does not enable it or send any message.
-  General personal-agent integration is outside this first increment.
+- **Ask {name}'s agent** (on another person's message): their small built-in
+  OpenChat agent answers right away *in the chat*, as a reply whose first line
+  is `🤖 {name}'s OpenChat agent · not {name}`. That label is stored in the
+  message text, so every client, notification and webhook shows it; new clients
+  also draw a dashed outline. `POST /api/chat/agent-reply {messageId, question?}`.
+  - **What it can read:** only what the owner already made visible to the asker:
+    their consented public card projection (`projectCardForStranger`), the Stream items
+    they pinned into this chat, their Context posts here (when the asker can read
+    Context), and the selected message. It never reads private notes, the private
+    people graph, unshared Thoughts, Secretary answers, other chats or account fields
+    (`loadShareableContext` is the only reader; `profileAgent.integration.test.ts`
+    seeds private canaries and asserts they never reach the model).
+  - **Injection:** all chat text is passed as JSON data under a system prompt that
+    treats it as untrusted. The model has no tools and at most 400 output tokens. Replies are
+    capped at 1,200 characters, forged label lines are removed, and links are kept only
+    when the owner's shared material contains them.
+  - **Owner control and limits:** Auto replies → *Let people ask my agent* (on by
+    default; off returns 409 `code:"off"`). Each owner's agent is metered against a
+    **$2 per month** cap from actual token usage (worst case reserved first), plus a global
+    monthly ceiling (`OPENCHAT_PROFILE_AGENT_GLOBAL_MONTHLY_USD`, default 50). Rate
+    limits: 10 asks per asker per hour, 5 per asker and owner, 40 per owner, and 2 per
+    message. Human sessions only (agent keys and connectors are refused).
+  - **Model and key:** the existing `ANTHROPIC_API_KEY` and `ASSISTANT_MODEL`
+    (default `claude-haiku-4-5`). `OPENCHAT_PROFILE_AGENT_ENABLED=false` is the kill switch.
+- **Auto replies** (Chats → Profile → Auto replies, and Settings → Auto replies) keeps
+  the existing opt-in Secretary (exact quick answers) and adds **auto-response rules**:
+  when I'm away, from these people, about these words → reply with my text, or let
+  my agent write it. **Draft for my approval is the default.** Drafts wait on that
+  screen with Send and Discard; recipients then see
+  `🤖 Drafted by {name}'s OpenChat agent · approved by {name}`. *Send automatically* is
+  an explicit per-rule choice, labelled `🤖 Automatic reply · {name}'s OpenChat agent, not {name}`,
+  at most once per rule per chat every 6 hours. Rules apply in direct chats, after
+  Secretary, and never to bots or automatic messages. Routes are under `/api/auto-responses`
+  (`settings`, `rules`, `drafts`). Linking a person's own fuller agent is future work.

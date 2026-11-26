@@ -3,6 +3,7 @@ import { deleteContextWebhooksForUser } from '../services/contextWebhooks.js';
 import { deleteImportedChatsForUser, exportImportedChatsForUser } from '../services/importedChatAccount.js';
 import { securityEvent } from '../services/securityEvent.js';
 import { deleteHostedContextForUser } from '../services/contextHosted.js';
+import { deleteProfileAgentDataForUser } from '../services/autoResponses.js';
 import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
@@ -1540,6 +1541,7 @@ router.delete('/me', requireAuth, requireDirectSession, async (req: Request, res
       // Remove request source snapshots and every associated private draft before deleting Thoughts.
       await deleteContextWebhooksForUser(tx,userId);
       await deleteHostedContextForUser(tx,userId);
+      await deleteProfileAgentDataForUser(tx, userId);
 
       // 2b. Delete ContextResponses pointing to this user's Context posts, their own responses, then delete Thoughts.
       await tx.run(`

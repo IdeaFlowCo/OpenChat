@@ -9,6 +9,7 @@ vi.mock('../../mobile/src/components/MessageStatusControls',()=>({MessageStatusC
 vi.mock('../../mobile/src/components/ReactionPicker',()=>({ReactionPicker:()=>null}));
 vi.mock('../../mobile/src/components/AppIcon',()=>({AppIcon:()=>null}));
 vi.mock('../../mobile/src/components/MessageLinkActions',()=>({MessageLinkActions:()=>null}));
+vi.mock('../../mobile/src/components/ProfileAgentAskControls',()=>({ProfileAgentAskControls:(props:unknown)=>React.createElement('ProfileAgentAskControls',props)}));
 import {MessageActionSheet} from '../../mobile/src/components/MessageActionSheet';
 let screen:ReturnType<typeof create>;
 const message={id:'synthetic-id',conversationId:'synthetic-chat',senderId:'synthetic-sender',content:'Synthetic request',createdAt:'2026-01-01',attachments:[]};
@@ -22,4 +23,18 @@ it('offers a one-action private built-in-agent response without prompting for an
 });
 it('opens the status controls for the exact selected message without replying or sharing',async()=>{
  await mount();await act(async()=>button('Set status…').props.onPress());expect(screen.root.findByType('MessageStatusControls').props.messageId).toBe(message.id);expect(mocks.ask).not.toHaveBeenCalled();
+});
+const mountWith=async(over:Record<string,unknown>)=>act(async()=>{screen=create(React.createElement(MessageActionSheet,{visible:true,message,isOwn:false,senderName:'Ana Synthetic',onDismiss:mocks.dismiss,onReply:vi.fn(),onForward:vi.fn(),onForwardToAssistant:vi.fn(),onAskAssistant:mocks.ask,onSaveToThoughts:vi.fn(),onEdit:vi.fn(),onDelete:vi.fn(),onReact:vi.fn(),onBlock:vi.fn(),onReport:vi.fn(),...over} as any));});
+const askRow=()=>screen.root.findAllByType('TouchableOpacity').find(b=>b.findAllByType('Text').some(t=>[t.props.children].flat().join('')==='Ask Ana Synthetic’s agent'));
+it('offers “Ask {name}’s agent” on other people’s messages and opens it for the exact message',async()=>{
+ const answered=vi.fn();
+ await mountWith({onProfileAgentAnswered:answered});await act(async()=>askRow()!.props.onPress());
+ const controls=screen.root.findByType('ProfileAgentAskControls');expect(controls.props).toMatchObject({messageId:message.id,name:'Ana Synthetic'});
+ await act(async()=>controls.props.onAnswered());expect(answered).toHaveBeenCalledOnce();expect(mocks.ask).not.toHaveBeenCalled();
+});
+it('never offers it on your own messages, bots, or automatic replies',async()=>{
+ await mountWith({isOwn:true});expect(askRow()).toBeUndefined();
+ await mountWith({message:{...message,sender:{id:'b',name:'Bot',isBot:true}}});expect(askRow()).toBeUndefined();
+ await mountWith({message:{...message,viaProfileAgent:true}});expect(askRow()).toBeUndefined();
+ await mountWith({message:{...message,viaAutoResponse:true}});expect(askRow()).toBeUndefined();
 });

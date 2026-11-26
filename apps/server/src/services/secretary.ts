@@ -11,7 +11,8 @@
 import type { Server as IOServer } from 'socket.io';
 import { nanoid } from 'nanoid';
 import { getDriver } from '../db.js';
-import { broadcastMessageToParticipants } from '../websocket/chatHandler.js';
+import { broadcastMessageToParticipants, isUserOnline } from '../websocket/chatHandler.js';
+import { runAutoResponses } from './autoResponses.js';
 import { dispatchMessageEvent } from './webhookDispatch.js';
 import { findSecretaryAnswer, type SecretaryAnswer } from './secretaryMatcher.js';
 
@@ -47,17 +48,32 @@ function toJS(value: unknown): unknown {
   return value;
 }
 
-export function maybeTriggerSecretary(opts: {
+type SecretaryTrigger = {
   senderId: string;
   conversationId: string;
   sourceMessageId: string;
   content: string;
   io?: IOServer;
-}): void {
-  const { senderId, conversationId, sourceMessageId, content, io } = opts;
-  if (!content.trim()) return;
+};
 
-  void (async () => {
+/**
+ * Secretary first (exact owner-approved answers). When it does not answer,
+ * the owner's auto-response rules get a chance (owner-approved draft by default).
+ */
+export function maybeTriggerSecretary(opts: SecretaryTrigger): void {
+  if (!opts.content.trim()) return;
+  void runSecretary(opts)
+    .then(async (replied) => {
+      if (replied) return;
+      await runAutoResponses({ ...opts, driver: getDriver(), isOnline: isUserOnline, broadcast: broadcastMessageToParticipants });
+    })
+    .catch(() => undefined);
+}
+
+/** Resolves true when Secretary handled (or deliberately throttled) this message. */
+async function runSecretary(opts: SecretaryTrigger): Promise<boolean> {
+  const { senderId, conversationId, sourceMessageId, content, io } = opts;
+  {
     const session = getDriver().session();
     try {
       // Direct chats only. A real human owner must be the one other human in
@@ -74,13 +90,14 @@ export function maybeTriggerSecretary(opts: {
          LIMIT 1`,
         { senderId, conversationId }
       );
-      if (result.records.length === 0) return;
+      if (result.records.length === 0) return false;
 
       const owner = toJS(result.records[0]!.get('owner')) as { id: string; name?: string };
       const answers = (toJS(result.records[0]!.get('answers')) as SecretaryAnswer[])
         .filter((entry) => entry?.id && entry.question && entry.answer);
       const match = findSecretaryAnswer(content, answers);
-      if (!match || isRateLimited(owner.id)) return;
+      if (!match) return false;
+      if (isRateLimited(owner.id)) return true;
 
       const messageId = nanoid();
       const now = new Date().toISOString();
@@ -123,7 +140,7 @@ export function maybeTriggerSecretary(opts: {
           now,
         }
       );
-      if (persisted.records.length === 0) return;
+      if (persisted.records.length === 0) return true;
 
       const message = toJS(persisted.records[0]!.get('message')) as Record<string, unknown>;
       const participantIds = persisted.records[0]!.get('participantIds') as string[];
@@ -135,10 +152,12 @@ export function maybeTriggerSecretary(opts: {
         sourceMessageId,
         answerId: match.id,
       }));
+      return true;
     } catch (error) {
       console.warn('[secretary] auto-reply failed:', error);
+      return false;
     } finally {
       await session.close();
     }
-  })();
+  }
 }

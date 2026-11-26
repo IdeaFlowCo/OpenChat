@@ -13,6 +13,7 @@ vi.mock('../../mobile/src/components/MessageStatusControls', () => ({ MessageSta
 vi.mock('../../mobile/src/components/ReactionPicker', () => ({ ReactionPicker: () => null }));
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 vi.mock('../../mobile/src/components/MessageLinkActions', () => ({ MessageLinkActions: () => null }));
+vi.mock('../../mobile/src/components/ProfileAgentAskControls', () => ({ ProfileAgentAskControls: () => null }));
 import { MessageActionSheet } from '../../mobile/src/components/MessageActionSheet';
 let screen: ReturnType<typeof create>;
 beforeEach(() => { vi.resetAllMocks(); mocks.copy.mockResolvedValue(true); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });

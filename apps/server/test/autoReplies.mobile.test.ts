@@ -6,6 +6,7 @@ vi.mock('react-native',()=>({ActivityIndicator:'ActivityIndicator',Alert:{alert:
 vi.mock('@react-navigation/native',()=>({useFocusEffect:(effect:()=>unknown)=>React.useEffect(effect as any,[effect])}));
 vi.mock('../../mobile/src/contexts/ThemeContext',()=>({useTheme:()=>({scheme:'light'})}));
 vi.mock('../../mobile/src/api/client',()=>({api:{getSecretary:mocks.get,setSecretaryEnabled:mocks.enable,createSecretaryAnswer:mocks.create}}));
+vi.mock('../../mobile/src/components/AgentAutoResponses',()=>({AgentAutoResponses:()=>null}));
 import {SecretaryScreen} from '../../mobile/src/screens/SecretaryScreen';
 let screen:ReturnType<typeof create>;
 beforeEach(()=>{vi.resetAllMocks();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;mocks.get.mockResolvedValue({enabled:false,answers:[]});mocks.enable.mockResolvedValue({enabled:true});});

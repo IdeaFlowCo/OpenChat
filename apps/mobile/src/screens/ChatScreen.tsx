@@ -1838,6 +1838,8 @@ export function ChatScreen({
               borderWidth: failed ? 1 : (isOwn || emojiOnly ? 0 : StyleSheet.hairlineWidth),
             },
             emojiOnly && { paddingHorizontal: 4, paddingVertical: 0 },
+            // Agent and automatic replies are never the person: a dashed outline marks them.
+            (m.viaProfileAgent || m.viaAutoResponse) && !failed && { borderStyle: 'dashed', borderWidth: 1, borderColor: c.primary },
             // Reply-message accent stripe (OpenChat-imt): a 3px colored
             // bar on the bubble's leading edge gives at-a-glance
             // distinction that this message is a reply. Stripe sits on
@@ -2615,6 +2617,7 @@ export function ChatScreen({
         onDismiss={() => setActionSheetVisible(false)}
         onCopiedReference={showToast}
         onStatusSaved={() => { void refreshMessageStatuses(); }}
+        onProfileAgentAnswered={() => showToast('Agent answered in this chat')}
         onReply={handleReply}
         onTranslate={m => setManualTranslations(previous => ({ ...previous, [m.id]: { content: m.content, version: (previous[m.id]?.version || 0) + 1 } }))}
         translateLanguage={translationPreference.language}
