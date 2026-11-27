@@ -60,7 +60,7 @@ export async function interruptDispatched(state, client, route) {
     return false;
   return !!state.db
     .prepare(
-      "UPDATE grants SET stage='interrupted' WHERE route=? AND state='revoked' AND request=? AND daemonTurn=? AND stage='native-terminal' AND nativeTurn IS NOT NULL AND nativeThread IS NOT NULL",
+      "UPDATE grants SET stage='interrupted' WHERE route=? AND state='revoked' AND request=? AND daemonTurn=? AND stage='native-terminal' AND EXISTS(SELECT 1 FROM native_requests n WHERE n.route=grants.route AND n.request=grants.request AND n.turn=grants.nativeTurn AND n.thread=grants.nativeThread)",
     )
     .run(route, g.request, result.turnId).changes;
 }

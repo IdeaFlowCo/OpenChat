@@ -103,6 +103,7 @@ test('restart and reorder never dispatch an accepted message twice', (t) => {
     )
     .run(job.route);
   f.store.db.prepare("INSERT INTO scoped_receipts VALUES(?,'owned')").run(job.route);
+  f.store.db.prepare("INSERT INTO native_requests VALUES('thread','native',?,?)").run(job.route, job.id);
   const saved = f.store.finish(job, 'result', 'private synthetic answer', 'owned');
   assert.ok(!saved.includes('synthetic answer'));
   f.restart();

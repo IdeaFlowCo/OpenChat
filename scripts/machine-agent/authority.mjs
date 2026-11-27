@@ -257,7 +257,11 @@ export class Authority {
           g.nativeThread &&
           g.nativeTurn &&
           g.daemonTurn === turnId &&
-          this.db.prepare('SELECT 1 FROM scoped_receipts WHERE route=? AND turn=?').get(job.route, turnId)
+          this.db
+            .prepare(
+              'SELECT 1 FROM scoped_receipts s JOIN native_requests n ON n.route=s.route WHERE s.route=? AND s.turn=? AND n.request=? AND n.thread=? AND n.turn=?',
+            )
+            .get(job.route, turnId, job.id, g.nativeThread, g.nativeTurn)
         )
       ) {
         status = 'attention';

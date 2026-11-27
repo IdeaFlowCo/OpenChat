@@ -63,9 +63,14 @@ test('native client actions through real relay preserve account isolation and re
       turns++;
       state.dispatch(item.job);
       state.db
-        .prepare("UPDATE grants SET stage='terminal',daemonTurn='fixture' WHERE route=?")
+        .prepare(
+          "UPDATE grants SET stage='native-terminal',daemonTurn='fixture',nativeThread='thread',nativeTurn='native' WHERE route=?",
+        )
         .run(invite.route);
       state.db.prepare("INSERT INTO scoped_receipts VALUES(?,'fixture')").run(invite.route);
+      state.db
+        .prepare("INSERT INTO native_requests VALUES('thread','native',?,?)")
+        .run(invite.route, item.job.id);
       priorReply = state.finish(item.job, 'result', 'private result', 'fixture');
       host.emit('frame', priorReply);
     }
