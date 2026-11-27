@@ -37,13 +37,13 @@ export function checkScope(agent, job) {
 export async function requireScoped(client) {
   try {
     const response = await client.localApprovedTurn({ op: 'probe' });
-    if (response.version === 1 && response.status === 'supported') return;
+    if (response.version === 2 && response.status === 'supported') return;
   } catch {}
   throw Error('This Paseo SDK and daemon need the reviewed local approved-turn operation.');
 }
 export async function bindGrant(client, g) {
   const response = await client.localApprovedTurn({ op: 'bind', route: g.route, proof: g.localProof });
-  if (response.version !== 1 || response.status !== 'bound')
+  if (response.version !== 2 || response.status !== 'bound')
     throw Error('A fresh, idle dedicated agent is required.');
 }
 export async function interruptDispatched(state, client, route) {
@@ -56,11 +56,11 @@ export async function interruptDispatched(state, client, route) {
     proof: g.localProof,
     item: g.request,
   });
-  if (result.version !== 1 || result.status !== 'stopped' || result.item !== g.request || !result.turnId)
+  if (result.version !== 2 || result.status !== 'stopped' || result.item !== g.request || !result.turnId)
     return false;
   return !!state.db
     .prepare(
-      "UPDATE grants SET stage='interrupted' WHERE route=? AND state='revoked' AND request=? AND daemonTurn=? AND stage='terminal'",
+      "UPDATE grants SET stage='interrupted' WHERE route=? AND state='revoked' AND request=? AND daemonTurn=? AND stage='native-terminal' AND nativeTurn IS NOT NULL AND nativeThread IS NOT NULL",
     )
     .run(route, g.request, result.turnId).changes;
 }
@@ -75,7 +75,7 @@ export async function runReviewed(authority, client, job, consent, signal) {
     if (!permit) return finish('expired', 'Approval expired.');
     const result = await client.localApprovedTurn({ op: 'run', ...permit });
     if (
-      result.version === 1 &&
+      result.version === 2 &&
       result.status === 'result' &&
       result.item === job.id &&
       typeof result.text === 'string' &&

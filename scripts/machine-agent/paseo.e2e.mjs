@@ -29,7 +29,7 @@ const install = process.env.PASEO_TEST_INSTALL,
   source = process.env.PASEO_TEST_SOURCE;
 if (!install?.startsWith('/') || !source?.startsWith('/'))
   throw Error('Set absolute PASEO_TEST_INSTALL and PASEO_TEST_SOURCE paths.');
-const dependencyRevision = '588f0c273f98d6d91c7a7006e0fd1ca8f1021d77';
+const dependencyRevision = 'db87bf6e2246748deef7136be032e98413b07025';
 for (const dir of new Set([source, install])) {
   const head = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   assert.equal(head, dependencyRevision, 'Use the reviewed Paseo revision');
@@ -262,6 +262,68 @@ try {
   assert.throws(
     () => db.offer(identity(randomBytes).publicKey, ref.id, workspace, 'auto', 'other'),
     /fresh agent/,
+  );
+  const heldAgent = await client.agents.create({
+    config: { provider: 'codex/mock-model', modeId: 'auto' },
+    cwd: workspace,
+    title: 'Synthetic cancellation check',
+  });
+  const heldKey = identity(randomBytes);
+  const heldOffer = cli('offer', heldKey.publicKey, heldAgent.id, workspace, 'synthetic');
+  await heldOffer.waitFor('then type approve:');
+  heldOffer.answer('approve');
+  assert.equal(await heldOffer.exit, 0);
+  const heldFile = readdirSync(stateDir).find((name) => name.endsWith('.offer'));
+  const grant = parseOffer(
+    readFileSync(join(stateDir, heldFile), 'utf8'),
+    heldKey.publicKey,
+    Date.now(),
+    'synthetic',
+  );
+  const ask = (verb, seq, text) =>
+    db.admit(
+      grant.route,
+      seal(
+        grant,
+        'request',
+        heldKey.secretKey,
+        [verb, seq, hex(randomBytes(16)), Date.now() + 60_000, text],
+        randomBytes,
+      ),
+    );
+  assert.equal(open(grant, 'reply', heldKey.secretKey, ask('pair', 0, grant.token).reply)[2], 'paired');
+  const approved = ask('turn', 1, 'create a file named "fixture.txt" with the content "held for review"');
+  const heldPermit = db.dispatch(approved.job);
+  assert.equal(
+    (await client.localApprovedTurn({ op: 'run', ...heldPermit, proof: hex(randomBytes(32)) })).status,
+    'denied',
+  );
+  const active = client.localApprovedTurn({ op: 'run', ...heldPermit });
+  let pending = false;
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const { agent } = await heldAgent.refresh();
+    if (
+      agent.pendingPermissions?.length &&
+      db.grant(grant.route).nativeThread &&
+      db.grant(grant.route).nativeTurn
+    ) {
+      pending = true;
+      break;
+    }
+    await delay(25);
+  }
+  assert.equal(pending, true, 'The synthetic provider is held at a local permission prompt');
+  const stopActive = cli('revoke', grant.route);
+  assert.equal(
+    await stopActive.exit,
+    0,
+    'The real daemon confirms cancellation of the exact active fixture turn',
+  );
+  assert.equal((await active).status, 'quarantined');
+  assert.equal(db.grant(grant.route).stage, 'interrupted');
+  assert.equal(calls, 3);
+  console.log(
+    'PASS real scoped operation refuses a wrong local proof and terminal revoke confirms the exact held synthetic turn',
   );
   console.log(
     'PASS real Paseo daemon with isolated deterministic provider, TCP relay and two sealed endpoints',

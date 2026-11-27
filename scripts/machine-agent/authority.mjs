@@ -44,13 +44,24 @@ export class Authority {
         ['localProof', 'TEXT'],
         ['context', 'TEXT'],
         ['daemonTurn', 'TEXT'],
+        ['nativeThread', 'TEXT'],
+        ['nativeTurn', 'TEXT'],
         ['approvedHash', 'TEXT'],
         ['deadline', 'INTEGER'],
       ]) {
         if (!fields.includes(name)) this.db.exec('ALTER TABLE grants ADD COLUMN ' + name + ' ' + type);
       }
+      // Grants from the pre-native-ACK protocol cannot attest historical turns.
+      if (!fields.includes('nativeTurn')) {
+        this.db.exec(
+          "UPDATE grants SET state='revoked',tokenHash=NULL,reply=NULL,stage=CASE WHEN stage IS NULL THEN NULL ELSE 'quarantined' END",
+        );
+      }
       this.db.exec(
         "UPDATE grants SET localProof=lower(hex(randomblob(32))) WHERE localProof IS NULL AND state='revoked'",
+      );
+      this.db.exec(
+        'CREATE TABLE IF NOT EXISTS native_requests(thread TEXT NOT NULL,turn TEXT NOT NULL,route TEXT NOT NULL,request TEXT NOT NULL,PRIMARY KEY(thread,turn),UNIQUE(route,request))',
       );
       this.db.exec(
         'CREATE TABLE IF NOT EXISTS scoped_receipts(route TEXT NOT NULL, turn TEXT NOT NULL, PRIMARY KEY(route,turn))',
@@ -215,7 +226,7 @@ export class Authority {
       // Reserve durably before any prompt, provider call or crash. A duplicate never redispatches.
       this.db
         .prepare(
-          "UPDATE grants SET seq=?,request=?,digest=?,stage='review',reply=NULL,daemonTurn=NULL,approvedHash=NULL,deadline=NULL WHERE route=?",
+          "UPDATE grants SET seq=?,request=?,digest=?,stage='review',reply=NULL,daemonTurn=NULL,nativeTurn=NULL,nativeThread=NULL,approvedHash=NULL,deadline=NULL WHERE route=?",
         )
         .run(n, id, digest, route);
       return {
@@ -242,7 +253,9 @@ export class Authority {
         status === 'result' &&
         !(
           turnId &&
-          g.stage === 'terminal' &&
+          g.stage === 'native-terminal' &&
+          g.nativeThread &&
+          g.nativeTurn &&
           g.daemonTurn === turnId &&
           this.db.prepare('SELECT 1 FROM scoped_receipts WHERE route=? AND turn=?').get(job.route, turnId)
         )

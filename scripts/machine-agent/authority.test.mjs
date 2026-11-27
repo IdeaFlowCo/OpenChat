@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Authority } from './authority.mjs';
-import { checkScope, interruptDispatched, runReviewed } from './paseo.mjs';
+import { checkScope, interruptDispatched, requireScoped, runReviewed } from './paseo.mjs';
 import {
   identity,
   hex,
@@ -97,7 +97,11 @@ test('restart and reorder never dispatch an accepted message twice', (t) => {
   assert.equal(f.admit(f.request('turn', 3, 'modified', job.id)), undefined);
   assert.equal(f.decrypt(f.admit(f.request('turn', 4, 'concurrent')))[2], 'busy');
   assert.equal(f.store.grant(f.g.route).stage, 'reserved');
-  f.store.db.prepare("UPDATE grants SET daemonTurn='owned',stage='terminal' WHERE route=?").run(job.route);
+  f.store.db
+    .prepare(
+      "UPDATE grants SET daemonTurn='owned',nativeThread='thread',nativeTurn='native',stage='native-terminal' WHERE route=?",
+    )
+    .run(job.route);
   f.store.db.prepare("INSERT INTO scoped_receipts VALUES(?,'owned')").run(job.route);
   const saved = f.store.finish(job, 'result', 'private synthetic answer', 'owned');
   assert.ok(!saved.includes('synthetic answer'));
@@ -145,7 +149,7 @@ test('review expiry, unsolicited actions and a substituted scope are refused', a
   ])
     assert.throws(() => checkScope({ ...snap, ...patch }, job));
   const sdk = {
-    localApprovedTurn: async () => ({ version: 1, status: 'supported' }),
+    localApprovedTurn: async () => ({ version: 2, status: 'supported' }),
     agents: {
       ref: () => ({ refresh: async () => ({ agent: snap }), send: () => assert.fail('expired dispatch') }),
     },
@@ -177,7 +181,7 @@ test('ambiguous submission, cancel rejection, and racing completion preserve the
   const sdk = {
     localApprovedTurn: async (input) => {
       cancel = input;
-      return { version: 1, status: 'quarantined' };
+      return { version: 2, status: 'quarantined' };
     },
   };
   assert.equal(await interruptDispatched(f.store, sdk, job.route), false);
@@ -230,7 +234,7 @@ test('transport sees a committed submission fence from another process connectio
   const client = {
     agents: { ref: () => ({ refresh: async () => ({ agent: snapshot }) }) },
     localApprovedTurn: async (request) => {
-      if (request.op === 'probe') return { version: 1, status: 'supported' };
+      if (request.op === 'probe') return { version: 2, status: 'supported' };
       assert.equal(observer.grant(job.route).stage, 'reserved');
       observer.revoke(job.route);
       throw Error('Simulated lost transport after revocation');
@@ -244,4 +248,27 @@ test('transport sees a committed submission fence from another process connectio
   assert.equal(f.store.grant(job.route).state, 'revoked');
   assert.equal(f.store.grant(job.route).reply, null);
   assert.equal(f.store.grant(job.route).stage, 'reserved');
+});
+
+test('legacy capability and receipts cannot establish a native turn binding', async (t) => {
+  await assert.rejects(
+    requireScoped({ localApprovedTurn: async () => ({ version: 1, status: 'supported' }) }),
+  );
+  const f = fixture(t);
+  f.pair();
+  const { job } = f.admit(f.request('turn', 1, 'legacy'));
+  f.store.dispatch(job);
+  f.store.db.prepare("UPDATE grants SET stage='terminal',daemonTurn='old' WHERE route=?").run(job.route);
+  f.store.db.prepare("INSERT INTO scoped_receipts VALUES(?,'old')").run(job.route);
+  assert.equal(
+    open(f.g, 'reply', f.client.secretKey, f.store.finish(job, 'result', 'old plaintext', 'old'))[2],
+    'attention',
+  );
+  f.store.db.exec('ALTER TABLE grants DROP COLUMN nativeThread; ALTER TABLE grants DROP COLUMN nativeTurn');
+  f.restart();
+  const g = f.store.grant(job.route);
+  assert.equal(g.state, 'revoked');
+  assert.equal(g.stage, 'quarantined');
+  assert.equal(g.reply, null);
+  assert.throws(() => f.store.offer(f.client.publicKey, f.agent, f.dir, 'auto', 'fixture'), /fresh agent/);
 });
