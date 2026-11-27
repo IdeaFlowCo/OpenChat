@@ -49,7 +49,7 @@ function Replies({owner,current}:{owner:string;current:()=>boolean}){
   let active=true,timer:ReturnType<typeof setTimeout>;const poll=async()=>{try{await reportRef.current(captured);}catch{if(active&&valid())setError('No authenticated update yet. This does not prove the reply was unsent.');}finally{if(active&&valid())timer=setTimeout(()=>{void poll();},3000);}};
   void poll();return()=>{active=false;clearTimeout(timer);};
  },[visibleOperation?.operationId,visibleOperation?.state,valid]));
- const action=async(work:()=>Promise<void>)=>{if(pending.current||!valid())return;pending.current=true;setBusy(true);setError('');try{await work();}catch{if(valid())setError('This operation needs review on your paired device or Mac. No new reply was created.');}finally{pending.current=false;if(valid())setBusy(false);}};
+ const action=async(work:()=>Promise<void>)=>{if(pending.current||!valid())return;pending.current=true;setBusy(true);setError('');try{await work();}catch{if(valid())setError('This operation needs review on your paired device or original Mac. A submission or status response may be missing; this does not prove the reply was unsent. Keep the original operation and check or retry that same request. Do not compose a replacement.');}finally{pending.current=false;if(valid())setBusy(false);}};
  const importGrant=()=>action(async()=>{
   if(Platform.OS==='web'||!wire.trim())return;
   const offer=await importWriteOffer(owner,wire.trim(),view=>new Promise(resolve=>{

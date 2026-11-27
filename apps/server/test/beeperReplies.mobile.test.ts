@@ -44,3 +44,22 @@ it('discards only an unsubmitted local draft without posting a send',async()=>{a
 it('keeps an unresolved reply visible when its local grant has expired without offering another send',async()=>{
  m.grants=[];m.summaries.mockResolvedValue([{operationId:'f'.repeat(48),connectionId:a,chatKey:chatA,state:'unknown',sequence:1,intentUntil:1}]);await render();expect(m.text.join(' ')).toContain('Send outcome unknown');expect(m.text.join(' ')).toContain('target approval is expired or unavailable');expect(m.prepare).not.toHaveBeenCalled();expect(m.api.enqueueBeeperSend).not.toHaveBeenCalled();
 });
+
+it('preserves uncertainty and the original submitted operation after an accepted enqueue loses its ACK',async()=>{
+ let accepted=0;m.api.enqueueBeeperSend.mockImplementation(async()=>{accepted++;throw Error('response lost after acceptance');});
+ await render();await write();const original=m.op.operationId;await press('Send reply for Mac approval');
+ expect(accepted).toBe(1);expect(m.mark).toHaveBeenCalledTimes(1);expect(m.op).toMatchObject({operationId:original,state:'submitted'});
+ const text=tree!.root.findAllByType('Text' as any).map(n=>n.props.children).join(' ');
+ expect(text).toContain('does not prove the reply was unsent');expect(text).toContain('Do not compose a replacement');expect(text).not.toContain('No new reply was created');
+ expect(tree!.root.findAllByType('Button' as any).some(n=>n.props.label==='Retry the same request')).toBe(true);
+ await press('Retry the same request');expect(accepted).toBe(2);expect(m.prepare).toHaveBeenCalledTimes(1);expect(m.mark).toHaveBeenCalledTimes(1);expect(m.resume).toHaveBeenCalledWith('owner-a',original);
+ expect(m.api.enqueueBeeperSend.mock.calls[1][0]).toEqual(m.api.enqueueBeeperSend.mock.calls[0][0]);
+});
+it('never claims an unsent reply when an authenticated status request fails after submission',async()=>{
+ await render();await write();await press('Send reply for Mac approval');const original=m.op.operationId;
+ m.api.getBeeperSend.mockRejectedValue(Error('lost post-send status'));
+ await press('Check reply status');
+ const text=tree!.root.findAllByType('Text' as any).map(n=>n.props.children).join(' ');
+ expect(text).toContain('does not prove the reply was unsent');expect(text).toContain('original operation');expect(text).not.toContain('No new reply was created');
+ expect(m.op).toMatchObject({operationId:original,state:'submitted'});expect(m.mark).toHaveBeenCalledTimes(1);expect(m.api.enqueueBeeperSend).toHaveBeenCalledTimes(1);expect(m.record).not.toHaveBeenCalled();
+});
