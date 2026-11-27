@@ -55,11 +55,11 @@ export function beeperJobState(job: BeeperReadJob | null, authorized: boolean): 
  * unknown fields and a different destination are never accepted by this UI. */
 export function parsePublicBeeperOffer(text: string): BeeperPublicOffer {
   const value: unknown = JSON.parse(text);
-  const fields = ['protocol', 'destination', 'connectionId', 'machineKey', 'deviceKey', 'accountKey', 'catalogueGrantId', 'relayTokenHash', 'relayBinding', 'ownerUserId', 'expiresAt'];
+  const fields = [...((value as Record<string,unknown>)?.protocol==='openchat.beeper.imessage.read.v1'?['network']:[]),'protocol', 'destination', 'connectionId', 'machineKey', 'deviceKey', 'accountKey', 'catalogueGrantId', 'relayTokenHash', 'relayBinding', 'ownerUserId', 'expiresAt'];
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.length || Object.keys(value).some(key => !fields.includes(key))) throw new Error('invalid_or_expired_offer');
   const v = value as Record<string, unknown>;
-  if (v.protocol !== 'openchat.beeper.read.v1' || v.destination !== 'https://chat.ideaflow.app'
+  if (!((v.protocol === 'openchat.beeper.read.v1' && v.network === undefined)||(v.protocol === 'openchat.beeper.imessage.read.v1' && v.network === 'imessage')) || v.destination !== 'https://chat.ideaflow.app'
     || typeof v.ownerUserId!=='string'||!v.ownerUserId||v.ownerUserId.length>200||Array.from(v.ownerUserId).some(c=>c.charCodeAt(0)<32||c.charCodeAt(0)===127)
     || fields.some(key => typeof v[key] !== 'string') || !Number.isFinite(Date.parse(v.expiresAt as string))
     || Date.parse(v.expiresAt as string) <= Date.now() || Date.parse(v.expiresAt as string) > Date.now() + 7 * 86400000

@@ -1055,6 +1055,7 @@ export type PrivateLinkTarget = { kind: 'user'; id: string } | { kind: PrivateTh
 export interface ImportedCoverage { asOf: string | null; method: string | null; earliestMessageAt: string | null; latestMessageAt: string | null; complete: boolean; note: string | null; sourceRowCounts?: { total: number; text: number | null; nonText: number | null } | null; lastImportAt: string | null; importCount: number }
 export type BeeperReadKind = 'open' | 'refresh' | 'earlier';
 export interface BeeperReadConnection {
+  protocol?:'openchat.beeper.read.v1'|'openchat.beeper.imessage.read.v1';network?:'whatsapp'|'imessage';catalogueReportedAt?:string|null;catalogueEmpty?:boolean;
   id: string; accountKey: string; machineKey: string; deviceKey: string; expiresAt: string;
   state: string; heartbeatAt?: string | null; lastSuccessAt?: string | null; lastError?: string | null;
 }
@@ -1063,12 +1064,13 @@ export interface BeeperCatalogueEntry {
   sourceReadAt?: string | null; receivedAt?: string | null; importedChatId?: string | null;
 }
 export interface BeeperReadJob {
+  network?:'whatsapp'|'imessage';
   id: string; epoch: number; state: 'pending' | 'leased' | 'done' | 'failed' | 'cancelled';
   nextSequence: number; kind: BeeperReadKind; chatId?: string | null; createdAt?: string;
   lastBatchAt?: string | null; completedAt?: string | null; lastError?: string | null;
 }
 export interface BeeperPublicOffer {
-  protocol: 'openchat.beeper.read.v1'; destination: 'https://chat.ideaflow.app'; connectionId: string;
+  protocol: 'openchat.beeper.read.v1'|'openchat.beeper.imessage.read.v1'; network?:'imessage'; destination: 'https://chat.ideaflow.app'; connectionId: string;
   machineKey: string; deviceKey: string; accountKey: string; catalogueGrantId: string; relayTokenHash: string; relayBinding: string; ownerUserId: string; expiresAt: string;
 }
 
@@ -1862,7 +1864,7 @@ export const api = {
     if (options.search) query.set('search', options.search);
     if (options.cursor) query.set('cursor', options.cursor);
     if (options.chatKey) query.set('chatKey', options.chatKey);
-    return request<{ connection: Pick<BeeperReadConnection, 'id' | 'state' | 'expiresAt'>; items: BeeperCatalogueEntry[]; nextCursor?: string | null }>(`/api/beeper/connections/${encodeURIComponent(id)}/chats${query.toString() ? `?${query}` : ''}`, { expireAuthOnForbidden: false });
+    return request<{ connection: Pick<BeeperReadConnection, 'id' | 'state' | 'expiresAt' | 'network' | 'protocol' | 'catalogueReportedAt' | 'catalogueEmpty'>; items: BeeperCatalogueEntry[]; nextCursor?: string | null }>(`/api/beeper/connections/${encodeURIComponent(id)}/chats${query.toString() ? `?${query}` : ''}`, { expireAuthOnForbidden: false });
   },
   requestBeeperRead: (id: string, input: { chatKey: string; clientRequestId: string; kind: BeeperReadKind }) => request<BeeperReadJob>(`/api/beeper/connections/${encodeURIComponent(id)}/reads`, { method: 'POST', body: JSON.stringify(input), expireAuthOnForbidden: false }),
   attachBeeperReadIntent: (id: string, jobId: string, frame: string) => request<{ ok: true }>(`/api/beeper/connections/${encodeURIComponent(id)}/reads/${encodeURIComponent(jobId)}/intent`, { method: 'PUT', body: JSON.stringify({ frame }), expireAuthOnForbidden: false }),

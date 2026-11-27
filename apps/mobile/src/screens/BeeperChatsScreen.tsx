@@ -133,7 +133,7 @@ function BeeperHome({ isCurrent,ownerId }: { isCurrent: () => boolean;ownerId:st
     <SectionLabel>Connections</SectionLabel>
     {!connections && !error && <ActivityIndicator color={r.accent} accessibilityLabel="Loading Beeper connections" />}
     {connections?.length === 0 && <Card><Note>No Mac connection approved. Secure device authorization is required before a source chat can be read.</Note></Card>}
-    {connections?.map(connection => <Card key={connection.id} padding="none"><ListRow title={`Mac · ${connection.machineKey.slice(0, 12)}…`} subtitle={`${beeperConnectionState(connection)} · account ${connection.accountKey.slice(0, 12)}…`}
+    {connections?.map(connection => <Card key={connection.id} padding="none"><ListRow title={`Mac · ${connection.machineKey.slice(0, 12)}…`} subtitle={`${connection.network==='imessage'?'iMessage':'WhatsApp'} · ${beeperConnectionState(connection)} · account ${connection.accountKey.slice(0, 12)}…`}
       trailing={<Chip label={selected === connection.id ? 'Selected' : 'Select'} selected={selected === connection.id} />} onPress={() => setSelected(connection.id)} /></Card>)}
     {active && <><Note>{`Last Mac contact: ${stamp(active.heartbeatAt)}. Connection expires: ${stamp(active.expiresAt)}.`}</Note>
       {active.lastError && <Note error>{beeperFailure(new Error(active.lastError))}</Note>}
@@ -146,7 +146,7 @@ function BeeperHome({ isCurrent,ownerId }: { isCurrent: () => boolean;ownerId:st
 function Catalogue({ connection, guard, open }: { connection: BeeperReadConnection; guard: () => () => boolean; open: (chatKey: string) => void }) {
   const r = useRoles();
   const [query, setQuery] = useState(''), [error, setError] = useState(''), [loading, setLoading] = useState(false);
-  const [record, setRecord] = useState<{ search: string; items: BeeperCatalogueEntry[]; cursor?: string | null } | null>(null);
+  const [record, setRecord] = useState<{ search: string; items: BeeperCatalogueEntry[]; cursor?: string | null; reportedAt?: string | null } | null>(null);
   const search = query.trim(), currentSearch = useRef(search); currentSearch.current = search;
   const entries = record?.search === search ? record.items : null;
   const cursor = record?.search === search ? record.cursor : null;
@@ -158,7 +158,7 @@ function Catalogue({ connection, guard, open }: { connection: BeeperReadConnecti
     try {
       const result = await api.getBeeperCatalogue(connection.id, { search, cursor: after });
       if (mounted.current && valid() && attempt === sequence.current && currentSearch.current === search) {
-        setRecord(previous => ({ search, cursor: result.nextCursor,
+        setRecord(previous => ({ search, cursor: result.nextCursor, reportedAt:result.connection.catalogueReportedAt,
           items: after && previous?.search === search ? [...new Map([...previous.items, ...result.items].map(item => [item.chatKey, item])).values()] : result.items }));
         setError('');
       }
@@ -171,7 +171,7 @@ function Catalogue({ connection, guard, open }: { connection: BeeperReadConnecti
     <Button label="Reload catalogue" variant="ghost" loading={loading} onPress={() => { void load(); }} />
     {!!error && <Note error>{error}</Note>}
     {!entries && !error && <ActivityIndicator color={r.accent} accessibilityLabel="Loading source catalogue" />}
-    {entries?.length === 0 && <Note>{search ? 'No matching chats in the reported catalogue.' : 'Waiting for your Mac to report its catalogue. Approving this connection does not start the Mac adapter.'}</Note>}
+    {entries?.length === 0 && <Note>{search ? 'No matching chats in the reported catalogue.' : (record?.reportedAt??connection.catalogueReportedAt) ? 'Your Mac reported no supported chats for this approved network/account on the last page. The catalogue may be partial.' : 'Waiting for your Mac to report its catalogue. Approving this connection does not start the Mac adapter.'}</Note>}
     {entries?.map(entry => <Card key={entry.chatKey} padding="none"><ListRow title={entry.title}
       subtitle={`${entry.network==='imessage'?'iMessage':'WhatsApp'} · ${entry.chatType === 'group' ? 'Group' : 'Direct chat'} · Catalogue read ${stamp(entry.sourceReadAt)}${entry.importedChatId ? ' · saved copy available' : ''}`}
       onPress={() => { if (mounted.current && guard()()) open(entry.chatKey); }} /></Card>)}
@@ -258,7 +258,7 @@ function ReadSession({ params, isCurrent,ownerId }: { ownerId:string;params: Rou
     navigation.navigate('ImportedChat', { chatId, title: source.chat.title, beeper: { connectionId: params.connectionId, chatKey: params.chatKey, jobId: job?.id } });
   };
   return <Page><View style={styles.heading}><Text accessibilityRole="header" style={[type.heading, styles.grow, { color: r.text }]}>{source?.chat.title ?? 'Read from Beeper'}</Text><Chip label="Read-only" /></View>
-    <Note>Only this selected chat is requested. A typed authorization on your paired device is required; no message is sent and no source app is controlled.</Note>
+    <Note>{`${source?(source.chat.network==='imessage'?'iMessage':'WhatsApp'):'Selected source'} · Only this selected chat is requested. A typed authorization on your paired device is required; no message is sent and no source app is controlled.`}</Note>
     <Card style={styles.form}><Text accessibilityLiveRegion="polite" style={[type.title, { color: r.text }]}>{beeperJobState(job, authorized)}</Text>
       {busy && <ActivityIndicator color={r.accent} accessibilityLabel="Preparing or authorizing read" />}
       {source && <Note>{beeperConnectionState(source.connection)}</Note>}

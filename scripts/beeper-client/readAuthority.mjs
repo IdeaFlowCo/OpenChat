@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { opaqueBeeperKey, catalogueEntry, importBatch } from './desktopApi.mjs';
+import { opaqueBeeperNetworkKey, catalogueEntry, importBatch } from './desktopApi.mjs';
 import {
   audience,
   protocol,
@@ -144,8 +144,12 @@ export class BeeperReadAuthority {
       CREATE TABLE IF NOT EXISTS operations(job TEXT PRIMARY KEY,grantId TEXT NOT NULL,request TEXT UNIQUE NOT NULL,hash TEXT NOT NULL,kind TEXT NOT NULL,until INTEGER NOT NULL,phase TEXT NOT NULL,cursor TEXT,direction TEXT NOT NULL,oldest TEXT,newest TEXT,chatId TEXT);
       CREATE UNIQUE INDEX IF NOT EXISTS one_pending_read ON operations(grantId) WHERE phase IN ('reserved','reading','staged');
       CREATE TABLE IF NOT EXISTS batches(job TEXT NOT NULL,sequence INTEGER NOT NULL,payload TEXT,digest TEXT NOT NULL,final INTEGER NOT NULL,confirmed INTEGER NOT NULL DEFAULT 0,attempted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(job,sequence));`);
-    if (!this.#db.prepare('PRAGMA table_info(catalogues)').all().some(column => column.name === 'network'))
-      this.#db.exec("ALTER TABLE catalogues ADD COLUMN network TEXT NOT NULL DEFAULT 'whatsapp'");
+    // Local revoke intentionally bypasses the worker lease. Serialize schema
+    // inspection AND migration with the same SQLite write lock as revocation.
+    this.#tx(() => {
+      if (!this.#db.prepare('PRAGMA table_info(catalogues)').all().some(column => column.name === 'network'))
+        this.#db.exec("ALTER TABLE catalogues ADD COLUMN network TEXT NOT NULL DEFAULT 'whatsapp'");
+    });
     this.#db.prepare('INSERT OR IGNORE INTO identity VALUES(1,?)').run(randomBytes(32));
   }
   close() {
@@ -178,6 +182,7 @@ export class BeeperReadAuthority {
       .prepare('SELECT * FROM catalogues WHERE route=? AND revoked=0 AND expires>?')
       .get(route, this.clock());
     if (!c || !['whatsapp','imessage'].includes(c.network) || (c.network==='imessage' && this.#platform!=='darwin')) reject();
+    if(c.accountKey !== opaqueBeeperNetworkKey(this.#identity(),c.network,'account',c.accountId)) reject();
     const p = this.#pairing(c.pairRoute);
     if (p.machineKey !== c.machine || p.deviceKey !== c.device || c.expires > p.expires) reject();
     return { c, p };
@@ -203,7 +208,7 @@ export class BeeperReadAuthority {
       expiresAt > Math.min(p.expires, this.clock() + 86400000)
     )
       reject();
-    const accountKey = opaqueBeeperKey(this.#identity(), 'account', accountId);
+    const accountKey = opaqueBeeperNetworkKey(this.#identity(), network, 'account', accountId);
     const consent = {
       authority: 'beeper.catalogue.read',
       ownerId,
@@ -244,11 +249,11 @@ export class BeeperReadAuthority {
           expiresAt,
           network,
         );
-      const expiry = new Date(expiresAt).toISOString();
+      const expiry = new Date(expiresAt).toISOString(), contract = readContract(network);
       const relayBinding = createHmac('sha256', relayToken)
         .update(
           JSON.stringify([
-            protocol,
+            contract.protocol,
             route,
             ownerId,
             p.machineKey,
@@ -257,13 +262,15 @@ export class BeeperReadAuthority {
             catalogueGrantId,
             expiry,
             destination,
+            ...(network === 'imessage' ? [network] : []),
           ]),
         )
         .digest('hex');
       return {
         relayToken,
         publicOffer: {
-          protocol,
+          protocol: contract.protocol,
+          ...(network === 'imessage' ? { network } : {}),
           connectionId: route,
           ownerUserId: ownerId,
           accountKey,
@@ -304,7 +311,7 @@ export class BeeperReadAuthority {
     const items = page.items
       .filter((v) => String(v.network).toLowerCase() === c.network && v.merge == null)
       .map((v) => catalogueEntry(v, mapping));
-    for (let i = 0; i < items.length; i += 200) {
+    for (let i = 0; i < Math.max(items.length, 1); i += 200) {
       let dispatched = false;
       await publish({ items: items.slice(i, i + 200), complete: false }, (start) =>
         fence(() => {
@@ -324,8 +331,7 @@ export class BeeperReadAuthority {
   }
   #scope(c, s) {
     return {
-      protocol,
-      audience,
+      ...readContract(c.network),
       destination,
       ownerId: c.owner,
       pairRoute: c.pairRoute,
@@ -377,9 +383,9 @@ export class BeeperReadAuthority {
       return {
         grantId,
         wire: sealReadEnvelope(
-          p,
+          { ...p, network: c.network },
           'grant',
-          { scope, display: { title: entry.title, chatType: entry.chatType, network: entry.network } },
+          { scope, display: { title: entry.title, chatType: entry.chatType, ...(c.network === 'imessage' ? { network: 'imessage' } : {}) } },
           p.secret,
           randomBytes,
         ),
@@ -417,15 +423,18 @@ export class BeeperReadAuthority {
               'nextSequence',
               'leaseId',
               'leaseUntil',
+              'network',
             ].includes(k),
         )
       )
         reject();
       const { c, p } = this.#connection(claim.connectionId),
-        v = openReadEnvelope(p, 'read', claim.intent, p.secret);
+        v = openReadEnvelope({ ...p, network: c.network }, 'read', claim.intent, p.secret);
       if (
         !validSelection(v) ||
-        Object.keys(v).sort().join(',') !== readFields ||
+        Object.keys(v).sort().join(',') !== (c.network === 'imessage' ? readFields.split(',').concat('network').sort().join(',') : readFields) ||
+        selectionNetwork(v) !== c.network ||
+        (claim.network ?? 'whatsapp') !== c.network ||
         v.operation !== 'readSelected' ||
         v.connectionId !== c.route ||
         !isHex(v.jobId, 48) ||

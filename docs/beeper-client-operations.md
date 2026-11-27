@@ -129,3 +129,28 @@ AppleScript. No credentials or Mac databases are copied to GCP.
 
 References: [Beeper Desktop API](https://developers.beeper.com/desktop-api/) and
 [Beeper iMessage on macOS setup](https://help.beeper.com/en_US/chat-networks/new-imessage-on-macos-getting-started-guide).
+
+
+### Network-specific identity and compatible app version
+
+Optional iMessage uses a distinct `openchat.beeper.imessage.read.v1` encrypted
+header, `beeper.imessage.read` audience and authenticated `network: imessage`
+selection/intent. An older WhatsApp-only app cannot open the new grant or issue a
+Mac-accepted read intent. Install the reviewed compatible app before approving
+this source. Existing WhatsApp v1 grants, wire headers, HMAC identity tuples and
+staged receipts remain unchanged; no automatic re-enrollment occurs.
+
+The iMessage account, chat, participant and message HMAC identities use a separate
+network domain even if provider IDs match WhatsApp. The public offer's verifier
+binds iMessage and its protocol. Server connections and immutable read jobs retain
+that network; catalogue updates and delivery cannot relabel it. Saved-copy joins
+also match network. The Mac independently pins the selected local source, while
+the native device verifies the authenticated network before sealing its intent.
+
+Legacy catalogue schema inspection and the additive WhatsApp-default migration
+share a SQLite write transaction with local revocation. New iMessage grants need
+fresh explicit local approval; unreviewed prototype grants are not a compatibility
+path. Empty/all-filtered catalogue pages publish an explicit bounded empty report,
+so waiting for the first Mac report differs from no supported chats on that page.
+Saved histories and account exports name their source network. These changes do
+not assert source readiness or authorize any real message access.

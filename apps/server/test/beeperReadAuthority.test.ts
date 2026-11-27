@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { Worker } from 'node:worker_threads';
+import * as legacy from './fixtures/beeperReadProtocolLegacy.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -111,16 +113,17 @@ async function fixture(network = 'whatsapp') {
   };
   const { publicOffer, relayToken } = await authority.approveCatalogue(options, async () => true);
   const { grantId, wire } = await authority.approveChat(publicOffer.connectionId, { ...chat, network }, async () => true);
-  const pins = { deviceKey: device.publicKey, machineKey: machine.publicKey };
+  const pins = { deviceKey: device.publicKey, machineKey: machine.publicKey, ...(network==='imessage'?{network:'imessage' as const}:{}) };
   const selection = (openReadEnvelope(pins, 'grant', wire, device.secretKey) as any).scope;
   await acceptBeeperReadOffer('owner', wire, async (scope) => scope.chatKey === selection.chatKey);
   stop = enableBeeperReadRegistry('owner');
-  const conn = { ...publicOffer, id: publicOffer.connectionId, state: 'active' };
+  const conn = { ...publicOffer, id: publicOffer.connectionId, state: 'active', network };
   const entry = { chatKey: selection.chatKey, title: 'Selected', chatType: 'group', network };
   const issue = async (kind = 'open', epoch = 1) => {
     const job = {
       id: id(),
       kind,
+      ...(network==='imessage'?{network}:{}),
       epoch,
       accountKey: selection.accountKey,
       chatKey: selection.chatKey,
@@ -418,4 +421,50 @@ it('adds the network column to a legacy private catalogue without changing keys,
   reopened.close();
   expect(authority.nextPending(ticket)).toEqual(original);
   expect(a.send).toHaveBeenCalledTimes(1);
+});
+
+it('keeps exact legacy WhatsApp header bytes but old native code rejects iMessage grants and intents', async () => {
+ const f=await fixture(), claim=await f.issue();
+ const selection:any=openReadEnvelope(f.pins,'grant',f.wire,device.secretKey);
+ expect(legacy.openReadEnvelope(f.pins,'grant',f.wire,device.secretKey)).toEqual(selection);
+ const input=selection;
+ const nonce=(n:number)=>new Uint8Array(n).fill(9);
+ expect(sealReadEnvelope(f.pins,'grant',input,machine.secretKey,nonce)).toBe(legacy.sealReadEnvelope(f.pins,'grant',input,machine.secretKey,nonce));
+ const ticket=authority.prepare(claim), a=adapter();await authority.read(ticket,a.api);
+ const staged=authority.nextPending(ticket);
+ authority.close();authority=new BeeperReadAuthority({directory:state,pairingDirectory:paired,clock:()=>now,platform:'darwin'});
+ expect(authority.nextPending(ticket)).toEqual(staged);
+ const im=await fixture('imessage');
+ expect(()=>legacy.openReadEnvelope(im.pins,'grant',im.wire,device.secretKey)).toThrow();
+ const newClaim=await im.issue();
+ expect(()=>legacy.openReadEnvelope(im.pins,'read',newClaim.intent,machine.secretKey)).toThrow();
+ const value:any=openReadEnvelope(im.pins,'read',newClaim.intent,machine.secretKey);
+ expect(legacy.validSelection(value)).toBe(false);
+ const oldWire=legacy.sealReadEnvelope(im.pins,'read',{...value,protocol:legacy.protocol,audience:legacy.audience,network:undefined},device.secretKey,nonce);
+ expect(()=>authority.prepare({...newClaim,intent:oldWire})).toThrow();
+ const admitted=authority.prepare(newClaim);await authority.read(admitted,a.api);
+ expect(authority.nextPending(admitted).payload.source.network).toBe('imessage');
+ expect(a.send).toHaveBeenCalledTimes(2);
+});
+it('serializes simultaneous legacy first-open migrations and local revoke', async () => {
+ const f=await fixture();authority.close();
+ let db=new DatabaseSync(join(state,'beeper-read.db'));db.exec('ALTER TABLE catalogues DROP COLUMN network');db.close();
+ const signal=new SharedArrayBuffer(4),flag=new Int32Array(signal);
+ const entry=new URL('../../../scripts/beeper-client/readAuthority.mjs',import.meta.url).href;
+ const workers=Array.from({length:4},(_,i)=>new Promise<void>((resolve,reject)=>{
+  const w=new Worker(`const {workerData,parentPort}=require('node:worker_threads'); (async()=>{const {BeeperReadAuthority}=await import(workerData.entry);parentPort.postMessage('ready');Atomics.wait(new Int32Array(workerData.signal),0,0);const a=new BeeperReadAuthority({directory:workerData.state,pairingDirectory:workerData.paired});if(workerData.revoke)a.revoke(workerData.route);a.close();})().catch(e=>{throw e;});`,{eval:true,workerData:{entry,state,paired,route:f.publicOffer.connectionId,revoke:i===0,signal}});
+  w.on('error',reject);w.on('exit',code=>code===0?resolve():reject(Error('worker failed')));w.on('message',()=>{ready++;if(ready===4){Atomics.store(flag,0,1);Atomics.notify(flag,0);}});
+ }));
+ let ready=0;await Promise.all(workers);
+ authority=new BeeperReadAuthority({directory:state,pairingDirectory:paired,clock:()=>now});
+ db=new DatabaseSync(join(state,'beeper-read.db'));expect(db.prepare('SELECT network,revoked FROM catalogues').get()).toEqual({network:'whatsapp',revoked:1});db.close();
+ await expect(authority.readCatalogue(f.publicOffer.connectionId,adapter().api,async()=>{})).rejects.toThrow();
+},15000);
+
+it('publishes a confirmed empty report when a page contains no supported approved-network chats',async()=>{
+ const f=await fixture();
+ const source=createBeeperReadonlyClient({readToken:async()=>'synthetic',fetchImpl:async()=>Response.json({items:[{...chat,network:'iMessage'}],hasMore:false})});
+ const reports:any[]=[];
+ expect(await authority.readCatalogue(f.publicOffer.connectionId,source,async(body,guard)=>guard(()=>reports.push(body)))).toMatchObject({count:0,hasMore:false});
+ expect(reports).toEqual([{items:[],complete:false}]);
 });

@@ -21,6 +21,12 @@ export function opaqueBeeperKey(identityKey,domain,...parts){
   return createHmac('sha256',identityKey).update(JSON.stringify([domain,...parts])).digest('hex');
 }
 
+export function opaqueBeeperNetworkKey(identityKey,network,domain,...parts){
+  if(network==='whatsapp')return opaqueBeeperKey(identityKey,domain,...parts);
+  if(network==='imessage')return opaqueBeeperKey(identityKey,'imessage.read.v1',domain,...parts);
+  bad();
+}
+
 /** @typedef {{items:Record<string,unknown>[],hasMore:boolean,newestCursor?:string,oldestCursor?:string}} Page */
 function page(value){
   if(!value||!Array.isArray(value.items)||typeof value.hasMore!=='boolean'||value.items.length>2000)bad();
@@ -87,8 +93,8 @@ export function catalogueEntry(chat,{identityKey,accountId,capturedAt,network='w
   if(!['whatsapp','imessage'].includes(network)||chat.accountID!==accountId||String(chat.network).toLowerCase()!==network||chat.merge!=null)bad();
   if(!['group','single','direct'].includes(chat.type))bad();
   const readAt=date(capturedAt);if(!readAt)bad();
-  return {accountKey:opaqueBeeperKey(identityKey,'account',identifier(accountId)),
-    chatKey:opaqueBeeperKey(identityKey,'chat',accountId,identifier(chat.id)),network,
+  return {accountKey:opaqueBeeperNetworkKey(identityKey,network,'account',identifier(accountId)),
+    chatKey:opaqueBeeperNetworkKey(identityKey,network,'chat',accountId,identifier(chat.id)),network,
     title:text(chat.title,200,true),chatType:chat.type==='group'?'group':'direct',
     lastActivityAt:date(chat.lastActivity),capturedAt:readAt};
 }
@@ -106,12 +112,12 @@ export function importBatch(chat,input,{identityKey,accountId,capturedAt,selfUse
     // Unsupported control/reaction events are counted, never recast as text.
     if(m.isHidden===true||m.type==='REACTION'||m.type==='NOTICE'){unsupported++;continue;}
     const sentAt=date(m.timestamp),senderId=identifier(m.senderID);if(!sentAt)bad();
-    const senderKey=opaqueBeeperKey(identityKey,'participant',accountId,chat.id,senderId);
+    const senderKey=opaqueBeeperNetworkKey(identityKey,network,'participant',accountId,chat.id,senderId);
     participantMap.set(senderKey,{sourceKey:senderKey,displayName:text(m.senderName,120),nameSource:'unknown',
       nameSourceMessageIds:[],membership:'unknown',...(selfUserId?{isOwner:senderId===selfUserId}:{}),profileFacts:[]});
     const hasMedia=Array.isArray(m.attachments)&&m.attachments.length>0;
     const editedAt=m.editedTimestamp===undefined?null:date(m.editedTimestamp);if(m.editedTimestamp!==undefined&&!editedAt)bad();
-    messages.push({sourceMessageId:opaqueBeeperKey(identityKey,'message',accountId,chat.id,identifier(m.id)),senderKey,sentAt,
+    messages.push({sourceMessageId:opaqueBeeperNetworkKey(identityKey,network,'message',accountId,chat.id,identifier(m.id)),senderKey,sentAt,
       kind:m.isDeleted===true?'deleted':hasMedia?'media':'text',text:m.isDeleted===true?null:text(m.text,20000),
       mediaType:m.isDeleted===true?null:hasMedia?'attachment':null,editedAt,replyToSourceMessageId:null});
   }

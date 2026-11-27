@@ -77,7 +77,7 @@ export async function main(argv=process.argv.slice(2)){
    }
    if(!await confirmBeeperLocally({operation:command==='catalogue'?'Publish one bounded chat catalogue page':'Start foreground selected-chat reads',connectionId,destination:'https://chat.ideaflow.app',disclosure:command==='catalogue'?'Chat titles, types and activity times from the locally approved network/account':'Only separately approved chat messages and participant attribution; Ctrl-C stops'}))return;
    if(command==='catalogue'){
-    await authority.readCatalogue(connectionId,adapter,(body,beforeFetch)=>transport.publishCatalogue(body,beforeFetch));console.log('One catalogue page published. It may be partial.');return;
+    const result=await authority.readCatalogue(connectionId,adapter,(body,beforeFetch)=>transport.publishCatalogue(body,beforeFetch));console.log(result.count?'One catalogue page published. It may be partial.':'Mac reported no supported chats for this approved network/account on this page. The catalogue may be partial.');return;
    }
    journal=new BeeperForegroundJournal(directory);
    const runner=createBeeperForegroundRunner({connectionId,transport,authority,adapter,journal,signal:abort.signal,onStatus:status=>console.log(status)});

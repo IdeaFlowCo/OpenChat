@@ -69,5 +69,9 @@ it('maps only an explicitly selected network and refuses automatic merged routin
  expect(()=>catalogueEntry({...imessage,merge:{}},{...opts,network:'imessage'})).toThrow();
  const batch=importBatch(imessage,{items:[message],hasMore:false},{...opts,network:'imessage'});
  expect(parseImportPayload(batch.payload).source.network).toBe('imessage');
- expect(batch.payload.source.accountKey).toBe(catalogueEntry(chat,opts).accountKey);
+ expect(batch.payload.source.accountKey).not.toBe(catalogueEntry(chat,opts).accountKey);
+ const legacy=importBatch(chat,{items:[message],hasMore:false},opts).payload;
+ expect(batch.payload.source.chatKey).not.toBe(legacy.source.chatKey);
+ expect(batch.payload.participants[0].sourceKey).not.toBe(legacy.participants[0].sourceKey);
+ expect(batch.payload.messages[0].sourceMessageId).not.toBe(legacy.messages[0].sourceMessageId);
 });

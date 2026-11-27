@@ -27,8 +27,8 @@ it('rejects stale account/registry results at both asynchronous boundaries',asyn
 });
 
 it('requires the relay label to match the independently authenticated local network before sealing',async()=>{
- const local=grant({display:{title:chat.title,chatType:chat.chatType,network:'imessage'}});clear=installReviewedBeeperReadResolver(async()=>local);
+ const local=grant({protocol:'openchat.beeper.imessage.read.v1',audience:'beeper.imessage.read',network:'imessage',display:{title:chat.title,chatType:chat.chatType,network:'imessage'}});clear=installReviewedBeeperReadResolver(async()=>local);
  await expect(authorizeBeeperRead(connection as any,job as any,{...chat,network:'whatsapp'} as any,'owner')).rejects.toMatchObject({code:'beeper_secure_grant_required'});
  expect(local.sealRead).not.toHaveBeenCalled();
- expect(await authorizeBeeperRead(connection as any,job as any,{...chat,network:'imessage'} as any,'owner')).toBe(frame);
+ expect(await authorizeBeeperRead({...connection,protocol:'openchat.beeper.imessage.read.v1',network:'imessage'} as any,{...job,network:'imessage'} as any,{...chat,network:'imessage'} as any,'owner')).toBe(frame);
 });

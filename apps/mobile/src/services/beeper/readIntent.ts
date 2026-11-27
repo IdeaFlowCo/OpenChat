@@ -1,11 +1,13 @@
 import * as Crypto from 'expo-crypto';
+import {readContract} from './readProtocol.mjs';
 import type {BeeperReadConnection,BeeperReadJob,BeeperCatalogueEntry} from '../../api/client';
 
 export interface LocalBeeperReadCapability {
-  protocol:'openchat.beeper.read.v1';
+  protocol:'openchat.beeper.read.v1'|'openchat.beeper.imessage.read.v1';
+  network?:'imessage';
   ownerId:string;
   route:string;
-  audience:'beeper.read';
+  audience:'beeper.read'|'beeper.imessage.read';
   machineKey:string;
   deviceKey:string;
   accountKey:string;
@@ -17,7 +19,7 @@ export interface LocalBeeperReadCapability {
    * typed operation. It must never use a server-provided key or generic prompt. */
   sealRead(request:Readonly<Record<string,unknown>>):Promise<string>;
 }
-type Scope={ownerId:string;route:string;audience:'beeper.read';machineKey:string;deviceKey:string;accountKey:string;chatKey:string};
+type Scope={network?:'imessage';ownerId:string;route:string;audience:'beeper.read'|'beeper.imessage.read';machineKey:string;deviceKey:string;accountKey:string;chatKey:string};
 type Resolver=(scope:Readonly<Scope>)=>Promise<LocalBeeperReadCapability|null>;
 let resolveLocal:Resolver|undefined;
 
@@ -35,9 +37,12 @@ export class BeeperSecureGrantRequired extends Error {
 export async function authorizeBeeperRead(connection:BeeperReadConnection,job:BeeperReadJob,chat:BeeperCatalogueEntry,ownerId:string):Promise<string>{
   const resolver=resolveLocal;
   if(!ownerId||!resolver||connection.state!=='active'||!Number.isFinite(Date.parse(connection.expiresAt))||Date.parse(connection.expiresAt)<=Date.now())throw new BeeperSecureGrantRequired();
-  const scope:Scope={ownerId,route:connection.id,audience:'beeper.read',machineKey:connection.machineKey,deviceKey:connection.deviceKey,accountKey:connection.accountKey,chatKey:chat.chatKey};
+  const network=connection.network??'whatsapp',contract=readContract(network);
+  if((connection.protocol??'openchat.beeper.read.v1')!==contract.protocol || (chat.network??'whatsapp')!==network || (job.network??'whatsapp')!==network)throw new BeeperSecureGrantRequired();
+  const scope:Scope={...(network==='imessage'?{network:'imessage' as const}:{}),ownerId,route:connection.id,audience:contract.audience,machineKey:connection.machineKey,deviceKey:connection.deviceKey,accountKey:connection.accountKey,chatKey:chat.chatKey};
   const grant=await resolver(Object.freeze(scope));
-  if(resolveLocal!==resolver||!grant||grant.protocol!=='openchat.beeper.read.v1'||grant.expiresAt<=Date.now()
+  if(resolveLocal!==resolver||!grant||grant.protocol!==contract.protocol||grant.expiresAt<=Date.now()
+    ||(network==='imessage' && grant.display?.network!=='imessage')
     ||(grant.display && (grant.display.title!==chat.title || grant.display.chatType!==chat.chatType || (grant.display.network??'whatsapp')!==(chat.network??'whatsapp')))
     ||Object.entries(scope).some(([key,value])=>grant[key as keyof Scope]!==value))throw new BeeperSecureGrantRequired();
   if(!job.id||!Number.isSafeInteger(job.epoch)||job.epoch<1)throw new Error('Reload the selected chat request before approving it.');

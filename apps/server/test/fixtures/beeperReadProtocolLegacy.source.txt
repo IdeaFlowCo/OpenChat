@@ -1,0 +1,5 @@
+beeperReadProtocolLegacy.mjs is the unchanged WhatsApp read protocol from actual
+main 31deea2dec03a82473bd6db794850972dd5a1468, path
+apps/mobile/src/services/beeper/readProtocol.mjs. It is a frozen mixed-version
+regression fixture, not an activation implementation. Tests verify that updated
+WhatsApp wire bytes stay compatible while iMessage headers fail its decoder.

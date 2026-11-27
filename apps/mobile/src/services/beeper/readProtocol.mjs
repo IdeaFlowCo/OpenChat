@@ -5,12 +5,25 @@ import { Buffer } from 'buffer';
 
 export const protocol = 'openchat.beeper.read.v1';
 export const audience = 'beeper.read';
+export const imessageProtocol = 'openchat.beeper.imessage.read.v1';
+export const imessageAudience = 'beeper.imessage.read';
+export function readContract(network = 'whatsapp') {
+  if (network === 'whatsapp') return { protocol, audience };
+  if (network === 'imessage') return { protocol: imessageProtocol, audience: imessageAudience, network: 'imessage' };
+  throw Error('Unsupported read network');
+}
+export function selectionNetwork(s) {
+  if (s?.protocol === protocol && s.audience === audience && s.network === undefined) return 'whatsapp';
+  if (s?.protocol === imessageProtocol && s.audience === imessageAudience && s.network === 'imessage') return 'imessage';
+  return null;
+}
 export const destination = 'https://chat.ideaflow.app';
 export const isHex = (s, n) => typeof s === 'string' && s.length === n && /^[a-f0-9]+$/.test(s);
 export function sameSelection(a, b) {
   return [
     'protocol',
     'audience',
+    'network',
     'route',
     'machineKey',
     'deviceKey',
@@ -26,8 +39,7 @@ export function sameSelection(a, b) {
 export function validSelection(s) {
   return (
     !!s &&
-    s.protocol === protocol &&
-    s.audience === audience &&
+    selectionNetwork(s) !== null &&
     s.destination === destination &&
     typeof s.ownerId === 'string' &&
     /^[a-zA-Z0-9_-]{1,120}$/.test(s.ownerId) &&
@@ -51,7 +63,8 @@ function keys(secret, pins, local) {
 }
 function header(pins, purpose) {
   if (!['grant', 'read'].includes(purpose)) throw Error('Invalid envelope purpose');
-  return [protocol, audience, destination, purpose, pins.machineKey, pins.deviceKey];
+  const contract = readContract(pins.network);
+  return [contract.protocol, contract.audience, destination, purpose, pins.machineKey, pins.deviceKey];
 }
 export function sealReadEnvelope(pins, purpose, value, secret, random) {
   const nonce = random(24);
