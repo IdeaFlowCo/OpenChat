@@ -1,5 +1,6 @@
 import neo4j, { Driver } from 'neo4j-driver';
 import { ensureImportedChatSchema } from './services/importedChats.js';
+import {ensureBeeperWriteSchema} from './services/beeperWrites.js';
 import { ensureBeeperReadSchema } from './services/beeperRelay.js';
 
 let driver: Driver | null = null;
@@ -163,6 +164,7 @@ export async function initDatabase(): Promise<void> {
     // Imported chat mirrors (OpenChat-061g) keep their own labels and keys.
     await ensureImportedChatSchema(session);
     await ensureBeeperReadSchema(session);
+    await ensureBeeperWriteSchema(session);
 
     console.log('Database constraints and indexes initialized');
   } finally {

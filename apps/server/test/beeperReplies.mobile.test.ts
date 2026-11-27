@@ -1,0 +1,65 @@
+import React from'react';import{act,create,type ReactTestRenderer}from'react-test-renderer';import{afterEach,beforeEach,expect,it,vi}from'vitest';
+const m=vi.hoisted(()=>({chat:{}as any,grants:[]as any[],op:null as any,text:[]as string[],platform:{OS:'ios'},alert:vi.fn(),list:vi.fn(),prepare:vi.fn(),display:vi.fn(),mark:vi.fn(),resume:vi.fn(),record:vi.fn(),disable:vi.fn(),cancel:vi.fn(),importGrant:vi.fn(),summaries:vi.fn(),api:{approveBeeperWriteConnection:vi.fn(),revokeBeeperWriteConnection:vi.fn(),enqueueBeeperSend:vi.fn(),getBeeperSend:vi.fn()},events:[]as string[]}));
+vi.mock('react-native',async()=>{const R=await import('react');return{Platform:m.platform,Alert:{alert:m.alert},StyleSheet:{create:(x:any)=>x},View:'View',ScrollView:'ScrollView',TextInput:'TextInput',ActivityIndicator:'ActivityIndicator',Text:({children,...props}:any)=>{m.text.push(String(children));return R.createElement('Text',props,children);}};});
+vi.mock('@react-navigation/native',()=>({useFocusEffect:(cb:any)=>React.useEffect(cb,[cb])}));
+vi.mock('expo-crypto',()=>({getRandomBytesAsync:async(n:number)=>new Uint8Array(n).fill(6)}));
+vi.mock('../../mobile/src/contexts/ChatContext',()=>({useChat:()=>m.chat}));vi.mock('../../mobile/src/contexts/ThemeContext',()=>({useTheme:()=>({scheme:'light'})}));
+vi.mock('../../mobile/src/api/client',()=>({api:m.api}));
+vi.mock('../../mobile/src/components/ui',()=>({Button:'Button',Card:'Card',Chip:'Chip',ListRow:'ListRow',SectionLabel:'SectionLabel'}));
+vi.mock('../../mobile/src/services/beeper/writeRegistry',()=>({importWriteOffer:m.importGrant,listWriteGrants:m.list,prepareSend:m.prepare,getSendDisplay:m.display,markSubmitAttempt:m.mark,resumeSubmittedSend:m.resume,recordSendReceipt:m.record,disableWriteGrant:m.disable,cancelPreparedSend:m.cancel,listSendSummaries:m.summaries}));
+import{BeeperRepliesScreen}from'../../mobile/src/screens/BeeperRepliesScreen';
+const a='a'.repeat(48),b='b'.repeat(48),chatA='c'.repeat(64),chatB='d'.repeat(64);let tree:ReactTestRenderer|undefined;
+const button=(label:string)=>tree!.root.findAllByType('Button' as any).find(n=>n.props.label===label)!;
+const press=async(label:string)=>{await act(async()=>{button(label).props.onPress();});};
+const render=async()=>{await act(async()=>{tree=create(React.createElement(BeeperRepliesScreen));});};
+const write=async(text='Synthetic private reply')=>{await act(async()=>tree!.root.findByProps({accessibilityLabel:'Reply message'}).props.onChangeText(text));await press('Review reply');};
+beforeEach(()=>{vi.useFakeTimers();vi.clearAllMocks();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;m.platform.OS='ios';m.chat={currentUser:{userId:'owner-a'},isIdentityVerified:true};m.text=[];m.events=[];m.op=null;m.grants=[{protocol:'openchat.beeper.send.v1',ownerUserId:'owner-a',connectionId:a,chatKey:chatA,machineKey:'1'.repeat(64),deviceKey:'2'.repeat(64),accountKey:'3'.repeat(64),writeGrantId:'4'.repeat(48),expiresAt:'2030-01-01T00:00:00Z',destination:'https://chat.ideaflow.app',relayTokenHash:'5'.repeat(64),relayBinding:'6'.repeat(64),title:'Locally approved A',chatType:'group',network:'whatsapp',pendingOperationId:null}];
+ m.summaries.mockResolvedValue([]);
+ m.list.mockImplementation(async()=>m.grants.map(g=>({...g,pendingOperationId:m.op&&m.op.connectionId===g.connectionId&&!['confirmed','failed','cancelled'].includes(m.op.state)?m.op.operationId:null})));
+ m.prepare.mockImplementation(async(_owner,route,chat,input)=>{m.events.push('prepare');m.op={operationId:input.operationId,connectionId:route,chatKey:chat,text:input.text,title:m.grants.find(g=>g.connectionId===route).title,state:'prepared'};return{connectionId:route,operationId:input.operationId,opaqueIntent:'original-ciphertext'};});
+ m.display.mockImplementation(async()=>({...m.op}));m.mark.mockImplementation(async()=>{m.events.push('durable-mark');m.op={...m.op,state:'submitted'};return{connectionId:m.op.connectionId,operationId:m.op.operationId,opaqueIntent:'original-ciphertext'};});m.resume.mockImplementation(async()=>{m.events.push('original-resume');return{connectionId:m.op.connectionId,operationId:m.op.operationId,opaqueIntent:'original-ciphertext'};});m.cancel.mockImplementation(async()=>{m.op={...m.op,state:'cancelled'};return m.op;});
+ m.record.mockImplementation(async()=>{m.op={...m.op,state:'confirmed'};return m.op;});m.api.enqueueBeeperSend.mockImplementation(async()=>{m.events.push('cloud-post');return{operationId:m.op.operationId,transportState:'done',receipt:null,receiptRevision:0};});m.api.getBeeperSend.mockImplementation(async()=>({operationId:m.op.operationId,transportState:'done',receipt:null,receiptRevision:0}));m.api.approveBeeperWriteConnection.mockResolvedValue({id:a,state:'active'});
+});
+afterEach(async()=>{if(tree)await act(async()=>tree!.unmount());tree=undefined;vi.useRealTimers();delete(globalThis as any).IS_REACT_ACT_ENVIRONMENT;});
+it('waits for verified identity and never installs a writer on web',async()=>{m.chat.isIdentityVerified=false;await render();expect(m.list).not.toHaveBeenCalled();m.chat.isIdentityVerified=true;m.platform.OS='web';await act(async()=>tree!.update(React.createElement(BeeperRepliesScreen)));expect(m.list).not.toHaveBeenCalled();expect(m.text.join(' ')).toContain('paired native OpenChat app');expect(m.prepare).not.toHaveBeenCalled();});
+it('prepares locally, then persists submission before first POST; an unsigned done flag never means confirmed',async()=>{
+ await render();expect(m.prepare).not.toHaveBeenCalled();await write();expect(m.api.enqueueBeeperSend).not.toHaveBeenCalled();expect(m.mark).not.toHaveBeenCalled();await press('Send reply for Mac approval');expect(m.events.indexOf('durable-mark')).toBeLessThan(m.events.indexOf('cloud-post'));expect(m.api.enqueueBeeperSend).toHaveBeenCalledWith(expect.objectContaining({connectionId:a,opaqueIntent:'original-ciphertext'}));expect(m.record).not.toHaveBeenCalled();expect(tree!.root.findAllByType('Text' as any).map(n=>n.props.children).join(' ')).not.toContain('Beeper confirmed the send');
+});
+it('trusts only a validated authenticated Mac receipt and retries only the original frame',async()=>{
+ await render();await write();await press('Send reply for Mac approval');await press('Retry the same request');expect(m.mark).toHaveBeenCalledTimes(1);expect(m.resume).toHaveBeenCalledWith('owner-a',m.op.operationId);expect(m.prepare).toHaveBeenCalledTimes(1);expect(m.api.enqueueBeeperSend.mock.calls[0][0]).toEqual(m.api.enqueueBeeperSend.mock.calls[1][0]);
+ m.api.getBeeperSend.mockResolvedValue({operationId:m.op.operationId,transportState:'queued',receipt:'authenticated-wire',receiptRevision:1});await press('Check reply status');expect(m.record).toHaveBeenCalledWith('owner-a',m.op.operationId,'authenticated-wire');expect(m.text.join(' ')).toContain('Beeper confirmed the send');
+});
+it('does not sign/submit after an account transition and never renders the old reply in the new account',async()=>{
+ let release!:(x:any)=>void;m.prepare.mockImplementation(async()=>new Promise(r=>{release=r;}));await render();await write();m.text=[];m.chat.currentUser={userId:'owner-b'};m.list.mockResolvedValue([]);await act(async()=>tree!.update(React.createElement(BeeperRepliesScreen)));await act(async()=>release({connectionId:a,operationId:'x',opaqueIntent:'old'}));expect(m.text.join(' ')).not.toContain('Synthetic private reply');expect(m.mark).not.toHaveBeenCalled();expect(m.api.enqueueBeeperSend).not.toHaveBeenCalled();
+});
+it('discards no draft on an unrelated context render and hides old target text on the very first target render',async()=>{
+ m.grants.push({...m.grants[0],connectionId:b,chatKey:chatB,title:'Locally approved B'});await render();await write('Secret target A body');await act(async()=>tree!.update(React.createElement(BeeperRepliesScreen)));expect(tree!.root.findAllByType('Text' as any).map(n=>n.props.children).join(' ')).toContain('Secret target A body');
+ m.text=[];const row=tree!.root.findAllByType('ListRow' as any).find(n=>n.props.title==='Locally approved B')!;await act(async()=>row.props.onPress());expect(m.text.join(' ')).not.toContain('Secret target A body');expect(m.api.enqueueBeeperSend).not.toHaveBeenCalled();
+});
+it('imports/approves no write grant before an explicit native scope confirmation',async()=>{
+ m.importGrant.mockImplementation(async(_owner,_wire,confirm)=>{if(!await confirm(m.grants[0]))throw Error('cancelled');const{title,chatType,network,pendingOperationId,...offer}=m.grants[0];return offer;});await render();await act(async()=>tree!.root.findByProps({accessibilityLabel:'Encrypted write grant'}).props.onChangeText('encrypted-grant'));expect(m.importGrant).not.toHaveBeenCalled();await press('Review write grant');expect(m.api.approveBeeperWriteConnection).not.toHaveBeenCalled();await act(async()=>m.alert.mock.calls[0][2][1].onPress());expect(m.api.approveBeeperWriteConnection).toHaveBeenCalledTimes(1);expect(m.prepare).not.toHaveBeenCalled();
+});
+it('discards only an unsubmitted local draft without posting a send',async()=>{await render();await write();await press('Discard prepared reply');expect(m.cancel).toHaveBeenCalledWith('owner-a',m.op.operationId);expect(m.api.enqueueBeeperSend).not.toHaveBeenCalled();expect(m.mark).not.toHaveBeenCalled();});
+
+it('keeps an unresolved reply visible when its local grant has expired without offering another send',async()=>{
+ m.grants=[];m.summaries.mockResolvedValue([{operationId:'f'.repeat(48),connectionId:a,chatKey:chatA,state:'unknown',sequence:1,intentUntil:1}]);await render();expect(m.text.join(' ')).toContain('Send outcome unknown');expect(m.text.join(' ')).toContain('target approval is expired or unavailable');expect(m.prepare).not.toHaveBeenCalled();expect(m.api.enqueueBeeperSend).not.toHaveBeenCalled();
+});
+
+it('preserves uncertainty and the original submitted operation after an accepted enqueue loses its ACK',async()=>{
+ let accepted=0;m.api.enqueueBeeperSend.mockImplementation(async()=>{accepted++;throw Error('response lost after acceptance');});
+ await render();await write();const original=m.op.operationId;await press('Send reply for Mac approval');
+ expect(accepted).toBe(1);expect(m.mark).toHaveBeenCalledTimes(1);expect(m.op).toMatchObject({operationId:original,state:'submitted'});
+ const text=tree!.root.findAllByType('Text' as any).map(n=>n.props.children).join(' ');
+ expect(text).toContain('does not prove the reply was unsent');expect(text).toContain('Do not compose a replacement');expect(text).not.toContain('No new reply was created');
+ expect(tree!.root.findAllByType('Button' as any).some(n=>n.props.label==='Retry the same request')).toBe(true);
+ await press('Retry the same request');expect(accepted).toBe(2);expect(m.prepare).toHaveBeenCalledTimes(1);expect(m.mark).toHaveBeenCalledTimes(1);expect(m.resume).toHaveBeenCalledWith('owner-a',original);
+ expect(m.api.enqueueBeeperSend.mock.calls[1][0]).toEqual(m.api.enqueueBeeperSend.mock.calls[0][0]);
+});
+it('never claims an unsent reply when an authenticated status request fails after submission',async()=>{
+ await render();await write();await press('Send reply for Mac approval');const original=m.op.operationId;
+ m.api.getBeeperSend.mockRejectedValue(Error('lost post-send status'));
+ await press('Check reply status');
+ const text=tree!.root.findAllByType('Text' as any).map(n=>n.props.children).join(' ');
+ expect(text).toContain('does not prove the reply was unsent');expect(text).toContain('original operation');expect(text).not.toContain('No new reply was created');
+ expect(m.op).toMatchObject({operationId:original,state:'submitted'});expect(m.mark).toHaveBeenCalledTimes(1);expect(m.api.enqueueBeeperSend).toHaveBeenCalledTimes(1);expect(m.record).not.toHaveBeenCalled();
+});
