@@ -67,6 +67,7 @@ export type RootStackParamList = {
   CatchUp: undefined;
   /** The owner's private, read-only copies of chats from other networks (OpenChat-061g). */
   BeeperChats: undefined;
+  BeeperReplies: undefined;
   BeeperRead: { connectionId: string; chatKey: string; kind: import('../api/client').BeeperReadKind; requestRevision?: string };
   ImportedChats: undefined;
   ImportedChat: { chatId: string; title?: string; tab?: 'conversation' | 'people' | 'asks' | 'memory'; beeper?: { connectionId: string; chatKey: string; jobId?: string } };

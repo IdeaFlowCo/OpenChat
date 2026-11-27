@@ -1,3 +1,4 @@
+import type {Offer as BeeperWriteOffer} from '../services/beeper/writeProtocol.mjs';
 import { ApiError, errorFromResponse } from './errors';
 export { ApiError } from './errors';
 import { authenticatedRequestLease } from './authenticatedRequest';
@@ -1849,6 +1850,10 @@ export const api = {
   listCatchUp: () => request<{ due: CatchUpPerson[] }>('/api/private/due'),
 
   // Imported chats — read-only; nothing here sends, invites or notifies anyone.
+  approveBeeperWriteConnection: (offer: BeeperWriteOffer) => request<{id:string;state:string}>('/api/beeper/write-connections', {method:'POST',body:JSON.stringify({offer}),expireAuthOnForbidden:false}),
+  revokeBeeperWriteConnection: (id:string) => request<{ok:true}>(`/api/beeper/write-connections/${encodeURIComponent(id)}`,{method:'DELETE',expireAuthOnForbidden:false}),
+  enqueueBeeperSend: (input:{connectionId:string;operationId:string;opaqueIntent:string}) => request<{operationId:string;transportState:string;receipt:string|null;receiptRevision:number}>(`/api/beeper/write-connections/${encodeURIComponent(input.connectionId)}/sends`,{method:'POST',body:JSON.stringify({operationId:input.operationId,opaqueIntent:input.opaqueIntent}),expireAuthOnForbidden:false}),
+  getBeeperSend: (connectionId:string,operationId:string) => request<{operationId:string;transportState:string;receipt:string|null;receiptRevision:number}>(`/api/beeper/write-connections/${encodeURIComponent(connectionId)}/sends/${encodeURIComponent(operationId)}`,{expireAuthOnForbidden:false}),
   listBeeperConnections: () => request<BeeperReadConnection[]>('/api/beeper/connections', { expireAuthOnForbidden: false }),
   approveBeeperConnection: (offer: BeeperPublicOffer) => request<Pick<BeeperReadConnection, 'id' | 'state' | 'accountKey' | 'expiresAt'>>('/api/beeper/connections', { method: 'POST', body: JSON.stringify({ offer }), expireAuthOnForbidden: false }),
   revokeBeeperConnection: (id: string) => request<{ ok: true }>(`/api/beeper/connections/${encodeURIComponent(id)}`, { method: 'DELETE', expireAuthOnForbidden: false }),

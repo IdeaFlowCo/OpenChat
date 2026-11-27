@@ -25,7 +25,8 @@ export const IMPORT_PATH = '/api/imported-chats/import';
  */
 export function exceptImportBody(parser: RequestHandler): RequestHandler {
   return (req, res, next) => ((req.method === 'PUT' && req.path === IMPORT_PATH)
-    || (req.method === 'POST' && req.path === '/api/beeper/relay/deliver') ? next() : parser(req, res, next));
+    || (req.method === 'POST' && req.path === '/api/beeper/relay/deliver')
+    || (req.method === 'POST' && /^\/api\/beeper\/write-connections\/[a-f0-9]{48}\/sends$/.test(req.path)) ? next() : parser(req, res, next));
 }
 
 const router = Router();

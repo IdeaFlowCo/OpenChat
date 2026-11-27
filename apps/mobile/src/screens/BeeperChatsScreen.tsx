@@ -108,7 +108,7 @@ function BeeperHome({ isCurrent,ownerId }: { isCurrent: () => boolean;ownerId:st
   const active = connections?.find(item => item.id === selected);
   return <Page>
     <View style={styles.heading}><Text accessibilityRole="header" style={[type.heading, { color: r.text }]}>Beeper chats</Text><Chip label="Read-only" /></View>
-    <Note>Read selected WhatsApp chats through your Mac, then explore their Conversation, People, Asks and Memory privately in OpenChat. Replies and iMessage are not available here yet.</Note>
+    <Note>Read selected WhatsApp chats through your Mac, then explore their Conversation, People, Asks and Memory privately in OpenChat. Replies require a separate write grant; iMessage is not enabled.</Note>
     <View style={styles.actions}><Button label="Set up Mac connection" onPress={() => setShowSetup(value => !value)} /><Button label="Reload connections" variant="ghost" onPress={() => { void load(); }} /></View>
     {!!error && <Note error>{error}</Note>}
     {showSetup && <Card style={styles.form}>
@@ -129,6 +129,7 @@ function BeeperHome({ isCurrent,ownerId }: { isCurrent: () => boolean;ownerId:st
       <Button label="Review selected chat grant" disabled={!grantText.trim() || busy} loading={busy} onPress={() => { void importGrant(); }} />
       {grantReady && <Note>Chat grant approved on this device. Select the same chat below, then authorize its read.</Note>}
     </Card>}
+    <Button label="Beeper replies" variant="ghost" onPress={() => navigation.navigate('BeeperReplies')} />
     <SectionLabel>Connections</SectionLabel>
     {!connections && !error && <ActivityIndicator color={r.accent} accessibilityLabel="Loading Beeper connections" />}
     {connections?.length === 0 && <Card><Note>No Mac connection approved. Secure device authorization is required before a source chat can be read.</Note></Card>}

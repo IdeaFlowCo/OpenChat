@@ -129,6 +129,8 @@ export class BeeperWriteAuthority {
       !isHex(pairRoute, 48) ||
       target !== destination ||
       !safe(accountId) ||
+      chatMetadata?.merge != null ||
+      chatMetadata?.isReadOnly === true ||
       !Number.isSafeInteger(expiresAt) ||
       expiresAt <= this.#clock() ||
       expiresAt > Math.min(this.#clock() + 86400000, p.expires)

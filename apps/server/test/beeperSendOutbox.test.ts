@@ -53,3 +53,10 @@ it('allows only fixed-origin bounded text/reply calls and blocks deferred or mis
  await adapter.send('local-account','local-chat',{text:'Reply',replyToMessageId:'source-message',beforeFetch:start=>start()});expect(fetch).toHaveBeenCalledTimes(2);
  await expect(adapter.send('local-account','local-chat',{text:'Reply',beforeFetch:async start=>{await Promise.resolve();return start();}})).rejects.toThrow();expect(fetch).toHaveBeenCalledTimes(2);
 });
+
+it.each([{merge:{chatIDs:['local-chat','other-account-chat']}},{isReadOnly:true}])('refuses merged automatic routing and read-only targets before any provider POST (%j)',async(extra)=>{
+ const fetch=vi.fn(async()=>Response.json({id:'local-chat',accountID:'local-account',network:'WhatsApp',...extra}));const adapter=createBeeperWriteClient({readWriteToken:async()=>'synthetic',fetchImpl:fetch});await expect(adapter.send('local-account','local-chat',{text:'Reply',beforeFetch:start=>start()})).rejects.toThrow();expect(fetch).toHaveBeenCalledTimes(1);
+});
+it('retires an expired unattempted approval without any provider call and preserves its spent operation ID',async()=>{
+ await outbox.authorize(frame,async()=>true);now=frame.until+1;expect(outbox.expireUnattempted(frame.operationId).state).toBe('cancelled');const a=provider();await outbox.dispatch(frame.operationId,a);expect(a.send).not.toHaveBeenCalled();
+});

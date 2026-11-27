@@ -1,0 +1,15 @@
+import express,{Router,type Request,type Response} from 'express';
+import {requireAuth,requireDirectSession} from '../middleware/auth.js';
+import {BeeperWriteRelayError,approveWriteConnection,listWriteConnections,revokeWriteConnection,enqueueWrite,readWriteOperation,verifyWriteRelay,claimWrite,publishWriteReceipt} from '../services/beeperWrites.js';
+const wrap=(fn:(r:Request)=>Promise<unknown>,status=200)=>async(req:Request,res:Response)=>{try{res.status(status).json(await fn(req));}catch(e){if(e instanceof BeeperWriteRelayError){res.status(e.status).json({error:e.code});return;}console.error('Beeper write relay failed:',e instanceof Error?e.name:'unknown');res.status(500).json({error:'beeper_write_relay_failed'});}};
+const noStore=(_r:Request,s:Response,n:()=>void)=>{s.set('Cache-Control','no-store');n();};
+export const beeperWriteOwnerRoutes=Router();beeperWriteOwnerRoutes.use(requireAuth,requireDirectSession,noStore);
+const owner=(r:Request)=>r.user!.userId,cid=(r:Request)=>r.params.connectionId as string;
+beeperWriteOwnerRoutes.post('/write-connections',wrap(r=>approveWriteConnection(owner(r),r.body?.offer),201));
+beeperWriteOwnerRoutes.get('/write-connections',wrap(r=>listWriteConnections(owner(r))));
+beeperWriteOwnerRoutes.delete('/write-connections/:connectionId',wrap(r=>revokeWriteConnection(owner(r),cid(r))));
+beeperWriteOwnerRoutes.post('/write-connections/:connectionId/sends',express.json({limit:'180kb'}),wrap(r=>enqueueWrite(owner(r),cid(r),r.body),201));
+beeperWriteOwnerRoutes.get('/write-connections/:connectionId/sends/:operationId',wrap(r=>readWriteOperation(owner(r),cid(r),r.params.operationId as string)));
+const tokens=new WeakMap<Request,string>();export const beeperWriteRelayRoutes=Router();beeperWriteRelayRoutes.use(noStore,async(r,s,next)=>{const a=r.headers.authorization;if(!a?.startsWith('Bearer ocbs_')){s.status(401).json({error:'write_relay_not_authorized'});return;}const token=a.slice(7);try{await verifyWriteRelay(token);tokens.set(r,token);next();}catch(e){if(e instanceof BeeperWriteRelayError){s.status(e.status).json({error:e.code});return;}s.status(500).json({error:'beeper_write_relay_failed'});}});
+beeperWriteRelayRoutes.post('/claim',wrap(r=>claimWrite(tokens.get(r)!,r.body)));
+beeperWriteRelayRoutes.post('/receipt',wrap(r=>publishWriteReceipt(tokens.get(r)!,r.body)));

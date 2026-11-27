@@ -3,14 +3,15 @@
 export class BeeperWriteApiError extends Error{constructor(code){super(code);this.code=code;}}
 const deny=code=>{throw new BeeperWriteApiError(code);};
 const ident=v=>typeof v==='string'&&v.length>0&&v.length<=2000&&!/[\u0000-\u001f\u007f]/u.test(v)&&!['.','..'].includes(v)?v:deny('source_incompatible');
-export function createBeeperWriteClient({readWriteToken,fetchImpl=fetch,port=23373,timeoutMs=10000}={}){
+export function createBeeperWriteClient({readWriteToken,fetchImpl=fetch,port=23373,timeoutMs=10000,signal}={}){
  if(typeof readWriteToken!=='function'||!Number.isInteger(port)||port<1024||port>65535||!Number.isFinite(timeoutMs)||timeoutMs<1||timeoutMs>30000)deny('write_approval_required');
  const origin=`http://127.0.0.1:${port}`;
  async function request(method,path,body,beforeFetch){
   if(typeof beforeFetch!=='function')deny('write_approval_required');
-  const token=await readWriteToken();if(typeof token!=='string'||!token||/[\r\n]/u.test(token))deny('source_authorization_required');
+  const stopped=()=>{if(signal?.aborted)deny('source_stopped');};stopped();
+  const token=await readWriteToken();stopped();if(typeof token!=='string'||!token||/[\r\n]/u.test(token))deny('source_authorization_required');
   let called=false,open=true,pending;
-  const start=()=>{if(!open||called)deny('write_approval_required');called=true;return fetchImpl(new URL(path,origin),{method,headers:{Authorization:`Bearer ${token}`,Accept:'application/json',...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.timeout(timeoutMs)});};
+  const start=()=>{if(!open||called)deny('write_approval_required');stopped();called=true;return fetchImpl(new URL(path,origin),{method,headers:{Authorization:`Bearer ${token}`,Accept:'application/json',...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(timeoutMs)]):AbortSignal.timeout(timeoutMs)});};
   try{pending=beforeFetch(start);}finally{open=false;}
   if(!called){void Promise.resolve(pending).catch(()=>{});deny('write_approval_required');}
   let response;try{response=await pending;}catch{deny('source_outcome_unknown');}
@@ -26,7 +27,7 @@ export function createBeeperWriteClient({readWriteToken,fetchImpl=fetch,port=233
    ident(accountId);ident(chatId);if(typeof text!=='string'||!text.trim()||Buffer.byteLength(text,'utf8')>16000||replyToMessageId!==null&&typeof replyToMessageId!=='string')deny('source_incompatible');
    const base=`/v1/chats/${encodeURIComponent(chatId)}`;
    const current=await request('GET',base,undefined,beforeFetch);
-   if(current?.id!==chatId||current?.accountID!==accountId||String(current.network).toLowerCase()!=='whatsapp')deny('source_incompatible');
+   if(current?.id!==chatId||current?.accountID!==accountId||String(current.network).toLowerCase()!=='whatsapp'||current.merge!=null||current.isReadOnly===true||(Number.isFinite(current.capabilities?.maxTextLength)&&current.capabilities.maxTextLength>0&&text.length>current.capabilities.maxTextLength)||(replyToMessageId!==null&&Number.isFinite(current.capabilities?.reply)&&current.capabilities.reply<1))deny('source_incompatible');
    const body={text,...(replyToMessageId!==null?{replyToMessageID:ident(replyToMessageId)}:{})};
    const sent=await request('POST',base+'/messages',body,beforeFetch);
    if(sent?.chatID!==chatId||!ident(sent.pendingMessageID))deny('source_incompatible');

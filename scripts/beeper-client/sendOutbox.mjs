@@ -43,6 +43,8 @@ export class BeeperPinnedSendOutbox{
  #tx(f){this.#db.exec('BEGIN IMMEDIATE');try{const v=f();this.#db.exec('COMMIT');return v;}catch(e){this.#db.exec('ROLLBACK');throw e;}}
  #row(id){if(!hex(id,48))deny();const r=this.#db.prepare('SELECT * FROM sends WHERE id=?').get(id);if(!r)deny();const scope=JSON.parse(r.scope);if(scope.machineKey!==this.#machine)deny();return {...r,scope};}
  #admit(scope,start){let admitted=false,open=true,result;try{result=this.#verifier.admit(Object.freeze(scope),()=>{if(!open||admitted)deny();admitted=true;return start();});}finally{open=false;}if(!admitted){void Promise.resolve(result).catch(()=>{});deny();}return result;}
+ has(id){if(!hex(id,48))deny();return !!this.#db.prepare('SELECT id FROM sends WHERE id=?').get(id);}
+ expireUnattempted(id){this.#tx(()=>{const r=this.#row(id);if(['review','approved'].includes(r.state)&&r.scope.until<=this.#now())this.#db.prepare("UPDATE sends SET state='cancelled' WHERE id=?").run(id);});return this.status(id);}
  /** Returns public local status only, never the message body/source IDs. */
  status(id){const r=this.#row(id);return {operationId:id,state:r.state,machineKey:this.#machine,pendingMessageId:r.pending,finalMessageId:r.final};}
  async authorize(frame,confirm){
